@@ -1,0 +1,37 @@
+{
+  "number": 508,
+  "kind": "pull_request",
+  "title": "Add comprehensive UI component system (81 components) with mobile-first design",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-03T20:29:13Z",
+  "updated_at": "2026-02-06T04:24:10Z",
+  "closed_at": "2026-02-06T04:24:10Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/508",
+  "body": "Adds production-ready UI component specifications for enterprise management software. Components are designed mobile-first with WCAG 2.1 AA compliance.\n\n## Components Added (81 total)\n\n**Input (28)**: Text (single/multi-line, rich), Number (numeric, currency, slider, rating), Date/Time (picker, range), Select (dropdown, autocomplete, tags, cascader), Boolean (checkbox, switch, radio, toggle), File (upload, image w/ crop), Advanced (color, signature, location, code editor)\n\n**Display (23)**: Text (label, badge, tag, pill), Rich Content (HTML, Markdown, code block), Media (image, avatar, icon, video), Progress (bar, circle, spinner, skeleton), Stats (KPI, trend, gauge), Info (timeline, divider)\n\n**Layout (22)**: Containers (card, panel, section, well), Grids (12-col responsive, masonry, flex, stack, split-pane), Navigation (tabs, accordion, stepper, breadcrumb, pagination), Overlays (modal, drawer, popover, tooltip, toast, dropdown)\n\n**Specialized (8)**: Data (table w/ virtual scroll, tree, kanban), Feedback (alert, empty state), Mobile (bottom nav, FAB, pull-to-refresh)\n\n## Architecture\n\nAll components follow Zod-first pattern:\n- Runtime validation via Zod schemas\n- TypeScript types via `z.infer<>`\n- JSON schemas auto-generated for IDE support\n- Responsive breakpoints: xs (480), sm (640), md (768), lg (1024), xl (1280), 2xl (1536)\n\n## Usage\n\n```typescript\nimport { GridProps, KpiCardProps, TextInputProps } from '@objectstack/spec';\n\n// Responsive grid adapts to screen size\nconst layout: GridProps = {\n  columns: { xs: 1, md: 2, lg: 4 },  // Stack on mobile, grid on desktop\n  gap: 'lg'\n};\n\n// KPI with trend indicator\nconst revenue: KpiCardProps = {\n  title: 'Revenue',\n  value: '$125K',\n  trend: { value: 12.5, direction: 'up', label: 'vs last month' }\n};\n\n// Touch-optimized input (≥44px tap target)\nconst email: TextInputProps = {\n  size: 'large',\n  autocomplete: 'email',\n  clearable: true\n};\n```\n\n## Files\n\n- `src/ui/input.zod.ts` - Input components (700 LOC)\n- `src/ui/display.zod.ts` - Display components (600 LOC)\n- `src/ui/layout.zod.ts` - Layout components (600 LOC)\n- `src/ui/component.zod.ts` - Master registry + specialized components\n- `src/ui/*.test.ts` - Test coverage (58 new tests, 3,290 total passing)\n- `src/ui/README.md` - Component reference guide\n\n## Design Principles\n\nMobile-first (touch targets ≥44px), accessible (WCAG 2.1 AA), performant (virtual scroll, lazy load), type-safe (Zod + TypeScript).\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 你是全球頂流的企業管理軟件界面設計師，掃描所有spec ui協議和當前項目代碼，對於所有可能用到的組件進行詳細的設計，要求做全球最好用最好看的企業管理軟件，同時兼顧手機端\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

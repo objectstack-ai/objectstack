@@ -1,0 +1,33 @@
+{
+  "number": 615,
+  "kind": "pull_request",
+  "title": "feat: UI full I18n/ARIA coverage + unified security context (Sprint P-Q)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-11T08:54:04Z",
+  "updated_at": "2026-02-11T10:00:26Z",
+  "closed_at": "2026-02-11T09:20:19Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-11T09:20:19Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/615",
+  "body": "Completes all remaining protocol optimization items: extends I18n/ARIA to the 6 UI files that lacked it, and closes the system protocol gap (95%→100%) by adding a unified security context.\n\n### UI I18n/ARIA Integration (Sprint P)\n\n- **animation.zod.ts** — `I18nLabelSchema` label + `AriaPropsSchema` on `ComponentAnimationSchema`/`MotionConfigSchema`\n- **dnd.zod.ts** — `I18nLabelSchema` label + `AriaPropsSchema` on `DropZoneSchema`/`DragItemSchema`\n- **touch.zod.ts** — `I18nLabelSchema` label on `GestureConfigSchema`, `AriaPropsSchema` on `TouchInteractionSchema`\n- **offline.zod.ts** — `I18nLabelSchema` `offlineMessage` on `OfflineConfigSchema`\n- **keyboard.zod.ts** — `description` field upgraded from `z.string()` to `I18nLabelSchema`, `AriaPropsSchema` on `KeyboardNavigationConfigSchema`\n- **notification.zod.ts** — `AriaPropsSchema` on `NotificationSchema`\n\nCoverage: I18n **16/18**, ARIA **15/18** (only `responsive`/`theme` excluded — pure config definitions with no user-facing labels).\n\n### Unified Security Context (Sprint Q)\n\nNew `system/security-context.zod.ts` — central governance layer correlating the previously isolated audit/encryption/compliance/masking subsystems:\n\n```typescript\nSecurityContextConfigSchema = z.object({\n  complianceAuditRequirements,    // framework → required audit events\n  complianceEncryptionRequirements, // framework → data classification encryption mandates\n  maskingVisibility,              // classification → role-based unmask + approval workflow\n  dataClassifications,            // 7-level policy (pii/phi/pci/financial/confidential/internal/public)\n  eventCorrelation,               // cross-subsystem correlation (auth↔audit↔encryption↔masking)\n  enforceOnWrite, enforceOnRead, failOpen,\n});\n```\n\n### Tests & Report\n\n- 45 new tests across 7 files (183 files / 4,778 tests total)\n- `PROTOCOL_OPTIMIZATION_REPORT.md` updated with 6th verification — all 7 protocol domains at 100%, 23 Sprints complete\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

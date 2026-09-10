@@ -1,0 +1,33 @@
+{
+  "number": 687,
+  "kind": "pull_request",
+  "title": "fix: add missing .describe() annotations and subpath exports for cloud/qa/identity/shared",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-15T03:54:29Z",
+  "updated_at": "2026-02-15T04:20:19Z",
+  "closed_at": "2026-02-15T04:09:58Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-15T04:09:58Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/687",
+  "body": "Eight Zod fields lacked `.describe()` annotations, and four modules exported from root were missing build entry points and subpath exports.\n\n### Missing `.describe()` annotations\n\n- **`field.zod.ts`** — `summaryOperations.object`, `.field`, `.function`\n- **`object.zod.ts`** — `ObjectExtensionSchema.label`, `.pluralLabel`, `.description`, `.validations`, `.indexes`\n\n### Missing subpath exports\n\n`cloud`, `qa`, `identity`, `shared` were namespace-exported from `src/index.ts` but absent from `tsup.config.ts` entry points and `package.json` exports map. This meant they were bundled into the root chunk only — no standalone subpath import was possible.\n\n```ts\n// Previously broken — module not resolved\nimport * as Cloud from '@objectstack/spec/cloud';\n\n// Now works\nimport * as Cloud from '@objectstack/spec/cloud';\nimport * as QA from '@objectstack/spec/qa';\nimport * as Identity from '@objectstack/spec/identity';\nimport * as Shared from '@objectstack/spec/shared';\n```\n\nAll 5,376 tests pass. Build produces correct output for all 16 entry points.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 发一个补丁\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

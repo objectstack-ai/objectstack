@@ -1,0 +1,33 @@
+{
+  "number": 768,
+  "kind": "pull_request",
+  "title": "feat: expand Export API protocol with full CRUD endpoints and IExportService contract",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-21T09:29:10Z",
+  "updated_at": "2026-02-21T09:52:23Z",
+  "closed_at": "2026-02-21T09:46:57Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-21T09:46:57Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/768",
+  "body": "Export API had only 2 endpoints (create + progress). This adds the remaining endpoints needed for the full export lifecycle: download, listing, scheduling, and cancellation. Also adds the `IExportService` contract and cursor-based pagination on `data.find()`.\n\n### New schemas in `api/export.zod.ts`\n- `GetExportJobDownloadRequest/Response` — presigned download URL with file metadata and checksum\n- `ListExportJobsRequest/Response` + `ExportJobSummary` — paginated job history with cursor-based pagination\n- `ScheduleExportRequest/Response` — recurring export creation\n- `ExportApiContracts` expanded from 2 → 6 endpoints (+getExportJobDownload, listExportJobs, scheduleExport, cancelExportJob)\n\n### `IExportService` contract (`contracts/export-service.ts`)\n- 6 required methods: `createExportJob`, `getExportJobProgress`, `getExportJobDownload`, `cancelExportJob`, `listExportJobs`, `scheduleExport`\n- 2 optional template methods: `getTemplate`, `listTemplates`\n\n### Cursor-based pagination in `FindDataResponseSchema`\n- Added `nextCursor` field alongside existing `hasMore`, aligning with the pattern already used in `ListRecordResponseSchema`, `FeedApiContracts`, and `AutomationApiContracts`\n\n```typescript\n// Before\nFindDataResponseSchema = z.object({\n  object, records, total, hasMore,\n});\n\n// After\nFindDataResponseSchema = z.object({\n  object, records, total, nextCursor, hasMore,\n});\n```\n\n### Tests\n- 18 new test cases across `export.test.ts` and `export-service.test.ts`\n- Full suite: 210 files, 5990 tests passing\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>export api</issue_title>\n> <issue_description>## 🎯 目标\n> \n> 新增 Export Job API，支持大数据集流式导出、调度导出和导出模板。\n> \n> ## 📋 Tasks\n> \n> - [ ] 在 `spec/src/api/` 新增 `export-api.zod.ts`：\n>   - `CreateExportJobRequest/Response` — 创建导出任务（format, filters, columns）\n>   - `GetExportJobStatusRequest/Response` — 查询任务状态\n>   - `GetExportJobDownloadRequest/Response` — 获取下载链接\n>   - `ListExportJobsRequest/Response` — 列出历史导出\n>   - `ScheduleExportRequest/Response` — 调度定时导出\n> - [ ] 定义 `IExportService` contract\n> - [ ] 在 `data.find()` 中支持 cursor-based pagination（`nextCursor` + `hasMore`）\n> - [ ] 实现 `InMemoryExportAdapter`（CSV/JSON 流式生成）\n> - [ ] 在 Client SDK 新增 `client.exports` namespace\n> - [ ] 编写测试\n> \n> ## 🔗 关联\n> \n> - 阻塞 ObjectUI Roadmap P1.3（Export all data、Scheduled exports）\n> - Parent: objectstack-ai/spec#753</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#759\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

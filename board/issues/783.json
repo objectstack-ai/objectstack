@@ -1,0 +1,33 @@
+{
+  "number": 783,
+  "kind": "pull_request",
+  "title": "feat: Studio Flow Builder, Wait NodeExecutor, BPMN Interop protocols",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-22T03:07:06Z",
+  "updated_at": "2026-02-22T03:29:26Z",
+  "closed_at": "2026-02-22T03:25:45Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-22T03:25:45Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/783",
+  "body": "Adds the three missing protocol layers from the BPMN semantic enhancement (#771/#780): canvas rendering descriptors for the Studio flow editor, wait node pause/resume executor plugin schema, and BPMN XML import/export interop spec. Updates ROADMAP.md to reflect completed/remaining items.\n\n### Studio Flow Builder (`studio/flow-builder.zod.ts`)\n- `FlowNodeRenderDescriptorSchema` — shape, icon, size, color, palette category per node type\n- `FlowCanvasNodeSchema` / `FlowCanvasEdgeSchema` — position, visual overrides, waypoints, animation\n- `FlowBuilderConfigSchema` — snap grid, zoom, layout algorithm (dagre/elk/force/manual), minimap, palette\n- `BUILT_IN_NODE_DESCRIPTORS` — pre-configured for all 18 `FlowNodeAction` types including `parallel_gateway`, `join_gateway`, `boundary_event`, `wait`\n\n### Wait Node Executor (`automation/node-executor.zod.ts`)\n- `WaitResumePayloadSchema` — typed resume for timer/signal/webhook/manual/condition events with variable injection\n- `WaitExecutorConfigSchema` — timeout behavior, condition polling, webhook URL pattern, checkpoint persistence\n- `NodeExecutorDescriptorSchema` — generic executor plugin descriptor with pause/cancel/retry capabilities\n- `WAIT_EXECUTOR_DESCRIPTOR` — built-in wait executor registration\n\n### BPMN XML Interop (`automation/bpmn-interop.zod.ts`)\n- `BpmnImportOptionsSchema` / `BpmnExportOptionsSchema` — unmapped element strategy, layout import, BPMN version targeting, extension elements\n- `BpmnInteropResultSchema` — success/diagnostics/mapped counts\n- `BUILT_IN_BPMN_MAPPINGS` — 11 bidirectional mappings (startEvent↔start, parallelGateway↔parallel_gateway, boundaryEvent↔boundary_event, etc.)\n\n### ROADMAP.md\n- Updated metrics: 193 schemas, 8,425+ `.describe()` annotations, 218 test files, 6,202 tests\n- Added tracking rows for spec-complete items (flow builder, node executor, BPMN interop) and runtime-pending items (canvas UI, wait executor plugin, XML importer)\n\n```typescript\nimport { FlowBuilderConfigSchema, BUILT_IN_NODE_DESCRIPTORS } from '@objectstack/spec/studio';\nimport { WaitResumePayloadSchema } from '@objectstack/spec/automation';\n\nconst config = FlowBuilderConfigSchema.parse({\n  layoutAlgorithm: 'dagre',\n  layoutDirection: 'LR',\n  snap: { gridSize: 20 },\n});\n\nconst resume = WaitResumePayloadSchema.parse({\n  executionId: 'exec_001',\n  checkpointId: 'cp_001',\n  nodeId: 'wait_approval',\n  eventType: 'webhook',\n  webhookPayload: { decision: 'approved' },\n  resumedAt: '2026-02-22T10:00:00Z',\n});\n```\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>遗留任务追踪：Studio UI 并行/汇聚节点、Wait运行时插件、BPMN XML互操作与 ROADMAP 更新</issue_title>\n> <issue_description># 🎯 遗留任务追踪\n> \n> 本 issue 汇总补充 BPMN 关键业务语义于自动化引擎（见 objectstack-ai/spec#771）后剩余尚未完成的关键工作，方便后续开发和进度管理。\n> \n> ---\n> \n> ## 1. Studio画布层并行/汇聚/边界节点控件（UI）\n> - [ ] 设计并实现 Studio (流程编辑器/画布) 的 `parallel_gateway`（并行分支）、`join_gateway`（汇聚）、`boundary_event`（边界事件）节点图形及交互控件。\n> - [ ] Demo 配套流程场景，UI联动自动化引擎。\n> \n> ## 2. Wait 节点运行时暂停/唤醒插件\n> - [ ] 补全 `wait` 节点的 NodeExecutor 插件，实现流程暂停与外部事件唤醒机制（支持 signal/manual/webhook/condition 等类型）。\n> - [ ] 测试覆盖常见暂停/唤醒场景。\n> \n> ## 3. BPMN XML 互操作（长期规划）\n> - [ ] 支持 BPMN XML 流程导入/导出（插件方式，兼容主流 BPM 工具，非强需求优先级低）。\n> - [ ] 研究流程互操作接口标准。\n> \n> ## 4. ROADMAP.md 更新与同步\n> - [ ] 将上述 BPMN 语义增强（节点类型、流程语义、测试覆盖、协议扩展）补充至 ROADMAP.md。\n> - [ ] 明确已完成/未完成项目、测试计数与协议增强项。\n> \n> ---\n> \n> ### 验收标准\n> - Studio 能正确显示并支持所有扩展节点类型。\n> - wait 节点实际支持流程暂停/恢复。\n> - ROADMAP.md 明确标注所有已完成与遗留工作。\n> - 测试覆盖主流程场景。\n> \n> ---\n> \n> 相关历史：\n> - objectstack-ai/spec#771 [补充BPMN关键业务语义于自动化引擎]\n> - objectstack-ai/spec#780 [BPMN语义扩展PR]\n> </issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#781\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

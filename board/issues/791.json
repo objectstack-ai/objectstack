@@ -1,0 +1,33 @@
+{
+  "number": 791,
+  "kind": "pull_request",
+  "title": "analysis: evaluate UI extension fields (source, groupBy, typeOptions) against existing ListViewSchema protocol",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-23T05:57:49Z",
+  "updated_at": "2026-02-23T12:20:16Z",
+  "closed_at": "2026-02-23T12:20:16Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/791",
+  "body": "Evaluated whether objectui console settings panel fields (`_source`, `_groupBy`, `_typeOptions`, `description`) need to be added to the spec protocol.\n\n### Analysis Result — All fields are redundant with existing protocol\n\nAfter careful evaluation, all four proposed fields already have equivalent coverage in the existing `ListViewSchema`:\n\n| objectui Field | Existing Protocol Equivalent | Verdict |\n|---|---|---|\n| `description` | `description: I18nLabelSchema` (already on ListViewSchema) | ✅ Already exists |\n| `_source` | `data: { provider: 'object', object: '...' }` (ViewDataSchema) | ❌ Redundant |\n| `_groupBy` | `grouping: { fields: [{ field: '...' }] }` (GroupingConfigSchema) | ❌ Redundant |\n| `_typeOptions` | `kanban` / `calendar` / `gantt` / `gallery` / `timeline` typed configs | ❌ Redundant — untyped `Record<string, unknown>` undermines Zod-first principle |\n\n### Recommendation\n\nThe objectui console should align its internal fields to the existing spec protocol rather than the spec adding shorthand aliases that create ambiguity about which field is the source of truth. No schema changes are needed.\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>将 UI extension 字段（description/_source/_groupBy/_typeOptions）标准化补充进协议（spec）</issue_title>\n> <issue_description>## 背景\n> \n> https://github.com/objectstack-ai/objectui\n> \n> 在 objectui Console 设置面板全面 spec 对齐梳理过程中，发现以下字段虽已成为 UI/交互层实际需求，却尚未被正式收录进 spec（NamedListView / ListViewSchema）：\n> - description（视图描述）\n> - _source（源对象显示）\n> - _groupBy（分组配置）\n> - _typeOptions（视图类型专项配置）\n> \n> ## 任务目标\n> 推动将上述 UI extension 字段整理为标准协议升级建议，推进进入 src/data/object.zod.ts 或 src/ui/view.zod.ts 标准中，并补全文档说明。\n> \n> ## 具体事项\n> - [ ] 梳理 4 个扩展字段在当前 objectui 中的 UI形态、交互数据结构、使用场景\n> - [ ] 撰写 protocol proposal（建议采纳的 zod schema 字段定义、类型、注释与示例）\n> - [ ] PR 到数据协议 / 视图协议文件，对应 source、groupBy、typeOptions 字段增补\n> - [ ] 协同 UI/产品/DSL 相关方审核（如有必要）\n> - [ ] 完善文档说明与注释，包括与当前 fields/card/view/data schema 的异同出处说明\n> \n> ## 验收标准\n> - [ ] PR被 merge，4个字段均覆盖 schema/runtime doc & usage\n> - [ ] 相关说明、注释在协议与文档中有明确体现\n> - [ ] 标注变更兼容性与升级路径\n> \n> 负责人: @hotlong</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#790\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 809,
+  "kind": "pull_request",
+  "title": "fix: resolve Check Links and Validate Dependencies CI failures",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-24T13:33:22Z",
+  "updated_at": "2026-02-24T14:19:00Z",
+  "closed_at": "2026-02-24T14:14:53Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-24T14:14:52Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/809",
+  "body": "Two CI workflows failing on `main`: Check Links (regex parse error) and Validate Dependencies (minimatch ReDoS audit failure).\n\n### Check Links — invalid regex in `.lycheeignore`\n\n`.lycheeignore` contained glob patterns (`**/meta.json`) but lychee parses these as regex, causing:\n```\nregex parse error:\n    **/meta.json\n    ^\nerror: repetition operator missing expression\n```\n\n- Removed glob-style file path patterns from `.lycheeignore` (these are file paths, not URLs — wrong file)\n- Moved exclusions to `lychee.toml` `exclude_path` with proper regex:\n  ```toml\n  exclude_path = [\n      \"\\\\.lycheeignore$\",\n      \"(^|.*/)meta\\\\.json$\",\n      \"(^|.*/)meta\\\\.cn\\\\.json$\"\n  ]\n  ```\n- Removed now-redundant `--exclude-path` CLI args from workflow\n\n### Validate Dependencies — minimatch ReDoS (GHSA-3ppc-4f35-3m26)\n\n`pnpm audit --audit-level=high` failing on 3 high-severity `minimatch` vulns in transitive deps (`@oclif/core`, `@vscode/vsce`).\n\n- Added pnpm override to force patched version:\n  ```json\n  \"pnpm\": {\n    \"overrides\": {\n      \"minimatch@<10.2.1\": \"10.2.1\"\n    }\n  }\n  ```\n\n### ROADMAP\n\nUpdated stale codebase metrics (200 schema files, 1,600+ exports, 6,507 tests).\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> fix ci build and test errors\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

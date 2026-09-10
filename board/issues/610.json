@@ -1,0 +1,33 @@
+{
+  "number": 610,
+  "kind": "pull_request",
+  "title": "feat(kernel): Dev Mode Plugin Protocol + full-service @objectstack/plugin-dev",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-11T05:59:52Z",
+  "updated_at": "2026-02-11T08:29:31Z",
+  "closed_at": "2026-02-11T08:24:19Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-11T08:24:19Z",
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/610",
+  "body": "- [x] Protocol schema (`dev-plugin.zod.ts`) — 19 tests\n- [x] Plugin implementation with 8 real service plugins\n- [x] Code review feedback addressed\n- [x] **ALL 17+ kernel services with contract-compliant stubs:**\n  - **Real plugins** (8): ObjectQL, InMemoryDriver, AppPlugin, Auth, Security, Hono Server, REST API, Dispatcher\n  - **Contract-compliant dev stubs** implementing interfaces from `packages/spec/src/contracts/`:\n    - `cache` (Map-backed ICacheService), `queue` (in-memory IQueueService), `job` (IJobService), `file-storage` (IStorageService), `search` (ISearchService), `automation` (IAutomationService), `graphql` (IGraphQLService), `analytics` (IAnalyticsService), `realtime` (IRealtimeService), `notification` (INotificationService), `ai` (IAIService), `i18n` (II18nService), `ui` (IUIService), `workflow` (IWorkflowService), `metadata` (IMetadataService), `data` (IDataEngine), `auth` (IAuthService), `security.*` (permissions/RLS/masking)\n- [x] Tests: 19 schema tests + 7 plugin tests with per-service contract assertions\n- [x] Code review + CodeQL — no alerts\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

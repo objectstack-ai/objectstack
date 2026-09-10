@@ -1,0 +1,33 @@
+{
+  "number": 780,
+  "kind": "pull_request",
+  "title": "feat(automation): add BPMN parallel gateway, default flow, boundary event, and wait event semantics",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-22T02:38:53Z",
+  "updated_at": "2026-02-22T02:59:36Z",
+  "closed_at": "2026-02-22T02:54:41Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-22T02:54:41Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/780",
+  "body": "Supplements the automation engine spec with high-value BPMN 2.0 business semantics: parallel split/join, default sequence flows, boundary events, and structured wait events. All additive, backward-compatible.\n\n### `flow.zod.ts` — Node & Edge Schema\n\n- **3 new node types** in `FlowNodeAction`: `parallel_gateway` (AND-split), `join_gateway` (AND-join), `boundary_event`\n- **`waitEventConfig`** on `FlowNodeSchema` — typed event resumption for `wait` nodes (timer/signal/webhook/manual/condition), with timeout and `onTimeout` behavior\n- **`boundaryConfig`** on `FlowNodeSchema` — BPMN boundary event attachment to host nodes (error/timer/signal/cancel), interrupting flag\n- **`isDefault`** on `FlowEdgeSchema` — marks the fallback edge when no sibling conditions match\n- **`conditional`** edge type added alongside existing `default`/`fault`\n\n### `execution.zod.ts` — Checkpoint Reasons\n\n- Added `parallel_join` and `boundary_event` to `CheckpointSchema.reason` enum\n\n### Example: Parallel Approval Flow\n\n```typescript\nconst flow = defineFlow({\n  name: 'parallel_approval',\n  label: 'Parallel Approval',\n  type: 'record_change',\n  nodes: [\n    { id: 'start', type: 'start', label: 'Start' },\n    { id: 'fork', type: 'parallel_gateway', label: 'Fork' },\n    { id: 'finance', type: 'connector_action', label: 'Finance Review' },\n    { id: 'legal', type: 'connector_action', label: 'Legal Review' },\n    { id: 'join', type: 'join_gateway', label: 'Join' },\n    { id: 'end', type: 'end', label: 'End' },\n  ],\n  edges: [\n    { id: 'e1', source: 'start', target: 'fork' },\n    { id: 'e2', source: 'fork', target: 'finance' },\n    { id: 'e3', source: 'fork', target: 'legal' },\n    { id: 'e4', source: 'finance', target: 'join' },\n    { id: 'e5', source: 'legal', target: 'join' },\n    { id: 'e6', source: 'join', target: 'end' },\n  ],\n});\n```\n\n### Tests\n\n19 new tests covering parallel gateway flows, default branch decision routing, wait event configurations, boundary event attachment, and fault edge semantics. Full suite: 215 files, 6140 tests passing.\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>补充BPMN关键业务语义于自动化引擎（并行分支、汇聚、默认分支、边界事件等）</issue_title>\n> <issue_description>## 补充完善：BPMN业务语义借鉴\n> \n> 参考主流流程建模与执行标准 BPMN 2.0，对 ObjectStack 自动化引擎补齐并行分支与汇聚、默认分支、边界事件等高价值业务语义。以支持更丰富的流程场景，但不直接实现完整 BPMN 规范。\n> \n> ---\n> \n> ### 🏗️ 改进/扩展点清单\n> \n> #### 1. 并行分支与汇聚（Parallel Gateway语义）\n> - [ ] 新增节点类型：`parallel_gateway` （AND分支）、`join_gateway`（并行汇聚）\n> - [ ] 支持流程分裂（一个节点后多个下游节点并行执行，`Promise.all`实现）、汇聚（需所有分支完成后继续向单一节点流转）\n> - [ ] DAG核心遍历与变量上下文隔离��化\n> - [ ] 单元测试：并行任务场景，确保汇聚点等所有分支\n> - [ ] Studio画布层UI控件支持（节点图形与交互）\n> \n> #### 2. 默认分支与条件生成（Default Sequence Flow）\n> - [ ] FlowEdgeSchema增加 `isDefault: true/false` 字段，decision节点无匹配条件时走默认分支\n> - [ ] DAG引擎实现决策逻辑补齐\n> - [ ] 测试覆盖：多条件分支场景\n> \n> #### 3. 等待事件与中间触发（Intermediate Wait Event）\n> - [ ] `wait`节点插件完善，支持流程暂停与外部事件唤醒\n> - [ ] 边界事件基础处理\n> - [ ] Studio交互与API对接（如外部 webhook/触发）\n> \n> #### 4. 流程边界错误事件 Catch/Fault Edge（Boundary Error）\n> - [ ] `fault`边类型完善，用于关键节点挂载边界故障处理分支\n> - [ ] DAG引擎激活fault分支处理（参考#769任务1，增强边界区分）\n> \n> #### 5. BPMN XML互操作（长期规划）\n> - [ ] 作为插件支持 BPMN XML格式的流程导入/导出（可选功能，无需强制）\n> \n> ---\n> \n> ### 验收标准\n> - 典型业务流程可支持：并行审批、分支任务、汇聚等待、默认决策、异常处理、流程暂停/触发。\n> - 测试覆盖所有新增语义。\n> - 与现有架构和已有改进（见#769）兼容。\n> </issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#771\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

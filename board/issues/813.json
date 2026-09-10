@@ -1,0 +1,36 @@
+{
+  "number": 813,
+  "kind": "issue",
+  "title": "全面排查 getService / handleAnalytics 的异步问题并增强测试用例",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "enhancement"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-02-25T07:57:16Z",
+  "updated_at": "2026-02-25T08:15:49Z",
+  "closed_at": "2026-02-25T08:15:49Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/813",
+  "body": "### 问题现象\n系统在调用 `/api/v1/analytics/query` 等接口时，出现错误：`Service 'analytics' is async - use await`。根源是 dispatcher 通过 `getService` 获取的 service 可能是异步的 Promise，没有正确地 await，导致实际调用时失败。\n\n### 影响范围\n- `handleAnalytics` 相关接口（query/meta/sql）\n- 其他 dispatcher 内部所有调用 `getService` 的 handler，如 `handleAuth`, `handleAutomation`, `handleStorage` 等\n- 插件加载、服务注册异步工厂场景\n\n### 修复建议\n1. 全面排查 dispatcher 和其他核心模块 `getService` 的所有调用点，确保对异步 service 正确 await。\n2. 复查 service-register/consumer 工厂模式文档，确保全员共识。\n3. dispatcher 层所有 handler 内部（如 handleAnalytics）需修正为 `await this.getService(...)` 后再调用。\n4. 针对所有核心 handler 增加或加强测试用例（Vitest），能够覆盖同步和异步 service 的场景，包括异常、未注册、Promise 注入等。\n5. 对异步工厂模式注册的服务补充测试。\n6. PR 合并前务必运行所有相关 test。\n\n### 测试增强建议\n- 覆盖 dispatcher 层 handleAnalytics、handleAuth、handleAutomation、handleStorage、handleData 等，用 mock kernel 注入 Promise/同步/未注册等情况。\n- 必须验证正常/异常场景，包括 service 返回异常、Promise reject、service 不存在等。\n- 测试用例需模拟真实 REST 请求及接口调用，包含断言 status、error message。\n- 提高测试覆盖率，保证将来 refactor 不再出现类似隐患。\n\n### 关联\n- 合并本次 issue 到 roadmap ObjectStack Roadmap，类型 Bug + Enhancement。\n- 针对类似异步工厂/Promise注入的注册方式，补充技术文档及最佳实践说明。\n\n---\n#### 开发任务完成后请运行所有 test，并及时更新 roadmap。"
+}

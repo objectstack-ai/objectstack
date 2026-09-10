@@ -1,0 +1,33 @@
+{
+  "number": 670,
+  "kind": "pull_request",
+  "title": "Add changeset for patch release",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-13T17:48:39Z",
+  "updated_at": "2026-02-13T18:34:22Z",
+  "closed_at": "2026-02-13T17:52:47Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-13T17:52:47Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/670",
+  "body": "Creates changeset to prepare for patch version bump (3.0.2 → 3.0.3).\n\n### Changes\n- Added `.changeset/shaggy-candies-listen.md` with patch bumps for all 21 packages\n- Follows fixed versioning strategy (all packages versioned together)\n\n### Usage\n```bash\npnpm version     # Updates package.json + CHANGELOG.md\npnpm release     # Builds and publishes to npm\n```\n\nThe changeset marks this as a maintenance release.\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> changeset 发一个补丁\n> \n> The user has attached the following file paths as relevant context:\n>  - .github/copilot-instructions.md\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\nCreated from [VS Code](https://code.visualstudio.com/docs/copilot/copilot-coding-agent).\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

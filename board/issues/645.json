@@ -1,0 +1,33 @@
+{
+  "number": 645,
+  "kind": "pull_request",
+  "title": "DX Roadmap Phase 3: Documentation & Reference",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-12T10:19:24Z",
+  "updated_at": "2026-02-12T13:08:23Z",
+  "closed_at": "2026-02-12T10:39:17Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-12T10:39:17Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/645",
+  "body": "Implements 8/10 items from DX Roadmap Phase 3 — the documentation & reference phase targeting developer adoption post-v3.0.\n\n### New reference pages\n\n- **Field Type Gallery** (`references/data/field-type-gallery.mdx`) — All 48 field types with per-type config tables, examples, and a decision tree\n- **Error Code Catalog** (`references/api/error-catalog.mdx`) — 41+ error codes by category with cause/fix/retry strategy, HTTP status mapping, client-side handling patterns\n- **Query Syntax Cheat Sheet** (`references/data/query-cheat-sheet.mdx`) — Filter operators, logical combinators, sorting, pagination (offset + cursor), aggregations, joins, full-text search, window functions\n\n### New guides\n\n- **Common Patterns** (`guides/common-patterns.mdx`) — Top 10: CRUD, master-detail, list/kanban views, app nav, flows, approval workflows, AI agents, pagination, field-level security\n- **Troubleshooting & FAQ** (`guides/troubleshooting.mdx`) — Validation errors, query debugging, config mistakes, TS type issues, performance\n- **Plugin Development Tutorial** (`guides/plugin-development.mdx`) — End-to-end: scaffold → manifest → implement → test → register\n\n### Navigation & roadmap\n\n- Updated `meta.json` for data, api, and guides sections\n- `DX_ROADMAP.md` updated — Phase 3 at 8/10 (remaining: visual protocol diagram, wire format JSON examples)\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

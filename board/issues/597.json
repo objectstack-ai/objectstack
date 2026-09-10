@@ -1,0 +1,33 @@
+{
+  "number": 597,
+  "kind": "pull_request",
+  "title": "feat(core): add replaceService to PluginContext",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-10T21:43:35Z",
+  "updated_at": "2026-02-11T01:47:52Z",
+  "closed_at": "2026-02-11T01:43:26Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-11T01:43:25Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/597",
+  "body": "Implements upstream spec change §5.1.2 from [objectql DESIGN_CORE_REFACTOR.md](https://github.com/objectstack-ai/objectql/blob/main/docs/DESIGN_CORE_REFACTOR.md). The downstream `OptimizationsPlugin` needs to replace/enhance kernel internals (metadata registry, connection pooling, hook manager), but `PluginContext` has no service replacement API.\n\n§5.1.1 (Query Profiling) required no changes — `OperationContext` and `EngineMiddleware` are already exported.\n\n### Changes\n\n- **`PluginContext` interface** (`types.ts`): New `replaceService<T>(name, implementation)` method — throws if service doesn't exist\n- **`ObjectKernelBase`** (`kernel-base.ts`): Implementation for `LiteKernel` path (Map + IServiceRegistry)\n- **`ObjectKernel`** (`kernel.ts`): Implementation with dual-write to services Map + PluginLoader (consistent with existing `registerService` pattern)\n- **`PluginLoader`** (`plugin-loader.ts`): `replaceService` with existence validation\n- **`SecurePluginContext`** (`plugin-permission-enforcer.ts`): Delegates through permission enforcement via `enforceServiceAccess`\n- **Tests**: 5 new tests across `kernel.test.ts` and `lite-kernel.test.ts` (basic replace, missing service error, decorator pattern)\n\n### Usage — decorator pattern for optimization plugins\n\n```typescript\n// In OptimizationsPlugin.init():\nconst existing = ctx.getService('metadata');\nconst optimized = new OptimizedMetadataRegistry(existing);\nctx.replaceService('metadata', optimized);\n```\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

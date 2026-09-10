@@ -1,0 +1,35 @@
+{
+  "number": 649,
+  "kind": "pull_request",
+  "title": "fix: resolve TypeScript DTS build errors from Zod v4 type drift",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-12T14:18:08Z",
+  "updated_at": "2026-02-12T15:45:30Z",
+  "closed_at": "2026-02-12T14:29:30Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-12T14:29:30Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/649",
+  "body": "DTS build fails with 3 TypeScript errors due to type mismatches between hand-written Zod v4 type stubs and actual Zod v4 types.\n\n- **`error-map.zod.ts`**: Replace hand-written `ObjectStackRawIssue` interface with `z.core.$ZodRawIssue` type alias — the manual interface had drifted from Zod v4 on `path` (`PropertyKey[]` vs `(string | number)[]`), `maximum` (`number | bigint` vs `number`), etc. Also widen `ZodIssueMinimal.path` to `PropertyKey[]`.\n\n- **`stack.zod.ts`**: `hook.object` is `string | string[]` per `hook.zod.ts`, but `validateCrossReferences` passed it directly to `Set.has()`. Normalize to array before iterating:\n\n```typescript\nconst hookObjects = Array.isArray(hook.object) ? hook.object : [hook.object];\nfor (const obj of hookObjects) {\n  if (!objectNames.has(obj)) { ... }\n}\n```\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

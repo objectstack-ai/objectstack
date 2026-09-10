@@ -1,0 +1,32 @@
+{
+  "number": 709,
+  "kind": "issue",
+  "title": "DashboardWidget type 支持 pivot/funnel/grouped-bar等类型（协议+objectui实现协同）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-02-18T05:47:46Z",
+  "updated_at": "2026-02-18T05:52:30Z",
+  "closed_at": "2026-02-18T05:52:30Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/709",
+  "body": "Airtable 仪表盘分析类组建中，\"pivot\"（交叉表）、\"funnel（漏斗）\"、\"grouped-bar（分组条形图）\"为常用交互范式，现协议有部分定义但 objectui 落地/映射不完整。\n\n**目标**：\n- DashboardWidgetSchema.type 完善支持\n- 文档/单测\n- 对应 objectui renderer 需协作实现\n\n详见[1.4/2.5/3.1](https://github.com/objectstack-ai/spec/blob/main)\n\n- 类型：enhancement\n- 实现后更新 roadmap 并通知 UI 侧开发协同落地"
+}

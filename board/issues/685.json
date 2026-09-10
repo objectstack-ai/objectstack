@@ -1,0 +1,33 @@
+{
+  "number": 685,
+  "kind": "pull_request",
+  "title": "docs: add v4.0 schema & toolchain roadmap priorities",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-15T02:30:49Z",
+  "updated_at": "2026-02-15T03:04:31Z",
+  "closed_at": "2026-02-15T02:36:49Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-15T02:36:49Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/685",
+  "body": "Adds prioritized schema infrastructure and cross-ecosystem interoperability roadmap items for v4.0.\n\n- **New section** \"v4.0 Schema & Toolchain Roadmap\" with P0–P3 priority table:\n  - P0: Zod v4 migration (2-7x perf + built-in JSON Schema)\n  - P1: JSON Schema output layer for non-TS ecosystems (Python/Go)\n  - P2: OpenAPI Spec generation from Zod schemas\n  - P3: Effect Schema evaluation as long-term fallback\n- **Updated Versioning Plan** v4.0 focus to reflect new priorities alongside existing AI/multi-tenancy items\n- **Updated ToC** with new section anchors\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 参考以下内容，更新4.0roadmap\n> \n> \r优先级行动原因P0完成 Zod v4 迁移2-7x 性能提升 + 内置 JSON SchemaP1增加 JSON Schema 输出层给非 TS 生态（Python/Go 客户端）提供协议描述P2考虑 OpenAPI Spec 生成从 Zod Schema 自动生成 OpenAPI，打通 API 工具链P3评估 Effect Schema如果 Zod v4 性能仍不够，作为长期候选\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

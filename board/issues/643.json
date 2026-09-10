@@ -1,0 +1,33 @@
+{
+  "number": 643,
+  "kind": "pull_request",
+  "title": "feat: implement DX Phase 2 define* helpers and enhance ObjectSchema.create()",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-12T09:11:46Z",
+  "updated_at": "2026-02-12T12:52:58Z",
+  "closed_at": "2026-02-12T09:53:19Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-12T09:53:19Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/643",
+  "body": "Implements DX Roadmap Phase 2 schema helper functions, bringing `define*` count from 1 to 6.\n\n### `ObjectSchema.create()` enhancement\n\nNo longer a pass-through identity function. Now auto-generates `label` from snake_case `name` and validates via `.parse()`:\n\n```ts\nconst Task = ObjectSchema.create({\n  name: 'project_task',\n  // label auto-generated as 'Project Task'\n  fields: {\n    subject: { type: 'text', label: 'Subject', required: true },\n  },\n});\n// Task.label === 'Project Task'\n// Task.active === true (defaults applied)\n```\n\n### New `define*()` factories\n\nAll follow the `defineStudioPlugin()` pattern — accept `z.input<Schema>`, return parsed output with defaults applied and validation enforced:\n\n- **`defineView()`** — `src/ui/view.zod.ts`\n- **`defineApp()`** — `src/ui/app.zod.ts`\n- **`defineFlow()`** — `src/automation/flow.zod.ts`\n- **`defineAgent()`** — `src/ai/agent.zod.ts`\n\nAll re-exported from root `src/index.ts` for top-level access:\n\n```ts\nimport { defineView, defineApp, defineFlow, defineAgent } from '@objectstack/spec';\n```\n\n### Tests\n\n21 new tests across 5 files. Full suite: 191 files, 5178 tests passing.\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

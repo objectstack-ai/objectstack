@@ -1,0 +1,33 @@
+{
+  "number": 760,
+  "kind": "issue",
+  "title": "api discovery",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-21T07:02:23Z",
+  "updated_at": "2026-02-22T02:30:46Z",
+  "closed_at": "2026-02-22T02:30:46Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/760",
+  "body": "## 🎯 目标\n\n扩展 Discovery 响应中的 `capabilities` 和 `services` 声明，让前端（ObjectUI）可以智能感知后端支持的功能。\n\n## 📋 Tasks\n\n- [ ] 在 `GetDiscoveryResponse` 的 `capabilities` 中新增：\n  - `feed: boolean` — 是否支持 Feed/Chatter API\n  - `comments: boolean` — 是否支持评论（Feed 的子集）\n  - `automation: boolean` — 是否支持 Automation CRUD\n  - `cron: boolean` — 是否支持 cron 调度\n  - `search: boolean` — 是否支持全文搜索\n  - `export: boolean` — 是否支持异步导出\n  - `chunkedUpload: boolean` — 是否支持分片上传\n- [ ] 在 `objectql/protocol.ts` 的 `getDiscovery()` 中动态检测已注册的 service 并填充 capabilities\n- [ ] 在 Client SDK 中暴露 `client.capabilities` getter\n- [ ] 编写测试验证 capabilities 随 service 注册动态变化\n\n## 🔗 关联\n\n- 所有新 API 的前端自适应依赖此 issue\n- Parent: objectstack-ai/spec#753"
+}

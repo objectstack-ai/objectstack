@@ -1,0 +1,33 @@
+{
+  "number": 719,
+  "kind": "pull_request",
+  "title": "feat(dashboard): add structured header and multi-measure pivot support",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-18T07:08:42Z",
+  "updated_at": "2026-02-18T07:47:35Z",
+  "closed_at": "2026-02-18T07:45:08Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-18T07:45:08Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/719",
+  "body": "`DashboardSchema` lacks a structured header configuration and pivot/matrix widgets only support a single measure. This adds both capabilities as optional extensions with full backward compatibility.\n\n### Schema additions (`dashboard.zod.ts`)\n\n- **`DashboardHeaderSchema`** — `showTitle` (default true), `showDescription` (default true), `actions[]` of `DashboardHeaderActionSchema` (label, actionUrl, actionType?, icon?)\n- **`WidgetMeasureSchema`** — `valueField`, `aggregate` (default count), `label?`, `format?` for multi-measure pivot/matrix analysis\n- **`DashboardSchema.header`** — optional structured header config\n- **`DashboardWidgetSchema.measures`** — optional array of `WidgetMeasureSchema`\n\n### Usage\n\n```typescript\nDashboard.create({\n  name: 'analytics_dashboard',\n  label: 'Analytics',\n  header: {\n    showTitle: true,\n    actions: [{ label: 'Export CSV', actionUrl: '/export/csv', icon: 'download' }],\n  },\n  widgets: [{\n    title: 'Sales Pivot',\n    type: 'pivot',\n    object: 'opportunity',\n    categoryField: 'region',\n    measures: [\n      { valueField: 'amount', aggregate: 'sum', label: 'Revenue', format: '$0,0' },\n      { valueField: 'amount', aggregate: 'count', label: 'Deals' },\n      { valueField: 'margin', aggregate: 'avg', label: 'Avg Margin', format: '0.0%' },\n    ],\n    layout: { x: 0, y: 0, w: 12, h: 6 },\n  }],\n});\n```\n\n### Tests & docs\n\n- 20 new tests covering header actions, header schema, measures, and integration with `Dashboard.create`\n- ROADMAP.md Phase 1 protocol items marked complete\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>Spec: DashboardSchema 支持自定义 header 和 multi-measure 分析配置</issue_title>\n> <issue_description>1. 仪表盘支持 structured header，包含 title/description/action\n> 2. Pivot/Matrix 支持 multi-measure（多数据字段、多聚合）\n> \n> **目标：**\n> - DashboardSchema 增加 header 配置区块\n> - widget/pivot 支持 measures 属性（数组，内含valueField, aggregate, label...)\n> - Spec、单元测试、文档范例\n> \n> 详见 [1.2, 1.5](https://github.com/objectstack-ai/spec/blob/main)\n> \n> 类型：enhancement\n> 完成后请运行测试并同步 roadmap</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#714\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

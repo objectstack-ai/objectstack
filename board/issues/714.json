@@ -1,0 +1,35 @@
+{
+  "number": 714,
+  "kind": "issue",
+  "title": "Spec: DashboardSchema 支持自定义 header 和 multi-measure 分析配置",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-02-18T05:52:06Z",
+  "updated_at": "2026-02-18T07:45:10Z",
+  "closed_at": "2026-02-18T07:45:10Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/714",
+  "body": "1. 仪表盘支持 structured header，包含 title/description/action\n2. Pivot/Matrix 支持 multi-measure（多数据字段、多聚合）\n\n**目标：**\n- DashboardSchema 增加 header 配置区块\n- widget/pivot 支持 measures 属性（数组，内含valueField, aggregate, label...)\n- Spec、单元测试、文档范例\n\n详见 [1.2, 1.5](https://github.com/objectstack-ai/spec/blob/main)\n\n类型：enhancement\n完成后请运行测试并同步 roadmap"
+}

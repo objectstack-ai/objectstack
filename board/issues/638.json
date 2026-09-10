@@ -1,0 +1,33 @@
+{
+  "number": 638,
+  "kind": "pull_request",
+  "title": "v3.0: Remove all @deprecated items across spec and runtime packages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-12T05:21:01Z",
+  "updated_at": "2026-02-12T08:01:01Z",
+  "closed_at": "2026-02-12T05:49:38Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-12T05:49:38Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/638",
+  "body": "Complete Phase 8 of the ROADMAP — remove all 23 deprecated items (14 spec, 9 runtime) targeting v3.0.0.\n\n### Spec: Runtime logic extraction (6 functions removed)\n- `definePlugin()`, `createErrorResponse()`, `getHttpStatusForCategory()` — moved to `@objectstack/core`\n- `createEventBusConfig()`, `createEventTypeDefinition()`, `createEventWebhookConfig()` — moved to `@objectstack/core`\n\n### Spec: Schema alias removal (5 items)\n- `RateLimitSchema` → use `RateLimitConfigSchema` from `shared/http.zod.ts`\n- `RealtimePresenceStatus` / `RealtimeAction` → use `PresenceStatus` / `RealtimeRecordAction` from `realtime-shared.zod.ts`\n- `ActionSchema.location` field → use `locations`\n- `ApiCapabilitiesSchema` → derived from `services` map in `DiscoverySchema`\n\n### Spec: Module cleanup\n- **Remove `hub/` barrel** — consumers import directly from `system/` or `kernel/`\n- **Remove `Hub.*` namespace** and `definePlugin` re-export from root `index.ts`\n- **Tighten `z.any()`** in `ui/i18n.zod.ts` params to `z.union([z.string(), z.number(), z.boolean()])`\n\n### Runtime packages (8 items removed)\n- `createHonoApp()` from `@objectstack/hono` (use plugin-based `HonoServerPlugin`)\n- `IPluginConfigValidator` from `@objectstack/core` (use `PluginConfigValidator` class)\n- `value`/`count`/`getObject` from `@objectstack/client` (use `records`/`total`/`getItem()`)\n- `ApiRegistryConfig`/`createApiRegistryPlugin` from `@objectstack/rest` (use `RestApiPluginConfig`/`createRestApiPlugin`)\n\n### Migration example\n\n```typescript\n// Before (v2.x)\nimport { Hub, definePlugin } from '@objectstack/spec';\nimport { createErrorResponse } from '@objectstack/spec/api';\nimport { RateLimitSchema } from '@objectstack/spec/api';\n\n// After (v3.0)\nimport { System, Kernel } from '@objectstack/spec';\nimport { RateLimitConfigSchema } from '@objectstack/spec/shared';\n// definePlugin/createErrorResponse → @objectstack/core\n```\n\n### Metrics\n\n| | Before | After |\n|---|---|---|\n| `@deprecated` in spec `.zod.ts` | 14 | 2 (informational) |\n| `@deprecated` in runtime | 9 | 1 (`HttpDispatcher` — adapters depend on it) |\n| `z.any()` non-filter | 1 | 0 |\n| Spec tests | 5165 | 5157 |\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

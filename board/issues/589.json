@@ -1,0 +1,33 @@
+{
+  "number": 589,
+  "kind": "pull_request",
+  "title": "Release 2.0.4: Auth service criticality downgrade",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-10T13:57:57Z",
+  "updated_at": "2026-02-10T14:16:42Z",
+  "closed_at": "2026-02-10T14:16:42Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/589",
+  "body": "Version bump to 2.0.4 following the auth service criticality change from `required` to `core`.\n\n## Changes\n\n- **Version**: All packages bumped from 2.0.3 → 2.0.4 (fixed versioning)\n- **Core change**: `ServiceRequirementDef.auth` downgraded from `required` to `core` criticality\n  - System now warns instead of failing when auth service is missing\n  - Enables degraded mode operation without authentication\n- **Changelog**: Updated across all 23 packages in monorepo\n\n## Technical Detail\n\nThe criticality level change in `packages/spec/src/system/core-services.zod.ts`:\n\n```typescript\nexport const ServiceRequirementDef = {\n  // Required: The kernel cannot function without these\n  metadata: 'required',\n  data: 'required',\n\n  // Core: Highly recommended, defaults to in-memory / no-op if missing\n  auth: 'core',  // Changed from 'required'\n  \n  // ...\n} as const;\n```\n\nThis allows the ObjectStack kernel to start without authentication services, falling back to no-op or in-memory implementations. System logs warnings for missing core services instead of hard failure.\n\n## Publishing\n\nAutomated via GitHub Actions on merge to main. Packages will publish to npm with the updated version and changelog entries.\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 根据最近的修改，用 changeset 发布一个版本\n> \n> The user has attached the following file paths as relevant context:\n>  - .github/copilot-instructions.md\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\nCreated from [VS Code](https://code.visualstudio.com/docs/copilot/copilot-coding-agent).\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

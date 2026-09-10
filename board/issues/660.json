@@ -1,0 +1,33 @@
+{
+  "number": 660,
+  "kind": "pull_request",
+  "title": "feat(spec): formalize i18n file organization conventions",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-13T10:51:18Z",
+  "updated_at": "2026-02-13T11:37:04Z",
+  "closed_at": "2026-02-13T11:34:58Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-13T11:34:58Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/660",
+  "body": "- [x] Analyze existing i18n/translation schema and conventions\n- [x] Add `FieldTranslationSchema` for reusable field translation structure\n- [x] Add `ObjectTranslationDataSchema` for per-object translation file validation\n- [x] Add `TranslationFileOrganizationSchema` enum (bundled, per_locale, per_namespace)\n- [x] Add `TranslationConfigSchema` for i18n stack configuration\n- [x] Add `TranslationData` type export\n- [x] Add `i18n` optional property to `ObjectStackDefinitionSchema` in stack.zod.ts\n- [x] Add 18 new tests for all new schemas (39 total, up from 21)\n- [x] Refactor `examples/app-todo/src/translations/` to per-locale file splitting\n- [x] Refactor `examples/app-crm/src/translations/` to per-locale file splitting (en, zh-CN, ja-JP, es-ES)\n- [x] Run full test suite — 195 files, 5269 tests all passing\n- [x] Code review — no issues found\n- [x] Security scan — no alerts\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 评估需要约定代码的规范，国际化是否建议按照每一种语言分拆开单独的文件。是否需要精确到安对象分才开。\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

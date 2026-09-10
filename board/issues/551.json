@@ -1,0 +1,37 @@
+{
+  "number": 551,
+  "kind": "pull_request",
+  "title": "Add REST API plugin protocol schemas for Phase 2 implementation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-08T10:50:43Z",
+  "updated_at": "2026-02-08T14:38:06Z",
+  "closed_at": "2026-02-08T14:29:58Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-08T14:29:58Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/551",
+  "body": "Implements the protocol layer for REST API plugins, enabling standardized route registration, validation, response wrapping, error handling, and OpenAPI generation across all ObjectStack services.\n\n### Core Schemas\n\n**Route Registration** (`RestApiRouteRegistrationSchema`)\n- Groups endpoints by prefix with shared middleware stack\n- 5 default registrations: Discovery, Metadata, Data CRUD, Batch, Permission\n- Middleware execution order: Auth (10) → Validation (20) → Envelope (100) → Error (200)\n\n**Request Validation** (`RequestValidationConfigSchema`)\n- Three modes: `strict` (reject invalid), `permissive` (log only), `strip` (remove invalid fields)\n- Validates body/query/params/headers against Zod schemas\n- Field-level error reporting with custom messages\n\n**Response Envelope** (`ResponseEnvelopeConfigSchema`)\n- Auto-wraps responses in `BaseResponseSchema` format\n- Injects metadata: timestamp, requestId, duration, traceId\n- Skip-if-wrapped logic for idempotency\n\n**Error Handling** (`ErrorHandlingConfigSchema`)\n- Standardizes errors to `ApiErrorSchema` format\n- Documentation URL generation by error code\n- Field redaction for sensitive data (password, ssn, etc.)\n\n**OpenAPI Generation** (`OpenApiGenerationConfigSchema`)\n- Supports OpenAPI 3.0.x/3.1.0\n- Auto-generates schemas from Zod definitions\n- Multiple UI frameworks: Swagger UI, Redoc, RapiDoc, Elements\n\n### Example Usage\n\n```typescript\nimport { RestApiPluginConfig, DEFAULT_DATA_CRUD_ROUTES } from '@objectstack/spec';\n\nconst config: RestApiPluginConfig = {\n  basePath: '/api',\n  version: 'v1',\n  routes: [DEFAULT_DATA_CRUD_ROUTES],\n  validation: { mode: 'strict', validateBody: true },\n  responseEnvelope: { includeMetadata: true },\n  errorHandling: { includeDocumentation: true },\n  openApi: { generateSchemas: true, uiFramework: 'swagger-ui' },\n};\n```\n\nResponse format:\n```json\n{\n  \"success\": true,\n  \"data\": { \"id\": \"123\", \"name\": \"example\" },\n  \"meta\": {\n    \"timestamp\": \"2026-02-08T10:00:00Z\",\n    \"requestId\": \"req_abc\",\n    \"duration\": 45\n  }\n}\n```\n\n### Files Added\n\n- `src/api/plugin-rest-api.zod.ts` - Protocol schemas (950 lines)\n- `src/api/plugin-rest-api.test.ts` - Test suite (33 tests)\n- `REST_API_PLUGIN.md` - Implementation guide\n- 9 JSON schemas for IDE support\n\nPhase 3/4 plugins (UI, Workflow, Analytics, Realtime, AI) will extend this pattern.\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> # API Protocol 实现计划\n> \n> ### Phase 2: 核心 REST API 插件（2-3 周）\n> \n> - [ ] **2.1** 实现 `plugin-rest-api`：注册 Discovery、Metadata、Data CRUD、Batch、Permission 路由\n> - [ ] **2.2** Request 校验中间件：使用 Zod Schema 自动验证请求体\n> - [ ] **2.3** Response 封装：统一使用 `BaseResponseSchema` 信封格式\n> - [ ] **2.4** 错误处理：统一使用 `ApiErrorSchema` 格式\n> - [ ] **2.5** OpenAPI 文档自动生成（基于 `documentation.zod.ts`）\n> \n> The user has attached the following file paths as relevant context:\n>  - .github/copilot-instructions.md\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\nCreated from [VS Code](https://code.visualstudio.com/docs/copilot/copilot-coding-agent).\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

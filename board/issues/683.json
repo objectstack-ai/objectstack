@@ -1,0 +1,33 @@
+{
+  "number": 683,
+  "kind": "pull_request",
+  "title": "feat(studio): Object Designer protocol — field editor, relationship mapper, ER diagram, object manager schemas",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-15T01:46:39Z",
+  "updated_at": "2026-02-15T02:18:57Z",
+  "closed_at": "2026-02-15T02:16:28Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-15T02:16:28Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/683",
+  "body": "Defines the full spec protocol for the Object Designer experience in Studio — visual field editing, relationship mapping, ER diagrams, and unified object management. Updates roadmaps with refined implementation phases.\n\n### New: `packages/spec/src/studio/object-designer.zod.ts`\n\n16 Zod schemas composing `ObjectDesignerConfigSchema`:\n\n- **Field Editor** — inline editing, drag-reorder, 6 property panel sections (basics/constraints/relationship/display/security/advanced), field grouping, batch ops, pagination at 50+ fields\n- **Relationship Mapper** — drag-to-create for lookup/master_detail/tree types, reverse relationships, cascade warnings, configurable line styles per type\n- **ER Diagram** — 4 layout algorithms (force/hierarchy/grid/circular), node display with field list + type badges, minimap, zoom 0.1x–3x, click-to-navigate, drag-to-connect, export PNG/SVG/JSON, orphan hiding\n- **Object Manager** — table/card/tree display modes, search + filter (package/tags/field types/relationships), quick-preview tooltips, stats summary, comparison mode\n- **Object Preview** — 8-tab detail view (Fields, Relationships, Indexes, Validations, Capabilities, Data, API, Code)\n\n```typescript\nimport { defineObjectDesignerConfig } from '@objectstack/spec/studio';\n\nconst config = defineObjectDesignerConfig({\n  defaultView: 'er-diagram',\n  erDiagram: { layout: 'hierarchy', hideOrphans: true },\n  fieldEditor: { showFieldGroups: true, batchOperations: true },\n  objectManager: { defaultDisplayMode: 'cards', showERDiagramToggle: true },\n});\n```\n\n### Tests\n\n46 tests covering all schemas — defaults, partial overrides, validation rejection. All 197 test files / 5,363 tests passing.\n\n### Roadmap updates\n\n- `ROADMAP.md` Phase 8.1 expanded with ER diagram and object manager line items; metrics updated\n- `apps/studio/ROADMAP.md` Phase 1 refined into sub-tasks 1.0–1.1d with protocol marked complete\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 你是顶级的低代码架构师，扫描目前的代码，提出用户体验最优的解决方案，评估优化的对象设计器，进行深度优化，更新roadmap\n> \n> Object Designer — visual field editor, relationship mapper，评估是否需要可视化的er图\n> 包括如何改善统一的对象管理器，方便的预览对象界面，设计对象相关的元数据。\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

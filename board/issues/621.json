@@ -1,0 +1,33 @@
+{
+  "number": 621,
+  "kind": "pull_request",
+  "title": "fix: register discovery endpoint at /api/v1/discovery",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-11T13:18:03Z",
+  "updated_at": "2026-02-11T13:38:00Z",
+  "closed_at": "2026-02-11T13:33:21Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-11T13:33:21Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/621",
+  "body": "`GET /api/v1/discovery` returned 404 because no route was registered at that path. Discovery was only reachable at `/api/v1` (RestServer) and `/.well-known/objectstack` (DispatcherPlugin), but Studio UI and user expectations reference `/api/v1/discovery`.\n\n### Changes\n\n- **`packages/rest/src/rest-server.ts`** — `registerDiscoveryEndpoints()` now registers the shared handler at both `basePath` and `${basePath}/discovery`\n- **`packages/runtime/src/dispatcher-plugin.ts`** — Added `GET ${prefix}/discovery` route alongside `/.well-known/objectstack`\n- **`packages/rest/src/rest.test.ts`** — Updated route assertions for the new `/discovery` path\n\n### Discovery endpoints after this change\n\n| Path | Provider |\n|---|---|\n| `/.well-known/objectstack` | DispatcherPlugin |\n| `/api/v1` | RestServer |\n| `/api/v1/discovery` | RestServer + DispatcherPlugin |\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

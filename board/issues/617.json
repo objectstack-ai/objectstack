@@ -1,0 +1,33 @@
+{
+  "number": 617,
+  "kind": "pull_request",
+  "title": "feat(plugin-dev): replace Map-based stubs with InMemoryDriver-backed metadata/data/search",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-11T10:02:53Z",
+  "updated_at": "2026-02-11T11:02:40Z",
+  "closed_at": "2026-02-11T11:02:40Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/617",
+  "body": "Optimizes `plugin-dev` by leveraging `@objectstack/driver-memory` (Mingo-powered) as the backing store for the three most critical dev stubs — metadata, data, and search — replacing their simple Map-based implementations with realistic CRUD+query behavior.\n\n### Changes\n\n- **Metadata service** — full CRUD with upsert semantics, query/filter/sort/pagination, `update()`, `count()`, package-scoped cleanup. Stored in `_meta_{type}` tables.\n- **Data engine** — no longer a no-op. Supports `find` with filters/sort/pagination, bulk insert, and `aggregate()` with full MongoDB-style pipelines ($group, $sum, etc.)\n- **Search service** — documents indexed with `_searchText` field, searched via Mingo `$regex`. Supports upsert-based re-indexing and `dropTable()`-based index deletion.\n- **Architecture** — shared `InMemoryDriver` instance across stubs, factory map split into `DEV_STUB_FACTORIES` (parameterless) and `DRIVER_BACKED_FACTORIES` (driver-injected). Driver lifecycle tied to plugin init/destroy.\n- **Dependency** — `@objectstack/driver-memory` moved from peerDependencies to direct dependencies.\n\n### Example\n\n```typescript\n// Metadata service now supports real queries\nconst meta = kernel.getService('metadata');\nawait meta.register('object', { name: 'account', label: 'Account', fields: [] });\nawait meta.register('object', { name: 'contact', label: 'Contact', fields: [] });\n\n// Filter, sort, paginate\nconst page = await meta.list('object', { limit: 10, orderBy: [{ field: 'name', order: 'asc' }] });\n\n// Update with partial merge\nawait meta.update('object', 'account', { label: 'Account (v2)' });\n\n// Data engine supports real CRUD + aggregation\nconst data = kernel.getService('data');\nawait data.insert('order', { data: { customer: 'Alice', amount: 100 } });\nconst results = await data.aggregate('order', [\n  { $group: { _id: '$customer', total: { $sum: '$amount' } } },\n]);\n```\n\n### Tests\n\n18 tests (7 existing updated for async, 11 new covering metadata CRUD, data engine operations, search indexing, aggregation, and cross-service isolation).\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 802,
+  "kind": "pull_request",
+  "title": "Harden UI schema type safety, unify filter format, extend cross-reference validation, add negative tests",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-24T07:17:12Z",
+  "updated_at": "2026-02-24T08:19:00Z",
+  "closed_at": "2026-02-24T08:13:15Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-24T08:13:15Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/802",
+  "body": "Spec protocol had loose typing (`z.any()` / `z.array(z.unknown())`) in UI schemas and incomplete cross-reference validation in `defineStack()`, allowing invalid metadata to pass silently.\n\n### `z.any()` → typed schemas (7 instances across 3 files)\n\n- **dashboard.zod.ts**: `GlobalFilterSchema` options `value`/`defaultValue` → `z.union([z.string(), z.number(), z.boolean()])`\n- **page.zod.ts**: `ElementDataSourceSchema.filter`, `RecordReviewConfigSchema.filter` → `FilterConditionSchema`; review action `value` → typed union\n- **component.zod.ts**: `ElementNumberPropsSchema.filter`, `ElementRecordPickerPropsSchema.filter` → `FilterConditionSchema`\n\nZero `z.any()` remaining in all 19 UI protocol files.\n\n### Filter format unification — `ViewFilterRuleSchema`\n\nCreated `ViewFilterRuleSchema` (`{ field, operator, value }`) as the standard typed schema for declarative view/tab/page filters. Replaced all `z.array(z.unknown())` filter fields:\n\n- **view.zod.ts**: `ListViewSchema.filter`, `ViewTabSchema.filter`, `quickFilters[].value`\n- **page.zod.ts**: `InterfacePageConfigSchema.filterBy`\n- **component.zod.ts**: `RecordRelatedListProps.filter`\n\nTwo unified filter conventions now exist:\n- **`FilterConditionSchema`** — MongoDB-style object filters for data queries\n- **`ViewFilterRuleSchema`** — Declarative array-of-objects filters for UI views/tabs\n\n### Cross-reference validation (`stack.zod.ts`)\n\n- **Seed data**: `data[].object` validated against defined objects\n- **Navigation**: App nav items (`object`, `dashboard`, `page`, `report`) validated against defined metadata, recursive into group children\n\n```ts\n// Now throws: \"Seed data references object 'ghost_object' which is not defined in objects.\"\ndefineStack({\n  objects: [{ name: 'account', fields: { name: { type: 'text' } } }],\n  data: [{ object: 'ghost_object', records: [{ name: 'Test' }] }],\n});\n```\n\n### Negative validation tests (+44)\n\nCovers missing required fields, invalid enum values, incomplete layout, camelCase name rejection, and cross-reference violations for `DashboardWidgetSchema`, `DashboardSchema`, `GlobalFilterSchema`, `PageSchema`, `PageComponentSchema`, `RecordReviewConfigSchema`, `ReportSchema`, `ViewFilterRuleSchema`, `ListViewSchema.filter`, and `defineStack`.\n\n### Example-level strict validation tests\n\nAdded full-stack config validation tests mirroring `examples/app-todo` and `examples/app-crm` patterns — Todo-style and CRM-style configs with objects, seed data, dashboards, reports, and navigation all validated in strict mode.\n\n### SSOT compliance\n\nAll 135 UI types derived via `z.infer<typeof ...>`, zero duplicate interfaces in `.zod.ts` files. Remaining `z.unknown()` instances are justified extensibility points (`properties`, `children`, `context`, `body`, `options`).\n\n### ROADMAP.md\n\nUpdated test metrics (6,456 tests) and added expanded Spec Protocol Hardening Status table.\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>Spec 协议健壮性提升与元数据一致性：多维度严��校验、必填字段、Zod-First、CI 守护等方案清单</issue_title>\n> <issue_description># 问题背景\n> \n> 通过对 objectui（及所有 example）项目应用的实战梳理发现，当前 spec 项目存在如下不足，导致规范约束性弱、静态校验缺失、下游实现不一致：\n> \n> - defineStack 入口几乎无 runtime 校验机制，默认能\"吞掉\"不规范数据\n> - DashboardWidget、View、Page 等类型定义大量字段可选且类型泛滥（z.unknown/z.any）\n> - interface 和 Zod schema 同名却常常不同步，易漂移\n> - 多种协议字段（如 filter 格式）业界无统一方案，当前 implementation 存在多种格式并存\n> - 自动化测试主要覆盖正向（happy path），未设置逆向与快照守护\n> \n> # 优化目标\n> - 使 Spec schema 能最大化提前捕获元数据规范错误，为 IDE/开发/CLI/CI 等提供一致、可靠的安全边界\n> - 下游用户和低代码 IDE 能获得一致强校验支持\n> \n> ---\n> \n> ## 方案要点（优先级已排定）\n> \n> ### 1. defineStack() 接口默认严格校验\n> - 默认 `{ strict: true }`，无特殊理由禁止关闭\n> - 校验顶层结构&子项 required/类型\n> - 导航、引用、seed data 等全部交叉验证\n> - 校验失败应抛异常，阻止加载/编译\n> \n> ### 2. 所有 Zod schema 必须按SSOT（单一真相）原则，类型和校验同步维护\n> - interface 一律用 z.infer<typeof Schema> 自动推导，禁止 interface/zod 漂移\n> - 删除冗余/过时 interface，禁止重复定义\n> \n> ### 3. DashboardWidget/Report/View/Page 等 schema 必填字段与 discriminated union 风格\n> - type, id, object[Name], field, layout 等协议主字段全部标记 required\n> - DashboardWidget/Report 建议用 discriminatedUnion 按 type 区分 subtype（chart、metric、table等必填字段不同）\n> - 替换所有 z.unknown/z.any，为具体的 composite schema\n> \n> ### 4. Filter 格式统一 & 全局复用 types\n> - filter 必须全局设定标准结构，如[['field','op','value']]，禁止扁平或对象式混用\n> - 一处改 schema，所有协议统一同步\n> \n> ### 5. 测试体系加强（正向/逆向/快照覆盖）\n> - 逆向测试（各类缺字段、类型非法、enum 越界等）必须报错\n> - example/kitchen-sink/crm/todo 等所有 defineStack 均需 strict 校验且能通过\n> - seed 数据与字段可用选项交叉快照，必测\n> \n> ### 6. CI/Lint/pre-commit 守护\n> - 新增/更新 spec schema 时，所�� example 元数据自动严格校验\n> - 拒绝 z.unknown/z.any，或报警给审批\n> - pre-commit 校验所有 type/interface/zod 只在一个地方维护\n> \n> ---\n> \n> ## 落地建议\n> - 首先针对 DashboardWidget/View/Page/Seed/Navigation 全面升级 required 字段及 discriminated union\n> - 补全所有文档注释，IDE 能提示每个字段含义/必填性\n> - 编写脚本自动迁移/校对历史 example 数据\n> - 逐步移除 z.any/z.unknown\n> - 形成使用模板/脚手架/校验工具链\n> - 完成后完善Roadmap、规范文档，并补充逆向用例\n> \n> ---\n> \n> 如需详细升级规划和接口代码示例，可分步骤提交子 issue。</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#801\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n🔒 GitHub Advanced Security automatically protects Copilot coding agent pull requests. You can protect all pull requests by enabling Advanced Security for your repositories. [Learn more about Advanced Security.](https://gh.io/cca-advanced-security)"
+}

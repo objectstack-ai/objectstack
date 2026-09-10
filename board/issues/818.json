@@ -1,0 +1,33 @@
+{
+  "number": 818,
+  "kind": "pull_request",
+  "title": "feat: auto-detect persistence strategy for memory driver",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-26T17:05:21Z",
+  "updated_at": "2026-02-26T17:56:28Z",
+  "closed_at": "2026-02-26T17:52:15Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-26T17:52:15Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/818",
+  "body": "Memory driver now auto-detects the runtime environment and picks the right persistence adapter by default. No configuration needed — `new InMemoryDriver()` just works.\n\n### Changes\n\n- **Spec schema** (`memory.zod.ts`): Added `'auto'` to `PersistenceTypeSchema`, new `AutoPersistenceConfigSchema` with optional `path`/`key`/`autoSaveInterval` overrides for environment-specific tuning. Persistence defaults to `'auto'`. Added `false` to explicitly disable persistence.\n- **Driver** (`memory-driver.ts`): `isBrowserEnvironment()` via `globalThis.localStorage` detection (covers browsers + Web Workers), `initPersistence()` routes `'auto'` → localStorage (browser) or file (Node.js). Defaults to `'auto'` when no persistence config is provided.\n- **Tests**: Schema validation + driver integration tests for both shorthand and object config. Existing tests updated to use `persistence: false` for pure in-memory behavior.\n\n### Default Adapter Values\n\n- **Node.js file path**: `.objectstack/data/memory-driver.json` (project-relative)\n- **Browser localStorage key**: `objectstack:memory-db`\n\n### Usage\n\n```typescript\n// Auto-detect (default): browser → localStorage, Node.js → file\nnew InMemoryDriver()\n\n// Explicit auto-detect\nnew InMemoryDriver({ persistence: 'auto' })\n\n// Auto-detect with per-environment overrides\nnew InMemoryDriver({\n  persistence: {\n    type: 'auto',\n    path: '/var/data/memory.json',  // Node.js override\n    key: 'myapp:db',               // browser override\n  }\n})\n\n// Pure in-memory (no persistence)\nnew InMemoryDriver({ persistence: false })\n```\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> memory driver应该可以自己检测是否浏览器环境，自动决定使用各种数据保存策略\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 726,
+  "kind": "pull_request",
+  "title": "feat: implement DatabaseLoader for datasource-backed metadata persistence",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-18T11:51:32Z",
+  "updated_at": "2026-02-18T13:01:10Z",
+  "closed_at": "2026-02-18T12:51:24Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-18T12:51:24Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/726",
+  "body": "ObjectStack metadata only supported memory/filesystem/http loaders — no database persistence. This was the single P0 blocker preventing production deployment (multi-instance sync, platform/user overlay persistence, Studio metadata editing).\n\n### SysMetadataObject (`packages/metadata/src/objects/sys-metadata.object.ts`)\n\n- Formal ObjectStack object definition for the `sys_metadata` table using `ObjectSchema.create()` with `isSystem: true`\n- All fields defined using `Field.*` helpers with proper labels, descriptions, and constraints\n- Database indexes for `[type, name]` (unique), `[type, scope]`, `[tenant_id]`, `[state]`, `[namespace]`\n- Capabilities: `trackHistory`, `apiEnabled` with full CRUD methods, `trash: false`\n- Defined in the `@objectstack/metadata` package (not `packages/spec`, which is protocol-only)\n\n### DatabaseLoader (`packages/metadata/src/loaders/database-loader.ts`)\n\n- Implements `MetadataLoader` with protocol `datasource:`, full CRUD via `IDataDriver`\n- Maps to configurable `sys_metadata` table using `MetadataRecordSchema` envelope\n- Auto-creates table on first use via `syncSchema` with the `SysMetadataObject` definition (idempotent, once per instance)\n- Upsert semantics with `version` increment for optimistic concurrency\n- Multi-tenant isolation via `tenantId` filter on all queries\n- Graceful degradation: read failures return null/empty, save failures throw descriptive errors\n\n### MetadataManager integration\n\n- Auto-registers `DatabaseLoader` when `config.datasource` + `config.driver` are both set\n- `setDatabaseDriver(driver: IDataDriver)` for deferred setup (kernel resolves driver name → instance later)\n- Respects `config.tableName` (default: `sys_metadata`)\n\n```typescript\n// Immediate setup\nconst manager = new MetadataManager({\n  datasource: 'default',\n  driver: myPostgresDriver,\n  formats: ['json'],\n});\n\n// Or deferred setup (plugin resolves driver from kernel)\nconst manager = new MetadataManager({ datasource: 'default', formats: ['json'] });\nmanager.setDatabaseDriver(resolvedDriver);\n```\n\n### Tests\n\n35 new tests covering loader operations, auto-configuration, multi-tenant isolation, error handling, and MetadataManager integration. All 139 tests pass (35 new + 104 existing).\n\n### ROADMAP updates\n\n- `packages/metadata/ROADMAP.md` Phase 1 → ✅\n- Root `ROADMAP.md` Phase 4a → ✅, P0 blocker resolved\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>[P0] 实现 Metadata DatabaseLoader，实现数据库持久化元数据</issue_title>\n> <issue_description>### 背景说明\n> 当前 ObjectStack 的 metadata 服务仅支持 memory��filesystem、http 三种 loader，实现 overlay/customization 只能保存在内存或本地文件，无法满足生产多实例部署、用户/平台定制持久化、大数据量平台运行等关键需求。Spec 层面所有相关 schema 已定义，缺口仅在 datasource-backed DatabaseLoader。\n> \n> ### 目标\n> - 最小闭环实现 DatabaseLoader，完成 metadata 的数据库持久化和 overlay 管理能力，为前端、平台上线扫清最大阻碍。\n> - 支持 platform 及 user 级元数据存储，解锁多用户自定义、平台自定义、任意规模实例间同步可能性。\n> \n> ### 需实现内容\n> 1. 实现 `packages/metadata/src/loaders/database-loader.ts`：\n>    - 遵循 MetadataLoader 接口，并声明 protocol 为 `datasource:`。\n>    - 注入 `IDataDriver` 获取物理数据库连接。\n>    - 映射到 sys_metadata（可配）表，CRUD 操作，实现 register/get/list/unregister/exists/stat/save 等能力。\n>    - 支持 `scope` 字段（system / platform / user）隔离。\n>    - ��次使用时自建表结构，后续自动迁移。\n> 2. 在 MetadataManager 中自动集成 DatabaseLoader（即 MetadataManagerConfig.datasource 存在时自动启用）。\n> 3. 支持 overlay 持久化到数据库，变更事件和 state 管理依赖数据库。\n> 4. 编写必要单元及集成测试。\n> 5. ROADMAP.md/README 适当同步调整。\n> \n> ### 验收标准\n> - platform scope 下的元数据能被持久化于数据库\n> - user scope 下自定义 overlay 能被存储数据库，支持按 userId 查询\n> - 数据库 offline 回落 filesystem/memory loader\n> \n> ---\n> 【本 Issue 来源于新 Roadmap P0 最小实现策略（2026-02-18）】</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#725\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

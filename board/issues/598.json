@@ -1,0 +1,33 @@
+{
+  "number": 598,
+  "kind": "pull_request",
+  "title": "[WIP] Release patch version for updates",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-11T01:51:25Z",
+  "updated_at": "2026-02-11T02:00:43Z",
+  "closed_at": "2026-02-11T01:58:57Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/598",
+  "body": "- [x] Create changeset file for patch release\n- [x] Run `pnpm changeset version` to bump all packages from 2.0.5 → 2.0.6\n- [x] Update main CHANGELOG.md with release notes for 2.0.6\n- [x] Verify all 20 packages updated to version 2.0.6\n- [x] Code review — no issues found\n- [x] Security scan — no code changes to analyze\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

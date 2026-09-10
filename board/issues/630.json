@@ -1,0 +1,33 @@
+{
+  "number": 630,
+  "kind": "pull_request",
+  "title": "docs: add per-metadata-type guide pages for application development",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-12T01:38:42Z",
+  "updated_at": "2026-02-12T02:46:31Z",
+  "closed_at": "2026-02-12T02:22:07Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-12T02:22:07Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/630",
+  "body": "The docs site lacked dedicated pages explaining each metadata type used in metadata-driven application development. All metadata concepts were either scattered across reference docs or bundled into the data-modeling guide.\n\n### Changes\n\n- **New `guides/metadata/` section** with 11 pages covering every metadata type a developer uses to build an application:\n  - **Data layer**: Object, Field, Validation\n  - **UI layer**: View (list + form), Page, App, Dashboard\n  - **Automation layer**: Flow, Workflow\n  - **Security layer**: Permission\n- **`index.mdx`** — overview with category table, architecture diagram, and quick-start example\n- Each page documents: schema properties, configuration options, type-specific variants, naming conventions, and complete examples\n- Updated `guides/meta.json` and `guides/index.mdx` to wire up navigation\n\n### Structure\n\n```\ncontent/docs/guides/metadata/\n├── meta.json        # nav config\n├── index.mdx        # overview + architecture\n├── object.mdx       # entities, capabilities, enterprise features\n├── field.mdx        # 40+ field types, constraints, factories\n├── view.mdx         # grid/kanban/calendar/gantt + form views\n├── page.mdx         # component-based custom pages\n├── app.mdx          # navigation, branding, access control\n├── dashboard.mdx    # chart widgets, date ranges, global filters\n├── flow.mdx         # visual automation, 15 node types\n├── workflow.mdx     # event triggers, 7 action types, time triggers\n├── validation.mdx   # 9 validation types, priorities\n└── permission.mdx   # CRUD, field security, tab visibility, RLS\n```\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

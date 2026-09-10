@@ -1,0 +1,35 @@
+{
+  "number": 712,
+  "kind": "issue",
+  "title": "DashboardSchema.globalFilters 协议支持动态选项与数据绑定高级配置",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-02-18T05:51:27Z",
+  "updated_at": "2026-02-18T06:33:55Z",
+  "closed_at": "2026-02-18T06:33:55Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/712",
+  "body": "Airtable style dashboard filter bar 需协议支持 optionsFrom，允许下拉选项自动从对象动态获取。\n\n**目标**：\n- DashboardSchema.globalFilters 协议项支持 options、optionsFrom（object/labelField/valueField）\n- 支持 scope、targetWidgets 等高级配置\n- 兼容旧协议写法\n\n参考[分析 1.3](https://github.com/objectstack-ai/spec/blob/main)\n\n- 类型：enhancement\n- 开发完成后测试，并更新 roadmap"
+}

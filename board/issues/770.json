@@ -1,0 +1,33 @@
+{
+  "number": 770,
+  "kind": "pull_request",
+  "title": "Automation engine: fault edges, safe eval, cycle detection, parallel execution, timeouts, versioning",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-21T09:53:31Z",
+  "updated_at": "2026-02-21T10:30:01Z",
+  "closed_at": "2026-02-21T10:22:51Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-21T10:22:51Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/770",
+  "body": "Deep refinement of the automation engine architecture, benchmarked against n8n/Activepieces/Zapier patterns. Covers 9 of 11 tasks from the tracking issue.\n\n### Spec Schema (`packages/spec/src/automation/flow.zod.ts`)\n\n- **Retry backoff**: `backoffMultiplier`, `maxRetryDelayMs`, `jitter` on `errorHandling`\n- **Node timeout**: `timeoutMs` on `FlowNodeSchema`\n- **Node I/O schemas**: `inputSchema`/`outputSchema` on `FlowNodeSchema` for Studio form generation and runtime validation\n- **Version history**: `FlowVersionHistorySchema` for rollback support\n\n### Engine (`packages/services/service-automation/src/engine.ts`)\n\n- **Fault edges**: On node failure, follow `type: 'fault'` edges instead of aborting. Error context written to `$error` variable for downstream nodes.\n- **Step-level logging**: Every node records `startedAt`, `completedAt`, `durationMs`, `status`, `error` into `steps[]` on the execution log.\n- **Safe expression eval**: Replaced `new Function()` with an operator-based string parser. No code execution possible — verified with malicious input tests.\n- **DAG cycle detection**: DFS-based validation on `registerFlow`, rejects cyclic graphs with descriptive error.\n- **Parallel branches**: Unconditional outgoing edges execute via `Promise.all`; conditional edges evaluate sequentially.\n- **Node timeout**: `Promise.race` wrapper when `timeoutMs > 0`.\n- **Exponential backoff**: `retryExecution` computes delay as `baseDelay * multiplier^attempt` capped at `maxRetryDelayMs`, optional jitter. Uses `executeWithoutRetry` to prevent recursive call stacking.\n- **Input schema validation**: Pre-execution check of required params and type matching against `inputSchema`.\n- **Flow versioning**: `registerFlow` appends to version history; `rollbackFlow(name, version)` restores a snapshot.\n\n```typescript\n// Fault edge in flow definition\nedges: [\n  { id: 'e1', source: 'risky_node', target: 'next', type: 'default' },\n  { id: 'e2', source: 'risky_node', target: 'error_handler', type: 'fault' },\n]\n\n// Node with timeout and input schema\n{ id: 'api_call', type: 'http_request', label: 'Call API',\n  timeoutMs: 5000,\n  inputSchema: { url: { type: 'string', required: true } } }\n\n// Backoff config\nerrorHandling: {\n  strategy: 'retry', maxRetries: 5, retryDelayMs: 1000,\n  backoffMultiplier: 2, maxRetryDelayMs: 30000, jitter: true,\n}\n```\n\n### Tests\n\n67 engine tests (25 new), 5996 spec tests (6 new). All pre-existing tests pass unchanged.\n\n### Security\n\nRemoved `new Function()` from both `engine.ts` and `logic-nodes-plugin.ts`. The replacement parser only handles comparison operators and boolean literals — no `eval`-family calls remain.\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>自动化引擎架构对标主流平台的细节完善任务拆分</issue_title>\n> <issue_description>## 背景\n> 参考 n8n、Activepieces、Zapier、Airtable 等平台，对 ObjectStack 自动化引擎核心架构进行深度完善。目标：提升系统健壮性、兼容主流自动化场景、强化开发体验。\n> \n> ---\n> \n> ## 🛠️ 待开发细节任务清单\n> \n> ### 1. Fault Edge 错误路径支持（节点级错误分支）\n> - [ ] 扩展 DAG 执行核心：节点执行失败时，自动查找并跳转 fault 类型的边，优先走故障分支，不中断全流程。\n> - [ ] 将失败信息（error/output）写入变量上下文，便于后续节点引用。\n> - [ ] 无 fault 路径则如旧逻辑中断。\n> - [ ] 单元测试覆盖：模拟节点失败，检��� fault 路径执行。\n> \n> ### 2. Node Step-level 执行日志\n> - [ ] 执行流程时，采集每个节点 id/type/status/timing 记录到 executionLog.steps。\n> - [ ] 日志包含：开始时间、结束时间、耗时、执行状态（success/failure/skipped）。\n> - [ ] UI/API优化：execution history 展示完整 step 详情。\n> - [ ] 测试覆盖：断点失败/并发分支均有 step 记录。\n> \n> ### 3. Retry/Backoff 递归保护与指数退避\n> - [ ] refine retryExecution：增加内部重试标志，防止递归调用叠加导致栈溢出。\n> - [ ] 支持 retryDelayMs、backoffMultiplier、maxRetryDelayMs、jitter 控制重试间隔。\n> - [ ] 测试覆盖：节点失败后正确指数退避重试，并最终输出 failure 日志。\n> \n> ### 4. 并行分支执行\n> - [ ] DAG 执行时支持无条件边并发（Promise.all），条件边按顺序互斥。\n> - [ ] 检查多条分支同时出边场景，确保并发执行不影响变量隔离。\n> - [ ] 测试覆盖：并行任务执行耗时显著下降。\n> \n> ### 5. 节点超时机制\n> - [ ] NodeExecutor 支持 timeoutMs 属性。\n> - [ ] 执行节点时包裹 Promise.race 超时控制，超时自动失败并记录日志。\n> - [ ] 测试覆盖：模拟长耗时节点，确保自动中断。\n> \n> ### 6. DAG 环检测与流程校验\n> - [ ] registerFlow 时自动检测环路，拒绝非 DAG 流程注册。\n> - [ ] 用户提示友好：具体环路详情。\n> - [ ] 测试覆盖：注册任意递归流程时抛出异常。\n> \n> ### 7. 安全表达式求值（替换 new Function）\n> - [ ] evaluateCondition/decision 节点改用 jexl 等沙箱表达式引擎。\n> - [ ] 支持变量对象嵌套结构、数值/文本安全解析。\n> - [ ] 测试覆盖：用恶意代码字符串验证不被执行。\n> \n> ### 8. 节点输入输出 Schema 校验（结构声明）\n> - [ ] NodeExecutor 扩展 inputSchema/outputSchema 属性，用于 Studio 表单生成与运行时校验。\n> - [ ] 运行前自动校验节点 config 参数是否结构正确。\n> - [ ] 测试覆盖：节点参数类型错误能即时报错。\n> \n> ### 9. Webhook/RecordChange Trigger 插件支持\n> - [ ] 新增标准 webhook trigger 插件，为 type=api flow 自动分配唯一 webhook URL。\n> - [ ] 基于 ObjectQL 的 record_change trigger 实现。\n> - [ ] 全流程自测：模拟外部调用触发引擎。\n> \n> ### 10. 流程版本管理与回滚\n> - [ ] registerFlow 保留历史版本。\n> - [ ] executionLogEntry 记录 flowVersion。\n> - [ ] 支持 API/UI 回滚到历史版本。\n> - [ ] 测试覆盖：注册多版本流程，执行与回滚。\n> \n> ### 11. 执行状态拓展\n> - [ ] executionLogEntry.status 增加 'running'、'paused'、'waiting'、'cancelled' 等状态。\n> - [ ] wait/script/approval 节点支持流程暂停与状态变更。\n> \n> ---\n> \n> ## 验收标准\n> - 所有上述细节点均有单元测试覆盖。\n> - 与现有架构兼容，不破坏现有所有通过的 test。\n> -  Roadmap 及时更新。\n> \n> **注：每项任务建议拆分为单独 PR、issue，支持独立测试与上线。**</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#769\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

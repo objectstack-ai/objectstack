@@ -1,0 +1,33 @@
+{
+  "number": 761,
+  "kind": "pull_request",
+  "title": "feat: Feed API route handler and client SDK integration",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-21T07:10:25Z",
+  "updated_at": "2026-02-21T07:37:30Z",
+  "closed_at": "2026-02-21T07:29:57Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-21T07:29:57Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/761",
+  "body": "Schema, contract, and service implementation for Feed/Chatter exist but lack route handlers and client SDK access. This PR wires up the remaining layers.\n\n### Protocol Interface (`spec/src/api/protocol.zod.ts`)\n- 14 Feed operations added to `ObjectStackProtocolSchema` and `ObjectStackProtocol` interface\n- Feed types re-exported from `feed-api.zod.ts`\n\n### Route Handler (`objectql/src/protocol.ts`)\n- `ObjectStackProtocolImplementation` constructor extended with optional `getFeedService` getter\n- 14 methods delegating to `IFeedService`: `listFeed`, `createFeedItem`, `updateFeedItem`, `deleteFeedItem`, `addReaction`, `removeReaction`, `pinFeedItem`, `unpinFeedItem`, `starFeedItem`, `unstarFeedItem`, `searchFeed`, `getChangelog`, `feedSubscribe`, `feedUnsubscribe`\n- `feed` service added to discovery response (`services.feed`)\n\n### Client SDK (`client/src/index.ts`)\n- `feed` namespace with 14 methods matching `FeedApiContracts` URL patterns\n- `feed` added to `getRoute()` routing → `/api/v1/data`\n\n```ts\n// Client usage\nconst items = await client.feed.list('account', 'rec_123', { type: 'all', limit: 20 });\nawait client.feed.create('account', 'rec_123', { type: 'comment', body: 'Hello @jane' });\nawait client.feed.addReaction('account', 'rec_123', 'feed_1', '👍');\nawait client.feed.subscribe('account', 'rec_123', { events: ['comment'], channels: ['in_app'] });\n```\n\n### Tests\n- 18 route handler unit tests with mock `IFeedService`\n- 14 client SDK tests verifying HTTP method/URL correctness\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>feed api</issue_title>\n> <issue_description>## 🎯 目标\n> \n> 打通 Feed/Chatter API 从协议到 Client SDK 的\"最后一公里\"。Schema、Contract、Service 均已完成，缺少 Route Handler 和 Client SDK 接入。\n> \n> ## 📊 当前状态\n> \n> | 层级 | 文件 | 状态 |\n> |------|------|------|\n> | Schema | `spec/src/data/feed.zod.ts` | ✅ |\n> | API Protocol | `spec/src/api/feed-api.zod.ts` (14 个端点) | ✅ |\n> | Contract | `spec/src/contracts/feed-service.ts` (`IFeedService`) | ✅ |\n> | Service Impl | `services/service-feed/InMemoryFeedAdapter` (40+ tests) | ✅ |\n> | **Route Handler** | `objectql/protocol.ts` → Feed 方法 | 🔴 缺失 |\n> | **Client SDK** | `client.feed.*` namespace | 🔴 缺失 |\n> \n> ## 📋 Tasks\n> \n> ### 1. Route Handler (`packages/objectql`)\n> \n> 在 `ObjectStackProtocolImplementation` 中新增 14 个 Feed 方法，对应 `FeedApiContracts`：\n> \n> - [ ] `listFeed` → `GET /api/data/:object/:recordId/feed`\n> - [ ] `createFeedItem` → `POST /api/data/:object/:recordId/feed`\n> - [ ] `updateFeedItem` → `PUT /api/data/:object/:recordId/feed/:feedId`\n> - [ ] `deleteFeedItem` → `DELETE /api/data/:object/:recordId/feed/:feedId`\n> - [ ] `addReaction` → `POST /api/data/:object/:recordId/feed/:feedId/reactions`\n> - [ ] `removeReaction` → `DELETE /api/data/:object/:recordId/feed/:feedId/reactions/:emoji`\n> - [ ] `pinFeedItem` / `unpinFeedItem` → Pin/Unpin endpoints\n> - [ ] `starFeedItem` / `unstarFeedItem` → Star/Unstar endpoints\n> - [ ] `searchFeed` → `GET /api/data/:object/:recordId/feed/search`\n> - [ ] `getChangelog` → `GET /api/data/:object/:recordId/changelog`\n> - [ ] `subscribe` / `unsubscribe` → Record subscription endpoints\n> \n> ### 2. Client SDK (`packages/client`)\n> \n> - [ ] 在 `ObjectStackClient` 中新增 `feed` namespace，包含 14 个方法\n> - [ ] 在 `getRoute()` 中新增 `feed` 路由类型（使用 `/api/data` 子路径模式）\n> - [ ] 新增 `client.feed.*` 的类型导出\n> - [ ] 编写 MSW 测试验证 Client ↔ Server 集成\n> \n> ### 3. Discovery 增强\n> \n> - [ ] 在 `getDiscovery()` 返回的 `services` 中新增 `feed` service 状态\n> - [ ] 在 `capabilities` 中新增 `feed: true` 和 `comments: true`\n> \n> ### 4. 测试\n> \n> - [ ] Route handler 单元测试\n> - [ ] Client SDK MSW 集成测试\n> - [ ] 验证 `FeedApiContracts` 的 input/output schema 与实际请求/响应一致\n> \n> ## 🔗 关联\n> \n> - 阻塞 ObjectUI Roadmap P1.5（Comments & Collaboration）\n> - 参考: `FeedApiContracts` in `packages/spec/src/api/feed-api.zod.ts`\n> - 参考: `InMemoryFeedAdapter` in `packages/services/service-feed/`\n> - Parent: objectstack-ai/spec#753</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#756\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

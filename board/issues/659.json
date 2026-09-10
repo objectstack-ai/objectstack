@@ -1,0 +1,33 @@
+{
+  "number": 659,
+  "kind": "pull_request",
+  "title": "feat: add i18n translation examples to app-todo and app-crm",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-13T10:02:21Z",
+  "updated_at": "2026-02-13T10:50:32Z",
+  "closed_at": "2026-02-13T10:47:08Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-13T10:47:08Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/659",
+  "body": "No i18n examples existed despite comprehensive `TranslationBundleSchema` support in the spec. Adds working translation bundles to both example apps.\n\n### app-todo (3 locales: en, zh-CN, ja-JP)\n- Task object: all 19 field labels, select options (status/priority/tags), help text\n- App label, 19 UI messages, 2 validation messages\n\n### app-crm (4 locales: en, zh-CN, ja-JP, es-ES)\n- 4 core objects (Account, Contact, Lead, Opportunity) with full field/option coverage\n- App & nav translations, 21 UI messages, 3 validation messages\n\n### Wiring pattern\nBoth follow the existing barrel-import convention:\n\n```typescript\nimport * as translations from './src/translations';\n\nexport default defineStack({\n  // ...\n  translations: Object.values(translations),\n});\n```\n\nEach `*.translation.ts` exports a typed `TranslationBundle` covering objects, apps, messages, and validationMessages:\n\n```typescript\nimport type { TranslationBundle } from '@objectstack/spec/system';\n\nexport const TodoTranslations: TranslationBundle = {\n  en:      { objects: { task: { label: 'Task', fields: { ... } } }, messages: { ... } },\n  'zh-CN': { objects: { task: { label: '任务', fields: { ... } } }, messages: { ... } },\n  'ja-JP': { objects: { task: { label: 'タスク', fields: { ... } } }, messages: { ... } },\n};\n```\n\n### README\n- Added I18n row to System Protocol coverage map\n- Updated directory structures and feature lists for both examples\n- Added `translations/` to standard file structure convention\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 完善example 中关于国际化的例子\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

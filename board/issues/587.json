@@ -1,0 +1,33 @@
+{
+  "number": 587,
+  "kind": "pull_request",
+  "title": "Fix CI build failures: lockfile mismatch and TypeScript type errors",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-10T10:18:57Z",
+  "updated_at": "2026-02-10T10:38:11Z",
+  "closed_at": "2026-02-10T10:33:52Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-10T10:33:52Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/587",
+  "body": "CI broken after merging #586 — `pnpm install --frozen-lockfile` fails and `@objectstack/objectql` has two type errors.\n\n- **Lockfile out of date**: `examples/metadata-objectql/package.json` was added to the workspace but `pnpm-lock.yaml` was never regenerated\n- **`protocol.ts` type mismatch**: `endpoints` typed as `Record<string, string>` but `GetDiscoveryResponseSchema` expects `ApiRoutes` (required `data` + `metadata` keys). Replaced with properly typed object and explicit service→endpoint key mapping:\n  ```typescript\n  const endpoints: ApiRoutes = {\n    data: '/api/data',\n    metadata: '/api/meta',\n    ...optionalEndpoints,\n  };\n  ```\n- **`plugin.ts` missing method**: `SchemaRegistry.listObjects()` does not exist → `SchemaRegistry.getAllObjects()`\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

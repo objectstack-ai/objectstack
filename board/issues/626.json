@@ -1,0 +1,33 @@
+{
+  "number": 626,
+  "kind": "pull_request",
+  "title": "fix: AnalyticsQuerySchema cube field separation of concerns",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-11T17:18:51Z",
+  "updated_at": "2026-02-11T20:58:01Z",
+  "closed_at": "2026-02-11T17:32:14Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-11T17:32:14Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/626",
+  "body": "`AnalyticsQuerySchema.cube` was required, causing 8 test failures. The cube targeting belongs at the API request wrapper level, not inside the query definition itself.\n\n### Changes\n\n- **`data/analytics.zod.ts`**: Made `cube` optional in `AnalyticsQuerySchema` — the query defines *what* to analyze (measures, dimensions, filters), not *which* cube\n- **`api/analytics.zod.ts`**: Added required `cube` field to `AnalyticsQueryRequestSchema` and added missing `AnalyticsQueryRequest` type export\n\n```typescript\n// Before: cube required inside query (wrong layer)\nAnalyticsQuerySchema.parse({ measures: ['orders.count'] }); // ❌ throws\n\n// After: cube optional in query, required at API request level\nAnalyticsQuerySchema.parse({ measures: ['orders.count'] }); // ✅\nAnalyticsQueryRequestSchema.parse({\n  query: { measures: ['total_revenue'] },\n  cube: 'orders',  // cube lives here now\n}); // ✅\n```\n\nAll 184 test files (4860 tests) pass.\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

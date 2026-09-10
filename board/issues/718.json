@@ -1,0 +1,33 @@
+{
+  "number": 718,
+  "kind": "pull_request",
+  "title": "feat(dashboard): enhance globalFilters with options, optionsFrom, defaultValue, scope, targetWidgets",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-18T06:22:56Z",
+  "updated_at": "2026-02-18T07:34:38Z",
+  "closed_at": "2026-02-18T06:33:54Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-18T06:33:54Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/718",
+  "body": "`DashboardSchema.globalFilters` lacked dynamic option binding and scoping — needed for Airtable-style filter bars where dropdowns auto-populate from object data.\n\n### Schema changes (`dashboard.zod.ts`)\n\n- **`GlobalFilterOptionsFromSchema`** — new schema for dynamic option binding (`object`, `valueField`, `labelField`, optional `filter`)\n- **`GlobalFilterSchema`** — extracted from inline definition, extended with:\n  - `options` — static option list `{ value, label }[]`\n  - `optionsFrom` — dynamic binding via `GlobalFilterOptionsFromSchema`\n  - `defaultValue` — pre-selected value\n  - `scope` — `'dashboard'` (default) | `'widget'`\n  - `targetWidgets` — selective widget targeting\n  - `'lookup'` added to type enum\n- New type exports: `GlobalFilter`, `GlobalFilterOptionsFrom`\n\n### Backward compatibility\n\nOld configs parse identically — all new fields are optional, `scope` defaults to `'dashboard'`.\n\n```typescript\n// Old style still works unchanged\nglobalFilters: [{ field: 'status', label: 'Status', type: 'select' }]\n\n// New: dynamic options from object\nglobalFilters: [{\n  field: 'owner_id',\n  type: 'lookup',\n  optionsFrom: {\n    object: 'user',\n    valueField: 'id',\n    labelField: 'full_name',\n    filter: { is_active: true },\n  },\n  scope: 'widget',\n  targetWidgets: ['revenue_chart'],\n}]\n```\n\n### Tests & roadmap\n\n- 22 new tests (5560 total, 200 files pass)\n- ROADMAP.md #712 marked complete\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>DashboardSchema.globalFilters 协议支持动态选项与数据绑定高级配置</issue_title>\n> <issue_description>Airtable style dashboard filter bar 需协议支持 optionsFrom，允许下拉选项自动从对象动态获取。\n> \n> **目标**：\n> - DashboardSchema.globalFilters 协议项支持 options、optionsFrom（object/labelField/valueField）\n> - 支持 scope、targetWidgets 等高级配置\n> - 兼容旧协议写法\n> \n> 参考[分析 1.3](https://github.com/objectstack-ai/spec/blob/main)\n> \n> - 类型：enhancement\n> - 开发完成后测试，并更新 roadmap</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#712\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

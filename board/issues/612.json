@@ -1,0 +1,33 @@
+{
+  "number": 612,
+  "kind": "pull_request",
+  "title": "feat: complete all remaining protocol optimization items",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-11T07:28:17Z",
+  "updated_at": "2026-02-11T08:41:30Z",
+  "closed_at": "2026-02-11T08:16:20Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-11T08:16:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/612",
+  "body": "Implements all remaining ⏳/❌ items from PROTOCOL_OPTIMIZATION_REPORT.md across 6 protocol domains. Adds 20 new schemas, 138 new tests (4518→4656), bringing Zod file count from 139→159.\n\n### UI Protocol (3 new files)\n- **`ui/touch.zod.ts`** — 7 gesture types (swipe/pinch/longPress/doubleTap/drag/rotate/pan), WCAG 44px touch targets, haptic feedback\n- **`ui/offline.zod.ts`** — 5 offline strategies (cache_first/network_first/stale_while_revalidate/network_only/cache_only), sync with conflict resolution, IndexedDB/LocalStorage/SQLite backends\n- **`ui/keyboard.zod.ts`** — Focus traps, keyboard shortcuts with 4 scopes (global/page/component/modal), roving tabindex\n- `ui/theme.zod.ts` extended with `touchTarget` + `keyboardNavigation`\n\n### API Protocol\n- **`api/contract.zod.ts`** — `DataLoaderConfigSchema`, `BatchLoadingStrategySchema`, `QueryOptimizationConfigSchema` for N+1 prevention\n- **`api/rest-server.zod.ts`** — `WebhookEventSchema`, `WebhookConfigSchema`, `CallbackSchema`, `OpenApi31ExtensionsSchema`\n\n### AI Protocol\n- **`ai/agent.zod.ts`** — `StructuredOutputConfigSchema` (json_object/json_schema/regex/grammar/xml formats + validation pipeline)\n- **`ai/mcp.zod.ts`** — `MCPStreamingConfigSchema`, `MCPToolApprovalSchema`, `MCPSamplingConfigSchema`, `MCPRootsConfigSchema`\n\n### Auth/Security\n- **`identity/scim.zod.ts`** — SCIM 2.0 Bulk Operations per RFC 7644 (`SCIMBulkRequestSchema`, `SCIMBulkResponseSchema`)\n- **`system/auth-config.zod.ts`** — `MutualTLSConfigSchema` (client certs, CA trust, CRL/OCSP, certificate pinning)\n- **`security/rls.zod.ts`** — `RLSAuditEventSchema`, `RLSAuditConfigSchema` (log level, destination, sample rate, retention)\n\n### Integration\n- **`integration/connector.zod.ts`** — `ErrorMappingConfigSchema` (8 error categories, unmapped behavior), `HealthCheckConfigSchema`, `CircuitBreakerConfigSchema`\n\n### Example\n\n```typescript\n// N+1 query prevention\nexport const QueryOptimizationConfigSchema = z.object({\n  preventNPlusOne: z.boolean().default(true),\n  dataLoader: DataLoaderConfigSchema.optional(),\n  batchStrategy: BatchLoadingStrategySchema.optional(),\n  maxQueryDepth: z.number().int().min(1).default(5),\n  queryComplexityLimit: z.number().int().optional(),\n  enableQueryPlan: z.boolean().default(false),\n});\n```\n\nPROTOCOL_OPTIMIZATION_REPORT.md updated to reflect all completions (rating: 4.2→4.8/5).\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

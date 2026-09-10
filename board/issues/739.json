@@ -1,0 +1,33 @@
+{
+  "number": 739,
+  "kind": "pull_request",
+  "title": "feat!: unify system kernel object naming prefix to `sys_`",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-19T13:36:37Z",
+  "updated_at": "2026-02-19T14:08:45Z",
+  "closed_at": "2026-02-19T14:08:45Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-19T14:08:45Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/739",
+  "body": "System kernel objects (`user`, `session`, `account`, `verification`) lacked the `sys_` prefix that `sys_metadata` already had, creating collision risk with business objects. Aligns with ServiceNow convention.\n\n### Changes\n\n- **`SystemObjectName` constants** — values updated to `sys_user`, `sys_session`, `sys_account`, `sys_verification`; constant keys unchanged\n- **Tests** — assertions updated to match\n- **ROADMAP.md** — added \"System Object Naming Convention\" section with mapping table and v3→v4 migration strategy\n\n```ts\n// Before\nSystemObjectName.USER    // 'user'\nSystemObjectName.SESSION // 'session'\n\n// After\nSystemObjectName.USER    // 'sys_user'\nSystemObjectName.SESSION // 'sys_session'\n```\n\nBackward compat: implementations can set `ObjectSchema.tableName` to the old name and use `StorageNameMapping.resolveTableName()` during transition. v4.0 removes legacy aliases.\n\n**BREAKING CHANGE:** All `SystemObjectName` values now carry `sys_` prefix.\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>统一系统内核对象命名前缀为 sys_，对标主流低代码平台最佳实践</issue_title>\n> <issue_description>## 背景\n> 目前系统内核对象（如 user、account、session、verification、metadata）命名不统一，其中仅 `sys_metadata` 使用了 sys_ 前缀，其余为无前缀裸名。这在标准对象和业务扩展对象共存时，存在命名歧义和冲突风险。\n> \n> ## 对比行业最佳实践\n> - ServiceNow 等主流低代码平台系统对象采用 `sys_` 前缀。\n> - Salesforce 虽无前缀，但通过 API Name/命名空间+后缀（`__c`）区分自定义对象。\n> - ObjectStack 已通过 namespace+FQN 实现业务对象隔离，但内核\"保留空间\"对象无前缀，实际仍与业务冲突。\n> \n> ## 变更建议\n> - 所有内核系统对象（user、session、account、verification 等，见 `SystemObjectName` 常量）统一改为 `sys_` 前缀：\n>   - `user` → `sys_user`\n>   - `session` → `sys_session`\n>   - `account` → `sys_account`\n>   - `verification` → `sys_verification`\n>   - `metadata` 保持 `sys_metadata`\n> - 常量名（如 `SystemObjectName.USER`）不变，只调整实际名称/表名\n> - 通过 `StorageNameMapping.resolveTableName()` 层兼容历史逻辑\n> - 在 v3.x 阶段可保留别名/v4.0 正式移除旧名\n> \n> ## 影响范围\n> - 所有核心内核对象注册、引用、权限、系统内置 API\n> - 测试用例、自动化脚本、ROADMAP 文档需同步跟进\n> \n> ## 动作项\n> 1. 制定统一命名方案对齐全局规范\n> 2. 修改 system-names.ts，统一常量值\n> 3. 批量替换核心系统对象引用\n> 4. ROADMAP 与文档补充为何采用此策略及迁移说明\n> 5. 考虑与 plugin-auth → service-auth 等命名变更并行推进\n> \n> ---\n> 如无异议，请评审通过后推进本 breaking change。</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#738\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

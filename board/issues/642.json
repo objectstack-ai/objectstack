@@ -1,0 +1,33 @@
+{
+  "number": 642,
+  "kind": "pull_request",
+  "title": "fix: resolve build errors in metadata and client-react packages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-12T06:40:12Z",
+  "updated_at": "2026-02-12T11:27:41Z",
+  "closed_at": "2026-02-12T06:57:43Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-12T06:57:43Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/642",
+  "body": "DTS build fails in `@objectstack/metadata` and `@objectstack/client-react` due to type mismatches against updated spec contracts.\n\n### `@objectstack/metadata`\n- **TS6133**: Prefix unused `type` param in `validate()` → `_type`\n- **TS2416**: `watch(type, callback: WatchCallback): void` conflicts with `IMetadataService.watch?` which expects `MetadataWatchCallback → MetadataWatchHandle`. Renamed internal methods to `addWatchCallback`/`removeWatchCallback` (protected) to eliminate the signature clash. `watchService()` already implements the contract correctly and now calls the renamed internals.\n\n### `@objectstack/client-react`\n- `PaginatedResult<T>` was refactored to use `records`/`total` but `data-hooks.tsx` still referenced old `value`/`count` properties\n- `metadata-hooks.tsx` called non-existent `client.meta.getObject()` → `client.meta.getItem('object', name)`\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

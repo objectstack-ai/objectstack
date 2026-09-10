@@ -1,0 +1,33 @@
+{
+  "number": 592,
+  "kind": "pull_request",
+  "title": "Fix TypeScript compilation errors in adapters - add AuthService type parameter",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-10T14:44:25Z",
+  "updated_at": "2026-02-10T15:06:20Z",
+  "closed_at": "2026-02-10T15:01:51Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-10T15:01:51Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/592",
+  "body": "TypeScript compilation failed in Hono, Next.js, and NestJS adapters because `kernel.getService('auth')` returned `{}` without a type parameter, preventing access to `handleRequest()`.\n\n## Changes\n\n- Added `AuthService` interface defining `handleRequest(request: Request): Promise<Response>`\n- Updated `getService()` calls to use type parameter: `getService<AuthService>('auth')`\n\n## Example\n\n```typescript\n// Before - TypeScript error: Property 'handleRequest' does not exist on type '{}'\nconst authService = kernel.getService('auth');\nif (authService && typeof authService.handleRequest === 'function') {\n  const response = await authService.handleRequest(req);\n}\n\n// After - properly typed\nconst authService = kernel.getService<AuthService>('auth');\nif (authService && typeof authService.handleRequest === 'function') {\n  const response = await authService.handleRequest(req);\n}\n```\n\n## Note\n\nThe `AuthService` interface is currently duplicated across the three adapters. Consider extracting to a shared types package in a follow-up.\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> fix build and test\n> \n> The user has attached the following file paths as relevant context:\n>  - .github/copilot-instructions.md\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\nCreated from [VS Code](https://code.visualstudio.com/docs/copilot/copilot-coding-agent).\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

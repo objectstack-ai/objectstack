@@ -1,0 +1,38 @@
+{
+  "number": 568,
+  "kind": "pull_request",
+  "title": "Verify client-spec protocol compliance and add integration test framework",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-09T10:49:04Z",
+  "updated_at": "2026-02-09T11:49:41Z",
+  "closed_at": "2026-02-09T11:49:41Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-09T11:49:41Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/568",
+  "body": "## Client-Spec API Protocol Compliance Verification - Fixed All Issues ✅\n\n### Investigation & Documentation Phase\n- [x] Review @objectstack/spec API protocol definitions (dispatcher.zod.ts, protocol.zod.ts)\n- [x] Review @objectstack/client implementation (packages/client/src/index.ts)\n- [x] Map all API namespaces and methods defined in spec\n- [x] Create comprehensive compliance matrix document\n- [x] Design integration test suite for client-server communication\n- [x] Create example integration tests\n- [x] Update client README with protocol information\n- [x] Create Chinese language summary report\n- [x] Create quick reference guide\n- [x] Update fumadocs documentation\n- [x] Fix all code review issues\n\n### ✅ All Issues Fixed\n\n**Code Fixes:**\n1. ✅ Fixed permission routes to use `/api/v1/auth` per spec (not `/api/v1/permissions`)\n2. ✅ Updated permission check to use POST method with JSON body\n3. ✅ Removed unused `beforeAll` import from integration test\n4. ✅ Added assertions to TC-DISC-004 test case\n\n**Documentation Fixes:**\n5. ✅ Fixed `analytics.getMeta()` → `analytics.meta(cube)` throughout docs\n6. ✅ Fixed `automation.trigger()` signature (takes string and payload, not object)\n7. ✅ Fixed `auth.refreshToken()` to take string parameter\n8. ✅ Fixed `permissions.getEffectivePermissions()` to take no object argument\n9. ✅ Fixed `storage.upload()` and `getDownloadUrl()` signatures\n10. ✅ Fixed `packages.install()` to use manifest object instead of packageId\n11. ✅ Removed non-existent `hub` namespace from all documentation\n12. ✅ Updated all server references to clarify external dependency\n13. ✅ Updated CI/CD examples to show placeholder structure\n14. ✅ Qualified compliance claims to be more accurate\n\n### 🎯 Key Changes\n\n#### Permission Route Alignment with Spec\n\n**Before:**\n- Routes: `/api/v1/permissions/*`\n- check: GET with query parameters\n\n**After (Aligned with spec):**\n- Routes: `/api/v1/auth/*` \n- check: POST `/api/v1/auth/check` with JSON body\n- getObjectPermissions: GET `/api/v1/auth/permissions/:object`\n- getEffectivePermissions: GET `/api/v1/auth/permissions/effective`\n\n#### Method Signature Corrections\n\nAll documentation now uses correct signatures matching the actual client implementation:\n\n```typescript\n// Analytics\nanalytics.meta('sales') // not analytics.getMeta('sales')\n\n// Automation  \nautomation.trigger('name', payload) // not automation.trigger({ trigger, payload })\n\n// Auth\nauth.refreshToken('token') // not auth.refreshToken({ refreshToken })\n\n// Permissions\npermissions.getEffectivePermissions() // not permissions.getEffectivePermissions('object')\n\n// Storage\nstorage.upload(fileData, 'user') // not storage.upload({ file, object, field })\nstorage.getDownloadUrl('id') // not storage.getDownloadUrl({ fileId })\n\n// Packages\npackages.install({ name, label, version }) // not packages.install({ packageId })\n```\n\n#### Server Dependency Clarification\n\nAll integration test documentation now clearly states:\n- Server is an external dependency (separate repository)\n- Must be set up independently\n- CI examples are placeholders showing expected structure\n\n### 📊 Files Changed (8 files)\n\n```\npackages/client/\n├── src/index.ts                           (FIXED - permission routes, methods)\n├── CLIENT_SPEC_COMPLIANCE.md              (FIXED - method signatures, routes)\n├── CLIENT_SERVER_INTEGRATION_TESTS.md     (FIXED - server references, CI examples)\n├── QUICK_REFERENCE.md                     (FIXED - method signatures, hub removal)\n├── README.md                              (FIXED - method signatures, server refs, compliance)\n└── tests/integration/\n    ├── 01-discovery.test.ts               (FIXED - unused import, assertions)\n    └── README.md                          (FIXED - server references)\n\ncontent/docs/guides/\n└── client-sdk.mdx                         (FIXED - all method signatures, server refs)\n```\n\n### 🏆 All Code Review Comments Addressed\n\n✅ 22/22 review comments resolved:\n- Permission route alignment with spec\n- Method signature corrections (8 fixes)\n- Server dependency clarification (6 locations)\n- Unused import removal\n- Test assertion additions\n- Hub namespace removal\n- CI/CD example updates\n- Compliance claim qualification\n\n---\n\n**Task Status:** ✅ **ALL ISSUES FIXED**  \n**Review Date:** 2026-02-09  \n**Files Modified:** 8 files  \n**Code Review:** All 22 comments addressed\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 确认 @objectstack/client 是否实现了spec api 协议要求的所有方法，并设计和服务端联合测试的测试用例，并更新文档\n> \n> The user has attached the following file paths as relevant context:\n>  - .github/copilot-instructions.md\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\nCreated from [VS Code](https://code.visualstudio.com/docs/copilot/copilot-coding-agent).\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

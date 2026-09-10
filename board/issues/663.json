@@ -1,0 +1,33 @@
+{
+  "number": 663,
+  "kind": "pull_request",
+  "title": "fix: make manifest optional in defineStack to prevent white screen on Vercel",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-13T13:02:08Z",
+  "updated_at": "2026-02-13T14:39:00Z",
+  "closed_at": "2026-02-13T14:36:12Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-13T14:36:12Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/663",
+  "body": "`defineStack()` throws `manifest: Required property 'manifest' is missing` at boot, causing a white screen. This regressed when `strict` defaulted to `true` — any config without an explicit `manifest` (e.g. `apps/studio/objectstack.config.ts`) now fails validation before the app renders.\n\n### Changes\n\n- **`packages/spec/src/stack.zod.ts`**: Make `manifest` optional in `ObjectStackDefinitionSchema`, consistent with every other field in the schema\n- **`packages/spec/src/stack.test.ts`**: Update assertion and add coverage for manifest-less `defineStack()` calls\n\n```ts\n// Previously crashed with validation error — now works\nexport default defineStack({\n  objects: [TaskObject],\n  data: [{ object: 'task', records: [...] }],\n});\n```\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

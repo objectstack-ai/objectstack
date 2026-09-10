@@ -1,0 +1,33 @@
+{
+  "number": 830,
+  "kind": "issue",
+  "title": "fixed group下minor版本号被错误提升为major，需排查并修正版本发布流程",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-02-28T06:22:50Z",
+  "updated_at": "2026-02-28T06:55:32Z",
+  "closed_at": "2026-02-28T06:55:32Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/830",
+  "body": "## 问题简述\n在objectstack-ai/spec仓库下，尝试发minor版本的changeset时，实际发布出的PR版本号却是major（4.0.0），而不是预期的minor（3.1.0）。初步分析原因为fixed group机制导致组内某包的状态影响了所有包的bump级别。\n\n## 待办事项\n- 检查.fixed分组内所有35个包的当前版本号，确保全为`3.0.11`\n- 检查.changeset目录内是否有残留未消费的major类型changeset\n- 本地执行`npx changeset status`分析bump计算链路，定位触发major bump的包或changeset\n- 若发现异常，手动修正（如删除多余的changeset或同步版本号）\n- 完成后重新生成release PR，验证minor版号正常\n\n## 参考链接\n- [PR #829（version packages）](https://github.com/objectstack-ai/spec/pull/829)\n- [PR #828（minor版变更的changeset）](https://github.com/objectstack-ai/spec/pull/828)\n\n---\n处理完毕后，请：\n- 运行测试\n- 更新相关issue\n- 更新ROADMAP.md\n- 如需其他仓库协作，创建cross-repo任务\n"
+}

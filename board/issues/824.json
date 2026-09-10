@@ -1,0 +1,33 @@
+{
+  "number": 824,
+  "kind": "issue",
+  "title": "[协议+Runtime] Package 级统一元数据发布机制 (publishPackage)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-27T06:05:56Z",
+  "updated_at": "2026-02-27T07:37:21Z",
+  "closed_at": "2026-02-27T07:37:21Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/824",
+  "body": "## 背景\n\n基于对 Airtable Interface Designer、Salesforce 2GP Package、Power Platform Solution、Retool/Appsmith 等平台的分析（参见 #823），我们确定：\n\n**发布粒度应该是 Package（解决方案），而不是单个元数据项。**\n\n### 为什么不是按单个元数据发布？\n\n元数据之间有依赖关系：Interface → View → Object → Field → Flow。如果只发布了 Interface 但没发布它引用的新 Object 字段，终端用户看到的界面会报错。\n\n**Salesforce 和 Power Platform 的做法是：整个 Package/Solution 一起发布，要么全部上线，要么全部不上。**\n\n### 行业对标\n\n| 平台 | 发布粒度 | 机制 |\n|:---|:---|:---|\n| **Salesforce 2GP** | Package（整包） | `sfdx force:package:version:create` |\n| **Power Platform** | Solution（整包） | Export Managed Solution → Import |\n| **Retool** | 单个 App | Versioned release |\n| **Airtable** | 单个 Interface | Publish button |\n\nObjectStack 定位企业级 → 采用 **Salesforce/Power Platform 的 Package 级发布**。\n\n---\n\n## 现有基础设施\n\n已有的组件已经覆盖了 80%：\n\n| 现有组件 | 作用 | 状态 |\n|:---|:---|:---:|\n| `MetadataRecordSchema` (`metadata-persistence.zod.ts`) | 存储所有元数据，含 `state: draft/active/archived` | ✅ 已有 |\n| `MetadataStateSchema` | 生命周期状态枚举 | ✅ 已有 |\n| `IMetadataService` (`metadata-service.ts`) | CRUD 合约 | ✅ 已有 |\n| `MetadataManager` | 实现类 | ✅ 已有 |\n| `DeployBundleSchema` (`deploy-bundle.zod.ts`) | 批量部署 | ✅ 已有 |\n| `InstalledPackageSchema` (`package-registry.zod.ts`) | 包安装状态 | ✅ 已有 |\n| `package_id` 字段 on `sys_metadata` | 元数据归属包 | ✅ 已有 |\n\n---\n\n## 需要做的事情\n\n### A. 协议层 (`packages/spec`)\n\n#### A1. 扩展 `MetadataRecordSchema` — 加 3 个字段\n\n```typescript\n// packages/spec/src/system/metadata-persistence.zod.ts\n// 在现有 MetadataRecordSchema 上补充：\n\nversion: z.number().int().min(0).default(0)\n  .describe('Version counter, increments on each package publish'),\n\npublished_definition: z.unknown().optional()\n  .describe('Snapshot of the last published definition'),\n\npublished_at: z.string().datetime().optional()\n  .describe('When this metadata was last published'),\n\npublished_by: z.string().optional()\n  .describe('Who published this version'),\n```\n\n#### A2. 扩展 `IMetadataService` 合约 — 加 3 个方法\n\n```typescript\n// packages/spec/src/contracts/metadata-service.ts\n\n/**\n * Publish an entire package:\n * 1. Validate all draft items (dependency check)\n * 2. Snapshot all items in the package\n * 3. Increment package version\n * 4. Set all items state → active\n */\npublishPackage(packageId: string, options?: {\n  changeNote?: string;\n  publishedBy?: string;\n  validate?: boolean;\n}): Promise<PackagePublishResult>;\n\n/**\n * Revert entire package to last published state\n */\nrevertPackage(packageId: string): Promise<void>;\n\n/**\n * Get the published version of any metadata item (for runtime serving)\n * Returns published_definition if exists, else current definition\n */\ngetPublished(type: string, name: string): Promise<unknown | undefined>;\n```\n\n#### A3. 定义 `PackagePublishResult` 类型\n\n```typescript\n// packages/spec/src/system/metadata-persistence.zod.ts 或新文件\n\nexport const PackagePublishResultSchema = z.object({\n  success: z.boolean(),\n  packageId: z.string(),\n  version: z.number().int(),\n  publishedAt: z.string().datetime(),\n  itemsPublished: z.number().int(),\n  validationErrors: z.array(z.object({\n    type: z.string(),\n    name: z.string(), \n    message: z.string(),\n  })).optional(),\n});\n```\n\n### B. Runtime 层 (`packages/metadata`)\n\n#### B1. `MetadataManager` 实现 `publishPackage()`\n\n- 查询 `package_id === packageId` 的所有元数据\n- 依赖校验：检查新引用的 View/Object 是否在同一个包或已发布的包中\n- Schema 校验：所有 draft 元数据格式合法\n- 快照：`published_definition = clone(definition)` for each item\n- 版本号递增\n- 状态：所有 `draft` → `active`\n\n#### B2. `MetadataManager` 实现 `revertPackage()`\n\n- 查询包下所有元数据\n- `definition = clone(published_definition)` for each item\n- `state → active`（丢弃未发布修改）\n\n#### B3. `MetadataManager` 实现 `getPublished()`\n\n- 返回 `published_definition` if exists\n- Falls back to `definition` if never published\n\n### C. API 层 (`packages/runtime`)\n\n#### C1. `HttpDispatcher` 加 publish 端点\n\n```\nPOST /api/v1/packages/:packageId/publish    → publishPackage()\nPOST /api/v1/packages/:packageId/revert     → revertPackage()\nGET  /api/v1/metadata/:type/:name/published → getPublished()\n```\n\n### D. 测试\n\n- [ ] `publishPackage()` 单元测试：正常发布、依赖校验失败、空包\n- [ ] `revertPackage()` 单元测试：正常回滚、从未发布过时报错\n- [ ] `getPublished()` 单元测试：已发布返回快照、未发布返回 definition\n- [ ] 集成测试：编辑 → 发布 → 编辑 → 回滚 → 终端用户看到的版本正确\n\n### E. 文档 & ROADMAP\n\n- [ ] 更新 `packages/metadata/README.md` 加 Package Publish 章节\n- [ ] 更新 `ROADMAP.md`\n- [ ] 更新 `content/docs/guides/contracts/metadata-service.mdx` 加 publishPackage 文档\n\n---\n\n## 数据流\n\n```\n设计者日常编辑（自动保存到 draft）\n├── 改了 Object \"opportunity\" 加了个字段\n├── 改了 View \"opp_list\" 显示新字段  \n├── 改了 Interface \"sales_dashboard\" 布局\n│\n▼  所有改动都在 draft，终端用户看不到\n│\n▼  [点击 Publish Package \"crm\"]\n│\n├── 1. 依赖校验：新 Interface 引用的 View/Object 都在这个包里吗？✓\n├── 2. Schema 校验：所有 draft 元数据格式合法吗？✓  \n├── 3. 快照：crm 包下所有元数据 → published_definition = clone(definition)\n├── 4. 版本号：crm package version++\n├── 5. 状态：所有 draft → active\n│\n▼  终端用户立刻看到所有变更，且保证一致性\n```\n\n## 工作量估计\n\n| 改动 | 工作量 |\n|:---|:---:|\n| `MetadataRecordSchema` 加 4 个字段 | 1 天 |\n| `IMetadataService` 加 3 个方法 + 类型定义 | 1 天 |\n| `MetadataManager` 实现 3 个方法（含依赖校验） | 3 天 |\n| `HttpDispatcher` 加 3 个端点 | 1 天 |\n| 测试 | 2 天 |\n| 文档 | 1 天 |\n| **总计** | **~1.5 周** |\n\n## 关联\n\n- 上游评估 Issue: #823\n- 前端 UI 实现: `objectstack-ai/objectui` (cross-repo)\n- 现有 Deploy Pipeline: `IDeployPipelineService` — deploy = 初始化时批量 publish\n- 现有 Package Upgrade: `package-upgrade.zod.ts` — upgrade = 外部包发布后 import\n\n## 验收标准\n\n- [ ] `pnpm test` 全部通过\n- [ ] 协议变更都有 `.describe()`，`published_*` 字段是 `.optional()` 保证兼容\n- [ ] `MetadataManager.publishPackage()` 可正确快照+版本递增+状态转换\n- [ ] `MetadataManager.getPublished()` 返回已发布快照，未发布返回当前 definition\n- [ ] REST 端点可用\n- [ ] ROADMAP.md 更新"
+}

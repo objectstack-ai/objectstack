@@ -1,0 +1,33 @@
+{
+  "number": 658,
+  "kind": "pull_request",
+  "title": "Add Vercel deployment guide for MSW and Server modes",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-13T05:04:10Z",
+  "updated_at": "2026-02-13T09:13:44Z",
+  "closed_at": "2026-02-13T05:17:03Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-13T05:17:03Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/658",
+  "body": "Documents how to deploy ObjectStack applications to Vercel in two modes: MSW (static SPA with in-browser kernel) and Server (Serverless Functions with real database).\n\n### Changes\n\n- **`content/docs/guides/deployment-vercel.mdx`** — New guide covering:\n  - **MSW mode**: Vite SPA deployment — kernel bootstrap in browser, MSW Service Worker setup, `vercel.json` with SPA rewrites, monorepo config\n  - **Server mode (Next.js)**: `@objectstack/nextjs` catch-all route handler with kernel singleton pattern\n  - **Server mode (Hono Edge)**: `HttpDispatcher`-based routing on Vercel Edge Functions\n  - Environment variables, runtime mode switching (`?mode=msw|server`), deployment checklists, feature comparison table\n- **`content/docs/guides/meta.json`** — Added `deployment-vercel` to Operations section\n- **`content/docs/guides/index.mdx`** — Added guide to Operations table\n\n### Key patterns documented\n\nMSW mode (`vercel.json`):\n```json\n{\n  \"framework\": \"vite\",\n  \"build\": { \"env\": { \"VITE_RUNTIME_MODE\": \"msw\" } },\n  \"rewrites\": [{ \"source\": \"/(.*)\", \"destination\": \"/index.html\" }]\n}\n```\n\nServer mode (Next.js catch-all):\n```typescript\n// app/api/[...objectstack]/route.ts\nimport { createRouteHandler } from '@objectstack/nextjs';\nconst handler = async (...args) => {\n  const kernel = await getKernel();\n  return createRouteHandler({ kernel, prefix: '/api' })(...args);\n};\nexport { handler as GET, handler as POST, handler as PATCH, handler as DELETE };\n```\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> objectstack应用如何以最佳的方式部署的vercel，包括msw模式和server模式。\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

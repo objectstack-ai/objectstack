@@ -1,0 +1,33 @@
+{
+  "number": 540,
+  "kind": "pull_request",
+  "title": "feat: Complete @objectstack/spec audit remediation (Phases 1–4)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-07T17:46:40Z",
+  "updated_at": "2026-02-07T18:49:46Z",
+  "closed_at": "2026-02-07T18:44:21Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-07T18:44:21Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/540",
+  "body": "Systematic resolution of all issues identified in the ZOD_SCHEMA_AUDIT_REPORT across 139 `.zod.ts` files. Reduces `z.any()` from 394→62, increases `z.unknown()` from 8→340, adds 25 missing type exports, and fixes 7 P0 bugs. All 3,073 tests pass.\n\n## Phase 1: Critical Bug Fixes\n\n- **`data/hook.zod.ts`** — `z.union([z.string(), z.any()])` → `z.union([z.string(), z.function()])` (z.any() swallowed the union)\n- **`data/validation.zod.ts`** — `ValidationRuleSchema: z.ZodType<any>` → explicit `BaseValidationRuleShape` interface for the lazy recursive type\n- **`system/auth-config.zod.ts`** — Invalid computed key `[z.string().regex(...).toString()]: z.any()` → `.catchall(z.unknown())`\n- **`data/driver/mongo.zod.ts`** — Capability keys (`aggregation`, `mutableSchema`) silently stripped by `parse()` → aligned with `DatasourceCapabilities` schema\n- **`data/datasource.zod.ts`** — `DatasourceConfig` type alias pointed at wrong schema → `DatasourceCapabilitiesType`\n- **`kernel/plugin-lifecycle-events.zod.ts`, `kernel/startup-orchestrator.zod.ts`** — `z.instanceof(Error)` (not JSON-serializable) → structured error shape\n- **`data/filter.zod.ts`** — `$exist` → `$exists` (MongoDB standard)\n\n## Phase 2: Deduplication & Naming\n\n- Created `shared/enums.zod.ts` (AggregationFunction, SortDirection, MutationEvent, IsolationLevel, CacheStrategy)\n- Created `shared/metadata-types.zod.ts` (MetadataFormat, BaseMetadataRecord)\n- Renamed kernel security schemas with `Kernel` prefix to resolve collisions with hub versions\n- `MetricType` → `LicenseMetricType` in `hub/license.zod.ts`\n- Replaced inline `/^[a-z_][a-z0-9_]*$/` regex with `SnakeCaseIdentifierSchema` in 4 UI files\n- `_id`/`created_by`/`created_at` → `id`/`createdBy`/`createdAt` in metadata-persistence\n- `z.date()` → `z.string().datetime()` across 6 files (29 occurrences)\n- Unified isolation level enum (kebab-case + SQL uppercase → snake_case via shared enum)\n- `service-registry.zod.ts` → `core-services.zod.ts`\n- `PresenceSchema` → `RealtimePresenceSchema` to disambiguate from WebSocket version\n\n## Phase 3: Type Safety Hardening\n\n- Bulk `z.record(z.string(), z.any())` → `z.record(z.string(), z.unknown())` for metadata/config/options/params fields (~200 occurrences)\n- Standalone `z.any()` → `z.unknown()` for payload/context/data fields (~130 occurrences)\n- `id: z.any()` → `z.union([z.string(), z.number()])` in data-engine request schemas\n- Hardened top offenders: `kernel/plugin.zod.ts`, `data/driver.zod.ts`, `data/data-engine.zod.ts`, `kernel/events.zod.ts`\n- `z.array(z.any())` → `z.array(z.unknown())` in UI schemas\n- Deprecated `location` field in `action.zod.ts` with migration notice\n\n## Phase 4: Completeness & Polish\n\n- Added 25 missing `z.infer<>` type exports across 7 files\n- Added `z.input<>` exports for schemas with `.default()` (action, app, dashboard, object, manifest)\n- Improved `.describe()` coverage in 5 under-documented files\n- Marked runtime helpers as `@deprecated` (`definePlugin`, `createErrorResponse`, `getHttpStatusForCategory`)\n- Converted `Object.assign(Schema, { create })` → `{ create } as const` in `app.zod.ts`\n- Added industry-standard fields: `sortable`, `inlineHelpText`, `recordTypes`, `sharingModel`, `emptyState`, `refreshInterval`\n- Added deprecation markers with migration paths for `formula` → `expression`, `stateMachine` → `stateMachines`\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

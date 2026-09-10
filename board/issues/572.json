@@ -1,0 +1,33 @@
+{
+  "number": 572,
+  "kind": "pull_request",
+  "title": "chore: add next-phase optimization roadmap (Phases 5–11)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-09T15:10:00Z",
+  "updated_at": "2026-02-09T17:40:47Z",
+  "closed_at": "2026-02-09T15:58:37Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-09T15:58:37Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/572",
+  "body": "Full codebase scan of all 18 packages to establish baseline metrics and plan the next development cycle beyond the completed DEVELOPMENT_PLAN.md (Phases 1–4).\n\n### Current state (v2.0.1)\n\n| Metric | Value |\n|--------|-------|\n| Schema test coverage | 76% (73/96 `.zod.ts` files) |\n| `z.any()` remaining | 8 (filter operators only) |\n| TODO/FIXME across monorepo | 24 |\n| Adapter implementations | 3 stubs |\n| Deprecated items pending removal | 5+ |\n\n### Changes\n\n- **`ROADMAP.md`** — New root-level roadmap covering Phases 5–11:\n  - **Phase 5:** Spec test coverage → 100% (23 untested schemas identified: 13 system, 5 kernel, 5 other)\n  - **Phase 6:** Runtime hardening — resolve all 24 TODOs (12 core security, 6 driver-memory, 6 other), add missing package tests\n  - **Phase 7:** Adapter implementation — Hono/Next.js/NestJS from stubs to functional\n  - **Phase 8:** Deprecation cleanup & v3.0 breaking change prep\n  - **Phase 9:** DX & tooling (`generate types`, bundled JSON schema, OpenAPI gen)\n  - **Phase 10:** Performance (lazy schema compilation, bundle size tracking, benchmark suite)\n  - **Phase 11:** Security hardening (sandbox completion, dependency audit, SBOM)\n- **`README.md`** — Added roadmap section with links\n- **`ARCHITECTURE.md`** — Added roadmap + studio roadmap to Related Documentation, updated date\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

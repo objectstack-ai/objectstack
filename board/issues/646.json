@@ -1,0 +1,33 @@
+{
+  "number": 646,
+  "kind": "pull_request",
+  "title": "docs: DX audit and roadmap update with examples catalog fixes",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-12T10:39:51Z",
+  "updated_at": "2026-02-12T13:19:22Z",
+  "closed_at": "2026-02-12T11:46:33Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-12T11:46:33Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/646",
+  "body": "Full codebase scan (171 schemas, 194 test files / 5,243 tests, 150+ doc pages, 4 examples) to identify DX gaps and update the roadmap.\n\n### Audit Findings\n\n10 issues discovered, most notable:\n- `examples/README.md` referenced non-existent `minimal-auth` directory\n- `plugin-bi` had no README, no scripts, placeholder-only code\n- Examples catalog had stale metadata (version `0.6.1`, count `3`)\n- Contracts docs section empty (`pages: []`)\n- `app-host` README used `npm run dev` instead of `pnpm dev`\n\n### DX_ROADMAP.md\n\n- Updated DX Assessment scores to reflect current state (Error Messages, Helper Functions → ⭐⭐⭐⭐⭐)\n- Added **Audit Findings Summary** table with 10 categorized issues\n- Phase 2 marked complete (9/9), Phase 3 expanded 10→16 items\n- New **Phase 4.4: Codemod & Migration Tooling** section\n- Refreshed Priority Matrix, Timeline Summary, Success Criteria with current metrics\n\n### Examples Catalog Fixes\n\n- Removed ghost `minimal-auth` reference, added `plugin-bi` section, updated metadata to v3.0.0\n- Created `examples/plugin-bi/README.md` with purpose, quick start, next steps\n- Added `typecheck` script + TS devDep to `plugin-bi/package.json`\n- Fixed `app-host/README.md`: `npm run dev` → `pnpm dev`\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

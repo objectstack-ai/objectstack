@@ -1,0 +1,33 @@
+{
+  "number": 547,
+  "kind": "pull_request",
+  "title": "feat(api): add missing client protocol operations for views, permissions, workflows, realtime, notifications, AI, i18n",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-08T07:29:44Z",
+  "updated_at": "2026-02-08T08:16:51Z",
+  "closed_at": "2026-02-08T08:15:00Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-08T08:15:00Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/547",
+  "body": "The `@objectstack/client` SDK surface audit identified 7 missing namespaces with no corresponding protocol definitions in `protocol.zod.ts`. This adds the 33 missing Request/Response schema pairs, protocol methods, type exports, and legacy interface bindings.\n\n### New protocol namespaces\n\n- **Views** (5 ops) — `listViews`, `getView`, `createView`, `updateView`, `deleteView`\n- **Permissions** (3 ops) — `checkPermission`, `getObjectPermissions`, `getEffectivePermissions`\n- **Workflows** (5 ops) — `getWorkflowConfig`, `getWorkflowState`, `workflowTransition`, `workflowApprove`, `workflowReject` with `WorkflowStateSchema` for state machine representation\n- **Realtime** (6 ops) — `realtimeConnect`, `realtimeDisconnect`, `realtimeSubscribe`, `realtimeUnsubscribe`, `setPresence`, `getPresence`\n- **Notifications** (7 ops) — device registration, preference management, listing with cursor pagination, mark read/all read\n- **AI** (4 ops) — `aiNlq`, `aiChat`, `aiSuggest`, `aiInsights`\n- **i18n** (3 ops) — `getLocales`, `getTranslations`, `getFieldLabels`\n\n### Design decisions\n\n- Imports existing domain schemas where available (`ObjectPermissionSchema`, `WorkflowRuleSchema`, `RealtimePresenceSchema`, `TranslationDataSchema`, `ViewSchema`) rather than duplicating definitions\n- `WorkflowStateSchema` is new — models current state, available transitions, and transition history for the approval engine\n- `NotificationPreferencesSchema` supports per-channel overrides with digest frequency\n- All schemas follow existing conventions: `.describe()` on every field, `z.input<>` for request types, `z.infer<>` for response types\n\n### Example usage\n\n```typescript\nimport type {\n  CheckPermissionRequest,\n  WorkflowTransitionRequest,\n  AiNlqRequest,\n} from '@objectstack/spec/api';\n\n// Permission check\nconst req: CheckPermissionRequest = {\n  object: 'account',\n  action: 'edit',\n  recordId: 'acc_123',\n};\n\n// Workflow transition\nconst transition: WorkflowTransitionRequest = {\n  object: 'deal',\n  recordId: 'd_001',\n  transition: 'submit_for_approval',\n  comment: 'Ready for review',\n};\n```\n\n`ObjectStackProtocolSchema` grows from 28 → 61 methods. Tests added for all 7 namespaces (3081 total, all passing).\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

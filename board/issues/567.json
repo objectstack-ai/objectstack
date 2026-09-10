@@ -1,0 +1,33 @@
+{
+  "number": 567,
+  "kind": "pull_request",
+  "title": "Remove hardcoded @example/app-crm and @example/app-todo dependencies from studio",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-09T09:43:29Z",
+  "updated_at": "2026-02-09T10:33:00Z",
+  "closed_at": "2026-02-09T10:29:55Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-09T10:29:55Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/567",
+  "body": "Studio should not depend on example app packages. Both MSW and server modes should load apps dynamically via `objectstack.config.ts` at runtime.\n\n### Changes\n\n- **`package.json`** — Remove `@example/app-crm` and `@example/app-todo` from dependencies\n- **`src/mocks/browser.ts`**, **`src/mocks/simulateBrowser.ts`** — Replace hardcoded example package imports with single import from studio's own `objectstack.config.ts`\n- **`objectstack.config.ts`** — Make studio self-contained: add `status`/`priority` select fields and seed data so MSW mode works without external packages\n- **Tests** — Update assertions from `todo__task` → `task` (no namespace prefix in studio config)\n\n### Before/After\n\n```ts\n// Before: hardcoded example app imports\nimport todoConfig from '@example/app-todo/objectstack.config';\nimport crmConfig from '@example/app-crm/objectstack.config';\nconst bootConfigs = [resolveConfig(todoConfig), resolveConfig(crmConfig)];\n\n// After: single dynamic config source\nimport studioConfig from '../../objectstack.config';\nconst bootConfigs = [resolveConfig(studioConfig)];\n```\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

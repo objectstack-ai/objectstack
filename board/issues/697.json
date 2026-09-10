@@ -1,0 +1,33 @@
+{
+  "number": 697,
+  "kind": "pull_request",
+  "title": "feat(ui): add InterfaceNavItemSchema, disambiguate PageTypeSchema overlaps",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-16T05:48:17Z",
+  "updated_at": "2026-02-16T06:48:16Z",
+  "closed_at": "2026-02-16T06:46:49Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-16T06:46:49Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/697",
+  "body": "Design review of Interface/App relationship and PageType duplicates. Conclusion: **don't merge** InterfaceSchema into AppSchema (navigation container ≠ content surface), **don't merge** overlapping page types (distinct abstraction levels). Instead, bridge and clarify.\n\n### InterfaceNavItemSchema (`app.zod.ts`)\n\nApp navigation had no way to reference Interfaces. Added `type: 'interface'` nav item:\n\n```typescript\nconst app = defineApp({\n  name: 'data_platform',\n  label: 'Data Platform',\n  navigation: [\n    { id: 'nav_review', label: 'Order Review', type: 'interface', interfaceName: 'order_review' },\n    { id: 'nav_sales', label: 'Sales', type: 'interface', interfaceName: 'sales_portal', pageName: 'page_dashboard' },\n  ],\n});\n```\n\n### PageTypeSchema disambiguation (`page.zod.ts`)\n\nAdded JSDoc clarifying the 3 overlap pairs that were flagged:\n\n- `record` (component-based FlexiPage layout) vs `record_detail` (auto-generated field display)\n- `home` (platform-level landing) vs `overview` (interface-level navigation hub)  \n- `app`/`utility`/`blank` — distinct layout contexts, not duplicates\n\n### Design doc updates\n\n- Updated gap analysis matrix to reflect Phase A implementation status\n- Decision Log #9: Keep App/Interface separate — different architectural roles\n- Decision Log #10: InterfaceNavItemSchema bridges the two without merging\n- Decision Log #11: All 16 page types retained with disambiguation rationale\n\n### Tests\n\n5 new tests for `InterfaceNavItemSchema` + 1 real-world App↔Interface navigation test. 199 files, 5473 tests pass.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 拉取请求: https://github.com/objectstack-ai/spec/pull/696\n> \n> 重新评审设计文档修订，评估能否要将interfaces 和 app合并，page 的 type有重复，是否需要合并。\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 772,
+  "kind": "pull_request",
+  "title": "Rename automation API schema test to `.zod.test.ts` convention + update ROADMAP",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-21T10:47:36Z",
+  "updated_at": "2026-02-21T11:07:03Z",
+  "closed_at": "2026-02-21T11:04:39Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-21T11:04:39Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/772",
+  "body": "The existing `automation-api.test.ts` (37 tests covering all 9 endpoint schemas, error codes, and contract registry) wasn't matching the filename convention requested in #757's checklist item for \"编写 schema 测试\".\n\n- **Rename** `automation-api.test.ts` → `automation-api.zod.test.ts` to align with the `automation-api.zod.ts` source file\n- **ROADMAP.md** — Annotate automation API protocol line with `(37 schema tests)` to reflect coverage\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>补充 Automation API Protocol Schema 单元测试</issue_title>\n> <issue_description>\n> \n> > **关联**: objectstack-ai/spec#757 Task 1 遗留项\n> > **Parent**: objectstack-ai/spec#753（Spec 优先 Roadmap 2026.02）\n> \n> ---\n> \n> ### 📊 背景\n> \n> 在 objectstack-ai/spec#757 的完成验证中发现，Task 1 checklist 要求的\"编写 schema 测试\"尚未完成。\n> \n> `packages/spec/src/api/automation-api.zod.ts` 已完整实现 9 个端点的 Request/Response schemas + `AutomationApiContracts` 注册表 + `AutomationApiErrorCode`，但 **缺少独立的 Zod schema parse/validate 单元测试文件**。\n> \n> 目前 schema 的正确性仅被 HTTP dispatcher 测试和 Client SDK 测试间接覆盖，不满足 Issue objectstack-ai/spec#757 中明确要求的 \"编写 schema 测试\" checklist 项。\n> \n> ### 🎯 目标\n> \n> 新增 `packages/spec/src/api/automation-api.zod.test.ts`，直接验证每个 schema 的 parse 正确性。\n> \n> ### 📝 Tasks\n> \n> - [ ] 创建 `packages/spec/src/api/automation-api.zod.test.ts`\n> - [ ] 测试 `ListFlowsRequestSchema` — 有效输入 parse、默认值（limit=50）、无效 status 拒绝\n> - [ ] 测试 `FlowSummarySchema` — 完整字段 parse、可选字段省略\n> - [ ] 测试 `ListFlowsResponseSchema` — 含 `data.flows` 数组验证\n> - [ ] 测试 `GetFlowRequestSchema` / `GetFlowResponseSchema`\n> - [ ] 测试 `CreateFlowRequestSchema` / `CreateFlowResponseSchema`\n> - [ ] 测试 `UpdateFlowRequestSchema` — `definition` 为 partial FlowSchema\n> - [ ] 测试 `DeleteFlowRequestSchema` / `DeleteFlowResponseSchema`\n> - [ ] 测试 `TriggerFlowRequestSchema` / `TriggerFlowResponseSchema`\n> - [ ] 测试 `ToggleFlowRequestSchema` / `ToggleFlowResponseSchema`\n> - [ ] 测试 `ListRunsRequestSchema` / `ListRunsResponseSchema` — 复用 `ExecutionLogSchema`\n> - [ ] 测试 `GetRunRequestSchema` / `GetRunResponseSchema`\n> - [ ] 测试 `AutomationApiErrorCode` — 9 个错误码枚举值\n> - [ ] 测试 `AutomationApiContracts` — 9 个端点注册，method/path 正确性\n> - [ ] 测试 `AutomationFlowPathParamsSchema` / `AutomationRunPathParamsSchema` — 路径参数\n> - [ ] 运行 `pnpm test`，确保全部测试通过\n> - [ ] 更新 `ROADMAP.md` 中测试计数\n> \n> ### 📐 工作量估算\n> \n> | Task | 估时 |\n> |------|------|\n> | 编写 schema 测试 | 0.5d |\n> \n> ### 🔗 关联\n> \n> - **来源**: objectstack-ai/spec#757 Task 1 遗留的 \"编写 schema 测试\" checklist 项\n> - **参考**: 现有 API schema 测试模式可参考 `packages/spec/src/api/` 目录下其他 `.test.ts` 文件\n> \n> **备注：开发任务完成后需运行 test，并及时更新 roadmap。**</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#767\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n🔒 GitHub Advanced Security automatically protects Copilot coding agent pull requests. You can protect all pull requests by enabling Advanced Security for your repositories. [Learn more about Advanced Security.](https://gh.io/cca-advanced-security)"
+}

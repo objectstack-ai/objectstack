@@ -1,0 +1,33 @@
+{
+  "number": 590,
+  "kind": "pull_request",
+  "title": "Align authentication endpoints with better-auth protocol",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-10T14:02:12Z",
+  "updated_at": "2026-02-10T14:38:41Z",
+  "closed_at": "2026-02-10T14:21:57Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-10T14:21:57Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/590",
+  "body": "Client SDK was using incorrect endpoint paths (`/login`, `/register`, `/logout`, `/me`) while plugin-auth implements better-auth endpoints (`/sign-in/email`, `/sign-up/email`, `/sign-out`, `/get-session`). This mismatch would cause authentication failures.\n\n## Changes\n\n### Protocol Specification\n- **Added** `auth-endpoints.zod.ts` defining canonical better-auth endpoints as the API contract\n- Includes HTTP methods, endpoint aliases, and legacy path mappings\n- 17 new tests validating endpoint definitions\n\n### Client SDK Updates\n- **Updated** `client.auth.*` methods to use correct better-auth paths:\n  ```typescript\n  // Before → After\n  login()      : POST /login           → POST /sign-in/email\n  register()   : POST /register        → POST /sign-up/email  \n  logout()     : POST /logout          → POST /sign-out\n  me()         : GET  /me              → GET  /get-session\n  refreshToken(): POST /refresh        → GET  /get-session\n  ```\n- No changes to method signatures or public API\n\n### Documentation\n- **Updated** `auth.mdx` with complete endpoint reference table\n- Added usage examples for both client SDK and direct API calls\n- Created evaluation report documenting adapter issues for future work\n\n## Migration Impact\n\n**Zero breaking changes.** Public SDK methods unchanged. Only internal HTTP paths updated:\n\n```typescript\n// Application code remains identical\nconst client = new ObjectStackClient({ baseUrl: 'http://localhost:3000' });\nawait client.auth.register({ email, password, name }); // Still works\nawait client.auth.login({ type: 'email', email, password });\n```\n\nDirect API consumers must update paths (e.g., `/api/v1/auth/register` → `/api/v1/auth/sign-up/email`).\n\n## Test Results\n- Spec tests: 4213/4213 passing\n- Auth endpoint tests: 17/17 passing  \n- Client auth tests: passing\n\n## Known Issues\nAdapters (Hono/Next.js/NestJS) use deprecated `HttpDispatcher.handleAuth()` instead of `kernel.getService('auth')`. Functional but should be updated in future PR. Documented in evaluation report.\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 评估目前 plugin-auth 是否符合 spec API  协议，是否 所有 adaptor hono nextjs nestjs 都已按协议规范接入，评估 @objectstack/client 是否按协议接入。按照最新的代码更新测试用例，更新官网文档\n> \n> The user has attached the following file paths as relevant context:\n>  - .github/copilot-instructions.md\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\nCreated from [VS Code](https://code.visualstudio.com/docs/copilot/copilot-coding-agent).\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 665,
+  "kind": "pull_request",
+  "title": "docs(metadata): rewrite README and add ROADMAP",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-13T15:13:02Z",
+  "updated_at": "2026-02-13T15:33:02Z",
+  "closed_at": "2026-02-13T15:27:19Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-13T15:27:19Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/665",
+  "body": "The `@objectstack/metadata` package had a 13-line stub README and no roadmap. The existing code (MetadataManager, loaders, serializers, overlay system) was undocumented, and the path from current state to database-backed persistence with UI-defined metadata was unclear.\n\n### `packages/metadata/README.md` — full rewrite\n\n- Architecture diagram: MetadataManager → Loader layer → Serializer layer\n- Three-scope model: `system` (files, read-only) → `platform` (DB, admin) → `user` (DB, personal)\n- Loader status matrix: FilesystemLoader, MemoryLoader, RemoteLoader (✅), DatabaseLoader (planned)\n- MetadataManager API surface: CRUD, query, bulk ops, overlay, import/export, type registry, dependency tracking, watch\n- Spec protocol reference table mapping to `metadata-loader.zod.ts`, `metadata-persistence.zod.ts`, `metadata-customization.zod.ts`, `IDataDriver`, etc.\n- Usage examples for browser, Node.js, and kernel plugin contexts\n\n### `packages/metadata/ROADMAP.md` — new\n\nFive phases from current state to production:\n\n| Phase | Target | What |\n|:------|:-------|:-----|\n| 1 | v3.1 | `DatabaseLoader` — bridge `IMetadataService` ↔ `IDataDriver` via configured `datasource`, persist to `sys_metadata` table using `MetadataRecordSchema` envelope |\n| 2 | v3.2 | Overlay persistence to DB, REST API for Studio UI, permission integration |\n| 3 | v3.3 | Zod schema dispatch per metadata type for full validation |\n| 4 | v4.0 | Versioning, three-way merge on package upgrade, sync, S3 loader |\n| 5 | v4.1 | Caching, connection pooling, batch optimization, observability |\n\nPhase 1 spec dependencies are already defined (`MetadataManagerConfig.datasource`, `MetadataRecordSchema`, `IDataDriver`, `ISchemaDriver`). The roadmap tracks what's missing at the implementation layer.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 目前的metadata软件包，我没看懂，我希望是能够实现加载软件包中的元数据，并支持客户在界面上定义。自定义的元数据保存在数据库中，支持基于指定的datasource，调用对应的数据库驱动，进行读写操作，请扫描代码，和其他软件包的相关代码，更新metadata软件包下的相关文档，编写roadmap\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

@@ -1,0 +1,38 @@
+{
+  "number": 594,
+  "kind": "pull_request",
+  "title": "Kernel Upgrade: ExecutionContext propagation, per-object hooks, middleware chain, plugin-security",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-10T15:34:27Z",
+  "updated_at": "2026-02-10T16:19:01Z",
+  "closed_at": "2026-02-10T16:07:38Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-10T16:07:38Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/594",
+  "body": "Implements the full execution context propagation chain specified in `docs/objectql_roadmap.md` — bridging the gap between `plugin-auth` (authentication) and data operations (authorization/context). Previously, `HookContextSchema.session`, `PermissionSetSchema`, and `RowLevelSecurityPolicySchema` were defined in spec but had zero runtime wiring.\n\n### Spec: ExecutionContext + Data Engine Context\n\n- New `ExecutionContextSchema` (`packages/spec/src/kernel/execution-context.zod.ts`) — userId, tenantId, roles, permissions, isSystem, accessToken, transaction, traceId\n- `BaseEngineOptionsSchema` with optional `context` field; all 6 DataEngine option schemas extend it\n- Added `./security` subpath export to `@objectstack/spec`\n\n### ObjectQL Engine: Hooks, Middleware, Context\n\n- **Per-object hooks** with priority: `registerHook(event, handler, { object?, priority? })` — replaces flat `Record<string, HookHandler[]>` with `Map<string, HookEntry[]>`, sorted by priority, with object-match filtering\n- **Middleware chain** (onion model): `registerMiddleware(fn, { object? })` wraps all CRUD operations\n- **Context propagation**: `options.context` → `HookContext.session` + `HookContext.transaction` in all methods\n- **MetadataFacade**: injectable wrapper over `SchemaRegistry`, registered as `metadata` service\n- **ObjectRepository + ScopedContext**: `engine.createContext({ userId, tenantId }).object('user').find()`\n\n```typescript\n// Context flows from HTTP layer to data operations\nconst results = await engine.find('account', {\n  filter: { status: 'active' },\n  context: { userId: 'u1', tenantId: 'org1', roles: ['sales'] }\n});\n\n// Or via scoped context\nconst ctx = engine.createContext({ userId: 'u1', tenantId: 'org1' });\nconst accounts = ctx.object('account');\nawait accounts.find({ filter: { status: 'active' } });\n```\n\n### ObjectQLPlugin: Audit Hooks + Tenant Middleware\n\n- Auto-stamp `created_by`/`modified_by`/`created_at`/`modified_at`/`space_id` on insert/update (priority 10)\n- Auto-fetch `previousData` for update/delete hooks (priority 5)\n- Tenant isolation middleware: auto-inject `space_id` filter for non-system operations with `tenantId`\n\n### AuthPlugin\n\n- Registers auth middleware on ObjectQL engine in `start()` (placeholder for session resolution via AsyncLocalStorage)\n\n### New Package: `@objectstack/plugin-security`\n\n- `PermissionEvaluator` — resolves PermissionSets from roles, checks CRUD permissions (most-permissive merge)\n- `RLSCompiler` — compiles `using` expressions (`field = current_user.prop`, `field IN (current_user.arr)`) into ObjectQL filters\n- `FieldMasker` — strips non-readable fields from results, strips non-editable fields from writes\n- `SecurityPlugin` — registers as engine middleware: RBAC check → RLS filter injection → field masking\n\nAll changes are backward compatible — `context` is optional everywhere, existing tests unmodified and passing.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> On objectql_roadmap.md, 参考此文件中的要求，修改代码\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

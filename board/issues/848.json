@@ -1,0 +1,33 @@
+{
+  "number": 848,
+  "kind": "pull_request",
+  "title": "feat(i18n): ICU MessageFormat, placeholder, sourceHash, _meta/bidi, namespace isolation, notifications/errors, coverage breakdown, AI hooks",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-01T16:40:13Z",
+  "updated_at": "2026-03-01T17:44:51Z",
+  "closed_at": "2026-03-01T17:40:56Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-01T17:40:56Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/848",
+  "body": "Enhances the i18n protocol to align with Salesforce/Dynamics/ICU standards. All additions are optional fields — fully backward compatible.\n\n### Schema additions\n\n- **`FieldTranslationSchema`** — `placeholder` for form input hints\n- **`TranslationConfigSchema`** — `messageFormat` (`'icu' | 'simple'`) via new `MessageFormatSchema` enum, defaulting to `'simple'`\n- **`AppTranslationBundleSchema`**:\n  - `_meta: { locale, direction }` — RTL/bidi rendering hints (Arabic, Hebrew)\n  - `namespace` — plugin/extension translation key isolation\n  - `notifications`, `errors` — global notification/error message groups\n- **`ObjectTranslationNodeSchema`** — `_notifications`, `_errors` (follows existing `_views`/`_actions` underscore convention)\n- **`TranslationDiffItemSchema`** — `sourceHash` for incremental stale detection; `aiSuggested` + `aiConfidence` for TMS/agent integration\n- **`TranslationCoverageResultSchema`** — `breakdown` array of `CoverageBreakdownEntrySchema` for per-group (fields/views/actions/messages) coverage stats\n\n### Contract addition\n\n- **`II18nService.suggestTranslations?`** — async hook returning diff items enriched with AI suggestions\n\n```typescript\nconst config: TranslationConfig = {\n  defaultLocale: 'en',\n  supportedLocales: ['en', 'ar-SA', 'zh-CN'],\n  messageFormat: 'icu', // enables ICU MessageFormat patterns\n};\n\nconst bundle: AppTranslationBundle = {\n  _meta: { locale: 'ar-SA', direction: 'rtl' },\n  namespace: 'plugin-helpdesk',\n  o: {\n    ticket: {\n      label: 'تذكرة',\n      fields: { subject: { label: 'الموضوع', placeholder: 'أدخل الموضوع' } },\n      _notifications: { assigned: { title: 'تم التعيين', body: '{agent} عيّن لك التذكرة' } },\n      _errors: { duplicate: 'تذكرة مكررة' },\n    },\n  },\n  notifications: { maintenance: { title: 'صيانة مجدولة' } },\n  errors: { unauthorized: 'غير مصرح' },\n};\n```\n\n21 new tests, 6613 total passing.\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>i18n协议国际化规范优化（ICU支持/占位符/可扩展性/AI Hook/覆盖分解等）</issue_title>\n> <issue_description>## 背景\n> 当前PR objectstack-ai/spec#846 引入了面向对象的国际化聚合协议（object-first），对标 Salesforce DX 和 Dynamics 365 元数据国际化实践，在结构、检测与批量处理方面已大幅领先 Retool、Appsmith 等低代码平台。\n> \n> 但对比主流平台标准（Salesforce、Dynamics、Mendix、OutSystems 等）以及最新 i18n 工程标准（ICU MessageFormat、MF2 等），协议在以下方面仍有优化空间：\n> \n> ---\n> \n> ## 优化建议\n> \n> ### 1. ICU MessageFormat 支持\n> - Schema 需显式支持 ICU pattern 字段，适配全球复杂复数、性别、变量插值等场景。\n> - messages/validationMessages 应标明支持 ICU MessageFormat。\n> \n> ### 2. FieldTranslation Schema 增加 placeholder\n> - 表单交互常用的\"占位提示\"，是 UI 协议的必备字段。\n> \n> ### 3. TranslationDiffItem 增加 sourceHash\n> - 支持 CLI/Workbench 精准检测 stale（陈旧）翻译，无需全量 diff。\n> \n> ### 4. Bundle 层级 _meta 支持（如 locale/bidi 方向性）\n> - 适配 RTL 语种（如阿拉伯语、希伯来语），兼容字体/布局等 UI 渲染。\n> \n> ### 5. 命名空间合并与插件隔离\n> - 支持插件/扩展包各自贡献 i18n，避免 key 冲突，建议 schema 增加 namespace 机制。\n> \n> ### 6. _notifications/_errors 分组\n> - 对象相关的按钮、通知、错误消息建议独立分组，增强企业级 SDUI 场景完整性。\n> \n> ### 7. TranslationCoverageResult 增强 breakdown\n> - 输出分组覆盖率明细，辅助翻译项目管理和任务优先级。\n> \n> ### 8. AI 翻译 hook 与 suggest 字段\n> - 便于集成自研 Agent、第三方 TMS，推送缺失/陈旧字段的 AI 翻译建议。\n> \n> ---\n> \n> ## 预期产出\n> - Schema 明确支持以上所有字段与分组扩展\n> - II18nService/CLI/Workbench/文档对应增强\n> - ROADMAP 与 i18n-standard 文档同步完善\n> - 回归测试 & lint\n> - 后续按优先级分阶段推进\n> \n> > 该任务合并所有国际化协议优化建议，作为 PR objectstack-ai/spec#846 后续增强。</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#847\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n🔒 GitHub Advanced Security automatically protects Copilot coding agent pull requests. You can protect all pull requests by enabling Advanced Security for your repositories. [Learn more about Advanced Security.](https://gh.io/cca-advanced-security)"
+}

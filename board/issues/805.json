@@ -1,0 +1,33 @@
+{
+  "number": 805,
+  "kind": "issue",
+  "title": "UI 协议设计缺陷与重复规范合并修正提案",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-02-24T09:18:37Z",
+  "updated_at": "2026-02-24T09:59:20Z",
+  "closed_at": "2026-02-24T09:59:20Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/805",
+  "body": "## 问题概述\n\n在全面审查了 packages/spec/src/ui 目录下的主要 UI 协议（包括 page、component、dashboard、theme、widget、action、animation 等 19 个核心 schema 文件）后，发现存在命名冲突、概念重复、部分 schema 设计不一致、条件校验缺失及部分通用 schema 存放位置不合理的问题，具体如下：\n\n---\n\n\n### 2. DashboardWidget 无唯一 id，导致 targetWidgets 无法引用\n- 给 `DashboardWidgetSchema` 添加必选 `id` 或 `name` 字段（建议使用 `SnakeCaseIdentifierSchema`）。\n- 相关全局过滤器等 schema 引用需联动修改。\n\n### 3. Action/WidgetActionType/ActionSchema.type 重复并不一致\n- 统一所有 action 类型来源，dashboard、view、component 相关 action 类型都应引用 ActionSchema。\n- WidgetActionType 增加缺失的 `script` 和 `api` 类型，或直接完全复用 ActionSchema.type。\n- 把 dashboard header action 等 schema 的结构调整为 ActionRef + inline。\n\n### 5. PageType 设计与条件校验\n- PageTypeSchema 枚举类型过多，部分 type 与 ListView 类型重叠。\n- 建议用 discriminatedUnion 或 .superRefine 实现 PageSchema 的类型/字段依赖条件校验（如 record_review 类型下 recordReview 必填等）。\n\n### 6. Animation 设计重复、命名不统一\n- theme.zod 与 animation.zod 分别定义动画 token 与运行时配置，easing 命名风格不一致（camelCase 与 snake_case）。\n- 统一 easing 命名风格为 snake_case。\n- animation.zod 支持使用 theme token。\n\n### 7. 各 schema 的 responsive/performance 配置统一化\n- ListView、Component、Dashboard 等应支持统一的 ResponsiveConfigSchema，确保 UI 适配逻辑一致。\n\n### 8. 共享协议放置位置\n- HttpMethodSchema、HttpRequestSchema 等协议建议迁移到 shared/data 模块，避免耦合 view 层定义。\n\n### 9. 其他一致性/命名问题\n- theme.zod.ts 内 type/value 命名建议统一为 ThemeModeSchema、DensityModeSchema 等，避免 TS 类型与 const 冲突。\n\n---\n\n\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 647,
+  "kind": "pull_request",
+  "title": "docs: complete DX_ROADMAP Phase 1 & Phase 3 documentation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-12T11:52:18Z",
+  "updated_at": "2026-02-12T13:23:41Z",
+  "closed_at": "2026-02-12T12:22:30Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-12T12:22:30Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/647",
+  "body": "Completes all actionable documentation items from DX_ROADMAP.md — Phase 1 (8/10) and Phase 3 (16/16, was 10/16).\n\n### Phase 3: 13 new MDX pages\n\n- **Protocol architecture**: `references/data/protocol-diagram.mdx` — Mermaid diagrams of all 7 protocol layers and request flow\n- **Wire format**: `references/api/wire-format.mdx` — JSON request/response for 8 API operations\n- **Contracts docs** (was empty `pages: []`): 6 pages covering `IMetadataService`, `IAuthService`, `IStorageService`, `IDataEngine`, `ICacheService` + overview index\n- **Field type decision tree**: `references/data/field-type-decision-tree.mdx` — Mermaid flowchart mapping use cases → field types\n- **Error handling guides**: `guides/error-handling-client.mdx` (React/TS patterns), `guides/error-handling-server.mdx` (hooks, transactions, safeParsePretty)\n- **Data flow diagrams**: `guides/data-flow.mdx` — 7 sequence diagrams (config→boot, read, write, metadata, realtime)\n- **Security permissions matrix**: `references/security/permissions-matrix.mdx` — CRUD × Profile matrix, FLS, sharing rules, OWD, role hierarchy\n\n### Phase 1: Onboarding improvements\n\n- StackBlitz \"Try Online\" badge on `packages/spec/README.md`\n- Prerequisites section + common setup issues in `getting-started/index.mdx`\n- Enhanced \"How to Run\" with expected output in all 4 example READMEs\n\n### Navigation\n\nUpdated 6 `meta.json` files: contracts (was empty), data, api, security, guides, references (added `contracts` entry).\n\n### DX_ROADMAP.md\n\nUpdated checklists, timeline, DX assessment scores. Remaining Phase 1 items (CLI wizard, video) are external/tooling scope.\n\nAll 194 test files / 5,243 tests pass unchanged.\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

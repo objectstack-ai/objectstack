@@ -1,0 +1,38 @@
+{
+  "number": 654,
+  "kind": "pull_request",
+  "title": "Enable strict validation by default in defineStack()",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-12T16:24:38Z",
+  "updated_at": "2026-02-12T18:00:51Z",
+  "closed_at": "2026-02-12T16:39:25Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-12T16:39:25Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/654",
+  "body": "Field name validation (snake_case requirement) existed in schema but was never enforced. `defineStack()` defaulted to `strict: false`, returning config as-is without running Zod validation.\n\n## Changes\n\n**Breaking Change**: `defineStack()` now validates by default\n- Changed `DefineStackOptions.strict` default: `false` → `true`\n- Validation logic: `const strict = options?.strict !== false`\n- Opt-out available via explicit `strict: false`\n\n**Validation enforcement**\n- Field names must match `/^[a-z_][a-z0-9_]*$/` (snake_case)\n- Object names, field types, and cross-references validated\n- Clear error messages: `\"Field names must be lowercase snake_case\"`\n\n## Migration\n\n```typescript\n// Now rejects invalid field names by default\ndefineStack({\n  manifest: {...},\n  objects: [{\n    name: 'task',\n    fields: {\n      firstName: { type: 'text' }  // ❌ Error: must be snake_case\n    }\n  }]\n});\n\n// Fix: Use snake_case\nfields: {\n  first_name: { type: 'text' }  // ✅\n}\n\n// Or temporarily bypass (not recommended)\ndefineStack(config, { strict: false });\n```\n\n## Files Modified\n- `stack.zod.ts`: Default strict=true, updated logic\n- `stack.test.ts`: Updated tests, added 4 validation tests\n- `field-name-validation.test.ts`: New direct FieldSchema tests\n- `.changeset/strict-validation-by-default.md`: Breaking change documentation\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 按规则，字段名必须是 snake_case，这里的代码是怎么 test 通过的？为什么启动没有报错？\n> \n> The user has attached the following file paths as relevant context:\n>  - .github/copilot-instructions.md\n>  - .github/copilot-instructions.md\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\nCreated from [VS Code](https://code.visualstudio.com/docs/copilot/copilot-coding-agent).\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 740,
+  "kind": "issue",
+  "title": "实现 service-automation：Flow 执行引擎（Runtime）详细设计与交付路线",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-02-19T13:56:04Z",
+  "updated_at": "2026-02-19T14:04:52Z",
+  "closed_at": "2026-02-19T14:04:52Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/740",
+  "body": "## 目标\n实现 ObjectStack Automation Protocol 对应的 Flow 执行引擎（service-automation），支持完整的流程编排和自动化执行，满足以下场景：\n- 执行 YAML/TS DSL 定义的 Flow（DAG/有向图）\n- 兼容节点类型（任务/条件/循环/HTTP/审批/连接器…）\n- 输入/输出变量传递，流程状态与日志追踪\n- 支持定时/事件/直接触发\n- 能够流畅调用对象存储、API、Connector 及自定义脚本\n\n---\n\n## 详细评估与设计拆分\n\n### 1. 技术任务清单\n\n#### 1.1 运行时核心\n- [ ] **解析与装载 FlowSchema**：加载并校验 flow.zod.ts 描述的 DAG 流程元数据\n- [ ] **节点分发引擎**：根据节点 type 分发到不同执行器（get_record/update_record/decision/...）\n- [ ] **变量作用域与流转**：流程变量生命周期、节点参数绑定、输出写回\n- [ ] **边缘条件判断与跳转执行**：基于节点条件和数据，动态选择下一个节点\n- [ ] **流程并行与子流程支持**：支持 parallel/loop/subflow 节点\n- [ ] **异常捕获与错误处理**：支持 try/catch、失败重试、分支或终止\n- [ ] **流程实例状态管理**：启动、暂停、终止、恢复（持久化）\n- [ ] **执行历史与日志**：追踪每一次运行的节点、数据、耗时、结果\n\n#### 1.2 节点执行器/驱动实现（建议每类节点对应单独执行器/策略模式）\n- [ ] 基础 CRUD 节点：get_record/create_record/update_record/delete_record\n- [ ] 条件/分支：decision\n- [ ] 循环体/ForEach 节点：loop\n- [ ] 脚本执行节点：script（支持 JS/TS/Python）\n- [ ] HTTP/Connector 调用：http_request/connector_action\n- [ ] 审批/人工节点接口：screen/approval���如有）\n- [ ] 支持自定义插件节点注册机制（未来拓展）\n\n#### 1.3 触发器与任务/实例管理\n- [ ] 支持定时/Schedule 触发\n- [ ] 事件触发（外部数据变更、API 调用）\n- [ ] 直接调用 API 触发/测试\n- [ ] 流程实例与队列管理\n\n### 2. 关键技术难点与决策点\n- 流程变量与节点输入输出映射的类型安全与解析\n- DAG 死循环与节点超时检测\n- 多实例并发与幂等���\n- 子流程/嵌套流程/递归限制\n- 日志存储与可视化（与 Studio 集成）\n- 容错与回滚策略\n- 性能指标与并发伸缩方案\n\n### 3. 最小可用版本（MVP）建议\n- 只支持 autolaunched 类型流程（无 UI/screen 节点）\n- 必选节点类型：start/end/get_record/update_record/decision/script/http_request\n- 支持流程运行 API 和日志 API\n- 支持流程暂停/终止/重试操作\n- 合理 WorkItem 持久化，便于未来分布式调度与监控\n\n### 4. 二期及进阶特性\n- 并行分支与批量\n- 子流程调用与参数传递\n- 支持 screen 节点（人机交互）与审批流\n- 任务队列持久化与弹性伸缩\n- AI 任务节点（如 agent_call/ai_task）\n\n---\n\n## 相关参考\n- `packages/spec/src/automation/flow.zod.ts` （协议）\n- `apps/studio/src/plugins/built-in/automation-plugin.tsx`（Studio 侧协议分组）\n- [ROADMAP.md](https://github.com/objectstack-ai/spec/blob/main/ROADMAP.md#phase-4d-business-logic-services-p2-future)\n- 业界参考：Salesforce Flow Runner、n8n Workflow Engine、Airflow DAG 执行器\n\n## 验收标准\n- Flow 执行能力覆盖 80% 常见自动化流程场景\n- Flow 运行/日志可供 Studio 可视化调试\n- 单元测试与端到端用例全覆盖\n\n---\n\n**备注：开发任务完成后需补充相关 test，并及时更新 roadmap。**\n\n<img alt=\"\" width=\"2732\" src=\"https://github.com/user-attachments/assets/5a1b881e-56f7-4011-80ac-31208eb98d70\" />\n"
+}

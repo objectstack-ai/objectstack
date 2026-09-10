@@ -1,0 +1,33 @@
+{
+  "number": 814,
+  "kind": "pull_request",
+  "title": "fix: await async getService in all dispatcher handlers",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-25T07:57:32Z",
+  "updated_at": "2026-02-25T08:20:32Z",
+  "closed_at": "2026-02-25T08:15:48Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-25T08:15:48Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/814",
+  "body": "`getService()` can return a Promise when services are registered via async factories, but no call site awaited it — causing runtime errors like `Service 'analytics' is async - use await`.\n\n### Changes\n\n- **`getService()` / `getObjectQLService()` → `async`** with `await` on `kernel.getService()` and `kernel.context.getService()`\n- **All 11 call sites across 7 handlers now `await`**: `handleAnalytics`, `handleAuth`, `handleStorage`, `handleAutomation`, `handlePackages`, `handleMetadata` (5 sites), `handleUi`\n- **20 new tests** covering Promise-based injection, sync backward compat, missing services, and method rejection\n\nBefore:\n```ts\nconst analyticsService = this.getService(CoreServiceName.enum.analytics);\n// analyticsService is a Promise, not the service — .query() fails\n```\n\nAfter:\n```ts\nconst analyticsService = await this.getService(CoreServiceName.enum.analytics);\n```\n\nRuntime: 49/49 tests pass. Spec: 6507/6507 unchanged.\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>全面排查 getService / handleAnalytics 的异步问题并增强测试用例</issue_title>\n> <issue_description>### 问题现象\n> 系统在调用 `/api/v1/analytics/query` 等接口时，出现错误：`Service 'analytics' is async - use await`。根源是 dispatcher 通过 `getService` 获取的 service 可能是异步的 Promise，没有正确地 await，导致实际调用时失败。\n> \n> ### 影响范围\n> - `handleAnalytics` 相关接口（query/meta/sql）\n> - 其他 dispatcher 内部所有调用 `getService` 的 handler，如 `handleAuth`, `handleAutomation`, `handleStorage` 等\n> - 插件加载、服务注册异步工厂场景\n> \n> ### 修复建议\n> 1. 全面排查 dispatcher 和其他核心模块 `getService` 的所有调用点，确保对异步 service 正确 await。\n> 2. 复查 service-register/consumer 工厂模式文档，确保全员共识。\n> 3. dispatcher 层所有 handler 内部（如 handleAnalytics）需修正为 `await this.getService(...)` 后再调用。\n> 4. 针对所有核心 handler 增加或加强测试用例（Vitest），能够覆盖同步和异步 service 的场景，包括异常、未注册、Promise 注入等。\n> 5. 对异步工厂模式注册的服务补充测试。\n> 6. PR 合并前务必运行所有相关 test。\n> \n> ### 测试增强建议\n> - 覆盖 dispatcher 层 handleAnalytics、handleAuth、handleAutomation、handleStorage、handleData 等，用 mock kernel 注入 Promise/同步/未注册等情况。\n> - 必须验证正常/异常场景，包括 service 返回异常、Promise reject、service 不存在等。\n> - 测试用例需模拟真实 REST 请求及接口调用，包含断言 status、error message。\n> - 提高测试覆盖率，保证将来 refactor 不再出现类似隐患。\n> \n> ### 关联\n> - 合并本次 issue 到 roadmap ObjectStack Roadmap，类型 Bug + Enhancement。\n> - 针对类似异步工厂/Promise注入的注册方式，补充技术文档及最佳实践说明。\n> \n> ---\n> #### 开发任务完成后请运行所有 test，并及时更新 roadmap。</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#813\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

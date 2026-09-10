@@ -1,0 +1,33 @@
+{
+  "number": 622,
+  "kind": "pull_request",
+  "title": "refactor: unify discovery protocol — remove redundant capabilities, fix route inconsistencies",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-11T13:46:07Z",
+  "updated_at": "2026-02-11T14:20:06Z",
+  "closed_at": "2026-02-11T14:15:00Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-11T14:15:00Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/622",
+  "body": "Discovery response had three problems: `capabilities`/`features` was fully derivable from `services[x].enabled`, `endpoints` vs `routes` naming was inconsistent between `DiscoverySchema` and `GetDiscoveryResponseSchema`, and core service routes used `/api/data` while plugin routes used `/api/v1/data`.\n\n### Schema changes (`discovery.zod.ts`, `protocol.zod.ts`)\n- Remove `features` from `DiscoverySchema` and `capabilities` from `GetDiscoveryResponseSchema` — redundant with `services`\n- Rename `endpoints` → `routes` in `GetDiscoveryResponseSchema` to align with `DiscoverySchema`\n- Make `services` required (was optional) — it's now the single source of truth\n- Deprecate `ApiCapabilitiesSchema` (export kept for backward compat in `stack.zod.ts`)\n\n### Route consistency (`objectql/protocol.ts`)\n- Core services (`data`, `metadata`, `analytics`) now use `/api/v1/` prefix, matching plugin services\n- GraphQL keeps `/graphql` (industry convention, not a versioned REST endpoint)\n\n### Consumer updates\n- `client/src/index.ts` — read `routes` instead of `endpoints`\n- `rest/src/rest-server.ts` — use `discovery.routes`\n- Tests, examples, docs updated accordingly\n\n### Before/After\n\n```jsonc\n// BEFORE — redundant capabilities, inconsistent routes\n{\n  \"capabilities\": { \"graphql\": false, \"ai\": false },  // derivable from services\n  \"endpoints\": { \"data\": \"/api/v1/data\", \"metadata\": \"/api/v1/meta\" },  // named differently than DiscoverySchema.routes\n  \"services\": {\n    \"data\": { \"enabled\": true, \"route\": \"/api/data\" },  // route mismatch with endpoints\n    \"metadata\": { \"enabled\": true, \"route\": \"/api/meta\" }\n  }\n}\n\n// AFTER — services is source of truth, routes is convenience shortcut\n{\n  \"routes\": { \"data\": \"/api/v1/data\", \"metadata\": \"/api/v1/meta\" },\n  \"services\": {\n    \"data\": { \"enabled\": true, \"route\": \"/api/v1/data\" },\n    \"metadata\": { \"enabled\": true, \"route\": \"/api/v1/meta\" }\n  }\n}\n```\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

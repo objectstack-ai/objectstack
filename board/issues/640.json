@@ -1,0 +1,33 @@
+{
+  "number": 640,
+  "kind": "pull_request",
+  "title": "chore: release v3.0.0 — unified version bump for all packages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-12T06:28:36Z",
+  "updated_at": "2026-02-12T10:55:43Z",
+  "closed_at": "2026-02-12T06:37:55Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-12T06:37:55Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/640",
+  "body": "Major version bump from `2.0.7` → `3.0.0` for all 21 `@objectstack/*` packages using changesets.\n\n- **Changeset**: Created major bump changeset covering all packages in the fixed version group\n- **Version apply**: Ran `changeset version` to update all `package.json` files and generate CHANGELOG entries\n- **Root sync**: Updated monorepo root `package.json` from `1.2.0` → `3.0.0`\n\nAll packages in the `fixed` group now share version `3.0.0`:\n\n```\n@objectstack/spec, cli, core, client, client-react, types,\nmetadata, objectql, runtime, rest, studio, driver-memory,\nplugin-auth, plugin-hono-server, plugin-msw, plugin-dev,\nplugin-security, hono, nestjs, nextjs, docs\n```\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

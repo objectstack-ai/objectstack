@@ -1,0 +1,33 @@
+{
+  "number": 734,
+  "kind": "pull_request",
+  "title": "feat(api): define Feed/Chatter API protocol endpoints",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-19T08:09:24Z",
+  "updated_at": "2026-02-19T08:31:52Z",
+  "closed_at": "2026-02-19T08:21:37Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-19T08:21:37Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/734",
+  "body": "Feed/Chatter data models and UI props landed in PR#732 but lack corresponding API endpoint contracts. This adds the HTTP interface specification for Feed CRUD, Reactions, and Subscription.\n\n### `src/api/feed-api.zod.ts`\n\n8 endpoints following existing contract patterns (`BaseResponseSchema.extend()`, Zod-first, `.describe()` annotations):\n\n- **Feed CRUD** — `GET /feed` (cursor pagination + type filter), `POST /feed`, `PUT /feed/:feedId`, `DELETE /feed/:feedId`\n- **Reactions** — `POST /feed/:feedId/reactions`, `DELETE /feed/:feedId/reactions/:emoji`\n- **Subscription** — `POST /subscribe`, `DELETE /subscribe`\n\nAll under base path `/api/data/:object/:recordId/`.\n\nReuses existing data-layer schemas (`FeedItemSchema`, `ReactionSchema`, `MentionSchema`, `RecordSubscriptionSchema`) — no duplication.\n\nIncludes `FeedApiErrorCode` enum and `FeedApiContracts` registry for SDK/doc generation:\n\n```typescript\nimport { FeedApiContracts, GetFeedRequestSchema } from '@objectstack/spec';\n\n// Contract registry maps method + path + input/output for all 8 endpoints\nFeedApiContracts.listFeed.method   // 'GET'\nFeedApiContracts.listFeed.path     // '/api/data/:object/:recordId/feed'\nFeedApiContracts.addReaction.input // AddReactionRequestSchema\n\n// Request validation with defaults\nconst req = GetFeedRequestSchema.parse({\n  object: 'account',\n  recordId: 'rec_123',\n}); // → { type: 'all', limit: 20, cursor: undefined, ... }\n```\n\n### Other changes\n\n- **`src/api/index.ts`** — export `feed-api.zod`\n- **`ROADMAP.md`** — API Protocol line updated\n- **45 tests** covering all schemas, defaults, validation, error codes, and contract registry\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>定义 Feed/Chatter 协议 API 端点（Feed CRUD、Reactions、Subscription）</issue_title>\n> <issue_description>### 背景\n> \n> [Feed/Chatter 协议相关数据模型、UI props 已完成](https://github.com/objectstack-ai/spec/issues/731 & PR#732)。目前暂无配套的 API 协议，无法规范服务端和前端协作的接口约定。\n> \n> ### 目标\n> - 定义统一的 Feed/Chatter 接口端点，包括 Feed CRUD、Reactions、Subscription\n> - 明确请求/响应参数 schema，便于前后端约束和 mock\n> - 对标 Airtable/Salesforce/Notion Timeline\n> \n> ### 推荐端点\n> - `GET    /api/data/{object}/{recordId}/feed?type=all&limit=20&cursor=xxx` — 拉取某条记录的活动时间线（混合评论、字段变更、task 等，支持翻页和类型筛选）\n> - `POST   /api/data/{object}/{recordId}/feed    { type: 'comment', body: '...'} ` — 新增评论/任务等 Feed 项\n> - `PUT    /api/data/{object}/{recordId}/feed/{feedId}   { body: '...'} ` — 编辑评论等\n> - `DELETE /api/data/{object}/{recordId}/feed/{feedId}`  — 删除 Feed 项（如评论）\n> \n> - `POST   /api/data/{object}/{recordId}/feed/{feedId}/reactions    { emoji: '👍'}` — 增加 emoji reaction\n> - `DELETE /api/data/{object}/{recordId}/feed/{feedId}/reactions/{emoji}` — 移除 reaction\n> \n> - `POST   /api/data/{object}/{recordId}/subscribe   { events: ['comment'...'field_change'...'all'], channels: ['in_app'...'email']} `\n> - `DELETE /api/data/{object}/{recordId}/subscribe`\n> \n> ### 期望\n> - 每个端点均应有详细的请求/响应参数 JSON schema（建议 Zod/TSType/JSON Schema）\n> - 补充接口错误说明，例如权限不足、非法操作\n> - 示例：如何通过 API 拉取包含评论、字段变更、回复和 reaction 的 unified feed 时间线\n> \n> ### 参考\n> - [已合并 PR#732（协议/模型实现）](https://github.com/objectstack-ai/spec/pull/732)\n> - [Airtable / Salesforce Chatter / Notion 评论Feed]\n> - [objectstack-ai/spec#731]\n> \n> ---\n> \n> test\n> \n> ---\n> \n> **建议实现：可新建 src/api/feed-api.zod.ts 或在现有 API contract 体系扩展**\n> \n> > 完成后请运行 test，并更新 ROADMAP</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#733\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 815,
+  "kind": "issue",
+  "title": "MemoryDriver 持久化能力：磁盘文件/LocalStorage 支持",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-02-26T06:44:22Z",
+  "updated_at": "2026-02-26T08:56:54Z",
+  "closed_at": "2026-02-26T08:56:54Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/815",
+  "body": "## 需求背景\n当前 `@objectstack/driver-memory` 仅支持纯内存数据，无法在开发与浏览器模式下实现数据持久化，导致进程重启、页面刷新或热重载时所有数据丢失。对开发体验和 UED 流程形成阻碍。\n\n主要目标：\n- 支持在 Node.js 环境下通过磁盘文件自动保存和恢复内存数据库。\n- 支持在浏览器环境下通过 localStorage 自动保存和恢复内存数据库。\n- 允许用户无感配置，即\"配置字符串\"自动切换对应 Adapter。\n- 不考虑 IndexDB，后者未来通过单独 driver 实现。\n\n## 详细需求\n1. **统一持久化入口：**\n    - 在 InMemoryDriverConfig 增加 `persistence` 配置项。\n    - 新增 type union: `'file' | 'local' | { type: 'file', path?: string } | { type: 'local', key?: string } | { adapter: PersistenceAdapter }`。\n    - 默认情况下不启用持久化（纯内存，行为不变）。\n\n2. **文件适配器（Node.js 环境）：**\n    - 实现 `FileSystemPersistenceAdapter`：以 JSON 格式序列化 `this.db`，保存到磁盘文件。\n    - 路径和文件名可配置，默认 `.objectstack/data/memory-driver.json`。\n    - 支持原子写（写 temp 文件再 rename）。\n    - 启动时自动 load 恢复。\n    - CRUD/批量写时自动 dirty 标记，定时（如 2s） autosave。\n    - 需有 flush() 方法和 disconnect 生命周期钩子确保安全关闭。\n\n3. **localStorage 适配器（浏览器环境）：**\n    - 实现 `LocalStoragePersistenceAdapter`：用 localStorage.getItem/setItem/JSON.stringify 保存完整 db。\n    - key 可配置，默认 `objectstack:memory-db`。\n    - 刷新或关闭页面时自动恢复。\n    - 小于 5MB 上限，超限可警告。\n    - 不需要异步逻辑或大数据管理。\n\n4. **接口/配置一致性：**\n    - `persistence: 'file'` 自动在 Node.js 下选择 FileSystemAdapter。\n    - `persistence: 'local'` 自动在浏览器下选择 localStorageAdapter。\n    - 对调用者完全透明，旧接口代码零破坏。\n\n5. **配置示例：**\n    ```ts\n    // Node.js\n    new InMemoryDriver({ persistence: 'file' })\n    // 浏览器\n    new InMemoryDriver({ persistence: 'local' })\n    // 纯内存\n    new InMemoryDriver()\n    ```\n\n6. **兼容性与降级：**\n    - 非 Node.js 环境配置 `file` 时抛出清晰错误。\n    - 非浏览器环境配置 `local` 时抛出清晰错误。\n    - 清晰注释/文档\n\n7. **文档与测���：**\n    - 用例覆盖：纯内存、文件、localStorage 3 种场景。\n    - 断言数据可恢复、变更可保存。\n    - 文档/README/TypeDoc 配置说明。\n\n8. **不包含：**\n    - IndexedDB 相关实现/适配。\n    - 持久化跨 Tab 同步能力。\n    - 多用户隔离/安全。\n\n## 相关影响\n- objectstack.config.ts、MSW/Storybook/browser.ts、CLI 默认使用推荐配置。\n- .gitignore 默认忽略 `.objectstack/data/`\n\n---\n\n- [ ] 核心实现方案评审\n- [ ] 配置项与 API 设计完成\n- [ ] Adapter 开发（文件/LocalStorage）\n- [ ] dev/测试用例/文档\n"
+}

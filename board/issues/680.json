@@ -1,0 +1,33 @@
+{
+  "number": 680,
+  "kind": "pull_request",
+  "title": "docs: Add map format examples to defineStack() documentation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-14T18:55:06Z",
+  "updated_at": "2026-02-15T01:37:39Z",
+  "closed_at": "2026-02-15T01:33:11Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-15T01:33:11Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/680",
+  "body": "`defineStack()` now accepts both array and map (Record) format for all named metadata collections, but docs only showed the array pattern. Updates the primary learning paths and reference docs to showcase both formats.\n\n### P0 — Primary learning paths\n\n- **core-concepts.mdx** — First `defineStack()` example now uses `<Tabs>` for Array/Map format with a callout explaining the feature\n- **common-patterns.mdx** — CRUD pattern and \"Putting It All Together\" use `<Tabs>` with both variants\n\n### P1 — Error/compatibility/architecture docs\n\n- **troubleshooting.mdx** — \"Object not found\" fix shows both registration patterns\n- **backward-compatibility.mdx** — Map format listed as guaranteed-stable under SemVer\n- **data-flow.mdx** / **protocol-diagram.mdx** — Flow tables note \"(array or map format)\"\n\n### Example (core-concepts.mdx)\n\n```typescript\n// Array format (traditional)\ndefineStack({\n  objects: [{ name: 'user', label: 'User', fields: [...] }],\n});\n\n// Map format — key becomes `name`\ndefineStack({\n  objects: {\n    user: { label: 'User', fields: { ... } },\n  },\n});\n```\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

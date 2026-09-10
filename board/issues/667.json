@@ -1,0 +1,33 @@
+{
+  "number": 667,
+  "kind": "pull_request",
+  "title": "Fix field naming convention in auth plugin documentation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-13T15:34:51Z",
+  "updated_at": "2026-02-13T16:09:28Z",
+  "closed_at": "2026-02-13T16:05:21Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-13T16:05:21Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/667",
+  "body": "Documentation showed camelCase field names (`createdAt`, `updatedAt`, `emailVerified`) that violate ObjectStack's snake_case validation for field identifiers.\n\n## Changes\n\n- **`packages/plugins/plugin-auth/README.md`**: Updated all code examples to use snake_case field names\n- **`content/docs/guides/authentication.mdx`**: Corrected field naming section to reflect protocol requirements\n\n## Corrected Examples\n\n**Before:**\n```typescript\nexport const AuthUser = ObjectSchema.create({\n  name: 'user',\n  fields: {\n    emailVerified: Field.boolean({ label: 'Email Verified' }),  // camelCase\n    createdAt: Field.datetime({ label: 'Created At' }),\n    updatedAt: Field.datetime({ label: 'Updated At' }),\n  }\n});\n```\n\n**After:**\n```typescript\nexport const AuthUser = ObjectSchema.create({\n  name: 'user',\n  fields: {\n    email_verified: Field.boolean({ label: 'Email Verified' }),  // snake_case\n    created_at: Field.datetime({ label: 'Created At' }),\n    updated_at: Field.datetime({ label: 'Updated At' }),\n  }\n});\n```\n\nImplementation files already use correct snake_case. This fixes documentation only.\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> fix. pnpm dev error ，解决所有类似问题\n> \n>   Loading objectstack.config.ts...\n> \n>   ✗ Unhandled error: [\n>   {\n>     \"code\": \"invalid_key\",\n>     \"origin\": \"record\",\n>     \"issues\": [\n>       {\n>         \"origin\": \"string\",\n>         \"code\": \"invalid_format\",\n>         \"format\": \"regex\",\n>         \"pattern\": \"/^[a-z_][a-z0-9_]*$/\",\n>         \"path\": [],\n>         \"message\": \"Field names must be lowercase snake_case (e.g., \\\"first_name\\\", \\\"company\\\", \\\"annual_revenue\\\")\"\n>       }\n>     ],\n>     \"path\": [\n>       \"fields\",\n>       \"createdAt\"\n>     ],\n>     \"message\": \"Invalid key in record\"\n>   },\n>   {\n>     \"code\": \"invalid_key\",\n>     \"origin\": \"record\",\n>     \"issues\": [\n>       {\n>         \"origin\": \"string\",\n>         \"code\": \"invalid_format\",\n>         \"format\": \"regex\",\n>         \"pattern\": \"/^[a-z_][a-z0-9_]*$/\",\n>         \"path\": [],\n>         \"message\": \"Field names must be lowercase snake_case (e.g., \\\"first_name\\\", \\\"company\\\", \\\"annual_revenue\\\")\"\n>       }\n>     ],\n>     \"path\": [\n>       \"fields\",\n>       \"updatedAt\"\n>     ],\n>     \"message\": \"Invalid key in record\"\n>   },\n>   {\n>     \"code\": \"invalid_key\",\n>     \"origin\": \"record\",\n>     \"issues\": [\n>       {\n>         \"origin\": \"string\",\n>         \"code\": \"invalid_format\",\n>         \"format\": \"regex\",\n>         \"pattern\": \"/^[a-z_][a-z0-9_]*$/\",\n>         \"path\": [],\n>         \"message\": \"Field names must be lowercase snake_case (e.g., \\\"first_name\\\", \\\"company\\\", \\\"annual_revenue\\\")\"\n>       }\n>     ],\n>     \"path\": [\n>       \"fields\",\n>       \"emailVerified\"\n>     ],\n>     \"message\": \"Invalid key in record\"\n>   }\n> ]\n>  ELIFECYCLE  Command failed with exit code 1.\n> \n> The user has attached the following file paths as relevant context:\n>  - .github/copilot-instructions.md\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\nCreated from [VS Code](https://code.visualstudio.com/docs/copilot/copilot-coding-agent).\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

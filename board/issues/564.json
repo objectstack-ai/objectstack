@@ -1,0 +1,30 @@
+{
+  "number": 564,
+  "kind": "pull_request",
+  "title": "chore: version packages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-09T06:39:41Z",
+  "updated_at": "2026-02-09T07:05:22Z",
+  "closed_at": "2026-02-09T06:40:43Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-09T06:40:43Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/564",
+  "body": "This PR was opened by the [Changesets release](https://github.com/changesets/action) GitHub action. When you're ready to do a release, you can merge this and the packages will be published to npm automatically. If you're not ready to do a release yet, that's fine, whenever you add more changesets to main, this PR will be updated.\n\n\n# Releases\n## @objectstack/spec@2.0.0\n\n### Minor Changes\n\n-   38e5dd5: feat: Studio DX, REST extraction, Dispatcher plugin\n-   38e5dd5: test minor bump\n\n## @objectstack/studio@2.0.0\n\n### Patch Changes\n\n-   Updated dependencies [38e5dd5]\n-   Updated dependencies [38e5dd5]\n    -   @objectstack/spec@2.0.0\n    -   @example/app-crm@1.2.1\n    -   @example/app-todo@1.2.1\n    -   @objectstack/client@2.0.0\n    -   @objectstack/client-react@2.0.0\n    -   @objectstack/metadata@2.0.0\n    -   @objectstack/objectql@2.0.0\n    -   @objectstack/driver-memory@2.0.0\n    -   @objectstack/plugin-msw@2.0.0\n    -   @objectstack/runtime@2.0.0\n\n## @objectstack/hono@2.0.0\n\n### Patch Changes\n\n-   @objectstack/runtime@2.0.0\n\n## @objectstack/nestjs@2.0.0\n\n### Patch Changes\n\n-   @objectstack/runtime@2.0.0\n\n## @objectstack/nextjs@2.0.0\n\n### Patch Changes\n\n-   @objectstack/runtime@2.0.0\n\n## @objectstack/cli@2.0.0\n\n### Patch Changes\n\n-   Updated dependencies [38e5dd5]\n-   Updated dependencies [38e5dd5]\n    -   @objectstack/spec@2.0.0\n    -   @objectstack/core@2.0.0\n    -   @objectstack/objectql@2.0.0\n    -   @objectstack/driver-memory@2.0.0\n    -   @objectstack/plugin-hono-server@2.0.0\n    -   @objectstack/rest@2.0.0\n    -   @objectstack/runtime@2.0.0\n\n## @objectstack/client@2.0.0\n\n### Patch Changes\n\n-   Updated dependencies [38e5dd5]\n-   Updated dependencies [38e5dd5]\n    -   @objectstack/spec@2.0.0\n    -   @objectstack/core@2.0.0\n\n## @objectstack/client-react@2.0.0\n\n### Patch Changes\n\n-   Updated dependencies [38e5dd5]\n-   Updated dependencies [38e5dd5]\n    -   @objectstack/spec@2.0.0\n    -   @objectstack/client@2.0.0\n    -   @objectstack/core@2.0.0\n\n## @objectstack/core@2.0.0\n\n### Patch Changes\n\n-   Updated dependencies [38e5dd5]\n-   Updated dependencies [38e5dd5]\n    -   @objectstack/spec@2.0.0\n\n## @objectstack/metadata@2.0.0\n\n### Patch Changes\n\n-   Updated dependencies [38e5dd5]\n-   Updated dependencies [38e5dd5]\n    -   @objectstack/spec@2.0.0\n    -   @objectstack/core@2.0.0\n    -   @objectstack/types@2.0.0\n\n## @objectstack/objectql@2.0.0\n\n### Patch Changes\n\n-   Updated dependencies [38e5dd5]\n-   Updated dependencies [38e5dd5]\n    -   @objectstack/spec@2.0.0\n    -   @objectstack/core@2.0.0\n    -   @objectstack/types@2.0.0\n\n## @objectstack/driver-memory@2.0.0\n\n### Patch Changes\n\n-   Updated dependencies [38e5dd5]\n-   Updated dependencies [38e5dd5]\n    -   @objectstack/spec@2.0.0\n    -   @objectstack/core@2.0.0\n\n## @objectstack/plugin-hono-server@2.0.0\n\n### Patch Changes\n\n-   Updated dependencies [38e5dd5]\n-   Updated dependencies [38e5dd5]\n    -   @objectstack/spec@2.0.0\n    -   @objectstack/core@2.0.0\n\n## @objectstack/plugin-msw@2.0.0\n\n### Patch Changes\n\n-   Updated dependencies [38e5dd5]\n-   Updated dependencies [38e5dd5]\n    -   @objectstack/spec@2.0.0\n    -   @objectstack/core@2.0.0\n    -   @objectstack/objectql@2.0.0\n    -   @objectstack/runtime@2.0.0\n    -   @objectstack/types@2.0.0\n\n## @objectstack/rest@2.0.0\n\n### Patch Changes\n\n-   Updated dependencies [38e5dd5]\n-   Updated dependencies [38e5dd5]\n    -   @objectstack/spec@2.0.0\n    -   @objectstack/core@2.0.0\n\n## @objectstack/runtime@2.0.0\n\n### Patch Changes\n\n-   Updated dependencies [38e5dd5]\n-   Updated dependencies [38e5dd5]\n    -   @objectstack/spec@2.0.0\n    -   @objectstack/core@2.0.0\n    -   @objectstack/rest@2.0.0\n    -   @objectstack/types@2.0.0\n\n## @objectstack/types@2.0.0\n\n### Patch Changes\n\n-   Updated dependencies [38e5dd5]\n-   Updated dependencies [38e5dd5]\n    -   @objectstack/spec@2.0.0\n\n## @example/app-crm@1.2.1\n\n### Patch Changes\n\n-   Updated dependencies [38e5dd5]\n-   Updated dependencies [38e5dd5]\n    -   @objectstack/spec@2.0.0\n\n## @example/app-host@1.2.1\n\n### Patch Changes\n\n-   Updated dependencies [38e5dd5]\n-   Updated dependencies [38e5dd5]\n    -   @objectstack/spec@2.0.0\n    -   @example/app-crm@1.2.1\n    -   @example/app-todo@1.2.1\n    -   @example/plugin-bi@1.2.1\n    -   @objectstack/metadata@2.0.0\n    -   @objectstack/objectql@2.0.0\n    -   @objectstack/driver-memory@2.0.0\n    -   @objectstack/plugin-hono-server@2.0.0\n    -   @objectstack/runtime@2.0.0\n\n## @example/app-todo@1.2.1\n\n### Patch Changes\n\n-   Updated dependencies [38e5dd5]\n-   Updated dependencies [38e5dd5]\n    -   @objectstack/spec@2.0.0\n    -   @objectstack/client@2.0.0\n    -   @objectstack/objectql@2.0.0\n    -   @objectstack/driver-memory@2.0.0\n    -   @objectstack/runtime@2.0.0\n\n## @example/plugin-bi@1.2.1\n\n### Patch Changes\n\n-   Updated dependencies [38e5dd5]\n-   Updated dependencies [38e5dd5]\n    -   @objectstack/spec@2.0.0\n\n## @objectstack/docs@2.0.0\n\n\n"
+}

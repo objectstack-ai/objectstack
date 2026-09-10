@@ -1,0 +1,33 @@
+{
+  "number": 546,
+  "kind": "pull_request",
+  "title": "Resolve all code-level issues from ZOD Schema Audit Report",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-08T07:06:34Z",
+  "updated_at": "2026-02-08T07:29:34Z",
+  "closed_at": "2026-02-08T07:25:36Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-08T07:25:36Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/546",
+  "body": "Addresses all P0/P1/P2 code-quality issues identified in the ZOD_SCHEMA_AUDIT_REPORT.md audit. Many items were already resolved in prior work; this PR closes the remaining gaps and updates the report to reflect current state.\n\n### Type Safety\n- **`SharingRuleSchema`**: Remove `z.ZodType<any>` cast — now properly inferred from `z.discriminatedUnion()`\n- **`api/metadata.zod.ts`**: Add missing `z.infer` exports (`ObjectDefinitionResponse`, `AppDefinitionResponse`, `ConceptListResponse`)\n\n### Deprecated Export Cleanup\n- **`integration/connector.zod.ts`**: Remove deprecated `AuthenticationSchema` and `FieldTransformSchema` re-exports; internal usage updated to canonical `ConnectorAuthConfigSchema`\n\n### Documentation & Annotations\n- **`qa/testing.zod.ts`**: `.describe()` coverage increased from 9 → 32 annotations\n- **DependencyConflict schemas**: Cross-reference JSDoc between `hub/plugin-security.zod.ts` and `kernel/plugin-versioning.zod.ts`\n\n### Audit Report Update\n- Metrics refreshed: `z.any()` 397→9, `z.unknown()` 8→350, `.describe()` 5,026→5,691, missing `z.infer` files 5→0\n- All P0/P1/P2 recommendations marked resolved; quality grade B+ → A-\n\n```typescript\n// Before: loses type info\nexport const SharingRuleSchema: z.ZodType<any> = z.discriminatedUnion('type', [...]);\n\n// After: proper inference\nexport const SharingRuleSchema = z.discriminatedUnion('type', [...]);\n```\n\nAll 3,074 tests pass across 97 test files.\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

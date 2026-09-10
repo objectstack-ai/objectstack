@@ -1,0 +1,35 @@
+{
+  "number": 852,
+  "kind": "issue",
+  "title": "[长期] 彻底解决 populate/expand/lookup 字段关联查不到数据等后端根本性问题",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-03-02T02:24:35Z",
+  "updated_at": "2026-03-02T02:59:50Z",
+  "closed_at": "2026-03-02T02:59:50Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/852",
+  "body": "## 背景\n在平台实际环境下，objectui 和 console 项目调用 spec 项目的数据 API 时，通过 populate/expand（或 lookup 字段）无法得到预期的对象展开关联数据。例如：\nGET /api/v1/data/order_item?populate=order,product 返回的 order/product 字段只是 ID，没有被扩展成对应对象。\n\n本问题不是 studio 或 mock 环境代码导致，而是 spec 仓库主线后端真实实现的系统性缺陷：\n- populate/lookup/expand 参数被正确地接收，但有多种场景未能深入解析并驱动底层数据引擎展开关联对象。\n- 除了主 objectql engine 的 expand 功能外，API 层、协议转换适配/ast、driver等链路可能有遗漏或绕行，导致大量真实接口无法获得关联数据。\n- 案例参考见 objectui 项目相关 PR 和 bug 讨论。\n\n## 长期解决目标\n- 任何接入 objectstack-ai/spec 的 API（无论 rest/odata/rpc），只要有 populate/expand/lookup 参数，返回内容都应与 schema 及字段定义严格一致：\n   - lookup/master_detail 字段自动转为对象，并展开 select 指定内容（递归/nested 支持3层+）\n   - 保证和 objectql find/findOne 直接用 expand 能力效果一致\n- 彻底补齐 API protocol → objectql → driver 全链路参数流转，杜绝任何场景下参数传递或处理被忽略\n   - 包括所有 http-dispatcher、broker、protocol implementation、engine toQueryAST 及 schema registry 驱动\n- 标准化所有 lookup/expand 返回（支持 depth，支持 select，嵌套安全、性能合理）\n- 完善自动化测试，验证所有 API 入口都能真正返回 fully expanded object\n- 完整补文档/注释，提升开发集成信心\n\n## 影响范围\n- /api/v1/data/ 对象的 rest/odata 等接口与协议所有查接口，特别是 lookup、populate、expand（包括 frontend 各种数据适配器）\n- objectql engine、protocol、http-dispatcher、broker、driver以及 schema 相关\n- 自动化单测/\u001b[insert test infra]\n\n## 参考资料\n- objectui PR #944 与相关试验与复现步骤\n- 用户实际 API 调用与截图\n- objectql/src/engine.ts expandRelatedRecords 实现，protocol 二层参数流转与转换\n\n## 路线建议（可增补）\n1. 跟踪 populate/expand 全链路流向和覆盖，补齐适配遗漏\n2. 对所有类型驱动（rest/odata）实现严格流程参数测试\n3. 标准化和补齐嵌套 expand 案例（带多级 select/projection）\n4. 完善主对象 expand 代码注释、示范和接口注释\n5. 推动社区/前端同步规范，方便 console/objectui 等团队调用\n"
+}

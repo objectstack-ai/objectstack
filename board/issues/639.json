@@ -1,0 +1,33 @@
+{
+  "number": 639,
+  "kind": "pull_request",
+  "title": "feat: Complete v3.0 roadmap — Phases 9, 10, 11",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-12T05:58:12Z",
+  "updated_at": "2026-02-12T10:51:49Z",
+  "closed_at": "2026-02-12T06:26:32Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-12T06:26:32Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/639",
+  "body": "Implements all remaining v3.0 roadmap items: DX tooling (Phase 9), performance/build optimization (Phase 10), and security/compliance hardening (Phase 11).\n\n## Phase 9: Developer Experience & Tooling\n\n- **JSON Schema `$id` URLs** — All 1,470 generated schemas now include `$id` (`https://schema.objectstack.io/v{version}/...`) and `x-spec-version`\n- **Bundled schema** — `objectstack.json` with 1,452 `$defs` for IDE autocomplete\n- **OpenAPI 3.1 generation** — New `build-openapi.ts` auto-generates spec from REST API protocol (CRUD, Metadata, Discovery endpoints)\n- **`generate types` CLI** — New sub-command reads `objectstack.config.ts` objects and emits typed interfaces:\n  ```\n  objectstack generate types [config] -o src/types/objectstack.d.ts\n  ```\n- **`llms.txt` updated** — Full schema inventory (171 schemas, 14 domains, 19 packages)\n\n## Phase 10: Performance & Build\n\n- **Benchmark suite** (`benchmark.bench.ts`) — Vitest bench for all 5 protocol domains + batch validation\n- **Bundle size analyzer** (`analyze-bundle-size.ts`) — Reports ESM/CJS/DTS per subpath export; `pnpm analyze` script added\n- **Tree-shaking enabled** — `treeshake: true` in tsup config\n- **CI gate** — `pnpm analyze` step added to `build-core` job\n- **Stale subpath cleanup** — Removed 4 dead exports (`hub`, `auth`, `driver`, `permission`) → 12 valid subpaths\n\n## Phase 11: Security & Compliance\n\n- **SBOM** (`generate-sbom.ts`) — CycloneDX 1.4 output, 63 components\n- **License audit** — All deps validated against allowlist (MIT, Apache-2.0, ISC, BSD)\n- **Compliance review** — GDPR (6 data subject rights, 6 legal bases), SOC2 (40+ audit event types, immutable logs), HIPAA, PCI-DSS schemas confirmed comprehensive\n\n## Housekeeping\n\n- ROADMAP.md updated to reflect all phases complete\n- `.gitignore` updated for generated artifacts (`bundle-size-report.json`, `sbom.json`)\n- 191 test files, 5,157 tests — all passing, zero CodeQL alerts\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 819,
+  "kind": "pull_request",
+  "title": "chore: add changeset for patch release",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-26T17:53:46Z",
+  "updated_at": "2026-02-26T18:24:25Z",
+  "closed_at": "2026-02-26T18:22:41Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-26T18:22:40Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/819",
+  "body": "Adds a changeset for the memory driver auto-detect persistence feature merged in #818.\n\n- **Changeset**: `patch` bump for `@objectstack/spec` — cascades to all 35 packages in the fixed versioning group via `changeset version`\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> changeset发一个补丁\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n🔒 GitHub Advanced Security automatically protects Copilot coding agent pull requests. You can protect all pull requests by enabling Advanced Security for your repositories. [Learn more about Advanced Security.](https://gh.io/cca-advanced-security)"
+}

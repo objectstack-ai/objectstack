@@ -1,0 +1,33 @@
+{
+  "number": 846,
+  "kind": "pull_request",
+  "title": "feat: object-first i18n convention (ObjectTranslationNode, AppTranslationBundle, diff/coverage schemas)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-01T15:56:26Z",
+  "updated_at": "2026-03-01T16:44:04Z",
+  "closed_at": "2026-03-01T16:40:04Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-01T16:40:04Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/846",
+  "body": "Current i18n keys use category-first flat structure, causing redundancy and poor workbench/detection ergonomics. Upgrades to object-first aggregation aligned with Salesforce DX / Dynamics conventions.\n\n### New schemas (`translation.zod.ts`)\n\n- **`ObjectTranslationNodeSchema`** — all translatable content for one object: `label`, `fields`, `_options`, `_views`, `_sections`, `_actions`, `description`, `helpText`\n- **`AppTranslationBundleSchema`** — single-locale app bundle with `o.{object}` root + global groups (`_globalOptions`, `app`, `nav`, `dashboard`, `reports`, `pages`, `messages`, `validationMessages`)\n- **`TranslationDiffItemSchema` / `TranslationCoverageResultSchema`** — per-key diff detection for CLI/API coverage reporting\n\n### Extended contract (`i18n-service.ts`)\n\nThree optional methods on `II18nService` (backward-compatible):\n- `getAppBundle(locale)` / `loadAppBundle(locale, bundle)` — object-first bundle I/O\n- `getCoverage(locale, objectName?)` — returns missing/redundant/stale items with coverage %\n\n### Example\n\n```typescript\nconst zh: AppTranslationBundle = {\n  o: {\n    account: {\n      label: '客户',\n      fields: { name: { label: '客户名称' } },\n      _options: { status: { active: '活跃' } },\n      _views: { all_accounts: { label: '全部客户' } },\n      _sections: { basic_info: { label: '基本信息' } },\n      _actions: { convert: { label: '转换', confirmMessage: '确认？' } },\n    },\n  },\n  _globalOptions: { currency: { usd: '美元' } },\n  app: { crm: { label: '客户关系管理' } },\n  nav: { home: '首页' },\n  messages: { 'common.save': '保存' },\n};\n```\n\n### Docs & tests\n\n- `i18n-standard.mdx` — added object-first convention section\n- `ROADMAP.md` — updated translation references\n- 22 new tests (6592 total, all green)\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>强化元数据国际化约定(对象优先/全局分离)，为自动检测和工作台优化结构</issue_title>\n> <issue_description>### 背景\n> 当前的元数据翻译 key 采用 category-first（按类别分散）结构，翻译覆盖但实际渲染/维护体验较差，且冗余严重。Salesforce、Dynamics 等主流平台采用以对象为单位聚合的国际化元数据布局，大幅提升翻译工作台和运行时自动检测能力。\n> \n> ## 方案 (Spec 协议和 API Runtime 优化)\n> \n> ### 1. 新增对象优先的国际化规范协议\n> 将 category-first flat key 约定升级为 object-first，嵌套所有对象可翻译内容，见下方结构：\n> ```ts\n> const zh = {\n>   o: {\n>     account: {\n>       label: '客户',\n>       description: '......',\n>       _options: { industry: { ... } },\n>       _views: { ... },\n>       _sections: { ... },\n>       _actions: { ... },\n>       // 预留 helpText/placeholder/pluralLabel\n>     },\n>     ...\n>   },\n>   _globalOptions: { ... },\n>   dashboard: { ... },\n>   pages: { ... },\n> };\n> ```\n> - 以`o.{object}`为根，将label/description, field, picklist, view, section, action(及params)等所有相关翻译聚合。\n> - category/fieldOptions/reports/dashboard.columns冗余节点将被移除，字段与选项复用。\n> - 全局（非对象绑定）翻译保持原有分组(app,nav,dashboard,reports,pages等)。\n> \n> #### 更新协议文档与 Zod Schema ：\n> - `ui/i18n.zod.ts` 新增 ObjectTranslationNodeSchema/AppTranslationBundleSchema、更新国际化约定 markdown 说明文档\n> - `contracts/i18n-service.ts` 扩展国际化服务接口支持以object级别聚合生成、diff检测\n> \n> ### 2. API Runtime与CLI/Workbench约定升级\n> - 新增API: 输入完整metadata与locale bundle可返回所有缺失、冗余、陈旧翻译项（支持object维度聚合结果）\n> - CLI工具自动检测、导出object优先的翻译骨架\n> - 文档与测试覆盖调整\n> \n> #### 验收标准\n> - 协议与示例schema同步\n> - 完整的object-first结构生成/检测能力\n> - API/CLI/Workbench三处完全一致的约定兼容\n> - 测试与ROADMAP文档同步\n> \n> ---\n> 如需协作/CLI采样脚本/Bench交互设计可随时跟进补充。</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#845\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

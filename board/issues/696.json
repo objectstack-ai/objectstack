@@ -1,0 +1,37 @@
+{
+  "number": 696,
+  "kind": "pull_request",
+  "title": "feat(ui): Interface Foundation — Phase A (v3.2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-16T04:09:59Z",
+  "updated_at": "2026-02-16T06:58:21Z",
+  "closed_at": "2026-02-16T06:58:21Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-16T06:58:21Z",
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/696",
+  "body": "Implements Phase A of the Airtable Interface parity roadmap, introducing a self-contained, shareable, multi-page application surface distinct from the existing `AppSchema` navigation container. The Interface concept enables role-specific surfaces that stitch together views, elements, and actions into cohesive experiences.\n\n### New: `InterfaceSchema` (`src/ui/interface.zod.ts`)\n- `InterfaceSchema` — top-level entity with pages, branding, role assignments, default landing page\n- `InterfaceBrandingSchema` — extends `AppBrandingSchema` with `coverImage`\n- `defineInterface()` factory — exported from root `index.ts` alongside `defineView`, `defineApp`, `defineFlow`, `defineAgent`\n\n### Unified Page System (`page.zod.ts`)\n- `PageTypeSchema` — unified 16-type enum: 4 platform (`record`, `home`, `app`, `utility`) + 12 interface (`dashboard`, `grid`, `list`, `gallery`, `kanban`, `calendar`, `timeline`, `form`, `record_detail`, `record_review`, `overview`, `blank`)\n- `RecordReviewConfigSchema` — sequential record review/approval with actions (`approve`/`reject`/`skip`/`custom`), navigation modes, field updates, progress indicator\n- `icon` property added to `PageSchema` for interface navigation\n- `InterfaceSchema.pages` references `PageSchema` directly (no separate `InterfacePageSchema`)\n\n### Content Elements (`page.zod.ts`, `component.zod.ts`)\n- Added `element:text`, `element:number`, `element:image`, `element:divider` to `PageComponentType`\n- `ElementTextPropsSchema` — markdown content, variant, alignment\n- `ElementNumberPropsSchema` — object/field aggregation (count/sum/avg/min/max), format, prefix/suffix\n- `ElementImagePropsSchema` — src, alt, object-fit, height\n- All registered in `ComponentPropsMap`\n\n### Per-element Data Binding (`page.zod.ts`)\n- `ElementDataSourceSchema` — object, view, filter, sort, limit\n- `dataSource` optional property on `PageComponentSchema` — overrides page-level object context for multi-object dashboards\n\n### Shared Primitives (`shared/enums.zod.ts`)\n- Extracted `SortItemSchema` (`{ field, order }`) reusing `SortDirectionEnum` — replaces inline sort definitions across UI schemas\n\n### Documentation & Roadmap\n- ROADMAP.md Phase 8.1 Phase A marked as ✅ complete\n- Codebase metrics updated (177 schema files, 199 test files, 5468 tests)\n- Phase 1 deliverables updated with Interface, Content Elements, `defineInterface()`\n- Design doc (`airtable-interface-gap-analysis.md`) status updated to \"Phase A Implemented\"\n- Design doc Phase A checklist marked complete with additional merge/extract items\n- Decision log expanded with entries #6-8 (PageSchema merge, SortItemSchema extraction, branding extend)\n\n```typescript\nconst portal = defineInterface({\n  name: 'order_management',\n  label: 'Order Management',\n  object: 'order',\n  pages: [\n    {\n      name: 'page_dashboard', label: 'Dashboard', type: 'dashboard',\n      regions: [{\n        name: 'main',\n        components: [\n          { type: 'element:number', properties: { object: 'order', aggregate: 'sum', field: 'total', format: 'currency' },\n            dataSource: { object: 'order', filter: { status: 'completed' } } },\n        ],\n      }],\n    },\n    {\n      name: 'page_review', label: 'Review', type: 'record_review',\n      recordReview: {\n        object: 'order',\n        actions: [\n          { label: 'Approve', type: 'approve', field: 'status', value: 'approved' },\n          { label: 'Reject', type: 'reject', field: 'status', value: 'rejected' },\n        ],\n      },\n      regions: [],\n    },\n  ],\n});\n```\n\n61 new tests. All 199 test files (5468 tests) pass.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 按 roadmap 完成 ui协议\n> \n> 8.1 UI Protocol Enhancement — Airtable Interface Parity\n> \n> See Airtable Interface Gap Analysis for the full evaluation.\n> Phase A: Interface Foundation (v3.2)\n> \n>  InterfaceSchema — Self-contained, shareable, multi-page application surface (src/ui/interface.zod.ts)\n>  RecordReviewConfigSchema — Sequential record review/approval page type with navigation and actions\n>  Content elements — element:text, element:number, element:image, element:divider as PageComponentType extensions\n>  Per-element data binding — dataSource property on PageComponentInstanceSchema for multi-object pages\n>  Element props — ElementTextPropsSchema, ElementNumberPropsSchema, ElementImagePropsSchema\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

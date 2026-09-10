@@ -1,0 +1,33 @@
+{
+  "number": 691,
+  "kind": "pull_request",
+  "title": "feat: add service-cache, service-queue, service-job, service-storage packages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-15T06:30:15Z",
+  "updated_at": "2026-02-15T06:55:47Z",
+  "closed_at": "2026-02-15T06:51:03Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-15T06:51:03Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/691",
+  "body": "Implements Phase 4 Priority 1 service packages from the v3.1 roadmap — the four essential `I*Service` contract implementations needed before communication and business logic services can proceed.\n\n### New packages (`packages/services/`)\n\n- **`@objectstack/service-cache`** — `MemoryCacheAdapter` (TTL, LRU eviction, hit/miss stats) + `RedisCacheAdapter` skeleton\n- **`@objectstack/service-queue`** — `MemoryQueueAdapter` (pub/sub, retry, dead letters) + `BullMQQueueAdapter` skeleton\n- **`@objectstack/service-job`** — `IntervalJobAdapter` (setInterval/setTimeout scheduling, execution history tracking) + `CronJobAdapter` skeleton\n- **`@objectstack/service-storage`** — `LocalStorageAdapter` (filesystem with nested dirs, listing) + `S3StorageAdapter` skeleton\n\nEach package ships a `Plugin` class for kernel registration, a production adapter, and an enterprise adapter skeleton:\n\n```ts\nimport { ObjectKernel } from '@objectstack/core';\nimport { CacheServicePlugin } from '@objectstack/service-cache';\nimport { JobServicePlugin } from '@objectstack/service-job';\n\nconst kernel = new ObjectKernel();\nkernel.use(new CacheServicePlugin({ adapter: 'memory', memory: { maxSize: 10000 } }));\nkernel.use(new JobServicePlugin({ adapter: 'interval' }));\nawait kernel.bootstrap();\n\nconst cache = kernel.getService<ICacheService>('cache');\nawait cache.set('session:abc', userData, 3600);\n```\n\n### Infrastructure\n\n- Added `packages/services/*` to `pnpm-workspace.yaml`\n- 40 new tests across 4 packages, all passing\n- Existing 5,376 spec tests unaffected\n\n### ROADMAP.md updates\n\n- Contract implementation count: 7 → 11 (44%)\n- Package count: 23 → 27\n- Phase 4 Priority 1 items marked complete\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> # ObjectStack 项目上下文提示词\n> \n> ## 项目概述\n> \n> ### 1. objectstack-ai/spec — ObjectStack 平台（上游）\n> - **定位**：元数据驱动的应用平台，微内核架构（类似操作系统设计）\n> - **版本**：v3.0.2，协议规范完成，运行时实现进行中\n> - **架构**：三层协议栈（ObjectQL 数据层 → ObjectOS 控制层 → ObjectUI 视图层）\n> - **核心包**：\n>   - `@objectstack/spec` — Zod-first 协议定义（175 schemas, 25 service contracts, 7,111 .describe()）\n>   - `@objectstack/core` — 微内核（ObjectKernel + LiteKernel + 插件生命周期 + DI 容器）\n>   - `@objectstack/objectql` — 数据引擎（CRUD + hooks + middleware）\n>   - `@objectstack/metadata` — 元数据管理（Filesystem/Memory/Remote loaders + overlay 系统）\n> - **已实现的合约（7/25）**：IDataEngine, IDataDriver, IMetadataService, IAuthService, IHttpServer, Logger, IServiceRegistry\n> - **未实现的关键合约（16个）**：ICacheService, IQueueService, IJobService, IStorageService, IRealtimeService, ISearchService, INotificationService, IAIService, IAutomationService, IWorkflowService, IGraphQLService, II18nService 等\n> - **技术栈**：TypeScript, Zod, Pino, Hono, pnpm monorepo, Vitest, 5,363 tests passing\n> \n> ## 核心架构原则\n> \n> 1. **合约驱动**：所有服务通过 `@objectstack/spec/contracts/` 中的 I*Service 接口定义\n> 2. **依赖反转**：插件依赖接口而非具体实现，通过 kernel.registerService() 注册\n> 3. **插件生命周期**：init（注册服务）→ start（连接资源）→ destroy（清理）\n> 4. **后注册覆盖**：下游项目可通过注册同名 service 覆盖平台默认实现\n> 5. **命名约定**：\n>    - `service-*` = 核心服务实现（implements I*Service）\n>    - `plugin-*` = 可选扩展（开发工具/测试）\n>    - `driver-*` = 数据驱动（implements IDataDriver）\n> 6. **分层隔离**：ObjectQL 不知道 Auth/UI；ObjectOS 不知道数据结构；ObjectUI 不知道业务逻辑\n> \n> ## 当前开发重点（v3.1 路线图 — Q2 2026）\n> \n> ### 平台端（spec repo）— 最小化实现\n> 评估是否需要创建 packges/services，\n> - `@objectstack/service-cache`：ICacheService（内存实现 + Redis 适配器骨架）\n> - `@objectstack/service-queue`：IQueueService（内存实现 + BullMQ 适配器骨架）\n> - `@objectstack/service-job`：IJobService（setInterval 实现 + cron 骨架）\n> - `@objectstack/service-storage`：IStorageService（本地文件系统实现\n> \n> ## 关键文件路径\n> \n> ### spec 仓库\n> - 合约定义：`packages/spec/src/contracts/` (cache-service.ts, queue-service.ts, job-service.ts, storage-service.ts)\n> - 内存 stub：`packages/plugins/plugin-dev/src/dev-plugin.ts` (createMemoryCache, createMemoryQueue, createMemoryJob)\n> - 架构文档：`ARCHITECTURE.md`, `ROADMAP.md`\n> - 核心类型：`packages/spec/src/system/core-services.zod.ts`（17 个 CoreServiceName）\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

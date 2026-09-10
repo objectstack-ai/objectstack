@@ -1,0 +1,32 @@
+{
+  "number": 565,
+  "kind": "issue",
+  "title": "feat(client): Complete @objectstack/client to cover full spec API surface",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-09T08:31:24Z",
+  "updated_at": "2026-02-11T03:00:50Z",
+  "closed_at": "2026-02-11T03:00:50Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/565",
+  "body": "## Summary\n\nThe `@objectstack/client` currently implements **~51%** of the spec-defined protocol (26/51 methods across 7/14 domains). This issue tracks completing the remaining API surface to achieve full spec compliance.\n\n## Current Coverage\n\n### ✅ Fully Implemented (7 domains)\n- **Discovery** — `connect()` with well-known fallback\n- **Metadata** — `meta.getTypes/getItems/getItem/saveItem/getCached/getView`\n- **Data CRUD** — `data.find/get/create/update/delete`\n- **Batch** — `data.batch/createMany/updateMany/deleteMany`\n- **Storage** — `storage.upload/getDownloadUrl`\n- **Analytics** — `analytics.query/meta/explain`\n- **Packages** — `packages.list/get/install/uninstall/enable/disable`\n\n### ❌ Missing Domains (5 domains, ~25 methods)\n\n## Tasks\n\n### P0 — Critical\n\n- [ ] **Permissions namespace** (`client.permissions.*`)\n  - `checkPermission({ object, action, recordId?, field? })` → `GET /permissions/check`\n  - `getObjectPermissions({ object })` → `GET /permissions/objects/:object`\n  - `getEffectivePermissions()` → `GET /permissions/effective`\n  - Reference: `ObjectStackProtocol` in `packages/spec/src/api/protocol.zod.ts`\n\n- [ ] **Realtime namespace** (`client.realtime.*`)\n  - `connect({ transport?, channels?, token? })` — WebSocket/SSE connection\n  - `disconnect()`\n  - `subscribe({ channel, events?, filter? })` → returns subscriptionId\n  - `unsubscribe({ subscriptionId })`\n  - `setPresence({ channel, state })`\n  - `getPresence({ channel })`\n  - Reference: `WebSocketMessageSchema` in `packages/spec/src/api/websocket.zod.ts`\n\n### P1 — Important\n\n- [ ] **Workflow namespace** (`client.workflow.*`)\n  - `getConfig({ object })` → `GET /workflow/:object/config`\n  - `getState({ object, recordId })` → `GET /workflow/:object/:id/state`\n  - `transition({ object, recordId, transition, comment?, data? })`\n  - `approve({ object, recordId, comment?, data? })`\n  - `reject({ object, recordId, reason, comment? })`\n\n- [ ] **Views CRUD namespace** (`client.views.*`)\n  - `list({ object, type? })` → `GET /ui/views/:object`\n  - `get({ object, viewId })` → `GET /ui/views/:object/:viewId`\n  - `create({ object, data })` → `POST /ui/views/:object`\n  - `update({ object, viewId, data })` → `PUT /ui/views/:object/:viewId`\n  - `delete({ object, viewId })` → `DELETE /ui/views/:object/:viewId`\n\n- [ ] **Auth enhancements**\n  - `auth.register(request)` → `POST /auth/register`\n  - `auth.refreshToken(refreshToken)` → `POST /auth/refresh`\n\n- [ ] **QueryBuilder enhancements** — add fluent methods for:\n  - `.expand(relation, subQuery)` — nested relation loading\n  - `.search(query, options?)` — full-text search\n  - `.cursor(cursor)` — keyset pagination\n  - `.distinct()` — SELECT DISTINCT\n  - `.between(field, min, max)` on FilterBuilder\n  - `.contains(field, value)` on FilterBuilder\n  - `.startsWith(field, value)` on FilterBuilder\n  - `.endsWith(field, value)` on FilterBuilder\n  - `.exists(field)` on FilterBuilder\n\n### P2 — Nice to Have\n\n- [ ] **Notifications namespace** (`client.notifications.*`)\n  - `registerDevice`, `unregisterDevice`\n  - `getPreferences`, `updatePreferences`\n  - `list`, `markRead`, `markAllRead`\n\n- [ ] **AI namespace** (`client.ai.*`)\n  - `nlq({ query, object?, conversationId? })`\n  - `chat({ message, conversationId?, context? })`\n  - `suggest({ object, field?, recordId?, partial? })`\n  - `insights({ object, recordId?, type? })`\n\n- [ ] **i18n namespace** (`client.i18n.*`)\n  - `getLocales()`\n  - `getTranslations({ locale, namespace?, keys? })`\n  - `getFieldLabels({ object, locale })`\n\n- [ ] **QueryBuilder advanced** — fluent methods for:\n  - `.join(object, on, type?)` — explicit joins\n  - `.having(filter)` — HAVING clause\n  - `.window(fn, partitionBy, orderBy)` — window functions\n\n## Implementation Guidelines\n\n1. Follow the existing namespace pattern in `packages/client/src/index.ts` (e.g., `client.meta.*`, `client.data.*`)\n2. All methods should call `this.request()` internally and use `unwrapResponse()` for envelope stripping\n3. Use route resolution via `getRoute(type)` with fallback to conventional paths\n4. Types should be imported from `@objectstack/spec/api` where available\n5. Add corresponding tests in `client.test.ts` (unit) and `client.msw.test.ts` (integration)\n6. Export all new types from `index.ts`\n\n## Acceptance Criteria\n\n- [ ] All P0 methods implemented with full type safety\n- [ ] Unit tests for each new namespace (mocked fetch)\n- [ ] Integration tests with MSW for P0 methods\n- [ ] All existing tests continue to pass\n- [ ] Exported types align with spec schemas\n- [ ] README.md updated with new namespace documentation\n\n## References\n\n- Spec protocol: `packages/spec/src/api/protocol.zod.ts`\n- REST routes: `packages/spec/src/api/router.zod.ts`\n- Contracts: `packages/spec/src/contracts/`\n- Existing client: `packages/client/src/index.ts`\n"
+}

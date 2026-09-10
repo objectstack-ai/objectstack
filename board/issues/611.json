@@ -1,0 +1,36 @@
+{
+  "number": 611,
+  "kind": "pull_request",
+  "title": "Complete development plan: modularize kernel/events.zod.ts, add v3.0 migration guide",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-11T06:29:22Z",
+  "updated_at": "2026-02-11T07:34:49Z",
+  "closed_at": "2026-02-11T07:27:02Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-11T07:27:02Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/611",
+  "body": "- [x] Sprint K: Modularize kernel/events.zod.ts (765 lines → 6 sub-modules) with backward-compatible re-exports\n- [x] Phase 8: Create v3.0 migration guide document (V3_MIGRATION_GUIDE.md)\n- [x] Phase 8: Update CHANGELOG.md with breaking changes for v3.0\n- [x] Update ROADMAP.md to reflect current completion status\n- [x] Update PROTOCOL_OPTIMIZATION_REPORT.md with Sprint K completion and final status\n- [x] Run all tests to verify no regressions (175 files, 4518 tests pass)\n- [x] Code review — all feedback addressed\n- [x] Security scan — no vulnerabilities found\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 605,
+  "kind": "pull_request",
+  "title": "feat(cli): add `os plugin` command group and plugin system documentation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-11T04:39:33Z",
+  "updated_at": "2026-02-11T06:04:28Z",
+  "closed_at": "2026-02-11T05:03:53Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-11T05:03:53Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/605",
+  "body": "Introduces CLI plugin management commands and comprehensive documentation for the plugin architecture.\n\n## CLI Plugin Commands\n\nNew `os plugin` command group with four subcommands:\n\n- **`os plugin list`** (`ls`) — Lists plugins/devPlugins from config. Supports `--json`.\n- **`os plugin info <name>`** — Shows name, version, type, environment, dependencies.\n- **`os plugin add <package>`** — Adds import + `plugins` array entry to config. `--dev` for devPlugins.\n- **`os plugin remove <name>`** (`rm`) — Removes import and array entry from config.\n\n```bash\nos plugin add @objectstack/plugin-auth\nos plugin list --json\nos plugin rm @objectstack/plugin-auth\n```\n\nThe `add`/`remove` commands perform text-based config transforms — inserting/removing import statements and plugin array entries in `objectstack.config.ts`.\n\n## Documentation\n\nNew `content/docs/guides/plugins.mdx` covering:\n\n- Architecture overview (microkernel + plugin layer)\n- Plugin interface, PluginContext, lifecycle phases (init → start → destroy)\n- Creating plugins via CLI scaffolding and manually\n- Configuration patterns (instances, objects, string refs, nested stacks)\n- Built-in plugins reference (auth, hono, security, msw, driver-memory)\n- Auto-detection behavior in `os serve`/`os dev`\n- Advanced: service replacement, health checks, security, timeouts, OPS directory conventions\n\n## Other Changes\n\n- Registered `pluginCommand` in `bin.ts` and `index.ts`\n- Updated CLI help text workflow to include `os plugin add`\n- Updated `README.md` with plugin command docs\n- Added plugins to guides navigation (`meta.json`)\n- 8 new tests (21 total CLI tests passing)\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

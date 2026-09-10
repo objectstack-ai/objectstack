@@ -1,0 +1,33 @@
+{
+  "number": 707,
+  "kind": "pull_request",
+  "title": "fix: resolve merge conflicts between dependabot production-deps bump and main",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-18T04:56:05Z",
+  "updated_at": "2026-02-18T06:41:54Z",
+  "closed_at": "2026-02-18T05:14:06Z",
+  "closed_by": {
+    "login": "dependabot[bot]",
+    "id": 49699333,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/707",
+  "body": "PR #694 (dependabot production-dependencies bump) became unmergeable due to concurrent devDependency updates landing on main in the same region of `apps/studio/package.json`.\n\n- **Conflict root cause**: Both sides modified adjacent lines in `apps/studio/package.json` devDependencies — main bumped `@types/react`, `@vitejs/plugin-react`, `happy-dom`; dependabot bumped `msw` on the next line\n- **Resolution**: Merged main into the dependabot branch, aligned devDependencies with main's versions, kept dependabot's production dep bumps (`lucide-react`, `react-resizable-panels`, `tailwind-merge`, `msw`)\n- **Lock file**: Regenerated `pnpm-lock.yaml` from the resolved state\n\nAll 5520 tests pass.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 拉取请求: https://github.com/objectstack-ai/spec/pull/694\n> \n> 修正不能合并main的问题\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

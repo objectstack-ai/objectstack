@@ -1,0 +1,33 @@
+{
+  "number": 804,
+  "kind": "pull_request",
+  "title": "fix: unify filter parameter protocol — naming, AST validation, param safety, response mapping",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-24T08:22:01Z",
+  "updated_at": "2026-02-24T09:05:36Z",
+  "closed_at": "2026-02-24T08:51:57Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-24T08:51:57Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/804",
+  "body": "Filter handling across the stack had five interrelated issues: inconsistent `filter`/`filters`/`$filter` naming, naive `Array.isArray` AST detection, wrong response field names in the dispatcher, unconstrained query param passthrough on GET-by-ID, and no shared AST validation utility.\n\n### Spec: `isFilterAST()` with structural validation\n\nReplaces the client's `Array.isArray(filter)` with a recursive validator exported from `@objectstack/spec/data` that checks for valid AST shapes (comparison nodes with known operators, logical nodes with valid children, legacy flat arrays).\n\n```typescript\nimport { isFilterAST, VALID_AST_OPERATORS } from '@objectstack/spec/data';\n\nisFilterAST(['status', '=', 'active'])              // true\nisFilterAST(['and', ['a', '=', 1], ['b', '>', 2]])  // true (recursive)\nisFilterAST([1, 2, 3])                               // false\nisFilterAST(['field', 'UNKNOWN_OP', 'val'])           // false\n```\n\n### Spec: `HttpFindQueryParamsSchema` + `GetDataRequestSchema` tightening\n\n- `HttpFindQueryParamsSchema` documents canonical HTTP query params. `filter` (singular) is the standard; `filters` (plural) accepted for backward compat.\n- `GetDataRequestSchema` now explicitly declares `select`/`expand` as the only allowed query params for GET-by-ID.\n\n### Runtime: dispatcher fixes\n\n- **`handleApiEndpoint`**: `result.data`/`result.count` → `result.records`/`result.total` to match `FindDataResponseSchema`\n- **GET `/data/:object/:id`**: only `select`/`expand` forwarded; all other query params discarded\n\n### Protocol: `filters` → `filter` normalization\n\n`objectql/protocol.ts` now normalizes `filters` to `filter` before parsing, and uses `isFilterAST()` instead of `Array.isArray`.\n\n### Client SDK\n\n- `QueryOptions.filter` added as canonical field; `filters` marked `@deprecated`\n- `isFilterAST` delegated to spec instead of inline `Array.isArray`\n- Sends `filter` (singular) as HTTP query param\n- Guard against `Object.entries` on array values\n\n### Documentation sync\n\n- Updated `api-reference.mdx` to use canonical `filter` (not `$filter`) for the standard REST API parameter table, with a note clarifying that OData-style `$`-prefixed parameters are supported via the dedicated OData endpoint.\n- Documented the allowlisted query parameters (`select`, `expand`) for `GET /data/:object/:id` in the API reference.\n\n### Tests\n\n19 new tests covering `isFilterAST` recursive validation, `VALID_AST_OPERATORS`, `GetDataRequestSchema` select/expand, `HttpFindQueryParamsSchema` coercion. Full suite: 229 files, 6475 tests passing.\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>全链路 filter 参数协议与兼容性问题：格式混乱、AST转换缺失、属性污染、命名不统一</issue_title>\n> <issue_description>## 概述\n> 本 issue 合并报告了 objectstack-ai/spec 中发现的所有 filter 参数相关协议和兼容问题，建议统一整改。\n> \n> ---\n> \n> ### 问题1：filter/filters/$filter 参数命名混乱（协议/实现/客户端不一致）\n> - HTTP Protocol 文档要求 `filter`（单数）作为 JSON 查询参数，API Reference 用 `$filter`，Client SDK 实际用的是 `filters`（复数）。\n> - 服务端 protocol.ts 同时兼容 `filter`/`filters` 字段，存在混用、处理混乱风险。\n> \n> **建议：** 尽快统一 filter ���数命名，建议全部采用 `filter`（单数），支持向后兼容。文档、SDK、协议、Dispatcher/Adapter 层都要同步。\n> \n> ---\n> \n> ### 问题2：AST 数组格式 filter → FilterCondition 对象转换缺失\n> - Client SDK、query-builder 产出的 filter 带数组 AST 结构：如 [\"and\", [\"priority\", \"=\", \"high\"], ...]，服务端 protocol.ts 直接用 JSON.parse 赋值，底层 engine 期待收到对象格式（如 { $and: [...] }）。\n> - Dispatcher 层与 Broker 传递格式不一致，filter 易丢失或无法生效。\n> \n> **建议：** Server 层需增加 AST 数组格式的转换处理（如自动兑现为 FilterCondition 对象 `{ $and: [...] }`）；SDK 需输出规范格式。\n> \n> ---\n> \n> ### 问题3：Dispatcher handleApiEndpoint 响应属性名不匹配\n> - eg: `find` 操作返回 `result.data` 和 `result.count`，但 engine 返回的是 `{ object, records, total }`。结果字段总是 undefined，统计数丢失。\n> \n> **建议：** Dispatcher 层需统一处理返回体，严格按照 Spec Contract 进行字段映射。\n> \n> ---\n> \n> ### 问题4：GET by ID 参数污染风险\n> - eg: GET /data/:object/:id 会将所有 URL 查询参数 `...query` 展开到 data.get 调用中，实际只需要 select/expand 等少量字段，容易引入未知参数。\n> \n> **建议：** 限制只传递 select/expand 等允许参数，其余参数丢弃。\n> \n> ---\n> \n> ### 问题5：isFilterAST 检测不严谨/易误判\n> - Client SDK `isFilterAST` 方法只判断 Array.isArray，无法区分合法 AST 与错误数组。误传数组会被错误处理。\n> \n> **建议：** 采用更精确 AST 检测方案，或通过 schema 校验。\n> \n> ---\n> \n> ## 建议整改细节\n> - 同步所有相关协议、实现、测试和文��中的 filter 格式，统一命名和支持格式。\n> - 完善 server-side AST 数组格式处理，对 filter/filters 参数加入安全转换。\n> - Dispatcher 层严格字段验证与映射。\n> - Client SDK filter 结构校验与构建辅助。\n> - 增加测试覆盖率，覆盖所有 format/命名/AST 转换的边界场景。\n> \n> ---\n> \n> ## 代码片段举例\n> \n> 1. Dispatcher GET List：\n> ```typescript\n> const result = await broker.call('data.query', { object: objectName, query }, ...);\n> ```\n> 2. Dispatcher APIEndpoint find：\n> ```typescript\n> const result = await broker.call('data.query', { object, query }, ...);\n> // result.data 实实际应该是 result.records\n> ```\n> 3. Client SDK isFilterAST：\n> ```typescript\n> return Array.isArray(filter); // 仅此判断\n> ```\n> \n> ---\n> \n> ## 影响范围\n> - 数据 API 列表筛选、复杂筛选\n> - 子协议定制、批量操作、聚合等\n> - 所有涉及 filter 参数的 REST API 和 SDK 通用层\n> \n> ---\n> \n> ## 请优先安排规范整改与单元测试覆盖更新\n> \n> 如需英文 issue 或细节补充请告知。\n> </issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#803\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

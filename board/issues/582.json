@@ -1,0 +1,33 @@
+{
+  "number": 582,
+  "kind": "pull_request",
+  "title": "Replace drizzle-orm with native ObjectQL implementation using better-auth naming conventions",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-10T05:51:30Z",
+  "updated_at": "2026-02-10T06:45:10Z",
+  "closed_at": "2026-02-10T06:32:48Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-10T06:32:48Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/582",
+  "body": "PR #580 integrated better-auth with drizzle-orm as database adapter. This PR replaces that with native ObjectQL implementation, eliminating the third-party ORM dependency while maintaining **better-auth's native naming conventions** for seamless migration.\n\n## Changes\n\n**Auth Object Definitions** (`src/objects/*.object.ts`)\n- `user`, `session`, `account`, `verification` defined using `ObjectSchema.create()`\n- Uses better-auth's native table names (no `auth_` prefix)\n- Uses better-auth's native field naming (camelCase): `emailVerified`, `createdAt`, `userId`, etc.\n- Maps directly to better-auth's schema requirements for seamless migration\n\n**ObjectQL Adapter** (`src/objectql-adapter.ts`)\n- Implements better-auth's CustomAdapter interface using ObjectQL's IDataEngine\n- No name translation needed - uses better-auth's native naming conventions directly\n- Converts better-auth where clauses to ObjectQL filter format\n- Sequential updates/deletes due to IDataEngine requiring IDs (noted for future optimization)\n\n**Integration**\n- AuthManager accepts `dataEngine` parameter, automatically injected by kernel's `data` service\n- Removed `databaseUrl` parameter (obsolete with ObjectQL)\n- Removed drizzle-orm from `peerDependencies`\n\n## Example\n\n```typescript\n// Object definitions use better-auth's native naming\nexport const AuthUser = ObjectSchema.create({\n  name: 'user',  // better-auth native table name\n  fields: {\n    email: Field.email({ label: 'Email', required: true }),\n    emailVerified: Field.boolean({ label: 'Email Verified' }),  // camelCase\n    createdAt: Field.datetime({ label: 'Created At' }),  // camelCase\n    // ...\n  },\n  indexes: [{ fields: ['email'], unique: true }]\n});\n\n// Adapter bridges better-auth to ObjectQL (no name conversion)\nconst adapter = createObjectQLAdapter(dataEngine);\nconst auth = betterAuth({ database: adapter });\n```\n\n## Benefits\n\n- ✅ **Seamless Migration**: Existing better-auth databases work without schema changes\n- ✅ **Driver-agnostic**: Works with any ObjectQL driver (memory, SQL, NoSQL) without ORM coupling\n- ✅ **Simplified Adapter**: No name conversion logic needed\n- ✅ **Better-auth Compatibility**: Full compatibility with better-auth ecosystem\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 拉取请求: https://github.com/objectstack-ai/spec/pull/580/files\n> 数据库应该基于objectql自己创建对象实现。不要使用第三方orm\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

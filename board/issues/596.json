@@ -1,0 +1,38 @@
+{
+  "number": 596,
+  "kind": "pull_request",
+  "title": "chore: unify all package versions to 2.0.5",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-10T16:10:34Z",
+  "updated_at": "2026-02-10T16:29:06Z",
+  "closed_at": "2026-02-10T16:29:05Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-10T16:29:05Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/596",
+  "body": "`@objectstack/plugin-auth` was at `2.0.3` while all other packages were at `2.0.4` — it was missing from the changeset fixed versioning group and fell behind.\n\n- **`.changeset/config.json`**: Added `@objectstack/plugin-auth` and `@objectstack/plugin-security` to the `fixed` group so all 20 packages always version-lock together\n- **Version bump**: Patch release `2.0.5` across all packages via `pnpm changeset version`\n- **`CHANGELOG.md`**: Added 2.0.5 entry\n\nBefore:\n```\n2.0.4  @objectstack/spec\n2.0.4  @objectstack/core\n2.0.3  @objectstack/plugin-auth   ← out of sync\n2.0.4  @objectstack/plugin-security  ← not in fixed group\n```\n\nAfter: all `@objectstack/*` packages at `2.0.5`, fixed group covers every package.\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

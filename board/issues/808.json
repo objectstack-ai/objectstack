@@ -1,0 +1,33 @@
+{
+  "number": 808,
+  "kind": "pull_request",
+  "title": "fix: remove duplicate IncidentNotificationMatrix type export",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-24T11:40:15Z",
+  "updated_at": "2026-02-24T12:01:10Z",
+  "closed_at": "2026-02-24T11:59:03Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-24T11:59:03Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/808",
+  "body": "Duplicate `export type IncidentNotificationMatrix` on lines 183 and 368 of `incident-response.zod.ts` causes `TS2300` errors, failing both the type check and DTS build on `main`.\n\n- Removed the redundant export at line 368 (the \"Type exports\" block); the inline export at line 183 is the canonical one\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> fix ci errors\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n🔒 GitHub Advanced Security automatically protects Copilot coding agent pull requests. You can protect all pull requests by enabling Advanced Security for your repositories. [Learn more about Advanced Security.](https://gh.io/cca-advanced-security)"
+}

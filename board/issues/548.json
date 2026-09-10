@@ -1,0 +1,33 @@
+{
+  "number": 548,
+  "kind": "pull_request",
+  "title": "feat: API protocol implementation plan with kernel service extensions",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-08T08:24:04Z",
+  "updated_at": "2026-02-08T08:59:15Z",
+  "closed_at": "2026-02-08T08:55:45Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-08T08:55:45Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/548",
+  "body": "Evaluates how the 61-method ObjectStackProtocolSchema maps to kernel services and plugins, defines REST endpoints, and extends the spec with the missing infrastructure.\n\n### Development Plan (`API_IMPLEMENTATION_PLAN.md`)\n\n- Maps all 14 protocol namespaces → CoreServices with ownership (3 required kernel-native, 12 plugin-provided)\n- Full REST endpoint table: 61 methods with HTTP verb, URL pattern, auth, owning service\n- Plugin roadmap: 11 plugins across 4 phases (P0 core gateway → P3 GraphQL)\n- 4 ADRs: service degradation, package mgmt ownership, REST/WS boundary, hot-plug routing\n\n### Spec Changes\n\n- **`core-services.zod.ts`** — Add `ai`, `i18n`, `ui`, `workflow` to `CoreServiceName` enum and `ServiceRequirementDef`\n- **`discovery.zod.ts`** — Extend `ApiRoutesSchema` with 6 new optional route fields (`packages`, `workflow`, `realtime`, `notifications`, `ai`, `i18n`); extend `ApiCapabilitiesSchema` with 4 capability flags\n- **`dispatcher.zod.ts`** *(new)* — `DispatcherRouteSchema` / `DispatcherConfigSchema` / `DEFAULT_DISPATCHER_ROUTES` defining how HttpDispatcher routes URL prefixes to kernel services\n- **`manifest.zod.ts`** — Add `contributes.routes` so plugins can declare API route ownership:\n\n```typescript\ncontributes: {\n  routes: [\n    { prefix: '/api/v1/ai', service: 'ai', methods: ['aiNlq', 'aiChat'] }\n  ],\n}\n```\n\n- **`dispatcher.test.ts`** *(new)* — 18 tests covering route validation, defaults, criticality levels, and DEFAULT_DISPATCHER_ROUTES completeness\n\nAll 3099 tests pass across 98 test files.\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 599,
+  "kind": "pull_request",
+  "title": "SPEC-001: Add service contract interfaces for cache, search, queue, notification, and storage",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-11T01:58:32Z",
+  "updated_at": "2026-02-11T02:34:23Z",
+  "closed_at": "2026-02-11T02:32:43Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-11T02:32:43Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/599",
+  "body": "`CoreServiceName` defines 17 service identifiers but the spec only has contract interfaces for a handful (Logger, IDataEngine, IHttpServer, etc.). Infrastructure services like cache, search, queue, notification, and file-storage had no formal method contracts — implementations had nothing to conform to.\n\n### New contracts in `src/contracts/`\n\n- **`ICacheService`** — `get<T>`, `set<T>`, `delete`, `has`, `clear`, `stats` with `CacheStats` type\n- **`ISearchService`** — `index`, `remove`, `search` (required); `bulkIndex`, `deleteIndex` (optional). Supporting types: `SearchHit`, `SearchResult`, `SearchOptions`\n- **`IQueueService`** — `publish`, `subscribe`, `unsubscribe` (required); `getQueueSize`, `purge` (optional). Supporting types: `QueueMessage<T>`, `QueueHandler<T>`, `QueuePublishOptions`\n- **`INotificationService`** — `send` (required); `sendBatch`, `getChannels` (optional). Supporting types: `NotificationMessage`, `NotificationResult`, `NotificationChannel`\n- **`IStorageService`** — `upload`, `download`, `delete`, `exists`, `getInfo` (required); `list`, `getSignedUrl` (optional). Supporting types: `StorageFileInfo`, `StorageUploadOptions`\n\nAll contracts follow the established pattern: pure TypeScript interfaces, JSDoc, co-located vitest tests, no Zod/no business logic. Exported from the contracts barrel.\n\n```typescript\nimport type { ICacheService, ISearchService } from '@objectstack/spec/contracts';\n\n// Implement against the contract\nconst cache: ICacheService = {\n  get: async (key) => redis.get(key),\n  set: async (key, value, ttl) => redis.set(key, value, { EX: ttl }),\n  delete: async (key) => Boolean(await redis.del(key)),\n  has: async (key) => Boolean(await redis.exists(key)),\n  clear: async () => { await redis.flushdb(); },\n  stats: async () => ({ hits: 0, misses: 0, keyCount: await redis.dbsize() }),\n};\n\nkernel.register('cache', cache); // type-safe service registration\n```\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

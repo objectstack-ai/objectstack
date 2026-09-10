@@ -1,0 +1,33 @@
+{
+  "number": 728,
+  "kind": "pull_request",
+  "title": "feat: implement service-i18n and service-realtime (Phase 4c)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-19T02:10:12Z",
+  "updated_at": "2026-02-19T02:48:24Z",
+  "closed_at": "2026-02-19T02:42:22Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-19T02:42:21Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/728",
+  "body": "Implements `II18nService` and `IRealtimeService` contracts as new `service-*` packages, following existing adapter+plugin patterns from service-cache/queue/job/storage.\n\n### `@objectstack/service-i18n`\n- **`FileI18nAdapter`** — Loads `{locale}.json` files from disk, dot-notation key resolution, `{{param}}` interpolation, fallback locale chain\n- **`I18nServicePlugin`** — Registers as `'i18n'` service on kernel init\n- 20 tests\n\n### `@objectstack/service-realtime`\n- **`InMemoryRealtimeAdapter`** — Map-backed pub/sub with channel routing, `object`/`eventTypes` subscription filtering, configurable `maxSubscriptions`, handler error isolation\n- **`RealtimeServicePlugin`** — Registers as `'realtime'` service on kernel init\n- 14 tests\n\n### ROADMAP.md\n- Contract matrix: both marked ✅, implemented count 11→13 (52%)\n- Added to Package Status Matrix\n\n### Usage\n\n```ts\nimport { I18nServicePlugin } from '@objectstack/service-i18n';\nimport { RealtimeServicePlugin } from '@objectstack/service-realtime';\n\nkernel.use(new I18nServicePlugin({ localesDir: './i18n', fallbackLocale: 'en' }));\nkernel.use(new RealtimeServicePlugin());\nawait kernel.bootstrap();\n\nconst i18n = kernel.getService('i18n');\ni18n.t('objects.account.label', 'zh-CN'); // '客户'\n\nconst realtime = kernel.getService('realtime');\nawait realtime.subscribe('records', handler, { object: 'account', eventTypes: ['record.created'] });\n```\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

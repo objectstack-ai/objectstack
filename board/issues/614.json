@@ -1,0 +1,33 @@
+{
+  "number": 614,
+  "kind": "pull_request",
+  "title": "feat: add full-featured memory driver spec and implementation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-11T08:26:39Z",
+  "updated_at": "2026-02-11T09:46:10Z",
+  "closed_at": "2026-02-11T09:15:28Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-11T09:15:28Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/614",
+  "body": "- [x] Analyze objectql memory driver reference (Mingo-powered)\n- [x] Create memory driver spec schema and enhance plugin implementation\n- [x] Integrate Mingo for MongoDB-compatible query/aggregation engine\n  - [x] Add `mingo@^7.1.1` dependency to driver-memory package\n  - [x] Replace custom filter logic with Mingo `Query` for all filtering operations\n  - [x] Add `aggregate()` method using Mingo `Aggregator` for full pipeline support\n  - [x] Add ObjectQL filter → MongoDB query conversion (AST node support, legacy array, passthrough)\n  - [x] Add regex escaping for safe literal matching\n  - [x] Fix: use `getValueByPath` in sort for nested field support\n  - [x] Tests: 50 total including aggregation edge cases and AST filter conversion tests\n- [x] Validate all tests pass (56 spec tests + 50 plugin tests)\n- [x] Validate full build passes (23/23 turbo tasks)\n- [x] Code review completed and issues addressed\n- [ ] Security scan\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

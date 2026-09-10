@@ -1,0 +1,34 @@
+{
+  "number": 787,
+  "kind": "pull_request",
+  "title": "chore(ci)(deps): bump actions/stale from 10.1.1 to 10.2.0",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "dependabot[bot]",
+    "id": 49699333,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-23T02:16:40Z",
+  "updated_at": "2026-02-25T02:44:50Z",
+  "closed_at": "2026-02-25T02:44:42Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-25T02:44:42Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/787",
+  "body": "Bumps [actions/stale](https://github.com/actions/stale) from 10.1.1 to 10.2.0.\n<details>\n<summary>Release notes</summary>\n<p><em>Sourced from <a href=\"https://github.com/actions/stale/releases\">actions/stale's releases</a>.</em></p>\n<blockquote>\n<h2>v10.2.0</h2>\n<h2>What's Changed</h2>\n<h3>Bug Fix</h3>\n<ul>\n<li>Fix checking state cache (fix <a href=\"https://redirect.github.com/actions/stale/issues/1136\">#1136</a>) and switch to Octokit helper methods by <a href=\"https://github.com/itchyny\"><code>@​itchyny</code></a> in <a href=\"https://redirect.github.com/actions/stale/pull/1152\">actions/stale#1152</a></li>\n</ul>\n<h3>Dependency Updates</h3>\n<ul>\n<li>Upgrade js-yaml from  4.1.0 to 4.1.1 by <a href=\"https://github.com/dependabot\"><code>@​dependabot</code></a> in <a href=\"https://redirect.github.com/actions/stale/pull/1304\">actions/stale#1304</a></li>\n<li>Upgrade lodash from 4.17.21 to 4.17.23 by <a href=\"https://github.com/dependabot\"><code>@​dependabot</code></a> in <a href=\"https://redirect.github.com/actions/stale/pull/1313\">actions/stale#1313</a></li>\n<li>Upgrade actions/cache from 4.0.3 to 5.0.2 and actions/github from 5.1.1 to 7.0.0  by <a href=\"https://github.com/chiranjib-swain\"><code>@​chiranjib-swain</code></a> in <a href=\"https://redirect.github.com/actions/stale/pull/1312\">actions/stale#1312</a></li>\n</ul>\n<h2>New Contributors</h2>\n<ul>\n<li><a href=\"https://github.com/itchyny\"><code>@​itchyny</code></a> made their first contribution in <a href=\"https://redirect.github.com/actions/stale/pull/1152\">actions/stale#1152</a></li>\n</ul>\n<p><strong>Full Changelog</strong>: <a href=\"https://github.com/actions/stale/compare/v10...v10.2.0\">https://github.com/actions/stale/compare/v10...v10.2.0</a></p>\n</blockquote>\n</details>\n<details>\n<summary>Commits</summary>\n<ul>\n<li><a href=\"https://github.com/actions/stale/commit/b5d41d4e1d5dceea10e7104786b73624c18a190f\"><code>b5d41d4</code></a> build(deps-dev): bump lodash from 4.17.21 to 4.17.23 (<a href=\"https://redirect.github.com/actions/stale/issues/1313\">#1313</a>)</li>\n<li><a href=\"https://github.com/actions/stale/commit/dcd2b9469d2220b7e8d08aedc00c105d277fd46b\"><code>dcd2b94</code></a> Fix punycode and url.parse Deprecation Warnings (<a href=\"https://redirect.github.com/actions/stale/issues/1312\">#1312</a>)</li>\n<li><a href=\"https://github.com/actions/stale/commit/d6f8a33132340b15a7006f552936e4b9b39c00ec\"><code>d6f8a33</code></a> build(deps-dev): bump js-yaml from 4.1.0 to 4.1.1 (<a href=\"https://redirect.github.com/actions/stale/issues/1304\">#1304</a>)</li>\n<li><a href=\"https://github.com/actions/stale/commit/a21a0816299b11691f9592ef0d63d08e02f06d9d\"><code>a21a081</code></a> Fix checking state cache (fix <a href=\"https://redirect.github.com/actions/stale/issues/1136\">#1136</a>), also switch to octokit methods (<a href=\"https://redirect.github.com/actions/stale/issues/1152\">#1152</a>)</li>\n<li>See full diff in <a href=\"https://github.com/actions/stale/compare/v10.1.1...v10.2.0\">compare view</a></li>\n</ul>\n</details>\n<br />\n\n\n[![Dependabot compatibility score](https://dependabot-badges.githubapp.com/badges/compatibility_score?dependency-name=actions/stale&package-manager=github_actions&previous-version=10.1.1&new-version=10.2.0)](https://docs.github.com/en/github/managing-security-vulnerabilities/about-dependabot-security-updates#about-compatibility-scores)\n\nDependabot will resolve any conflicts with this PR as long as you don't alter it yourself. You can also trigger a rebase manually by commenting `@dependabot rebase`.\n\n[//]: # (dependabot-automerge-start)\n[//]: # (dependabot-automerge-end)\n\n---\n\n<details>\n<summary>Dependabot commands and options</summary>\n<br />\n\nYou can trigger Dependabot actions by commenting on this PR:\n- `@dependabot rebase` will rebase this PR\n- `@dependabot recreate` will recreate this PR, overwriting any edits that have been made to it\n- `@dependabot show <dependency name> ignore conditions` will show all of the ignore conditions of the specified dependency\n- `@dependabot ignore this major version` will close this PR and stop Dependabot creating any more for this major version (unless you reopen the PR or upgrade to it yourself)\n- `@dependabot ignore this minor version` will close this PR and stop Dependabot creating any more for this minor version (unless you reopen the PR or upgrade to it yourself)\n- `@dependabot ignore this dependency` will close this PR and stop Dependabot creating any more for this dependency (unless you reopen the PR or upgrade to it yourself)\n\n\n</details>"
+}

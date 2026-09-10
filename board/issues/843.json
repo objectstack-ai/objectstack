@@ -1,0 +1,33 @@
+{
+  "number": 843,
+  "kind": "pull_request",
+  "title": "feat: auto-merge actions into object metadata via objectName",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-01T14:05:49Z",
+  "updated_at": "2026-03-01T15:15:54Z",
+  "closed_at": "2026-03-01T14:53:42Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-01T14:53:42Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/843",
+  "body": "Top-level `actions` in `defineStack()` are not associated with objects, so `metadata.getObject` returns objects without actions. Downstream consumers (Console, Studio, ActionBar) all depend on `objectDef.actions` and must manually merge — breaking the Salesforce/ServiceNow convention where actions are part of the object schema.\n\n### Changes\n\n- **`ActionSchema`** — added optional `objectName` field (snake_case validated) to declare object association\n- **`ObjectSchema`** — added optional `actions` array field to hold object-scoped actions\n- **`defineStack()`** — post-parse merge step injects actions with `objectName` into their target object's `actions` array; runs in both strict and non-strict modes\n- **`composeStacks()`** — applies same merge for cross-stack action→object references\n- **Cross-reference validation** — `action.objectName` referencing an undefined object now produces a validation error (consistent with existing workflow/hook/view validation)\n- **Example apps updated** — all action definitions in `app-todo` and `app-crm` (lead, opportunity, case, contact) now include `objectName`; global actions (`log_call`, `export_csv`) intentionally remain without `objectName` as platform-wide action examples\n\nTop-level `actions` array is preserved for global access (platform overview, search).\n\n### Usage\n\n```ts\nconst stack = defineStack({\n  objects: [\n    { name: 'deal', fields: { amount: { type: 'number' } } },\n  ],\n  actions: [\n    { name: 'close_deal', label: 'Close Deal', objectName: 'deal' },\n    { name: 'global_search', label: 'Search' }, // no objectName → global only\n  ],\n});\n\n// stack.objects[0].actions → [{ name: 'close_deal', ... }]\n// stack.actions → both actions still present\n```\n\nActions defined inline on the object are preserved; merged actions are appended after them.\n\n### End-to-End Flow\n\n- **Metadata API** (`/api/v1/meta/objects/:name`) returns the full `ObjectSchema` without field filtering — `actions` field is included automatically\n- **ObjectQL engine** stores the full object definition during registration — `actions` preserved through the pipeline\n- **No downstream changes needed** — Console, Studio, and custom UIs receive actions as part of `objectDef.actions`\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>AppPlugin自动合并actions到object元数据，以便API返回的对象自带actions字段</issue_title>\n> <issue_description>### 问题描述\n> 当前actions是以顶层数组（defineStack({ actions:[...] })）独立声明，并未自动合并/挂载到相应object中，导致API如 /api/v1/meta/objects/:name 返回的对象没有actions。Console及Studio上的所有ActionBar、ActionButton等均依赖objectDef.actions，所以下游全部失效。\n> \n> ### 预期行为\n> - AppPlugin在加载/注册栈(config)时，自动将actions归类（按objectName、前缀、或新设计的关联字段）合并到对应object的`actions`属性中\n> - `metadata.getObject` 接口返回的object必须包含actions（兼容主流企业平台如ServiceNow/Salesforce/APPEX等，actions必须是对象schema字段一部分）\n> - 任何下游消费端（Console/Studio/自定义UI）都无需手动merge\n> \n> ### 参考\n> - Salesforce: CustomActions 配置直接嵌入object，API响应天然包含action列表\n> - HotCRM plugin/定义已建议插��独立出口object及actions，无需外部merge\n> \n> ### 实现建议\n> - AppPlugin初始化时，遍历actions数组，依照objectName或命名规范自动注入对象\n> - 如无法确定归属可加warning\n> - 保留单独actions API，供特殊场景（如平台总览、全局搜索）用\n> \n> ### 价值\n> - 一致兼容所有使用场景，无需每个消费端各自patch/merge\n> - 明确与国际主流平台的对齐\n> - 减少未来低代码/设计器及runtime二次开发门槛\n> \n> ---\n> fixes objectstack-ai/spec#840\n> </issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#842\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

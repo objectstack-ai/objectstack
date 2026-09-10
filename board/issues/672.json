@@ -1,0 +1,33 @@
+{
+  "number": 672,
+  "kind": "pull_request",
+  "title": "docs: sync all package READMEs and website docs with current monorepo state",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-13T17:57:02Z",
+  "updated_at": "2026-02-13T18:41:47Z",
+  "closed_at": "2026-02-13T18:18:25Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-13T18:18:24Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/672",
+  "body": "Repository documentation was stale — missing 9 packages from tables, 2 packages had no README, schema counts were outdated (139→175), and several incorrect references (wrong git URL, wrong license badge).\n\n### New READMEs\n- `packages/rest/README.md` — `@objectstack/rest` (REST API server, was completely missing)\n- `packages/plugins/plugin-security/README.md` — `@objectstack/plugin-security` (RBAC/RLS/field masking)\n\n### Root README.md\n- License badge: MIT → Apache 2.0 (matches all `package.json`)\n- Git clone URL: `nicecui/spec` → `objectstack-ai/spec`\n- Added **Framework Adapters** table (7 adapters: Express, Fastify, Hono, NestJS, Next.js, Nuxt, SvelteKit)\n- Added missing entries: `plugin-security`, `plugin-dev`, `@objectstack/rest`, `create-objectstack`, `objectstack-vscode`\n- Schema count 139 → 175, package count 15 → 25\n\n### Website docs (`content/docs/`)\n- **`concepts/packages.mdx`** — 16 → 25 packages; added all 7 adapters, `plugin-security`, `plugin-dev`, `rest`, `create-objectstack`, `objectstack-vscode`; updated dependency graph\n- **`references/index.mdx`** — Updated per-module schema counts to match actual `*.zod.ts` files; replaced obsolete Hub protocol with Cloud + Studio\n- **`guides/cheatsheets/quick-reference.mdx`** — Schema count 139 → 175\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 扫描所有软件包更新read me更新官网文档\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

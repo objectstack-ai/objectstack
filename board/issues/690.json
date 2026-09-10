@@ -1,0 +1,33 @@
+{
+  "number": 690,
+  "kind": "pull_request",
+  "title": "Adopt service-* vs plugin-* package naming convention in ROADMAP",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-15T05:16:17Z",
+  "updated_at": "2026-02-15T05:37:29Z",
+  "closed_at": "2026-02-15T05:28:05Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-15T05:28:05Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/690",
+  "body": "Evaluates the proposal to distinguish core platform services (`service-*`) from optional extensions (`plugin-*`) and updates the roadmap accordingly.\n\n### Naming convention\n\n| Prefix | Purpose | Examples |\n|:---|:---|:---|\n| `service-*` | Implements an `I*Service` contract | `service-auth`, `service-cache`, `service-queue` |\n| `plugin-*` | Optional extension, not required for production | `plugin-dev`, `plugin-msw`, `plugin-bi` |\n| `driver-*` | `IDataDriver` implementation | `driver-memory`, `driver-postgres` |\n\n### Changes to `ROADMAP.md`\n\n- **New section: Package Naming Convention** — prefix rules + migration table for existing packages (`plugin-auth` → `service-auth` in v4.0)\n- **Phase 4** — all 19 contract implementations renamed from `plugin-*` to `service-*` with explicit package column\n- **Contract Implementation Matrix** — planned `service-*` package names for all unimplemented contracts\n- **v4.0 Roadmap** — P0 rename action for `plugin-auth`, `plugin-hono-server`, `plugin-security`\n- **Versioning Plan** — v3.1–v3.3 milestones use `service-*` names\n\n### Migration strategy\n\n- v3.x: new packages publish directly as `service-*`\n- v4.0: existing `plugin-auth` → `service-auth` with deprecation shim\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 评估一下建议是否合理，更新roadmap\n> \n> 当前命名建议命名理由@objectstack/plugin-auth@objectstack/service-auth实现 IAuthService 合约@objectstack/plugin-cache@objectstack/service-cache实现 ICacheService 合约@objectstack/plugin-queue@objectstack/service-queue实现 IQueueService 合约@objectstack/plugin-dev@objectstack/plugin-dev✅ 保持，这是真正的插件@objectstack/plugin-msw@objectstack/plugin-msw✅ 保持，这是真正的插件@objectstack/plugin-bi@objectstack/plugin-bi✅ 保持，这是真正的插件这样的区分可以让用户更清楚哪些是平台核心服务（service-*），哪些是可选扩展（plugin-*）。\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

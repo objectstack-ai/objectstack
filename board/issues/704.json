@@ -1,0 +1,33 @@
+{
+  "number": 704,
+  "kind": "pull_request",
+  "title": "feat: migrate CLI architecture from Commander.js to oclif",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-18T03:33:47Z",
+  "updated_at": "2026-02-18T05:11:44Z",
+  "closed_at": "2026-02-18T04:26:28Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-18T04:26:28Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/704",
+  "body": "Current CLI uses Commander.js with a custom `loadPluginCommands` mechanism that requires `objectstack.config.ts` to discover plugin commands — making cloud commands (`os login`, `os push`) unusable before project init (chicken-egg problem). Migrates to oclif for native plugin discovery, unified `bin/os` entry, and decoupled command extension.\n\n## Command Migration\n\n- All 16 commands converted from `new Command('name').action(...)` → `class extends Command { async run() }` \n- `plugin` subcommands split into topic dir: `commands/plugin/{list,info,add,remove}.ts`\n- `codemod` subcommands split into topic dir: `commands/codemod/v2-to-v3.ts`\n\n```typescript\n// Before (Commander.js)\nexport const compileCommand = new Command('compile')\n  .description('Compile ObjectStack configuration')\n  .option('-o, --output <path>', 'Output path', 'dist/objectstack.json')\n  .action(async (configPath, options) => { ... });\n\n// After (oclif)\nexport default class Compile extends Command {\n  static override description = 'Compile ObjectStack configuration to JSON artifact';\n  static override flags = {\n    output: Flags.string({ char: 'o', description: 'Output path', default: 'dist/objectstack.json' }),\n  };\n  async run(): Promise<void> {\n    const { args, flags } = await this.parse(Compile);\n    ...\n  }\n}\n```\n\n## Plugin System\n\n- Removed `loadPluginCommands` + `plugin-commands.ts` — replaced by oclif's native plugin system\n- `@oclif/plugin-help` for auto-generated help, `@oclif/plugin-plugins` for runtime plugin install\n- Cloud/third-party commands extend via `os plugins install <pkg>` — no project config needed\n\n## Build & Entry Points\n\n- Build changed from `tsup` → `tsc -p tsconfig.build.json` (oclif needs preserved file structure for command discovery)\n- New `bin/run.js` / `bin/run-dev.js` using oclif `execute()`; removed old `bin/objectstack.js`\n- `package.json` gains `oclif` config section with pattern-based command discovery\n\n## Spec Updates\n\n- `cli-extension.zod.ts` documentation updated for oclif plugin model\n- Added `OclifPluginConfigSchema` for validating plugin `package.json` oclif sections\n- Removed `CLIExtensionExportSchema` (Commander.js-specific)\n\n## Tests\n\n- 35 CLI tests updated for oclif static property assertions\n- 5520 spec tests unchanged and passing\n- New tests for oclif package.json configuration validation\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>迁移 CLI 架构到 oclif，实现主 CLI 与插件自动分离</issue_title>\n> <issue_description>### 背景\n> 当前 ObjectStack CLI 基于 Commander.js，自定义了一套插件注册机制（loadPluginCommands）进行命令扩展，但：\n> - 存在命令入口冲突（spec 和 cloud 各有 @objectstack/cli，bin 均为 os）\n> - 插件自动发现机制依赖项目 config 文件，导致 os login、os push 等云端命令在未初始化项目时无法使用（鸡蛋问题）\n> - 插件注册、加载、失败处理、版本兼容等都需自维护\n> \n> ### 行动目标\n> 迁移 ObjectStack 主 CLI 架构为 [oclif](https://oclif.io/)，以便：\n> - 主 CLI 与云端/第三方插件通过 oclif 内置机制解耦，bin/os 统一\n> - 删除自定义 loadPluginCommands 等机制，利用 oclif 自动命令发现与插件注册\n> - 按 oclif 典型结构将 packages/cli/src/commands 分为本地开发相关子命令包\n> - 为 cloud 项目的云端命令预留 plugin 注册入口\n> \n> ### 工作内容\n> 1. 使用 oclif 脚手架生成新的主 CLI 骨架（bin: os）\n> 2. 将现有本地相关命令（init、dev、serve、plugin、compile、validate、generate、create、test、doctor、lint、diff、explain、codemod 等）迁移为 src/commands/ 下对应 TS class\n> 3. 保持主 CLI package.json 的 bin/os 唯一性，移除独立 cloud cli\n> 4. 移除 loadPluginCommands，相关扩展点迁移为 oclif plugins\n> 5. 提供插件注册与文档说明\n> \n> ### 验收标准\n> - 用户全局安装 @objectstack/cli 后直接获得 \"os\" 主命令、所有子命令与自动 help\n> - cloud 项目的命令可通过 plugin 引入自动获得\n> - 项目内 objectstack.config.ts plugins 不再决定主 CLI 命令集合\n> - 提供迁移文档、测试用例\n> \n> ---\n> 如需临时平滑迁移方案，可支持 Commander.js/oClif 双栈过渡一段时间。</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#703\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

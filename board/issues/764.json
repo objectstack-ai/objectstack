@@ -1,0 +1,33 @@
+{
+  "number": 764,
+  "kind": "issue",
+  "title": "补全 Automation API 服务端与路由实现、接口契约及测试覆盖",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-21T08:10:50Z",
+  "updated_at": "2026-02-21T08:50:04Z",
+  "closed_at": "2026-02-21T08:50:04Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/764",
+  "body": "## Automation API 完成度补全任务：Spec/Runtime/测试全链路\n\n### 背景\n根据 [Issue #757](https://github.com/objectstack-ai/spec/issues/757) 的交付内容审查，发现 Automation API 的 protocol schema、Client SDK 层面已基本实现，但 contract、Engine 执行历史及 HTTP route handler 等 Runtime/服务端内容尚未开发或未完善。同时 schema 测试和 contract matrix 也未进行严格验证，ROADMAP 标记与代码实现不一致。需补齐薄弱环节，闭环 API、服务、路由、测试链路。\n\n---\n\n### 待开发内容清单\n\n#### 1️⃣ Contract/接口扩展\n- [ ] 在 `contracts/automation-service.ts` 中新增以下 `IAutomationService` 可选方法：\n    - `getFlow?(name: string): Promise<FlowDefinition | null>`\n    - `toggleFlow?(name: string, enabled: boolean): Promise<void>`\n    - `listRuns?(flowName: string, options?: { limit?: number; cursor?: string }): Promise<ExecutionLog[]>`\n    - `getRun?(runId: string): Promise<ExecutionLog | null>`\n- [ ] 编写 contract 合约测试，确保类型兼容性\n- [ ] 更新 Contract Implementation Matrix\n\n#### 2️⃣ Engine 服务实现\n- [ ] 在 `AutomationEngine` （service-automation/src/engine.ts）新增执行历史存储（run log/step log）\n- [ ] 实现上述 IAutomationService 新增方法：\n    - `getFlow` — 查询 flow 定义\n    - `toggleFlow` — enable/disable 标记\n    - `listRuns` — 查询执行历史\n    - `getRun` — 查询单次执行详情\n- [ ] 每次 `execute()` 记录 ExecutionLog，支持 runId 流水存档\n- [ ] 为以上方法编写测试用例\n\n#### 3️⃣ HTTP 路由 handler 扩展\n- [ ] 扩展 `runtime/src/http-dispatcher.ts` 的 `handleAutomation()`，新增以下路由分支\n    - GET    `/automation` → listFlows\n    - GET    `/automation/:name` → getFlow\n    - POST   `/automation` → createFlow\n    - PUT    `/automation/:name` → updateFlow\n    - DELETE `/automation/:name` → deleteFlow\n    - POST   `/automation/:name/trigger` → execute\n    - POST   `/automation/:name/toggle` → toggleFlow\n    - GET    `/automation/:name/runs` → listRuns\n    - GET    `/automation/:name/runs/:runId` → getRun\n- [ ] 在 `createDispatcherPlugin()` 注册对应 server 路由\n- [ ] 编写路由 handler 测试\n\n#### 4️⃣ 测试与持续交付\n- [ ] 创建 `packages/spec/src/api/automation-api.test.ts`，补齐 Automation API schema 单测\n- [ ] 完善 pnpm test 测试覆盖至新增 contract、engine 及路由\n- [ ] 完成后严格检查 ROADMAP checklist 与实际代码同步\n\n---\n\n### 补充\n> 补全后需运行 test，并及时更新 ROADMAP.md、Contract/Package Matrix，确保 Spec, Service, Router, Client, Test 全链路一致。\n\n---\n\n### 关联\n- 原任务：[Issue #757](https://github.com/objectstack-ai/spec/issues/757)\n- ROADMAP Section 2 — Automation API"
+}

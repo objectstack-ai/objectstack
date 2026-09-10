@@ -1,0 +1,33 @@
+{
+  "number": 800,
+  "kind": "pull_request",
+  "title": "Fix filter AST array format incompatibility with query engine",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-24T06:48:39Z",
+  "updated_at": "2026-02-24T07:20:27Z",
+  "closed_at": "2026-02-24T07:13:07Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-24T07:13:07Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/800",
+  "body": "Client sends filters as JSON array AST (`[\"and\", [\"priority\", \"=\", \"high\"], [\"status\", \"=\", \"active\"]]`), but the query engine expects FilterCondition objects (`{ $and: [{ priority: \"high\" }, { status: \"active\" }] }`). Two bugs: (1) no AST→object conversion after `JSON.parse`, (2) dispatcher passes `{ filters: query }` instead of `{ query }`, so `findData` never sees the params.\n\n### Changes\n\n- **`packages/spec/src/data/filter.zod.ts`** — Add `parseFilterAST()` utility that converts array AST to FilterCondition objects. Supports all comparison operators (`=`, `!=`, `>`, `>=`, `<`, `<=`, `in`, `not_in`, `contains`, `like`, `between`, `is_null`, `is_not_null`) and logical combinators (`and`, `or`). Passthrough for inputs already in object format.\n\n- **`packages/objectql/src/protocol.ts`** — Call `parseFilterAST()` after JSON.parse in `findData` when the parsed filter is an array.\n\n- **`packages/runtime/src/http-dispatcher.ts`** — Fix param shape from `{ object, filters: query }` → `{ object, query }` so protocol receives query params at `request.query` as expected.\n\n- **Broker shims** (`apps/studio`, `packages/client`) — Updated to handle corrected param format.\n\n### Example\n\n```typescript\nimport { parseFilterAST } from '@objectstack/spec/data';\n\nparseFilterAST([\"and\", [\"priority\", \"=\", \"high\"], [\"status\", \"!=\", \"deleted\"]])\n// → { $and: [{ priority: \"high\" }, { status: { $ne: \"deleted\" } }] }\n\nparseFilterAST([\"status\", \"=\", \"active\"])\n// → { status: \"active\" }\n\nparseFilterAST({ status: \"active\" })\n// → { status: \"active\" }  (object passthrough)\n```\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>filters 参数格式与查询引擎不兼容导致筛选无效</issue_title>\n> <issue_description>## 问题描述\n> 列表筛选时，浏览器请求的 `filters` 参数为 JSON 数组 AST 格式（如：`[\"and\", [\"priority\", \"=\", \"high\"], [\"status\", \"=\", \"active\"]]`），服务端接收到参数后，并未按照 spec 规范转换为正确的 FilterCondition（对象）格式，导致服务端未对数据进行筛选，返回了全部记录。\n> \n> ## 复现步骤\n> 1. 在 ObjectUI 列表页面进行多条件筛选（如按照 priority=high 且 status=active）。\n> 2. 浏览器发出的请求如：\n> ```\n> GET /api/v1/data/contact?top=100&sort=name&filters=[\"and\",[\"priority\",\"=\",\"high\"],[\"status\",\"=\",\"active\"]]\n> ```\n> 3. 服务端收到后，最终在 `findData` 处理时，仅做了 `JSON.parse`，但未将 AST 数组格式转换为 FilterCondition 对象格式，导致 filter 永远无法生效。\n> \n> ## 期望行为\n> - 服务端能够识别 filters 为 AST （数组）格式时，自动转换为符合 FilterCondition 对象结构，传给底层查询引擎。\n> - 筛选条件能准确生效，返回预期的结果集。\n> \n> ## 建议修复点\n> - 建议在 `packages/objectql/src/protocol.ts` 的 `findData` 方法里处理 filters，如果解析后为数组 AST，自动转换为 `{ $and: [...] }` 结构传递。\n> - 并在 Dispatcher 层需保证参数在整个链路中以规范形式传递（不要丢失/多包一层）。\n> \n> ## 参考\n> - [spec/src/data/filter.zod.ts](https://github.com/objectstack-ai/spec/blob/main/packages/spec/src/data/filter.zod.ts)\n> - [spec/src/data/query.zod.ts](https://github.com/objectstack-ai/spec/blob/main/packages/spec/src/data/query.zod.ts)\n> - 详细排查与链路分析见本 Issue 下说明。\n> \n> ---\n> 如需英文描述请告知。</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#799\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

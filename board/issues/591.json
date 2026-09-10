@@ -1,0 +1,33 @@
+{
+  "number": 591,
+  "kind": "pull_request",
+  "title": "Update adapters to use AuthPlugin service for authentication",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-10T14:25:04Z",
+  "updated_at": "2026-02-10T14:52:35Z",
+  "closed_at": "2026-02-10T14:38:09Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-10T14:38:09Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/591",
+  "body": "Adapters (Hono/Next.js/NestJS) bypassed the AuthPlugin service, routing auth through the deprecated `HttpDispatcher.handleAuth()`. This PR wires them to `kernel.getService('auth')` with graceful fallback.\n\n### Adapter changes\n\n- **Hono**: Forwards `c.req.raw` (Web Request) directly to `authService.handleRequest()`\n- **Next.js**: Forwards `NextRequest` to `authService.handleRequest()`, converts Web Response back to `NextResponse`\n- **NestJS**: Constructs Web Request from Express/Fastify req (URL, headers, body), forwards to `authService.handleRequest()`, pipes response back through `res`\n- All three fall back to `dispatcher.handleAuth()` when no auth service is registered\n\n```typescript\n// New preferred path (all adapters)\nconst authService = typeof kernel.getService === 'function'\n  ? kernel.getService('auth')\n  : null;\n\nif (authService && typeof authService.handleRequest === 'function') {\n  return await authService.handleRequest(request);\n}\n\n// Legacy fallback\nconst result = await dispatcher.handleAuth(path, method, body, { request });\n```\n\n### Tests\n\n- 12 new auth integration tests (4 per adapter): service usage, fallback, GET forwarding, error handling\n- All 84 tests pass (24 existing + 4 new per adapter)\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

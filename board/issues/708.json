@@ -1,0 +1,33 @@
+{
+  "number": 708,
+  "kind": "pull_request",
+  "title": "fix: resolve CI build errors across service packages, CLI, and app-crm",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-18T05:17:29Z",
+  "updated_at": "2026-02-18T07:00:48Z",
+  "closed_at": "2026-02-18T05:47:14Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-18T05:47:14Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/708",
+  "body": "CI failing on `main` due to four independent build errors: unused variable in service-cache, broken tsconfig inheritance in all service packages, stale `@ts-expect-error` in CLI, and missing interface files in app-crm example.\n\n### tsconfig `exclude` inheritance (service-cache, service-job, service-queue, service-storage)\n\nService package tsconfigs inherited root `exclude: [\"packages\"]`, which resolved to `../../../packages` relative to the child config—excluding their own `src` directory. Added local `exclude: [\"node_modules\", \"dist\"]` override to match other working packages.\n\n```jsonc\n// Before: inherits root exclude which matches ../../../packages (self)\n{ \"extends\": \"../../../tsconfig.json\", \"include\": [\"src\"] }\n\n// After: local exclude prevents self-exclusion\n{ \"extends\": \"../../../tsconfig.json\", \"include\": [\"src\"], \"exclude\": [\"node_modules\", \"dist\"] }\n```\n\n### TS6133: unused `defaultTtl` in `redis-cache-adapter.ts`\n\n`defaultTtl` was assigned in constructor but never read. Included it in the `get()` error message alongside the existing `url` and `keyPrefix` references.\n\n### TS2578: stale `@ts-expect-error` in `packages/cli/src/utils/studio.ts`\n\nThe `duplex` property on `RequestInit` is now recognized by current TypeScript types. Removed the unnecessary directive.\n\n### Missing interface files in `examples/app-crm`\n\n`src/interfaces/index.ts` re-exported from three `.interface.ts` files that were never created. Cleared the broken exports since `InterfaceSchema` was removed from the spec.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> fix ci errors\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

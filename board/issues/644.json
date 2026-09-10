@@ -1,0 +1,33 @@
+{
+  "number": 644,
+  "kind": "pull_request",
+  "title": "feat: Complete DX Phase 2 — branded types, error map, suggestions, strict defineStack",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-12T09:54:00Z",
+  "updated_at": "2026-02-12T13:00:17Z",
+  "closed_at": "2026-02-12T10:17:55Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-12T10:17:55Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/644",
+  "body": "Implements all remaining DX Phase 2 items from `DX_ROADMAP.md`: custom error map, \"Did you mean?\" suggestions, pretty-print formatter, branded types, and strict cross-reference validation for `defineStack()`.\n\n### Branded Types (`shared/branded-types.zod.ts`)\n- `ObjectName`, `FieldName`, `ViewName`, `AppName`, `FlowName`, `RoleName` — Zod `.brand()` types for compile-time identifier safety\n\n### \"Did you mean?\" Suggestions (`shared/suggestions.zod.ts`)\n- Space-optimized Levenshtein distance + fuzzy matching\n- 40+ alias mappings for common FieldType typos (`string`→`text`, `dropdown`→`select`, `int`→`number`, etc.)\n\n### Custom Zod v4 Error Map (`shared/error-map.zod.ts`)\n- `objectStackErrorMap` — contextual error messages for `invalid_value`, `too_small`, `too_big`, `invalid_type`, `invalid_format`, `unrecognized_keys`\n- `formatZodError()` / `formatZodIssue()` — CLI-friendly pretty-print\n- `safeParsePretty()` — parse + format in one call\n\n```ts\nconst result = safeParsePretty(ObjectStackDefinitionSchema, config, 'objectstack.config.ts');\nif (!result.success) {\n  console.error(result.formatted);\n  // objectstack.config.ts (2 issues):\n  //   ✗ objects.0.fields.status.type: Invalid field type 'dropdown'. Did you mean 'select'?\n  //   ✗ manifest.name: Required property 'name' is missing.\n}\n```\n\n### Strict `defineStack()` (`stack.zod.ts`)\n- `defineStack(config, { strict: true })` validates cross-references: workflows (`objectName`), approvals (`object`), hooks (`object`), and view data sources against defined objects\n\n```ts\ndefineStack({\n  manifest: { id: 'com.acme.crm', name: 'crm', version: '1.0.0', type: 'app' },\n  objects: [{ name: 'lead', fields: { status: { type: 'text' } } }],\n  workflows: [{ name: 'qualify', objectName: 'nonexistent', triggerType: 'on_create' }],\n}, { strict: true });\n// throws: \"Workflow 'qualify' references object 'nonexistent' which is not defined in objects.\"\n```\n\n### Test coverage\n65 new tests across 3 new test files + expanded `stack.test.ts` (194 files, 5243 tests total).\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

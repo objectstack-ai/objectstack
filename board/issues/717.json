@@ -1,0 +1,35 @@
+{
+  "number": 717,
+  "kind": "issue",
+  "title": "[Feature] 支持多应用 stack 合并原语（composeStacks）：解决多配置手工合并痛点",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-02-18T06:16:55Z",
+  "updated_at": "2026-02-18T08:55:28Z",
+  "closed_at": "2026-02-18T08:55:28Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/717",
+  "body": "## 背景\n\n当前 objectui（和 ObjectStack 在多个项目场景）的应用汇总配置存在严重的手工合并痛点：\n- 当引入多个应用（如 CRM、Todo、Kitchen Sink），必须分别读出其配置，再用 `...spread` 手工合并多个字段：objects、apps、dashboards、reports、pages、manifest.data 等。\n- 每加一个配置项都需要代码层反复 spread 合并，每个地方都重复一遍，容易遗漏且难维护。\n- 如果多个对象同名（如 CRM 和 Kitchen Sink 都有 account），不得不额外实现 object 去重/优先级策略，或硬合成一个大 AppPlugin。\n\n**根因分析**\n1. `defineStack` 只支持单一 stack，不支持声明式组合多个 stack，没有 `composeStacks`/`mergeStacks` 原语。\n2. Runtime 的 Schema Registry 不支持多 owner 的同名 object，导致无法直接 plugin 多个 stack，只能先合并。\n3. views 配置在 stack 顶层，而 runtime 协议期望 views 挂在 object 下，需要自己写 bridge 代码做合并。\n\n## 希望的能力\n\n### 1. 声明式 stack 组合\n- 引入一个原生的 `composeStacks(...stacks, options)` 或类似 API，支持将多个 defineStack 的输出合并为一个大 stack。\n- `options` 支持 object 派生策略、manifest 合并、字段 override、同名 object merge/优先级等。\n\n### 2. 多 AppPlugin/Plugin 机制\n- 允许 runtime 多 AppPlugin 共存，即便出现同名 object（通过 namespace/owner/优先级等机制）\n- 支持 plugin 隔离，不同 App 的 metadata/seed 数据不会冲突\n\n### 3. 自动 bridge views → objects\n- spec 层自动将 views[].listViews 合并到 objects 的 listViews 字段，无需手工 bridge\n\n### 4. 合并策略内置\n- 内置 object 去重/优先级策略，支持 seed 数据优先、plugin metadata优先等\n- 可选 deep-merge/override/error 三种同名对象处理\n\n## ���状代码痛点举例\n\n1. apps/console/objectstack.shared.ts\n```\nobjects: mergeViewsIntoObjects(\n  mergeObjects([\n    ...(crmConfig.objects || []),\n    ...(todoConfig.objects || []),\n    ...(kitchenSinkConfig.objects || []),\n  ], hotcrmObjects),\n  allConfigs,\n),\napps: [\n  ...crmApps,\n  ...(todoConfig.apps || []),\n  ...(kitchenSinkConfig.apps || []),\n  ...hotcrmApps,\n],\n// dashboards, reports, pages, manifest.data等全部 spread 合并\n```\n2. objectstack.config.ts\n```\napps: [\n  ...(crm.apps || []),\n  ...(todo.apps || []),\n  ...(kitchenSink.apps || []),\n],\nobjects: baseObjects,\n// pages, dashboards, reports, manifest.data 等 spread 合并\n```\n3. 组合多个 plugin 时因同名 object 只能选单一AppPlugin，错失插件隔离能力\n\n## 建议\n\n- 在 @objectstack/spec 层尽早增加 compose/merge 支持，不再依赖手工 spread\n- 支持 runtime 多 AppPlugin 注册，解决 schema registry owner 冲突问题\n- 自动 views → objects bridge，提升协议层一致性\n\n---\n\n如能推进此 feature，将极大简化多应用架构内容、提升维护效率，减少手工合并和错配风险。"
+}

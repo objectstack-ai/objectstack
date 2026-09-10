@@ -1,0 +1,33 @@
+{
+  "number": 579,
+  "kind": "pull_request",
+  "title": "Analysis: Confirm plugin-auth naming convention is correct",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-10T03:35:30Z",
+  "updated_at": "2026-02-10T04:00:02Z",
+  "closed_at": "2026-02-10T03:40:24Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/579",
+  "body": "Question raised: Should `@objectstack/plugin-auth` be renamed to `@objectstack/service-auth` given it provides a required core service?\n\n**Answer: No.** Package naming follows implementation type, not service criticality.\n\n## Architecture\n\n```typescript\n// Plugin = delivery mechanism\nexport class AuthPlugin implements Plugin {\n  async init(ctx: PluginContext) {\n    // Service = runtime capability\n    ctx.registerService('auth', this.authManager);\n  }\n}\n```\n\n## Naming Pattern\n\nAll plugins use `plugin-*` prefix regardless of service requirement level:\n\n| Package | Service | Criticality |\n|---------|---------|-------------|\n| `plugin-hono-server` | `http-server` | required |\n| `plugin-auth` | `auth` | required |\n| `plugin-msw` | mock | optional |\n\nZero packages use `service-*` prefix. Previous `service-registry.zod.ts` was renamed to `core-services.zod.ts`.\n\n## Changes\n\n- Added `NAMING_ANALYSIS.md` documenting the architectural rationale\n- No code changes required\n\nThe separation between package name (implementation) and service name (capability) is intentional and consistent across the codebase.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 拉取请求: https://github.com/objectstack-ai/spec/pull/577\n> \n> \n> 软件包名称是不是应该叫 service-auth\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 625,
+  "kind": "pull_request",
+  "title": "Implement MemoryAnalyticsService for semantic layer queries",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-11T15:20:16Z",
+  "updated_at": "2026-02-11T17:05:25Z",
+  "closed_at": "2026-02-11T15:55:10Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-11T15:55:10Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/625",
+  "body": "InMemoryDriver has full aggregation capabilities via Mingo but `IAnalyticsService` only had a stub returning empty results. This implements a production-ready analytics service for development/testing.\n\n## Implementation\n\n**New: `MemoryAnalyticsService`** (`packages/plugins/driver-memory/src/memory-analytics.ts`)\n- Implements `IAnalyticsService` using InMemoryDriver's MongoDB-compatible aggregation pipeline\n- Translates cube-based semantic queries to Mingo aggregation stages\n- Handles field name mapping (MongoDB doesn't support dots in $project keys)\n\n**Schema Alignment**\n- Added `order` and `timezone` fields to `AnalyticsQuery` interface\n- Synchronized Zod schema with TypeScript contract\n- Fixed cube field reference in `AnalyticsQuerySchema`\n\n## Usage\n\n```typescript\nimport { MemoryAnalyticsService, InMemoryDriver } from '@objectstack/driver-memory';\n\nconst driver = new InMemoryDriver({ initialData: { orders: [...] } });\nawait driver.connect();\n\nconst service = new MemoryAnalyticsService({\n  driver,\n  cubes: [{\n    name: 'orders',\n    sql: 'orders',\n    measures: {\n      count: { type: 'count', sql: 'id' },\n      revenue: { type: 'sum', sql: 'amount' }\n    },\n    dimensions: {\n      status: { type: 'string', sql: 'status' }\n    }\n  }]\n});\n\nconst result = await service.query({\n  cube: 'orders',\n  measures: ['orders.revenue'],\n  dimensions: ['orders.status'],\n  order: { 'orders.revenue': 'desc' }\n});\n```\n\n## Technical Notes\n\nMongoDB aggregation creates nested objects for dotted field names in `$project`. Pipeline uses short names internally, then maps to `cube.field` format in final results.\n\n**Test Coverage:** 18 tests covering metadata discovery, aggregations (count/sum/avg/min/max), grouping, filters, sorting, pagination, SQL generation.\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 评估目前的 memory driver 应该已经有数据分析能力，是否应实现 数据分析服务。\n> \n> The user has attached the following file paths as relevant context:\n>  - .github/copilot-instructions.md\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\nCreated from [VS Code](https://code.visualstudio.com/docs/copilot/copilot-coding-agent).\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 684,
+  "kind": "pull_request",
+  "title": "fix: add map format support to CLI commands and fix docs field syntax",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-15T01:51:19Z",
+  "updated_at": "2026-02-15T02:50:04Z",
+  "closed_at": "2026-02-15T02:15:36Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-15T02:15:36Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/684",
+  "body": "CLI commands (`lint`, `doctor`, `validate`, `compile`, `info`) used `Array.isArray()` on raw config input, silently skipping map-formatted metadata collections. Documentation examples incorrectly showed `fields` as arrays when ObjectSchema defines `fields` as `z.record()` (map-only).\n\n### CLI: normalize before processing\n\nAll commands that consume raw user configs now call `normalizeStackInput()` before processing:\n\n```typescript\nconst { config: rawConfig } = await loadConfig(configPath);\nconst config = normalizeStackInput(rawConfig as Record<string, unknown>);\n```\n\n- **lint.ts** — map-formatted objects/apps/flows/agents now lint correctly\n- **doctor.ts** — circular dependency, orphan view, unused object checks work with maps\n- **validate.ts / compile.ts** — `normalizeStackInput()` before `safeParse()` so map configs pass validation\n- **info.ts** — metadata stats report correct counts for map configs\n- **format.ts** — `collectMetadataStats()` count helper handles both formats defensively\n\n### Docs: `fields` must always be map format\n\nFixed all \"Array Format\" tab examples where `fields` was incorrectly shown as `fields: [{ name: 'x', ... }]`. Per `ObjectSchema`, `fields` is `z.record()` — only the top-level collection (`objects`, `apps`, etc.) varies between array/map:\n\n```typescript\n// ✗ Wrong — fields is never an array\nobjects: [{ name: 'user', fields: [{ name: 'email', type: 'email' }] }]\n\n// ✓ Correct — fields is always a map, only objects uses array format here\nobjects: [{ name: 'user', fields: { email: { type: 'email' } } }]\n```\n\nFiles: `core-concepts.mdx`, `common-patterns.mdx` (CRUD, master-detail, approval, field-level security, summary)\n\n### Audit: packages with correct support (no changes)\n\n`core`, `client`, `rest`, `runtime`, `objectql` (explicit dual-format handling in `registerPlugin`), `metadata`, `studio` — all already handle map format correctly or don't consume raw stack configs.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 拉取请求: https://github.com/objectstack-ai/spec/pull/680\n> \n> 评估所有的内核软件包，所有的api 和client是不是都已经支持新的map语法\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 710,
+  "kind": "issue",
+  "title": "Spec：DashboardWidgetSchema 支持 colorVariant/actionUrl/description",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-02-18T05:48:04Z",
+  "updated_at": "2026-02-18T06:17:32Z",
+  "closed_at": "2026-02-18T06:17:32Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/710",
+  "body": "仪表盘 KPI 卡等支持多色变体、操作按钮/外链、描述信息，须协议扩展。\n\n**目标**\n- DashboardWidgetSchema 新增 colorVariant 属性：orange/teal/blue/purple/success/warning 等\n- 新增 description 字段：widget header 下方文字\n- 新增 actionUrl/actionType：widget 顶部右侧操作按钮（如外链）\n- 协议单测/文档更新，兼容性说明\n\n详见[分析 1.1](https://github.com/objectstack-ai/spec/blob/main)\n\n- 类型：enhancement\n- 开发完成后请运行 test ��同步 Roadmap"
+}

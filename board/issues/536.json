@@ -1,0 +1,36 @@
+{
+  "number": 536,
+  "kind": "pull_request",
+  "title": "Standardize documentation to use ObjectSchema.create() and Field.* helpers",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-06T04:02:20Z",
+  "updated_at": "2026-02-06T05:03:12Z",
+  "closed_at": "2026-02-06T04:59:57Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-06T04:59:57Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/536",
+  "body": "Documentation and prompts were inconsistent in how they demonstrated object and metadata definitions. Some used type annotations only (no runtime validation), others used plain object literals. This PR standardizes all examples to use the recommended pattern and adds comprehensive rules and principles documentation.\n\n## Changes\n\n### Pattern Migration\n- **Before**: Type annotations (`const Obj: ServiceObject = {...}`) or object literals\n- **After**: Factory method with helpers (`ObjectSchema.create({...})` + `Field.*()`)\n\n### Files Updated\n\n**Prompt Files:**\n- `content/prompts/`: Updated `metadata.prompt.md`, `app.prompt.md`, `zod-compliance.prompt.md`, `plugin.prompt.md`\n- `.github/prompts/example-creator.prompt.md`: Migrated 7 example objects\n\n**READMEs:**\n- `packages/spec/README.md`, `examples/app-react-crud/README.md`\n\n**Documentation (`content/docs/`):**\n- `introduction/metadata-driven.mdx`: Added comprehensive \"Object Definition Rules\" section with 6 core rules, naming conventions, and quick reference\n- `introduction/architecture.mdx`: Updated 2 object examples (Customer, Opportunity)\n- `objectql/schema.mdx`: Added complete TypeScript example with Project object\n- `objectos/plugin-spec.mdx`: Updated Account object example\n- `objectos/i18n-standard.mdx`: Updated Account i18n example\n\n### Rules and Principles Added\n\nThe PR now includes a comprehensive rules section in `introduction/metadata-driven.mdx` that documents:\n\n1. **Always use `ObjectSchema.create()` with `Field.*` helpers** - Provides type safety and runtime validation\n2. **Naming Conventions** - snake_case for machine names, PascalCase for exports, camelCase for config keys\n3. **Select Field Options** - Must use `{label, value}` object format (not string arrays)\n4. **Lookup Fields** - Must specify target object\n5. **Descriptive Labels** - All fields must include human-readable labels\n6. **Enable Flags** - Use for object capabilities configuration\n\n### Example\n\n```typescript\n// Old pattern (type checking only)\nconst Task: ServiceObject = {\n  name: 'task',\n  fields: {\n    title: { type: 'text', required: true }\n  }\n};\n\n// New pattern (type checking + runtime validation)\nexport const Task = ObjectSchema.create({\n  name: 'task',\n  fields: {\n    title: Field.text({ \n      label: 'Title',\n      required: true \n    })\n  }\n});\n```\n\nThe new pattern provides:\n- Compile-time type safety via `z.input<typeof ObjectSchemaBase>`\n- Runtime validation via Zod schema\n- IDE autocomplete for field types and properties\n- Consistent naming enforcement (snake_case for fields, PascalCase for constants)\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 更新所有的文档，官网文档，例子，提示词，应该使用严格ts校验的方式来定义对象和元数据\n> \n> import { ObjectSchema, Field } from '@objectstack/spec/data';\n> \n> export const TodoTask = ObjectSchema.create({\n>   name: 'todo_task',\n>   label: 'Todo Task',\n>   icon: 'check-square',\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

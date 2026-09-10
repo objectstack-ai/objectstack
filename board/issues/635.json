@@ -1,0 +1,33 @@
+{
+  "number": 635,
+  "kind": "pull_request",
+  "title": "feat: comprehensive metadata API protocol and cross-framework integration tests",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-12T04:43:06Z",
+  "updated_at": "2026-02-12T07:38:45Z",
+  "closed_at": "2026-02-12T05:04:33Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-12T05:04:32Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/635",
+  "body": "Establishes `@objectstack/metadata` as the single authority for all metadata services/APIs platform-wide. Expands the thin 3-schema API surface to a full contract covering every `IMetadataService` operation, with integration tests validating routing through Hono, Next.js, and NestJS adapters.\n\n### API Protocol (`packages/spec/src/api/metadata.zod.ts`)\n\nExpanded from 3 response schemas to 20+ Zod schemas aligned with `IMetadataService`:\n\n- **CRUD** — `MetadataRegisterRequestSchema`, `MetadataItemResponseSchema`, `MetadataListResponseSchema`, `MetadataNamesResponseSchema`, `MetadataExistsResponseSchema`, `MetadataDeleteResponseSchema`\n- **Query/Search** — `MetadataQueryRequestSchema`/`ResponseSchema` (wraps kernel `MetadataQuerySchema` with pagination)\n- **Bulk** — `MetadataBulkRegisterRequestSchema`, `MetadataBulkUnregisterRequestSchema`, `MetadataBulkResponseSchema`\n- **Overlay** — `MetadataOverlayResponseSchema`, `MetadataOverlaySaveRequestSchema`, `MetadataEffectiveResponseSchema`\n- **Import/Export** — `MetadataExportRequestSchema`/`ResponseSchema`, `MetadataImportRequestSchema`/`ResponseSchema`\n- **Validation** — `MetadataValidateRequestSchema`/`ResponseSchema`\n- **Type Registry** — `MetadataTypesResponseSchema`, `MetadataTypeInfoResponseSchema`\n- **Dependencies** — `MetadataDependenciesResponseSchema`, `MetadataDependentsResponseSchema`\n\n```typescript\n// Example: register metadata via POST /api/meta/:type\nconst req = MetadataRegisterRequestSchema.parse({\n  type: 'object',\n  name: 'project_task',\n  data: { label: 'Project Task', fields: { title: { type: 'text' } } },\n});\n```\n\n### Integration Tests\n\n| Package | File | Tests |\n|---------|------|-------|\n| `@objectstack/spec` | `api/metadata.test.ts` | 84 (schema validation + cross-framework contracts) |\n| `@objectstack/hono` | `metadata-api.test.ts` | 34 |\n| `@objectstack/nextjs` | `metadata-api.test.ts` | 28 |\n| `@objectstack/nestjs` | `metadata-api.test.ts` | 29 |\n\nEach adapter test suite covers: CRUD routing, query/search, bulk ops, overlay management, import/export, validation, type registry, dependency tracking, error handling, and path parsing. All 5165 existing spec tests remain green.\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

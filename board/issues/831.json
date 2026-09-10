@@ -1,0 +1,33 @@
+{
+  "number": 831,
+  "kind": "pull_request",
+  "title": "fix: prevent minor changeset from producing major bump in fixed group",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-28T06:23:04Z",
+  "updated_at": "2026-02-28T06:58:23Z",
+  "closed_at": "2026-02-28T06:55:31Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-28T06:55:31Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/831",
+  "body": "A minor changeset for `@objectstack/spec` produced a `4.0.0` release PR instead of `3.1.0`. Root cause: `workspace:*` peer deps resolve to exact versions in changesets, and the default `onlyUpdatePeerDependentsWhenOutOfRange: false` treats any non-patch peer dep bump as breaking — cascading a major through the entire fixed group.\n\n### Changes\n\n- **`.changeset/config.json`** — Enable `onlyUpdatePeerDependentsWhenOutOfRange: true` so peer dep bumps only trigger major when the new version actually leaves the compatible range\n- **10 `package.json` files** — Change internal `workspace:*` → `workspace:^` in peerDependencies so minor bumps stay within `^x.y.z` range\n\n### Affected packages\n\n`@objectstack/cli`, all 7 adapter packages, `plugin-dev`, `plugin-msw`\n\n### Verification\n\n```\n# Before (onlyUpdatePeerDependentsWhenOutOfRange: false)\n@objectstack/spec : 3.0.11 -> major -> 4.0.0\n\n# After\n@objectstack/spec : 3.0.11 -> minor -> 3.1.0\n```\n\nSimulated via `assembleReleasePlan()` directly — all 35 fixed-group packages resolve to `3.1.0`.\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>fixed group下minor版本号被错误提升为major，需排查并修正版本发布流程</issue_title>\n> <issue_description>## 问题简述\n> 在objectstack-ai/spec仓库下，尝试发minor版本的changeset时，实际发布出的PR版本号却是major（4.0.0），而不是预期的minor（3.1.0）。初步分析原因为fixed group机制导致组内某包的状态影响了所有包的bump级别。\n> \n> ## 待办事项\n> - 检查.fixed分组内所有35个包的当前版本号，确保全为`3.0.11`\n> - 检查.changeset目录内是否有残留未消费的major类型changeset\n> - 本地执行`npx changeset status`分析bump计算链路，定位触发major bump的包或changeset\n> - 若发现异常，手动修正（如删除多余的changeset或同步版本号）\n> - 完成后重新生成release PR，验证minor版号正常\n> \n> ## 参考链接\n> - [PR objectstack-ai/spec#829（version packages）](https://github.com/objectstack-ai/spec/pull/829)\n> - [PR objectstack-ai/spec#828（minor版变更的changeset）](https://github.com/objectstack-ai/spec/pull/828)\n> \n> ---\n> 处理完毕后，请：\n> - 运行测试\n> - 更新相关issue\n> - 更新ROADMAP.md\n> - 如需其他仓库协作，创建cross-repo任务\n> </issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#830\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n🔒 GitHub Advanced Security automatically protects Copilot coding agent pull requests. You can protect all pull requests by enabling Advanced Security for your repositories. [Learn more about Advanced Security.](https://gh.io/cca-advanced-security)"
+}

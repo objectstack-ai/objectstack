@@ -1,0 +1,33 @@
+{
+  "number": 745,
+  "kind": "pull_request",
+  "title": "feat: adapt better-auth adapter and objects for sys_ prefix naming convention",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-19T15:39:13Z",
+  "updated_at": "2026-02-19T18:42:18Z",
+  "closed_at": "2026-02-19T18:37:11Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-19T18:37:11Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/745",
+  "body": "better-auth hardcodes model names (`user`, `session`, `account`, `verification`) but the protocol layer now requires `sys_` prefixed names. The adapter layer couldn't resolve the correct object definitions, breaking auth flows.\n\n### Adapter mapping (`objectql-adapter.ts`)\n- Added `AUTH_MODEL_TO_PROTOCOL` mapping and `resolveProtocolName()` to translate better-auth model names → protocol names\n- All 8 adapter operations now route through `resolveProtocolName(model)` instead of passing raw model names\n- Unknown models pass through unchanged for extensibility (e.g. better-auth plugins adding custom models)\n\n```typescript\nimport { AUTH_MODEL_TO_PROTOCOL, resolveProtocolName } from '@objectstack/plugin-auth';\n\n// { user: 'sys_user', session: 'sys_session', account: 'sys_account', verification: 'sys_verification' }\nresolveProtocolName('user');    // → 'sys_user'\nresolveProtocolName('custom');  // → 'custom' (passthrough)\n```\n\n### Object definitions\n- `auth-user.object.ts` → `name: 'sys_user'`\n- `auth-session.object.ts` → `name: 'sys_session'`\n- `auth-account.object.ts` → `name: 'sys_account'`\n- `auth-verification.object.ts` → `name: 'sys_verification'`\n\n### Tests\n- 11 new tests covering mapping constants, `resolveProtocolName` fallback, and all adapter operations confirming `sys_` names reach `IDataEngine`\n\n### Documentation\n- Updated plugin-auth `README.md`, `authentication.mdx`, and `ROADMAP.md` migration notes\n\n> **Breaking change**: Custom adapters or plugins referencing auth objects by name must switch to `sys_`-prefixed protocol names (or import `SystemObjectName` constants). Client-side REST routes (`/api/v1/auth/*`) are unaffected.\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>better-auth适配内核 sys_ 前缀命名和协议表名映射，前端API兼容评估</issue_title>\n> <issue_description>## 背景\n> 近期已将系统内核对象的协议层命名全部统一为 `sys_` 前缀（详见 [#738](https://github.com/objectstack-ai/spec/issues/738)），但 better-auth 深度集成需要兼容这一变更。\n> \n> ## 影响分析\n> ### better-auth 核心对象名是硬编码的('user'、'session'、'account'、'verification')，而现在协议层为 'sys_user'、'sys_session' ...。此时：\n> - better-auth -> ObjectQL adapter 层调用时依赖 model = 'user'（等四个核心对象名）\n> - Auth 对象定义、系统协议层常量已切换为 'sys_user' 等\n> \n> 现状会导致 adapter 层找不到正确 object definition，影响认证流程。\n> \n> ### 客户端 API 仅通过 HTTP REST 路由（/auth/sign-in, /auth/get-session 等）访问，不直接涉及对象名，前端接口无影响。但如果直接操作对象（如 client.data.find('user', ...)），需要同步切换新协议名。\n> \n> ## 必须修正内容\n> 1. **adapter(model名到协议object名的映射)**\n>     - 在 `objectql-adapter.ts` 增加 model→protocol name 映射，如：{\"user\":\"sys_user\",...}\n>     - 所有 adapter 函数通过映射表查找 object definition\n> 2. **auth对象四个定义文件同步name值**\n>     - `auth-user.object.ts`：`name: 'sys_user'`\n>     - `auth-session.object.ts`：`name: 'sys_session'`\n>     - `auth-account.object.ts`：`name: 'sys_account'`\n>     - `auth-verification.object.ts`：`name: 'sys_verification'`\n> 3. **配套文档集中更新**\n>     - README、authentication.mdx\n>     - 补充说明\"better-auth对象映射适配\"原理、升级影响\n> \n> ## ROADMAP动作建议\n> - [x] 完成协议层命名规范化 (#738)\n> - [ ] 适配 better-auth adapter 与 object 名称同步（本 issue）\n> - [ ] 完成端到端 E2E 测试并回归\n> - [ ] 更新迁移文档，提醒插件自定义 adapter 必须同步协议层新名称\n> \n> ---\n> 涉及 breaking change，需团队评审通过。</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#743\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

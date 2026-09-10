@@ -1,0 +1,33 @@
+{
+  "number": 782,
+  "kind": "pull_request",
+  "title": "fix: resolve CI type-check and DTS build errors",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-22T03:00:06Z",
+  "updated_at": "2026-02-22T03:11:44Z",
+  "closed_at": "2026-02-22T03:08:56Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-22T03:08:56Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/782",
+  "body": "Four TypeScript errors breaking CI on `main`: duplicate exports in `kernel/index.ts`, unused imports, and a nonexistent type import.\n\n- **Duplicate export conflict (TS2308):** Both `dependency-resolution.zod.ts` and `plugin-versioning.zod.ts` export `DependencyResolutionResultSchema` / `DependencyResolutionResult`. Renamed the plugin-versioning variants to `PluginDependencyResolutionResultSchema` / `PluginDependencyResolutionResult` since they're structurally different schemas (plugin-scoped vs package-lifecycle).\n\n- **Missing type export (TS2305):** `package-service.ts` imported `Manifest` from `manifest.zod.ts`, which actually exports `ObjectStackManifest`. Fixed all references.\n\n- **Unused imports (TS6133):** Removed `UpgradePackageResponseSchema` and `RollbackPackageResponseSchema` from `package-api.zod.ts`.\n\n- **Test updates:** Updated `plugin-versioning.test.ts` to reference the renamed schema.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> fix ci errors \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

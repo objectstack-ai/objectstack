@@ -1,0 +1,36 @@
+{
+  "number": 569,
+  "kind": "pull_request",
+  "title": "Fix Next.js DoS vulnerability (GHSA-h25m-26qc-wcjf)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "size/xs"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-09T11:21:28Z",
+  "updated_at": "2026-02-09T11:35:24Z",
+  "closed_at": "2026-02-09T11:31:34Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-09T11:31:34Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/569",
+  "body": "CI failing on `pnpm audit` due to high-severity vulnerability in Next.js <15.0.8: HTTP request deserialization can trigger DoS in React Server Components.\n\n## Changes\n\n- **packages/adapters/nextjs/package.json**\n  - `next`: `^14.0.0` → `^15.0.8` (resolves to 15.5.12)\n  - `react-dom`: `^18.3.1` → `^19.2.4` (align with React 19, eliminate peer dep warning)\n  \n- **pnpm-lock.yaml**\n  - Updated to remove vulnerable Next.js 14.x from dependency tree\n\n## Security Status\n\n- `@objectstack/nextjs`: 15.5.12 (patched)\n- `@objectstack/docs`: 16.1.6 (unaffected)\n\nAdvisory: https://github.com/advisories/GHSA-h25m-26qc-wcjf\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 引用: https://github.com/objectstack-ai/spec/actions/runs/21822911292/job/62960629039#step:8:1\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

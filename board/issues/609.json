@@ -1,0 +1,33 @@
+{
+  "number": 609,
+  "kind": "pull_request",
+  "title": "Complete all P0/P1/P2 protocol optimizations (Sprints A–J)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-11T05:50:32Z",
+  "updated_at": "2026-02-11T07:02:20Z",
+  "closed_at": "2026-02-11T06:28:24Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-11T06:28:24Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/609",
+  "body": "Implements all optimization items identified in `PROTOCOL_OPTIMIZATION_REPORT.md` — UI i18n/ARIA/responsive coverage, performance configs, mobile nav, theme enhancements, disaster recovery, distributed cache, and external lookup resilience.\n\n### UI Protocol (P0)\n\n- **I18n full coverage (11/11)**: Replaced `z.string()` label/description fields with `I18nLabelSchema` in dashboard, report, chart, action, page, widget — backward-compatible union type preserves plain string usage\n- **ARIA accessibility (7/11)**: Added `AriaPropsSchema` to all interactive UI schemas (dashboard, report, chart, action, page, widget)\n- **Responsive layout**: New `responsive.zod.ts` with `ResponsiveConfigSchema` (breakpoint visibility, 12-col grid mapping, display order) and `PerformanceConfigSchema` (lazy load, virtual scroll, cache strategy) — integrated into dashboard widgets, page components, report columns\n\n### Enhancements (P1)\n\n- **Mobile navigation**: `app.zod.ts` gains `mobileNavigation` with `drawer | bottom_nav | hamburger` modes\n- **Theme**: Added `DensityMode`, `WcagContrastLevel`, `rtl` to `theme.zod.ts`\n- **i18n**: Added `PluralRuleSchema` (ICU/CLDR), `NumberFormatSchema`, `DateFormatSchema`, `LocaleConfigSchema` with fallback chain\n\n### Infrastructure (P2)\n\n- **Disaster recovery**: New `system/disaster-recovery.zod.ts` — backup strategies, failover modes (active-passive/active-active/pilot-light/warm-standby), RPO/RTO, replication, DR testing\n- **Distributed cache**: Extended `cache.zod.ts` with `DistributedCacheConfigSchema` — write consistency strategies, avalanche prevention (jitter TTL, circuit breaker, lockout), cache warmup\n- **External lookup**: Added retry with exponential backoff, request/response transform pipeline, cursor/offset/page pagination to `external-lookup.zod.ts`\n\n### Example: I18n backward compatibility\n\n```typescript\n// Both forms valid — existing configs unchanged\nconst dashboard = DashboardSchema.parse({\n  name: 'sales_overview',\n  label: 'Sales Overview',                                    // plain string ✅\n  description: { key: 'dash.sales.desc', defaultValue: '…' }, // i18n object ✅\n  widgets: [],\n  aria: { ariaLabel: 'Sales dashboard', role: 'region' },\n  performance: { lazyLoad: true, cacheStrategy: 'stale-while-revalidate' },\n});\n```\n\n### Testing\n\n151 new test cases across 15 files. Full suite: **4,506 tests / 174 files — all passing**.\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

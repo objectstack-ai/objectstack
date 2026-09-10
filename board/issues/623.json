@@ -1,0 +1,37 @@
+{
+  "number": 623,
+  "kind": "pull_request",
+  "title": "chore: release v2.0.7",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-11T14:30:43Z",
+  "updated_at": "2026-02-11T15:01:00Z",
+  "closed_at": "2026-02-11T15:01:00Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-11T15:01:00Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/623",
+  "body": "Bump all 21 packages from 2.0.7 via changesets. Fixed versioning group ensures unified release.\n\n### Release content\n- Modularized `kernel/events.zod.ts` (765 LOC) into 6 sub-modules for tree-shaking: `core`, `handlers`, `queue`, `dlq`, `integrations`, `bus`\n- `kernel/events.zod.ts` re-exports from sub-modules (backward compatible)\n- v3.0 migration guide added\n\n### What this PR does\n- Changeset created and consumed via `changeset version`\n- All package `package.json` versions bumped to `2.0.7`\n- Per-package `CHANGELOG.md` entries auto-generated\n- Root `CHANGELOG.md` updated: `[Unreleased]` → `[2.0.7] - 2026-02-11`\n\nAll 184 test files (4860 tests) pass. Build clean across 23 packages.\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

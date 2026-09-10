@@ -1,0 +1,33 @@
+{
+  "number": 633,
+  "kind": "pull_request",
+  "title": "feat: Metadata Plugin Protocol — unified metadata management spec",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-12T03:56:58Z",
+  "updated_at": "2026-02-12T06:18:29Z",
+  "closed_at": "2026-02-12T04:13:11Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-12T04:13:11Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/633",
+  "body": "Platform metadata management was fragmented across `metadata-loader`, `metadata-customization`, `metadata-persistence`, and a thin `IMetadataService` contract. No unified plugin spec existed to tie them together or define the canonical type registry.\n\n## New: `kernel/metadata-plugin.zod.ts`\n\n- **`MetadataTypeSchema`** — Canonical enum of all 23 platform metadata types (`object`, `view`, `flow`, `app`, `dashboard`, `permission`, `agent`, etc.)\n- **`MetadataTypeRegistryEntrySchema`** — Per-type config: file patterns, overlay support, load ordering, domain classification\n- **`DEFAULT_METADATA_TYPE_REGISTRY`** — Built-in registry with correct load order (`datasource:5 → object:10 → view:50 → flow:80`)\n- **`MetadataQuerySchema` / `MetadataQueryResultSchema`** — Search/filter/paginate across all metadata\n- **`MetadataEventSchema`** — 9 lifecycle events (`metadata.registered`, `metadata.overlay.applied`, etc.)\n- **`MetadataPluginConfigSchema`** — Unified config composing `MetadataManagerConfigSchema` + `CustomizationPolicySchema` + `MergeStrategyConfigSchema`\n- **`MetadataPluginManifestSchema`** — Plugin identity with 8 capability flags (crud, query, overlay, watch, importExport, validation, versioning, events)\n- **`MetadataBulkRegisterRequestSchema`** / **`MetadataDependencySchema`** — Batch ops and dependency tracking\n\n## Expanded: `contracts/metadata-service.ts`\n\nAll new methods are **optional** — fully backward compatible with existing implementations.\n\n- `query()` — filtered search with pagination\n- `bulkRegister()` / `bulkUnregister()` — batch operations\n- `getOverlay()` / `saveOverlay()` / `removeOverlay()` / `getEffective()` — overlay management\n- `watch()` — change subscription with `MetadataWatchHandle`\n- `exportMetadata()` / `importMetadata()` — portable bundles\n- `validate()` — schema validation\n- `getRegisteredTypes()` / `getTypeInfo()` — type registry discovery\n- `getDependencies()` / `getDependents()` — impact analysis\n\n## Usage\n\n```typescript\nimport { MetadataTypeSchema, MetadataPluginConfigSchema, DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec';\n\n// Validate a metadata type\nMetadataTypeSchema.parse('object'); // ✓\nMetadataTypeSchema.parse('widget'); // throws\n\n// Configure the metadata plugin\nconst config = MetadataPluginConfigSchema.parse({\n  storage: { datasource: 'default', fallback: 'filesystem' },\n  enableVersioning: true,\n  cacheMaxItems: 5000,\n});\n\n// Look up type loading order\nconst objEntry = DEFAULT_METADATA_TYPE_REGISTRY.find(e => e.type === 'object');\n// { type: 'object', loadOrder: 10, domain: 'data', supportsOverlay: true, ... }\n```\n\n56 new tests across 2 test files. Full suite passes (191 files, 5093 tests).\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

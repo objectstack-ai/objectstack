@@ -1,0 +1,33 @@
+{
+  "number": 751,
+  "kind": "pull_request",
+  "title": "chore: unify all package versions and changeset fixed group",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-20T05:56:29Z",
+  "updated_at": "2026-02-20T06:12:44Z",
+  "closed_at": "2026-02-20T06:08:23Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-20T06:08:23Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/751",
+  "body": "Several packages (services, adapters, `create-objectstack`, `objectstack-vscode`) were missing from the changeset `fixed` group and had drifted version numbers. This meant they could release independently with inconsistent versions.\n\n### Changes\n\n- **`.changeset/config.json`** — Added 14 missing packages to the `fixed` group:\n  - Adapters: `express`, `fastify`, `nuxt`, `sveltekit`\n  - Services: `service-automation`, `service-cache`, `service-feed`, `service-i18n`, `service-job`, `service-queue`, `service-realtime`, `service-storage`\n  - Standalone: `create-objectstack`, `objectstack-vscode`\n\n- **Version alignment to `3.0.7`** across all 40 packages:\n  - `create-objectstack` 3.0.0 → 3.0.7\n  - `objectstack-vscode` 0.1.0 → 3.0.7\n  - Root monorepo 3.0.0 → 3.0.7\n  - `@example/*` packages 1.2.16 → 3.0.7\n\n- **Changeset** — Added `.changeset/unify-package-versions.md` for the next coordinated release.\n\nAll 35 publishable packages now share a single `fixed` group — any future changeset touching one package bumps them all together.\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 801,
+  "kind": "issue",
+  "title": "Spec 协议健壮性提升与元数据一致性：多维度严��校验、必填字段、Zod-First、CI 守护等方案清单",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-24T07:16:27Z",
+  "updated_at": "2026-02-24T08:13:17Z",
+  "closed_at": "2026-02-24T08:13:17Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/801",
+  "body": "# 问题背景\n\n通过对 objectui（及所有 example）项目应用的实战梳理发现，当前 spec 项目存在如下不足，导致规范约束性弱、静态校验缺失、下游实现不一致：\n\n- defineStack 入口几乎无 runtime 校验机制，默认能\"吞掉\"不规范数据\n- DashboardWidget、View、Page 等类型定义大量字段可选且类型泛滥（z.unknown/z.any）\n- interface 和 Zod schema 同名却常常不同步，易漂移\n- 多种协议字段（如 filter 格式）业界无统一方案，当前 implementation 存在多种格式并存\n- 自动化测试主要覆盖正向（happy path），未设置逆向与快照守护\n\n# 优化目标\n- 使 Spec schema 能最大化提前捕获元数据规范错误，为 IDE/开发/CLI/CI 等提供一致、可靠的安全边界\n- 下游用户和低代码 IDE 能获得一致强校验支持\n\n---\n\n## 方案要点（优先级已排定）\n\n### 1. defineStack() 接口默认严格校验\n- 默认 `{ strict: true }`，无特殊理由禁止关闭\n- 校验顶层结构&子项 required/类型\n- 导航、引用、seed data 等全部交叉验证\n- 校验失败应抛异常，阻止加载/编译\n\n### 2. 所有 Zod schema 必须按SSOT（单一真相）原则，类型和校验同步维护\n- interface 一律用 z.infer<typeof Schema> 自动推导，禁止 interface/zod 漂移\n- 删除冗余/过时 interface，禁止重复定义\n\n### 3. DashboardWidget/Report/View/Page 等 schema 必填字段与 discriminated union 风格\n- type, id, object[Name], field, layout 等协议主字段全部标记 required\n- DashboardWidget/Report 建议用 discriminatedUnion 按 type 区分 subtype（chart、metric、table等必填字段不同）\n- 替换所有 z.unknown/z.any，为具体的 composite schema\n\n### 4. Filter 格式统一 & 全局复用 types\n- filter 必须全局设定标准结构，如[['field','op','value']]，禁止扁平或对象式混用\n- 一处改 schema，所有协议统一同步\n\n### 5. 测试体系加强（正向/逆向/快照覆盖）\n- 逆向测试（各类缺字段、类型非法、enum 越界等）必须报错\n- example/kitchen-sink/crm/todo 等所有 defineStack 均需 strict 校验且能通过\n- seed 数据与字段可用选项交叉快照，必测\n\n### 6. CI/Lint/pre-commit 守护\n- 新增/更新 spec schema 时，所�� example 元数据自动严格校验\n- 拒绝 z.unknown/z.any，或报警给审批\n- pre-commit 校验所有 type/interface/zod 只在一个地方维护\n\n---\n\n## 落地建议\n- 首先针对 DashboardWidget/View/Page/Seed/Navigation 全面升级 required 字段及 discriminated union\n- 补全所有文档注释，IDE 能提示每个字段含义/必填性\n- 编写脚本自动迁移/校对历史 example 数据\n- 逐步移除 z.any/z.unknown\n- 形成使用模板/脚手架/校验工具链\n- 完成后完善Roadmap、规范文档，并补充逆向用例\n\n---\n\n如需详细升级规划和接口代码示例，可分步骤提交子 issue。"
+}

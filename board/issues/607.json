@@ -1,0 +1,33 @@
+{
+  "number": 607,
+  "kind": "pull_request",
+  "title": "feat: CLI command extension protocol for plugins",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-11T05:05:19Z",
+  "updated_at": "2026-02-11T06:28:57Z",
+  "closed_at": "2026-02-11T05:52:15Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-11T05:52:14Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/607",
+  "body": "- [x] Analyze existing CLI architecture, plugin system, and manifest schema\n- [x] Add `commands` contribution point to ManifestSchema `contributes` section\n- [x] Add `CLICommandContributionSchema` and `CLIExtensionExportSchema`\n- [x] Export new schemas from kernel index\n- [x] Add tests for CLI extension schemas (10 tests)\n- [x] Add manifest tests for CLI command contributions (2 new tests)\n- [x] Add plugin command loading mechanism (`plugin-commands.ts`)\n- [x] Update `bin.ts` to load plugin commands before parsing\n- [x] Export `loadPluginCommands` from CLI package index\n- [x] Add tests for CLI plugin command loading (8 tests)\n- [x] Address code review feedback (type safety improvements)\n- [x] Run CodeQL security check — 0 alerts\n- [x] Update `content/docs/guides/plugins.mdx` with CLI Command Extensions section (architecture diagram, step-by-step guide, marketplace example, deployment example)\n- [x] Add `content/docs/references/kernel/cli-extension.mdx` reference page\n- [x] Update kernel `meta.json` to include `cli-extension`\n- [x] Update `packages/cli/README.md` with Plugin CLI Extensions documentation\n- [x] Update directory structure convention to include `cli.ts`\n- [x] Verify build passes (22 tasks)\n- [x] Verify all tests pass (spec: 30, CLI: 29)\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

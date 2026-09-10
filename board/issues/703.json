@@ -1,0 +1,33 @@
+{
+  "number": 703,
+  "kind": "issue",
+  "title": "迁移 CLI 架构到 oclif，实现主 CLI 与插件自动分离",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-18T03:32:06Z",
+  "updated_at": "2026-02-18T04:26:29Z",
+  "closed_at": "2026-02-18T04:26:29Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/703",
+  "body": "### 背景\n当前 ObjectStack CLI 基于 Commander.js，自定义了一套插件注册机制（loadPluginCommands）进行命令扩展，但：\n- 存在命令入口冲突（spec 和 cloud 各有 @objectstack/cli，bin 均为 os）\n- 插件自动发现机制依赖项目 config 文件，导致 os login、os push 等云端命令在未初始化项目时无法使用（鸡蛋问题）\n- 插件注册、加载、失败处理、版本兼容等都需自维护\n\n### 行动目标\n迁移 ObjectStack 主 CLI 架构为 [oclif](https://oclif.io/)，以便：\n- 主 CLI 与云端/第三方插件通过 oclif 内置机制解耦，bin/os 统一\n- 删除自定义 loadPluginCommands 等机制，利用 oclif 自动命令发现与插件注册\n- 按 oclif 典型结构将 packages/cli/src/commands 分为本地开发相关子命令包\n- 为 cloud 项目的云端命令预留 plugin 注册入口\n\n### 工作内容\n1. 使用 oclif 脚手架生成新的主 CLI 骨架（bin: os）\n2. 将现有本地相关命令（init、dev、serve、plugin、compile、validate、generate、create、test、doctor、lint、diff、explain、codemod 等）迁移为 src/commands/ 下对应 TS class\n3. 保持主 CLI package.json 的 bin/os 唯一性，移除独立 cloud cli\n4. 移除 loadPluginCommands，相关扩展点迁移为 oclif plugins\n5. 提供插件注册与文档说明\n\n### 验收标准\n- 用户全局安装 @objectstack/cli 后直接获得 \"os\" 主命令、所有子命令与自动 help\n- cloud 项目的命令可通过 plugin 引入自动获得\n- 项目内 objectstack.config.ts plugins 不再决定主 CLI 命令集合\n- 提供迁移文档、测试用例\n\n---\n如需临时平滑迁移方案，可支持 Commander.js/oClif 双栈过渡一段时间。"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 397,
+  "kind": "pull_request",
+  "title": "Define GitHub organization architecture for 60+ repository microkernel ecosystem",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-30T15:14:49Z",
+  "updated_at": "2026-02-06T04:26:32Z",
+  "closed_at": "2026-02-06T04:26:32Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/397",
+  "body": "Defines complete repository architecture for ObjectStack's transition from monorepo to distributed microkernel ecosystem. Addresses the question: \"如何在一个GitHub组织中创建哪些项目\" (How to organize projects in a GitHub organization).\n\n## Architecture\n\n**7 repository categories, 60+ total repositories:**\n\n```\nProtocol Layer (1)          Microkernel Layer (6)         Plugin Layer (50+)\n└─ spec                     ├─ core, objectql             ├─ Drivers (12+): postgres, mysql, mongodb, redis...\n                            ├─ runtime, client            ├─ Connectors (10+): salesforce, slack, stripe...\n                            └─ cli, types                 ├─ Plugins (15+): encryption, cache, multitenancy...\n                                                          ├─ Server Adapters (8+): hono, express, nextjs...\n                                                          ├─ Templates (10+): crm, helpdesk, hr-system...\n                                                          └─ Tools (5+): devtools, vscode-extension...\n```\n\n**Naming conventions:**\n- Core: `[name]` → `@objectstack/[name]`\n- Drivers: `driver-[database]` → `@objectstack/driver-[database]`\n- Connectors: `connector-[service]` → `@objectstack/connector-[service]`\n- Plugins: `plugin-[feature]` → `@objectstack/plugin-[feature]`\n- Templates: `template-[domain]` → `@objectstack/template-[domain]`\n\n## Migration Strategy\n\n**4-phase extraction from monorepo:**\n\n| Phase | Timeline | Scope | Count |\n|---|---|---|---|\n| P0 | Q1 2026 | Core repositories | 7 |\n| P1 | Q2 2026 | Essential drivers (PostgreSQL, MySQL, MongoDB, Redis) | 4 |\n| P2 | Q2 2026 | Security/performance plugins | 4 |\n| P3-P6 | Q3-Q4 2026 | Connectors, templates, tools | 20+ |\n\n## Repository Templates\n\nEach category has standardized structure with CI/CD, testing, docs requirements. Example driver template:\n\n```\ndriver-postgres/\n├── src/\n│   ├── driver.ts              # Implements DriverInterface from @objectstack/spec\n│   ├── connection.ts          # Connection pooling\n│   ├── query-builder.ts       # SQL generation\n│   └── __tests__/\n│       ├── unit/\n│       └── integration/       # With docker-compose.yml for test DB\n├── .github/workflows/\n│   ├── ci.yml                 # Lint, typecheck, test, build\n│   └── integration-test.yml   # Database integration tests\n└── docs/\n    ├── CONFIGURATION.md\n    └── MIGRATION.md\n```\n\n## Governance & Quality\n\n**Tier-based ownership:**\n- Tier 1 (spec, core): Core team only, RFC + voting required\n- Tier 2 (objectql, runtime, client, cli): Core + trusted contributors\n- Tier 3 (drivers, server plugins): Core + community\n- Tier 4 (connectors, templates, tools): Community-led\n\n**Quality standards:**\n- Test coverage: 60-90% (tier-dependent)\n- TypeScript strict mode required for core/drivers/plugins\n- All repos: CodeQL scanning, Dependabot, signed commits (Tier 1-2)\n\n## Deliverables\n\n- **[ARCHITECTURE_QUICK_REFERENCE.md](./ARCHITECTURE_QUICK_REFERENCE.md)** - Visual overview, 5-min read\n- **[GITHUB_ORGANIZATION_STRUCTURE.md](./GITHUB_ORGANIZATION_STRUCTURE.md)** / **[CN](./GITHUB_ORGANIZATION_STRUCTURE_CN.md)** - Complete specification, 849 lines\n- **[PROJECT_STRUCTURE_IMPLEMENTATION_SUMMARY.md](./PROJECT_STRUCTURE_IMPLEMENTATION_SUMMARY.md)** - Implementation roadmap with benchmarking against Kubernetes, Salesforce, VS Code, Prisma\n\n## Rationale\n\n**Why multi-repo over monorepo:**\n- Independent versioning (plugins evolve at different rates)\n- Lower contribution barrier (fork single repo, not entire monorepo)\n- Isolated CI/CD (faster feedback, parallel builds)\n- Clear ownership boundaries (Tier 1-4 governance model)\n- Scalable community growth (40+ community-maintained repos planned)\n\n**Benchmarked against:**\n- Kubernetes: Core vs kubernetes-sigs/* separation, CRD pattern\n- Salesforce: AppExchange marketplace model, metadata-driven architecture\n- VS Code: Extension marketplace, plugin API design\n- Prisma: Schema-first approach, driver abstraction pattern\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 你是企业管理软件领域的顶级开发工程师师，我编写的是全球企业管理软件的基础规范，采用微内核及插件式设计，按照全球最新最优秀软件的最佳实践，扫描目前完成的所有的协议，请从具体开发实现的角度，包括内核的开发， data, ui, system的子项目开发，以及各个插件的开发，评估如何在一个GitHub组织中创建哪些项目每个项目分别负责做哪些开发的内容以及每一个项目的具体结构。\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

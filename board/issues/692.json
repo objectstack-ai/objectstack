@@ -1,0 +1,33 @@
+{
+  "number": 692,
+  "kind": "pull_request",
+  "title": "feat: driver-turso design evaluation — spec schema, design document, and roadmap",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-15T06:57:03Z",
+  "updated_at": "2026-02-15T10:04:09Z",
+  "closed_at": "2026-02-15T09:58:57Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-15T09:58:57Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/692",
+  "body": "Evaluates the architectural impact of developing `driver-turso` (Turso/libSQL) across server, client, and cloud layers. Delivers the protocol schema, a comprehensive design document, and roadmap updates.\n\n### Turso Driver Spec (`packages/spec/src/data/driver/turso.zod.ts`)\n\n- `TursoConfigSchema` — three connection modes: remote (`libsql://`), local (`file:`), embedded replica (local + sync)\n- `TursoSyncConfigSchema` — replica sync interval and on-connect behavior\n- `TursoDriverSpec` — `DriverDefinitionSchema` with capabilities (transactions, FTS5, aggregations, joins, CTEs)\n\n```typescript\nimport { TursoConfigSchema } from '@objectstack/spec';\n\nconst config = TursoConfigSchema.parse({\n  url: 'libsql://my-db-orgname.turso.io',\n  authToken: process.env.TURSO_AUTH_TOKEN,\n  // Embedded replica mode\n  syncUrl: 'libsql://my-db-orgname.turso.io',\n  localPath: './replica.db',\n  sync: { intervalSeconds: 60, onConnect: true },\n});\n```\n\n### Design Document (`docs/design/driver-turso.md`)\n\n- **Server-side**: Zero impact — microkernel `IDataDriver` contract fully decouples drivers from core/objectql/REST/adapters\n- **Client-side**: Zero impact — SDK communicates via REST/GraphQL\n- **Cloud/Edge**: Unlocks 4 deployment topologies (traditional, edge replica, offline-first, DB-per-tenant)\n- **Capabilities**: 24/24 `IDataDriver` methods, 7/8 `ISchemaDriver` methods (`modifyColumn` needs table rebuild — SQLite limitation)\n- **Multi-tenancy**: Native DB-per-tenant (10k+ lightweight databases) via Turso platform API\n- **Service integration**: Compatible with all 25 service contracts; native FTS5→`ISearchService`, vector search→`IAIService`, better-auth Turso adapter→`IAuthService`\n- **4-phase plan**: Core Driver (v3.1) → Edge & Sync (v3.2) → Multi-Tenancy (v3.3) → Advanced (v4.0)\n\n### ROADMAP Updates\n\n- Phase 6.1 expanded with Turso sub-phases (A–D)\n- Versioning plan updated with Turso milestones across v3.1–v4.0\n- Design doc linked in Related Documents\n\n### Tests\n\n- 29 new tests for `TursoConfigSchema`, `TursoSyncConfigSchema`, `TursoDriverSpec`\n- Full suite: 198 files, 5,405 tests passing\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 评估如果开发 driver-turso 对于整个架构的改变，应用服务端，客户端，云端，编写详细的设计方案，并更新Road map\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

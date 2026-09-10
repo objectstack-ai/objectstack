@@ -1,0 +1,35 @@
+{
+  "number": 833,
+  "kind": "issue",
+  "title": "Action 元数据与 handler 校验一致性及绑定机制一揽子修复",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-02-28T12:07:36Z",
+  "updated_at": "2026-03-01T02:57:55Z",
+  "closed_at": "2026-03-01T02:57:55Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/833",
+  "body": "### 背景\n当前 Action 声明与运行时执行绑定存在以下主要问题：\n- `execute` / `target` 字段混乱，缺少严格检测\n- type = script/flow 等情形下引用目标是否存在完全无静态校验，规范未定义唯一来源\n- 示例/实际工程存在大量\"悬空\"引用，运行到实际 UI/自动化时可能失败但CI/typecheck不报错\n- 测试用例和 schema 只查结构/形状，不查引用有效性\n\n**与 Salesforce/ServiceNow/Power Platform 等主流平台做法严重不一致：** 它们均强制元数据声明和 handler 必须一一绑定，并在部署或保存、编辑阶段检测引用有效。\n\n---\n\n### 具体细节与优化清单\n\n**1. 规范/schema**\n- [ ] type:'script'/'flow'/等时，统一只允许 target 字段指向唯一 handler，下沉 execute 字段为 legacy 并逐步移除\n- [ ] ActionSchema 增加 `.refine()`，要求 type 不同，target 必须满足各种严格必填和唯一性条件，message 友好\n- [ ] Markdown/mdx 文档与所有 example 统一用法和命名\n\n**2. 交叉引用校验与集成**\n- [ ] `defineStack` crossref 检查补全：所有 Action[target] 必须能 resolve 到真实 handler/flow/modal，不允许悬空\n- [ ] stack 注册出错时必须 fail\n- [ ] 集成测试补充所有 action/handler/flow/modal 是否 can find（可用一个虚拟 registry/反射模拟）\n\n**3. 示例/工程工具**\n- [ ] 后续代码生成、低代码、SDK等产出，仅允许 target 统一模式\n- [ ] 示例/测试用例不得再出现只写字符串但无 handler/脚本存在的案例\n\n**4. 文档/协作**\n- [ ] 补充主流平台设计对标说明和当前问题总结，团队共识\n\n**价值**\n- 降低潜在线上运行失败风险\n- 提高 schema/stack/工具链鲁棒性\n- 向主流平台、一线低代码产品看齐\n\n---\n\n"
+}

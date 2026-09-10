@@ -1,0 +1,33 @@
+{
+  "number": 608,
+  "kind": "pull_request",
+  "title": "docs: re-evaluate protocol optimization report with UI-focused priorities",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-11T05:28:09Z",
+  "updated_at": "2026-02-11T06:53:32Z",
+  "closed_at": "2026-02-11T05:48:31Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-11T05:48:31Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/608",
+  "body": "Re-assessment of `PROTOCOL_OPTIMIZATION_REPORT.md` against current codebase state (139 Zod files, 146 test files, v2.0.6). 7/10 original P0-P1 items are now complete — priorities shift to UI protocol gaps.\n\n### Updated verification (2nd pass)\n\n- File counts corrected: 113 → **139** .zod.ts files, 73 → **146** test files, **4,395+** test cases\n- 7 completed items archived: i18n infrastructure, realtime-shared, GraphQL Federation, multi-agent coordination, driver contracts, query adapter, service contracts\n\n### UI protocol audit (core finding)\n\nPer-file analysis of all 11 UI files reveals UI as the **#1 priority gap**:\n\n| Metric | Coverage |\n|--------|----------|\n| I18n (I18nLabelSchema) | 3/11 files (27%) — only view, app, component |\n| ARIA (AriaPropsSchema) | 1/11 files (9%) — only component |\n| Responsive layout | 1/11 files — only theme (defines breakpoints, nobody consumes them) |\n| Performance config | 1/11 files — only view (virtualScroll) |\n\n6 files still hardcode `z.string()` for labels: dashboard, report, chart, action, page, widget.\n\n### Re-prioritized roadmap\n\n- **P0 (immediate)**: Sprint A (I18n full coverage), Sprint B (ARIA expansion), Sprint C (responsive config)\n- **P1 (1 month)**: Performance config, mobile navigation, theme density/WCAG, i18n plurals\n- **P2 (3-6 months)**: Disaster recovery, distributed cache, external lookup retry, file modularization\n\n### Updated benchmarks\n\nNew UI-specific dimension added comparing against Salesforce Lightning and ServiceNow UI Builder. Adjusted scores: API 3→4, AI 4→4.5 (reflecting completed Federation + multi-agent work).\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

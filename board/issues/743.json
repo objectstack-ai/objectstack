@@ -1,0 +1,33 @@
+{
+  "number": 743,
+  "kind": "issue",
+  "title": "better-auth适配内核 sys_ 前缀命名和协议表名映射，前端API兼容评估",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-19T14:13:22Z",
+  "updated_at": "2026-02-19T18:37:12Z",
+  "closed_at": "2026-02-19T18:37:12Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/743",
+  "body": "## 背景\n近期已将系统内核对象的协议层命名全部统一为 `sys_` 前缀（详见 [#738](https://github.com/objectstack-ai/spec/issues/738)），但 better-auth 深度集成需要兼容这一变更。\n\n## 影响分析\n### better-auth 核心对象名是硬编码的('user'、'session'、'account'、'verification')，而现在协议层为 'sys_user'、'sys_session' ...。此时：\n- better-auth -> ObjectQL adapter 层调用时依赖 model = 'user'（等四个核心对象名）\n- Auth 对象定义、系统协议层常量已切换为 'sys_user' 等\n\n现状会导致 adapter 层找不到正确 object definition，影响认证流程。\n\n### 客户端 API 仅通过 HTTP REST 路由（/auth/sign-in, /auth/get-session 等）访问，不直接涉及对象名，前端接口无影响。但如果直接操作对象（如 client.data.find('user', ...)），需要同步切换新协议名。\n\n## 必须修正内容\n1. **adapter(model名到协议object名的映射)**\n    - 在 `objectql-adapter.ts` 增加 model→protocol name 映射，如：{\"user\":\"sys_user\",...}\n    - 所有 adapter 函数通过映射表查找 object definition\n2. **auth对象四个定义文件同步name值**\n    - `auth-user.object.ts`：`name: 'sys_user'`\n    - `auth-session.object.ts`：`name: 'sys_session'`\n    - `auth-account.object.ts`：`name: 'sys_account'`\n    - `auth-verification.object.ts`：`name: 'sys_verification'`\n3. **配套文档集中更新**\n    - README、authentication.mdx\n    - 补充说明\"better-auth对象映射适配\"原理、升级影响\n\n## ROADMAP动作建议\n- [x] 完成协议层命名规范化 (#738)\n- [ ] 适配 better-auth adapter 与 object 名称同步（本 issue）\n- [ ] 完成端到端 E2E 测试并回归\n- [ ] 更新迁移文档，提醒插件自定义 adapter 必须同步协议层新名称\n\n---\n涉及 breaking change，需团队评审通过。"
+}

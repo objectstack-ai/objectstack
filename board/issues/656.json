@@ -1,0 +1,33 @@
+{
+  "number": 656,
+  "kind": "pull_request",
+  "title": "Fix plugin-auth field naming and add CLI validation scripts",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-12T16:43:15Z",
+  "updated_at": "2026-02-12T18:34:07Z",
+  "closed_at": "2026-02-12T16:55:27Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-12T16:55:27Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/656",
+  "body": "Field names in plugin-auth kernel objects violated the ObjectStack Protocol naming convention (camelCase instead of snake_case). Package also lacked CLI validation tooling.\n\n## Changes\n\n**Field renaming (22 fields across 4 objects)**\n- `auth-user`: `createdAt` → `created_at`, `updatedAt` → `updated_at`, `emailVerified` → `email_verified`\n- `auth-session`: `userId` → `user_id`, `expiresAt` → `expires_at`, `ipAddress` → `ip_address`, `userAgent` → `user_agent`\n- `auth-account`: `providerId` → `provider_id`, `accountId` → `account_id`, `accessToken` → `access_token`, `refreshToken` → `refresh_token`, `idToken` → `id_token`, `accessTokenExpiresAt` → `access_token_expires_at`, `refreshTokenExpiresAt` → `refresh_token_expires_at`\n- `auth-verification`: `expiresAt` → `expires_at`\n- Updated `compactLayout`, index definitions, and JSDoc comments\n\n**CLI validation tooling**\n- Added `objectstack.config.ts` exporting all auth objects via `defineStack()`\n- Added scripts to `package.json`: `validate`, `compile`, `info`\n- Added `@objectstack/cli` dev dependency\n\n## Example\n\n```typescript\n// Before\nfields: {\n  emailVerified: Field.boolean({\n    label: 'Email Verified',\n    defaultValue: false,\n  }),\n}\n\n// After\nfields: {\n  email_verified: Field.boolean({\n    label: 'Email Verified',\n    defaultValue: false,\n  }),\n}\n```\n\n## Breaking Change\n\nDatabase column names and any code referencing these fields must be updated.\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> plugin-auth 内核对象中的字段名不符合规范，且该软件包没有 使用 @objectstack/cli 相关的测试脚本。\n> \n> The user has attached the following file paths as relevant context:\n>  - .github/copilot-instructions.md\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\nCreated from [VS Code](https://code.visualstudio.com/docs/copilot/copilot-coding-agent).\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

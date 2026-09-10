@@ -1,0 +1,35 @@
+{
+  "number": 847,
+  "kind": "issue",
+  "title": "i18n协议国际化规范优化（ICU支持/占位符/可扩展性/AI Hook/覆盖分解等）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-01T16:38:40Z",
+  "updated_at": "2026-03-01T17:40:57Z",
+  "closed_at": "2026-03-01T17:40:57Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/847",
+  "body": "## 背景\n当前PR #846 引入了面向对象的国际化聚合协议（object-first），对标 Salesforce DX 和 Dynamics 365 元数据国际化实践，在结构、检测与批量处理方面已大幅领先 Retool、Appsmith 等低代码平台。\n\n但对比主流平台标准（Salesforce、Dynamics、Mendix、OutSystems 等）以及最新 i18n 工程标准（ICU MessageFormat、MF2 等），协议在以下方面仍有优化空间：\n\n---\n\n## 优化建议\n\n### 1. ICU MessageFormat 支持\n- Schema 需显式支持 ICU pattern 字段，适配全球复杂复数、性别、变量插值等场景。\n- messages/validationMessages 应标明支持 ICU MessageFormat。\n\n### 2. FieldTranslation Schema 增加 placeholder\n- 表单交互常用的\"占位提示\"，是 UI 协议的必备字段。\n\n### 3. TranslationDiffItem 增加 sourceHash\n- 支持 CLI/Workbench 精准检测 stale（陈旧）翻译，无需全量 diff。\n\n### 4. Bundle 层级 _meta 支持（如 locale/bidi 方向性）\n- 适配 RTL 语种（如阿拉伯语、希伯来语），兼容字体/布局等 UI 渲染。\n\n### 5. 命名空间合并与插件隔离\n- 支持插件/扩展包各自贡献 i18n，避免 key 冲突，建议 schema 增加 namespace 机制。\n\n### 6. _notifications/_errors 分组\n- 对象相关的按钮、通知、错误消息建议独立分组，增强企业级 SDUI 场景完整性。\n\n### 7. TranslationCoverageResult 增强 breakdown\n- 输出分组覆盖率明细，辅助翻译项目管理和任务优先级。\n\n### 8. AI 翻译 hook 与 suggest 字段\n- 便于集成自研 Agent、第三方 TMS，推送缺失/陈旧字段的 AI 翻译建议。\n\n---\n\n## 预期产出\n- Schema 明确支持以上所有字段与分组扩展\n- II18nService/CLI/Workbench/文档对应增强\n- ROADMAP 与 i18n-standard 文档同步完善\n- 回归测试 & lint\n- 后续按优先级分阶段推进\n\n> 该任务合并所有国际化协议优化建议，作为 PR #846 后续增强。"
+}

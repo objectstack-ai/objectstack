@@ -1,0 +1,33 @@
+{
+  "number": 588,
+  "kind": "pull_request",
+  "title": "Fix startup message to show correct API endpoint",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-10T12:14:11Z",
+  "updated_at": "2026-02-10T13:35:47Z",
+  "closed_at": "2026-02-10T13:34:02Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/588",
+  "body": "Startup message incorrectly displayed API at `http://localhost:3000/` when actual endpoint is `/api/v1`. Root path redirects to Studio UI in dev mode, causing user confusion.\n\n**Change**\n- Updated `packages/cli/src/utils/format.ts:191` to display `/api/v1` instead of `/`\n\n**Before**\n```\n➜  API:     http://localhost:3000/\n➜  Studio:  http://localhost:3000/_studio/\n```\n\n**After**\n```\n➜  API:     http://localhost:3000/api/v1\n➜  Studio:  http://localhost:3000/_studio/\n```\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> pnpm dev 现在启动服务后 访问 http://localhost:3000/api/v1 没有进入 api 地址，而是显示了 studio\n> \n> The user has attached the following file paths as relevant context:\n>  - .github/copilot-instructions.md\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\nCreated from [VS Code](https://code.visualstudio.com/docs/copilot/copilot-coding-agent).\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 763,
+  "kind": "pull_request",
+  "title": "feat(storage): chunked upload protocol, contract methods, and Client SDK",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-21T08:01:57Z",
+  "updated_at": "2026-02-21T08:31:30Z",
+  "closed_at": "2026-02-21T08:25:26Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-21T08:25:26Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/763",
+  "body": "Extends the Storage API with complete chunked/multipart upload support across spec schemas, service contract, S3 adapter skeleton, and Client SDK.\n\n### API Schemas (`api/storage.zod.ts`)\n- Added `CompleteChunkedUploadResponseSchema` — the missing response counterpart (`fileId`, `key`, `size`, `mimeType`, optional `eTag`/`url`)\n- Added `StorageApiContracts` route registry (6 endpoints), following the `AutomationApiContracts` pattern\n\n### Service Contract (`contracts/storage-service.ts`)\n- Extended `IStorageService` with 4 optional chunked upload methods:\n  - `initiateChunkedUpload(key, options?)` → session ID\n  - `uploadChunk(uploadId, partNumber, data)` → ETag\n  - `completeChunkedUpload(uploadId, parts)` → storage key\n  - `abortChunkedUpload(uploadId)` → void\n- Uses `partNumber` (1-based) at adapter layer per S3 convention; API schema retains existing `chunkIndex` (0-based)\n\n### S3 Adapter (`service-storage`)\n- Added skeleton stubs for all 4 chunked methods on `S3StorageAdapter`\n\n### Client SDK\n- 5 new methods on `client.storage`:\n\n```ts\nawait client.storage.getPresignedUrl({ filename, mimeType, size });\nconst session = await client.storage.initChunkedUpload({ filename, mimeType, totalSize });\nconst chunk = await client.storage.uploadPart(uploadId, chunkIndex, resumeToken, blob);\nawait client.storage.completeChunkedUpload({ uploadId, parts });\nawait client.storage.resumeUpload(uploadId, file, chunkSize, resumeToken); // fetches progress, uploads remaining, completes\n```\n\n### Tests\n- 12 new schema tests (`CompleteChunkedUploadResponseSchema`, `StorageApiContracts`)\n- 3 new contract tests (chunked lifecycle, abort, implementation shape)\n- All 5964 tests passing\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>storage api</issue_title>\n> <issue_description>## 🎯 目标\n> \n> 扩展 Storage API，支持 S3/Azure/GCS presigned URL 直传和大文件断点续传。\n> \n> ## 📊 当前状态\n> \n> | 层级 | 状态 | 说明 |\n> |------|------|------|\n> | Client SDK | ���️ | `client.storage.upload()` 已有 presigned flow 骨架，但无 chunked upload |\n> | Service Impl | ⚠️ | `service-storage` 有 Local FS + S3 skeleton |\n> \n> ## 📋 Tasks\n> \n> - [ ] 在 `spec/src/api/` 新增 `ChunkedUploadInitRequest/Response` schema（含 chunkSize、totalChunks）\n> - [ ] 新增 `ChunkedUploadPartRequest/Response` schema（含 partNumber、uploadId）\n> - [ ] 新增 `ChunkedUploadCompleteRequest/Response` schema\n> - [ ] 在 `IStorageService` contract 中新增 chunked upload 方法\n> - [ ] 在 `service-storage` 中实现 S3 multipart upload adapter\n> - [ ] 在 Client SDK 中扩展 `client.storage`：\n>   - `getPresignedUrl()` — 获取直传 URL\n>   - `initChunkedUpload()` — 初始化分片上传\n>   - `uploadPart()` — 上传分片\n>   - `completeChunkedUpload()` — 完成分片上传\n>   - `resumeUpload()` — 断点续传\n> - [ ] 编写测试\n> \n> ## 🔗 关联\n> \n> - 阻塞 ObjectUI Roadmap P1.2（Cloud storage + Upload resume）\n> - Parent: objectstack-ai/spec#753</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#758\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n🔒 GitHub Advanced Security automatically protects Copilot coding agent pull requests. You can protect all pull requests by enabling Advanced Security for your repositories. [Learn more about Advanced Security.](https://gh.io/cca-advanced-security)"
+}

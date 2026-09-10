@@ -1,0 +1,35 @@
+{
+  "number": 799,
+  "kind": "issue",
+  "title": "filters 参数格式与查询引擎不兼容导致筛选无效",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-02-24T06:48:23Z",
+  "updated_at": "2026-02-24T07:13:08Z",
+  "closed_at": "2026-02-24T07:13:08Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/799",
+  "body": "## 问题描述\n列表筛选时，浏览器请求的 `filters` 参数为 JSON 数组 AST 格式（如：`[\"and\", [\"priority\", \"=\", \"high\"], [\"status\", \"=\", \"active\"]]`），服务端接收到参数后，并未按照 spec 规范转换为正确的 FilterCondition（对象）格式，导致服务端未对数据进行筛选，返回了全部记录。\n\n## 复现步骤\n1. 在 ObjectUI 列表页面进行多条件筛选（如按照 priority=high 且 status=active）。\n2. 浏览器发出的请求如：\n```\nGET /api/v1/data/contact?top=100&sort=name&filters=[\"and\",[\"priority\",\"=\",\"high\"],[\"status\",\"=\",\"active\"]]\n```\n3. 服务端收到后，最终在 `findData` 处理时，仅做了 `JSON.parse`，但未将 AST 数组格式转换为 FilterCondition 对象格式，导致 filter 永远无法生效。\n\n## 期望行为\n- 服务端能够识别 filters 为 AST （数组）格式时，自动转换为符合 FilterCondition 对象结构，传给底层查询引擎。\n- 筛选条件能准确生效，返回预期的结果集。\n\n## 建议修复点\n- 建议在 `packages/objectql/src/protocol.ts` 的 `findData` 方法里处理 filters，如果解析后为数组 AST，自动转换为 `{ $and: [...] }` 结构传递。\n- 并在 Dispatcher 层需保证参数在整个链路中以规范形式传递（不要丢失/多包一层）。\n\n## 参考\n- [spec/src/data/filter.zod.ts](https://github.com/objectstack-ai/spec/blob/main/packages/spec/src/data/filter.zod.ts)\n- [spec/src/data/query.zod.ts](https://github.com/objectstack-ai/spec/blob/main/packages/spec/src/data/query.zod.ts)\n- 详细排查与链路分析见本 Issue 下说明。\n\n---\n如需英文描述请告知。"
+}

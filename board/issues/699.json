@@ -1,0 +1,33 @@
+{
+  "number": 699,
+  "kind": "pull_request",
+  "title": "feat: Phase B (Element Library & Builder) + Phase C (Sharing, Embedding & Permissions)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-16T10:40:26Z",
+  "updated_at": "2026-02-16T17:19:03Z",
+  "closed_at": "2026-02-16T17:15:35Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-16T17:15:35Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/699",
+  "body": "Implements the next two roadmap phases from the Airtable Interface gap analysis.\n\n### Phase B: Element Library & Builder (v3.3)\n\n- **Interactive elements** — `element:button`, `element:filter`, `element:form`, `element:record_picker` with prop schemas, registered in `PageComponentType` and `ComponentPropsMap`\n- **`BlankPageLayoutSchema`** — Grid-based free-form canvas positioning (`columns`, `rowHeight`, `gap`, positioned `items[]`), wired as optional `blankLayout` on `PageSchema`\n- **Variable binding** — `PageVariableSchema` gains `record_id` type and `source` field; `ElementRecordPickerPropsSchema` has `targetVariable` for bidirectional binding\n- **Studio Interface Builder** — `InterfaceBuilderConfigSchema` with snap/zoom/palette/panel settings (`studio/interface-builder.zod.ts`)\n\n### Phase C: Sharing, Embedding & Permissions (v4.0)\n\n- **`SharingConfigSchema`** — public link, password, domain allowlist, expiration, anonymous access (`ui/sharing.zod.ts`)\n- **`EmbedConfigSchema`** — iframe origin restrictions, responsive sizing, header/nav visibility\n- **`InterfaceSchema`** — optional `sharing` and `embed` fields (`assignedRoles` already existed)\n- **`FormViewSchema`** — optional `sharing` for public form sharing\n\n### Usage\n\n```ts\n// Blank page with record picker → variable binding\ndefineInterface({\n  name: 'order_portal',\n  label: 'Order Portal',\n  sharing: { enabled: true, password: 'secret', expiresAt: '2027-01-01T00:00:00Z' },\n  embed: { enabled: true, allowedOrigins: ['https://partner.com'] },\n  pages: [{\n    name: 'picker_page',\n    label: 'Pick Account',\n    type: 'blank',\n    variables: [\n      { name: 'selected_id', type: 'record_id', source: 'acct_picker' },\n    ],\n    regions: [{\n      name: 'main',\n      components: [\n        { id: 'acct_picker', type: 'element:record_picker',\n          properties: { object: 'account', displayField: 'name', targetVariable: 'selected_id' } },\n        { id: 'submit', type: 'element:button',\n          properties: { label: 'Continue', variant: 'primary' } },\n      ],\n    }],\n    blankLayout: {\n      columns: 12,\n      items: [\n        { componentId: 'acct_picker', x: 0, y: 0, width: 8, height: 2 },\n        { componentId: 'submit', x: 0, y: 2, width: 4, height: 1 },\n      ],\n    },\n  }],\n});\n```\n\n57 new tests, all 5,541 passing. No CodeQL alerts.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 按 roadmap 完成 Phase B: Element Library & Builder (v3.3)\n> \n>  Interactive elements — element:button, element:filter, element:form, element:record_picker\n>  BlankPageLayoutSchema — Free-form canvas composition with grid-based positioning\n>  Record picker variable binding — PageVariableSchema integration with element:record_picker\n>  Studio Interface Builder — Drag-and-drop element placement UI\n> Phase C: Sharing, Embedding & Permissions (v4.0)\n> \n>  SharingConfigSchema — Public link, password, domain restriction, expiration (src/ui/sharing.zod.ts)\n>  EmbedConfigSchema — iframe embedding with origin restrictions and display options\n>  Per-interface role assignment — assignedRoles on InterfaceSchema\n>  Public form sharing — sharing property on FormViewSchema\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

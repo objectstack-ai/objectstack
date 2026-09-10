@@ -1,0 +1,33 @@
+{
+  "number": 553,
+  "kind": "pull_request",
+  "title": "feat: Add CRM ecosystem integration connector schemas",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-08T12:29:01Z",
+  "updated_at": "2026-02-08T14:03:43Z",
+  "closed_at": "2026-02-08T14:03:43Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/553",
+  "body": "Adds domain-specific connector protocols to support downstream CRM app needs (Phase 3: Ecosystem & Connectivity) — payment gateways, e-signatures, communication platforms, email, accounting, HRIS, and recruiting/ATS.\n\n## New Connector Schemas\n\nEach extends `ConnectorSchema` with provider enums, domain-specific webhook events, object types with CRUD flags, and configuration sections:\n\n- **`payment.zod.ts`** — Stripe, PayPal, Square, Braintree, Adyen. Payment methods, currencies, idempotency config, statement descriptors, sandbox mode.\n- **`esign.zod.ts`** — DocuSign, Adobe Sign, HelloSign, PandaDoc. Envelope lifecycle, signing options, sequential signing, reminders/expiration, branding.\n- **`communication.zod.ts`** — Slack, Discord, Microsoft Teams. Channel mappings for deal rooms/support, CRM notification rules, bot config.\n- **`email.zod.ts`** — Gmail, Outlook, Exchange. Email-to-lead, email-to-case, open/click tracking, signature injection, folder sync scope.\n- **`accounting.zod.ts`** — QuickBooks, Xero, NetSuite, FreshBooks, Sage. Invoice sync with line item mapping, chart of accounts, multi-currency, tax config, fiscal year.\n- **`hris.zod.ts`** — BambooHR, Workday, ADP, Gusto, Rippling. Employee/payroll sync, org structure, PII protection (SSN/bank masking, encryption, retention).\n- **`recruiting.zod.ts`** — LinkedIn, Greenhouse, Lever, Workable. Candidate pipeline stages, interview scheduling, scorecards, GDPR/EEOC compliance.\n\n## Pattern\n\nAll connectors follow the established `ConnectorSchema.extend()` pattern:\n\n```typescript\nexport const PaymentConnectorSchema = ConnectorSchema.extend({\n  type: z.literal('saas'),\n  provider: PaymentProviderSchema,\n  mode: PaymentModeSchema,\n  supportedCurrencies: z.array(z.string()),\n  objectTypes: z.array(PaymentObjectTypeSchema),\n  webhookEvents: z.array(PaymentWebhookEventSchema).optional(),\n  idempotencyConfig: IdempotencyConfigSchema.optional(),\n  // ...\n});\n```\n\nEach file includes 2 example configurations and a co-located `.test.ts` with full schema coverage. 154 new tests, 225 total integration tests passing.\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

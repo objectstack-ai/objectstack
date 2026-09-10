@@ -1,0 +1,33 @@
+{
+  "number": 736,
+  "kind": "pull_request",
+  "title": "feat: unified Navigation protocol with Area support and new nav item types",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-19T12:38:19Z",
+  "updated_at": "2026-02-19T13:01:21Z",
+  "closed_at": "2026-02-19T12:55:21Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-19T12:55:21Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/736",
+  "body": "NavigationItem had limited type coverage (object/dashboard/page/url/group) and lacked per-item ordering, badges, and permissions. No support for Salesforce-style Area partitioning for enterprise apps with multiple business domains.\n\n### BaseNavItemSchema enhancements\n- `order` — sort position within same level\n- `badge` — string or number notification indicator\n- `requiredPermissions` — per-item access control\n\n### New navigation item types\n- `ReportNavItemSchema` (`type: 'report'`) — targets a named report\n- `ActionNavItemSchema` (`type: 'action'`) — triggers a named action with optional params\n\n### NavigationAreaSchema\nBusiness domain partitioning (à la Salesforce App Areas). Each area owns an independent navigation tree with its own visibility/permissions.\n\n### AppSchema\nAdded optional `areas: NavigationArea[]`. Coexists with existing `navigation[]` for backward compat.\n\n```ts\nconst app = defineApp({\n  name: 'enterprise_crm',\n  label: 'Enterprise CRM',\n  areas: [\n    {\n      id: 'area_sales', label: 'Sales', icon: 'briefcase', order: 1,\n      navigation: [\n        { id: 'nav_leads', type: 'object', label: 'Leads', objectName: 'lead', badge: 12 },\n        { id: 'nav_report', type: 'report', label: 'Pipeline', reportName: 'pipeline_overview' },\n        { id: 'nav_new_lead', type: 'action', label: 'New Lead', actionDef: { actionName: 'create_lead' } },\n      ],\n    },\n    {\n      id: 'area_settings', label: 'Settings', icon: 'settings', order: 99,\n      requiredPermissions: ['admin.access'],\n      navigation: [\n        { id: 'nav_users', type: 'object', label: 'Users', objectName: 'user' },\n      ],\n    },\n  ],\n});\n```\n\nAll fields are optional additive — zero breaking changes to existing configs. 20 new tests added, full suite passes (5770/5770). ROADMAP updated.\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>统一 Navigation 协议，支持 Area/分区、系统对象管理和 Spec 级配置</issue_title>\n> <issue_description># 🎯 协议升级：App Navigation 统一与 Area/对象管理支持\n> \n> ## 背景\n> 当前 ObjectStack 在 \"App\" 和 \"导航\" 协议上，存在多模型并行和難以系统对象化管理的问题（如 MenuItem、NavigationItem 两套并存）。主流低代码体系（Salesforce、Power Apps）普遍采用 Area（分区）、对象化与 JSON Schema 导航协议统一管理所有应用与导航。随着 Console/PC 端大幅企业增强，需要 Spec 协议层做支撑。\n> \n> ---\n> \n> ## 改动要求\n> \n> ### 1. 统一 NavigationItem 为唯一导航协议\n> - 删除/废弃 MenuItem/多余历史协议，NavigationItem 成为唯一 source of truth。\n> - 字段支持：type、label、icon、order、badge、children、visible、requiredPermissions、(objectName|dashboardName|pageName|reportName|url|target|actionDef)、areaId（归属分区）。\n> - 表达式与权限一致可控。\n> \n> ### 2. 增加 Area/NavigationArea 支持\n> - `areas?: NavigationArea[]` 分区，每个分区/业务域可定义独立 NavigationItem[] 树。\n> \n> ### 3. 规范所有协议为 Spec/Schema 驱动\n> - 明确以 Zod Schema 为唯一入口，所有类型通过 z.infer 推导。\n> - 命名规范：JS/TS 配置 camelCase，数据值 snake_case\n> - 与 objectstack-ai/objectui、console、cli 完全对齐\n> \n> ### 4. 影响范围与兼容性说明\n> - packages/spec/src/ui/app.zod.ts、view.zod.ts 等需要同步更新\n> - 变动为 breaking change，建议增加 deprecate 声明并短期向后兼容\n> - 建议文档附升级迁移指导方案\n> \n> ## 建议 Roadmap\n> - [ ] 设计与评审统一 NavigationItem/Area 协议草案\n> - [ ] 更新 Zod Schema 与主类型定义\n> - [ ] CLI/Console/PC 框架适配新版 schema\n> - [ ] 保留临时 transform 处理现有 menu 到 navigation 数据\n> - [ ] 更新测试、Spec 文档、migration guide\n> \n> ---\n> \n> 开发与合入标准：规范性 PR + test + roadmap 更新\n> </issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#735\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 797,
+  "kind": "issue",
+  "title": "[Runtime] 内核多租户 Runtime 协议升级 — Tenant Context + Router + Deploy Pipeline 合同",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-24T03:40:28Z",
+  "updated_at": "2026-02-24T05:03:25Z",
+  "closed_at": "2026-02-24T05:03:25Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/797",
+  "body": "\n### Summary\n\n升级 `@objectstack/spec` 内核协议层，为 Cloud 多租户 \"注册即开通\" 架构提供完整的类型定义和服务合同。\n\n### 背景\n\nspec v3.0 已完成 `TenantSchema`、`TenantIsolationLevel`、`KernelContextSchema` 等基础协议。现在需要扩展以支持：\n- 请求级租户上下文注入\n- 租户路由合同（session → tenantId → DB connection）\n- 元数据驱动部署流水线合同\n- 配额与用量追踪协议\n- 应用安装生命周期合同\n\n### 开发任务\n\n#### Part A: Tenant Runtime Context 扩展\n\n- [ ] **A1. `TenantRuntimeContextSchema`** — 扩展 `packages/spec/src/kernel/context.zod.ts`\n  ```typescript\n  // 在 KernelContextSchema 基础上扩展\n  TenantRuntimeContextSchema = KernelContextSchema.extend({\n    tenantId: z.string().describe('Current tenant ID from session'),\n    tenantPlan: z.enum(['free', 'pro', 'enterprise']).describe('Tenant subscription plan'),\n    tenantRegion: z.string().optional().describe('Primary database region'),\n    tenantDbUrl: z.string().describe('Turso DB connection URL for current tenant'),\n    tenantQuotas: TenantQuotaSchema.optional(),\n  });\n  ```\n  - 更新 `context.test.ts` 增加新字段测试\n  - 确保向后兼容（新字段可选或有默认值）\n\n- [ ] **A2. `TenantUsageSchema`** — 新增到 `packages/spec/src/system/tenant.zod.ts`\n  ```typescript\n  TenantUsageSchema = z.object({\n    currentUsers: z.number().int(),\n    currentStorageBytes: z.number().int(),\n    currentObjectCount: z.number().int(),\n    currentRecordCount: z.number().int(),\n    deploymentsToday: z.number().int(),\n    apiRequestsThisMinute: z.number().int(),\n  });\n  ```\n\n- [ ] **A3. 扩展 `TenantQuotaSchema`** — 增加以下字段\n  - `maxObjects: z.number().int().optional()` — 最大对象数\n  - `maxRecordsPerObject: z.number().int().optional()` — 每对象最大记录数\n  - `maxDeploymentsPerDay: z.number().int().optional()` — 每日最大部署次数\n  - 更新现有测试\n\n#### Part B: 服务合同定义\n\n- [ ] **B1. `ITenantRouter` 合同** — `packages/spec/src/contracts/tenant-router.ts` (NEW)\n  ```typescript\n  export interface ITenantRouter {\n    resolveTenant(session: AuthSession): Promise<TenantRuntimeContext>;\n    getTenantDriver(tenantId: string): Promise<Driver>;\n    invalidateCache(tenantId: string): void;\n  }\n  ```\n  - 注意：`Driver` 类型引用 `@objectql/types` 中已有的 `Driver` interface\n\n- [ ] **B2. `IDeployPipelineService` 合同** — `packages/spec/src/contracts/deploy-pipeline-service.ts` (NEW)\n  ```typescript\n  export interface IDeployPipelineService {\n    validateBundle(bundle: DeployBundle): DeployValidationResult;\n    planDeployment(tenantId: string, bundle: DeployBundle): Promise<MigrationPlan>;\n    executeDeployment(tenantId: string, plan: MigrationPlan): Promise<DeployResult>;\n    rollbackDeployment(tenantId: string, deploymentId: string): Promise<void>;\n  }\n  ```\n\n- [ ] **B3. `IProvisioningService` 合同** — `packages/spec/src/contracts/provisioning-service.ts` (NEW)\n  ```typescript\n  export interface IProvisioningService {\n    provisionTenant(request: TenantProvisioningRequest): Promise<TenantProvisioningResult>;\n    suspendTenant(tenantId: string): Promise<void>;\n    resumeTenant(tenantId: string): Promise<void>;\n    destroyTenant(tenantId: string): Promise<void>;\n    getTenantStatus(tenantId: string): Promise<TenantProvisioningStatus>;\n  }\n  ```\n\n- [ ] **B4. `IAppLifecycleService` 合同** — `packages/spec/src/contracts/app-lifecycle-service.ts` (NEW)\n  ```typescript\n  export interface IAppLifecycleService {\n    checkCompatibility(tenantId: string, manifest: AppManifest): Promise<CompatibilityResult>;\n    installApp(tenantId: string, manifest: AppManifest): Promise<AppInstallResult>;\n    upgradeApp(tenantId: string, appId: string, newManifest: AppManifest): Promise<AppInstallResult>;\n    uninstallApp(tenantId: string, appId: string): Promise<void>;\n  }\n  ```\n\n#### Part C: 数据 Schema 定义\n\n- [ ] **C1. `TenantProvisioningSchema`** — `packages/spec/src/system/provisioning.zod.ts` (NEW)\n  - `TenantProvisioningRequestSchema` — 输入：orgId, plan, region\n  - `TenantProvisioningResultSchema` — 输出：tenantId, connectionUrl, status\n  - `TenantProvisioningStatusEnum` — `'provisioning' | 'active' | 'suspended' | 'failed' | 'destroying'`\n  - `ProvisioningStepSchema` — 单步状态追踪\n\n- [ ] **C2. `DeployBundleSchema`** — `packages/spec/src/system/deploy-bundle.zod.ts` (NEW)\n  - `DeployBundleSchema` — objects[], views[], flows[], permissions[], seedData[]\n  - `DeployManifestSchema` — version, checksum, metadata\n  - `DeployDiffSchema` — added/modified/removed\n  - `MigrationPlanSchema` — 有序 DDL 列表\n  - `DeployStatusEnum` — `'validating' | 'diffing' | 'migrating' | 'registering' | 'ready' | 'failed'`\n\n- [ ] **C3. `AppManifestSchema`** — `packages/spec/src/system/app-install.zod.ts` (NEW)\n  - `AppManifestSchema` — name, version, objects[], views[], flows[], seedData[]\n  - `AppInstallResultSchema` — installed objects, created tables, seeded records\n  - `AppCompatibilityCheckSchema` — kernel version check, conflict detection\n\n- [ ] **C4. 扩展 `TenantSchema`** — 修改 `packages/spec/src/system/tenant.zod.ts`\n  - 新增 `databaseProvider: z.enum(['turso', 'postgres', 'memory']).optional()`\n  - 新增 `provisioningStatus: TenantProvisioningStatusEnum.optional()`\n  - 新增 `plan: z.enum(['free', 'pro', 'enterprise']).optional()`\n\n#### Part D: 导出与文档\n\n- [ ] **D1.** 更新 `packages/spec/src/system/index.ts` 导出新模块\n- [ ] **D2.** 更新 `packages/spec/src/contracts/index.ts` 导出新合同\n- [ ] **D3.** 运行 `build-docs.ts` 生成新 schema 的参考文档\n- [ ] **D4.** 更新 `ROADMAP.md` Phase 6 进度\n\n### Acceptance Criteria\n\n- [ ] 所有新 schema 有 `.describe()` 注释\n- [ ] 所有 interface 为 async 纯定义（spec 中零实现）\n- [ ] 新增 `.test.ts` ≥ 90% 分支覆盖\n- [ ] `pnpm test` 全通过\n- [ ] `pnpm build` 零 TypeScript 错误\n\n### Labels\n`protocol`, `runtime`, `multi-tenant`, `P0`"
+}

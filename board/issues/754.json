@@ -1,0 +1,33 @@
+{
+  "number": 754,
+  "kind": "pull_request",
+  "title": "Update Spec priority Roadmap (2026.02)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-21T06:12:28Z",
+  "updated_at": "2026-02-21T06:34:58Z",
+  "closed_at": "2026-02-21T06:21:53Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-21T06:21:53Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/754",
+  "body": "Consolidates and reprioritizes the roadmap around ObjectUI frontend needs, with a clear gap analysis of what's already specified vs. what's missing.\n\n### New Priority Roadmap section\n\nAdds a **🎯 Priority Roadmap — February 2026** section with 5 items, each with a status table mapping existing schemas (✅) to remaining gaps (🔴):\n\n- **Comments & Collaboration API** — Feed CRUD, mentions, reactions, OT/CRDT all specified; missing pin/star, notification integration, feed search\n- **Automation Persistence & Scheduling** — Flows, triggers, cron, state machines specified; missing execution log schema, checkpointing, error tracking\n- **File Direct Upload & Resumable Upload** — Presigned URLs, multipart, multi-provider specified; missing resume tokens, progress tracking, file validation\n- **Streaming Data Export & Batch Ops** — Batch CRUD, pagination, mapping specified; missing streaming export endpoints, dedup, scheduled jobs\n- **API Discovery & Capabilities** — Service status, routing, metadata specified; missing capability descriptors, versioning, rate limits\n\n### Cleanup\n\n- Completed phases (1, 2, 5) collapsed into `<details>` blocks with one-line result summaries\n- Versioning plan updated: v3.1 now leads with ObjectUI priorities; v3.2/v3.3 drop already-shipped items (service-realtime, service-i18n, service-automation)\n- Header date → 2026-02-21; Phase 5 ToC entry corrected to \"✅ Complete\"\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>更新 Spec 项目的优先 Roadmap（2026.02）</issue_title>\n> <issue_description>清理合并现有roadmap，简化已完成的部分。\n> \n> 优先完成前端开发需要的API和client\n> \n> https://github.com/objectstack-ai/objectui/blob/main/ROADMAP.md\n> \n> ## 最新 Spec 优先级 Roadmap（2026年2月）\n> \n> ### 1. 支持 ObjectUI 的 Comments 与 Collaboration API\n> - 新增 comments schema，支持 record comments、@mention、activity feed 与 changelog。\n> - 定义 RESTful/GraphQL 协议，覆盖 create/list/update/delete、search、pin/star/comment notification。\n> - 兼容 protocol v3.0+，可扩展到 plugin。\n> \n> ### 2. Automation 持久化与调度规范\n> - 新增 automation schema，支持多阶段触发器（record, field, cron）与 action pipeline（webhook, email, update, create, delete, notification）。\n> - 定义 executionLog/history 存储协议，支持执行日志与错误追踪。\n> - 内置 cron/调度表达式与 ConflictResolution 标准。\n> \n> ### 3. 文件直传与断点续传协议\n> - 新增 CloudFile/PresignedUrl schema，支持 S3/Azure/GCS 等云存储文件直传。\n> - ��义 chunked upload、断点续传协议，保证大文件安全上传。\n> - 兼容 mobile/file picker 与 browser fallback。\n> \n> ### 4. 数据流式导出与批量操作优化\n> - 新增 Cursor/Pagination 协议用于大数据批量导入导出。\n> - 加强 import validation 与 deduplication，支持 template-based mapping。\n> - 支持 scheduled export 作业与 export job status 查询。\n> \n> ### 5. API 能力声明与服务发现标准\n> - 强化 discovery 中的 capabilities 声明（comments, automation, search, cron, files, analytics）。\n> - 定义服务发现动态能力报告，便于前端智能适配。\n> \n> ---\n> \n> > 建议：与 ObjectUI/client/runner/console 同步 Roadmap，优先推动 v3.1 协议以补齐核心平台能力。\n> \n> **更新时间**：2026-02-21\n> **负责人**：@hotlong\n> </issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#753\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

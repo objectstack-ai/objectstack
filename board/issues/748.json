@@ -1,0 +1,35 @@
+{
+  "number": 748,
+  "kind": "issue",
+  "title": "Spec UI配置对齐Airtable Interface能力，补全ListView/Page等声明式功能",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-20T02:05:58Z",
+  "updated_at": "2026-02-20T04:25:30Z",
+  "closed_at": "2026-02-20T04:25:30Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/748",
+  "body": "### 问题背景\n评估 Airtable Interface 风格的客户列表界面，发现 Spec UI 配置存在与实际业务需求（如截图所示）差距。当前 ListViewSchema/PageSchema 仅部分覆盖，未能满足所有高级可视化、用户定制、操作与布局能力需求。\n\n<img alt=\"客户列表 Airtable 配置截图\" width=\"2732\" src=\"https://github.com/user-attachments/assets/b4a81a35-e664-44f0-9076-da6a1b1979b8\" />\n\n---\n\n### 主要功能差距（Gap Analysis）\n1. **Page-level Interface 配置缺失：** 需支持 title、levels、filter by、appearance、user actions、advanced（如打印）等声明式页面级配置。\n2. **Tabs（标签页）显式配置：** 缺少 tabs 排序、图标、默认选中、用户可添加等能力。\n3. **User Action 配置不足：** 排序、搜索、过滤、行高切换、添加记录入口、按钮开放性需更强声明式支持。\n4. **Record Count 显示配置缺失：** 底部记录数显示 configurable。\n5. **Add Record 入口配置缺失：** 添加记录入口（位置、模式、是否通过表单等）需可配置。\n6. **Visualizations 白名单缺失：** 控制用户可切换的可视化类型列表。\n\n---\n\n### 改进建议\n- 在 `view.zod.ts` 或新增 InterfacePageSchema 补充：\n  - `userActions` 配置对象（sort/search/filter/rowHeight/addRecordForm/buttons）。\n  - `appearance` 配置对象（showDescription, allowedVisualizations）。\n  - `tabs` 数组和 ViewTabSchema，支持多 tab 排序、图标、pin 等。\n  - `showRecordCount` 布尔开关。\n  - `addRecord` 配置对象。\n  - `allowPrinting` 高级功能。\n- 更强的 PageSchema 与 ListViewSchema 配合，支持 Airtable Interface 级细粒度声明式配置。\n\n---\n\n### 优先级与后续\n- P0：User Actions、Appearance、Visualizations 支持（与业务交互强相关）\n- P1：Tabs、Add Record、Record Count\n- P2：Printing、高级操作\n\n完成后需补全测试，更新 ROADMAP.md\n\n---\n\n### 参考\n- Screenshot（Airtable Interface parity）\n- 源文件：packages/spec/src/ui/view.zod.ts, page.zod.ts\n\n---\n\n> 本 Issue 旨在推动 Spec UI Schema 的接口声明能力与实际业务需求对齐，实现与 Airtable Interface 同等交互/配置能力，为 Studio 及业务应用提供更完整 UI 元数据支持。\n\n---\n\n**相关 Roadmap/实现后请运行测试并同步 ROADMAP.md。**\n"
+}

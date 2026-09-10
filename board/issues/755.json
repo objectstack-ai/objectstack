@@ -1,0 +1,33 @@
+{
+  "number": 755,
+  "kind": "pull_request",
+  "title": "feat: complete February 2026 Priority Roadmap protocol schemas",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-21T06:23:33Z",
+  "updated_at": "2026-02-21T06:55:36Z",
+  "closed_at": "2026-02-21T06:49:51Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-21T06:49:51Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/755",
+  "body": "Implements all remaining protocol specifications for the 5 priority areas in the February 2026 roadmap. Moves 17 items from 🔴 to ✅.\n\n### Comments & Collaboration API\n- Added `pinned`/`starred`/`pinnedAt`/`pinnedBy`/`starredAt` to `FeedItemSchema`\n- Pin/Star, SearchFeed, and Changelog API endpoints + contracts in `feed-api.zod.ts`\n- `ChangelogEntrySchema` with field-level audit trail backed by existing `FieldChangeEntrySchema`\n\n### Automation Execution Protocol (`automation/execution.zod.ts` — new)\n- `ExecutionLogSchema` / `ExecutionStepLogSchema` — step-by-step flow execution history\n- `ExecutionErrorSchema` — structured error tracking with severity and diagnostics context\n- `CheckpointSchema` — pause/resume state capture for wait nodes, screens, crash recovery\n- `ConcurrencyPolicySchema` — max concurrent, lock scope (global/per_record/per_user), conflict strategy\n- `ScheduleStateSchema` — runtime schedule persistence (next-run, pause/resume, consecutive failures)\n\n### Chunked Upload Protocol (`api/storage.zod.ts`)\n- `FileTypeValidationSchema` — whitelist/blacklist MIME + extension validation\n- `InitiateChunkedUpload` → `UploadChunk` → `CompleteChunkedUpload` flow with resume tokens\n- `UploadProgressSchema` — real-time upload progress tracking\n\n### Data Export & Import Protocol (`api/export.zod.ts` — new)\n- `CreateExportJobRequestSchema` / `ExportJobProgressSchema` — async streaming export with CSV/JSON/XLSX/Parquet\n- `ImportValidationConfigSchema` — strict/lenient/dry_run modes with deduplication strategies\n- `ExportImportTemplateSchema` — reusable field mapping templates with transforms\n- `ScheduledExportSchema` — cron-based recurring exports with email/storage/webhook delivery\n\n### API Discovery Enhancements (`api/discovery.zod.ts`)\n- `ServiceInfoSchema`: added `version` and `rateLimit` (requests/min, burst, retry-after)\n- `DiscoverySchema`: added `capabilities` (hierarchical feature descriptors) and `schemaDiscovery` (OpenAPI/GraphQL/JSON Schema URLs)\n\n### Tests\n116 new tests across 5 files. 208 test files, 5921 tests total — all green.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 完成 roadmap开发\n> \n> Priority Roadmap — February 2026\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n🔒 GitHub Advanced Security automatically protects Copilot coding agent pull requests. You can protect all pull requests by enabling Advanced Security for your repositories. [Learn more about Advanced Security.](https://gh.io/cca-advanced-security)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 566,
+  "kind": "pull_request",
+  "title": "feat(client): Complete @objectstack/client to cover full spec API surface",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-09T08:33:54Z",
+  "updated_at": "2026-02-09T09:09:39Z",
+  "closed_at": "2026-02-09T09:01:42Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-09T09:01:42Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/566",
+  "body": "Client SDK covered ~51% of the spec protocol (26/51 methods across 7/14 domains). This adds the remaining namespaces and query builder enhancements to reach full spec compliance.\n\n### New namespaces\n\n- **`permissions`** — `check`, `getObjectPermissions`, `getEffectivePermissions`\n- **`realtime`** — `connect`, `disconnect`, `subscribe`, `unsubscribe`, `setPresence`, `getPresence`\n- **`workflow`** — `getConfig`, `getState`, `transition`, `approve`, `reject`\n- **`views`** — `list`, `get`, `create`, `update`, `delete`\n- **`notifications`** — `registerDevice`, `unregisterDevice`, `getPreferences`, `updatePreferences`, `list`, `markRead`, `markAllRead`\n- **`ai`** — `nlq`, `chat`, `suggest`, `insights`\n- **`i18n`** — `getLocales`, `getTranslations`, `getFieldLabels`\n\n### Auth enhancements\n\n- `auth.register(request)` — user registration with auto-token-set\n- `auth.refreshToken(refreshToken)` — token refresh with auto-token-set\n\n### QueryBuilder / FilterBuilder enhancements\n\n- **QueryBuilder**: `.expand(relation, subQuery?)`, `.search(query, opts?)`, `.cursor(cursor)`, `.distinct()`\n- **FilterBuilder**: `.between(field, min, max)`, `.contains(field, value)`, `.startsWith(field, value)`, `.endsWith(field, value)`, `.exists(field)`\n\n### Usage\n\n```typescript\nconst client = new ObjectStackClient({ baseUrl: 'https://api.example.com', token });\n\n// Permissions\nconst { allowed } = await client.permissions.check({ object: 'order', action: 'delete', recordId: '123' });\n\n// Workflow\nawait client.workflow.transition({ object: 'order', recordId: '123', transition: 'submit' });\n\n// Views CRUD\nconst views = await client.views.list('customer', 'list');\n\n// QueryBuilder with new methods\nconst query = createQuery<Customer>('customer')\n  .select('name', 'email')\n  .where(f => f.contains('name', 'alice').between('age', 18, 65))\n  .expand('orders', { fields: ['total', 'status'] })\n  .search('premium')\n  .distinct()\n  .build();\n```\n\nAll methods follow existing SDK patterns: `getRoute()` → `fetch()` → `unwrapResponse()`. Request/response types imported from `@objectstack/spec/api` and re-exported for consumers. 50 unit tests (44 new), all passing.\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

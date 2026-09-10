@@ -1,0 +1,33 @@
+{
+  "number": 648,
+  "kind": "pull_request",
+  "title": "[WIP] Complete development of DX_ROADMAP.md",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-12T12:25:06Z",
+  "updated_at": "2026-02-12T15:33:54Z",
+  "closed_at": "2026-02-12T14:14:17Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-12T14:14:17Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/648",
+  "body": "- [x] **NEW REQUIREMENT: Migrate non-auto-generated docs out of references/**\n  - [x] Identified 16 hand-written files + contracts docs in auto-generated `content/docs/references/`\n  - [x] Moved all hand-written files to `content/docs/guides/` (safe from build-docs.ts deletion)\n  - [x] Removed 18 stale auto-generated orphan files (hub/, cross-category duplicates)\n  - [x] Updated `guides/meta.json` with new pages and `contracts/` subdirectory\n  - [x] Cleaned up all category `meta.json` files in `references/`\n  - [x] Added auto-generation warning to `build-docs.ts` header + generated file template\n  - [x] Updated `.cursorrules` with documentation directory convention warning\n  - [x] Updated `.cursorrules.d/objectstack.prompt.md` with same warning\n  - [x] Stored memory about this convention for future agents\n- [x] **Phase 1** — First Five Minutes\n  - [x] Implemented `create-objectstack` CLI wizard package with 3 templates (minimal-api, full-stack, plugin)\n  - [ ] Record 5-minute getting-started video (requires recording, not code)\n- [x] **Phase 3** — Documentation gaps\n  - [x] Field validation rules per type documentation (`guides/field-validation-rules.mdx`)\n  - [x] Backward compatibility policy documentation (`guides/backward-compatibility.mdx`)\n  - [x] Added `defineStudioPlugin` guide to `plugin-development.mdx`\n- [x] **Phase 4** — CLI & Tooling DX (all code items complete)\n  - [x] `objectstack diff` with breaking change detection\n  - [x] Enhanced `objectstack doctor` (circular deps, missing tests, deprecated usage, orphan views, deprecation scanner)\n  - [x] `objectstack lint` for naming conventions\n  - [x] `objectstack explain` for schema documentation\n  - [x] VSCode extension scaffold with autocomplete, snippets, hover provider\n  - [x] JSON Schema for `objectstack.config.ts` + `generate schema` CLI command\n  - [x] `objectstack generate client` for typed SDK generation\n  - [x] `objectstack generate migration` for schema diffs\n  - [x] `objectstack codemod v2-to-v3` for automated migration\n  - [x] Deprecation scanner added to `objectstack doctor --scan-deprecations`\n- [x] **Phase 5** — Studio as DX Hub (all components created)\n  - [x] SchemaDesigner — visual object builder with field editor\n  - [x] FieldTypePicker — searchable field type picker with categories\n  - [x] RelationshipVisualizer — SVG-based ERD diagram\n  - [x] QueryBuilder — visual query builder with live JSON preview\n  - [x] RequestHistory — API request/response history with localStorage\n  - [x] CodeExporter — \"Export as Code\" for objects/views/flows\n  - [x] CodeImporter — \"Import from Code\" with parsing\n  - [x] LiveSyncStatus — file system sync status indicator\n- [ ] **Phase 6** — Ecosystem & Community (not started — community/infra items)\n- [x] Updated DX_ROADMAP.md checklist items\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

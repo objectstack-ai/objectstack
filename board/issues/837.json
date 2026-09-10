@@ -1,0 +1,33 @@
+{
+  "number": 837,
+  "kind": "pull_request",
+  "title": "Add action handler examples, modal cross-reference validation, and action.mdx doc sync",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-01T07:48:03Z",
+  "updated_at": "2026-03-01T08:42:24Z",
+  "closed_at": "2026-03-01T08:34:42Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-01T08:34:42Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/837",
+  "body": "Follow-up to #833: fills three gaps — dangling handler references in examples, stale docs, and missing modal target validation.\n\n### Modal cross-reference validation (`stack.zod.ts`)\n\n- `validateCrossReferences()` now checks `action.type=\"modal\"` targets against the `pages[]` collection, mirroring the existing `flow` → `flows[]` pattern\n- Skips when `pageNames.size === 0` (plugin may provide them)\n\n```typescript\n// Validate modal-type actions reference a defined page\nif (action.type === 'modal' && action.target && pageNames.size > 0 && !pageNames.has(action.target)) {\n  errors.push(\n    `Action '${action.name}' references page '${action.target}' (via modal target) which is not defined in pages.`,\n  );\n}\n```\n\n### Example handler implementations (18/18 actions covered)\n\nComplete handler coverage across both example apps with full registration lifecycle:\n\n- **app-todo** (8/8 actions): `task.handlers.ts` — 6 script handlers (`completeTask`, `startTask`, `cloneTask`, `massCompleteTasks`, `deleteCompletedTasks`, `exportTasksToCSV`) + 2 modal handlers (`deferTask`, `setReminder`)\n- **app-crm** (10/10 actions): `handlers/` directory with lead (`convertLead`, `addToCampaign`), opportunity (`cloneRecord`, `massUpdateStage`), case (`escalateCase`, `closeCase`), contact (`markAsPrimaryContact`, `sendEmail`), and global (`exportToCSV`, `logCall`) handlers\n- **`register-handlers.ts`** for both apps — demonstrates the full `engine.registerAction()` registration lifecycle with architecture diagrams showing metadata → handler → registration flow\n- **`objectstack.config.ts`** updated in both apps with `onEnable` lifecycle hook that wires handler registration at runtime\n- Action barrels (`index.ts`) export metadata definitions only (safe for `Object.values()` → `defineStack()`); handlers are in separate paths\n\n### Documentation (`action.mdx`)\n\n- `execute` field marked **deprecated** with migration callout\n- Added target binding rules table (required vs optional per action type)\n- Added cross-reference validation section\n- Added platform comparison table (Salesforce, ServiceNow, Power Platform)\n\n### Tests\n\n- 3 new tests: detect undefined page, pass with defined page, skip when no pages defined\n- Full suite: 6557/6557 passing\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>补充Action示例Handler实现、.mdx文档同步和Modal交叉引用校验（833后续）</issue_title>\n> <issue_description># 续上 [#833](https://github.com/objectstack-ai/spec/issues/833)\n> \n> ### 尚待完善细节（合并为一新issue可子任务化执行）：\n> \n> **1. 示例层：Handler注册/实现**\n> - [ ] 在examples/app-todo和app-crm的所有action handler相关actions，补充实际的handler函数实现与注册。避免悬空字符串引用，比如completeTask/startTask/cloneTask等应有示例方法体。\n> \n> **2. 文档层：参考文档与schema注释同步**\n> - [ ] 重新生成并发布含target新规范的.mdx文档；execute字段明确为deprecated，示例全改target并与代码一致。\n> - [ ] 在文档/平台对标部分补充与Salesforce、ServiceNow、Power Platform 的action绑定机制对比。\n> \n> **3. 校验层扩展：Modal类型引用合规性**\n> - [ ] 参考action→flow的交叉引用校验，增加action.type=\"modal\"时target(弹框名)的存在性检查；若modal声明表或规范未完善，优先给出后续设计方案/位置。\n> \n> ---\n> </issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#836\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

@@ -1,0 +1,30 @@
+{
+  "number": 838,
+  "kind": "issue",
+  "title": "Protocol: Add DetailView display hints — hideEmpty, primaryField, summaryFields, collapseWhenEmpty",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-01T07:57:20Z",
+  "updated_at": "2026-03-01T07:58:23Z",
+  "closed_at": "2026-03-01T07:58:23Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/838",
+  "body": "\n\n### Background\n\nBased on a platform-wide DetailView UX audit (see cross-repo issue in objectstack-ai/objectui), the current spec schemas lack several display-hint properties that renderers need to deliver intelligent default behavior. The protocol already has rich layout primitives (`FormSectionSchema`, `RecordDetailsProps`, `RecordActivityProps`, `ResponsiveConfigSchema`), but is missing a few critical fields that prevent renderers from optimizing empty-state, header, and activity panel behavior without hardcoding.\n\nThis issue covers **protocol-only** changes. The corresponding renderer consumption work is tracked in objectstack-ai/objectui.\n\n### Changes Required\n\n#### 1. `FormSectionSchema` — add `hideEmpty` + `emptyPlaceholder`\n\n**File:** `packages/spec/src/ui/view.zod.ts`\n\nCurrent:\n```typescript\nexport const FormSectionSchema = z.object({\n  label: I18nLabelSchema.optional(),\n  collapsible: z.boolean().default(false),\n  collapsed: z.boolean().default(false),\n  columns: z.enum(['1', '2', '3', '4']).default('2'),\n  fields: z.array(z.union([z.string(), FormFieldSchema])),\n});\n```\n\nAdd:\n```typescript\n  hideEmpty: z.boolean().optional()\n    .describe('Hide fields with null/undefined/empty string values'),\n  emptyPlaceholder: I18nLabelSchema.optional()\n    .describe('Placeholder text for empty values when hideEmpty is false (default: \"—\")'),\n```\n\nAlso consider adding `'auto'` to the `columns` enum so renderers can infer optimal column count:\n```typescript\n  columns: z.enum(['auto', '1', '2', '3', '4']).default('2'),\n```\n\n#### 2. `RecordDetailsProps` — add `hideEmpty`, `primaryField`, `summaryFields`\n\n**File:** `packages/spec/src/ui/component.zod.ts`\n\nAdd to existing `RecordDetailsProps`:\n```typescript\n  hideEmpty: z.boolean().default(false)\n    .describe('Hide fields with empty values in detail display'),\n  primaryField: z.string().optional()\n    .describe('Field name to use as record title in header (e.g. \"name\"). Renderer falls back to first text field or objectName.'),\n  summaryFields: z.array(z.string()).max(5).optional()\n    .describe('Key fields to render as badges/chips in the header area (e.g. [\"status\", \"priority\"])'),\n```\n\n#### 3. `RecordActivityProps` — add `collapseWhenEmpty`, `emptyActions`\n\n**File:** `packages/spec/src/ui/component.zod.ts`\n\nAdd to existing `RecordActivityProps`:\n```typescript\n  collapseWhenEmpty: z.boolean().default(false)\n    .describe('Auto-collapse activity panel when no feed items exist'),\n  emptyActions: z.array(z.string()).optional()\n    .describe('Quick-action IDs to surface when timeline is empty (e.g. [\"log_call\", \"send_email\"])'),\n```\n\n### Tests to Add\n\n**File:** `packages/spec/src/ui/view.test.ts`\n- `FormSectionSchema` accepts `hideEmpty: true`\n- `FormSectionSchema` accepts `emptyPlaceholder` string\n- `FormSectionSchema` accepts `columns: 'auto'`\n- Backward compat: existing schemas without new fields still parse\n\n**File:** `packages/spec/src/ui/component.test.ts`\n- `RecordDetailsProps` accepts `primaryField`, `summaryFields`, `hideEmpty`\n- `RecordActivityProps` accepts `collapseWhenEmpty`, `emptyActions`\n- Backward compat: `RecordDetailsProps.parse({})` still works with defaults\n\n### Documentation Updates\n\n- `content/docs/references/ui/component.mdx` — add new properties to RecordDetailsProps and RecordActivityProps tables\n- `content/docs/protocol/objectui/layout-dsl.mdx` — add `hideEmpty` example in Section Definition\n- `content/docs/guides/metadata/view.mdx` — add best-practice example showing `hideEmpty` + `columns: 'auto'`\n\n### Non-Breaking\n\nAll additions are **optional fields with defaults** — zero impact on existing schema consumers.\n\n### Cross-Repo\n\n- objectstack-ai/objectui will track the renderer consumption of these new properties (cross-repo issue)"
+}

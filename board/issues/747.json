@@ -1,0 +1,33 @@
+{
+  "number": 747,
+  "kind": "pull_request",
+  "title": "feat: implement service-feed package with IFeedService contract and system objects",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-19T18:42:36Z",
+  "updated_at": "2026-02-20T01:32:45Z",
+  "closed_at": "2026-02-20T01:26:18Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-20T01:26:18Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/747",
+  "body": "Feed/Chatter protocol layer exists (`feed.zod.ts`, `feed-api.zod.ts`, `subscription.zod.ts`) but lacks a service implementation and persistent object definitions. This adds `@objectstack/service-feed` following the Plugin + Adapter pattern established by `service-i18n` and `service-realtime`.\n\n### IFeedService Contract (`packages/spec/src/contracts/feed-service.ts`)\n- Feed CRUD: `listFeed`, `createFeedItem`, `updateFeedItem`, `deleteFeedItem`, `getFeedItem`\n- Reactions: `addReaction`, `removeReaction`\n- Subscriptions: `subscribe`, `unsubscribe`, `getSubscription`\n\n### System Object Metadata (`packages/services/service-feed/src/objects/`)\n- `sys_feed_item` — 13 activity types, threading via `parent_id`/`reply_count`, visibility levels\n- `sys_feed_reaction` — Unique constraint on `(feed_item_id, emoji, user_id)`\n- `sys_record_subscription` — Event type + channel arrays, unique per `(object, record_id, user_id)`\n\nAll use `sys_` prefix per #738 naming convention. Objects live in the service package, not in spec/core.\n\n### InMemoryFeedAdapter\n- Cursor-based pagination with stable sort (timestamp + ID tiebreak)\n- Filter modes: `all`, `comments_only`, `changes_only`, `tasks_only`\n- Thread reply count maintenance on create/delete\n- Reaction aggregation with duplicate detection\n- Subscription upsert semantics\n\n### FeedServicePlugin\n- Plugin ID: `com.objectstack.service.feed`, registers as `'feed'` service\n\n```ts\nconst kernel = new ObjectKernel();\nkernel.use(new FeedServicePlugin());\nawait kernel.bootstrap();\n\nconst feed = kernel.getService<IFeedService>('feed');\nawait feed.createFeedItem({\n  object: 'account', recordId: 'rec_123', type: 'comment',\n  actor: { type: 'user', id: 'user_1', name: 'Alice' },\n  body: 'Great progress!',\n});\n```\n\n### Tests\n- 40 unit tests for `InMemoryFeedAdapter` (CRUD, filtering, pagination, threading, reactions, subscriptions, edge cases)\n- 4 contract compliance tests for `IFeedService`\n\n### ROADMAP\n- Added to Phase 4c table, implementation tracker (row 15), and package registry\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>实现 Feed/Chatter 核心服务：service-feed 包开发与业务对象定义</issue_title>\n> <issue_description>### 背景\n> 当前协议层已经定义好 Feed/Chatter 相关的数据协议（feed.zod.ts、feed-api.zod.ts、subscription.zod.ts），但缺少实际可用的服务层实现和持久化支撑。为配合架构最佳实践，需将\"Feed/Chatter\"相关业务对象（如 feed_item、feed_reaction、record_subscription）与其业务服务实现一并放入新的包 `packages/services/service-feed/` 中。\n> \n> ### 目标\n> 1. 新建 `packages/services/service-feed/` 服务包，实现 Feed/Chatter 相关 API 业务逻辑与持久化适配层。\n> 2. 将 Feed/Chatter 的业务对象定义（metadata，包括 sys_feed_item、sys_feed_reaction、sys_record_subscription）放在该服务包内，实现\"协议分包、对象归属服务\"的体系化落地。\n> 3. 系统对象命名需要参考规范，https://github.com/objectstack-ai/spec/issues/738\n> 4. 按照协议和 API Contracts 提供真实可用的 Feed/Chatter 接口，支持评论、字段变更历史、回复、Reaction、订阅等功能。\n> ### 主要任务拆解\n> #### Phase 1: 服务骨架与对象定义\n> - [ ] 新建 `packages/services/service-feed/` 目录与基础结构\n> - [ ] 在 service-feed 包内定义 feed_item、feed_reaction、record_subscription 三大系统业务对象（元数据/metadata）\n> \n> #### Phase 2: 核心业务实现\n> - [ ] 实现 FeedRepository 和 FeedService（含接口契约）\n> - [ ] 完成 API 层 Zod 校验与持久化 CRUD\n> - [ ] 路由注册（通过 RestServer/Dispatcher plugin）映射至 /api/v1/data/:object/:recordId/feed 及相关 endpoints\n> \n> #### Phase 3: 增值特性与兼容\n> - [ ] 支持字段变更自动追踪（event-bus 监听 data.afterUpdate）\n> - [ ] 支持 @mention 理解与通知集成（可选，视是否有 notification/realtime service）\n> - [ ] 实现 reactions、threading、订阅增强\n> \n> #### Phase 4: 测试与文档\n> - [ ] 单元和集成测试\n> - [ ] 示例/文档和用法演示\n> \n> ### 前置条件\n> - data service 对象驱动能力可用（已就绪）\n> - http.server 服务已安装（如 plugin-hono-server）\n> - event-bus 可用性（建议）\n> - 已有 Feed 协议层（feed.zod.ts/feed-api.zod.ts）\n> \n> ### 参考\n> - [Feed/Chatter 协议 issue objectstack-ai/spec#731](https://github.com/objectstack-ai/spec/issues/731)\n> - [`plugin-hono-server`](https://github.com/objectstack-ai/spec/tree/main/packages/plugins/plugin-hono-server)\n> - [`rest-api-plugin`](https://github.com/objectstack-ai/spec/tree/main/packages/rest)\n> - [`service-i18n`](https://github.com/objectstack-ai/spec/tree/main/packages/services/service-i18n)\n> \n> ---\n> > 业务对象（如 feed_item、feed_reaction 等）须在其服务包（service-feed）中定义和分组归属，严禁分散于协议 core/spec 层。\n> > 实现完毕需自动校对/运行测试并在 ROADMAP 标记进度。</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#737\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 616,
+  "kind": "pull_request",
+  "title": "feat(ui): add Airtable-like view customization schemas",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-11T09:25:55Z",
+  "updated_at": "2026-02-11T10:15:21Z",
+  "closed_at": "2026-02-11T09:36:39Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-11T09:36:39Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/616",
+  "body": "The existing `ListViewSchema` lacked several primitives needed for Airtable-style view customization — per-view field visibility/ordering, record grouping, row density, column pinning/summaries, gallery/timeline configs, and view sharing semantics.\n\n### New schemas\n\n- **`RowHeightSchema`** — `compact | short | medium | tall | extra_tall`\n- **`GroupingConfigSchema`** — Multi-level record grouping with per-level sort order and collapse state\n- **`GalleryConfigSchema`** — Cover image field, fit mode, card size, title/visible fields\n- **`TimelineConfigSchema`** — Start/end date fields, group-by, color field, time scale\n- **`ViewSharingSchema`** — `personal | collaborative` ownership with optional lock\n- **`RowColorConfigSchema`** — Color rows by field value with explicit color map\n- **`ColumnSummarySchema`** — Footer aggregation: `count | sum | avg | min | max | count_unique | percent_empty | percent_filled | …`\n\n### Enhanced existing schemas\n\n- **`ListColumnSchema`** — Added `pinned: 'left' | 'right'` (frozen columns) and `summary` (footer aggregation)\n- **`ListViewSchema`** — Added `description`, `sharing`, `rowHeight`, `grouping`, `rowColor`, `hiddenFields`, `fieldOrder`, `gallery`, `timeline`\n\n### Example\n\n```typescript\nconst view: ListView = {\n  name: 'project_tracker',\n  type: 'grid',\n  columns: [\n    { field: 'name', pinned: 'left', sortable: true, width: 250 },\n    { field: 'status', width: 120, summary: 'count_unique' },\n    { field: 'budget', align: 'right', summary: 'sum' },\n  ],\n  rowHeight: 'medium',\n  grouping: {\n    fields: [{ field: 'department', order: 'asc' }],\n  },\n  rowColor: {\n    field: 'status',\n    colors: { on_track: '#22c55e', at_risk: '#f59e0b', blocked: '#ef4444' },\n  },\n  hiddenFields: ['internal_id'],\n  sharing: { type: 'collaborative', lockedBy: 'admin' },\n};\n```\n\n37 new tests added (124 total view tests).\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 603,
+  "kind": "pull_request",
+  "title": "Verify Protocol Optimization Report against codebase and add Sprint-level development plan",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-11T04:12:26Z",
+  "updated_at": "2026-02-11T05:33:14Z",
+  "closed_at": "2026-02-11T04:33:01Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-11T04:33:01Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/603",
+  "body": "Scanned all 113 `.zod.ts` protocol files against the claims in `PROTOCOL_OPTIMIZATION_REPORT.md`. Found 3 P0 items already implemented, multiple incorrect file counts/paths, and re-prioritized the roadmap accordingly.\n\n### Corrections\n\n- **Cursor pagination**: Already in `query.zod.ts` (`cursor: z.record(...)`) — removed from backlog\n- **Plugin registry**: `kernel/plugin-registry.zod.ts` fully implements discovery/validation/install — removed from backlog\n- **Unified query DSL**: `data/query.zod.ts` provides base unified language — demoted to P1 (API adapter layer still needed)\n- **File counts**: 113 files (not 127), `events.zod.ts` 766 lines in `kernel/` (not 772 in `system/`), `logging.zod.ts` 579 (not 682), `metrics.zod.ts` 597 (not 705), `agent.zod.ts` 80 (not 59)\n\n### Confirmed issues\n\n- UI layer has zero i18n integration (despite `system/translation.zod.ts` existing)\n- `websocket.zod.ts` / `realtime.zod.ts` overlap on Presence and Subscription schemas\n- GraphQL Federation: only a comment, no directive schemas\n- Zero disaster recovery / failover schemas\n- `cache.zod.ts` at 71 lines lacks distributed consistency\n\n### Added verification assessment section\n\nTop of document now includes a verification table mapping each original claim → actual codebase state, plus a reasonableness rating for each suggestion with priority adjustments.\n\n### Added concrete development plan (10 Sprints, 3 Phases)\n\n| Phase | Timeline | Sprints | Key deliverables |\n|-------|----------|---------|-----------------|\n| P0 | 2 weeks | 1-2 | UI i18n schema + realtime protocol dedup |\n| P1 | 1-2 months | 3-6 | GraphQL Federation, multi-agent AI, driver refactor, API query adapters |\n| P2 | 3-6 months | 7-10 | Disaster recovery, cache enhancement, external-lookup retry, events.zod.ts modularization |\n\nEach sprint specifies files to create/modify, schema names, estimated effort, and deliverables.\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

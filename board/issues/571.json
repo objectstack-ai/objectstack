@@ -1,0 +1,33 @@
+{
+  "number": 571,
+  "kind": "pull_request",
+  "title": "docs: sync client-sdk guide with latest source code",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-09T13:57:55Z",
+  "updated_at": "2026-02-09T14:37:35Z",
+  "closed_at": "2026-02-09T14:28:25Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-09T14:28:25Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/571",
+  "body": "The `/docs/guides/client-sdk` guide had drifted significantly from the actual `@objectstack/client` and `@objectstack/client-react` source code — wrong method signatures, missing namespaces, and fictional React hooks.\n\n### Protocol Coverage\n- Added missing `storage` (2 methods) and `permissions` (3 methods) namespaces; 13→15 total\n- Fixed `analytics` method count: 2→3 (was missing `explain()`)\n\n### API Signature Fixes\n- `analytics.getMeta()` → `analytics.meta(cube)` — requires cube param\n- `packages.install({ manifest: {...} })` → `packages.install({...})` — manifest is the first arg directly\n- `notifications.list({ unreadOnly })` → `notifications.list({ read })` — correct param name\n- `realtime.setPresence({ status })` → `realtime.setPresence(channel, state)` — two args\n- Added missing methods to examples: `realtime.unsubscribe/getPresence`, `notifications.unregisterDevice/getPreferences/updatePreferences`\n\n### Query Builder\nRewrote to match actual fluent API:\n```typescript\n// Before (wrong)\ncreateFilter().and('industry', '=', 'Technology').build()\n\n// After (matches source)\ncreateFilter().equals('industry', 'Technology').build()\n\n// QueryBuilder: .where() takes a callback, .orderBy() takes field + direction\ncreateQuery('account')\n  .select('name', 'revenue')\n  .where((f) => { f.equals('industry', 'Technology'); })\n  .orderBy('revenue', 'desc')\n  .build();\n```\n\n### ClientConfig\n- Removed non-existent `timeout`; added actual `logger` and `debug` options\n\n### React Hooks\n- Replaced fictional `useFind`/`useGet`/`useObjectStack` with actual exports: `useQuery`, `useMutation`, `usePagination`, `useInfiniteQuery`, `useObject`, `useView`, `useFields`, `useMetadata`, `ObjectStackProvider`, `useClient`\n- Added hooks reference table\n\n### Cleanup\n- Removed broken link to non-existent `CLIENT_SPEC_COMPLIANCE_CN.md`\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

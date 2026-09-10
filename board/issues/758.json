@@ -1,0 +1,33 @@
+{
+  "number": 758,
+  "kind": "issue",
+  "title": "storage api",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-21T07:01:19Z",
+  "updated_at": "2026-02-21T08:25:27Z",
+  "closed_at": "2026-02-21T08:25:27Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/758",
+  "body": "## 🎯 目标\n\n扩展 Storage API，支持 S3/Azure/GCS presigned URL 直传和大文件断点续传。\n\n## 📊 当前状态\n\n| 层级 | 状态 | 说明 |\n|------|------|------|\n| Client SDK | ���️ | `client.storage.upload()` 已有 presigned flow 骨架，但无 chunked upload |\n| Service Impl | ⚠️ | `service-storage` 有 Local FS + S3 skeleton |\n\n## 📋 Tasks\n\n- [ ] 在 `spec/src/api/` 新增 `ChunkedUploadInitRequest/Response` schema（含 chunkSize、totalChunks）\n- [ ] 新增 `ChunkedUploadPartRequest/Response` schema（含 partNumber、uploadId）\n- [ ] 新增 `ChunkedUploadCompleteRequest/Response` schema\n- [ ] 在 `IStorageService` contract 中新增 chunked upload 方法\n- [ ] 在 `service-storage` 中实现 S3 multipart upload adapter\n- [ ] 在 Client SDK 中扩展 `client.storage`：\n  - `getPresignedUrl()` — 获取直传 URL\n  - `initChunkedUpload()` — 初始化分片上传\n  - `uploadPart()` — 上传分片\n  - `completeChunkedUpload()` — 完成分片上传\n  - `resumeUpload()` — 断点续传\n- [ ] 编写测试\n\n## 🔗 关联\n\n- 阻塞 ObjectUI Roadmap P1.2（Cloud storage + Upload resume）\n- Parent: objectstack-ai/spec#753"
+}

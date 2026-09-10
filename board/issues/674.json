@@ -1,0 +1,33 @@
+{
+  "number": 674,
+  "kind": "pull_request",
+  "title": "feat(objectql): upstream @objectql/core functionality into @objectstack/objectql",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-14T03:33:07Z",
+  "updated_at": "2026-02-14T06:43:05Z",
+  "closed_at": "2026-02-14T06:39:26Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-14T06:39:26Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/674",
+  "body": "- [x] Analyze downstream `@objectql/core` package to identify functionality to upstream\n- [x] Analyze current `@objectstack/objectql` package exports\n- [x] Add utility functions (`toTitleCase`, `convertIntrospectedSchemaToObjects`) to `@objectstack/objectql`\n- [x] Add introspection types (`IntrospectedSchema`, `IntrospectedTable`, `IntrospectedColumn`, `IntrospectedForeignKey`)\n- [x] Add `createObjectQLKernel` async factory function to `@objectstack/objectql`\n- [x] Re-export downstream-compatible types and interfaces (`ObjectQLKernelOptions`)\n- [x] Update `@objectstack/objectql` index.ts to export new modules\n- [x] Add 22 tests for utility functions (all passing)\n- [x] Build and verify no regressions (81 pass, 7 pre-existing failures in plugin.integration.test.ts)\n- [x] Add changeset for version bump\n- [x] Code review completed and feedback addressed\n- [x] Security scan (CodeQL) - no alerts\n- [x] Update README with full API docs, exported components, and migration summary\n- [x] Add migration guide (`content/docs/guides/objectql-migration.mdx`) with step-by-step instructions\n- [x] Register migration guide in `content/docs/guides/meta.json`\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

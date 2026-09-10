@@ -1,0 +1,33 @@
+{
+  "number": 631,
+  "kind": "pull_request",
+  "title": "feat(cloud): add developer-portal, marketplace-admin, and app-store protocols",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-12T02:32:04Z",
+  "updated_at": "2026-02-12T03:49:38Z",
+  "closed_at": "2026-02-12T03:47:37Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-12T03:47:37Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/631",
+  "body": "- [x] Analyze existing protocols (marketplace, kernel, package registry, upgrade, customization)\n- [x] Create `cloud/developer-portal.zod.ts` — Developer Portal Protocol (PublisherProfile, release channels, listing CRUD, publishing analytics)\n- [x] Create `cloud/marketplace-admin.zod.ts` — Marketplace Administration Protocol (review workflow, curation, governance, platform analytics)\n- [x] Create `cloud/app-store.zod.ts` — App Store (Customer) Protocol (reviews/ratings, discovery/recommendations, subscriptions, installed apps)\n- [x] Refactor: Add `ApiKeySchema` to Identity module following better-auth API key plugin pattern\n- [x] Refactor: Remove duplicate auth/org schemas from developer-portal.zod.ts — use Identity module instead\n- [x] Refactor: Add `PublisherProfileSchema` linking Identity.Organization to marketplace publisher\n- [x] Update all tests — 5041 tests passing across 190 files\n- [x] Code review — clean\n- [x] Security scan (CodeQL) — no alerts\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 539,
+  "kind": "pull_request",
+  "title": "Migrate CRM documentation to developer guide following fumadocs conventions",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-06T08:35:46Z",
+  "updated_at": "2026-02-06T11:04:07Z",
+  "closed_at": "2026-02-06T10:56:28Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-06T10:56:28Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/539",
+  "body": "Migrated English documentation from `examples/app-crm/docs` to `content/docs/developer` as a structured developer guide.\n\n## Changes\n\n**File migrations** (all converted to `.mdx` with fumadocs frontmatter):\n- `README.md` → `index.mdx` - CRM application overview\n- `01-data-modeling.md` → `data-modeling.mdx` - Object schema, field types, relationships\n- `02-business-logic.md` → `business-logic.mdx` - Validations, workflows, triggers, formulas\n- `05-security.md` → `security.mdx` - Profiles, permissions, sharing rules\n- `08-ai-capabilities.md` → `ai-capabilities.mdx` - AI agents, RAG pipelines\n- `STANDARDS.md` → `standards.mdx` - Development conventions\n\n**Navigation structure**:\n- Added `content/docs/developer/meta.json` defining page order\n- Updated root `content/docs/meta.json` to include developer section\n\n**Link normalization**:\n- Stripped numerical prefixes from all filenames (`01-`, `02-`, etc.)\n- Updated internal references to use extension-less paths (`./data-modeling` vs `./01-data-modeling.md`)\n\nBuild verified: all pages generated successfully at `/en/docs/developer/*`\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> examples/crm 中的文档全部用英文，迁移到官网文档，放到 content/docs/developer 下合适的栏目中，按照fumadocs规范，文件名也不应该有数字\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 826,
+  "kind": "issue",
+  "title": "【严重缺陷】memory-driver 在 serverless (Vercel) 环境下默认数据持久化策略导致数据静默丢失",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-02-27T11:30:08Z",
+  "updated_at": "2026-02-27T17:51:34Z",
+  "closed_at": "2026-02-27T17:51:34Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/826",
+  "body": "## Background\nThe current memory-driver persistence mechanism causes critical hidden failures on Vercel and other serverless function platforms:\n- Default persistence chooses file-system adapter, which is not safe or persistent in a serverless environment.\n- Read-only paths or short-lived instances lead to complete data loss.\n- Data is not shared across concurrent function instances.\n- Dirty-flag delayed write approach cannot guarantee consistency.\n\n## Impact\nWhen deployed on serverless platforms like Vercel, all written data will be lost with no warning or error. All writable use cases are affected.\n\n## Fix recommendations\n1. Auto-detect runtime (serverless/edge/node/browser) in the driver. If serverless detected, disable file persistence and display prominent warning.\n2. Update documentation and schema docs to clearly warn about incompatibility in serverless context; instruct users to use `{ persistence: false }` or supply custom adapter.\n3. Add out-of-box config option for serverless-safe setup, providing hooks/samples for Upstash/KV adapters (hooks only, no implementation required).\n4. Ensure auto mode never triggers file-system adapter in serverless.\n\n## Suggested schedule\n- P0: Complete runtime detection and warning + docs update.\n- P1: Custom adapter config guidance.\n\n---\nPS: driver-turso should be a separate tracked task, not included in this patch.\n\n---\nRelevant code paths:\n- packages/plugins/driver-memory/src/memory-driver.ts\n- packages/plugins/driver-memory/src/persistence/file-adapter.ts\n- packages/spec/src/data/driver/memory.zod.ts\n"
+}

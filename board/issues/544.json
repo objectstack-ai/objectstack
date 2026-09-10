@@ -1,0 +1,33 @@
+{
+  "number": 544,
+  "kind": "pull_request",
+  "title": "Complete Phase 4 of @objectstack/spec Development Plan",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-08T03:13:33Z",
+  "updated_at": "2026-02-08T04:06:28Z",
+  "closed_at": "2026-02-08T04:00:34Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-08T04:00:34Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/544",
+  "body": "Completes all remaining Phase 4 (Completeness & Polish) tasks from `DEVELOPMENT_PLAN.md`, bringing the spec package to its v1.2.0 target state.\n\n### z.input<> type exports (4.2)\n- Added 62 `z.input<>` exports across 17 files for all schemas using `.default()` or `.transform()`\n- Enables consumers to omit defaulted fields when constructing config objects\n\n```typescript\nexport type HttpServerConfig = z.infer<typeof HttpServerConfigSchema>;\nexport type HttpServerConfigInput = z.input<typeof HttpServerConfigSchema>;\n```\n\n### .describe() coverage (4.3)\n- Added field-level descriptions to 9 under-documented files: `message-queue`, `compliance`, `search-engine`, `migration`, `translation`, `cache`, `encryption`, `masking`, `plugin-structure`\n- Total annotations: 5,026 → 5,341\n\n### Factory pattern unification (4.5)\n- Fixed `App.create()` to use `AppSchema.parse(config)` instead of identity passthrough, matching `Dashboard`/`Action`/`Report` pattern\n\n### Industry-standard fields (4.6)\n- **data/field.zod.ts**: `trackFeedHistory`, `caseSensitive`, `autonumberFormat`\n- **data/object.zod.ts**: `keyPrefix`\n- **data/datasource.zod.ts**: `healthCheck`, `retryPolicy`\n- **data/hook.zod.ts**: `description`, `retryPolicy`, `timeout`\n- **ui/view.zod.ts** (ListView): `rowActions`, `bulkActions`, `virtualScroll`, `conditionalFormatting`, `inlineEdit`, `exportOptions`\n- **ui/dashboard.zod.ts**: `globalFilters`\n- **ui/action.zod.ts**: `disabled`, `shortcut`, `bulkEnabled`, `timeout`\n\n### Deprecation markers (4.7)\n- Added proper `@deprecated` JSDoc to `encryption` field in `field.zod.ts`\n\n### Barrel export fix (4.9)\n- Removed duplicate `auth.zod`/`storage.zod` re-exports in `api/index.ts`\n\n### Final metrics\n\n| Metric | Original | Final |\n|--------|----------|-------|\n| `z.any()` | 397 | 9 |\n| `z.unknown()` | 8 | 343 |\n| `.describe()` | 5,026 | 5,341 |\n| `z.input<>` exports | 0 | 122 |\n| JSON schemas generated | — | 1,207 |\n| Tests | 3,074 pass | 3,074 pass |\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

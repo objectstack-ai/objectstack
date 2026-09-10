@@ -1,0 +1,33 @@
+{
+  "number": 613,
+  "kind": "pull_request",
+  "title": "feat(ui): add animation, notification, dnd protocols + extend ARIA coverage",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-11T08:17:22Z",
+  "updated_at": "2026-02-11T09:53:55Z",
+  "closed_at": "2026-02-11T08:51:28Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-11T08:51:28Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/613",
+  "body": "Continues UI protocol optimization per PROTOCOL_OPTIMIZATION_REPORT.md. Closes gaps in the industry comparison (animation/motion, notifications, drag-and-drop) and extends ARIA accessibility coverage.\n\n### New protocol files\n\n- **`animation.zod.ts`** — Motion design system: 9 transition presets, 6 easing functions, 7 animation triggers, component/page transition configs, `prefers-reduced-motion` support\n- **`notification.zod.ts`** — Toast/snackbar/banner/alert/inline notifications with severity, positioning, auto-dismiss, action buttons\n- **`dnd.zod.ts`** — Drag-and-drop: drag handles, drop effects, axis/bounds constraints, grid snapping, sortable lists, touch delay\n\n### ARIA accessibility extensions\n\n- `view.zod.ts` — `AriaPropsSchema` added to `ListViewSchema` and `FormViewSchema`\n- `app.zod.ts` — `AriaPropsSchema` added to `AppSchema`\n- Coverage: 7/14 → 9/17 UI files\n\n### Tests\n\n- 3 new test files (58 test cases)\n- Full suite: 181 files, 4,714 tests passing\n\n```typescript\n// animation.zod.ts\nexport const MotionConfigSchema = z.object({\n  defaultTransition: TransitionConfigSchema.optional(),\n  pageTransitions: PageTransitionSchema.optional(),\n  componentAnimations: z.record(z.string(), ComponentAnimationSchema).optional(),\n  reducedMotion: z.boolean().default(false),\n  enabled: z.boolean().default(true),\n});\n\n// notification.zod.ts\nexport const NotificationSchema = z.object({\n  type: NotificationTypeSchema.default('toast'),\n  severity: NotificationSeveritySchema.default('info'),\n  title: I18nLabelSchema.optional(),\n  message: I18nLabelSchema,\n  duration: z.number().optional(),\n  dismissible: z.boolean().default(true),\n  actions: z.array(NotificationActionSchema).optional(),\n  position: NotificationPositionSchema.optional(),\n});\n```\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

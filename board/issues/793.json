@@ -1,0 +1,33 @@
+{
+  "number": 793,
+  "kind": "pull_request",
+  "title": "feat(system): ISO 27001:2022 compliance schemas — incident response, supplier security, training, audit governance",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-23T11:42:10Z",
+  "updated_at": "2026-02-23T13:04:32Z",
+  "closed_at": "2026-02-23T12:44:59Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-23T12:44:59Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/793",
+  "body": "Closes schema gaps identified in the ISO 27001:2022 compliance audit that block certification at the organizational control layer.\n\n### New schemas\n\n- **`system/incident-response.zod.ts`** (A.5.24–A.5.28) — Incident severity/category/status enums, NIST SP 800-61 response phases, notification matrix with escalation chains, org-level response policy\n- **`system/supplier-security.zod.ts`** (A.5.19–A.5.22) — Supplier risk levels, per-requirement compliance assessment, remediation tracking, reassessment policy\n- **`system/training.zod.ts`** (A.6.3) — Course definitions with validity/passing scores, completion records, org training plans with recertification intervals\n\n### Extended schemas\n\n- **`system/compliance.zod.ts`** (A.5.35) — `AuditScheduleSchema` for recurring internal/external audits, `AuditFindingSchema` with severity→remediation→verification lifecycle. `ComplianceConfigSchema` gains `auditSchedules` field.\n- **`system/change-management.zod.ts`** (A.8.32) — `securityImpact` optional field on `ChangeRequestSchema`: risk level, affected data classifications, security reviewer sign-off workflow\n- **`system/security-context.zod.ts`** — Extracted `DataClassificationSchema` and `ComplianceFrameworkSchema` as canonical shared enums, eliminating inline duplication across all security subsystem schemas\n\n```ts\n// Security impact assessment on change requests (A.8.32)\nconst change = ChangeRequestSchema.parse({\n  // ...existing fields...\n  securityImpact: {\n    assessed: true,\n    riskLevel: 'high',\n    affectedDataClassifications: ['pii', 'confidential'],\n    requiresSecurityApproval: true,\n    reviewedBy: 'ciso',\n    reviewedAt: Date.now(),\n  },\n});\n```\n\n### Deduplication with existing protocols\n\n- **`DataClassificationSchema`** (`pii/phi/pci/financial/confidential/internal/public`) — extracted from `security-context.zod.ts` as canonical source; all new schemas import instead of inlining. Also replaced 3 pre-existing inline copies within `security-context.zod.ts` itself.\n- **`ComplianceFrameworkSchema`** (`gdpr/hipaa/sox/pci_dss/ccpa/iso27001`) — extracted from `security-context.zod.ts`; used by both existing `ComplianceAuditRequirementSchema` and new `AuditFindingSchema`/`AuditScheduleSchema`.\n- Verified no conceptual overlap between new and existing schemas:\n  - `incident-response` (incident lifecycle management) ≠ `audit.zod.ts` (automated event logging)\n  - `AuditScheduleSchema` (planned human audits) ≠ `AuditConfigSchema` (automated audit trail config)\n  - `AuditFindingSeveritySchema` (critical/major/minor/observation) ≠ `AuditEventSeverity` (syslog-style debug→emergency)\n  - `IncidentNotificationRuleSchema` (severity-based escalation with pagerduty) ≠ `NotificationConfigSchema` (general delivery channels)\n\n### Infrastructure\n\n- Barrel exports updated in `system/index.ts`\n- 73 new tests across 5 files (6275 total, all passing)\n- `ROADMAP.md` — new Phase 6.5 section tracking ISO 27001 schema coverage\n\n### Not in scope (tracked in roadmap)\n\n- OAuth scope binding on API endpoints (A.8.1)\n- Permission registry refactor from `string[]` to structured enum (A.8.2)\n- Temporary privilege elevation protocol\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>ISO 27001:2022 合规性差距分析与强化计划</issue_title>\n> <issue_description>## 背景\n> 根据对当前协议仓库的全面审计，ObjectStack Protocol 在技术控制与安全治理层具备良好基础（符合大部分 ISO 27001:2022 的技术要求），但在组织管理层面仍存在几项必要补充以满足认证：\n> \n> ## 主要合规差距与建议行动（基于 ISO 27001:2022 最新要求）\n> \n> ### 1. 🔴 高优先级（直接阻碍认证）\n> - [ ] **信息安全事件管理**（A.5.24-5.28）\n>     - 建议：新增 `system/incident-response.zod.ts`，实现安全事件分类、严重性分级、响应流程、通知矩阵等 schema。\n> - [ ] **信息安全独立审查**（A.5.35）\n>     - 建议：在 `compliance.zod.ts` 扩展审计调度、发现追踪 schema，支持独立评估与追踪建议整改。\n> - [ ] **变更管理安全审批**（A.8.32）\n>     - 建议：在 `change-management.zod.ts` 中完善审批流程，增加安全影响评估节点。\n> \n> ### 2. 🟡 中优先级（影响合规完整性）\n> - [ ] **供应商安全评估**（A.5.19-5.22）\n>     - 建议：新增 `system/supplier-security.zod.ts`，记录供应商安全审查与风险评估。\n> - [ ] **OAuth Scope 明确绑定**（A.8.1）\n>     - 建议：API 端点 schema 补充所需 OAuth Scopes。\n> - [ ] **权限注册中心**（A.8.2）\n>     - 建议：将 `manifest.permissions` 从 string[] 改造为注册中心枚举 schema。\n> - [ ] **信息安全培训追踪**（A.6.3）\n>     - 建议：建立培训计划与完成记录 schema。\n> \n> ### 3. 🟢 低优先级（增强项）\n> - 权限委派与临时权限提升协议（如 AWS STS AssumeRole 类库型）；设备信任策略扩展等。\n> \n> ## 支持性依据\n> - `iso27001` 已为一等公民合规框架（`ComplianceAuditRequirementSchema`/`ComplianceEncryptionRequirementSchema`）；相关安全上下文治理已涵盖大部分技术控制指标。\n> - 但组织控制与合规治理（如事件管理、审计调度、供应商、培训）需补全 schema 才能满足 ISO 27001 全面认证。\n> \n> ## 验证方法\n> - 新增/完善 schema 后，全量运行测试用例（已存在 6,202 个通过测试）。\n> - 用例应覆盖 ISO 27001 合规相关的新业务场景与边界。\n> \n> ## 路线建议\n> - 参考本 Issue，分子任务创建 Roadmap 多项子 issue，确保规范修正后组织盖章认证可一次通过。\n> \n> ---\n> _如需详细映射到 Annex A 93 项控制要求清单，可补充子任务。_\n> </issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#792\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n🔒 GitHub Advanced Security automatically protects Copilot coding agent pull requests. You can protect all pull requests by enabling Advanced Security for your repositories. [Learn more about Advanced Security.](https://gh.io/cca-advanced-security)"
+}

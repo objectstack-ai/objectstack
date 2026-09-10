@@ -1,0 +1,33 @@
+{
+  "number": 573,
+  "kind": "pull_request",
+  "title": "Phase 5–6: 100% spec test coverage + resolve all TODOs",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-09T15:59:02Z",
+  "updated_at": "2026-02-10T00:20:42Z",
+  "closed_at": "2026-02-10T00:20:42Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-10T00:20:42Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/573",
+  "body": "- [x] **Phase 5: Spec Test Coverage** — 100% complete (150 test files, 4,196 tests)\n- [x] **Phase 6: TODO Resolution + Runtime Tests** — 0 TODOs, REST/metadata/adapter tests added\n- [x] **Phase 7: Adapter Implementation** — All 3 adapters fully implemented + tested (72 adapter tests)\n- [x] **Phase 8: Deprecation Cleanup** — 4 deprecated fields removed (formula, encryption, geoSpatial, stateMachine)\n- [x] **Build fixes** — Fixed 3 DTS build errors:\n  - `z.ZodTypeDef` → `z.ZodType<T>` (Zod v4 compatibility in rag-pipeline.zod.ts and query.zod.ts)\n  - `StudioPluginContributionsSchema.default({})` → explicit empty defaults (Zod v4 strict typing)\n  - Web Crypto types (RsaHashedImportParams etc.) → inline object types (no DOM lib)\n- [x] **Full monorepo build** — All 20 tasks pass (`pnpm build`)\n- [x] **All tests pass** — spec (4,196), REST (37), metadata (45), Hono (24), NestJS (24), Next.js (24)\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

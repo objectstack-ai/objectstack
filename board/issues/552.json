@@ -1,0 +1,33 @@
+{
+  "number": 552,
+  "kind": "pull_request",
+  "title": "feat(kernel): production hot reload, full plugin isolation, dynamic loading protocol",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-08T12:02:28Z",
+  "updated_at": "2026-02-08T12:35:59Z",
+  "closed_at": "2026-02-08T12:28:00Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-08T12:28:00Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/552",
+  "body": "- [x] Analyze existing plugin system schemas and test patterns\n- [x] Identify three gap areas: Hot Reload (🟡), Plugin Isolation (🟡), Dynamic Loading (🔲)\n- [x] Enhance `PluginHotReloadSchema` with production-safe features\n- [x] Enhance `PluginSandboxingSchema` with full plugin isolation\n- [x] Create `plugin-runtime.zod.ts` with Dynamic Loading protocol\n- [x] Export new module from `kernel/index.ts`\n- [x] Create `plugin-runtime.test.ts` with tests for all new schemas\n- [x] Update existing tests in `plugin-loading.test.ts` for enhanced schemas\n- [x] Validate all 324 kernel tests pass\n- [x] Run code review and address feedback\n- [x] Run security checks (CodeQL: 0 alerts)\n- [x] Update `PROTOCOL_MAP.md` — add `plugin-runtime.zod.ts` entry (⭐), update descriptions for `plugin-loading.zod.ts`, `plugin-lifecycle-advanced.zod.ts`, `plugin-security-advanced.zod.ts`\n- [x] Update `PLUGIN_STANDARDS.md` — add Section 5 \"Plugin Runtime Capabilities\" with hot reload (5.1), isolation (5.2), dynamic loading (5.3), and assessment summary table (5.4)\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

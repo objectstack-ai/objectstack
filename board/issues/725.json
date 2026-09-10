@@ -1,0 +1,33 @@
+{
+  "number": 725,
+  "kind": "issue",
+  "title": "[P0] 实现 Metadata DatabaseLoader，实现数据库持久化元数据",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-02-18T11:48:53Z",
+  "updated_at": "2026-02-18T12:51:25Z",
+  "closed_at": "2026-02-18T12:51:25Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/725",
+  "body": "### 背景说明\n当前 ObjectStack 的 metadata 服务仅支持 memory��filesystem、http 三种 loader，实现 overlay/customization 只能保存在内存或本地文件，无法满足生产多实例部署、用户/平台定制持久化、大数据量平台运行等关键需求。Spec 层面所有相关 schema 已定义，缺口仅在 datasource-backed DatabaseLoader。\n\n### 目标\n- 最小闭环实现 DatabaseLoader，完成 metadata 的数据库持久化和 overlay 管理能力，为前端、平台上线扫清最大阻碍。\n- 支持 platform 及 user 级元数据存储，解锁多用户自定义、平台自定义、任意规模实例间同步可能性。\n\n### 需实现内容\n1. 实现 `packages/metadata/src/loaders/database-loader.ts`：\n   - 遵循 MetadataLoader 接口，并声明 protocol 为 `datasource:`。\n   - 注入 `IDataDriver` 获取物理数据库连接。\n   - 映射到 sys_metadata（可配）表，CRUD 操作，实现 register/get/list/unregister/exists/stat/save 等能力。\n   - 支持 `scope` 字段（system / platform / user）隔离。\n   - ��次使用时自建表结构，后续自动迁移。\n2. 在 MetadataManager 中自动集成 DatabaseLoader（即 MetadataManagerConfig.datasource 存在时自动启用）。\n3. 支持 overlay 持久化到数据库，变更事件和 state 管理依赖数据库。\n4. 编写必要单元及集成测试。\n5. ROADMAP.md/README 适当同步调整。\n\n### 验收标准\n- platform scope 下的元数据能被持久化于数据库\n- user scope 下自定义 overlay 能被存储数据库，支持按 userId 查询\n- 数据库 offline 回落 filesystem/memory loader\n\n---\n【本 Issue 来源于新 Roadmap P0 最小实现策略（2026-02-18）】"
+}

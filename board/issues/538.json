@@ -1,0 +1,33 @@
+{
+  "number": 538,
+  "kind": "pull_request",
+  "title": "Refactor CRM example with enterprise architecture and comprehensive documentation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-06T05:16:45Z",
+  "updated_at": "2026-02-06T08:39:15Z",
+  "closed_at": "2026-02-06T08:34:37Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-06T08:34:37Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/538",
+  "body": "Transforms the CRM example into a reference implementation demonstrating all 128+ ObjectStack protocol modules with production-grade patterns from Salesforce, ServiceNow, and HubSpot.\n\n## Architecture\n\n**Domain-Driven Organization**\n```\nsrc/\n├── domains/{sales,service,marketing,products}/  # 10 objects by domain\n├── security/        # Profiles, roles, sharing rules\n├── ai/             # Agents, RAG pipelines\n├── automation/     # Flows, workflows\n└── ui/             # Dashboards, reports, actions\n```\n\n**New Objects** (4)\n- Product: Catalog with SKU, inventory, pricing\n- Quote: Automated calculations, expiration workflows\n- Campaign: ROI tracking, response metrics, formulas\n- Contract: Renewal tracking, scheduled workflows\n\n## Security Model\n\n- **5 Profiles**: Granular CRUD permissions (Admin, Sales Manager, Sales Rep, Service Agent, Marketing User)\n- **10-Level Role Hierarchy**: Executive → Directors → Managers → Reps\n- **5+ Sharing Rules**: Criteria-based, territory-based, owner-based with parent record cascading\n- **Field-Level Security**: Sensitive data masking (revenue, SSN)\n\n## AI & Automation\n\n**AI Agents** (5): Sales Assistant, Service Agent, Lead Enrichment, Revenue Intelligence, Email Campaign\n- Tool-calling with object context\n- RAG integration for knowledge retrieval\n- Trigger-based and scheduled execution\n\n**RAG Pipelines** (4): Sales, Support, Product, Competitive\n- Hybrid search (vector + keyword)\n- Semantic chunking with 1000-token windows\n- Cohere reranking for precision\n\n**Flows** (5): Lead Conversion, Opportunity Approval, Case Escalation, Quote Generation, Campaign Enrollment\n- Multi-step with screen/autolaunched/scheduled types\n- Approval routing through role hierarchy\n- Conditional branching and loops\n\n## Documentation\n\n**80KB+ across 6 guides**:\n- Data Modeling: Field types, relationships, validation patterns\n- Business Logic: Workflow rules, triggers, formula syntax\n- Security: OWD, sharing model, permission inheritance\n- AI Capabilities: Agent instructions, RAG configuration, NLQ\n- Standards: Naming conventions, folder structure, code patterns\n\n**Bilingual** (English/中文) with code examples throughout.\n\n## Code Example\n\n```typescript\n// Before: Flat structure, basic fields\nexport const Account = ObjectSchema.create({\n  name: 'account',\n  fields: {\n    name: Field.text({ label: 'Name' }),\n  },\n});\n\n// After: Domain-organized, enterprise features\nexport const Account = ObjectSchema.create({\n  name: 'account',\n  titleFormat: '{account_number} - {name}',\n  fields: {\n    account_number: Field.autonumber({ format: 'ACC-{0000}' }),\n    billing_address: Field.address({ addressFormat: 'international' }),\n    office_location: Field.location({ displayMap: true }),\n  },\n  indexes: [{ fields: ['name'], unique: false }],\n  enable: { trackHistory: true, apiEnabled: true, feeds: true },\n  validations: [{ name: 'revenue_positive', type: 'script', ... }],\n  workflows: [{ name: 'update_last_activity', triggerType: 'on_update', ... }],\n});\n```\n\n## Type Safety\n\nAll schemas use Zod-first definitions with `z.infer<>` for TypeScript types. Config keys use `camelCase`, data values use `snake_case` per protocol standards.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 你是全球顶级企业管理软件专家,我要打造全球最新最顶流最受欢迎的企业管理软件平台，开发应用市场，，扫描目前已定义的所有spec zod协议模块，从ai自动化编写业务应用，人工便于评审的角度，设计最佳方案和编写规范，包括文件夹结构，数据建模，业务逻辑，界面，统计，权限，自动化等，修改examples/crm应用，并按分类编写详细的规范文档。\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

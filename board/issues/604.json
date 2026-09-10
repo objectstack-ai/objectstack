@@ -1,0 +1,33 @@
+{
+  "number": 604,
+  "kind": "pull_request",
+  "title": "feat: P0 Phase 1 — UI i18n infrastructure & realtime protocol unification",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-11T04:33:57Z",
+  "updated_at": "2026-02-11T05:58:27Z",
+  "closed_at": "2026-02-11T04:57:30Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-11T04:57:30Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/604",
+  "body": "Implements Sprint 1-2 from `PROTOCOL_OPTIMIZATION_REPORT.md`: UI internationalization support and realtime protocol deduplication.\n\n### UI i18n (`ui/i18n.zod.ts`)\n\n- **`I18nLabelSchema`** — backward-compatible union: plain `string` or `{ key, defaultValue?, params? }` object\n- **`AriaPropsSchema`** — WAI-ARIA attributes (`ariaLabel`, `ariaDescribedBy`, `role`)\n- Integrated into `view.zod.ts`, `app.zod.ts`, `component.zod.ts` — all `label` fields now accept both forms\n\n```typescript\n// Before: label: z.string()\n// After:\nexport const I18nLabelSchema = z.union([\n  z.string(),                          // backward compatible\n  z.object({\n    key: z.string(),                   // translation key\n    defaultValue: z.string().optional(),\n    params: z.record(z.string(), z.any()).optional(),\n  }),\n]);\n```\n\n### Realtime protocol unification (`api/realtime-shared.zod.ts`)\n\n`websocket.zod.ts` and `realtime.zod.ts` had overlapping `PresenceStatus` and action enums. Extracted shared definitions into `realtime-shared.zod.ts`:\n\n- **`PresenceStatus`** — canonical enum (`online | away | busy | offline`)\n- **`RealtimeRecordAction`** — canonical enum (`created | updated | deleted`)\n- **`BasePresenceSchema`** — shared presence fields (`userId`, `status`, `lastSeen`, `metadata`)\n\nBoth files now import from shared and re-export for full backward compatibility. Zero breaking changes.\n\n### Test coverage\n\n25 new tests across `i18n.test.ts` and `realtime-shared.test.ts`. Full suite: 4337 tests pass.\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

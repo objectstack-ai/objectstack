@@ -1,0 +1,33 @@
+{
+  "number": 756,
+  "kind": "issue",
+  "title": "feed api",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-21T06:59:37Z",
+  "updated_at": "2026-02-21T07:29:58Z",
+  "closed_at": "2026-02-21T07:29:58Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/756",
+  "body": "## 🎯 目标\n\n打通 Feed/Chatter API 从协议到 Client SDK 的\"最后一公里\"。Schema、Contract、Service 均已完成，缺少 Route Handler 和 Client SDK 接入。\n\n## 📊 当前状态\n\n| 层级 | 文件 | 状态 |\n|------|------|------|\n| Schema | `spec/src/data/feed.zod.ts` | ✅ |\n| API Protocol | `spec/src/api/feed-api.zod.ts` (14 个端点) | ✅ |\n| Contract | `spec/src/contracts/feed-service.ts` (`IFeedService`) | ✅ |\n| Service Impl | `services/service-feed/InMemoryFeedAdapter` (40+ tests) | ✅ |\n| **Route Handler** | `objectql/protocol.ts` → Feed 方法 | 🔴 缺失 |\n| **Client SDK** | `client.feed.*` namespace | 🔴 缺失 |\n\n## 📋 Tasks\n\n### 1. Route Handler (`packages/objectql`)\n\n在 `ObjectStackProtocolImplementation` 中新增 14 个 Feed 方法，对应 `FeedApiContracts`：\n\n- [ ] `listFeed` → `GET /api/data/:object/:recordId/feed`\n- [ ] `createFeedItem` → `POST /api/data/:object/:recordId/feed`\n- [ ] `updateFeedItem` → `PUT /api/data/:object/:recordId/feed/:feedId`\n- [ ] `deleteFeedItem` → `DELETE /api/data/:object/:recordId/feed/:feedId`\n- [ ] `addReaction` → `POST /api/data/:object/:recordId/feed/:feedId/reactions`\n- [ ] `removeReaction` → `DELETE /api/data/:object/:recordId/feed/:feedId/reactions/:emoji`\n- [ ] `pinFeedItem` / `unpinFeedItem` → Pin/Unpin endpoints\n- [ ] `starFeedItem` / `unstarFeedItem` → Star/Unstar endpoints\n- [ ] `searchFeed` → `GET /api/data/:object/:recordId/feed/search`\n- [ ] `getChangelog` → `GET /api/data/:object/:recordId/changelog`\n- [ ] `subscribe` / `unsubscribe` → Record subscription endpoints\n\n### 2. Client SDK (`packages/client`)\n\n- [ ] 在 `ObjectStackClient` 中新增 `feed` namespace，包含 14 个方法\n- [ ] 在 `getRoute()` 中新增 `feed` 路由类型（使用 `/api/data` 子路径模式）\n- [ ] 新增 `client.feed.*` 的类型导出\n- [ ] 编写 MSW 测试验证 Client ↔ Server 集成\n\n### 3. Discovery 增强\n\n- [ ] 在 `getDiscovery()` 返回的 `services` 中新增 `feed` service 状态\n- [ ] 在 `capabilities` 中新增 `feed: true` 和 `comments: true`\n\n### 4. 测试\n\n- [ ] Route handler 单元测试\n- [ ] Client SDK MSW 集成测试\n- [ ] 验证 `FeedApiContracts` 的 input/output schema 与实际请求/响应一致\n\n## 🔗 关联\n\n- 阻塞 ObjectUI Roadmap P1.5（Comments & Collaboration）\n- 参考: `FeedApiContracts` in `packages/spec/src/api/feed-api.zod.ts`\n- 参考: `InMemoryFeedAdapter` in `packages/services/service-feed/`\n- Parent: objectstack-ai/spec#753"
+}

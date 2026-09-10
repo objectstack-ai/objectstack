@@ -1,0 +1,39 @@
+{
+  "number": 576,
+  "kind": "pull_request",
+  "title": "Update /apps/docs to latest fumadocs template",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "size/xl",
+    "tooling"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-10T02:32:46Z",
+  "updated_at": "2026-02-10T03:38:50Z",
+  "closed_at": "2026-02-10T03:27:46Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-10T03:27:46Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/576",
+  "body": "Aligns the docs app scaffolding with the current `pnpm create fumadocs-app` output while preserving all existing customizations (i18n, custom homepage, blog, middleware).\n\n### Config modernization\n- **source.config.ts**: Use `pageSchema`/`metaSchema` from `fumadocs-core/source/schema`, enable `includeProcessedMarkdown` for LLM support\n- **next.config.mjs**: Remove webpack alias hacks, add `rewrites` for per-page `.mdx` LLM endpoints\n- **package.json**: Pin fumadocs versions to exact, add `postinstall: \"fumadocs-mdx\"` for `.source` generation, drop unused deps (`clsx`, `class-variance-authority`, `autoprefixer`, `client-only`, `server-only`)\n- **global.css**: `fumadocs-ui/css/neutral.css` + `preset.css` replaces `fumadocs-ui/style.css`\n- **tsconfig.json**: `baseUrl`, `ESNext` target, drop `source.config.ts` exclude\n- **postcss**: Drop `autoprefixer` (Tailwind v4)\n- **tailwind.config.js**: Removed (Tailwind v4 CSS-first)\n\n### Structural migration\n- `app/source.ts` → `lib/source.ts` with `lucideIconsPlugin`, `getPageImage`, `getLLMText`\n- `app/layout.config.tsx` → `lib/layout.shared.tsx` (`baseOptions()` function + `gitConfig`)\n- `mdx-components.tsx`: `useMDXComponents` → `getMDXComponents`\n- `lib/utils.ts`: `cn` simplified to `twMerge` re-export\n- Docs page: `DocsTitle`/`DocsDescription`/`DocsBody` from `fumadocs-ui/layouts/docs/page`, `createRelativeLink` for MDX links\n- Search API: `createFromSource(source)` replaces `createSearchAPI('simple', ...)`\n- Root layout owns `<html>`/`<body>`; `[lang]/layout.tsx` provides only `<RootProvider>`\n\n### New features from latest template\n- **LLM support**: `/llms.txt`, `/llms-full.txt`, `/docs/:path*.mdx` (via rewrite to `/llms.mdx/docs/:path*`)\n- **OG images**: `/og/docs/[...slug]` using `fumadocs-ui/og`\n- **AI page actions**: `components/ai/page-actions.tsx` — Copy Markdown, Open in ChatGPT/Claude/GitHub\n\n### Cleanup\n- Removed unused `components/ui/badge.tsx`, `components/ui/button.tsx` (zero imports)\n\nBuild verified: 660 static pages generated, all existing + new routes functional.\n\n> [!WARNING]\n>\n> <details>\n> <summary>Firewall rules blocked me from connecting to one or more addresses (expand for details)</summary>\n>\n> #### I tried to connect to the following addresses, but was blocked by firewall rules:\n>\n> - `fonts.googleapis.com`\n>   - Triggering command: `/home/REDACTED/work/_temp/ghcca-node/node/bin/node node /home/REDACTED/work/spec/spec/apps/docs/node_modules/.bin/../next/dist/bin/next build git conf\u0004\u0018 unset rom Create Fumadocs App 4@0.27.2/node_modules/@esbuild/linux-x64/bin/esbuild user.name` (dns block)\n>\n> If you need me to access, download, or install something from one of these locations, you can either:\n>\n> - Configure [Actions setup steps](https://gh.io/copilot/actions-setup-steps) to set up my environment, which run before the firewall is enabled\n> - Add the appropriate URLs or hosts to the custom allowlist in this repository's [Copilot coding agent settings](https://github.com/objectstack-ai/spec/settings/copilot/coding_agent) (admins only)\n>\n> </details>\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

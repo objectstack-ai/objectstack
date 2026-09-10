@@ -1,0 +1,33 @@
+{
+  "number": 629,
+  "kind": "pull_request",
+  "title": "feat: add metadata customization overlay, package upgrade, and marketplace protocols",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-12T01:36:23Z",
+  "updated_at": "2026-02-12T02:44:34Z",
+  "closed_at": "2026-02-12T02:29:04Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-12T02:29:03Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/629",
+  "body": "- [x] Analyze current metadata-related protocols (manifest, package-registry, metadata-persistence, metadata-loader, plugin-versioning)\n- [x] Identify gaps in metadata loading from plugin packages, customer customization persistence, and package upgrade flows\n- [x] Create Metadata Customization Layer protocol (`kernel/metadata-customization.zod.ts`) - overlay tracking, 3-way merge for package upgrades\n- [x] Create Package Upgrade Protocol (`kernel/package-upgrade.zod.ts`) - upgrade plan, snapshot, rollback, validation\n- [x] Create Marketplace Protocol (`cloud/marketplace.zod.ts`) - listing, publishing, review, search for plugin marketplace\n- [x] Enhance MetadataRecordSchema with `packageId` and `managedBy` fields for package ownership tracking\n- [x] Enhance PackageStatusEnum with `upgrading` status and InstalledPackageSchema with version tracking\n- [x] Add tests for all new protocols (60 new tests, 187 test files, 4972 tests all passing)\n- [x] Update kernel/index.ts and cloud/index.ts barrel exports\n- [x] Move marketplace protocol from kernel/ to cloud/ per review feedback\n- [x] Run code review and security checks\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

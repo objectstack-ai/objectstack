@@ -1,0 +1,33 @@
+{
+  "number": 779,
+  "kind": "pull_request",
+  "title": "feat: add well-known capabilities to API discovery",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-22T01:56:44Z",
+  "updated_at": "2026-02-22T02:35:34Z",
+  "closed_at": "2026-02-22T02:30:45Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-22T02:30:45Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/779",
+  "body": "Adds typed boolean capability flags to the Discovery response so ObjectUI can detect backend features without probing individual endpoints.\n\n### Schema (`packages/spec`)\n\n- New `WellKnownCapabilitiesSchema` in `discovery.zod.ts` with 7 fields: `feed`, `comments`, `automation`, `cron`, `search`, `export`, `chunkedUpload`\n- Added `capabilities` to `GetDiscoveryResponseSchema` in `protocol.zod.ts`\n\n### Runtime (`packages/objectql`)\n\n- `getDiscovery()` now builds capabilities dynamically from the service registry:\n\n```typescript\nconst capabilities: WellKnownCapabilities = {\n    feed: registeredServices.has('feed'),\n    comments: registeredServices.has('feed'),\n    automation: registeredServices.has('automation'),\n    cron: registeredServices.has('job'),\n    search: registeredServices.has('search'),\n    export: registeredServices.has('automation') || registeredServices.has('queue'),\n    chunkedUpload: registeredServices.has('file-storage'),\n};\n```\n\n### Client SDK (`packages/client`)\n\n- Added `get capabilities(): WellKnownCapabilities | undefined` getter, available after `connect()`\n\n### Tests\n\n- 15 new tests across discovery schema, protocol schema, protocol implementation, and client SDK\n- All 6,121 spec tests pass\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>api discovery</issue_title>\n> <issue_description>## 🎯 目标\n> \n> 扩展 Discovery 响应中的 `capabilities` 和 `services` 声明，让前端（ObjectUI）可以智能感知后端支持的功能。\n> \n> ## 📋 Tasks\n> \n> - [ ] 在 `GetDiscoveryResponse` 的 `capabilities` 中新增：\n>   - `feed: boolean` — 是否支持 Feed/Chatter API\n>   - `comments: boolean` — 是否支持评论（Feed 的子集）\n>   - `automation: boolean` — 是否支持 Automation CRUD\n>   - `cron: boolean` — 是否支持 cron 调度\n>   - `search: boolean` — 是否支持全文搜索\n>   - `export: boolean` — 是否支持异步导出\n>   - `chunkedUpload: boolean` — 是否支持分片上传\n> - [ ] 在 `objectql/protocol.ts` 的 `getDiscovery()` 中动态检测已注册的 service 并填充 capabilities\n> - [ ] 在 Client SDK 中暴露 `client.capabilities` getter\n> - [ ] 编写测试验证 capabilities 随 service 注册动态变化\n> \n> ## 🔗 关联\n> \n> - 所有新 API 的前端自适应依赖此 issue\n> - Parent: objectstack-ai/spec#753</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#760\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 641,
+  "kind": "pull_request",
+  "title": "docs: add DX Roadmap for post-v3.0 developer experience improvements",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-12T06:37:23Z",
+  "updated_at": "2026-02-12T11:24:19Z",
+  "closed_at": "2026-02-12T06:52:42Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-12T06:52:42Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/641",
+  "body": "Full codebase + docs audit (171 schemas, 191 test files, 40+ doc pages, 4 examples, 19 packages) to identify DX gaps and prioritize next improvements.\n\n## Key Findings\n\n- **Onboarding**: No interactive playground, no `create-objectstack` scaffolder, examples missing \"How to Run\" sections\n- **Schema DX**: `Field.*` helpers are excellent but `ObjectSchema.create()` is a pass-through identity function; no `defineView()`/`defineApp()`/`defineFlow()` helpers\n- **Validation errors**: Zod defaults + sparse custom refinements — no contextual error map\n- **Reference gaps**: No field type gallery (46+ types undocumented visually), no error code catalog, no query syntax cheat sheet\n- **Tooling**: `objectstack diff` and enhanced `objectstack doctor` marked as future in v3.0 roadmap but not implemented\n\n## `DX_ROADMAP.md` — 6 Phases\n\n- **Phase 1 — First Five Minutes** (2w): StackBlitz playground, `create-objectstack` wizard, quick-start improvements\n- **Phase 2 — Schema DX Helpers** (2w): Enhanced factories, custom Zod error map, branded types\n- **Phase 3 — Documentation & Reference** (3w): Field type gallery, error code catalog, protocol diagrams, common patterns guide\n- **Phase 4 — CLI & Tooling** (2w): `diff`, `doctor`, `lint`, `explain` commands; VSCode extension\n- **Phase 5 — Studio as DX Hub** (3w): Visual object builder, query builder UI, code↔visual bridge\n- **Phase 6 — Ecosystem & Community** (ongoing): Plugin marketplace, example gallery, Discord\n\nIncludes priority matrix (impact × effort), success metrics table, and relationship mapping to existing `ROADMAP.md` and `apps/studio/ROADMAP.md`.\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

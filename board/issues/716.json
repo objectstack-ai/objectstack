@@ -1,0 +1,33 @@
+{
+  "number": 716,
+  "kind": "pull_request",
+  "title": "feat: add colorVariant, description, actionUrl/actionType/actionIcon to DashboardWidgetSchema",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-18T06:06:59Z",
+  "updated_at": "2026-02-18T07:30:29Z",
+  "closed_at": "2026-02-18T06:17:31Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-18T06:17:31Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/716",
+  "body": "Extends `DashboardWidgetSchema` to support color-coded KPI cards, widget descriptions, and header action buttons.\n\n### Schema additions\n\n- **`WidgetColorVariantSchema`** — `z.enum`: `default | blue | teal | orange | purple | success | warning | danger`\n- **`WidgetActionTypeSchema`** — `z.enum`: `url | modal | flow`\n- **`DashboardWidgetSchema`** new optional fields:\n  - `description` (`I18nLabel`) — subtext below widget title\n  - `colorVariant` — accent color theming\n  - `actionUrl` / `actionType` / `actionIcon` — header action button config\n- New exported types: `WidgetColorVariant`, `WidgetActionType`\n\nAll fields optional — fully backward compatible.\n\n### Usage\n\n```ts\n{\n  title: 'Critical Bugs',\n  description: 'P0/P1 bugs requiring attention',\n  type: 'metric',\n  colorVariant: 'danger',\n  actionUrl: 'bug_triage_flow',\n  actionType: 'flow',\n  actionIcon: 'alert-triangle',\n  object: 'bug',\n  aggregate: 'count',\n  layout: { x: 0, y: 0, w: 3, h: 2 },\n}\n```\n\n### Other\n\n- ROADMAP.md updated to mark this item complete\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>Spec：DashboardWidgetSchema 支持 colorVariant/actionUrl/description</issue_title>\n> <issue_description>仪表盘 KPI 卡等支持多色变体、操作按钮/外链、描述信息，须协议扩展。\n> \n> **目标**\n> - DashboardWidgetSchema 新增 colorVariant 属性：orange/teal/blue/purple/success/warning 等\n> - 新增 description 字段：widget header 下方文字\n> - 新增 actionUrl/actionType：widget 顶部右侧操作按钮（如外链）\n> - 协议单测/文档更新，兼容性说明\n> \n> 详见[分析 1.1](https://github.com/objectstack-ai/spec/blob/main)\n> \n> - 类型：enhancement\n> - 开发完成后请运行 test ��同步 Roadmap</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#710\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 556,
+  "kind": "pull_request",
+  "title": "chore(deps)(deps-dev): bump the development-dependencies group with 2 updates",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "dependabot[bot]",
+    "id": 49699333,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-09T02:19:31Z",
+  "updated_at": "2026-02-10T00:27:38Z",
+  "closed_at": "2026-02-10T00:27:29Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-10T00:27:29Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/556",
+  "body": "Bumps the development-dependencies group with 2 updates: [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/HEAD/types/node) and [happy-dom](https://github.com/capricorn86/happy-dom).\n\nUpdates `@types/node` from 25.1.0 to 25.2.2\n<details>\n<summary>Commits</summary>\n<ul>\n<li>See full diff in <a href=\"https://github.com/DefinitelyTyped/DefinitelyTyped/commits/HEAD/types/node\">compare view</a></li>\n</ul>\n</details>\n<br />\n\nUpdates `happy-dom` from 20.5.0 to 20.5.3\n<details>\n<summary>Release notes</summary>\n<p><em>Sourced from <a href=\"https://github.com/capricorn86/happy-dom/releases\">happy-dom's releases</a>.</em></p>\n<blockquote>\n<h2>v20.5.3</h2>\n<h3>:construction_worker_man: Patch fixes</h3>\n<ul>\n<li>Node.replaceWith does not throw w/o parent - By <strong><a href=\"https://github.com/lukeed\"><code>@​lukeed</code></a></strong></li>\n</ul>\n<h2>v20.5.2</h2>\n<h3>:construction_worker_man: Patch fixes</h3>\n<ul>\n<li>Use entities package for HTML/XML encoding and decoding - By <strong><a href=\"https://github.com/TrevorBurnham\"><code>@​TrevorBurnham</code></a></strong> in task <a href=\"https://redirect.github.com/capricorn86/happy-dom/issues/1947\">#1947</a></li>\n</ul>\n<h2>v20.5.1</h2>\n<h3>:construction_worker_man: Patch fixes</h3>\n<ul>\n<li>Fixes logic in <code>HTMLInputElement.stepUp()</code> and <code>HTMLInputElement.stepDown()</code> to work according to spec - By <strong><a href=\"https://github.com/stevematney\"><code>@​stevematney</code></a></strong> in task <a href=\"https://redirect.github.com/capricorn86/happy-dom/issues/1955\">#1955</a></li>\n</ul>\n</blockquote>\n</details>\n<details>\n<summary>Commits</summary>\n<ul>\n<li><a href=\"https://github.com/capricorn86/happy-dom/commit/273ad6c6ae6c76cf2eb3a9dbf5b8815d2d3e8739\"><code>273ad6c</code></a> fix: Node.replaceWith does not throw w/o parent (<a href=\"https://redirect.github.com/capricorn86/happy-dom/issues/1969\">#1969</a>)</li>\n<li><a href=\"https://github.com/capricorn86/happy-dom/commit/7c44f48c396dabc19adc8c1014d0b12a95c80d6a\"><code>7c44f48</code></a> chore: <a href=\"https://redirect.github.com/capricorn86/happy-dom/issues/1947\">#1947</a> Adds unit tests for decode ' / numeric character referenc...</li>\n<li><a href=\"https://github.com/capricorn86/happy-dom/commit/560589cf2d0ccf6fc636a18e35cf0fcf9005d9ef\"><code>560589c</code></a> fix: <a href=\"https://redirect.github.com/capricorn86/happy-dom/issues/1947\">#1947</a> Use entities package for HTML/XML encoding/decoding (<a href=\"https://redirect.github.com/capricorn86/happy-dom/issues/2016\">#2016</a>)</li>\n<li><a href=\"https://github.com/capricorn86/happy-dom/commit/ce559c33c1ff18285da6e150bf2e8c12e5721f4c\"><code>ce559c3</code></a> fix: <a href=\"https://redirect.github.com/capricorn86/happy-dom/issues/1955\">#1955</a> Fixes stepUp and stepDown on HTMLInputElement according to spec ...</li>\n<li>See full diff in <a href=\"https://github.com/capricorn86/happy-dom/compare/v20.5.0...v20.5.3\">compare view</a></li>\n</ul>\n</details>\n<br />\n\n\nDependabot will resolve any conflicts with this PR as long as you don't alter it yourself. You can also trigger a rebase manually by commenting `@dependabot rebase`.\n\n[//]: # (dependabot-automerge-start)\n[//]: # (dependabot-automerge-end)\n\n---\n\n<details>\n<summary>Dependabot commands and options</summary>\n<br />\n\nYou can trigger Dependabot actions by commenting on this PR:\n- `@dependabot rebase` will rebase this PR\n- `@dependabot recreate` will recreate this PR, overwriting any edits that have been made to it\n- `@dependabot show <dependency name> ignore conditions` will show all of the ignore conditions of the specified dependency\n- `@dependabot ignore <dependency name> major version` will close this group update PR and stop Dependabot creating any more for the specific dependency's major version (unless you unignore this specific dependency's major version or upgrade to it yourself)\n- `@dependabot ignore <dependency name> minor version` will close this group update PR and stop Dependabot creating any more for the specific dependency's minor version (unless you unignore this specific dependency's minor version or upgrade to it yourself)\n- `@dependabot ignore <dependency name>` will close this group update PR and stop Dependabot creating any more for the specific dependency (unless you unignore this specific dependency or upgrade to it yourself)\n- `@dependabot unignore <dependency name>` will remove all of the ignore conditions of the specified dependency\n- `@dependabot unignore <dependency name> <ignore condition>` will remove the ignore condition of the specified dependency and ignore conditions\n\n\n</details>"
+}

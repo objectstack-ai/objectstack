@@ -1,0 +1,33 @@
+{
+  "number": 628,
+  "kind": "pull_request",
+  "title": "Add ZOS protocol improvement plan for AI-driven metadata apps",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-11T17:36:11Z",
+  "updated_at": "2026-02-11T21:09:48Z",
+  "closed_at": "2026-02-11T18:05:00Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-11T18:05:00Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/628",
+  "body": "Spec needs a concrete improvement plan that evaluates every ZOS protocol from metadata app development/runtime perspectives with AI-generated maintenance in mind. This PR adds a structured, domain-by-domain plan with cross-protocol principles, priorities, and rollout targets.\n\n- **Documentation: ZOS protocol improvement plan**\n  - New `docs/analysis/11-zos-protocol-improvement-plan.md` outlining evaluation methodology, cross-protocol standards, and prioritized actions per protocol domain.\n  - Includes phased roadmap and acceptance metrics for AI-generated metadata reliability and runtime governance.\n\n```markdown\n## 2. 跨协议通用改进原则 (必须统一落地)\n\n- `description` / `aiHint`：面向模型的语义描述与偏好提示。\n- `examples`：标准样例输入/输出 (JSON)。\n- `confidence` / `source`：生成置信度与来源 (model/user/template)。\n- `riskLevel`：变更风险等级，驱动发布策略。\n```\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

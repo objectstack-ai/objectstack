@@ -1,0 +1,33 @@
+{
+  "number": 822,
+  "kind": "pull_request",
+  "title": "feat: implement $expand post-processing for lookup/master_detail fields in engine and protocol layers",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-27T05:34:08Z",
+  "updated_at": "2026-02-27T06:15:52Z",
+  "closed_at": "2026-02-27T06:10:48Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-27T06:10:48Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/822",
+  "body": "The engine's `find()`/`findOne()` methods mapped `populate → expand` in the QueryAST but never consumed it — driver results were returned with raw foreign key IDs, never resolved to full objects.\n\n### Engine (`packages/objectql/src/engine.ts`)\n\n- Added `expandRelatedRecords()` — batch-loads related records via `$in` queries against the SchemaRegistry field definitions, replaces IDs with full objects, recurses nested expand up to `MAX_EXPAND_DEPTH=3`\n- Wired into `find()` (post-driver, pre-afterFind hooks) and `findOne()`\n- Graceful fallback: missing schema, missing reference, driver errors → raw IDs preserved\n\n```ts\n// Before: assignee remains \"u1\"\nawait engine.find('task', { populate: ['assignee'] });\n// After: assignee resolved to { _id: 'u1', name: 'Alice', ... }\n```\n\n### Protocol (`packages/objectql/src/protocol.ts`)\n\n- `findData()`: normalize `$expand`/`expand` query params → `populate` array (covers REST, OData, JSON-RPC entry points)\n- `getData()`: accept `expand` and `select` for single-record retrieval\n\n### Spec schema documentation\n\n- `query.zod.ts`: QueryAST `expand` JSDoc with usage examples\n- `odata.zod.ts`: `$expand` behavior, field type requirements, depth limits\n- `field.zod.ts`: `reference` property docs clarifying role in `$expand` resolution\n- `data-engine.zod.ts`, `protocol.zod.ts`: enhanced `populate`/`expand` descriptions\n\n### Tests\n\n- 14 new engine tests: lookup/master_detail expand, null handling, ID dedup, missing refs fallback, multi-field, findOne, array values, already-expanded objects, driver error graceful degradation\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>[协议层] 完善 $expand/lookup/关系字段展开的规范及 Engine Reference 实现</issue_title>\n> <issue_description>## 任务背景\n> \n> ObjectQL 是可选加载的数据引擎，前端（ObjectUI）、后端（ObjectQL Engine）、各种第三方 driver 可能各自实现 relationships 相关功能。`@objectstack/spec` 作为协议与标准仓库，必须在协议层提供完整的 $expand 能力定义，并在 `packages/objectql/src/engine.ts` 中提供 **reference 实现**，不受下游 Engine/Driver 约束。\n> \n> ### 当前 Gap\n> \n> - **Spec Schema 层**：`QueryAST.expand` (递归 `Record<string, QueryAST>`)、`ODataQuerySchema.$expand`、`QueryAdapterConfig.expand` 已完整定义 ✅\n> - **Engine 层**：`engine.ts` 的 `toQueryAST()` 已将 `populate → expand` 映射到 AST ⚠️，但 `find()` 和 `findOne()` **在拿到 driver 返回的原始数据后，没有执行 expand 后处理**（即批量查询关联记录并注入结果）\n> - **Protocol 层**：`protocol.ts` 的 `findData()` 透传 query 给 engine，未处理 expand\n> - **Auth Adapter**：`objectql-adapter.ts` 明确注释 \"Joins/populate functionality is planned for future ObjectQL releases\"\n> \n> ### 关键代码定位\n> \n> - `packages/objectql/src/engine.ts` L653-659: `toQueryAST()` 将 populate 映射为 `ast.expand`，但 expand 未被消费\n> - `packages/objectql/src/engine.ts` L668-708: `find()` 方法 — driver 返回后直接返回，无 expand 后处理\n> - `packages/objectql/src/engine.ts` L710-730: `findOne()` — 同上\n> - `packages/objectql/src/protocol.ts` L280-346: `findData()` — 透传 query 给 engine\n> - `packages/spec/src/data/query.zod.ts` L512-535: `QueryAST.expand` 递归定义 ✅\n> - `packages/spec/src/data/data-engine.zod.ts` L88: `DataEngineQueryOptions.populate` ✅\n> \n> ## 任务目标\n> \n> ### A. Engine Reference 实现（核心）\n> \n> 1. 在 `engine.ts` 的 `find()` 方法中，driver 返回原始数据后，检测 `ast.expand`：\n>    - 读取 SchemaRegistry 中目标对象的 field 定义，识别 `type === 'lookup' || type === 'master_detail'` 的字段\n>    - 收集所有外键 ID（批量），用 `$in` 查询关联对象\n>    - 将关联对象注入到每条记录的对应字段上（替换原始 ID 为完整对象）\n>    - 递归处理嵌套 expand，受 `maxExpandDepth`（默认 3）限制\n> 2. 在 `findOne()` 中复用同一套 expand 后处理逻辑\n> 3. 抽取为独立方法 `private async expandRelatedRecords(object, records, expand, depth)` 便于测试和复用\n> \n> ### B. Protocol 层对接\n> \n> 4. `protocol.ts` 的 `findData()` 中，解析 query 中的 `expand` / `$expand` 参数，传递给 engine\n> 5. 确保 REST / JSON-RPC / OData 三种协议入口都能正确传递 expand\n> \n> ### C. 协议文档与测试\n> \n> 6. 在 data/query.zod.ts、api/odata.zod.ts 中梳理并补充 $expand 的协议字段说明\n> 7. 补充 Lookup/Master-Detail 字段类型的协议文档，明确 `reference`/`reference_to` 属性要求\n> 8. 为 $expand 添加 protocol-level 单元测试（mock schema + mock driver，验证 expand 后数据结构）\n> 9. 制定 protocol compliance checklist，便于 objectql 可选加载时行为一致\n> \n> ### D. 兼容性\n> \n> 10. Engine expand 实现必须兼容所有 driver（Memory, SQL, Mongo, FS, etc.），因为 expand 是在 Engine 层用二次查询实现，不依赖 driver 的 JOIN 能力\n> 11. 保留 fallback：如果字段没有注册 schema 或没有 reference 定义，跳过 expand，原样返回 ID\n> \n> ## 实现理由\n> \n> - spec 项目包含 `packages/objectql`（Engine reference implementation），expand 能力属于 Engine 核心职责\n> - 确保不依赖 `objectstack-ai/objectql` 可选项目，spec 自身即可完整支持 lookup 字段展开\n> - 与 OData plugin 在 objectql 仓库中已有的 `expandNavigationProperties` 对齐，但实现在 Engine 层（协议无关）\n> - 满足前端（ObjectUI）的 $expand 注入需求，闭合完整数据链路\n> \n> ## 关联任务\n> \n> - ObjectUI: [跨仓库] 支持自动注入 $expand 以解决动态 lookup 字段展示问题\n> - ObjectQL (可选): OData/GraphQL protocol 层可进一步增强，但核心 expand 在 spec engine 层完成\n> \n> ---\n> 实现完成后运行 tests、更新相关 issues，并补充 ROADMAP.md。</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#821\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

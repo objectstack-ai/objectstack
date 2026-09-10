@@ -1,0 +1,33 @@
+{
+  "number": 676,
+  "kind": "pull_request",
+  "title": "feat(kernel): add preview/demo runtime mode with auto-login and simulated identity",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-14T07:29:26Z",
+  "updated_at": "2026-02-14T08:34:23Z",
+  "closed_at": "2026-02-14T08:30:11Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-14T08:30:11Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/676",
+  "body": "Adds a `'preview'` runtime mode to the ObjectStack kernel, allowing the platform to bypass authentication screens and automatically simulate an admin identity. This is useful for marketplace demos, app showcases, or onboarding tours where visitors should explore the system without registering or logging in.\n\n## Changes\n\n### Schema (`packages/spec/src/kernel/context.zod.ts`)\n- Added `'preview'` to `RuntimeMode` enum alongside `development`, `production`, `test`, and `provisioning`\n- Added `PreviewModeConfigSchema` with the following properties:\n  - `autoLogin` (default `true`) — skip login/registration pages\n  - `simulatedRole` (`'admin' | 'user' | 'viewer'`, default `'admin'`) — permission role for the simulated user\n  - `simulatedUserName` (default `'Preview User'`) — display name in the UI\n  - `readOnly` (default `false`) — restrict to read-only operations\n  - `expiresInSeconds` (default `0`) — session duration (0 = no expiration)\n  - `bannerMessage` (optional) — banner displayed in the UI during preview mode\n- Added optional `previewMode` field to `KernelContextSchema`\n\n### Tests (`packages/spec/src/kernel/context.test.ts`)\n- 8 new tests covering preview mode validation, defaults, role enum, read-only config, and edge cases\n\n### Example (`examples/app-host/`)\n- Added `PreviewHostExample` to `objectstack.config.ts` with full `KernelContext` preview mode usage\n- Updated `README.md` with preview mode section, `OS_MODE=preview` quick start, `PreviewModeConfig` properties table, and security warning\n\n### Documentation\n- Updated `content/docs/references/kernel/context.mdx` with `preview` enum value, `previewMode` property on `KernelContext`, and full `PreviewModeConfig` schema reference\n- Updated `examples/README.md` with preview mode in System Protocol coverage table and app-host description\n\n## Usage\n\n```typescript\nimport { KernelContextSchema } from '@objectstack/spec/kernel';\n\nconst ctx = KernelContextSchema.parse({\n  instanceId: '550e8400-e29b-41d4-a716-446655440000',\n  mode: 'preview',\n  version: '1.0.0',\n  cwd: '/app',\n  startTime: Date.now(),\n  previewMode: {\n    autoLogin: true,\n    simulatedRole: 'admin',\n    simulatedUserName: 'Demo Admin',\n    bannerMessage: 'You are exploring a demo — data will be reset periodically.',\n  },\n});\n```\n\nThe frontend detects `mode === 'preview'` to skip login/registration and enter the system with the simulated admin identity.\n\n## Testing\n\n- All 195 test files / 5278 tests pass\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 是否考虑引入一种演示模式或者叫预览模式？因为比如说应用市场客户只是想看一下软件包的内容，我不想进入繁琐的登录注册的画面。\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

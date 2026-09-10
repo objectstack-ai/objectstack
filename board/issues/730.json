@@ -1,0 +1,33 @@
+{
+  "number": 730,
+  "kind": "pull_request",
+  "title": "feat: protocol-layer constants and storage name mapping for object/field decoupling",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-19T07:32:48Z",
+  "updated_at": "2026-02-19T08:02:36Z",
+  "closed_at": "2026-02-19T07:46:17Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-19T07:46:17Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/730",
+  "body": "System objects (user, session, account) are currently referenced by hardcoded strings throughout API/SDK/permissions, tightly coupling protocol-layer identifiers to physical DB table/column names. This adds the protocol-layer constants and mapping infrastructure to decouple them.\n\n### Changes\n\n- **`SystemObjectName` / `SystemFieldName` constants** — single source of truth for protocol-layer identifiers (`user`, `session`, `account`, `verification`, `sys_metadata`, `id`, `created_at`, `owner_id`, etc.)\n- **`columnName` on `FieldSchema`** — optional physical column name override, defaults to field key\n- **`StorageNameMapping` utilities** — pure functions for engine/driver layer: `resolveTableName`, `resolveColumnName`, `buildColumnMap`, `buildReverseColumnMap`\n- **Exports wired** from `system/constants/index.ts` → `system/index.ts`\n- **ROADMAP updated**\n\n`tableName` on `ObjectSchema` already existed — no change needed there.\n\n### Usage\n\n```ts\nimport { SystemObjectName, SystemFieldName, StorageNameMapping } from '@objectstack/spec/system';\n\n// Protocol layer always uses constants\nconst users = await engine.find(SystemObjectName.USER, {\n  filters: [SystemFieldName.OWNER_ID, '=', currentUserId],\n});\n\n// Driver layer resolves physical names\nconst table = StorageNameMapping.resolveTableName(objectDef); // 'ba_users' or 'user'\nconst col = StorageNameMapping.resolveColumnName('user_id', field); // 'userId' or 'user_id'\nconst colMap = StorageNameMapping.buildColumnMap(objectDef.fields);\nconst reverseMap = StorageNameMapping.buildReverseColumnMap(objectDef.fields);\n```\n\n### Object definition with storage mapping\n\n```ts\nObjectSchema.create({\n  name: 'user',\n  tableName: 'ba_users',       // physical table\n  fields: {\n    email: { type: 'email', columnName: 'email_address' },\n    created_at: { type: 'datetime', columnName: 'createdAt' },\n  },\n});\n```\n\n19 new tests added. All 5,643 tests pass.\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>支持系统对象名与表名/字段名解耦（协议层常量与存储层映射设计）</issue_title>\n> <issue_description>## 背景\n> 当前内核���服务的数据对象在 API/协议层（如 user、session、account）与实际数据库表名/字段名强绑定，导致：\n> - 前端、SDK、权限系统必须硬编码表名、字段名\n> - 后端迁移、扩展难以无损修改（如 DB 分表、兼容旧系统等）\n> \n> 参考 better-auth 机制，宜在协议层（前端 API、SDK、ObjectQL Engine）和存储层（DB Driver/Table/Column）之间加入映射层，支持表名/字段名自由配置。\n> \n> ## 需求\n> 1. 在 `@objectstack/spec/system` 中新增 `SystemObjectName` 和 `SystemFieldName` 常量，统一协议层引用（如 user、session、owner_id）。\n> 2. 在 `ObjectSchema` 增加 `tableName` 字段，允许后端指定实际存储表名，默认与 `name` 相同。\n> 3. 在 Field 定义增加 `columnName` 字段，允许指定实际存储列名，默认与 key 相同。\n> 4. ObjectQL Engine/Driver 层实现 protocol name ↔ tableName，field key ↔ columnName 的双向转换。\n> 5. 保证前端 API/SDK/权限检查/元数据自描述等全部依赖 `SystemObjectName`（协议层唯一来源），而不是实际表名。\n> 6. 现有插件（如 plugin-auth）加适配支持。\n> \n> ## 好处\n> - 前后端完全解耦\n> - 支持 DB 迁移/多驱动/分表/分库/兼容场景\n> - 升级不会破坏前端/插件开发者\n> - 支持多租户/多 schema 下表名冲突自动化\n> \n> ## 参考链接\n> - [better-auth 官方数据库自定义机制](https://www.better-auth.com/docs/concepts/database#custom-tables)\n> - [spec/plugin-auth/objectql-adapter.js 源码分析](https://github.com/objectstack-ai/spec/blob/main/packages/plugins/plugin-auth/src/objectql-adapter.ts)\n> \n> ## TODO\n> - [ ] 完成上述设计 draft\n> - [ ] 编写单元测试，验证映射机制\n> - [ ] 更新 ROADMAP\n> \n> ---\n> 开发任务完成之后都应该运行 test，并且相关的问题，然后更新 roadmap。</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#729\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

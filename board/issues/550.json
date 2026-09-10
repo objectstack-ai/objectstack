@@ -1,0 +1,37 @@
+{
+  "number": 550,
+  "kind": "pull_request",
+  "title": "Add Model Context Protocol (MCP) specification for AI agent integration",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-08T09:35:58Z",
+  "updated_at": "2026-02-08T10:23:18Z",
+  "closed_at": "2026-02-08T10:16:35Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-08T10:16:35Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/550",
+  "body": "Adds standardized protocol for connecting AI agents to ObjectStack data, workflows, and tools via MCP.\n\n## Schema Implementation\n\n**17 Zod schemas** in `src/ai/mcp.zod.ts`:\n- **Transport layer**: stdio, HTTP, WebSocket, gRPC with auth and retry configuration\n- **Resource protocol**: Static resources + dynamic URI templates (`objectstack://objects/{name}`)\n- **Tool protocol**: Function calling with recursive parameter schemas, side effect declarations, confirmation flows\n- **Prompt protocol**: Reusable templates with variable substitution\n- **Server/Client configs**: Health checks, rate limiting, access control\n\n**Key design decision**: Tool parameters use explicit type-first pattern to handle recursive structures:\n```typescript\nexport type MCPToolParameter = {\n  name: string;\n  type: 'string' | 'number' | 'boolean' | 'object' | 'array';\n  properties?: Record<string, MCPToolParameter>;  // Recursive\n  items?: MCPToolParameter;\n};\n\nexport const MCPToolParameterSchema: z.ZodType<MCPToolParameter> = z.object({\n  // ... definition using z.lazy() for recursion\n});\n```\n\nThis avoids TypeScript circular reference errors in dts generation while maintaining full type inference.\n\n## Usage Example\n\n```typescript\nimport { MCPServerConfigSchema } from '@objectstack/spec/ai';\n\nexport const objectStackMCP = MCPServerConfigSchema.parse({\n  name: 'objectstack_mcp',\n  transport: { type: 'http', url: 'https://api.example.com/mcp' },\n  \n  resourceTemplates: [{\n    uriPattern: 'objectstack://objects/{objectName}/{recordId}',\n    handler: 'resources.getRecord',\n  }],\n  \n  tools: [{\n    name: 'create_record',\n    parameters: [\n      { name: 'object', type: 'string', required: true },\n      { name: 'data', type: 'object', required: true },\n    ],\n    handler: 'flows.create_record',\n    sideEffects: 'write',\n    requiresConfirmation: true,\n  }],\n});\n```\n\n## Documentation\n\n- **English guide**: `docs/MCP_GUIDE.md` - Architecture, use cases, integration patterns\n- **Chinese guide**: `docs/MCP_GUIDE_CN.md` - Complete implementation examples for ObjectStack workflows\n- **Protocol map**: Updated AI section to include MCP alongside Agent and RAG protocols\n\n## Testing\n\n27 test cases covering transport configs, resource templates, tool definitions, prompts, and server configurations.\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 在我整个协议框架中，如何和大模型对接，定义mcp相关的协议，并更新相关文档。\n> \n> The user has attached the following file paths as relevant context:\n>  - .github/copilot-instructions.md\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\nCreated from [VS Code](https://code.visualstudio.com/docs/copilot/copilot-coding-agent).\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

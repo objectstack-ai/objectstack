@@ -1,0 +1,33 @@
+{
+  "number": 600,
+  "kind": "pull_request",
+  "title": "feat: add missing service contract interfaces for all CoreServiceName services",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-11T02:35:22Z",
+  "updated_at": "2026-02-11T03:26:29Z",
+  "closed_at": "2026-02-11T02:50:23Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-11T02:50:23Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/600",
+  "body": "`CoreServiceName` defines 17 service identifiers but only 6 had contract interfaces. This PR closes the gap by adding the 11 missing contracts.\n\n### New contracts\n\n- **`IMetadataService`** — register/get/list/unregister metadata by type, convenience methods for objects (aligned with `MetadataFacade`)\n- **`IAuthService`** — `handleRequest(Request)`, `verify(token)`, optional `logout`/`getCurrentUser`\n- **`IAutomationService`** — `execute(flowName, context)`, `listFlows()`, optional register/unregister\n- **`IGraphQLService`** — `execute(GraphQLRequest)`, optional `handleRequest`/`getSchema`\n- **`IAnalyticsService`** — `query(AnalyticsQuery)`, `getMeta()`, optional `generateSql` dry-run\n- **`IRealtimeService`** — pub/sub with `publish(event)`, `subscribe(channel, handler)`, `unsubscribe(id)`\n- **`IJobService`** — `schedule(name, schedule, handler)`, `cancel`, `trigger`, optional execution history\n- **`IAIService`** — `chat(messages)`, `complete(prompt)`, optional `embed`/`listModels`\n- **`II18nService`** — `t(key, locale)`, `loadTranslations`, `getLocales`, optional default locale\n- **`IUIService`** — `getView`/`listViews`, optional dashboard CRUD\n- **`IWorkflowService`** — `transition(WorkflowTransition)`, `getStatus`, optional `getHistory`\n\n### Coverage after this change\n\n| CoreServiceName | Contract |\n|---|---|\n| `metadata` | `IMetadataService` ✅ new |\n| `data` | `IDataEngine` (existed) |\n| `auth` | `IAuthService` ✅ new |\n| `cache` | `ICacheService` (existed) |\n| `search` | `ISearchService` (existed) |\n| `queue` | `IQueueService` (existed) |\n| `file-storage` | `IStorageService` (existed) |\n| `notification` | `INotificationService` (existed) |\n| `automation` | `IAutomationService` ✅ new |\n| `graphql` | `IGraphQLService` ✅ new |\n| `analytics` | `IAnalyticsService` ✅ new |\n| `realtime` | `IRealtimeService` ✅ new |\n| `job` | `IJobService` ✅ new |\n| `ai` | `IAIService` ✅ new |\n| `i18n` | `II18nService` ✅ new |\n| `ui` | `IUIService` ✅ new |\n| `workflow` | `IWorkflowService` ✅ new |\n\nAll contracts follow the established pattern: TypeScript interfaces in `src/contracts/` with co-located `.test.ts` files, exported via barrel. 168 test files / 4312 tests pass.\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

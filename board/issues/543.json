@@ -1,0 +1,33 @@
+{
+  "number": 543,
+  "kind": "pull_request",
+  "title": "refactor: implement Zod Schema Audit — eliminate z.any(), deduplicate schemas, update dev plan",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-08T02:06:23Z",
+  "updated_at": "2026-02-08T03:05:26Z",
+  "closed_at": "2026-02-08T03:01:48Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-08T03:01:48Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/543",
+  "body": "Implements findings from `ZOD_SCHEMA_AUDIT_REPORT.md`. Reduces `z.any()` from 62 → 8 (remaining are legitimate filter operators), deduplicates Presence schemas, and updates `DEVELOPMENT_PLAN.md` to reflect actual completion state of all phases.\n\n### z.any() → z.function() / z.unknown()\n\n- **kernel/plugin.zod.ts** (−23): All service method interfaces (`logger`, `storage`, `i18n`, `ql`, `os`, `router`, `drivers`) and lifecycle hooks now use `z.function()` with `.describe()` annotations\n- **api/protocol.zod.ts** (−28): All `ObjectStackProtocolSchema` method definitions converted from `z.any()` to `z.function()`\n- **data/hook.zod.ts**, **system/core-services.zod.ts**, **ui/widget.zod.ts** (−3): Generic data refs switched to `z.unknown()`\n\n```typescript\n// Before\nlogger: z.object({ debug: z.any(), info: z.any(), ... })\nonInstall: z.any().optional()\n\n// After\nlogger: z.object({ debug: z.function().describe('Log debug message'), ... })\nonInstall: z.function().optional().describe('Called when plugin is installed')\n```\n\n### Presence schema deduplication\n\n`WebSocketPresenceStatus` now re-exports `RealtimePresenceStatus` instead of defining a duplicate enum. Added `busy` to the canonical enum in `realtime.zod.ts`.\n\n### Missing type exports\n\nAdded `WidgetSource` type export in `ui/widget.zod.ts`.\n\n### DEVELOPMENT_PLAN.md\n\nUpdated all Phase 1–3 checklists to ✅ with actual metrics. Key metrics table now reflects current state (`z.any()`: 8, `z.unknown()`: 340). Phase 4 items remain as future work.\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

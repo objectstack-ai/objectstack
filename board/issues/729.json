@@ -1,0 +1,35 @@
+{
+  "number": 729,
+  "kind": "issue",
+  "title": "支持系统对象名与表名/字段名解耦（协议层常量与存储层映射设计）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-19T06:26:34Z",
+  "updated_at": "2026-02-19T07:46:18Z",
+  "closed_at": "2026-02-19T07:46:18Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/729",
+  "body": "## 背景\n当前内核���服务的数据对象在 API/协议层（如 user、session、account）与实际数据库表名/字段名强绑定，导致：\n- 前端、SDK、权限系统必须硬编码表名、字段名\n- 后端迁移、扩展难以无损修改（如 DB 分表、兼容旧系统等）\n\n参考 better-auth 机制，宜在协议层（前端 API、SDK、ObjectQL Engine）和存储层（DB Driver/Table/Column）之间加入映射层，支持表名/字段名自由配置。\n\n## 需求\n1. 在 `@objectstack/spec/system` 中新增 `SystemObjectName` 和 `SystemFieldName` 常量，统一协议层引用（如 user、session、owner_id）。\n2. 在 `ObjectSchema` 增加 `tableName` 字段，允许后端指定实际存储表名，默认与 `name` 相同。\n3. 在 Field 定义增加 `columnName` 字段，允许指定实际存储列名，默认与 key 相同。\n4. ObjectQL Engine/Driver 层实现 protocol name ↔ tableName，field key ↔ columnName 的双向转换。\n5. 保证前端 API/SDK/权限检查/元数据自描述等全部依赖 `SystemObjectName`（协议层唯一来源），而不是实际表名。\n6. 现有插件（如 plugin-auth）加适配支持。\n\n## 好处\n- 前后端完全解耦\n- 支持 DB 迁移/多驱动/分表/分库/兼容场景\n- 升级不会破坏前端/插件开发者\n- 支持多租户/多 schema 下表名冲突自动化\n\n## 参考链接\n- [better-auth 官方数据库自定义机制](https://www.better-auth.com/docs/concepts/database#custom-tables)\n- [spec/plugin-auth/objectql-adapter.js 源码分析](https://github.com/objectstack-ai/spec/blob/main/packages/plugins/plugin-auth/src/objectql-adapter.ts)\n\n## TODO\n- [ ] 完成上述设计 draft\n- [ ] 编写单元测试，验证映射机制\n- [ ] 更新 ROADMAP\n\n---\n开发任务完成之后都应该运行 test，并且相关的问题，然后更新 roadmap。"
+}

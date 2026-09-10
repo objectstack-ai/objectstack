@@ -1,0 +1,33 @@
+{
+  "number": 653,
+  "kind": "pull_request",
+  "title": "Enterprise readiness assessment and v4.0 roadmap",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-12T14:59:45Z",
+  "updated_at": "2026-02-12T16:06:29Z",
+  "closed_at": "2026-02-12T15:37:33Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-12T15:37:33Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/653",
+  "body": "Benchmarked all 171 metadata protocols and kernel design against Salesforce, ServiceNow, SAP S/4HANA, Dynamics 365, Oracle Fusion, and Workday. Identified 23 critical gaps blocking enterprise adoption and proposed concrete schema-level fixes.\n\n### `ENTERPRISE_ASSESSMENT.md` — New\n\nProtocol-by-protocol scoring across 9 domains with gap analysis:\n\n- **Data (⭐⭐⭐⭐):** No expression language spec, no record types, no custom metadata types, no duplicate detection, no multi-currency management\n- **UI (⭐⭐⭐½):** No page layout engine, no document generation templates, no report scheduling, no dashboard drill-down, no portal protocol\n- **Automation (⭐⭐⭐⭐):** No SLA/entitlement engine, no queue/assignment rules, no standalone scheduled job protocol\n- **Security (⭐⭐⭐⭐):** No audit trail query API, no delegated administration\n- **System (⭐⭐⭐):** No deployment/change management, no sandbox/environment management, no fiscal calendar\n- **AI (⭐⭐⭐⭐):** No predictive analytics integration with data layer, no model governance\n\nEach gap includes a concrete Zod schema recommendation, e.g.:\n\n```\nCreate src/automation/sla.zod.ts:\n  SLADefinition:\n    name, label, object, active\n    milestones: Milestone[]\n      type: 'first_response' | 'resolution' | 'custom'\n      timeTarget: Duration\n      businessHours: string  // Reference to business hours calendar\n      warningAction, violationAction, successAction: Action[]\n    startCondition, stopCondition, pauseCondition: FilterExpression\n```\n\n### `ROADMAP.md` — Updated\n\nAdded v4.0 enterprise readiness roadmap (Phases 12–17):\n\n| Phase | Scope | Duration |\n|-------|-------|----------|\n| 12 | Data model completeness | 3 weeks |\n| 13 | UI & reporting enhancement | 3 weeks |\n| 14 | Automation maturity | 2 weeks |\n| 15 | System & DevOps | 2 weeks |\n| 16 | AI & intelligence | 2 weeks |\n| 17 | Service contract expansion (+6 contracts) | 1 week |\n\nTarget: ~18 new schema files, ~500 new tests, ~95% Salesforce parity, ~90% ServiceNow parity.\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

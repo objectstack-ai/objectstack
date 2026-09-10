@@ -1,0 +1,32 @@
+{
+  "number": 746,
+  "kind": "issue",
+  "title": "对比 ObjectStack 自动化引擎 与 Activepieces 架构差异",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-02-19T15:47:41Z",
+  "updated_at": "2026-03-01T15:33:57Z",
+  "closed_at": "2026-03-01T15:33:57Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/746",
+  "body": "## 目标\n调研和详细对比 ObjectStack 平台内置自动化引擎（service-automation）与流行开源自动化平台 Activepieces 的底层架构、扩展机制、执行模型、能力优劣等，支撑后续架构完善和选型决策。\n\n---\n\n## 主要内容\n- 核心架构模式对比（平台内嵌 vs. iPaaS）\n- 插件/扩展机制差异\n- 执行模型和技术选型（同步遍历 vs. 分布式Worker vs. 独立沙箱）\n- 扩展生态与能力比较\n- 持久化与回溯能力分析\n- 跨SaaS场景 vs. 平台内流程自动化的适配性\n- 从Activepieces可借鉴的能力（如沙箱、运行态追踪、可视化监控或调试）\n- 下一步建议/演进路线\n\n---\n\n## 背景说明\nObjectStack 的自动化引擎强调插件模式、内嵌与平台数据层深度集成，目标主要是提升平台内业务流程/审批/低代码自动化能力；Activepieces 则是面向第三方SaaS集成的独立产品。\n\n---\n\n## 验收标准\n- 输出一份结构化Markdown文档，对比核心架构设计与实现思路\n- 结合具体工程实现细节及源码片段\n- 明确每套方案的适用场景及优劣势\n- 补充test用例、并及时更新roadmap\n\n---\n\n> 参考资料：\n> - https://github.com/objectstack-ai/spec\n> - https://github.com/activepieces/activepieces\n> - https://www.activepieces.com/docs/install/architecture/overview\n\n---\n\n**备注：开发任务完成后，请务必补充测试用例与roadmap修订。**"
+}

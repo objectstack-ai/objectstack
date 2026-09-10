@@ -1,0 +1,33 @@
+{
+  "number": 620,
+  "kind": "pull_request",
+  "title": "fix: resolve metadata package build errors and spec type mismatches",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-11T12:44:55Z",
+  "updated_at": "2026-02-11T13:10:06Z",
+  "closed_at": "2026-02-11T13:06:28Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-11T13:06:28Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/620",
+  "body": "`@objectstack/metadata` failed to build due to type mismatches against `@objectstack/spec`, blocking all downstream packages (client, studio, CLI, etc.) and rendering the studio blank in dev mode.\n\n### Spec schema fixes (`packages/spec`)\n\n- **Protocol enum**: Added `'memory:'` to `MetadataLoaderContractSchema.protocol` in both `system/` and `kernel/` schemas\n- **Config types**: Changed `MetadataManagerConfig` and `MetadataLoaderContract` to use `z.input<>` instead of `z.infer<>` — fields with `.default()` (`tableName`, `fallback`) are now optional in constructor params as expected\n- **Missing field**: Added `watchOptions` to system `MetadataManagerConfigSchema` (already present in kernel version)\n\n### Metadata package fixes (`packages/metadata`)\n\n- **Protocol values**: Aligned loader protocols to colon-suffix convention (`'file:'`, `'http:'`, `'memory:'`)\n- **Type fixes**: `modifiedAt` and `timestamp` now emit ISO strings instead of `Date` objects\n- **Test fixes**: Updated mock protocol values, added missing `.js` import extensions, removed unused import, added `replaceService` to mock context\n\n```typescript\n// Before — z.infer makes .default() fields required in output type\nexport type MetadataManagerConfig = z.infer<typeof MetadataManagerConfigSchema>;\n// Consumers forced to pass: { tableName: '...', fallback: '...', ... }\n\n// After — z.input keeps .default() fields optional for constructors\nexport type MetadataManagerConfig = z.input<typeof MetadataManagerConfigSchema>;\n// Consumers can omit: { rootDir: '/app' } ✓\n```\n\n### Result\nBuild: 23/23 packages. Tests: spec 4859, metadata 45, studio 8 — all passing.\n\n![Studio MSW Working](https://github.com/user-attachments/assets/ace9fd65-fc13-4698-a523-f99fbe5a1034)\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}
