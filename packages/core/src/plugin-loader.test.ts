@@ -124,6 +124,43 @@ describe('PluginLoader', () => {
                 expect(result.success).toBe(false);
             }
         });
+
+        /**
+         * #17070 — the eight strings SemVer 2.0.0 forbids that this loader
+         * LOADS, all of them, pinned as accepted.
+         *
+         * ⭐ The predicate behind these is `isSemverShapedVersion`, renamed in
+         * #17070 off the name `isValidSemanticVersion`, because a predicate
+         * named for SemVer that answers a wider grammar gets misused by the next
+         * caller no matter what its docblock says. This block is what makes the
+         * new name TRUE rather than merely better-worded: the grammar is a
+         * strict superset of SemVer 2.0.0, and here is the part that exceeds it.
+         *
+         * ⛔ These pass on purpose. `01.1.1` has loaded since before #16365 —
+         * the pre-#16365 `/^\d+\.\d+\.\d+$/` admitted it too — and #16365
+         * ruled that nothing which loads today may stop loading. Narrowing this
+         * check to the official SemVer regex reverses that ruling and breaks
+         * every plugin published against the wider grammar; it is a published
+         * behaviour change wanting its own card, not a cleanup.
+         */
+        it.each([
+            // §2 — numeric identifiers MUST NOT include leading zeroes.
+            '01.1.1', '1.01.1', '1.1.01',
+            // §9 — prerelease identifiers MUST NOT be empty or carry leading zeroes.
+            '1.0.0-0123', '1.0.0-alpha..1', '1.0.0-alpha..', '1.0.0-.',
+            // §10 — build-metadata identifiers MUST NOT be empty.
+            '1.0.0+.',
+        ])('loads a plugin versioned %s, which SemVer 2.0.0 forbids — deliberately', async (version) => {
+            const plugin: Plugin = {
+                name: `semver-fringe-${version}`,
+                version,
+                init: async () => {},
+            };
+
+            const result = await loader.loadPlugin(plugin);
+            expect(result.success).toBe(true);
+        });
+
     });
 
     describe('Service Factory Registration', () => {

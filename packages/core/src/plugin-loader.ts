@@ -409,7 +409,7 @@ export class PluginLoader {
             throw new Error('Plugin init function is required');
         }
         
-        if (!this.isValidSemanticVersion(plugin.version)) {
+        if (!this.isSemverShapedVersion(plugin.version)) {
             throw new Error(`Invalid semantic version: ${plugin.version}`);
         }
     }
@@ -434,7 +434,7 @@ export class PluginLoader {
      *
      * ⭐ Those structural checks no longer DISAGREE with the schema, which for
      * `version` they used to. #16365 gave `PluginSchema.version` the grammar
-     * {@link isValidSemanticVersion} implements, character for character, and
+     * {@link isSemverShapedVersion} implements, character for character, and
      * `plugin-contract.ts` dropped the `version` exclusion it carried while the
      * two spellings differed. Both now judge `version` by the same regex, so
      * this method and the one above it can only agree on that key; the
@@ -454,7 +454,7 @@ export class PluginLoader {
         // In a real implementation, this would check against kernel version
         const version = plugin.version;
         
-        if (!this.isValidSemanticVersion(version)) {
+        if (!this.isSemverShapedVersion(version)) {
             return {
                 compatible: false,
                 pluginVersion: version,
@@ -468,7 +468,40 @@ export class PluginLoader {
         };
     }
 
-    private isValidSemanticVersion(version: string): boolean {
+    /**
+     * Does `version` have the SHAPE this loader accepts — `major.minor.patch`
+     * with an optional `-prerelease` and an optional `+build` suffix?
+     *
+     * ⛔ This is NOT a SemVer 2.0.0 conformance check, and was renamed off that
+     * claim in #17070 precisely so the next caller does not read it as one. The
+     * grammar below is a strict SUPERSET of SemVer 2.0.0: it accepts every
+     * SemVer-valid string — there is no gap in that direction — and ADDITIONALLY
+     * accepts eight forms SemVer 2.0.0 forbids:
+     *
+     * - leading zeroes in the numeric core (§2) — `01.1.1`, `1.01.1`, `1.1.01`
+     * - leading-zero / empty prerelease identifiers (§9) — `1.0.0-0123`,
+     *   `1.0.0-alpha..1`, `1.0.0-alpha..`, `1.0.0-.`
+     * - degenerate build metadata (§10) — `1.0.0+.`
+     *
+     * ⭐ Those eight are accepted DELIBERATELY and are pinned as accepted in
+     * `plugin-loader.test.ts`. `01.1.1` predates every card here — the original
+     * `/^\d+\.\d+\.\d+$/` admitted it too, because `\d+` always has — and
+     * #16365's ruling (widen, never narrow: nothing that loads today stops
+     * loading) froze the accept set. So #17070 moved the CLAIM instead of the
+     * grammar: the regex below is byte-for-byte what it has been, and this
+     * method's name and this docblock are what changed.
+     *
+     * ⚠️ Need real SemVer 2.0.0 conformance — ordering, precedence, or a
+     * standards-compliant verdict? This is not that predicate; do not reach for
+     * it. `dependency-resolver.ts` parses and COMPARES versions and is the
+     * module to extend.
+     *
+     * ⭐ This regex is `PluginSchema.version`'s spelling character for character
+     * (`@objectstack/spec`, `kernel/plugin.zod.ts`) — the convergence #16365
+     * created, and a property `plugin-loader.test.ts` asserts rather than
+     * narrates. Change one spelling and you must change both.
+     */
+    private isSemverShapedVersion(version: string): boolean {
         const semverRegex = /^\d+\.\d+\.\d+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$/;
         return semverRegex.test(version);
     }
