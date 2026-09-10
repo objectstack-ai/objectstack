@@ -379,13 +379,28 @@ describe('[#15021] §3 reachability — which MOUNTED REST routes carry an allow
   it('READING (not a drive): the gate block sits on the shared identity path, so EVERY route that resolves a context inherits the refusal', () => {
     // The census above is about PATTERNS this server mounts. It is not a claim
     // about concrete requests: `/api/v1/data/:object` with `object` = `health`
-    // materializes `/api/v1/data/health`, which `isAuthGateAllowlisted` answers
-    // `true` for (the `ALLOW_SUFFIXES` rule is a suffix test, not a route test).
-    // That over-broad direction is #7898's subject, ⛔ not this card's, and it
-    // is recorded here only so the census is not read as "the allow-list never
-    // fires on this door".
-    expect(isAuthGateAllowlisted('/api/v1/data/health')).toBe(true);
+    // materializes `/api/v1/data/health`, and that concrete path used to be
+    // ALLOW-LISTED — which is what made the over-broad direction reachable at
+    // this very door.
+    //
+    // ⚠️ RE-AIMED IN PLACE (#16839), per this file's own header instruction.
+    // The superseded assertion and its reason, verbatim:
+    //
+    //     // ... which `isAuthGateAllowlisted` answers `true` for (the
+    //     // `ALLOW_SUFFIXES` rule is a suffix test, not a route test).
+    //     // That over-broad direction is #7898's subject, ⛔ not this card's
+    //     expect(isAuthGateAllowlisted('/api/v1/data/health')).toBe(true);
+    //
+    // The allow-list is anchored to a mount boundary now, so a record id or an
+    // object name can no longer spell its way into the exemption. The reading
+    // this leg exists to record is UNCHANGED — the census must still not be
+    // read as "the allow-list never fires on this door", and the discovery
+    // document below is what makes it fire.
+    expect(isAuthGateAllowlisted('/api/v1/data/health')).toBe(false);
     expect(isAuthGateAllowlisted('/api/v1/data/sys_user')).toBe(false);
+    // ⭐ POSITIVE CONTROL — the predicate did not simply start refusing
+    // everything: the allow-listed mounted route the census found still is.
+    expect(isAuthGateAllowlisted('/api/v1/discovery')).toBe(true);
   });
 });
 
