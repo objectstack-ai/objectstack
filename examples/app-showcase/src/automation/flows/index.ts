@@ -1042,6 +1042,120 @@ export const FanOutNotifyFlow = defineFlow({
 });
 
 /**
+ * Nested Fan-out Reminders — demonstrates the ADR-0031 **parallel block nested
+ * inside a loop body**, the one composition the flows above do not show:
+ * `BatchRemindersFlow` loops, `FanOutNotifyFlow` fans out, and neither sits
+ * inside the other.
+ *
+ * Why the nesting earns its own flow rather than a comment: it is the only
+ * shape in which a single execution step carries BOTH region indices. The
+ * maintainer ruling of 2026-09-03 made `ExecutionStepLog.iteration`
+ * single-valued — always the enclosing loop's row, carried through any nesting
+ * — and gave the parallel branch position its own `branch` key. A step inside
+ * a parallel branch that is itself inside a loop body therefore records
+ * `iteration` (which row) and `branch` (which audience) at once, so a per-row
+ * failure inside one branch stays attributable to the row. In every other
+ * composition one of the two keys is absent by construction.
+ *
+ * Shape: the `loop` body holds exactly one node — the `parallel` — so each row
+ * fans out to both audiences concurrently and the block joins before the next
+ * row starts. ⛔ Deliberately NO `try_catch` between the two: a containment
+ * region would retag the leaf steps `try` / `catch`, and the branch position
+ * would no longer be readable off them. Per-iteration containment is
+ * demonstrated by `BatchRemindersFlow` instead.
+ *
+ * Input rows are task-shaped — `{ id, title, owner, watcher }`. `owner` and
+ * `watcher` are the two recipients and `notify` refuses an empty resolved
+ * recipient set, so a row missing either ends the sweep; drive it with at least
+ * two rows so the `(iteration, branch)` pairs have something to distinguish.
+ *
+ * Fixture for `docs/qa/platform-checklist/areas/automation.json`
+ * → `automation.flow-run-step-nesting`, the `loop { parallel }` clause.
+ */
+export const NestedFanOutRemindersFlow = defineFlow({
+  name: 'showcase_nested_fan_out_reminders',
+  label: 'Nested Fan-out Reminders (Loop of Parallel)',
+  description: 'Iterates a collection of tasks and notifies each task\'s owner and watcher concurrently — a parallel block nested in a loop body, the only shape that carries both region indices on one step (ADR-0031).',
+  type: 'autolaunched',
+  status: 'active',
+  variables: [
+    { name: 'tasks', type: 'list', isInput: true, isOutput: false },
+  ],
+  nodes: [
+    { id: 'start', type: 'start', label: 'Start' },
+    {
+      id: 'each_task',
+      type: 'loop',
+      label: 'For each task',
+      config: {
+        collection: '{tasks}',
+        iteratorVariable: 'task',
+        indexVariable: 'taskIndex',
+        maxIterations: 500,
+        body: {
+          nodes: [
+            {
+              // The whole body is this one `parallel` node. Its branch steps are
+              // the records the `loop { parallel }` clause reads: each carries
+              // `regionKind: 'parallel-branch'`, its own `branch` (0 or 1) and
+              // the enclosing loop's `iteration`. The container step itself is a
+              // loop-body step — the row on `iteration`, no `branch` of its own.
+              id: 'fan_out_audiences',
+              type: 'parallel',
+              label: 'Notify both audiences',
+              config: {
+                branches: [
+                  {
+                    name: 'Notify the owner',
+                    nodes: [
+                      {
+                        id: 'notify_owner',
+                        type: 'notify',
+                        label: 'Notify Owner',
+                        config: {
+                          recipients: '{task.owner}',
+                          title: 'Overdue ({taskIndex}): {task.title}',
+                          sourceObject: 'showcase_task',
+                          sourceId: '{task.id}',
+                        },
+                      },
+                    ],
+                    edges: [],
+                  },
+                  {
+                    name: 'Notify the watcher',
+                    nodes: [
+                      {
+                        id: 'notify_watcher',
+                        type: 'notify',
+                        label: 'Notify Watcher',
+                        config: {
+                          recipients: '{task.watcher}',
+                          title: 'Watching ({taskIndex}): {task.title}',
+                          sourceObject: 'showcase_task',
+                          sourceId: '{task.id}',
+                        },
+                      },
+                    ],
+                    edges: [],
+                  },
+                ],
+              },
+            },
+          ],
+          edges: [],
+        },
+      },
+    },
+    { id: 'end', type: 'end', label: 'End' },
+  ],
+  edges: [
+    { id: 'e1', source: 'start', target: 'each_task' },
+    { id: 'e2', source: 'each_task', target: 'end' },
+  ],
+});
+
+/**
  * Resilient Sync — demonstrates the ADR-0031 **try/catch/retry** construct.
  *
  * The `try_catch` node runs a protected `try` region (an outbound HTTP push);
@@ -1825,6 +1939,7 @@ export const allFlows = [
   ProjectClosureFlow,
   BatchRemindersFlow,
   FanOutNotifyFlow,
+  NestedFanOutRemindersFlow,
   ResilientSyncFlow,
   ProjectEscalationFlow,
   InboundTaskWebhookFlow,
