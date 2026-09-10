@@ -40,6 +40,10 @@ import {
   assertObjectsReadable,
   type ObjectReadAdmissionProvider,
 } from './read-admission.js';
+// [#17130] The ROW-scope half's refusal envelope — the sibling of the
+// object-level `readAdmissionDeniedError` above, and the reason a fail-closed
+// row-scope denial can no longer be re-judged by its wording.
+import { readScopeUnresolvedError } from './read-scope-refusal.js';
 // [#15768] The measure result-type rule — which aggregates return a value of
 // the aggregated field's own type, and which are numeric whatever they read.
 // Owned in its own module so the enumerated verdict per `AggregationFunction`
@@ -1058,6 +1062,14 @@ export class AnalyticsService implements IAnalyticsService {
    *
    * Fail-closed: if the provider throws for an object, the whole query is
    * rejected rather than emitting SQL with that object unscoped.
+   *
+   * [#17130] And the rejection DECLARES itself. This throw lands inside
+   * {@link AnalyticsService.queryDataset}'s catch, whose first question is
+   * `hasDeclaredErrorEnvelope` and whose second is {@link isMissingSourceError}
+   * — six substrings over driver phrasing, three of which are what a registry
+   * or security refusal naturally says. Bare, this refusal reached the caller
+   * as a confident empty chart the day its wording drifted into one of them;
+   * enveloped, it is re-thrown before the wording is ever read.
    */
   private async resolveReadScopes(
     query: AnalyticsQuery,
@@ -1078,7 +1090,10 @@ export class AnalyticsService implements IAnalyticsService {
           `rejecting query (fail-closed, ADR-0021 D-C)`,
           e instanceof Error ? e : new Error(String(e)),
         );
-        throw new Error(
+        // ⛔ The message is unchanged, deliberately: #17130's fix is the
+        // DECLARATION, not a luckier string. Rewording to dodge the sniffer
+        // would leave the next author to rediscover the mine.
+        throw readScopeUnresolvedError(
           `[Analytics] read-scope resolution failed for "${object}"; query denied (fail-closed).`,
         );
       }
