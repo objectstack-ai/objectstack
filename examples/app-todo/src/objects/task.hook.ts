@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { HookContext, Hook } from '@objectstack/spec/data';
+import { defineHook, type HookContext } from '@objectstack/spec/data';
 
 /**
  * Lifecycle logic for `todo_task` — insert defaults and the completion stamp.
@@ -47,7 +47,7 @@ import { HookContext, Hook } from '@objectstack/spec/data';
  * timestamp that every report and list view reads as fact. The same
  * `readonly`/strip reasoning applies — only a hook can write the clear.
  */
-const taskHook: Hook = {
+const taskHook = defineHook({
   name: 'task_logic',
   object: 'todo_task',
   events: ['beforeInsert', 'beforeUpdate', 'afterUpdate'],
@@ -120,6 +120,6 @@ const taskHook: Hook = {
       // runs daily and selects on `due_date` directly.
     }
   }
-};
+});
 
 export default taskHook;

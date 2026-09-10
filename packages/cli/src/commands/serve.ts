@@ -3770,7 +3770,6 @@ export default class Serve extends Command {
                   const remedy = formatOrganizationsInstallRemedy(
                     hostImportFailureKind(orgErr),
                     declaration,
-                    hostRoot,
                   );
                   console.error(
                     chalk.red(formatOrganizationsAbsentFatal(tenancyPosture, remedy, cause)),
@@ -5404,9 +5403,26 @@ export function formatI18nLoadDiagnostic(pkg: string, err: unknown): string {
  *
  * The question each arm answers is **"is the declaration the problem?"**:
  *
- *   - `declared-unresolvable` — the app's `package.json` DOES name the package
- *     and the INSTALL is what is broken. Telling that operator to re-read a
+ *   - `declared-unresolvable` — the app's `package.json` DOES name the package,
+ *     so the DECLARATION is not the problem. Telling that operator to re-read a
  *     file that is already correct is the defect this branch exists to avoid.
+ *     ⚠️ It used to mint an install remedy here too — "Repair the INSTALL: run
+ *     `pnpm install`, check that a production prune did not drop it, and that
+ *     its dist is actually built". DRIVEN, on both shapes this kind covers, it
+ *     was wrong twice over (#17046):
+ *       · a genuinely broken install already gets those three remedies, word
+ *         for word, from `unresolvableMessage` in the `cause:` line printed
+ *         four lines below — so the bullet was a second copy to drift;
+ *       · the #15045 sub-case — a location install this finder cannot tie to
+ *         the declaration — prints a `cause:` that says outright "This is NOT
+ *         an install problem … re-running `pnpm install`, un-pruning a deploy
+ *         and rebuilding a dist all change nothing here", so the two halves of
+ *         one screen contradicted each other. #17046 narrowed that sub-case
+ *         (a correctly linked package now LOADS) but did NOT remove it: pnpm's
+ *         `file:` virtual-store copy and every git / tarball declaration still
+ *         land here.
+ *     So this arm now says only what it uniquely knows — the declaration — and
+ *     defers the remedy, exactly as the next one does.
  *   - `declared-no-loadable-entry` (#14041) — the app declares it, the install
  *     DELIVERED it, and the package's own `exports` names no runtime entry
  *     Node can load. Neither absence applies: there is nothing to declare and
@@ -5434,15 +5450,15 @@ export function formatI18nLoadDiagnostic(pkg: string, err: unknown): string {
 export function formatOrganizationsInstallRemedy(
   kind: HostImportFailureKind | undefined,
   declaration: HostDeclaration,
-  hostRoot: string,
 ): string {
   const pkg = Serve.ORGANIZATIONS_RUNTIME_PKG;
   if (kind === 'declared-unresolvable') {
     return `      • this app DECLARES ${pkg} ` +
       `(${declaration.field}: ${JSON.stringify(declaration.specifier)}) — the\n` +
       '        declaration is NOT the problem and re-reading package.json will not help.\n' +
-      `        Repair the INSTALL in ${hostRoot}: run \`pnpm install\`, check that a\n` +
-      '        production prune did not drop it, and that its dist is actually built — or\n';
+      '        What IS wrong was measured by the importer: the cause below names the\n' +
+      '        directory it consulted and what it found there, and is the authority on\n' +
+      '        whether any install action can change it — or\n';
   }
   if (kind === 'declared-no-loadable-entry') {
     return `      • this app DECLARES ${pkg} ` +

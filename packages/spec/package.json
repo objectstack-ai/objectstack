@@ -108,6 +108,16 @@
       }
     },
     "./api": {
+      "browser": {
+        "import": {
+          "types": "./dist/api/index.d.mts",
+          "default": "./dist/browser/api/index.mjs"
+        },
+        "require": {
+          "types": "./dist/api/index.d.ts",
+          "default": "./dist/browser/api/index.js"
+        }
+      },
       "import": {
         "types": "./dist/api/index.d.mts",
         "default": "./dist/api/index.mjs"

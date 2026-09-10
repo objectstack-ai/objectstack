@@ -965,10 +965,21 @@ the chain resolves from either end:
   parked on an `approval`, resuming the parent is refused too.
 
 A child that fails terminally after the pause fails every waiting ancestor, so
-no run is stranded as resumable-forever. See the worked example pair in the
-showcase app: `showcase_project_closure` invokes the reusable
-`showcase_closure_signoff` approval subflow and notifies the owner with the
-bubbled decision.
+no run is stranded as resumable-forever. **When the child's failure is a
+strand** — its resume consumed the pause and a downstream node threw — each
+ancestor's consumed pause is recorded too, and the repair verb puts the whole
+chain back in one call: `POST …/runs/{runId}/restore-suspension` on **any**
+member re-arms every member, deepest first, so the continuation re-issued on
+the run you named flows back up through the ancestors instead of completing a
+leaf into a parent that never continues. Re-arming an ancestor is all the verb
+does — an ancestor is never *stranded*, because resuming it is not what moves
+it. A cascade from a child that is **not** repairable records no ancestor
+snapshot, deliberately, so the verb never promises a chain repair it could not
+finish.
+
+See the worked example pair in the showcase app:
+`showcase_project_closure` invokes the reusable `showcase_closure_signoff`
+approval subflow and notifies the owner with the bubbled decision.
 
 ### Observing runs
 
@@ -1747,7 +1758,7 @@ curl -b cookies.txt -X POST \
 | `POST /api/v1/automation/:name/runs/:runId/resume` | Resume a paused run — body `{ inputs, output, branchLabel }` |
 | `GET /api/v1/automation/:name/runs/:runId/screen` | The pending screen of a screen-flow run |
 | `POST /api/v1/automation/:name/runs/:runId/cancel` | Cancel a suspended run (ADR-0044) — `PLATFORM_ADMIN` posture only (`isSystem` bypass); body `{ reason? }`. `501 NOT_IMPLEMENTED` when the service does not declare the verb |
-| `POST /api/v1/automation/:name/runs/:runId/restore-suspension` | Re-arm a run stranded by a failed resume — same gate as `cancel`; body `{ reason? }`. `501 NOT_IMPLEMENTED` when the service does not declare the verb |
+| `POST /api/v1/automation/:name/runs/:runId/restore-suspension` | Re-arm a run stranded by a failed resume — and, for a nested run, every ancestor whose pause that strand's cascade consumed, deepest first, from whichever member you name. Same gate as `cancel`; body `{ reason? }`. `501 NOT_IMPLEMENTED` when the service does not declare the verb |
 
 **Failures answer real HTTP status codes.** A flow that does not run is not a
 `200`. The route classifies five outcomes, and it reads the engine's own verdict

@@ -690,8 +690,25 @@ export interface AnalyticsServiceConfig {
    *   that field's storage scale via `percentScaleOf`, so a renderer scales by
    *   declared metadata instead of guessing from the value.
    * - Date bucketing: a date vs datetime dimension drills by the right bound.
+   * - [#16236] Formula result type: `returnType` is what a `formula` field was
+   *   DECLARED to compute, and the only channel it has to the measure
+   *   result-column rule. See the key's own note below.
+   *
+   * ⚠️ [#16236] `returnType` is `FieldSchema.returnType` — the AUTHORING
+   * vocabulary `'number' | 'text' | 'boolean' | 'date'`, whose owner is
+   * `packages/spec/src/data/field.zod.ts`. It is declared `string` here for the
+   * reason its sibling `type` is: this shape is what a HOST answers at runtime,
+   * and a host can answer a word this contract does not accept. ⛔ The accepted
+   * set is NEVER restated at this seam — `measureResultType` reads it off
+   * {@link FORMULA_RETURN_TYPE_RESULT}, which is the one copy, and tiers an
+   * unrecognised word as "cannot answer, do not block".
+   *
+   * ⛔ It is NOT a wire word. `AnalyticsResult.fields[].type` speaks
+   * `DimensionType`, in which `text` is `'string'` and `date` is `'time'`;
+   * relaying this key into that position is the mistake the translation table
+   * exists to prevent.
    */
-  sourceFieldMeta?: (object: string, field: string) => { type?: string; defaultCurrency?: string; max?: number } | undefined;
+  sourceFieldMeta?: (object: string, field: string) => { type?: string; defaultCurrency?: string; max?: number; returnType?: string } | undefined;
   /**
    * [#15684] The SQL dialect of the datasource backing `object` — `'sqlite'`,
    * `'postgres'`, `'mysql'`, or `undefined` when the host cannot answer.
@@ -1818,7 +1835,13 @@ export class AnalyticsService implements IAnalyticsService {
         // holding both halves of the question, the AUTHORED measure (`aggregate`
         // + `field`) and the source field's declared type. A per-producer copy
         // would be four implementations of one rule, free to drift.
-        const resultType = measureResultType(m.aggregate, meta?.type);
+        //
+        // [#16236] The third input is the aggregated field's declared
+        // `returnType` — read off the SAME hook, in the same call, so a formula
+        // measure is typed from metadata the host already had rather than from
+        // a second probe. Absent (an unproven `dyn` expression) or unrecognised
+        // ⇒ the rule declines and the producer's `number` stands.
+        const resultType = measureResultType(m.aggregate, meta?.type, meta?.returnType);
         if (resultType) f.type = resultType;
       }
     }
