@@ -519,20 +519,51 @@ function selfTest() {
   eq('1.7.2 admits only itself', semver.satisfies('1.7.3', '1.7.2'), false);
 
   // ── the repo's own state, read through the same collector ─────────────────
+  //
+  // [#17440] This case used to be anchored on `@better-auth/core/db` naming
+  // `createLocalAccountIssuer` — the #16186 defect itself — and carried the
+  // instruction "if the durable fix landed, retire this case with it". The
+  // durable fix HAS landed: the platform adopted better-auth's rollback, the
+  // two deleted names are imported nowhere, and the family sits on an exact
+  // 1.7.3.
+  //
+  // ⛔ Retiring the SPECIMEN is not retiring the case. What this case exists
+  // to catch is a collector that has silently stopped reaching publishable
+  // source — at which point the whole gate passes over nothing, exactly the
+  // way #16186 passed over nothing for three releases. So it re-anchors on a
+  // LIVE edge instead of being deleted, and it still asserts a NAMED symbol
+  // rather than merely the specifier: an edge with an empty symbol set proves
+  // the import was found but not parsed.
   const { edges, declarations } = collectVendorEdges();
-  const core = edges.get('@better-auth/core');
-  if (!core || !core.has('@better-auth/core/db')) {
+  const root = edges.get('better-auth');
+  if (!root || !root.has('better-auth/adapters')) {
     failures.push(
-      'the collector no longer sees the @better-auth/core/db edge in publishable source — ' +
+      'the collector no longer sees the better-auth/adapters edge in publishable source — ' +
         'either the import moved (update this case) or the scan stopped reaching plugin-auth.',
     );
   } else {
-    const symbols = [...core.get('@better-auth/core/db')].sort();
-    if (!symbols.includes('createLocalAccountIssuer')) {
+    const symbols = [...root.get('better-auth/adapters')].sort();
+    if (!symbols.includes('createAdapterFactory')) {
       failures.push(
-        'the @better-auth/core/db edge no longer names createLocalAccountIssuer — if the durable ' +
-          'fix landed, retire this case with it.',
+        'the better-auth/adapters edge no longer names createAdapterFactory — if that import ' +
+          'genuinely moved, re-anchor this case on another LIVE value import from a governed ' +
+          'vendor. ⛔ Never delete it: an unanchored collector is a gate over nothing.',
       );
+    }
+  }
+  // The retired specimen, asserted GONE. A stray re-introduction of either
+  // deleted name would not load at all on the pinned 1.7.3, so it is worth one
+  // line here rather than a runtime discovery.
+  for (const [pkg, specs] of edges) {
+    for (const [spec, syms] of specs) {
+      for (const dead of ['createLocalAccountIssuer', 'createOAuthAccountIssuer']) {
+        if (syms.has(dead)) {
+          failures.push(
+            `publishable source imports ${dead} from ${spec} (${pkg}) — better-auth deleted that ` +
+              'export in 1.7.3 and #17440 retired our use of it; on the pinned line it cannot resolve.',
+          );
+        }
+      }
     }
   }
   if (!declarations.has('@better-auth/core')) {
