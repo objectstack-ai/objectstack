@@ -136,6 +136,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { requireDependency } from './import-prerequisite.mjs';
 const { parseDocument } = await requireDependency('yaml', () => import('yaml'), import.meta.url);
 import { isEntrypoint } from './invoked-as.mjs';
@@ -600,11 +601,17 @@ function selfTest() {
   //    `bodyMode` handed it the wrong text (an empty string, say), so this leg
   //    runs a real process over a real input and grades the exit code. Both
   //    input spellings and both non-error exits are covered.
+  //
+  //    The child is THIS file (`import.meta.url`), never `join(root, SELF)`:
+  //    `root` comes from the cwd, so a self-test launched from a sibling
+  //    checkout would spawn THAT tree's copy and grade a script nobody edited
+  //    -- the #4690 shape again, a harness that verified the wrong subject.
   const dir = mkdtempSync(join(tmpdir(), 'closing-keyword-body-'));
   try {
+    const selfPath = fileURLToPath(import.meta.url);
     const drive = (args, input) => {
       try {
-        return { status: 0, out: execFileSync(process.execPath, [join(root, SELF), ...args], { cwd: root, encoding: 'utf8', input: input ?? '', stdio: ['pipe', 'pipe', 'pipe'] }) };
+        return { status: 0, out: execFileSync(process.execPath, [selfPath, ...args], { cwd: root, encoding: 'utf8', input: input ?? '', stdio: ['pipe', 'pipe', 'pipe'] }) };
       } catch (err) {
         return { status: err.status, out: `${err.stdout ?? ''}${err.stderr ?? ''}` };
       }
