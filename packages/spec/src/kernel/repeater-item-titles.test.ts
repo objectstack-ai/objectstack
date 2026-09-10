@@ -117,7 +117,7 @@ function* walkFormFields(fields: any[] | undefined, prefix = ''): Generator<{ pa
 }
 
 /** Follow `$ref` into `$defs`. */
-function deref(node: Node | undefined, root: Node, depth = 0): Node | undefined {
+function deref(node: Node | undefined, root: Node): Node | undefined {
   let n = node;
   let d = 0;
   while (n && typeof n === 'object' && typeof n.$ref === 'string' && d++ < 8) {
