@@ -49,10 +49,14 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { FILE_REFERENCE_TYPES } from '@objectstack/spec/data';
+import type { DriverOptions } from '@objectstack/spec/data';
+import type { DriverQuery } from '@objectstack/spec/contracts';
 import { SqlDriver } from './sql-driver.js';
 import { DIALECT_CELLS, declareDialectCell, type DialectCell } from './live-dialect-matrix.testkit.js';
 
-const OPTS = { bypassTenantAudit: true } as any;
+// ⛔ Not `as any`: `check:query-options-erasure` counts every erased options
+// bag, tests included, and this one is squarely ON contract.
+const OPTS: DriverOptions = { bypassTenantAudit: true };
 
 /** The width the SQL generator emits for the family, transcribed once. */
 const GENERATOR_WIDTH = 2048;
@@ -90,7 +94,7 @@ async function writeRaw(driver: SqlDriver, table: string, id: string, patch: Rec
  * that never landed report as a value that never moved.
  */
 async function readField(driver: SqlDriver, table: string, id: string, field: string): Promise<unknown> {
-  const row = await driver.findOne(table, { where: { id } } as any, OPTS);
+  const row = await driver.findOne(table, { where: { id } } as DriverQuery, OPTS);
   expect(row, `${table}#${id} was not found`).not.toBeNull();
   return (row as Record<string, unknown>)[field];
 }
