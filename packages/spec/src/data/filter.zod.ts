@@ -29,12 +29,17 @@ import { bareDateRangePresetComparandMessage, isDateRangePresetName } from './da
 
 /**
  * Field Reference
- * Represents a reference to another field/column instead of a literal value.
- * Used for joins (ON clause) and cross-field comparisons.
+ * Represents a reference to another COLUMN OF THE SAME ROW instead of a
+ * literal value. Used for cross-field comparisons. There is no ON clause to
+ * write one into: `query.joins` was removed (#4286, ADR-0049) and related
+ * records are read through `expand`, so a reference naming a relation path
+ * (`order.owner_id`) is not a join — it is the dotted spelling "Execution
+ * support" below says SQL push-down refuses with `INVALID_FILTER`.
  *
  * @example
- * // user.id = order.owner_id
- * { "$eq": { "$field": "order.owner_id" } }
+ * // amount > budget — a SAME-TABLE cross-field comparison, the shape both
+ * // execution paths compile (`cross-field-conformance-cases.ts` pins the rows)
+ * { "$gt": { "$field": "budget" } }
  *
  * @example
  * // completed_at <= due_date + grace_days  (#14104 — a SAME-TABLE offset
