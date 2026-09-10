@@ -49,7 +49,7 @@ interface FindCall {
     objectName: string;
     where: Record<string, unknown>;
     limit?: number;
-    context?: { isSystem?: boolean };
+    context?: { isSystem?: boolean; tenantId?: string };
 }
 
 /**
@@ -65,6 +65,39 @@ function fakeDataEngine(rows: Row[], knownObjects: string[] = ['contracts']) {
             const where = (query?.where ?? {}) as Record<string, unknown>;
             calls.push({ objectName, where, limit: query?.limit, context: query?.context });
             const out = rows.filter((row) => matches(row, where));
+            return typeof query?.limit === 'number' ? out.slice(0, query.limit) : out;
+        },
+        getObject(name) {
+            return knownObjects.includes(name) ? { name } : undefined;
+        },
+    };
+    return { engine, calls };
+}
+
+/**
+ * [#16659] A fake ObjectQL surface that HONOURS `context.tenantId`, so the
+ * differential control can put matching rows in two organizations and observe
+ * which ones come back.
+ *
+ * The scope it implements is the SQL driver's documented one — `tenantId`
+ * present ⇒ `(organization_id = :tenant OR organization_id IS NULL)`; `tenantId`
+ * absent ⇒ no predicate at all, which is exactly how the unfixed sweep read.
+ * ⛔ Not a convenience double that filters whatever it is handed: the "absent"
+ * arm has to reproduce the DEFECT, or ablating the fix would still look scoped.
+ */
+function tenantScopedDataEngine(rows: Row[], knownObjects: string[] = ['contracts']) {
+    const calls: FindCall[] = [];
+    const engine: TimeRelativeDataEngine = {
+        async find(objectName, query) {
+            const where = (query?.where ?? {}) as Record<string, unknown>;
+            calls.push({ objectName, where, limit: query?.limit, context: query?.context });
+            const tenant = query?.context?.tenantId;
+            const scoped = rows.filter((row) => {
+                if (tenant === undefined) return true;
+                const org = row.organization_id;
+                return org === tenant || org == null;
+            });
+            const out = scoped.filter((row) => matches(row, where));
             return typeof query?.limit === 'number' ? out.slice(0, query.limit) : out;
         },
         getObject(name) {
@@ -98,13 +131,21 @@ function silentLogger(): TriggerLogger {
 /** Fixed reference clock: 2026-07-18 (noon UTC). */
 const NOW = () => new Date('2026-07-18T12:00:00.000Z');
 
+/**
+ * [#16659] The organization every fixture binding declares. Named rather than
+ * inlined because it is now asserted from two directions — the sweep's query
+ * scope and the launched run's identity — and a literal repeated at both ends
+ * of that pair can drift into agreeing with itself.
+ */
+const TEST_ORG = 'org_2mtx1w9d0k4bqf7v';
+
 function binding(timeRelative: unknown, overrides: Partial<FlowTriggerBinding> = {}): FlowTriggerBinding {
     return {
         flowName: 'renewal_alert',
         object: 'contracts',
         config: { timeRelative },
         // [#16659] see the schedule trigger's fixture note.
-        organization: 'org_2mtx1w9d0k4bqf7v',
+        organization: TEST_ORG,
         ...overrides,
     };
 }
@@ -227,8 +268,14 @@ describe('TimeRelativeTrigger', () => {
         // Context is record-shaped (so `{record.x}` + start conditions work).
         expect(seen[0]).toMatchObject({ object: 'contracts', event: 'time_relative' });
         expect(seen[0].record).toBe(seen[0].params);
-        // The sweep queries as a system op (sees all rows, RLS-bypassing).
-        expect(calls[0].context).toEqual({ isSystem: true });
+        // The sweep queries as a system op (sees all rows, RLS-bypassing) AND
+        // inside its declared organization. [#16659] This assertion used to
+        // read `{ isSystem: true }` and it was pinning the defect: `isSystem`
+        // is AUTHORIZATION and `tenantId` is TENANCY, and a sweep carrying only
+        // the first selects across every tenant while its runs act as one.
+        // ⛔ Do not relax it back to a subset match — the exact-equality is
+        // what makes "the sweep asks for no scope" red.
+        expect(calls[0].context).toEqual({ isSystem: true, tenantId: TEST_ORG });
         expect(calls[0].where).toEqual({
             status: 'active',
             end_date: { $gte: '2026-07-18T00:00:00.000Z', $lte: '2026-09-16T23:59:59.999Z' },
@@ -733,23 +780,29 @@ describe('TimeRelativeTriggerPlugin', () => {
 // ─── The acting-organization refusal (#16659) ───────────────────────
 //
 // The time-relative sweep is NOT the weaker case for carrying an organization,
-// it is the stronger one: it queries with `context: { isSystem: true }` on
-// purpose, so an org-less sweep selects across every tenant and then launches a
-// run that can write into none of them.
+// it is the stronger one: it runs ELEVATED on purpose (`isSystem` — a
+// background sweep must see every row, not the RLS-scoped subset), so the
+// declaration is the only thing keeping its SELECTION inside one organization.
+// An org-less sweep selects across every tenant and then launches a run that
+// can write into none of them; a sweep whose declaration reached only the run
+// selects across every tenant and launches runs that write into ONE, which is
+// worse. Both halves are pinned below.
 
 describe('TimeRelativeTrigger — the acting-organization refusal (#16659)', () => {
     const DESC = { object: 'contracts', dateField: 'end_date', withinDays: 60 };
 
-    function recordingLogger(): { logger: TriggerLogger; errors: string[] } {
+    function recordingLogger(): { logger: TriggerLogger; errors: string[]; warns: string[] } {
         const errors: string[] = [];
+        const warns: string[] = [];
         return {
             logger: {
                 info: () => {},
                 debug: () => {},
-                warn: () => {},
+                warn: (msg: string) => void warns.push(String(msg)),
                 error: (msg: string) => void errors.push(String(msg)),
             },
             errors,
+            warns,
         };
     }
 
@@ -786,5 +839,148 @@ describe('TimeRelativeTrigger — the acting-organization refusal (#16659)', () 
         ).toThrow();
         await flush();
         expect(job.jobs.size).toBe(0);
+    });
+
+    // ── the SELECTION half (#16659, F2) ───────────────────────────────────
+    //
+    // Declaring an organization bounded the RUN and left the QUERY unbounded,
+    // so a sweep declared for A matched rows in every tenant and launched runs
+    // stamped A about other organizations' records. These pins are about the
+    // query.
+
+    it('EVERY window query carries the declared organization, not just the first', async () => {
+        // Offset mode issues one query per offset — a scope threaded onto only
+        // the first would leave the rest crossing organizations, and a pin that
+        // read `calls[0]` alone would not notice.
+        const job = fakeJobService();
+        const { engine, calls } = fakeDataEngine([]);
+        const trigger = new TimeRelativeTrigger(() => job.service, () => engine, silentLogger(), NOW);
+
+        trigger.start(
+            binding({ object: 'contracts', dateField: 'end_date', offsetDays: [60, 30, 7] }),
+            async () => {},
+        );
+        await flush();
+        await job.fire('flow-time-relative:renewal_alert');
+
+        expect(calls.length, 'offset mode must issue one query per offset').toBe(3);
+        expect(
+            calls.map((c) => c.context?.tenantId ?? 'NO-SCOPE'),
+            'an unscoped window query selects every organization\'s rows',
+        ).toEqual([TEST_ORG, TEST_ORG, TEST_ORG]);
+        // The scope is the ONLY thing tenancy contributes: the author's filter
+        // and the date window are untouched, so no organization predicate was
+        // hand-built onto `where` (which would hardcode a column name the
+        // object is free to rename, and select nothing where there is none).
+        for (const call of calls) {
+            expect(Object.keys(call.where)).toEqual(['end_date']);
+        }
+    });
+
+    it('DIFFERENTIAL: with matching rows in two organizations only the declared one is swept', async () => {
+        // The discriminating shape. A pin that only proved "A's rows are found"
+        // passes on the defect too — the defect FOUND them, alongside B's.
+        //
+        // The double implements the documented driver contract rather than a
+        // convenient one: `DriverOptions.tenantId` scopes to
+        // `(organization_id = :tenant OR organization_id IS NULL)`
+        // (sql-driver's own `tenantFieldByTable` note), and an ABSENT scope
+        // applies no predicate at all — which is precisely how the unfixed
+        // sweep read.
+        const ORG_B = 'org_beta_0000000000000';
+        const rows: Row[] = [
+            { id: 'a1', end_date: '2026-07-25T00:00:00.000Z', organization_id: TEST_ORG },
+            { id: 'b1', end_date: '2026-07-25T00:00:00.000Z', organization_id: ORG_B },
+            { id: 'b2', end_date: '2026-07-26T00:00:00.000Z', organization_id: ORG_B },
+        ];
+        const job = fakeJobService();
+        const { engine, calls } = tenantScopedDataEngine(rows);
+        const trigger = new TimeRelativeTrigger(() => job.service, () => engine, silentLogger(), NOW);
+        const seen: AutomationContext[] = [];
+
+        trigger.start(
+            binding({ object: 'contracts', dateField: 'end_date', withinDays: 60 }),
+            async (ctx) => void seen.push(ctx),
+        );
+        await flush();
+        await job.fire('flow-time-relative:renewal_alert');
+
+        expect(
+            seen.map((c) => (c.record as Row).id),
+            'the sweep launched a run for a record in an organization the flow never declared',
+        ).toEqual(['a1']);
+        expect(
+            seen.map((c) => c.tenantId),
+            'and the run still acts as the declared organization',
+        ).toEqual([TEST_ORG]);
+        expect(calls[0].context?.tenantId, 'the scope must reach the engine, not be applied afterwards').toBe(TEST_ORG);
+    });
+
+    it('a store that CANNOT honour the scope is reported at `error`, never answered unscoped', async () => {
+        // `driver-memory` refuses any call handed a tenant scope (#16589). A
+        // sweep required to stay inside one organization, talking to a store
+        // that cannot keep it there, must be LOUD — "selected nothing this
+        // tick" and "cannot select at all" are different facts.
+        const job = fakeJobService();
+        const engine: TimeRelativeDataEngine = {
+            async find(_objectName, query) {
+                if (query?.context?.tenantId !== undefined) {
+                    throw Object.assign(new Error('[driver-memory] Refusing to answer: this driver has NO row-level tenant isolation.'), {
+                        code: 'MEMORY_MULTI_TENANT_UNSUPPORTED',
+                    });
+                }
+                return [];
+            },
+            getObject: () => ({ name: 'contracts' }),
+        };
+        const log = recordingLogger();
+        const trigger = new TimeRelativeTrigger(() => job.service, () => engine, log.logger, NOW);
+
+        trigger.start(binding({ object: 'contracts', dateField: 'end_date', withinDays: 60 }), async () => {});
+        await flush();
+        await job.fire('flow-time-relative:renewal_alert');
+
+        const failure = log.errors.find((l) => l.includes('sweep failed'));
+        expect(failure, `the sweep failed silently; errors seen: ${JSON.stringify(log.errors)}`).toBeTruthy();
+        expect(failure, 'the failure must name the flow it belongs to').toContain('renewal_alert');
+        expect(failure, "and carry the store's own reason").toContain('NO row-level tenant isolation');
+    });
+
+    it('says so at bind when the swept object is one the engine will NOT scope', async () => {
+        // ⚠️ The quiet direction. A `tenancy.enabled: false` object (ADR-0066)
+        // is exempt from the engine's tenant scope, so the declaration cannot
+        // narrow this sweep at all — it still selects across every
+        // organization, while the flow's `organization` line makes it LOOK
+        // contained. Nothing here changes which rows come back; the pin is that
+        // the operator is TOLD.
+        const job = fakeJobService();
+        const { engine } = fakeDataEngine([]);
+        engine.getObject = () => ({ name: 'contracts', tenancy: { enabled: false } });
+        const log = recordingLogger();
+        const trigger = new TimeRelativeTrigger(() => job.service, () => engine, log.logger, NOW);
+
+        trigger.start(binding({ object: 'contracts', dateField: 'end_date', withinDays: 60 }), async () => {});
+        await flush();
+
+        const said = log.warns.find((l) => l.includes('tenancy'));
+        expect(said, `nothing was said; warns seen: ${JSON.stringify(log.warns)}`).toBeTruthy();
+        expect(said, 'the warning must name the object whose declaration makes the scope inert').toContain('contracts');
+        expect(said, 'and state the consequence, not just the fact').toContain('does NOT narrow this sweep');
+        expect(job.jobs.size, 'the sweep still binds — this is a disclosure, not a refusal').toBe(1);
+    });
+
+    it('control: a tenant-scoped object gets NO such warning', async () => {
+        const job = fakeJobService();
+        const { engine } = fakeDataEngine([]);
+        const log = recordingLogger();
+        const trigger = new TimeRelativeTrigger(() => job.service, () => engine, log.logger, NOW);
+
+        trigger.start(binding({ object: 'contracts', dateField: 'end_date', withinDays: 60 }), async () => {});
+        await flush();
+
+        expect(
+            log.warns.filter((l) => l.includes('does NOT narrow this sweep')),
+            'an ordinary object must not be warned about — that would train operators to ignore the line',
+        ).toHaveLength(0);
     });
 });
