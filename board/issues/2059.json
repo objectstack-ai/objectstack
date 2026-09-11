@@ -1,0 +1,32 @@
+{
+  "number": 2059,
+  "kind": "pull_request",
+  "title": "feat(app-showcase): Account 360 record page + Delivery Operations dashboard",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-20T06:16:21Z",
+  "updated_at": "2026-06-20T06:16:36Z",
+  "closed_at": "2026-06-20T06:16:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-20T06:16:31Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2059",
+  "body": "## Why\n\nThe showcase is a thorough *atomic* fixture (one-of-every field / chart / flow), but thin on **composed, realistic enterprise surfaces** a developer would actually build. This adds the first two flagship surfaces.\n\n## What\n\n### Account 360 — `showcase_account_detail`\nThe account object's first record page, and the first to exercise the related-data + collaboration blocks nothing else used:\n- `record:related_list` → **Projects** and **Invoices** as live child lists\n- `record:history` → audit-trail tab\n- synthesized **discussion** slot → activity + comment feed (@mentions)\n- `record:highlights` + `record:details` (Company / Billing sections)\n\n> ⚠️ Gotcha encoded for future authors: `record:details` **dedupes** any field already in `record:highlights` and **hide-empties** the rest — so reusing the same fields in both collapses every section to empty (the first draft hit exactly this). Highlights and details now use disjoint fields, and the account seed gained `tax_id` + `billing_email` so the Billing section renders.\n\n### Delivery Operations — `showcase_ops_dashboard`\nA believable ops landing page (vs the one-of-every-chart Chart Gallery):\n- KPI hero row of `metric` tiles, each scoped by a **per-widget filter** (active / at-risk / awaiting-review) — one dataset sliced different ways\n- health column + status bar + priority donut + throughput line + budget-vs-spent table\n- global `dateRange` + global status filter\n\n`showcase_project_metrics` gains `status` + `health` dimensions to power it.\n\n## Verification\n\nBrowser-verified on `:5181`: KPI per-widget filters resolve (Active 2 / At-Risk 1 / Awaiting Review 2 / Budget \\$1.09M), all charts render, the Account tabs (Details / Projects(2) / Invoices) and the discussion feed populate. `typecheck` + **20** showcase tests pass.\n\nWired into nav (Analytics → Delivery Operations) and `objectstack.config`.\n\nPart 1 of the enterprise-surfaces set; My Work home / Approvals inbox / wizard / settings to follow.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

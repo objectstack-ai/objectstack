@@ -1,0 +1,34 @@
+{
+  "number": 2182,
+  "kind": "pull_request",
+  "title": "fix: single-tenant audit follow-ups — member/invitation org optional + headOf org-scope (ADR-0057)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T06:53:00Z",
+  "updated_at": "2026-06-22T07:02:49Z",
+  "closed_at": "2026-06-22T07:02:47Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T07:02:47Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2182",
+  "body": "Follow-ups from the single-tenant audit you requested (after #2178).\n\n## 1. `sys_member` / `sys_invitation` — `organization_id` optional\n\nSame class as #2178 (BU/team): `required` org-id with no org row + no auto-stamp in single-tenant. These are better-auth org-flow objects so they're not *directly* reachable in single-tenant Setup, but this completes the org-scoped identity graph's single-tenant consistency. Multi-tenant still auto-stamps via OrgScopingPlugin; tenant-isolation RLS hides any null-org row (fail-closed).\n\n## 2. `BusinessUnitGraphService.headOf()` — missing org isolation (real bug)\n\n`headOf(buId)` queried `sys_business_unit` by **id alone** under `SYSTEM_CTX` (which bypasses RLS), while its sibling `descendants()` correctly uses `orgScope()`. So in **multi-tenant** a caller could read another organization's BU `manager_user_id` (cross-tenant leak). Fixed to use `orgScope()` + added a regression test (an org1-scoped service must not read an org2 BU's head).\n\n## Audit result (the rest is clean)\n\nThe runtime is otherwise correct-by-design in single-tenant — verified: the wildcard `organization_id` RLS policies are **stripped** when org-scoping is absent (saw it live), and the `organization_id == tenantId` lookups are all guarded by `if (tenantId)` (fall back to self). No other actionable single-tenant breakage found.\n\nVerified: `headOf` tests 2/2 pass locally; changed packages build clean.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

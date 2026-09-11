@@ -1,0 +1,30 @@
+{
+  "number": 2173,
+  "kind": "pull_request",
+  "title": "chore: version packages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T05:12:22Z",
+  "updated_at": "2026-06-22T05:20:48Z",
+  "closed_at": "2026-06-22T05:15:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2173",
+  "body": "This PR was opened by the [Changesets release](https://github.com/changesets/action) GitHub action. When you're ready to do a release, you can merge this and the packages will be published to npm automatically. If you're not ready to do a release yet, that's fine, whenever you add more changesets to main, this PR will be updated.\n\n\n# Releases\n\n> The changelog information of each package has been omitted from this message, as the content exceeds the size limit.\n\n## @objectstack/platform-objects@10.0.0\n\n\n## @objectstack/plugin-sharing@10.0.0\n\n\n## @objectstack/formula@10.0.0\n\n\n## @objectstack/objectql@10.0.0\n\n\n## @objectstack/plugin-hono-server@10.0.0\n\n\n## @objectstack/plugin-security@10.0.0\n\n\n## @objectstack/rest@10.0.0\n\n\n## @objectstack/runtime@10.0.0\n\n\n## @objectstack/service-ai@10.0.0\n\n\n## @objectstack/service-analytics@10.0.0\n\n\n## @objectstack/spec@10.0.0\n\n\n## @objectstack/verify@10.0.0\n\n\n## @objectstack/express@10.0.0\n\n\n## @objectstack/fastify@10.0.0\n\n\n## @objectstack/hono@10.0.0\n\n\n## @objectstack/nestjs@10.0.0\n\n\n## @objectstack/nextjs@10.0.0\n\n\n## @objectstack/nuxt@10.0.0\n\n\n## @objectstack/sveltekit@10.0.0\n\n\n## @objectstack/account@10.0.0\n\n\n## @objectstack/setup@10.0.0\n\n\n## @objectstack/studio@10.0.0\n\n\n## @objectstack/cli@10.0.0\n\n\n## @objectstack/client@10.0.0\n\n\n## @objectstack/client-react@10.0.0\n\n\n## @objectstack/cloud-connection@10.0.0\n\n\n## @objectstack/connector-mcp@10.0.0\n\n\n## @objectstack/connector-openapi@10.0.0\n\n\n## @objectstack/connector-rest@10.0.0\n\n\n## @objectstack/connector-slack@10.0.0\n\n\n## @objectstack/core@10.0.0\n\n\n## @objectstack/mcp@10.0.0\n\n\n## @objectstack/metadata@10.0.0\n\n\n## @objectstack/metadata-core@10.0.0\n\n\n## @objectstack/metadata-fs@10.0.0\n\n\n## @objectstack/observability@10.0.0\n\n\n## @objectstack/driver-memory@10.0.0\n\n\n## @objectstack/driver-mongodb@10.0.0\n\n\n## @objectstack/driver-sql@10.0.0\n\n\n## @objectstack/driver-sqlite-wasm@10.0.0\n\n\n## @objectstack/embedder-openai@10.0.0\n\n\n## @objectstack/knowledge-memory@10.0.0\n\n\n## @objectstack/knowledge-ragflow@10.0.0\n\n\n## @objectstack/plugin-approvals@10.0.0\n\n\n## @objectstack/plugin-audit@10.0.0\n\n\n## @objectstack/plugin-auth@10.0.0\n\n\n## @objectstack/plugin-dev@10.0.0\n\n\n## @objectstack/plugin-email@10.0.0\n\n\n## @objectstack/plugin-msw@10.0.0\n\n\n## @objectstack/plugin-org-scoping@10.0.0\n\n\n## @objectstack/plugin-reports@10.0.0\n\n\n## @objectstack/plugin-webhooks@10.0.0\n\n\n## @objectstack/service-automation@10.0.0\n\n\n## @objectstack/service-cache@10.0.0\n\n\n## @objectstack/service-cluster@10.0.0\n\n\n## @objectstack/service-cluster-redis@10.0.0\n\n\n## @objectstack/service-datasource@10.0.0\n\n\n## @objectstack/service-i18n@10.0.0\n\n\n## @objectstack/service-job@10.0.0\n\n\n## @objectstack/service-knowledge@10.0.0\n\n\n## @objectstack/service-messaging@10.0.0\n\n\n## @objectstack/service-package@10.0.0\n\n\n## @objectstack/service-queue@10.0.0\n\n\n## @objectstack/service-realtime@10.0.0\n\n\n## @objectstack/service-settings@10.0.0\n\n\n## @objectstack/service-storage@10.0.0\n\n\n## @objectstack/trigger-api@10.0.0\n\n\n## @objectstack/trigger-record-change@10.0.0\n\n\n## @objectstack/trigger-schedule@10.0.0\n\n\n## @objectstack/types@10.0.0\n\n\n## @objectstack/console@10.0.0\n\n\n## create-objectstack@10.0.0\n\n\n## objectstack-vscode@10.0.0\n\n\n## @objectstack/example-crm@4.0.55\n\n\n## @objectstack/example-showcase@0.2.1\n\n\n## @objectstack/example-todo@4.0.55\n\n\n## @objectstack/dogfood@0.0.3\n\n\n## @objectstack/downstream-contract@0.0.1\n\n"
+}

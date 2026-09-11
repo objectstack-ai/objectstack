@@ -1,0 +1,33 @@
+{
+  "number": 1887,
+  "kind": "issue",
+  "title": "[P0][security] SharingRuleSchema disconnected from the live engine",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "priority:p0",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T06:56:19Z",
+  "updated_at": "2026-06-21T04:25:32Z",
+  "closed_at": "2026-06-21T04:25:32Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1887",
+  "body": "Part of the metadata liveness audit umbrella #1878 (P0 security cluster).\n\n## Problem\n`SharingRuleSchema` is **disconnected from the live engine**. The runtime enforces a divergent `sys_sharing_rule` model:\n- runtime: JSON `criteria_json`, recipient enum `user` / `team` / `department` / `role` / `queue`;\n- spec: CEL `condition`, recipients including `role_and_subordinates` / `guest`.\n\nThe spec's CEL `condition` is never compiled, and unparsable CEL degrades to **\"match nothing\"** — so spec-authored sharing rules silently grant no access. The two models have diverged into a write-only spec surface.\n\n## Decision required (enforce or remove)\n- **Reconcile/enforce**: compile the spec's CEL `condition` into the live engine and map the spec recipient set (including `role_and_subordinates`, which depends on the Role `parent` walk, and `guest`) onto `sys_sharing_rule`.\n- **Remove**: deprecate `SharingRuleSchema` in favor of authoring `sys_sharing_rule` directly, and document the supported (`criteria_json`, 5-recipient) model.\n\n## Evidence\n- `docs/audits/2026-06-security-identity-property-liveness.md`\n- runtime `sys_sharing_rule` model vs spec `SharingRuleSchema`\n\n> Note: depends on the Role `parent` hierarchy issue for the `role_and_subordinates` recipient.\n"
+}

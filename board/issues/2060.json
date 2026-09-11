@@ -1,0 +1,32 @@
+{
+  "number": 2060,
+  "kind": "pull_request",
+  "title": "feat(app-showcase): My Work home, Approvals review queue, New Project wizard",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-20T06:23:45Z",
+  "updated_at": "2026-06-20T06:24:00Z",
+  "closed_at": "2026-06-20T06:23:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-20T06:23:57Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2060",
+  "body": "## Why\n\nPart 2 of the composed-enterprise-surfaces set (part 1: [#2059](https://github.com/objectstack-ai/framework/pull/2059)). Three more realistic pages, each surfacing SDUI capabilities the showcase never rendered as real pages.\n\n## What\n\n### My Work — `showcase_my_work` (type: home)\nA role-aware workspace that composes **live** data:\n- KPI hero row of live `object-metric` tiles (Open Tasks / In Review / At-Risk Projects) — async aggregates with per-tile filters\n- a personal work queue: `object-grid` filtered to the signed-in user via the **`{current_user_id}`** token (records I own)\n- a **role-gated card** (`properties.visible` CEL) only the admin sees — per-user differentiated rendering\n\n### Approvals — `showcase_review_queue` (type: list)\nThe human side of the ~20 approval/review flows: an interface page over tasks `in_review` (work awaiting a decision), the object's action as a toolbar button (\"Mark done\" = approve & complete), drawer to inspect before deciding.\n\n### New Project Wizard — `showcase_new_project_wizard`\n`object-form` with `formType:'wizard'` + step indicator: **Basics → Status & Health → Budget** — the first page to actually walk a stepped create flow.\n\n## Verification\n\nBrowser-verified on `:5181`:\n- My Work — KPIs resolve (Open 8 / In Review 2 / At-Risk 1), owner-filtered queue + role card render\n- Approvals — exactly the 2 in-review tasks (Design system, Warehouse schema) + the approve button\n- Wizard — navigates Basics → Status & Health (Step 2 of 3) with the step checkmark\n\n`typecheck` + **20** showcase tests pass. Wired into nav + `objectstack.config`.\n\n> Remaining from the selected set: a Settings page (needs a small preference object) and a Utility panel — to follow.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

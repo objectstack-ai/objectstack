@@ -1,0 +1,35 @@
+{
+  "number": 1966,
+  "kind": "pull_request",
+  "title": "feat(cli): liveness author-warning lint — close the spec-liveness loop",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T15:13:42Z",
+  "updated_at": "2026-06-16T15:29:00Z",
+  "closed_at": "2026-06-16T15:21:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T15:21:57Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1966",
+  "body": "## Why\n\nThe spec-liveness ledgers (`packages/spec/liveness/*.json`) classify every authorable property **live / experimental / dead** with evidence, and the CI gate enforces that classification is *complete*. But that knowledge lived only in CI — it never reached the person (very often an **AI generating templates**) writing the metadata. So an author could keep setting `enable.feeds: true` or `field.columnName` forever, expecting them to do something, while they silently do nothing.\n\nThis closes the loop: the ledger now **warns the author at build time**.\n\n## What\n\nNew `compile` lint `packages/cli/src/utils/lint-liveness-properties.ts`, wired as an advisory stage in the compile pipeline (alongside the existing flow anti-pattern lint — **never fails the build**). It reads the shipped ledgers and warns when an authored object/field sets a *misleading* property, with a corrective hint:\n\n```\n⚠ object 'crm_account': sets `enable.feeds` but this object property has no runtime effect (liveness: dead).\n    Comments/collaboration live on the dedicated sys_comment object (plugin-audit), not this flag.\n    rule: liveness-dead-property\n⚠ object 'crm_account' · field 'code': sets `columnName` but this field property has no runtime effect (liveness: dead).\n    The physical column always equals the field key — a custom `columnName` is silently ignored by the driver.\n    rule: liveness-dead-property\n```\n\n### Signal over noise — opt-in per ledger entry\nA property being merely `dead` is **not** enough to warn (plenty of dead props are benign display/doc metadata). Warnings opt in via a new annotation:\n\n| Field | Effect |\n|---|---|\n| `\"authorWarn\": true` | warn when authored (any `experimental` entry also warns by default — a declared-but-unenforced guarantee) |\n| `\"authorHint\": \"…\"` | the corrective one-liner (falls back to `note`) |\n\nTwo rules keep it false-positive-free: **(1)** only genuinely *misleading* dead props are marked; **(2)** booleans warn only when set `true` and only `default(false)` flags are marked — so schema defaults like `enable.trash`/`enable.searchable` never trip it. (Discovered the hard way during verification: `enable.searchable` defaults `true`, so it's deliberately left unmarked — see its `_authorWarnSkipped`.) Documented in `liveness/README.md`.\n\nThe lint is **ledger-driven**: coverage grows by annotating more entries, not by touching lint code. v1 covers `object` (incl. `enable.*`) and `field` — the highest-signal surfaces.\n\n### Seeded annotations\n- **object**: `enable.{files,feeds,activities,trackHistory}` (dead default-false capability flags) + `versioning`/`partitioning`/`softDelete`/`search`/`recordName`/`defaultDetailForm`/`keyPrefix` (aspirational/duplicate blocks).\n- **field**: `columnName`, `referenceFilters`, `index`, `maxRating`, `vectorConfig`, `fileAttachmentConfig` (misleading dead — imply behavior that isn't wired).\n- `@objectstack/spec` now ships `liveness/` in package `files` so the installed CLI can read the ledgers.\n\n## Verification\n\n- **Real `objectstack compile`** end-to-end: injected `enable.feeds` / `versioning` / `columnName` into a showcase object → all three warned with hints; default-on `enable.trash` correctly silent. The lint also caught **two genuine pre-existing dead-prop usages** already in `app-showcase` (`f_rating.maxRating`, `f_vector.vectorConfig`) — flagged as a follow-up.\n- **9 new unit tests** (`lint-liveness-properties.test.ts`) run against the real shipped ledgers, so they double as a contract test (removing an `authorWarn` annotation fails the matching assertion).\n- `@objectstack/cli` **451** tests green; liveness gate green (new fields tolerated); `@objectstack/spec` ledger JSON validates.\n\nThis is the productization of the whole spec-liveness effort: measurement (ledger) + completeness gate (CI) + drift re-audit (monthly cron) + **now author-facing prevention** — directly serving the \"templates are AI-authored; avoid AI mistakes\" north star.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

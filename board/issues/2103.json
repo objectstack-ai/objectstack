@@ -1,0 +1,33 @@
+{
+  "number": 2103,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0060 — Conformance Ledger as a Platform Pattern",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T06:56:19Z",
+  "updated_at": "2026-06-21T07:02:34Z",
+  "closed_at": "2026-06-21T07:02:32Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T07:02:32Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2103",
+  "body": "Promotes the conformance-ledger discipline from a hand-written habit to a reusable platform pattern.\n\n## Why\nWe've now written the **same ledger twice** — ADR-0056 D10 (authz matrix) and ADR-0058 D7 (expression surface) — both defending against the **declared-but-unenforced** failure class: a property that's authorable but the runtime never wires, so it silently does nothing (#1887). AI authorship amplifies this — LLMs produce config that *looks* complete and don't notice nothing reads it. Two near-identical instances is the signal to standardize.\n\n## Decision (decision-only PR)\n- **D1** one reusable `ConformanceRow` model + `assertLedger` CI helper (unique ids / valid state / enforced-has-site / proof-exists / **ratchet**: discover the real surface from source, fail if any is unclassified).\n- **D2** refactor the two existing ledgers onto it (delete duplicated test logic, prove reuse).\n- **D3** third instance over the object **validation-rule** surface (`state_machine`/`cross_field`/`script`/…) — pins the ADR-0020 `state_machine` enforcement into CI; a new rule type with no enforcement becomes a build break.\n- **D4** home the helper in `@objectstack/verify` (static complement to its runtime harness).\n- **D5** \"landed\" is *defined* by the ledger: no green ratchet → not landed. ADR-0049's \"enforce or remove\" gains a mechanical third leg.\n\n## Phasing\nP1 model + unify the two · P2 validation-rule ledger · P3 the \"landed\" bar + extend to next surfaces.\n\n**Non-goal**: no runtime-semantics change; purely the conformance/verification layer.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 2183,
+  "kind": "pull_request",
+  "title": "fix(showcase): hide Mark Done once the task is complete",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T06:55:55Z",
+  "updated_at": "2026-06-22T07:03:42Z",
+  "closed_at": "2026-06-22T07:03:40Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T07:03:40Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2183",
+  "body": "Closes the last of the action-UX issues from the audit. Mark Done lingered on already-done records, and clicking it again was a silent no-op that still popped a success toast (the \"why is it still here?\" report).\n\n## Fix\n\nGate the action: `visible: '!record.done'`. It hides on tasks whose `done` flag is set (which is exactly what this action sets), so the button disappears after a successful click and stays hidden on finished records.\n\n### Why `record.`-prefixed (and a single operand)\n\nThis is the subtle part the first attempt got wrong:\n\n- A record-header action's `visible` is filtered by `ActionEngine.getActionsForLocation`, which evaluates against the runner context `{ record, recordId, objectName, user }` with **fail-closed** semantics (`evaluateCondition(expr, { throwOnError: true })` → `catch` → hide). The record fields live under `record.`, so a **bare** `done` / `status` predicate is an undefined top-level variable → throws → the action is hidden on *every* record (active and done alike). `record.done` resolves correctly. (This matches the existing `record:alert` predicate in `task-detail.page.ts`, which uses `record.status`.)\n- The renderer wraps `visible` as a `${...}` template whose evaluator throws on compound `&&` / `||`, so the predicate is kept atomic.\n\n## Verification (in-browser, current console)\n\n- Active task (`done=false`) → **Mark Done shows** (alongside Log Time).\n- Click Mark Done → `done=true`, `progress=100` (status untouched, per the action's design).\n- Reload → **Mark Done hidden** on the now-done record.\n- Done seed task → hidden from the start.\n- `pnpm verify` (app-showcase): typecheck + **30 tests**.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

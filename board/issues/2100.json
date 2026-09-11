@@ -1,0 +1,33 @@
+{
+  "number": 2100,
+  "kind": "pull_request",
+  "title": "ci(spec): signature-level snapshot for defineX factories — catch narrowing (#2035)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T06:48:08Z",
+  "updated_at": "2026-06-21T06:59:19Z",
+  "closed_at": "2026-06-21T06:59:17Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T06:59:17Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2100",
+  "body": "Follow-up #4 from the #2035 discussion. The name+kind snapshot (#2092) catches add/remove/rename of exports, but **not narrowing** — a `.default()` that flips an input field to required, or a `string` tightened to an enum, keeps the same `name (kind)`. The downstream-contract fixtures (#2089/#2095) catch narrowing only for the fields they happen to set.\n\n## What\n\nAdds `packages/spec/api-surface-signatures.json`: a stable, compact hash of each `defineX` factory's **resolved signature** (27 factories). A factory's signature embeds the full accepted authoring shape (`config: { ... }`), so any narrowing of what a domain accepts flips its hash.\n\nDeliberately **scoped to the factories** — the authoring contract — to stay low-noise (this was my one hesitation when I recommended it). The breadth file (4251 exports) is untouched; full per-export signatures would churn on every internal type tweak and wouldn't be worth the noise.\n\nRides the existing `check:api-surface` CI step — one command now checks both the breadth snapshot and the signatures.\n\n## Verification (local)\n\n- `check:api-surface` → clean (`surface + factory signatures unchanged ✓`)\n- **breadth snapshot byte-identical to main** — zero churn to the existing artifact\n- Deterministic: regenerated twice → identical (structural `typeToString`, no locale; same pinned TS as CI, which already proved macOS↔Linux parity for the breadth file in #2092)\n- Teeth: a flipped hash → `signature changed: defineAction` + breaking-change guidance, exit 1\n\nThis completes the four follow-ups (#2095 depth coverage, #2097 guard→apps, #2098 ADR-0059, and this).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

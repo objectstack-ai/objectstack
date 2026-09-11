@@ -1,0 +1,30 @@
+{
+  "number": 2137,
+  "kind": "pull_request",
+  "title": "fix(runtime): honor app-declared default profile on the artifact-serve path (ADR-0056 D7)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T15:14:37Z",
+  "updated_at": "2026-06-22T00:58:40Z",
+  "closed_at": "2026-06-22T00:57:55Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2137",
+  "body": "取代 #2132/#2136(GitHub 未对其 synchronize/已见 SHA 触发 CI)。变更同前:createStandaloneStack 浮出 permissions/roles,artifact 启动路径honor app 默认 profile;含 runtime + dogfood 回归测试。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 2017,
+  "kind": "pull_request",
+  "title": "fix(service-settings): remove legacy buildAuditSink that wrote to sys_audit_log with wrong columns",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-18T03:40:13Z",
+  "updated_at": "2026-06-18T03:59:01Z",
+  "closed_at": "2026-06-18T03:58:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-18T03:58:59Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2017",
+  "body": "## Summary\n\n- `buildAuditSink` in `SettingsServicePlugin` was inserting into `sys_audit_log` with columns that don't exist on that table (`actor_id`, `entity_type`, `entity_id`, `payload`, `occurred_at`). This caused a `SqliteError` on every settings write, caught silently and emitted as a `WARN SettingsServicePlugin: audit record failed` log.\n- The Phase 3 `buildAuditWriter` (already wired in the same `bindEngine` call) correctly writes to `sys_setting_audit` with the proper schema.\n- Fix: remove `buildAuditSink` entirely and pass `undefined` for the legacy audit sink slot.\n\n## Root cause\n\nThe `sys_audit_log` object schema defines `user_id` (not `actor_id`) and has no `entity_type`, `entity_id`, `payload`, or `occurred_at` columns. `buildAuditSink` was written before `sys_setting_audit` existed and was never updated when Phase 3 introduced the dedicated table.\n\n## Test plan\n\n- [ ] Boot `examples/app-crm` and write a setting via the Setup UI — confirm no `WARN SettingsServicePlugin: audit record failed` in the console\n- [ ] Confirm `sys_setting_audit` rows are written correctly after a settings save\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

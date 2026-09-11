@@ -1,0 +1,35 @@
+{
+  "number": 1968,
+  "kind": "pull_request",
+  "title": "fix(driver-sql): Field.date is a tz-naive YYYY-MM-DD calendar day (ADR-0053 Phase 1)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T15:20:29Z",
+  "updated_at": "2026-06-16T15:46:18Z",
+  "closed_at": "2026-06-16T15:46:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T15:46:14Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1968",
+  "body": "## What\n\nImplements **Phase 1** of [ADR-0053](https://github.com/objectstack-ai/framework/blob/main/docs/adr/0053-date-and-datetime-semantics.md): make `Field.date` a timezone-naive `YYYY-MM-DD` calendar day end-to-end at the SQL-driver boundary. `Field.datetime` is untouched (keeps full-instant UTC-ms semantics).\n\nRefs ADR-0053, #1928.\n\n## Why — the silent date-equality miss\n\nA `Field.date` (\"close date\", \"due date\", \"birthday\") is semantically a **calendar day**, but the driver treated it as an *instant*. The three layers disagreed:\n\n| Layer | Old behaviour |\n|-------|---------------|\n| **Write** (`formatInput`) | stored the value verbatim — a `Date`/ISO kept its time (`dev.db` held `close_date = \"2026-07-15T17:24:56.533Z\"`) |\n| **Filter** (`coerceFilterValue`) | already normalized the comparand to date-only `YYYY-MM-DD` |\n| **Read** (`formatOutput`) | no normalization — returned the stored timestamp |\n\nSo `close_date == '2026-07-15'` compared `\"2026-07-15T17:24Z\"` against `\"2026-07-15\"` → **never equal**. The same broke `$in` of dates and `daysFromNow(n)`-style equality comparands. Range filters (`$gte`/`$lt`) only worked by accident of lexicographic ISO ordering.\n\n## What changed (`packages/plugins/driver-sql/src/sql-driver.ts`)\n\n- **Shared helper** `toDateOnly()` — single source of truth for date-only truncation (Date → UTC calendar day; string → leading `YYYY-MM-DD`). `coerceFilterValue` now delegates to it, so filter/write/read all agree.\n- **Write** (`formatInput`): every `Field.date` value collapses to `YYYY-MM-DD` before insert/update, matching the filter's existing contract. Dialect-agnostic.\n- **Read** (`formatOutput`): `Field.date` returned as `YYYY-MM-DD`, slicing any stored time — **transparently repairs legacy timestamped rows on read, no data migration**. Read normalization now runs on the `find` path for every dialect too (previously only `findOne`); the json/boolean deserialisation stays SQLite-gated internally.\n\n## Out of scope (ADR-0053 Phase 2, needs separate review)\n\nTimezone-aware `today()`/`daysFromNow()`/`daysAgo()`, org/user reference timezone, `datetime` render-time TZ. This PR is the low-risk root fix; it composes with the #1950 build lint (`flow-date-equality-filter`), which becomes a belt-and-suspenders hint.\n\n## Testing\n\n- New suite `sql-driver-date-only.test.ts` (8 tests): Date/ISO/date-only write→read round-trips collapse to `YYYY-MM-DD`; `Field.datetime` keeps its instant; **the silent-miss regression** (date-only equality matches a timestamped write); `$in` of days; range filters; and legacy-row read-repair + that an in-place rewrite makes a legacy row filter-matchable.\n- Full `driver-sql` suite green: **160 tests** (152 existing + 8 new).\n- `pnpm --filter @objectstack/example-crm build` ✓ (ADR-0032 expression validation passes, so the `days_to_close` formula still compiles).\n\n> ⚠️ Note for `pg`/`mysql` real `DATE` columns: a `Date` returned by the driver collapses on its **UTC** calendar day (consistent with the pre-existing `coerceFilterValue` contract). SQLite (TEXT affinity) is fully correct; a native-type parser for pg/mysql is left for a follow-up if needed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

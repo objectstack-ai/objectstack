@@ -1,0 +1,33 @@
+{
+  "number": 2205,
+  "kind": "pull_request",
+  "title": "docs(cli): document os migrate + dev autoMigrate self-heal (#2186 follow-up)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T12:31:46Z",
+  "updated_at": "2026-06-22T12:37:05Z",
+  "closed_at": "2026-06-22T12:37:03Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T12:37:03Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2205",
+  "body": "Follow-up to #2196 ([#2186](https://github.com/objectstack-ai/framework/issues/2186)) — the schema-drift / `os migrate` feature shipped with no documentation. This adds it.\n\n- **`content/docs/getting-started/cli.mdx`** — new **Schema migrations** section: `os migrate plan` / `os migrate apply`, the safe / needs-confirm / destructive categories, `--allow-destructive`, and the dev-only `autoMigrate:'safe'` self-heal (force-disabled in production; SQLite reconciles via data-preserving table rebuild).\n- **`skills/objectstack-platform/SKILL.md`** — `os migrate plan/apply` added to the CLI cheat sheet (the ops/migrations skill).\n- **`skills/objectstack-data/SKILL.md`** — new **Schema evolution on an existing database** note: the sync is additive-only, so relaxing `required` / type changes / drops on a live DB need `os migrate` (dev auto-heals loosening). Calls out the tell-tale — `/meta` reports a field optional but a write still 400s `\"<field> is required\"` = a stale `NOT NULL` column (physical drift), **not** a validator bug.\n\nDocs/skills only — no versioned package touched (hence `skip-changeset`). Skill edits are body-only, so the frontmatter-generated skill docs don't drift.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

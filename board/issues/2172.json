@@ -1,0 +1,33 @@
+{
+  "number": 2172,
+  "kind": "pull_request",
+  "title": "fix(cloud-connection): reseed reports honest result instead of fake success",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T05:06:36Z",
+  "updated_at": "2026-06-22T05:15:11Z",
+  "closed_at": "2026-06-22T05:15:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T05:15:09Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2172",
+  "body": "## Problem\n\n`POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data` could report **`success: true` while writing zero rows**, and flip the install's `withSampleData` flag to `true` regardless.\n\nThe seed loader (`SeedLoaderService`) runs row-by-row and counts write failures — a locked DB, a missing table, a rejected validation — into `result.errors` instead of throwing. The handler only bailed on `seeded.mode === 'skipped'`, so an all-errors run looked like a success.\n\n**Real-world trigger** (found while debugging a showcase): the published `@objectlab/project` template's seed data had drifted from its object schema — every `pm_project` row was missing the required `project_type` / `planned_end_date`. Result: `{ inserted: 0, updated: 0, errors: 38 }` → yet a green \"re-seeded\" toast and an empty database.\n\n## Fix\n\nIn `handleReseed`:\n- **0 rows written ⇒ `422 reseed_no_rows`**, surfacing the first underlying error (e.g. `Validation failed: project_type (required)…`) so the cause is actionable.\n- `withSampleData` only flips `true` once rows actually land.\n- Partial success (some rows + some errors) still succeeds but reports the error count.\n\n`applySideEffects` now carries an `errorSample` (first error message) in the seed summary.\n\n## Tests\n\nNew `marketplace-install-local-reseed.test.ts` (4 cases): zero-rows-with-errors → 422 + reason, zero-rows-no-errors → 422, rows-land → 200 + flag flips + ledger updated, partial → 200 + error count. All green; package builds clean (tsup + dts).\n\n## Notes\n- Behaviour-compatible for the normal case (rows seed → success as before).\n- The matching console-side change (surface the error, stop showing a success toast on 0 rows) is in objectui `fix/marketplace-sample-data`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

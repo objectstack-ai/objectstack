@@ -1,0 +1,35 @@
+{
+  "number": 1994,
+  "kind": "pull_request",
+  "title": "fix(security)[P0]: enforce RLS on by-id writes — close member-edits-others'-records hole (#1985)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-17T00:57:04Z",
+  "updated_at": "2026-06-17T01:39:30Z",
+  "closed_at": "2026-06-17T01:39:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-17T01:39:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1994",
+  "body": "Closes the **P0 broken-access-control** vulnerability found driving app-crm end-to-end (#1985): **any authenticated member could read and modify/delete any other user's records.**\n\n## Root cause\n\nA single-id `update`/`delete` goes straight to `driver.update(object, id, …)` / `driver.delete(object, id)` and **builds no query `ast`** — so the RLS `where` filter the security middleware injects on the *read* path (`if (opCtx.ast) …`) is never applied to by-id writes. Meanwhile `member_default` grants `*: { edit, delete }`, intended to be owner-scoped by the `owner_only_writes/deletes` RLS. Two failures compounded:\n\n1. **Owner scoping was inert** — the policies keyed on `owner_id`, which author-defined objects almost never declare; the engine stamps `created_by`, not `owner_id`. `computeRlsFilter` dropped the missing-column policy, so the predicate silently no-op'd.\n2. **Writes weren't row-guarded at all** — even with a valid predicate, the by-id mutation path never evaluates it.\n\nVerified: a member `PATCH`'d an admin's record and the change **persisted** (admin re-read it).\n\n## Fix (two coordinated changes)\n\n**1. Pre-image authorization check** (`security-plugin.ts`). Before a single-id `update`/`delete`, compute the write-operation RLS filter and re-read the target row with `{ id } AND <writeFilter>`; if it isn't visible (someone else's row, or RLS-hidden) → `PermissionDeniedError` (403).\n- Reuses the existing RLS/tenant machinery (no new predicate engine).\n- Recursion-safe: a `find` doesn't re-enter the check.\n- **Skipped when no RLS policy applies** — admin sets, `modifyAllRecords`, unguarded objects behave exactly as before.\n\n**2. Owner scoping on a column that exists** (`default-permission-sets.ts`). `owner_only_writes`/`owner_only_deletes` now key on `created_by` — the ownership column the registry injects on **every** object (registry.ts:263) — instead of the usually-absent `owner_id`.\n\n## Behavior after fix\n\n| Actor → target | Before | After |\n|---|---|---|\n| member → **own** record (update/delete) | 200 | **200** |\n| member → **another user's** record | 200 *(persisted!)* | **403** |\n| admin / `modifyAllRecords` → any | 200 | **200** |\n\n- Objects that opt out of audit fields (`systemFields.audit: false`, no `created_by`) now fail **closed** for member writes — grant `modifyAllRecords` or a per-object policy to allow. (Safe direction.)\n- Objects modeling transferable ownership with a dedicated owner field should override with a per-object owner policy.\n\n## Verification\n\n- **Live app-crm, 2 users:** member→admin's record PATCH **403** + DELETE **403** (record unmutated); member→own PATCH/DELETE **200**; admin→anyone **200**.\n- **Tests:** 4 new pre-image unit tests (deny non-owner / allow owner / skip-when-no-RLS / skip-multi-id); `plugin-security` **91**, `plugin-org-scoping` **15**, `runtime` **382**, `objectql` **639** green.\n\n## Scope / follow-up\n\nThis closes the **owner (intra-tenant) write-authorization** hole — the verified vuln. **Cross-tenant** isolation additionally needs an organization assigned at sign-up (fresh users currently have `activeOrg = None`, so `tenant_isolation` doesn't bind); tracked in #1985. The pre-image check here *will* enforce the tenant predicate on writes too once org-scoping is active.\n\n> ⚠️ Security-sensitive default-auth change — please review rather than fast-merge. It tightens the default member write posture across **all** apps (members can no longer edit records they didn't create).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

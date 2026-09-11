@@ -1,0 +1,36 @@
+{
+  "number": 2215,
+  "kind": "pull_request",
+  "title": "feat(lint): extract static metadata validators into @objectstack/lint (ADR-0019 P3)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T14:54:22Z",
+  "updated_at": "2026-06-22T15:04:26Z",
+  "closed_at": "2026-06-22T15:04:24Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T15:04:23Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2215",
+  "body": "**ADR-0019 Phase 3.** Gives the pure, build-time metadata validators a clean public home so consumers other than the CLI (notably the AI build) can run them — instead of being trapped in `cli/src/utils/` where only the CLI can reach them.\n\n## What\n- New package **`@objectstack/lint`** — pure `(stack) => Finding[]` validators, no I/O, no runtime, never bundled into a frontend.\n- First release moves the two the AI build needs (neither depends on the others):\n  - `validateWidgetBindings` (ADR-0021 — widget→dataset→measure/dimension + measure-aggregation coherence)\n  - `validateStackExpressions` (ADR-0032 — CEL/predicate validity)\n- `@objectstack/cli` imports both from `@objectstack/lint` (was `./utils/*`) — **pure move, no behavior change**.\n\n## Why not in `@objectstack/spec`\n`spec` is the **frontend-facing contract** (ships to the browser). Build-time validators don't belong there — it inverts layering and bloats the frontend bundle. Dependency direction is one-way **`lint → spec`**.\n\n## Scope\nFilesystem-coupled (`lint-liveness-properties`) and command-coupled (`score` → cli's `lintConfig`) checks deliberately **stay in the CLI** for a later increment.\n\n## Verification\n- `@objectstack/lint` builds (ESM + CJS + DTS); **62 moved tests pass**.\n- `@objectstack/cli` rebuilds clean consuming the package (type-level + runtime import verified).\n- No stray references to the old `./utils/*` paths anywhere in the tree.\n\nNext (separate PR): cloud's AI build (`service-ai-studio`) assembles its staged drafts into a stack and runs these validators at `verify_build` (ADR-0019 P2).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

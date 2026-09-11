@@ -1,0 +1,35 @@
+{
+  "number": 2201,
+  "kind": "pull_request",
+  "title": "feat(cli): make `os validate` the author-time gate; steer scaffolds/skills/examples/docs to it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T11:34:40Z",
+  "updated_at": "2026-06-22T11:50:33Z",
+  "closed_at": "2026-06-22T11:49:38Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T11:49:38Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2201",
+  "body": "## Why\n\nObjectStack metadata mistakes fail **silently at runtime** — a bare-field predicate (`done` instead of `record.done`) resolves to `null` and hides an action on every record (#2183/#2185); a dangling dashboard binding renders an empty chart (ADR-0021). `os build` caught these via the ADR-0032 expression gate, but `os validate` did **not** — yet the scaffolder's post-create \"Next steps\" steered users to `npm run validate`, giving a false sense of safety. And nothing in the examples, scaffolded projects, or most skills told an AI agent to run the gate after editing metadata.\n\nThis closes the gap end to end.\n\n## What changed\n\n**CLI — `os validate` is now a read-only superset of `os build`'s checks**\n- `packages/cli/src/commands/validate.ts` runs `validateStackExpressions` (CEL syntax + `record.<field>` existence) between the protocol-schema parse and the widget-binding pass. It already ran schema + bindings; the expression gate is the missing piece. No artifact emitted — it's the fast inner-loop check.\n\n**create-objectstack — every generated project now carries AI guidance**\n- Emits `AGENTS.md` + `.github/copilot-instructions.md` (rendered from a shared template) with a prominent **Verify your work** rule: run `npm run validate` after editing metadata.\n- Blank template `dev`/`start` scripts aligned with the example apps (`objectstack dev`/`objectstack start`).\n- Sharpened the post-create \"Next steps\" output. Removed the previously dead `copilot-instructions.md` template (superseded by the emitted guide).\n\n**Skills — a \"Verify your work\" section in all 9 `objectstack-*` skills**\n- Authoritative in `objectstack-platform`; predicate/binding-focused in `data`/`ui`/`automation`/`formula`; tight pointers in `api`/`query`/`i18n`/`ai`. `automation` (the biggest gap, flow predicates) now explicitly tells authors to validate.\n\n**Examples**\n- `validate` script added to each app (folded into `app-showcase`'s `verify`); single `examples/AGENTS.md`.\n\n**Docs**\n- New guide `content/docs/guides/validating-metadata.mdx` (registered in nav); corrected the now-stale `os validate` reference in `getting-started/cli.mdx`.\n\nChangeset: `@objectstack/cli` + `create-objectstack` (minor, same fixed group).\n\n## Verification\n- CLI builds clean under full `tsc` (turbo: 54 tasks, 0 errors).\n- `os validate` **passes** `examples/app-todo` and runs the new \"Validating expressions (ADR-0032)\" step.\n- Injected a bare `visible: '!is_completed'` → `os validate` **fails exit 1** with the corrective message `Write 'record.is_completed'`, then reverted. Proves the gate, not just the build.\n- Scaffolder smoke test: `AGENTS.md` emitted with placeholders substituted, `.github/copilot-instructions.md` present, scripts aligned.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

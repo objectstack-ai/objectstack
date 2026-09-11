@@ -1,0 +1,35 @@
+{
+  "number": 2181,
+  "kind": "pull_request",
+  "title": "feat(ai): split ask/build agents by surface + tool scoping (ADR-0063/0064)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T06:50:40Z",
+  "updated_at": "2026-06-22T07:19:33Z",
+  "closed_at": "2026-06-22T07:19:31Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T07:19:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2181",
+  "body": "Implements the framework side of #2168 (ADR-0063 two agents bound by surface; ADR-0064 tool scoping).\n\n## spec\n- `SkillSchema` gains `surface: 'ask'|'build'|'both'` affinity (ADR-0063 §3).\n- `AgentSchema` gains `surface: 'ask'|'build'` (the product it binds).\n- `agent` metadata-type → `allowRuntimeCreate:false, allowOrgOverride:false` (ADR-0063 §2: `*.agent.ts` closed to third parties).\n\n## service-ai (`ask`)\n- Rename `data-chat-agent.ts` → `ask-agent.ts`; `DATA_CHAT_AGENT`→`ASK_AGENT`, `DEFAULT_DATA_AGENT_NAME`→`ASK_AGENT_NAME` (`LEGACY_DATA_AGENT_NAME` kept).\n- `ask` persona is data-only: drop the ADR-0040 unified \"INTENT FIRST\" classifier; it declines app-building and points at the Builder.\n- New `schema_reader` (`surface:'both'`) owns the shared reads `describe_object`/`list_objects`/`query_data`; `data_explorer`/`actions_executor` marked `surface:'ask'` and stop dual-listing the shared reads.\n- Remove the `buildRegisterActive` degradation shim in `agent-runtime`.\n- `resolveActiveSkills` hard-fails on incompatible skill↔agent surface (ADR-0064 §3); `listAgents` filters the catalog to platform agents only.\n\n## Notes\n- Several items were already done in `main` (the `ask` rename; the resolver was already skill-scoped — the \"global fall-through\" ADR-0064 describes was gone, only a stale comment remained). This PR finishes the rest.\n\n## Acceptance tests (issue)\n- `tools(ask)` carries no `create_*`/`*_metadata`/blueprint tools.\n- A `surface:'build'` skill bound to `ask` is a load error; `surface:'both'` binds.\n\nVerified: `turbo run build` (spec + service-ai DTS) green; **404/404** service-ai tests pass.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

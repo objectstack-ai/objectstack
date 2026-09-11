@@ -1,0 +1,33 @@
+{
+  "number": 2095,
+  "kind": "pull_request",
+  "title": "test(spec): extend downstream-contract to all 16 writable domains (#2035)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T06:35:44Z",
+  "updated_at": "2026-06-21T06:49:03Z",
+  "closed_at": "2026-06-21T06:49:01Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T06:49:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2095",
+  "body": "Strengthens the depth gate from #2089. It previously exercised only object/view/action/report/page; this adds a **frozen bare-literal fixture per remaining domain** — datasource, connector, policy, sharing rule, role, permission set, email template, webhook, object extension, cube, mapping, theme, translation bundle — typed with the spec's own input aliases and parsed against each domain's schema.\n\nSo a narrowed/removed schema property on **any** writable domain now breaks the contract. Authoring it already caught two latent constraints the gate now locks in: `EmailTemplate` requires `bodyHtml`, `Cube` requires `dimensions`.\n\nSame freeze contract as #2089 — these fixtures must not be edited to make a failing spec change pass.\n\n## Verification\n\n- `pnpm --filter @objectstack/downstream-contract typecheck` → 0\n- `pnpm --filter @objectstack/downstream-contract test` → 15 passed (2 original + 13 new domains)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 2077,
+  "kind": "issue",
+  "title": "ADR-0056 D6: activate declarative `roles` + `sharingRules` at runtime (enforce-or-remove) — unblocks `role_and_subordinates` showcase demo",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-20T12:45:44Z",
+  "updated_at": "2026-06-21T03:22:26Z",
+  "closed_at": "2026-06-21T03:22:26Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2077",
+  "body": "## Background\n\nADR-0056 D6 added the `role_and_subordinates` sharing-rule recipient (configurable role-hierarchy widening), implemented in `@objectstack/plugin-sharing` (`role-graph.ts` `RoleGraphService` + `sharing-rule-service.ts` `expandRecipient`) and covered by the plugin's own unit tests.\n\nWhile trying to **demonstrate** D6 in the showcase (as part of #2076), I found a deeper, pre-existing architectural gap that blocks it from being shown end-to-end.\n\n## The gap\n\n**Stack-declared `roles` and `sharingRules` are never seeded into `sys_role` / `sys_sharing_rule` at runtime** — neither by the verify harness (`bootStack`) nor by the real `pnpm dev` CLI (`packages/cli/src/commands/serve.ts`).\n\nEvidence:\n- Booting the showcase via `bootStack` yields `sys_role` count = **0** and `sys_sharing_rule` count = **0**, even though the showcase declares 3 roles + 2 sharing rules.\n- `SharingServicePlugin.start()` binds rule hooks from `ruleService.listRules()`, which **reads the `sys_sharing_rule` table** — but nothing populates that table from app metadata. Boot logs show `[sharing-rule] hooks bound {\"objects\":[],\"ruleCount\":0}`.\n- A repo-wide search finds **no** code path that inserts stack-declared `roles`/`sharingRules` into `sys_role`/`sys_sharing_rule` (only the runtime `createRule` API at `sharing-rule-service.ts:138` writes the table).\n\n**Consequence:** the showcase's existing declarative roles + sharing rules (and any app's, e.g. `examples/app-crm`) are **decorative** — Studio/authoring metadata that never enforces at runtime. This is a classic enforce-or-remove (ADR-0049) situation.\n\n> Note: this is distinct from **permission sets**, which *do* resolve at runtime via `metadataService.list('permission')` / `sys_permission_set` (`permission-evaluator.ts resolvePermissionSets`). D7's app-declared default profile was wired through the CLI in #2076 precisely because permission sets resolve; roles + sharing rules do **not**.\n\n## Proposed work\n\nSeed (idempotent upsert) stack-declared `roles` → `sys_role` and `sharingRules` → `sys_sharing_rule` at boot, so the existing sharing-rule evaluator (`rule-hooks.ts` `afterInsert`/`afterUpdate`) activates them.\n\n- Likely homes: `SecurityPlugin` for roles (`sys_role`), `SharingServicePlugin` for sharing rules (`sys_sharing_rule`), reading from `metadataService.list('role' / 'sharingRule')`.\n- Must be idempotent (re-seed on each boot without duplicating), and reconcile updates/removals.\n- Decide org-scoping behavior (per-tenant seeding under `plugin-org-scoping`).\n\n### ⚠️ Blast radius — needs its own ADR + careful review\n\nThis **changes enforcement behavior for every app** that declares roles/sharing rules (`examples/app-showcase` **and** `examples/app-crm` today). Activating previously-inert rules can change who-can-see-what. Requires:\n- A full dogfood-suite run across all example apps (currently green precisely because rules are inert).\n- An ADR documenting the enforce-or-remove decision and migration/rollout posture.\n\n## Acceptance criteria\n\n- [ ] ADR for \"activate declarative roles + sharing rules at runtime\".\n- [ ] Stack-declared roles + sharing rules seeded idempotently into `sys_role` / `sys_sharing_rule` at boot (verify harness + CLI).\n- [ ] Full dogfood suite green across all example apps; any behavior changes intentional + documented.\n- [ ] **Showcase D6 demo:** add a `role_and_subordinates` sharing rule + a conventional role hierarchy (exec → manager → contributor), with an end-to-end dogfood proof that a manager + their subordinates gain access via the widening.\n\n## References\n- ADR-0056 (permission model landing verification); D6 section.\n- Merged in #2076: Option A public form + D7 default-profile CLI wiring (D6 explicitly deferred here).\n- Code: `packages/plugins/plugin-sharing/src/{role-graph,sharing-rule-service,rule-hooks,sharing-plugin}.ts`, `packages/cli/src/commands/serve.ts`, `packages/plugins/plugin-security/src/security-plugin.ts`."
+}

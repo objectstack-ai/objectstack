@@ -1,0 +1,33 @@
+{
+  "number": 2024,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0054 — prove-it-runs gate for the authorable surface",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-18T06:18:30Z",
+  "updated_at": "2026-06-18T13:04:09Z",
+  "closed_at": "2026-06-18T13:03:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-18T13:03:14Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2024",
+  "body": "## Summary\n\nExtends **[ADR-0049](https://github.com/objectstack-ai/framework/blob/main/docs/adr/0049-no-unenforced-security-properties.md)** (enforce-or-remove) with a third leg: **prove-it-runs**.\n\nThe spec-liveness ledger (#1919) classifies every authorable property **live / experimental / dead** with evidence — and kills silent *dead* surface. But \"live\" today means only a static `file:line` consumer pointer: proof that *something reads* the property, **not** that authoring it produces correct runtime behavior. That gap — call it **unproven liveness** — is where the recent regressions fell:\n\n- **[#2018](https://github.com/objectstack-ai/framework/pull/2018)** (tz bucketing) was live at every layer and green on every static gate (~900 unit tests, spec-liveness, CodeQL) — broken only in the *integration* of engine ↔ strategy ↔ settings ↔ REST context.\n- **[#2022](https://github.com/objectstack-ai/framework/pull/2022)** (field-zoo matrix) found `rating`/`slider`/`toggle` reading back wrong-typed on its first run.\n\n## Why it matters for *this* platform\n\nObjectStack's authors are **AI emitting arbitrary metadata** across a combinatorial space the curated examples never cover. When a human authors something broken they notice; when an AI is told a property is \"live\" and it silently misbehaves, it ships into a third-party app. So \"live\" must carry a stronger guarantee for the primitives most likely to break in integration.\n\n## The decision\n\nA `live` classification may be backed by a **`proof`** — a [`@objectstack/dogfood`](https://github.com/objectstack-ai/framework/tree/main/packages/dogfood) test that authors the property against the real in-process stack and asserts the runtime outcome. Enforced as a **ratchet, not a retrofit**:\n\n- required for a defined **high-risk authorable class** (field types, analytics dims/measures, RLS/sharing, flow nodes, form widgets) **on add/change**;\n- required for any property implicated in a **shipped regression** (the fix carries its proof — as #2018 did, and as the rating/slider/toggle fix must lift the field-zoo `it.fails` quarantine);\n- **not** demanded of all ~200 live properties (trivial/presentation props keep a static pointer).\n\nComposes the three gates into one honest chain: **valid** (build-time guardrails) → **has a consumer** (liveness) → **runs correctly** (dogfood).\n\nGenerative property testing is explicitly **deferred** (Phase 3, evidence-gated) — high-ceiling, high-maintenance, doesn't lead.\n\n## Status\n\n`Proposed` — for Protocol Architect review. Doc-only (`docs/adr/0054-...md`); no code change."
+}

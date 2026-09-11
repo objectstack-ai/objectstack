@@ -1,0 +1,33 @@
+{
+  "number": 2190,
+  "kind": "pull_request",
+  "title": "fix(service-ai): share agent-alias registry across ESM/CJS builds + decouple agent catalog from it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T09:07:04Z",
+  "updated_at": "2026-06-22T09:19:08Z",
+  "closed_at": "2026-06-22T09:07:15Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T09:07:15Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2190",
+  "body": "## Problem\n\nLive EE-rig verification of ADR-0063/0064 surfaced two coupled defects in the AI agent catalog/alias layer:\n\n1. `GET /api/v1/ai/agents` omitted **`build`** even though `POST /agents/build/chat` worked.\n2. `POST /api/v1/ai/agents/metadata_assistant/chat` **404'd** — the legacy `metadata_assistant`→`build` alias was dead.\n\n## Root cause (deeper than the suspected record-init order)\n\n`@objectstack/service-ai` ships BOTH an ESM (`import`→`dist/index.js`) and a CJS (`require`→`dist/index.cjs`) build, and the alias table was a module-level `new Map()` — so **each build got its own copy**. The cloud AI Studio plugin is bundled as CJS and `require`s the CJS copy to register the alias, while the framework's agent routes load as ESM and read the ESM copy → the alias was written to a Map nobody read. (The record-init-order hypothesis was a red herring; only the live rig exposed the split.)\n\n## Fix\n\n- **`agent-aliases`:** anchor the registry (and its `data_chat`→`ask` seed) on a `Symbol.for(...)` key on `globalThis` so the ESM and CJS builds share **one** table.\n- **`agent-runtime.listAgents`:** stop keying catalog membership solely on the in-memory alias-table values. Decide it from an **intrinsic, persisted** package signal (`_provenance:'package'`/`_lock`, or a pre-translation `protection` block), with the alias values kept as a fallback union. A missed alias must never hide a real platform agent (ADR-0063 §2 still hides stray tenant agents).\n- **`ask-agent`:** carry a package `protection` block (`lock:'full'`); translate it to the runtime `_lock`/`_provenance` envelope at register via `applyProtection` so the catalog signal is present and the built-in persona is locked against overlay edits.\n\n## Verification\n\n- EE rig (`apps/objectos-ee`, live LLM): `GET /api/v1/ai/agents` → both `ask` and `build`; `/agents/metadata_assistant/chat` → resolves to `build`, streams the Schema-Architect persona.\n- Unit: full `service-ai` suite green (409), incl. new tests for the globalThis-shared registry and the intrinsic-signal catalog filter.\n\nPaired with cloud PR `objectstack-ai/cloud#fix/ai-agent-catalog-alias` (build-agent protection + alias hardening).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 2067,
+  "kind": "pull_request",
+  "title": "polish(app-showcase): clean welcome home + full nav/list i18n",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-20T08:24:02Z",
+  "updated_at": "2026-06-20T08:24:18Z",
+  "closed_at": "2026-06-20T08:24:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-20T08:24:16Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2067",
+  "body": "QA-pass polish after walking **every** showcase surface in the browser (`:5181`).\n\n## Home — `showcase_component_gallery`\nThe default landing rendered like a debug canvas: an `ai:input` **placeholder**, an **empty** `page:card`, a full-width logo image, and a static number. Redesigned into a clean welcome:\n- intro text\n- a **live 4-tile KPI grid** (`object-metric` in the now-unshadowed layout grid: Projects 5 / Tasks 10 / Accounts 3 / Open Tasks 8)\n- a primary **Create Task** action\n- an **Explore** shortcut list in the sidebar\n\nNo placeholders or empty blocks.\n\n## i18n — consistent locale\nThe bundle only covered project/task/account/invoice/preference, so **Products / Teams / Categories / Field Zoo** (+ memberships) showed English labels in a zh-CN session — an obvious mixed-locale nav. Added en + zh-CN object + key-field labels for the rest. Nav now reads **项目 / 任务 / 客户 / 发票 / 产品 / 团队 / 分类 / 字段动物园** consistently.\n\n## Verified\nWalked the gallery, object lists, visualizations (grid + gallery cover cards), record pages, dashboard, and reports. All render cleanly. `typecheck` + **20** showcase tests pass.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

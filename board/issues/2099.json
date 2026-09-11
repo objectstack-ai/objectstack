@@ -1,0 +1,34 @@
+{
+  "number": 2099,
+  "kind": "pull_request",
+  "title": "feat(security): ADR-0058 D1 follow-through — RLS predicates migrate to canonical CEL",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T06:44:18Z",
+  "updated_at": "2026-06-21T06:53:43Z",
+  "closed_at": "2026-06-21T06:53:41Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T06:53:41Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2099",
+  "body": "Follow-through on ADR-0058 D1 (\"one expression language, one compiler\"). After the compiler landed (#2090), this retires the second dialect on the RLS surface.\n\n## What changed\nRLS `using`/`check` predicates were SQL-ish (`owner_id = current_user.id`, `IN (...)`) while sharing conditions were CEL. AI/authors had to learn two dialects and the runtime carried a `sqlPredicateToCel` bridge. Now **every seeded RLS predicate is pure CEL**:\n\n- `default-permission-sets.ts` (49) + `app-showcase` (2): all owner/tenant/self policies → CEL (`==`, `in`).\n- `rls.zod.ts` `RLS.ownerPolicy` / `tenantPolicy` / `allowAllPolicy` helper factories now emit CEL templates; doc examples updated.\n\n## The bridge is kept, but deprecated (deliberate)\n`sqlPredicateToCel` is **not deleted** — it's downgraded to a transitional shim. `compileExpression` now warns *only when it actually rewrites* a SQL-style predicate; canonical CEL passes through as a no-op (idempotent), so the migrated seeds emit no warning. Rationale: a stored/legacy SQL predicate in a `sys` table must keep compiling — hard-deleting the bridge would turn it into a **silent deny**, which is exactly the kind of invisible security regression we refuse. The bridge gets removed pre-launch once we confirm no stored predicate needs it.\n\n## No behavior change\nCEL and the old SQL form compile to the **identical** `FilterCondition` — verified by re-running every RLS seed through `isPushdownableCel` and the full runtime dogfood. New tests prove the bridge both ways (SQL still compiles + warns; CEL is silent).\n\n## Verification (local, all green)\nspec 6599 · plugin-security 122 · plugin-sharing 65 · formula 201 · dogfood 130 (full).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

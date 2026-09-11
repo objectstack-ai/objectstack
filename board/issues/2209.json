@@ -1,0 +1,32 @@
+{
+  "number": 2209,
+  "kind": "pull_request",
+  "title": "chore(spec): refresh api-surface snapshot for aggregation-policy exports (#2208 follow-up)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T13:24:00Z",
+  "updated_at": "2026-06-22T13:34:01Z",
+  "closed_at": "2026-06-22T13:33:59Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T13:33:58Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2209",
+  "body": "Fast follow-up to #2208. That PR added three `@objectstack/spec/data` exports (`defaultAggregateFor`, `isIncoherentAggregate`, `MEASURE_FIELD_TYPES`) but did not regenerate the committed public-API-surface snapshot, so the `check:api-surface` gate is red on `main`.\n\nThis regenerates `packages/spec/api-surface.json` via `pnpm --filter @objectstack/spec gen:api-surface`. Intentional addition — **0 breaking, 3 added**; check is green again.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

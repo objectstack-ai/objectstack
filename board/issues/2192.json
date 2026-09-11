@@ -1,0 +1,35 @@
+{
+  "number": 2192,
+  "kind": "pull_request",
+  "title": "fix(ai): keep platform agents in catalog regardless of alias-map timing (ADR-0063 follow-up)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T09:20:19Z",
+  "updated_at": "2026-06-22T09:39:57Z",
+  "closed_at": "2026-06-22T09:39:55Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2192",
+  "body": "Follow-up to #2181 (ADR-0063/0064). Found during live verification on the EE rig: `GET /api/v1/ai/agents` returned only `{ask}` — the `build` agent was missing — because `listAgents()` filtered the catalog by the in-memory `registerAgentAlias` values, and the cloud studio package's `metadata_assistant`→`build` alias wasn't applied to the runtime's map at request time (bundle module-load ordering). A missed alias must never hide a real platform agent.\n\n## Change\n- `listAgents()` recognises a platform agent by the intrinsic package-protection envelope stamped on built-ins at registration (`_provenance`/`_lock`/`_packageId`, or a still-public `protection` block) via `isPlatformAgentRecord(...)`, with the alias-table values kept only as a belt-and-suspenders fallback.\n- Stray tenant custom agents (ADR-0063 §2, withdrawn) still stay filtered out of the catalog.\n\nPairs with cloud-side robustness for the studio alias registration (objectstack-ai/cloud#419).\n\nVerified on the EE rig after the fix; no spec/schema change (no liveness impact).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 2239,
+  "kind": "pull_request",
+  "title": "feat(authz): ADR-0066 D1 — capability registry (sys_capability records)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-23T11:29:43Z",
+  "updated_at": "2026-06-23T11:36:40Z",
+  "closed_at": "2026-06-23T11:36:38Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-23T11:36:38Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2239",
+  "body": "Implements **ADR-0066 D1**: promotes authorization **capabilities** from bare strings to **first-class records** (layer 1 of the three-way separation: capability / assignment / requirement).\n\n### Changes (plugin-security)\n- **`sys_capability`** system object — `name`, `label`, `description`, `scope` (platform | org), `managed_by` (platform | package | admin), `active`. Registered in the manifest + given a **Setup → Access Control** nav entry (Roles → Capabilities → Permission Sets).\n- **`bootstrapSystemCapabilities`** — back-compat seed (idempotent, on `kernel:ready`): the curated platform set (`manage_users`, `manage_org_users`, `manage_metadata`, `manage_platform_settings`, `setup.access`, `studio.access`) **plus** any capability referenced by the default grants' `systemPermissions[]`. Platform-seeded rows are `managed_by: 'platform'`; never pruned (admins add their own in Setup).\n\n### Design notes\n- `systemPermissions[]` (assignment) and `requiredPermissions[]` (requirement) keep referencing capabilities **by name** — the strings *are* the references, so **nothing migrates**; `sys_capability` is the catalog/definition. The string-based gates (D2/D3/D4) keep working unchanged; this is purely additive.\n- Named **`sys_capability`** (not the ADR's loosely-floated `sys_permission`) to avoid collision with `sys_permission_set` and match ADR-0066's \"capability\" vocabulary.\n\n### Tests\n+6 (object shape: name/fields/scope+managed_by options/unique index; seeding: curated set, idempotency, derivation from systemPermissions, org-scope). plugin-security full-DTS build + 139 tests green.\n\nFollow-up (later phase): D1's optional admin/Studio authoring polish; capabilities in the CEL surface (`$Permission`) is a roadmap item.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

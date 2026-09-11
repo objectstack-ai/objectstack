@@ -1,0 +1,33 @@
+{
+  "number": 2134,
+  "kind": "pull_request",
+  "title": "feat(objectql,spec): execute $search via metadata-driven cross-field filter (ADR-0061 P1+P2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T15:03:20Z",
+  "updated_at": "2026-06-21T15:14:00Z",
+  "closed_at": "2026-06-21T15:13:58Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T15:13:58Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2134",
+  "body": "Implements **ADR-0061** phases **P1 (contract)** and **P2 (executor)**. `$search` was a textbook declared-but-unenforced no-op (defined in spec, sent by every client, executed by no driver — see `docs/audits/2026-06-record-search-liveness.md`). This wires it end-to-end, server-resolved and driver-agnostic.\n\n## P1 — contract\n- `spec`: add **`object.searchableFields`** to `ObjectSchemaBase` — the canonical, server-side source for which fields `$search` matches. Classified **live** in `liveness/object.json`.\n\n## P2 — executor\n- `objectql/search-filter.ts` (`expandSearchToFilter`): turns a `$search` term into `{ $or: [{ field: { $contains } }] }` across **server-resolved** fields — declared `searchableFields` → auto-default (name/title + short-text types), excluding system/heavy/enumerated-as-text. Multiple terms **AND**, fields **OR**. `select`/`status` map the query to stored option **values via labels** (`$in`) with a raw-value fallback. An optional `$searchFields` override is **intersected with the allowed set** (never client-trusted).\n- Wired into `engine.find()` after schema resolution and before the driver call, merging with any existing filter via `$and`. **No driver changes** — every driver already executes `$or`/`$contains`.\n\n## Showcase\n`showcase_account.searchableFields = [name, industry, status, billing_email, tax_id]` — searching **\"retail\" now matches by industry**, not just name.\n\n## Verification\n- `search-filter.test.ts` — 10 cases (field resolution, auto-default exclusions, declared override, `$searchFields` subset-validation, label→value `$in`, multi-term AND/OR, case-insensitive).\n- `engine.test.ts` — `$search` expands into the `where` that reaches the driver; ANDs with an existing filter; honours declared `searchableFields`.\n- Liveness gate green; objectql typecheck clean; app-showcase typecheck clean (only pre-existing connector/objectql module-resolution noise).\n\n## Scope\nPer ADR-0061, **P3** (unify list/lookup/⌘K onto this resolver + objectui `$searchFields` contract) and **P4** (trigram/`tsvector` indexes, relevance/boost/fuzzy, external engines, server `searchAll`) are deferred to follow-ups. The renderer `$or` hack from the \"rejected alternatives\" is **not** used."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 2185,
+  "kind": "pull_request",
+  "title": "feat(cli): validate action visible/disabled predicates at build time",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T07:20:20Z",
+  "updated_at": "2026-06-22T07:31:27Z",
+  "closed_at": "2026-06-22T07:31:25Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T07:31:25Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2185",
+  "body": "The build-time guard that would have caught the #2183 bug at `os build` instead of at click-time. Closes the post-mortem follow-up from the Mark Done / action-UX work.\n\n## Why\n\nA record-header / row action's `visible` is evaluated by `ActionEngine.getActionsForLocation` against `{ record, recordId, objectName, user, … }` with **fail-closed** semantics (`evaluateCondition(expr, { throwOnError: true })` → `catch` → hide). So a **bare** field reference — `!done` instead of `!record.done` — is an undefined top-level identifier, throws, and the action is **silently hidden on every record**. That's exactly the trap that sent the #2183 debugging down a long path: the predicate *looked* fine and the failure was invisible (no error, just a missing button).\n\nThe ADR-0032 build validator already detects \"bare reference in a record-scoped formula\" — but its v1 scope was flows + validation-rule / field-formula predicates only. **Action predicates weren't covered**, so a bare-field `visible` shipped clean.\n\n## What\n\n- `@objectstack/cli` — `validateStackExpressions` now also checks action `visible` / `disabled` predicates (stack-level and object-attached), record-scoped, with the same corrective `record.<field>` message. `disabled: <boolean>` is skipped; `disabled: <predicate>` is checked. Actions merged onto objects *and* kept top-level are de-duped.\n- `@objectstack/formula` — adds `ctx` and `features` to the record-scope namespace roots, so the ambient globals real action predicates legitimately use (`record.id == ctx.user.id`, `features.multiOrgEnabled`) are not false-positives. (Consistent with the file's stated \"declare more roots — a missing root is a build-breaking false positive\" philosophy.)\n\n## Effect\n\n```ts\n// Before: builds clean, button silently hidden on every record at runtime.\n// After:  os build → error: bare reference `done` — did you mean `record.done`?\ndefineAction({ name: 'mark_done', objectName: 'showcase_task', visible: '!done' })\n```\n\n## Verification\n\n- **Full monorepo build (`turbo build`, 76 tasks)**: every example + platform bundle still compiles clean — no false positives (incl. platform-objects' `ctx.user` / `features` predicates and the showcase's `!record.done`).\n- **Tests**: `@objectstack/formula` 201 pass; `@objectstack/cli` 496 pass, incl. 5 new cases (bare-field action `visible` flagged; `record.`-qualified accepted; `ctx`/`features`/`user` accepted; bare `disabled` flagged but boolean `disabled` ignored; object-attached action validated).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

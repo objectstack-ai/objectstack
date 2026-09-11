@@ -1,0 +1,35 @@
+{
+  "number": 2171,
+  "kind": "pull_request",
+  "title": "feat(spec): reject script actions with no executable binding + showcase execution tests",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T04:15:05Z",
+  "updated_at": "2026-06-22T04:25:00Z",
+  "closed_at": "2026-06-22T04:24:58Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T04:24:58Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2171",
+  "body": "Follow-up hardening for [#2169](https://github.com/objectstack-ai/framework/pull/2169) (the \"Mark Done\" runtime error). That bug shipped because a `type: 'script'` action with **neither `body` nor `target`** is schema-valid and passes the coverage test, yet registers no runtime handler — so it only failed when a user clicked the button (`Action '<name>' on object '*' not found`).\n\nThis adds the two layers that would have caught it, per the post-mortem discussion.\n\n## ① Author/compile-time guard (root cause)\n\n`ActionSchema` now enforces `body || target` when `type === 'script'` via a `superRefine`, mirroring the existing \"non-script types require `target`\" rule. `os build` / `defineAction` reject the broken shape immediately, for **every** bundle.\n\n- `body`-bound actions are auto-registered by the runtime (`AppPlugin` → `actionBodyRunnerFactory`).\n- `target`-bound actions name a function wired imperatively (e.g. via `onEnable`, as app-todo does) — the compiler can't see that wiring, so `target` is accepted as the author's assertion that a handler exists.\n- Only `body`-less **and** `target`-less script actions are rejected — those are unambiguously dead.\n\nVerified against the **full monorepo build** (`turbo build`, 76 tasks): every shipped bundle still compiles, so this rejects only configurations that were already non-functional at runtime. Spec fixtures that leaned on the looser rule were updated.\n\n## ② Execution-path test (catch-net)\n\n`examples/app-showcase/test/actions.test.ts` drives the **real** `actionBodyRunnerFactory` + QuickJS sandbox (the exact bridge `AppPlugin` uses) against the shipped actions:\n\n- every declared `script` action is executable (`body` or `target`);\n- the runtime produces a handler for Mark Done (regression: #2169);\n- Mark Done writes `{ done: true, progress: 100 }` and leaves `status` untouched;\n- a body-less script action yields no handler (documents the failure mode the schema now blocks).\n\nThe prior `coverage.test.ts` only asserted each `ActionType` *appeared* in the bundle — that blind spot is what let #2169 ship.\n\n## Verification\n\n- `@objectstack/spec` full suite: **6603 tests** pass (incl. updated action/stack fixtures).\n- `turbo build` (whole monorepo): **76 tasks** pass — no real bundle violates the new rule.\n- `turbo test` for runtime / objectql / downstream-contract / cli / service-ai / service-automation / example-crm / example-todo: all pass.\n- app-showcase `pnpm verify`: typecheck + **26 tests** (incl. the 4 new execution tests).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

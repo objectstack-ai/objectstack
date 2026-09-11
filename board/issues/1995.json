@@ -1,0 +1,34 @@
+{
+  "number": 1995,
+  "kind": "pull_request",
+  "title": "chore(crm): demo CEL disabled on the Reassign Lead action",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-17T01:25:20Z",
+  "updated_at": "2026-06-17T01:25:45Z",
+  "closed_at": "2026-06-17T01:25:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-17T01:25:43Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1995",
+  "body": "## What\n\nExample-only: the CRM **Reassign Lead** list action gains a CEL `disabled` predicate (`status == \"converted\"`), so the row-menu item **greys out** on converted leads — demonstrating `disabled` (greys) vs `visible` (hides).\n\nPairs with the objectui PR that makes the action renderers evaluate a CEL `disabled` (previously boolean-only). No spec change (`disabled` already accepts a CEL predicate).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

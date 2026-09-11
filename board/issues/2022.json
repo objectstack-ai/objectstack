@@ -1,0 +1,35 @@
+{
+  "number": 2022,
+  "kind": "pull_request",
+  "title": "test(dogfood): field-type capability-matrix round-trip (#2004 + AI-authoring)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-18T06:01:04Z",
+  "updated_at": "2026-06-18T06:13:55Z",
+  "closed_at": "2026-06-18T06:13:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-18T06:13:52Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2022",
+  "body": "## Why\n\nThis is a **development platform** where third parties have an AI author arbitrary metadata. The real runtime risk isn't \"a platform change broke the CRM example\" — it's \"the AI used a valid primitive the examples don't exercise, and it silently breaks at runtime.\" So the dogfood gate ([#2020](https://github.com/objectstack-ai/framework/pull/2020)) has to grow from *pinning one curated app* into a **capability matrix**: every authorable primitive gets a runtime round-trip proof.\n\n`showcase_field_zoo` carries one field of (almost) every protocol `FieldType`, but until now it was only **static**-checked — the metadata bundle registers it; nothing ever wrote a record and read it back.\n\n## What\n\nFirst capability-matrix block: write one record covering many field types over the **real REST data API**, read it back, assert each round-trips with type fidelity.\n\n- **Headliner coverage = the #2004 regressions** — array-typed fields (`multiselect`/`checkboxes`/`tags`) and `Field.time` (time-of-day). All proven to round-trip end-to-end on the in-memory (WASM) driver path that `objectstack dev` uses for `:memory:`.\n- Broad matrix across text / numbers / temporal / scalar-select / JSON / color, plus behavioral checks for computed (`formula` = 31.5) and system (`autonumber`) fields.\n\n## The gate earned its keep on day one\n\nOn its first run it surfaced **three real type-fidelity gaps**: `rating`/`slider`/`toggle` persist but read back as strings (`'4'`/`'25'`/`'1'`) while `number`/`currency`/`percent`/`boolean` round-trip correctly with the same harness. The value isn't lost — the type leaks (schema→column mapping / read coercion doesn't cover these types).\n\nPer dogfood philosophy these are **not hidden by coercion** — they're quarantined with `it.fails`, which passes while broken and turns **RED the day the gap is fixed**, forcing the quarantine to be lifted rather than rotting. Filed as a separate task to fix the mapping/coercion and lift the quarantine.\n\n```ts\nconst runner = c.xfail ? it.fails : it;\n```\n\n## Notes\n\n- Private package — no changeset. `21 passed | 3 expected fail`.\n- Driver nuance: the harness uses `SqliteWasmDriver(':memory:')` (what dev uses for in-memory), so this guards the **shared validator + WASM driver** array path and complements #2004's `driver-sql` unit test by covering the integration + a second driver.\n- This is the first slice; full 45-type coverage + flow-node / form-widget / RLS-pattern matrices + a generative pass are roadmap, scoped by a forthcoming ADR (binding policy: every authorable+live primitive must carry a runtime proof).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

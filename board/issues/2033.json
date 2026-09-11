@@ -1,0 +1,32 @@
+{
+  "number": 2033,
+  "kind": "pull_request",
+  "title": "test(dogfood): complete field-zoo round-trip matrix over every existing field type",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-18T12:23:34Z",
+  "updated_at": "2026-06-18T12:31:27Z",
+  "closed_at": "2026-06-18T12:31:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-18T12:31:22Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2033",
+  "body": "Follow-up to #2025 / #2028. The user's steer: *adding new field types is an extreme case — first make sure the **existing** field types are OK.*\n\nThe dogfood field-zoo matrix covered ~26 of field-zoo's ~47 types; the rest were only static-registered (the bundle loads them) but **never written and read back over the real stack**. This closes that gap.\n\n## Result\n\n**No source change was needed** — every newly-covered existing type already round-trips correctly. That's the point: this locks the existing field-type surface in as a runtime regression gate. (The only real leaks — `rating`/`slider`/`toggle`/`progress` — were already fixed in #2025/#2028.)\n\n## Added coverage\n\n- **text family**: `markdown`, `html`, `richtext`, `code`, `signature`, `qrcode`\n- **temporal**: `datetime` — exact instant preserved (`2024-03-15T14:30:00.000Z` round-trips verbatim)\n- **structured JSON**: `vector`, `composite`, `repeater`, `location`, `address`, `image`, `file`, `avatar`\n- **relational**: `lookup`, `master_detail`, `tree` — value fidelity (id string round-trips). FK enforcement is off in this harness, so this asserts the stored type doesn't drift, not referential integrity / `$expand` (covered elsewhere).\n- **security**: `secret` (encrypt-on-write, masked to `SECRET_MASK` on read — verified plaintext never echoes back over HTTP), `password` (persists; the generic CRUD path stores it opaquely, auth owns hashing).\n\n`f_summary` is intentionally excluded (computed roll-up, null on a childless fixture row — covered by dedicated roll-up tests).\n\n## Verification\n\nDogfood field-zoo HTTP round-trip: **46 passed** (was 22 at #2022).\n\n> ⚠️ Surfaced while writing this: a `password`-typed field on a **non-auth** object (like field-zoo) is stored opaquely by the generic path but is **not** hashed or masked the way `secret` is — worth a separate look at whether `password` outside the auth subsystem should mask-on-read like `secret`. Not addressed here.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 2165,
+  "kind": "issue",
+  "title": "ADR-0063 follow-up: collapse data-chat naming drift + skill→shell affinity + tier-aware routing",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T03:14:51Z",
+  "updated_at": "2026-06-22T09:33:04Z",
+  "closed_at": "2026-06-22T09:33:04Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2165",
+  "body": "Follow-up to **ADR-0063** ([#2164](https://github.com/objectstack-ai/framework/pull/2164)) — the mechanical landing of the two-shell (`ask`/`build`) + skills-only model. The `ask` id is already canonical, but code/files still speak 'data-chat', which is the physical source of the id≠name ambiguity.\n\n### Naming cleanup (kills the id≠name drift)\n- [ ] Rename `packages/services/service-ai/src/agents/data-chat-agent.ts` → `ask-agent.ts`; update `agents/index.ts` re-exports.\n- [ ] `DEFAULT_DATA_AGENT_NAME` → `ASK_AGENT_NAME` (retain `LEGACY_DATA_AGENT_NAME = 'data_chat'` as the alias constant).\n- [ ] Sweep docs/prose: 'data agent' / 'Data Assistant' → 'ask agent' / the `ask` id. Keep `data_chat` / `metadata_assistant` only in the alias table, never as vocabulary.\n\n### Skill → shell affinity (the one new contract)\n- [ ] Add `surface: 'ask' | 'build' | 'both'` to the skill schema in `@objectstack/spec`.\n- [ ] Backfill built-ins: `data_explorer`/`actions_executor` → `ask`; `metadata_authoring`/`solution_design` → `build`.\n- [ ] Routing loads only a shell's affine skills (build shell shouldn't drown in data skills, and vice versa).\n\n### Tier-aware routing\n- [ ] Per-turn intent routing must not assume both shells exist: on OSS/free (only `ask` present) a `build`-intent turn degrades gracefully ('authoring needs the cloud Build assistant') instead of dead-ending.\n- [ ] Document at the skill-authoring contract that `surface:'build'` skills are inert on OSS (intentional tiering, not a bug).\n\n### Withdraw the tenant-agent surface (ADR-0040 §3)\n- [ ] Remove any `app.defaultAgent` → tenant-authored-agent assumptions in `../objectui` / Studio.\n- [ ] Close `*.agent.ts` as a third-party authoring surface (keep it internal to platform-owned shells/subagents).\n\nAll independently shippable; none changes a public id. See `docs/adr/0063-two-kernel-agents-skills-are-the-extension-primitive.md`."
+}

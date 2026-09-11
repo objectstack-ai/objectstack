@@ -1,0 +1,33 @@
+{
+  "number": 2167,
+  "kind": "pull_request",
+  "title": "docs(adr): two agents bound by surface (revise ADR-0063) + ADR-0064 tool scoping",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T03:47:08Z",
+  "updated_at": "2026-06-22T03:52:37Z",
+  "closed_at": "2026-06-22T03:52:34Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T03:52:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2167",
+  "body": null
+}

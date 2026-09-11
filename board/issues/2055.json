@@ -1,0 +1,30 @@
+{
+  "number": 2055,
+  "kind": "pull_request",
+  "title": "feat(spec): interfaceConfig.recordAction — configure how a list opens a record",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-20T04:39:11Z",
+  "updated_at": "2026-06-20T04:51:09Z",
+  "closed_at": "2026-06-20T04:39:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-20T04:39:59Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2055",
+  "body": "## Summary\nAdds `recordAction: 'drawer' | 'page' | 'modal' | 'none'` to `InterfacePageConfig` plus a select in the page form (under User actions). Lets the author choose how clicking a record opens its detail — right-side **drawer** (default), full-page **navigate**, **modal**, or **not clickable**.\n\nPairs with objectstack-ai/objectui#1812 (the runtime wires the click accordingly; without an explicit value it defaults to drawer, restoring record-opening on interface pages).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

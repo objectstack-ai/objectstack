@@ -1,0 +1,33 @@
+{
+  "number": 2079,
+  "kind": "pull_request",
+  "title": "feat(platform): ADR-0057 system data lifecycle + P0 telemetry-growth stopgap",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-20T14:32:39Z",
+  "updated_at": "2026-06-21T08:26:59Z",
+  "closed_at": "2026-06-21T08:26:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T08:26:57Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2079",
+  "body": "## Why\n\nA 20-second scheduled digest flow in `app-showcase` grew `dev.db` to **260 MB+** over a multi-day `pnpm dev` — **all platform-generated telemetry, zero business data**. Forensics:\n\n- A fresh seeded DB is 2.3 MB; the bloated one was 261 MB (~110×).\n- No business table grew (same seed rows every boot). Growth was entirely in append-only platform tables.\n- Each 20s digest tick fanned out to `sys_job_run` + `sys_notification` (+delivery +receipt) + `sys_inbox_message` — **and every one was mirrored into both `sys_audit_log` and `sys_activity`** (~21 rows/tick, audit+activity ≈ **76%**).\n- SQLite shipped `auto_vacuum=NONE`, so the file never shrinks even after deletes.\n\nRoot causes, by leverage: (1) no retention contract on platform objects; (2) audit+activity dual-write amplifying every internal mutation; (3) `auto_vacuum=NONE`; (4) demo-tuned 20s interval.\n\n## What\n\n**`docs/adr/0057-system-data-lifecycle-and-retention.md`** — makes data lifecycle a first-class, declarable, runtime-enforced metadata concern (classify → declare → enforce via a platform-owned `LifecycleService` Reaper/Rotator/Archiver → reclaim → gate). Builds on ADR-0052 (bounded contexts) along the orthogonal *time* axis it never specified. Benchmarked against Salesforce (Big Objects / Field Audit Trail), ServiceNow (Table Rotation / Cleaner), Dataverse (Elastic TTL / data lake), OutSystems, Mendix. Rollout P0→P4.\n\n**P0 stopgap (this PR):**\n- `plugin-audit` — exclude operational/plumbing objects (`sys_job`, `sys_job_run`, `sys_automation_run`, `sys_notification*`, `sys_inbox_message`, `sys_http_delivery`, `ai_traces`, `sys_device_code`) from the audit+activity writer `SKIP_OBJECTS`. Kills the dominant amplifier.\n- `driver-sql` — default SQLite `auto_vacuum=INCREMENTAL` so freed pages can be reclaimed (Reaper hook lands in P1). New DBs only; existing files adopt it after one `VACUUM`.\n- `app-showcase` — digest interval 20s→60s, flagged demo-only with cost rationale.\n\n> Note: I deliberately did **not** skip by `context.isSystem` — the seed loader and server-side automations write *business* records with `isSystem:true`, so that would punch a real compliance hole in the ledger. The precise axis is the object's lifecycle class, not who wrote it.\n\n## Verification\n\nFresh showcase boot in this branch:\n- **0 `invalid_transition` errors** (the red noise that started this investigation).\n- Over ~165s the digest still fires: `sys_job_run` / `sys_notification` / `sys_notification_delivery` / `sys_notification_receipt` / `sys_inbox_message` each **+2** (2 ticks @ 60s).\n- **`sys_audit_log` and `sys_activity` grew by 0** (were +120 each in a comparable pre-fix window).\n- `PRAGMA auto_vacuum` reads back as `2` (INCREMENTAL).\n- `plugin-audit` tests **18/18 pass**; full `turbo build` **69/69**.\n\nCombined effect: ~21 rows/tick @ 20s → 5 rows/tick @ 60s (≈93% lower row-growth rate), and space is now reclaimable.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1963,
+  "kind": "pull_request",
+  "title": "fix(runtime): serve /discovery with Cache-Control: no-store (cloud#152)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T10:37:36Z",
+  "updated_at": "2026-06-16T11:09:10Z",
+  "closed_at": "2026-06-16T11:09:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T11:09:07Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1963",
+  "body": "## Bug (cloud#152)\nDiscovery reflects **mutable** runtime config — `routes.mcp` is only advertised when `OS_MCP_SERVER_ENABLED=true`. But the discovery routes set **no `Cache-Control`**, so an edge/CDN can cache the response. On a staging env, after enabling MCP, `GET /api/v1/discovery` kept returning `routes.mcp: undefined` (stale, even with cache-busting query params) while `POST /api/v1/mcp` correctly served — so the objectui Integrations page showed **\"MCP not enabled\"** against a live server.\n\n## Root cause\n`getDiscoveryInfo()` (http-dispatcher.ts) and `isMcpEnabled()` (reads `process.env` fresh) recompute the payload correctly per request — the in-app value is never stale. `buildSecurityHeaders()` sets no `Cache-Control` (its `max-age` is HSTS). So the only staleness is the HTTP cache layer.\n\n## Fix\nMark both discovery routes (`/.well-known/objectstack` + `${prefix}/discovery`) **`Cache-Control: no-store`**. `res.header()` is the same emit method the adjacent no-cache routes use. +regression test asserting the header on both routes.\n\n## Test\n`@objectstack/runtime` builds clean; `dispatcher-plugin.routes.test.ts` green (4/4, incl. the new no-store assertion).\n\nNote: the actual CF-edge cache only clears once cloud bumps `.framework-sha` to this and deploys to staging.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

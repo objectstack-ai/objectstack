@@ -1,0 +1,35 @@
+{
+  "number": 2200,
+  "kind": "pull_request",
+  "title": "feat(analytics): analytics over federated objects honors the remote table (ADR-0062 Phase 3, D6)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T11:33:33Z",
+  "updated_at": "2026-06-22T12:20:18Z",
+  "closed_at": "2026-06-22T12:20:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T12:20:15Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2200",
+  "body": "## ADR-0062 Phase 3 — native-analytics SQL over external objects (D6)\n\n**Stacked on #2199 (Phase 2) → #2198 (Phase 1).** Merge those first; this PR's base is the Phase 2 branch.\n\nAnalytics over a federated object now aggregates against the **correct** remote table instead of silently querying the wrong one.\n\n### Problem\n`NativeSQLStrategy` hand-compiles `FROM \"<object>\"` and bare column references. These bypass the driver's physical-table resolution (`external.remoteName` / `remoteSchema` / `columnMap`), so for a federated object whose object name ≠ remote table it queries the **wrong table** (or errors).\n\n### Fix (reuse the driver's resolution — don't re-implement it)\n- `NativeSQLStrategy.canHandle` now **declines** any query whose base **or joined** object is federated.\n- Declining routes the query to the lower-priority `ObjectQLStrategy`, whose `engine.aggregate()` goes through the driver's `getBuilder` — which already honours `remoteName`/`remoteSchema` (#2138/#2149). So external analytics is **correct via the single source of truth (the driver)**, and native-SQL never hits the wrong table (\"disabled beats silently-wrong\", per the ADR).\n- New optional `StrategyContext.isExternalObject(objectName)` hook, reported by the analytics plugin from the object's `external` block. **Purely additive** — with no hook, managed-object behavior is unchanged.\n\nA native-SQL fast path for external objects (exposing `physicalTableFor`/`physicalColumnFor` on the driver) and deeper `columnMap`-in-`GROUP BY` support are noted as follow-ups in the ADR.\n\n### Tests\n- 4 unit tests on `canHandle`: declines external base object, declines external joined object, accepts managed object, no-hook legacy path unchanged. Full `service-analytics` suite green (147).\n\nCloses (partially) #2163 — Phase 3.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

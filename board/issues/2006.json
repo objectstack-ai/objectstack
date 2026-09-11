@@ -1,0 +1,35 @@
+{
+  "number": 2006,
+  "kind": "pull_request",
+  "title": "feat(settings): localization settings — platform timezone/language/formats (ADR-0053 Phase 2) (#1928)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-17T05:40:23Z",
+  "updated_at": "2026-06-17T05:48:33Z",
+  "closed_at": "2026-06-17T05:48:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-17T05:48:30Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2006",
+  "body": "**P0 base-settings, item 1 of 3.** Part of ADR-0053 Phase 2 (#1928). The keystone that makes the Phase 2 reference-timezone **actually configurable end-to-end** — previously the resolver read a setting nothing could write.\n\n## Why a manifest, not bespoke wiring\nObjectStack already has a settings stack (`@objectstack/service-settings` + `sys_setting`'s 4-tier cascade: platform `default` → `global` → `tenant` → `user`) with seven manifests (ai/auth/branding/…). Localization was simply never declared. Declaring it gives, for free:\n- **Platform default → global → tenant** resolution (your \"系统 / 组织\" default tiers).\n- A **permission-gated settings page** (`setup.access`/`setup.write`) rendered from the manifest.\n- i18n (en + zh-CN shipped; ja/es fall back to inline labels).\n\n## Keys (organization-level; per-user overrides out of scope for v1)\nBenchmarked vs Salesforce/Workday \"Company Information + Locale\": `timezone` (UTC), `locale` (en-US), `default_country`, `date_format`, `time_format`, `number_format`, `first_day_of_week`, `currency` (USD), `fiscal_year_start` — grouped Region / Formats / Finance.\n\n## Resolver 收编\n`resolveExecutionContext` now resolves **`timezone` and `locale`** from the `localization` settings via the `settings` service (canonical 4-tier cascade), falling back to a direct tenant-scoped `sys_setting` read, then `UTC` / `en-US`. This **replaces the hand-rolled `sys_user_preference` + tenant-only `sys_setting` path from #1978** (which bypassed the settings abstraction); the per-user tier is dropped per the org-level decision. New `ExecutionContext.locale`.\n\n## Consumer wiring\n- **Analytics** — `DatasetExecutor` threads `ExecutionContext.timezone` into the query (precedence: explicit selection tz → request tz → UTC), so **#1982's tz-aware buckets now fire for a configured org** without callers passing a zone.\n- **Formula** `today()`/`datetime` — already wired (#1979/#1980).\n- **Email** `datetime` (`SendTemplateInput.timezone`, #1981) — intentionally **not** wired: the only current `sendTemplate` callers are pre-session auth emails with no org context. Capability stays ready for business-notification callers.\n\n## Tests\n- `localization.manifest.test.ts` — schema parse, namespace/scope/version, defaults (UTC/en-US/…), every tz option is a valid IANA zone, key/group structure.\n- `resolve-execution-context.test.ts` — rewritten localization block: settings-service path (tz+locale), direct-`sys_setting` fallback, **per-user `sys_user_preference` now ignored**, UTC/en-US default, invalid-zone fallback, anonymous → unset.\n- `dataset-executor.test.ts` — unchanged behavior holds (13 pass).\n- Suites green: service-settings 118, service-analytics 125, runtime 388. DTS builds type-check clean.\n\n## Follow-on P0 (separate PRs)\n2. `company` manifest (legal name, address, tax/VAT, primary contact). 3. `security` manifest (password policy, session/MFA, IP allowlist, SSO/SCIM) — will honestly mark keys lacking enforcement as planned/experimental.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

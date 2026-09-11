@@ -1,0 +1,35 @@
+{
+  "number": 1998,
+  "kind": "pull_request",
+  "title": "feat(formula): timezone-aware today() / daysFromNow() / daysAgo()",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-17T02:44:37Z",
+  "updated_at": "2026-06-17T03:27:44Z",
+  "closed_at": "2026-06-17T03:27:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-17T03:27:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1998",
+  "body": "Part of #1980. The compute-tz core of [ADR-0053 Phase 2](https://github.com/objectstack-ai/framework/pull/1975), building on the resolver (#1978).\n\n## What\n\n`today()` / `daysFromNow()` / `daysAgo()` become **calendar-day** functions resolved in a reference timezone. The zone is threaded `ExecutionContext.timezone` (#1978) → `EvalContext.timezone` → CEL stdlib, and the timezone math uses `Intl.DateTimeFormat` (DST-safe, no hand-rolled offsets).\n\nEach returns the reference-tz calendar day expressed as a **UTC-midnight `Date`** — decision **D1** in the ADR. This is the one representation consistent with:\n- how a `Field.date` string hydrates in CEL (`Date.parse(\"2026-06-15\")` = UTC midnight),\n- how the SQL driver normalizes date filters (`getUTC*`),\n- how Phase 1 (#1968) stores dates.\n\nSo `record.close_date == daysFromNow(30)` now matches **in-memory** too — not just at the storage boundary. (Avoids the \"local-midnight-as-instant\" trap that would re-introduce the off-by-one.)\n\n## ⚠️ Behavior change\n\n`daysFromNow(n)` / `daysAgo(n)` previously kept `now`'s wall-clock time (`daysFromNow(30)` at `10:00Z` → `…T10:00:00Z`). They now **drop the time** and return the calendar day at **midnight** (`…T00:00:00Z`) — the ADR-0053 \"defect #3\" fix, and what makes date-equality work in-memory.\n\n- `today()` is **unchanged at UTC** (already start-of-day).\n- For a genuine sub-day offset, use the documented escape hatch `now() + duration(\"Nh\")` (cel-js `duration()` is supported — confirmed by existing tests).\n- With **no reference timezone configured**, the zone resolves to `UTC`: `today()` is byte-for-byte unchanged; only the `daysFromNow`/`daysAgo` midnight-truncation differs from before.\n\nThe two pre-existing tests that asserted the old wall-clock behavior are updated to the calendar-day semantic. A scan found **no other package** relies on the old time-carrying behavior.\n\n## Wiring\n\n`objectql` threads `execCtx.timezone` into read-time formula evaluation (`applyFormulaPlan`, from #1979) and default-value expressions (`applyFieldDefaults`).\n\n## Testing\n\n- New: tz-aware `today()`/`daysFromNow()`/`daysAgo()` across the `America/New_York` day boundary; `daysFromNow` midnight semantics; UTC default unchanged for `today()`.\n- `@objectstack/formula` **121** green, `@objectstack/objectql` **639** green; DTS build + typecheck clean.\n- Changeset: `minor`.\n\n> Note: consuming a non-UTC reference timezone end-to-end also needs the discoverable `localization` settings manifest noted in #1978 (a small follow-up). The resolver + this slice are wired; an org just can't set the value via UI yet.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 2031,
+  "kind": "pull_request",
+  "title": "feat(org-scoping): multi-tenant seed ownership handoff to default-org admin",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-18T12:11:52Z",
+  "updated_at": "2026-06-18T12:12:16Z",
+  "closed_at": "2026-06-18T12:12:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-18T12:12:05Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2031",
+  "body": "## Summary\n\nThe multi-tenant companion to [#2021](https://github.com/objectstack-ai/framework/pull/2021)'s single-tenant `claimSeedOwnership`. Completes the ownership-handoff story symmetrically across both deployment modes.\n\n**Gap:** seeded rows land `owner_id` NULL (authors leave it unset; `cel\\`os.user.id\\`` resolves to NULL at seed time). In multi-tenant mode `claimOrphanOrgRows` back-fills their `organization_id`, but `owner_id` stayed NULL — so \"My\" views, owner reports and owner notifications were empty for the org's members.\n\n## Change\n- **`claimOrgSeedOwnership(ql, organizationId, ownerUserId)`** — assigns `owner_id = ownerUserId` to an org's NULL-owned seed rows. Scoped to one org (never touches another tenant), idempotent, skips `managedBy` / `sys_*`, requires both `owner_id` and `organization_id` columns.\n- **`ensureDefaultOrganization`** calls it after binding the platform admin as the default org's `owner`, so the default org's demo data is owned by the admin out of the box.\n\n## Tests\n- `claim-org-seed-ownership.test.ts` (+5): registry-unavailable, no-op without org/owner, skip managed/sys_/missing-column, org-scoped claim (other orgs + human-owned untouched), idempotent.\n- Full org-scoping suite green (20 tests); build + typecheck clean.\n\n## Follow-ups (not here)\n- Subsequent orgs (`cloneOrgSeedData`) could stamp `owner_id` = the new org's creator at clone time — the default-org case (the common one) is covered here.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

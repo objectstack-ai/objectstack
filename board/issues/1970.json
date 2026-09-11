@@ -1,0 +1,35 @@
+{
+  "number": 1970,
+  "kind": "pull_request",
+  "title": "chore(security): pin transitive form-data to >=4.0.6 (GHSA-hmw2-7cc7-3qxx)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xs",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T15:33:35Z",
+  "updated_at": "2026-06-16T15:43:50Z",
+  "closed_at": "2026-06-16T15:38:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T15:38:12Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1970",
+  "body": "## What\n\n`form-data@4.0.5` — **GHSA-hmw2-7cc7-3qxx** (high: CRLF injection via unescaped multipart field names, vulnerable `>=4.0.0 <4.0.6`) — is pulled in transitively through `@vscode/vsce` (in `packages/vscode-objectstack`). This tripped `pnpm audit --audit-level=high`, the **`Validate Package Dependencies`** CI gate, which was **red on every PR**.\n\nAdds a `pnpm-workspace.yaml` `overrides` pin forcing the patched line, using the same mechanism already in place for the esbuild / minimatch / tar security pins. (pnpm v10 ignores `pnpm.overrides` in `package.json` — overrides must live in `pnpm-workspace.yaml`.)\n\n```yaml\noverrides:\n  ...\n  'form-data@<4.0.6': '>=4.0.6'\n```\n\n## Verification\n\n- Lockfile resolves `form-data` 4.0.5 → **4.0.6**; no other resolution changes.\n- `pnpm audit --audit-level=high` → **0 high** (was 1 high; 2 low + 6 moderate remain, which don't fail the gate).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

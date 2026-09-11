@@ -1,0 +1,36 @@
+{
+  "number": 2109,
+  "kind": "pull_request",
+  "title": "ci(showcase): non-blocking nightly browser smoke over every nav surface",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T07:44:42Z",
+  "updated_at": "2026-06-21T07:59:49Z",
+  "closed_at": "2026-06-21T07:59:47Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T07:59:47Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2109",
+  "body": "Implements the CI half of objectui#1849. A Playwright smoke drives the console (served at /_console — single server) across all 29 showcase nav surfaces, asserting no render crash / no leaked `no actions configured` placeholder / main content / dashboards draw non-zero-size chart SVGs. `webServer` boots `os serve --dev`; `global-setup` signs in. NON-BLOCKING (workflow_dispatch + nightly schedule only — never gates PRs); promote once stable. Local run: 29/29 passed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

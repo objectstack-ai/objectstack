@@ -1,0 +1,36 @@
+{
+  "number": 2003,
+  "kind": "pull_request",
+  "title": "feat(formula,email): render datetime in reference timezone (ADR-0053 Phase 2) (#1981)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-17T04:47:24Z",
+  "updated_at": "2026-06-17T05:03:43Z",
+  "closed_at": "2026-06-17T05:03:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-17T05:03:40Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2003",
+  "body": "**Part of ADR-0053 Phase 2 (Slice 4 of 6 — render-tz).** Closes #1981. Design: #1975 · Parent: #1928.\n\nShows `datetime` instants in a **reference timezone** at the presentation boundary. Storage stays UTC. This is the last of the six Phase 2 slices.\n\n## Changes\n### Centralized path — formula template engine (low blast radius)\n- The `datetime` formatter takes the reference timezone from `EvalContext.timezone` (threaded in #1980) and passes it to `Intl.DateTimeFormat`. `{{ ts | datetime }}` now renders in that zone; `{{ ts | datetime:iso }}` stays UTC (machine-readable, unambiguous).\n- Calendar-day `date` rendering is **intentionally unchanged** — a `Field.date` is tz-naive, so applying a zone would shift the day (acceptance criterion 3).\n- New exported `formatValue(name, value, arg, { locale, timeZone })` — the single source of truth for value→string semantics, reusable by renderers that don't run the full CEL template engine.\n\n### Outlier — email pipeline (the architectural cost)\n`plugin-email`'s renderer **bypassed the formatter pipeline entirely** (`String()` only), so a datetime was emailed as raw ISO. Now:\n- Email holes accept the shared formula formatters — `{{ order.total | currency }}`, `{{ ts | datetime }}` — by reusing `formatValue` (so email formatting is identical to in-app). The engine keeps its HTML-escaping + `{{{ }}}` raw-output semantics and its lenient \"never throw on render\" contract (unknown formatter → raw value).\n- `SendTemplateInput.timezone` (mirroring the existing `locale`) flows into rendering, so the caller supplies the recipient's / tenant's zone (typically from `ExecutionContext.timezone`).\n- `plugin-email` gains a `@objectstack/formula` dependency (acyclic; formula is a leaf).\n\n## Acceptance criteria\n- [x] `{{ value | datetime }}` renders in the reference tz when set; UTC/runtime when unset.\n- [x] An email template containing a datetime renders in the reference tz (not raw UTC/ISO).\n- [x] `date` (calendar-day) rendering is unaffected (tz-naive after Phase 1).\n\n## Tests\n- `template-formatters.test.ts` — datetime in NY vs UTC; `datetime:iso` stays UTC; `date:iso` unaffected; `formatValue` reuse + unknown-formatter `undefined`.\n- `plugin-email/template-engine.test.ts` — formatter holes, tz datetime, escaping preserved (`{{ }}` vs `{{{ }}}`), unknown-formatter fallback, missing value → ''.\n- `send-template.test.ts` — end-to-end: an email datetime renders in `input.timezone`, not raw ISO.\n- Suites green: formula 125, plugin-email 55. DTS builds type-check clean.\n\n## Depends on\nSlice 1 (timezone value #1978) and #1980 — both merged.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

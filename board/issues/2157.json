@@ -1,0 +1,36 @@
+{
+  "number": 2157,
+  "kind": "pull_request",
+  "title": "fix(runtime): surface code-defined datasources on the host-config boot path (ADR-0015 §18)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T02:23:12Z",
+  "updated_at": "2026-06-22T02:31:57Z",
+  "closed_at": "2026-06-22T02:31:55Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T02:31:55Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2157",
+  "body": "## Problem\n\nA datasource declared in `defineStack({ datasources: [...] })` (e.g. `examples/app-showcase`'s `showcase_external`) was **absent** from `GET /api/v1/datasources` and `GET /api/v1/meta/datasource` under `os dev`/`serve` — even though the boot banner counted it (\"1 Datasources\") and its federated objects were queryable. Affects any code-defined datasource (app-crm too). Follow-up to #2111 / ADR-0015 §18.\n\n## Root cause (write-side, not read-side)\n\nThe read paths were already correct: `protocol.getMetaItems({type:'datasource'})` merges `metadataService.list(type)`, and datasource-admin's `listDatasourceRecords` reads `metadata.list('datasource')`.\n\nThe showcase config has **instantiated** plugins, so `isHostConfig` is true → `shouldBootWithLibrary` is false → it boots via the lightweight assembler, **not** `createStandaloneStack`/`MetadataPlugin`. On that host-config path the `metadata` service is the kernel's in-memory fallback (`createMemoryMetadata`), which implemented `register`/`list`/`get` but **not `registerInMemory`**. `AppPlugin` gates code-defined-datasource (and stack-RBAC) registration on `typeof metadata.registerInMemory === 'function'`, so the registration was **silently skipped** and both REST surfaces read empty. The standalone path (`NodeMetadataManager`, which has `registerInMemory`) was unaffected.\n\n## Fix\n\nAdd `registerInMemory` (synchronous, no persistence — identical to `register` for an in-memory store, matching `MetadataManager`'s signature) to **both** in-memory metadata fallbacks:\n- `packages/core/src/fallbacks/memory-metadata.ts`\n- `packages/plugins/plugin-dev/src/dev-plugin.ts` (same latent gap)\n\nThis also restores stack-declared RBAC (`roles`/`permissions`/`sharingRules`/`policies`) listing on this path, since AppPlugin registers those through the same guard.\n\n## Test / verification\n\n- New regression test `packages/runtime/src/datasource-visibility.test.ts` boots the host-config shape (no MetadataPlugin → kernel injects the fallback) and asserts `metadata.list`, `datasource-admin.listDatasources()` (backs `/api/v1/datasources`), and `protocol.getMetaItems` (backs `/api/v1/meta/datasource`) all include the code datasource with `origin:'code'`. Verified **RED before → GREEN after**.\n- Live HTTP (real Hono server + REST + admin routes) returns both endpoints `200` with `showcase_external` (`origin:\"code\"`).\n- No regressions: core 284, runtime 404, plugin-dev 7 tests pass; eslint + builds clean.\n\nChangeset: `@objectstack/core: patch` (fixed group).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

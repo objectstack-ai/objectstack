@@ -1,0 +1,33 @@
+{
+  "number": 2114,
+  "kind": "pull_request",
+  "title": "feat(showcase): demonstrate RLS check (D4) + compound sharing (#1887) as live examples",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T08:17:14Z",
+  "updated_at": "2026-06-21T08:22:53Z",
+  "closed_at": "2026-06-21T08:22:51Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T08:22:51Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2114",
+  "body": "Shows the two new authz capabilities on the **real showcase app** so AI authors see them in use (the showcase is living documentation).\n\n## What\n- **RLS `check` (ADR-0058 D4)**: `invoice_owner_immutable` on showcase_invoice — a contributor cannot reassign an invoice they own to a different owner (write-time post-image validation, not a read filter).\n- **Compound sharing (ADR-0058 D3 / #1887)**: `HighValueRedProjectRule` with `record.health == 'red' && record.budget > 100000` — before #1887 a compound `&&` condition was silently skipped; now it compiles to a compound criteria_json and enforces (the AND matters).\n\n## Proof (dogfood: showcase-d3-d4-capabilities)\n- the compound condition seeds as `{$and:[{health:'red'},{budget:{$gt:100000}}]}` and matches **only** the red-AND-high project (not red-but-cheap, not high-but-green);\n- the RLS check **denies** an owner reassignment over HTTP and **allows** a same-owner edit.\n\nFull dogfood **141** (26 files), no regression. example/dogfood are private → no changeset.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

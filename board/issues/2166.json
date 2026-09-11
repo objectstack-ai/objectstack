@@ -1,0 +1,35 @@
+{
+  "number": 2166,
+  "kind": "pull_request",
+  "title": "fix(rest): unwrap getMetaItem envelope so nav capability gate fires (ADR-0057 D10)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T03:34:46Z",
+  "updated_at": "2026-06-22T03:41:02Z",
+  "closed_at": "2026-06-22T03:41:01Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T03:41:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2166",
+  "body": "Follow-up fix to **ADR-0057 D10** (#2150).\n\n## The bug (you reported it)\n\nEven on latest single-tenant code, `Organizations` still showed in the Setup app sidebar.\n\n## Root cause\n\n`GET /meta/app/:name` returns a metadata **envelope** `{ type, name, item: <app>, ... }`, but `filterAppForUser` was handed the **envelope** — whose `.navigation` is `undefined` — so it returned it untouched. That silently bypassed **both** the pre-existing `requiredPermissions` gate **and** the new D10 `requiresService` gate on this path. (The list path `/meta/app` already passed the raw app, so it worked there — which is why the unit test passed but the live console didn't.)\n\n## Fix\n\n`filterAppForUser` and `resolveRegisteredServices` now unwrap the `isMetaEnvelope` shape (filter the inner app, re-wrap). One unwrap point; the call site is simplified back.\n\n## Verification (live `os dev`, fresh build)\n\n| | single-tenant | multi-tenant |\n|---|---|---|\n| `nav_organizations` | **hidden** ✓ | shown ✓ |\n| `nav_invitations` | **hidden** ✓ | shown ✓ |\n| `nav_business_units` | shown ✓ | shown ✓ |\n\nConfirmed on both the by-name and list endpoints. Plus a regression unit test (envelope → inner app gated).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

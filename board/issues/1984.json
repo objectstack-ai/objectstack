@@ -1,0 +1,35 @@
+{
+  "number": 1984,
+  "kind": "pull_request",
+  "title": "fix: two CRM end-to-end runtime gaps (delete cascade + dead convert route)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T16:01:08Z",
+  "updated_at": "2026-06-16T16:27:36Z",
+  "closed_at": "2026-06-16T16:09:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T16:09:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1984",
+  "body": "Found by driving the `app-crm` example as a real user end-to-end (boot → sign-up/session → CRUD → record clone → aggregation → domain actions → RBAC → console UI). The core path is solid (auth, CRUD, clone, aggregation, audit stamping, metadata, console all work); these two are the runtime gaps that surfaced.\n\n## 1. Delete of a parent with a required-FK child failed with a misleading error (data layer)\n\nDeleting a `crm_account` that has `crm_opportunity` children returned:\n```\n400 {\"error\":\"account is required\",\"code\":\"VALIDATION_FAILED\",\"fields\":[{\"field\":\"account\",...}]}\n```\n…naming `account`, a field that **isn't even on `crm_account`**. Root cause: `cascadeDeleteRelations` defaults a `lookup` FK to `set_null`; for the **required** `crm_opportunity.account` FK it issued an UPDATE clearing the column, which the child's required-field validator rejected. A required FK can't be nulled — that's a contradiction, not the author's intent.\n\n**Fix:** a *defaulted* `set_null` on a **required** FK now escalates to `restrict` (SQL's standard for a NOT NULL FK):\n```\n409 {\"error\":\"Cannot delete crm_account (…): 4 dependent crm_opportunity record(s) reference it via account\n     (account is required, so it cannot be cleared). Delete or reassign them first, or set\n     deleteBehavior:'cascade' on crm_opportunity.account.\",\n     \"code\":\"DELETE_RESTRICTED\",\"dependentObject\":\"crm_opportunity\",\"dependentCount\":4}\n```\nExplicit `cascade`/`restrict` and optional (nullable) lookups are **unchanged**. New `engine-cascade-delete.test.ts` (4 cases: required→restrict, no-dependents→ok, optional→set_null, explicit cascade→removed).\n\n## 2. Removed the hardcoded `POST /data/lead/:id/convert` endpoint + `convertLead` (false surface)\n\nThe route and `convertLead` baked **bare object names** (`lead`/`account`/`contact`/`opportunity`) and a fixed Salesforce field mapping into the framework runtime. So it's unreachable by any real app: `/data/crm_lead/:id/convert` → 404, and the literal `lead` object doesn't exist. The CRM models conversion correctly as a **flow** (`crm_convert_lead_wizard` screen flow) — a CRM-specific workflow doesn't belong hardcoded in the framework. Untested, undocumented, no consumers. Removed (narrow-and-true).\n\n## Verification\n\n- **Live CRM run** (rebuilt packages): delete-with-children → `409` clear message; childless delete → `200`; record clone (same data-action group) unaffected → `201`; convert route gone → `404`.\n- `@objectstack/objectql` **637** (+4 cascade tests), `@objectstack/rest` **121** green.\n\n## Not fixed here — needs a product call (Gap 3)\n\nA third finding is a **deliberate posture, not a bug**, so I did not flip it unilaterally: a freshly-authenticated user who resolves to **zero permission sets** has object-permission enforcement *skipped* (`security-plugin.ts:325` `if (permissionSets.length > 0)`), i.e. **fail-open when unconfigured**. This lets apps with no security metadata \"just work,\" but means once an app defines permission sets without assigning them to every user, unassigned users get full read/create instead of none. Flipping to default-deny would break every app that doesn't assign permission sets to all users (showcase, todo, the CRM itself). Tracking separately for a design decision (default-deny-when-object-has-any-permission-set, a default authenticated permission set, or an explicit secure-by-default flag).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

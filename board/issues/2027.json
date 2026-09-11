@@ -1,0 +1,33 @@
+{
+  "number": 2027,
+  "kind": "pull_request",
+  "title": "feat(dogfood): metadata-driven verifier (objectstack verify) — auto-derive runtime proofs",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-18T06:42:02Z",
+  "updated_at": "2026-06-18T06:51:55Z",
+  "closed_at": "2026-06-18T06:51:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-18T06:51:52Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2027",
+  "body": "## Why\n\nThe dogfood gate ([#2020](https://github.com/objectstack-ai/framework/pull/2020), [#2022](https://github.com/objectstack-ai/framework/pull/2022)) pins the framework's **own** example apps. But the platform's value is that an **AI authors arbitrary metadata** for a third-party app — and framework CI never sees that app's metadata. A bug that only manifests with *their* objects ships green.\n\nThis is the seed of **`objectstack verify`**: derive a runtime contract from an app's metadata **alone** (no hand-written tests), then run it against the real in-process stack. The consumer (e.g. hotcrm) runs it on **their own** app.\n\n## What\n\nv0 derives **per-object CRUD round-trip**: synthesize a valid create body from each object's field types → POST → GET → assert type fidelity.\n\n- **`src/derive.ts`** — metadata → CRUD cases; reports objects *blocked* by an un-synthesizable required field (e.g. required lookup) instead of silently skipping.\n- **`src/verify.ts`** — runs over real HTTP; classifies `verified` / `fidelity-gaps` (type leaks) / `needs-fixture` (auto-record tripped the app's *own* validation rules) / `create-failed`·`read-failed` (real failures) / `skipped`.\n- **`harness.ts`** — wire `LocalCryptoProvider` (as `objectstack dev` does) so `Field.secret` apps are exercisable.\n- **`test/auto-verify.dogfood.test.ts`** — runs on CRM + showcase; gates on \"no object fails to create/read\". Auto-found `f_progress`'s fidelity gap that the hand-written field-zoo matrix missed.\n- **`test/verify-external.dogfood.test.ts`** — `OS_VERIFY_ARTIFACT=<app>/dist/objectstack.json` points it at any app's built artifact (plain JSON, no cross-repo hazard); `skipIf`-gated, never runs in CI.\n\n## Proven against hotcrm (the real third-party case)\n\n[hotcrm](https://github.com/objectstack-ai/hotcrm) — separate repo, 15 objects, zero dogfood dependency, whose entire runtime verification today is a static smoke test. Pointed at its artifact, the verifier booted it in-process, seeded 162 records, auto-verified:\n\n```\n  ✓ 5 objects verified (account/campaign/forecast/knowledge_article/task)\n  ⚠ crm_case   customer_rating <rating>: wrote 3 → read \"3\"\n  ⚠ crm_lead   rating <rating>:          wrote 3 → read \"3\"\n  ⚠ crm_product sku <text>:              wrote \"verify-sample\" → read \"VERIFY-SAMPLE\"\n  – 7 skipped (required lookup/master-detail need targets)\n```\n\n- rating → the **platform** type-leak, proven to **propagate into a real consumer app**.\n- `crm_product.sku` → a **hotcrm-specific** write divergence (uppercased) that **no framework test could reach** — only the verifier run on hotcrm's metadata surfaces it. (May be intended; the verifier reports a runtime *contract divergence*, not a pass/fail oracle.)\n\n## Notes\n\n- Private package — no changeset. Full dogfood suite: `27 passed | 3 expected-fail | 1 skipped`.\n- Directly answers \"does dogfood solve the third-party problem?\": the framework-side gate is blind to a consumer's metadata; the **shipped metadata-driven verifier run on their app** closes it.\n- Roadmap: RLS cross-owner derivation (#1994 invariant — needs multi-user harness + sharing service); richer fixtures; a real `objectstack verify` CLI. Scope per ADR-0054 ([#2024](https://github.com/objectstack-ai/framework/pull/2024)).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

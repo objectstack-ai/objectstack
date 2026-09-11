@@ -1,0 +1,34 @@
+{
+  "number": 2007,
+  "kind": "pull_request",
+  "title": "docs: action disabled/errorMessage/undoable + predicate scope + object-form screen wizard",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-17T05:41:15Z",
+  "updated_at": "2026-06-17T05:41:28Z",
+  "closed_at": "2026-06-17T05:41:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-17T05:41:21Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2007",
+  "body": "Fills hand-written **doc + authoring-skill** gaps for action/flow capabilities\nthat shipped over the recent rounds but were undocumented. No code/spec change.\n\n## Changes\n\n**`content/docs/protocol/objectui/actions.mdx`**\n- Add `errorMessage` and `undoable` to the interface field table and the\n  Confirmation & Feedback list (with a worked Reassign example).\n- New **Evaluation context** subsection: action predicates are **bare CEL**\n  evaluated against the record; `record.<field>` resolves identically on every\n  surface (`record_header`, `list_item`, …) — narrower scope than\n  [record-alert](/docs/protocol/objectui/record-alert) conditions (no `os.*`).\n- Callout warning against `${…}`/`{…}`-wrapped predicates.\n\n**`content/docs/guides/metadata/flow.mdx`**\n- Document the `screen` node's **object-form** mode (`objectName` / `mode` /\n  `recordId` / `defaults` / `idVariable`) and the atomic parent+child save / id\n  rebind that powers multi-step object-form wizards (lead → account →\n  opportunity).\n\n**`skills/objectstack-ui/SKILL.md`**\n- Document `disabled` (CEL; greys out vs `visible` which hides), `errorMessage`,\n  `undoable`, and the bare-CEL `record.*` predicate convention.\n\n## Why now\n\nThese pair with the recently-merged action work (custom messages, undoable,\nCEL `disabled`/`visible`, object-form wizard) and the\n[evaluateCondition fix](https://github.com/objectstack-ai/objectui/pull/1788)\nthat made bare-CEL predicates actually evaluate. The docs/skill already taught\nbare CEL correctly — this fills the *coverage* gaps (the new fields + the\nevaluation scope), it does not correct a now-false claim.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

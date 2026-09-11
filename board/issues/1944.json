@@ -1,0 +1,35 @@
+{
+  "number": 1944,
+  "kind": "pull_request",
+  "title": "fix(build): collect per-doc order/group frontmatter for book sorting",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T06:10:58Z",
+  "updated_at": "2026-06-16T11:46:02Z",
+  "closed_at": "2026-06-16T11:45:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T11:45:58Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1944",
+  "body": "## Problem\n\nThe CLI doc collector (`collectDocsFromSrc`) parsed only `title:`/`description:` from each `src/docs/*.md` frontmatter, so the `order` and `group` fields defined on the `Doc` schema (ADR-0046 §6) were **never populated** on the compiled `doc` item.\n\nThe book resolver (`resolveBookTree`) already sorts group members by `doc.order` then label and honors explicit `doc.group` placement — but with the collection half silently dropping both fields, frontmatter-driven sorting/placement never reached the artifact. Confirmed against published `9.7.0` and source HEAD.\n\n## Fix\n\n- `parseFrontmatter` now also reads `order:` (parsed to a number; ignored when non-numeric) and `group:` (string), consistent with the existing single-line `frontmatterScalar` helper.\n- `collectDocsFromSrc` threads `order`/`group` onto the collected doc item when present; absent leaves both `undefined` so schema/resolver defaults apply.\n- `DocItem` interface gains `order?: number` / `group?: string`.\n\n### Secondary\nCorrects the `order` JSDoc in `doc.zod.ts`: it claimed \"Absent ⇒ sorts after ordered siblings\", but `resolveBookTree` uses `(a.order ?? 0)` — i.e. absent is treated as `0` (sorts among 0-keyed siblings), as `book.test.ts` (`z_doc // order 0 → first`) confirms. Comment updated to match the implementation (zero behavior-change).\n\n## Tests\nNew cases in `collect-docs.test.ts` cover: `order:` parsed as number, non-numeric `order:` ignored, `order: 0` retained, `group:` parsed as string, and absence leaving both undefined.\n\n- CLI: 18 passed\n- spec (`doc.test.ts` + `book.test.ts`): 26 passed"
+}

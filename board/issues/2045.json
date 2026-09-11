@@ -1,0 +1,37 @@
+{
+  "number": 2045,
+  "kind": "pull_request",
+  "title": "feat(spec,verify): prove-it-runs proof field + ratchet, binding 4 high-risk classes (ADR-0054 #1 + Phase 2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-19T09:38:12Z",
+  "updated_at": "2026-06-19T11:01:05Z",
+  "closed_at": "2026-06-19T11:01:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-19T11:01:03Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2045",
+  "body": "## What & why\n\nADR-0054 **follow-up (1)** + **Phase 2**: define the authoritative high-risk-class list and add the **`proof` field + ratchet** to the spec liveness gate, then bind the high-risk classes — including new runtime proofs/bindings for flow nodes and analytics.\n\nUntil now, a `live` classification in the liveness ledger meant only **a static pointer to a consumer** — proof that *something reads* the property. That is necessary but **not sufficient**: a property can be live at every layer yet broken *end-to-end* (the break lives in the engine↔driver↔service↔HTTP integration — #2018, the `rating/slider/toggle` fidelity leak). ADR-0054 adds the third leg — **prove-it-runs**: for high-risk authorable classes, `live` must carry a **`proof`** (a `@objectstack/dogfood` test that authors the property against the real in-process stack and asserts the runtime outcome).\n\nThe earlier ADR-0054 follow-ups are already merged: field-fidelity fix + field-zoo (#2025/#2022), tz-bucketing proof (#2018), the `@objectstack/verify` engine (#2041), and the #1994 RLS seed + multi-user harness (#2024/#2032). This adds the missing keystone (the ratchet) and binds four classes.\n\n## Design (the proof contract)\n\n- **`proof` = `\"<repo-relative-file>#<proof-id>\"`.** The dogfood test self-declares the id with a greppable `// @proof: <id>` tag near its top.\n- **Validation is STATIC** — the gate checks the file exists *and* declares the tag; it never runs the test (that's the dogfood gate's job), keeping the liveness gate seconds-cheap (ADR §4). A greppable tag (not a test title) is deliberate: field-zoo titles are generated in a loop.\n- **Bidirectional integrity.** A bound `live` entry must carry a valid proof *of its own class*. The reverse check flags any `@proof:` tag under `packages/dogfood/test/**` not registered in `proof-registry.mts` (warning).\n- Gate also triggers on `packages/dogfood/**`, so deleting/renaming a proof re-runs the check and a dangling reference is caught.\n\n## The ratchet — four classes bound (ADR §3)\n\nA class is CI-enforced only once it has **both** a runtime proof **and** a governed ledger entry to carry it.\n\n| High-risk class | Bound? | Ledger binding | Proof |\n|---|---|---|---|\n| Field types | ✅ enforced | `field.type` | `field-zoo-roundtrip#field-type-roundtrip` |\n| RLS / sharing | ✅ enforced | `permission.rowLevelSecurity.using` | `rls-fixture#rls-by-id-write` |\n| **Flow nodes** | ✅ enforced | `flow.nodes.type` | `flow-node#flow-node-execution` (**new proof**) |\n| **Analytics dims/measures** | ✅ enforced | `dataset.dimensions.dateGranularity` | `analytics-timezone#analytics-tz-bucketing` (**newly bound**) |\n| Form layout/section/widget | ⛔ pending | — | none yet (form surface not governed) |\n\n## Phase 2 — new this PR\n\n**Flow-node runtime proof.** Flow execution wasn't reachable through the harness (`bootStack` registered no automation service). Mirroring how the RLS proof first needed a multi-user harness capability:\n- `@objectstack/verify`: `bootStack` gains an opt-in `automation` flag that registers `@objectstack/service-automation`; the app's flows are then pulled from the registry and their nodes execute. Default off — standard boot stays lean.\n- dogfood proof: a self-contained fixture (one object + one `autolaunched` flow whose `update_record` node stamps a record) triggers the flow over HTTP and asserts **both directions** — the targeted record IS stamped (node executed) **and** a bystander is **not** (the input variable wired into the node's filter, not a blanket update).\n\n**Govern `dataset` + bind analytics.** The analytics proof existed (#2018) but its surface wasn't governed. This adds `liveness/dataset.json` (all 19 authorable props classified with file:line evidence from a consumer audit; 26 live, 1 dead) and binds `dataset.dimensions.dateGranularity` to the tz-bucketing proof.\n\n## Verification (all local, green)\n\n- `pnpm --filter @objectstack/spec check:liveness` → green; 11 governed types; reports the 4 bound classes.\n- Red paths confirmed: dangling proof tag → fail; bound `live` with no proof → fail; orphan tag → warning.\n- 17 unit + wiring tests (`proof-registry.test.ts`).\n- **Flow-node proof** runs green; **analytics tz proof** runs green; **full dogfood suite 59/59**.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

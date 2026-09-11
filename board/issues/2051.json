@@ -1,0 +1,32 @@
+{
+  "number": 2051,
+  "kind": "pull_request",
+  "title": "feat(spec): interface-editor polish — composite disclosure popover + buttons=object-actions",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-19T14:59:07Z",
+  "updated_at": "2026-06-19T14:59:56Z",
+  "closed_at": "2026-06-19T14:59:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-19T14:59:54Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2051",
+  "body": "## Summary\n\nSpec side of the interface-page editor polish (pairs with the objectui runtime PR).\n\n### Progressive-disclosure popover\n- `FormFieldSchema` gains `disclosure?: 'inline' | 'popover'`. A composite marked `disclosure: 'popover'` renders as a summary line + gear popover instead of an inline box.\n- The page form marks `appearance` / `userActions` / `addRecord` with `disclosure: 'popover'`.\n\n### Buttons = object actions\n- `InterfacePageConfigSchema` gains `buttons: z.array(z.string())` — names of the source object's actions surfaced as page toolbar buttons.\n- The page form renders Buttons with the new **`action-multi`** widget (`dependsOn: source`) so the author picks from the object's real actions (correct-by-construction).\n- Showcase `task-workbench` demonstrates it: `buttons: ['showcase_bulk_reassign', 'showcase_mark_done']` → **Reassign… / Mark Done** in the page header.\n\n## Verification\nBrowser-tested against the live showcase (see objectui PR): the Buttons picker lists the task object's actions, the workbench header renders them, and the composite popovers collapse/expand correctly. Spec `tsc` clean.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

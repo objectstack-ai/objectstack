@@ -1,0 +1,30 @@
+{
+  "number": 2136,
+  "kind": "pull_request",
+  "title": "fix(runtime): honor app-declared default profile on the artifact-serve path (ADR-0056 D7)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T15:09:55Z",
+  "updated_at": "2026-06-22T00:58:25Z",
+  "closed_at": "2026-06-22T00:57:50Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2136",
+  "body": "取代 #2132(GitHub 未对该 PR 的 synchronize/reopen 事件触发 CI —— 其他分支正常,属该 PR 的触发故障。新分支用 `opened` 事件重新跑 CI)。\n\n## 问题\n`objectstack dev`/`serve`/`start` 从编译产物(`dist/objectstack.json`,无 host `objectstack.config.ts`)启动时,不应用 app 声明的默认权限集 profile(`isProfile + isDefault`),而带 config 启动时会。表现:默认 profile 携带 `readScope`(如 ADR-0057 `unit_and_below`)的 app,在 artifact 启动路径下被忽略,所有用户回退到内置 owner-only 的 `member_default`。\n\n## 根因\n`dev` 没有独立启动路径,它把 `serve --dev` 当子进程拉起;无 config 时走 artifact 启动路径。产物本身保留了 `permissions`/`isDefault`,但 `createStandaloneStack`(`packages/runtime`)只把 `objects`/`requires`/`manifest` 浮到顶层,漏掉了 `permissions[]`/`roles[]`。于是 `serve.ts` 的 `appDefaultProfileName(config.permissions)` 拿到 `undefined`,SecurityPlugin 回退到 `member_default`。config 加载路径未受影响(`originalConfig.permissions` 在展开时幸存)。\n\n## 修复\n`createStandaloneStack` 把产物 bundle 的 `permissions[]`/`roles[]` 一并浮到顶层,与现有 `objects`/`requires`/`manifest` 一致。artifact 启动路径自此与 config 路径行为相同。\n\n## 验证\n- `packages/runtime/src/standalone-stack.test.ts`:artifact 路径浮出 permissions/roles(含 `readScope`),驱动 `appDefaultProfileName`。\n- `packages/dogfood/test/showcase-scope-depth-fallback.dogfood.test.ts`:profile 按名字作 `fallbackPermissionSet` 解析,矩阵按 `unit_and_below` 放宽(配合参考层级 resolver),无 resolver 时 fail-closed。\n- 全量:runtime 401、dogfood 145 通过。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

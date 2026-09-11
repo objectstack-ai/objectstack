@@ -1,0 +1,34 @@
+{
+  "number": 2008,
+  "kind": "pull_request",
+  "title": "chore(todo): fix owner lookup ref + completed-task seed validation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-17T05:47:41Z",
+  "updated_at": "2026-06-17T05:51:04Z",
+  "closed_at": "2026-06-17T05:51:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-17T05:51:03Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2008",
+  "body": "Two app-todo defects found driving it end-to-end (boot + seed + CRUD over HTTP).\n\n## 1. `owner` lookup pointed at a non-existent object\n\n`todo_task.owner` was `Field.lookup('user', …)`. `user` is **not a registered object** — the platform user object is `sys_user` (better-auth managed). So at seed/owner-resolution time the driver queried a `user` table that doesn't exist, flooding the boot log with:\n```\nselect `id` from `user` where `name` = 'admin' — no such table: user\n```\nFix: repoint to `Field.lookup('sys_user')`, and drop the seed `owner: 'admin'` (there's no stable seed key for the auth-created bootstrap admin; leaving it unset is correct).\n\n## 2. Completed seed tasks failed their own validation\n\nTwo seed tasks are `status: 'completed'` but had **no `completed_date`** — which the object's own `completed_date_required` validation rejects. They silently failed to insert, so only **6 of 8** rows seeded:\n```\nInsert failed: todo_task — Validation failed for 1 field(s): _record (rule_violation)\n```\nFix: gave the completed seeds a `completed_date`.\n\n## Verification (live boot)\n\n- **0** `no such table: user` errors, **0** `rule_violation`s.\n- `todo_task` now seeds **all 8 rows** (both completed tasks load).\n- Validation still enforced: `POST` a completed task with no `completed_date` → **400**.\n- Aggregation/reports group-by-status returns correct counts (200).\n\nExample-app only; no package impact.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

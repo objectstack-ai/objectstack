@@ -1,0 +1,32 @@
+{
+  "number": 2053,
+  "kind": "pull_request",
+  "title": "fix(app-showcase): complete field translations so list columns don't mix locales",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-20T04:09:48Z",
+  "updated_at": "2026-06-20T04:12:08Z",
+  "closed_at": "2026-06-20T04:12:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-20T04:12:07Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2053",
+  "body": "## Summary\n\nThe showcase translation bundle only translated a handful of fields, so list columns like **Project / Assignee / Progress / Estimate** fell back to their English field label and sat next to the translated **状态 / 优先级 / 截止日期** on a zh-CN session — a visible locale-mixing inconsistency.\n\nExtends both `en` and `zh-CN` to **every field surfaced as a column** on the showcase pages (task + project).\n\n## Verification\nTask Triage header now reads `标题 / 项目 / 负责人 / 状态 / 优先级 / 截止日期 / 进度` — fully consistent, no Latin fallback.\n\n### Context (enterprise-UI review)\nThis is the one genuine visual gap from an Apple-craft-but-enterprise-calibrated review of the new pages. The objectui design system already handles the rest at the component layer — soft-pill badges (not candy-saturated) with a `appearance: 'dot'` density option, right-aligned `tabular-nums` numeric columns, and a polished data-table — so those were deliberately **not** churned.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 2101,
+  "kind": "pull_request",
+  "title": "feat(audit): record a service/non-user principal on sys_audit_log.actor (ADR-0014 D2, cloud#340)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T06:52:19Z",
+  "updated_at": "2026-06-21T07:06:27Z",
+  "closed_at": "2026-06-21T07:06:25Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T07:06:25Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2101",
+  "body": "## Why\nA non-user-authenticated write — e.g. an `OS_CLOUD_API_KEY` service-token call — left `sys_audit_log.user_id` **null** and was therefore **unattributable**. That's exactly how the prod env-delete of `os-790m7q` went unaccountable (service-token, no user/IP/UA). `user_id` is a strict `sys_user` lookup, so a service principal can't be recorded there at all.\n\n## What — open the mechanism (the host wires the value)\n- **`spec` ExecutionContext** ([execution-context.zod.ts](packages/spec/src/kernel/execution-context.zod.ts)): new optional `actor` field — a stable principal label for attribution when there's no `userId` (e.g. `svc:<name>`). Additive / backward-compatible; **public API surface unchanged** (the gate tracks export names, not zod field internals).\n- **`plugin-audit` `sys_audit_log`**: new first-class `actor` text field, independent of the `user_id` lookup. `user_id` stays user-only.\n- **audit writer** ([audit-writers.ts](packages/plugins/plugin-audit/src/audit-writers.ts)): record `actor = userId ?? session.actor ?? null`. **Conditionally stamped** (same pattern as `organization_id`) so audit tables that predate the column keep inserting cleanly; the column auto-adds on the next schema sync.\n\nThis is the open half (ADR-0012 style): the framework defines + records the contract; the **host** sets `ExecutionContext.actor`. The cloud control plane will set `svc:<name>` in service-mode auth (cloud#340 cloud half) — no behavior change here until it does.\n\n## Tests\n- real user → `actor = user id`, `user_id = user id`\n- **service token (no userId)** → `actor = 'svc:cloud-control'`, `user_id` stays **null** (the os-790m7q class, now attributable)\n- neither → `actor` null\n\n`@objectstack/spec` **6599/6599** + `check:api-surface` ✓; `@objectstack/plugin-audit` **21/21**; spec build clean.\n\nPairs with cloud#340 (cloud sets the service-mode actor + names the token). Relates to cloud ADR-0014 D2.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

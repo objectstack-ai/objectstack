@@ -1,0 +1,37 @@
+{
+  "number": 2089,
+  "kind": "pull_request",
+  "title": "test(spec): downstream-consumer contract — backward-compat gate for third parties (#2035)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T05:12:11Z",
+  "updated_at": "2026-06-21T05:18:13Z",
+  "closed_at": "2026-06-21T05:18:11Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T05:18:10Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2089",
+  "body": "Follow-up to #2035 / #2088. Builds recommendation #1 from that discussion: the missing gate that catches a spec change breaking a **lagging third-party consumer** before release.\n\n## The gap this closes\n\nEvery spec consumer the framework currently tests — the example apps, `@objectstack/dogfood` — lives in this monorepo and **co-evolves with the spec in the same commit**. When a spec change would break them, the same PR just fixes them. So none of them can catch a change that breaks a *real* third party (e.g. [hotcrm](https://github.com/objectstack-ai/hotcrm)) that is pinned to a **published** release and authors metadata independently. `grep hotcrm .github/` → 0 hits today.\n\n## What this adds\n\n`@objectstack/downstream-contract` — a **frozen** fixture authored the way an external consumer does: the `ObjectSchema.create` builder, the `defineX` factories, **and bare metadata literals** (`: ActionInput` / `: ReportInput` / `: PageInput` — the pre-#2035 pattern real third parties used). It is governed by a freeze contract (see the package README):\n\n> A spec change that requires editing the fixtures to stay green is, by definition, a **breaking change** for third parties.\n\nTwo signals, both riding **existing** CI jobs (no new workflow):\n\n| Signal | Catches | Wired into |\n|---|---|---|\n| `typecheck` | type-surface breaks (removed/narrowed export — the #2023 class) | `lint.yml` → TypeScript Type Check |\n| `test` | runtime schema + cross-reference breaks | `turbo run test` → Test Core |\n\nThe test runs each bare-literal fixture through its schema's `.parse()` and assembles all metadata via `defineStack` (schema + cross-reference validation — the metadata core of `objectstack validate`).\n\n## Grounding (done for real, not theory)\n\nBefore writing this I overlaid the merged spec build into a local checkout of **hotcrm** (real external consumer on published 9.11.0) and ran its own gates: `tsc --noEmit` → 0 errors, `objectstack validate` → ✓ passed (15 objects / 15 pages / 10 reports / 11 actions / 17 flows). hotcrm also proved the original thesis — it uses `defineView()` but authors pages/reports/actions/flows as bare literals (incl. `: Action`, the output-type footgun), exactly because the factories were missing. This package is the deterministic, in-CI floor under that manual check.\n\n## Verification (local)\n\n- `pnpm --filter @objectstack/downstream-contract typecheck` → exit 0\n- `pnpm --filter @objectstack/downstream-contract test` → 2 passed\n- `turbo run test --filter=@objectstack/downstream-contract` → picked up ✓\n- Teeth confirmed: `ActionSchema.parse` rejects a broken action `type` (not a no-op)\n\n## Follow-ups (not in this PR)\n\n- A `spec` public-API surface snapshot (api-extractor) for an even tighter type-break signal.\n- Optional release-pipeline step that runs hotcrm's live `validate && typecheck && build` against the unreleased spec.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

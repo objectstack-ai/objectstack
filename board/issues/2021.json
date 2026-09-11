@@ -1,0 +1,35 @@
+{
+  "number": 2021,
+  "kind": "pull_request",
+  "title": "feat(ownership): auto-provision canonical owner_id + hand seeded records to first admin",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-18T05:43:33Z",
+  "updated_at": "2026-06-18T06:52:12Z",
+  "closed_at": "2026-06-18T06:50:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-18T06:50:18Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2021",
+  "body": "## Problem\n\nRecord ownership was **opt-in** and the boot order made it impossible to seed ownership to the eventual human admin:\n\n- Data seed runs in `app-plugin.start()` — **before** any human user exists (the login admin is minted later, on `kernel:ready`). So `os.user` is bound to a deterministic, non-loginable `usr_system`, and seeded rows land owned by `usr_system` or `NULL`.\n- The human admin's id is random (better-auth), so it can't be referenced from static seed.\n- Apps \"almost never declare `owner_id`\" (the platform's own RLS comment), so they reinvent a custom `owner` lookup that the platform's ownership machinery (auto-stamp, RLS, \"My\" views) can't see.\n\nNet effect: seeded demo data is owned by nobody a human can log in as → My-views / owner reports / owner notifications are empty out of the box, and author-written objects silently ship with no working ownership at all. This is the worst failure mode for AI authors: it compiles, seeds and renders, but the feature is silently dead.\n\n## Fix — ownership correct-by-default\n\n**1. `applySystemFields` (objectql)** auto-injects a canonical, **reassignable** `owner_id` lookup (→ `sys_user`) on user-authored business objects, next to the existing tenant/audit fields. Unlike the audit `*_by` lookups it is NOT readonly — ownership transfers. Withheld for `managedBy` / `sys_*` tables and for objects that opt out via `ownership: 'org' | 'none'` (Dataverse-style). Once present, the existing machinery engages automatically (insert auto-stamp at security step 3.5, owner RLS, owner-keyed views/reports).\n\n> Safe default direction: forgetting the opt-out leaves a harmless spare nullable column; the old opt-IN model let authors ship broken ownership.\n\n**2. `claimSeedOwnership` (plugin-security)** — invoked from `bootstrapPlatformAdmin` right after the first human is promoted to platform admin — transfers ownership of seeded rows (`owner_id` NULL or `usr_system`) to that admin. The ownership twin of org-scoping's `claimOrphanOrgRows`. Idempotent; skips `managedBy` / `sys_*`. **Authors write plain seed records (no `owner_id`); the platform performs the handoff** — nothing to remember or mistype.\n\n**3.** Hardens `bootstrapPlatformAdmin` against a latent dts typecheck error (defensive read of the untyped `description` on seed permission sets, surfaced when the cache invalidated).\n\n## Why this shape (AI-authored code)\n\nThe design optimizes for *correct-by-default, loud-on-mistake* because the code — schemas and seeds — is largely AI-written:\n- **Zero-config default**: write a normal object → ownership just works. Nothing to declare/forget.\n- **Platform-decided exclusions**: `managedBy` / `sys_*` auto-excluded; only the rare catalog/junction needs one line `ownership: 'org'`.\n- **Handoff, not author-supplied owner**: seeds stay plain; no `cel\\`os.user.id\\`` to mistype.\n\n## Tests\n- `registry.test.ts`: +5 owner_id injection cases (default inject, managedBy/sys_ exclusion, `ownership` opt-out, no-overwrite).\n- `claim-seed-ownership.test.ts`: +6 (NULL & usr_system claim, human-owned untouched, managed/sys_ skip, idempotent, system-target no-op).\n- **Full framework suite green: 128/128 tasks.**\n\n## Follow-ups (not in this PR)\n- Multi-tenant: mirror the handoff in `claimOrphanOrgRows` / `ensureDefaultOrganization` so per-org seed clones are owned by the org's admin.\n- A compile-time lint that flags author-declared custom `owner`-ish lookups (now redundant alongside the auto `owner_id`).\n- App migration: HotCRM's custom `owner` → canonical `owner_id`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 2230,
+  "kind": "pull_request",
+  "title": "feat(cluster): multi-node authorization gate (open seam for EE license)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-23T04:58:53Z",
+  "updated_at": "2026-06-23T05:04:13Z",
+  "closed_at": "2026-06-23T05:04:11Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-23T05:04:11Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2230",
+  "body": "Adds the **open mechanism** an EE license plugs into to gate multi-node — zero license logic in the framework (cloud ADR-0022 D4/D7).\n\n### What\n- `@objectstack/service-cluster` exports `registerMultiNodeGate` / `checkMultiNodeAllowed` / `__resetMultiNodeGate` + `MultiNodeGate` type. A distribution registers a gate that authorizes whether the runtime may enable a multi-node (remote-driver) topology. **Open framework ships no gate → always allowed.**\n- `os serve` consults the gate before activating a remote cluster driver. On denial it **downgrades to single-node (in-memory) rather than failing** — multi-node is an add-on, never bricks the runtime (distinct from the split-brain guard, which throws on outright misconfiguration).\n- The CLI uses a **dynamic, non-literal import specifier** so it does not statically depend on the cluster package — mirrors the existing remote-driver import (the framework intentionally treats cluster packages as runtime-resolved).\n\n### Verification\n- `service-cluster` full build (tsup ESM+DTS) clean; **45 tests** pass incl. 5 new gate tests (no-gate→allowed, deny-with-reason, allow, last-wins, reset).\n- `@objectstack/cli` build (tsc) green — `serve.ts` compiles.\n\nChangeset included (`service-cluster` minor, `cli` minor).\n\nNext (cloud side, ADR-0022): objectos-ee registers a license-based gate here via security-enterprise; objectos-runtime entitlement-source seam; boot wiring + downgrade.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

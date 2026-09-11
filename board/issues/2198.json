@@ -1,0 +1,35 @@
+{
+  "number": 2198,
+  "kind": "pull_request",
+  "title": "feat(datasource): DatasourceConnectionService + declared auto-connect (ADR-0062 Phase 1)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T11:13:15Z",
+  "updated_at": "2026-06-22T12:17:22Z",
+  "closed_at": "2026-06-22T12:17:20Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T12:17:20Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2198",
+  "body": "## ADR-0062 Phase 1 — `DatasourceConnectionService` + declared-datasource auto-connect (D1/D2/D5)\n\nFirst PR of epic #2163. **Declare an external datasource → it auto-connects to a live ObjectQL driver and its federated objects are queryable with zero app code** — no `onEnable` driver wiring.\n\n### What changed\n\n**D1 — one connect path.** New `DatasourceConnectionService` (`@objectstack/service-datasource`) owns the single \"definition → live driver\" path: build via the injected driver factory → resolve `external.credentialsRef` via the `SecretBinder` → `connect()` → `engine.registerDriver` under the **datasource name** → `registerDatasourceDef` → DDL-free `syncObjectSchema` for each bound federated object. Both origins converge on it — the runtime-admin `registerPool` now **delegates** here, and `AppPlugin` auto-connects code-defined datasources. Exposed as the `'datasource-connection'` kernel service.\n\n**D2 — opt-in-safe gate.** A declared datasource auto-connects only when it is `external`, an object **explicitly** binds via `object.datasource`, or it sets the new `autoConnect: true` flag. A managed datasource that nothing explicitly binds — including one referenced only by a `datasourceMapping` rule, e.g. `examples/app-crm`'s `:memory:` datasources — stays metadata-only. **Existing apps are byte-for-byte unchanged.**\n\n> ⚠️ **Reviewer note — deliberate refinement of D2's literal wording.** The ADR's gate (b) reads \"an object/`datasourceMapping` actually routes to it.\" Implementing against `app-crm` showed that auto-connecting on a *mapping rule alone* would break it: `crm_primary` (`:memory:`, managed) is referenced by a mapping rule + is the `default:true` fallback but has no `onEnable`, so today its objects fall through to the `default` driver. Connecting it would divert them to a fresh empty `:memory:` driver. So mapping-only routing to a *managed* datasource is treated as decorative; gate (b) fires only on explicit `object.datasource`. Documented in the ADR D2/D5 implementation notes in this PR.\n\n**D5 — lifecycle, ordering & policy.** Connect runs in `AppPlugin.start()` (before the `kernel:ready` validation gate; relies on the kernel's init-all→start-all ordering, so the connection service registered in the admin plugin's `init()` is available). Fail-fast for a declared `external` datasource with `validation.onMismatch:'fail'`; degrade-with-warning otherwise (and always for runtime-admin/rehydrate, so a UI action or replica blip never bricks the server). Adds a host-injectable **`DatasourceConnectPolicy`** (epic #2163 seam): open-core default allows (subject to the D2 gate); a multi-tenant host binds a stricter, fail-closed policy for egress isolation — one connect path, no cloud fork.\n\n### Tests\n- `datasource-connection-service.test.ts` — 15 unit tests: D2 gate (incl. app-crm cases), build/connect/name-stamp/register, `credentialsRef` resolution, idempotency vs. a pre-registered `onEnable` driver, policy deny + throw-as-deny, no-infra degrade, fail-fast vs. degrade per trigger, `connectDeclared` gating.\n- `datasource-autoconnect.test.ts` (runtime) — 5 integration tests with the **real** driver factory: auto-connects the declared external datasource, leaves a managed+unrouted one metadata-only, keeps both visible, **federated object queryable end-to-end**, deny-policy leaves it unconnected-but-visible.\n- Full suites green locally: `service-datasource` 80, `runtime` 409, `spec` 6604.\n\n### Scope / not in this PR\n- The riskiest `default`-driver bootstrap refactor onto the shared service is **deferred to a final follow-up PR** (per ADR risk guidance: land auto-connect first, refactor `default` last behind the dogfood gate).\n- The `examples/app-showcase` `onEnable` bridge is **kept** here (idempotent vs. auto-connect) and removed in **Phase 4 (D8)**.\n- Credentials at connect (D3) hardening is **Phase 2**; the `credentialsRef` resolve hook is already wired through the shared service.\n\nCloses (partially) #2163 — Phase 1.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

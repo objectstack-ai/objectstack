@@ -1,0 +1,33 @@
+{
+  "number": 2002,
+  "kind": "pull_request",
+  "title": "feat(email): drain queued sys_email rows so app inserts actually deliver",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-17T04:35:57Z",
+  "updated_at": "2026-06-17T05:51:56Z",
+  "closed_at": "2026-06-17T05:51:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-17T05:51:54Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2002",
+  "body": "## Problem (verified empirically, not by reading specs)\n\nAn app that can only \\`api.write\\` — e.g. a **sandboxed action body**, which exposes no \\`api.email\\` and cannot reach the queue — has exactly one way to \"send\" mail: INSERT a \\`sys_email\\` row. But the transport (and the \\`queued → sent\\` transition) only ran *inside* \\`EmailService.send()\\`. A raw insert never invokes it, so the row sat at \\`status:'queued'\\` **forever** — declared-but-never-delivered, not even log-simulated.\n\nThis was caught while auditing a real consumer (HotCRM's \\`send_email\\` action): it raw-inserts a queued \\`sys_email\\` and writes a \"completed Email\" timeline activity — i.e. the UI claimed delivery that never happened.\n\n## Fix\n\nTreat a \\`sys_email\\` row inserted as \\`status:'queued'\\` with no \\`message_id\\` as an **outbox** entry. A \\`sys_email\\` afterInsert hook delivers it through the live transport and finalizes the **same row in place** (\\`sent\\` + \\`message_id\\` + \\`sent_at\\`, or \\`failed\\` + \\`error\\`).\n\n- Delivery is **deferred** past the insert op so transport I/O never runs inside the insert's transaction, and the committed row is **re-read + re-checked** (\\`status==queued\\`) under system context before sending — idempotent against concurrent drains.\n- Rows that the service's own \\`send()\\` inserts are tagged managed (\\`EmailService.isServiceManaged\\`) and **skipped** by the hook, so they are delivered **exactly once** by \\`send()\\` — never double-sent.\n\n### Changes\n- \\`email-service.ts\\`: \\`managedRowIds\\` guard; extract \\`deliverNormalized()\\` shared by \\`send()\\` and the new \\`deliverPersistedRow()\\`; \\`rowToNormalized()\\` helper.\n- \\`email-plugin.ts\\`: register the \\`sys_email\\` afterInsert drain hook (own packageId, unregister-on-reinstall).\n- tests: +5 (managed-guard active at the insert moment; \\`deliverPersistedRow\\` delivers without inserting a 2nd row and fails cleanly on bodyless rows; \\`rowToNormalized\\` parse/throw).\n\n## Verification\n- **Empirical (HotCRM, patched dist):** raw \\`INSERT\\` of a queued \\`sys_email\\` → \\`sent\\` with a transport \\`message_id\\` (\\`<dev-…@objectstack.local>\\`) + \\`sent_at\\` within ~600ms. Before this change the identical insert stayed \\`queued\\` forever (\\`message_id:null\\`, \\`sent_at:null\\`).\n- **Unit:** \\`pnpm exec vitest run\\` → 20/20 in email-service.test.ts; full package 49→ still green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

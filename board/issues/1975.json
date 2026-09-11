@@ -1,0 +1,33 @@
+{
+  "number": 1975,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0053 — Phase 2 detailed design (reference-timezone model)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T15:58:50Z",
+  "updated_at": "2026-06-16T22:03:37Z",
+  "closed_at": "2026-06-16T22:03:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T22:03:36Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1975",
+  "body": "## What\n\nAdds a **Phase 2 — Detailed Design** section to [ADR-0053](https://github.com/objectstack-ai/framework/blob/docs/adr-0053-phase2-design/docs/adr/0053-date-and-datetime-semantics.md) now that **Phase 1 landed** ([#1968](https://github.com/objectstack-ai/framework/pull/1968) — `Field.date` is a tz-naive `YYYY-MM-DD` string at the driver boundary).\n\nThis is the **plan for review**, not a commitment to ship. Each slice is independently revertable and gated behind \"reference timezone unset → UTC\" (today's behavior). Refs ADR-0053, #1928.\n\n## Highlights\n\n- **Two-axis reframe** — `compute-tz` (`today()`/`daysFromNow`, analytics bucketing, cron day-boundaries) vs `render-tz` (datetime display): distinct sources, distinct risk. Conflating them is the chief risk of Phase 2.\n- **Reference-timezone resolver** — precedence (user pref → tenant-scoped org default → UTC), the single `resolveExecutionContext` chokepoint, a new `ExecutionContext.timezone` field, and the three execution branches (interactive / scheduled job / flow).\n- **Shared DST-safe primitive** reused from `preference-resolver`'s `Intl.formatToParts` pattern — no hand-rolled offset math.\n- **Three decisions, with rationale:**\n  - **D1** — `today()`/`daysFromNow()`/`daysAgo()` return a `Date` at **UTC-midnight of the reference-tz calendar day** (forced by cel-js hydration; explicit callout of the \"local-midnight-as-instant\" trap that would re-introduce the silent-miss bug). Side-effect: fixes the \"keeps wall-clock time\" defect for free.\n  - **D2** — tz-aware analytics buckets **in-memory, uniformly**; do not emit dialect-specific `date_trunc … AT TIME ZONE` (SQLite/MySQL have no tz support → cross-driver bucket skew).\n  - **D3** — wire report schedules onto the **existing** croner+tz adapter rather than delete the dormant `cron_expression`/`timezone` fields (the *enforce* resolution the spec-liveness gate wants).\n- **`applyFormulaPlan` blind spot** — read-time formula fields evaluate with no `now`/ctx/tz; worth fixing regardless of timezone.\n- **Per-slice implementation map** (6 slices, file-level), **open prerequisites** (cel-js `duration()` support; email rendering bypasses the formatter pipeline), and the **feature-flag rollback**.\n\n## Follow-up\n\nThe 6 implementation slices are being filed as separate tracked issues (linked under #1928).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

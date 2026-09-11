@@ -1,0 +1,34 @@
+{
+  "number": 1992,
+  "kind": "pull_request",
+  "title": "feat(action): conditional visibility + undoable actions (CRM demo)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T23:17:38Z",
+  "updated_at": "2026-06-16T23:19:08Z",
+  "closed_at": "2026-06-16T23:19:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T23:19:06Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1992",
+  "body": "## What\n\nAction UX follow-ups (the third batch from the conversion-wizard review): conditional action visibility and an undoable action affordance.\n\n### 1. Conditional action visibility\n`Action.visible` / `Action.disabled` CEL predicates were already evaluated by the action renderers — this wires the CRM example up to use them: **Convert Lead** now declares `visible: record.status != \"converted\"`, so the button disappears on already-converted leads instead of the user clicking it and hitting the flow's guard screen (kept as a server-side backstop).\n\n### 2. Undoable actions\nNew `Action.undoable` flag. A single-record update action that sets it gets an **Undo** affordance on its success toast (backed by the client UndoManager). New CRM **Reassign Lead** list action demonstrates it — reassigns `assigned_to`, restorable from the toast (and Ctrl+Z).\n\n## Changes\n- **spec**: `Action.undoable`.\n- **app-crm**: `Convert Lead` gains `visible`; new `Reassign Lead` undoable action.\n\n## Verification\nBrowser E2E (console + app-crm):\n- Convert Lead is **hidden** on a converted lead, **shown** on a new/qualified lead.\n- Reassign Lead → param dialog → updates `assigned_to`, toast shows \"Undo\" → clicking Undo restores the prior owner.\n\nSmoke test (29) passes. Pairs with the objectui companion PR.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

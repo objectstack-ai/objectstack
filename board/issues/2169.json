@@ -1,0 +1,32 @@
+{
+  "number": 2169,
+  "kind": "pull_request",
+  "title": "fix(showcase): register Mark Done action handler via inline body",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T03:48:33Z",
+  "updated_at": "2026-06-22T03:53:04Z",
+  "closed_at": "2026-06-22T03:53:02Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T03:53:02Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2169",
+  "body": "## Problem\n\nClicking **Mark Done** on a `showcase_task` record errored. The request\n`POST /api/v1/actions/showcase_task/showcase_mark_done` returned HTTP 200 with\nan error payload:\n\n```json\n{\"success\":true,\"data\":{\"success\":false,\"error\":\"Action 'showcase_mark_done' on object '*' not found\"}}\n```\n\nThe `showcase_mark_done` action was declared `type: 'script'` but carried\n**neither a `body` nor a `target` handler**. `AppPlugin` only registers an\nengine handler for actions that have an inline `body` (or a `target` → bundle\nfunction), so nothing was wired up. The dispatcher tried `showcase_task`, fell\nback to the `'*'` wildcard, and surfaced the engine's \"not found\" — shown in the\nUI as an error.\n\n## Fix\n\nAdd an L2 sandboxed `body` to `MarkDoneAction` that flips the dedicated `done`\nflag and sets `progress` to 100.\n\nIt deliberately **does not** write `status: 'done'`: the `task_status_flow`\nstate-machine only permits `in_review → done`, so a direct status write would be\nrejected from Backlog / To Do / In Progress rows. Using the `done` boolean lets\nthe action succeed from any state. Also added `successMessage: 'Task marked done.'`.\n\n## Verification\n\n- **Browser (localhost:3000):** rebuilt bundle + restarted the showcase dev\n  server (metadata hot-reload does not re-register action handlers — that only\n  happens at bundle bind), clicked **Mark Done** → green **\"Task marked done.\"**\n  toast, no errors, clean console.\n- **API regression:** ran the action on an *In Progress* task → `progress 45→100`,\n  `done false→true`, `status` unchanged (no state-machine violation); test record\n  restored afterward.\n- `pnpm verify` green: `tsc --noEmit` clean + **22 tests passing**.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

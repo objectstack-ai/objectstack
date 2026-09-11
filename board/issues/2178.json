@@ -1,0 +1,35 @@
+{
+  "number": 2178,
+  "kind": "pull_request",
+  "title": "fix(platform-objects): organization_id optional so BU/Team create in single-tenant (ADR-0057)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T05:48:02Z",
+  "updated_at": "2026-06-22T06:23:43Z",
+  "closed_at": "2026-06-22T06:23:41Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T06:23:41Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2178",
+  "body": "You reported: creating a Business Unit in the Setup console errors.\n\n## Root cause\n\n`sys_business_unit.organization_id` (and `sys_team.organization_id`) are `required: true`, but a **single-tenant** deployment has **no `sys_organization` row** and **nothing auto-stamps one** (`OrgScopingPlugin` is multi-tenant-only). So every create fails:\n\n```\nVALIDATION_FAILED: organization_id (required)   →  HTTP 400\n```\n\nThis made the whole org-scoped identity graph uncreatable single-tenant — directly contradicting \"BU is usable in the open/single-tenant edition\" (ADR-0057 addendum).\n\n## Fix\n\nMake `organization_id` **optional** on `sys_business_unit` and `sys_team`:\n- **single-tenant** → `null` (consistent with \"no org concept\");\n- **multi-tenant** → still auto-stamped by `OrgScopingPlugin`; `tenant_isolation` RLS hides any null-org row (fail-closed) → no cross-tenant exposure.\n\nPure validation change (the columns are already nullable) — no migration.\n\n`sys_member` / `sys_invitation` carry the same flag but are created only via better-auth org flows (which always supply an org) and aren't directly creatable in single-tenant Setup — left unchanged.\n\n## Verified (live `os dev`, single-tenant)\n\n```\nPOST /data/sys_business_unit {name,kind}  →  201  (organization_id: null)\nPOST /data/sys_team {name}                →  201  (organization_id: null)\n```\n\nBefore the fix both returned 400. Plus a dogfood regression test (boots single-tenant, creates both).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

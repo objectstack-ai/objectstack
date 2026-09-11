@@ -1,0 +1,35 @@
+{
+  "number": 2092,
+  "kind": "pull_request",
+  "title": "ci(spec): public API-surface snapshot gate to catch silent export drift (#2035)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "size/xl",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T05:23:02Z",
+  "updated_at": "2026-06-21T06:18:03Z",
+  "closed_at": "2026-06-21T06:18:01Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T06:18:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2092",
+  "body": "Follow-up to #2035 / #2088 / #2089. The tightest pure-type backward-compat gate: catch a removed/renamed/kind-changed `@objectstack/spec` export at PR time, before it breaks a published-spec third party.\n\n## Why\n\nFor a metadata-driven platform the spec package **is** the third-party API. A silently dropped export breaks every consumer pinned to a published release the moment they upgrade — the #2023 class of break. No in-repo consumer catches it, because the examples and `@objectstack/dogfood` co-evolve with the spec in the same commit.\n\n## What\n\n`scripts/build-api-surface.ts` enumerates every exported `name (kind)` from the built `.d.ts` of all 16 public entry points (`.`, `./ui`, `./data`, … — 4251 exports), resolving re-export aliases to their real kind (so `definePage` reads as `function`, `PageInput` as `type`). The snapshot is committed at `packages/spec/api-surface.json`.\n\n```\npnpm --filter @objectstack/spec gen:api-surface     # regenerate + write\npnpm --filter @objectstack/spec check:api-surface   # CI: fail on drift\n```\n\nWired into **lint.yml's TypeScript Type Check job** (after the build step that produces the dist). A **removed** export fails as breaking; an **added** export still requires regenerating the snapshot — so every change to the public surface is deliberate, never silent.\n\n## How it fits the third-party validation strategy\n\n| Gate | Proves | PR |\n|---|---|---|\n| `objectstack validate` (loader) | a third party's own metadata parses | exists |\n| downstream-contract (typed fixtures) | exercised exports still **accept** real metadata — *depth* | #2089 |\n| **api-surface snapshot** | the whole export set still **exists** — *breadth* | **this** |\n\n## Verification (local)\n\n- `check:api-surface` → clean immediately after `gen` (`unchanged ✓`)\n- Teeth: a simulated removed export → exit 1, prints `- defineLegacyThing (function)` + breaking-change guidance\n- Determinism: code-unit sort (not `localeCompare`); regenerated twice → byte-identical\n- Confirmed the 16 new factories + 6 input aliases (#2088) are captured\n\n## Notes\n\n- Dev tooling only — neither the script nor `api-surface.json` is in the package `files`, so nothing ships to consumers (no changeset needed; the gate's pending-changeset count is already > 0).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 2035,
+  "kind": "issue",
+  "title": "spec: 为剩余 16 个可编写域补全 defineX 工厂 / XInput,统一编写入口",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-18T12:27:22Z",
+  "updated_at": "2026-06-21T04:48:25Z",
+  "closed_at": "2026-06-21T04:48:25Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2035",
+  "body": "## 背景\n\n源自 #2023 的排查:示例应用从根 `@objectstack/spec` 导入类型 → 解析成 `any` → 静默吞掉所有对象字面量的类型检查,掩盖了约 30 个真实类型错误。根因之一是**这些域没有一个统一、类型安全的编写入口**,作者(尤其是 AI)只能写裸 `: X` 字面量,而输出态(`z.infer`)会把 `.default()` 字段变必填、拒绝 CEL 字符串简写。\n\n后续的 #2026 / #2029 已经堵上了 CI 闸门(示例 typecheck + ESLint 导入守卫)。本 issue 处理更上游的一致性问题。\n\n## 问题:三种并存的编写惯用法\n\n| 写法 | 适用域 | 输入态人体工学 | 编写处类型安全 | 运行期校验 |\n|------|--------|:---:|:---:|:---:|\n| `defineX()` 工厂 | view/flow/job/agent/app/portal/dataset/book… (19 个) | ✅ | ✅ | ✅ (`.parse()`) |\n| `ObjectSchema.create()` / `Field.x()` 构建器 | object / field | ✅ | ✅ | ✅ |\n| 裸类型字面量 `: X` | **下列 16 个域** | ❌ | ⚠️ | ❌ |\n\n用哪种纯粹看历史,无规律。第三类正是 #2023 翻车的地方。\n\n## 缺口清单(当前 main 实测)\n\n**16 个可编写域没有 `defineX` 工厂:**\n`Datasource`、`Connector`、`Policy`、`SharingRule`、`Role`、`PermissionSet`、`EmailTemplateDefinition`、`Report`、`Webhook`、`ObjectExtension`、`Cube`、`Mapping`、`Theme`、`TranslationBundle`、`Page`、`Action`\n\n其中 **6 个连 `XInput` 别名也没有**(需一并补):`Policy`、`Cube`、`Mapping`、`Theme`、`TranslationBundle`、`Page`\n\n(已有 `defineX` 的 19 个域作为模板:defineView/defineForm/defineApp/defineFlow/defineJob/defineBook/defineAgent/defineTool/defineSkill/definePortal/defineDataset/defineStack/defineSeed/defineSolutionBlueprint/defineViewItem/defineActionDescriptor/defineFlowBuilderConfig/defineObjectDesignerConfig/defineStudioPlugin)\n\n## 长期价值\n\n1. **让 #2023 那一类 bug 在结构上不可能再发生**:`defineX` 是**值**导入,坏掉会立刻硬报错,没有 `any` 可退化躲藏。\n2. **AI 只需学一种写法**(对齐\"模板都是 AI 写的、避免 AI 犯错\"的北极星):消灭\"看着对其实错\"的输出态字面量选项。\n3. **编写期错误信息好得多**:`.parse()` 接已导出的错误映射(`objectStackErrorMap` / `safeParsePretty`),给出 `webhook.timeoutMs 必须 ≥ 1000` 这类就地、字段级提示,而非 TS 结构不匹配的墙。\n4. **隔离 schema 变动**:给某 schema 加 `.default()` 不再静默打破生态里所有裸输出态字面量。\n\n`defineX(config: z.input<typeof XSchema>): X { return XSchema.parse(config); }` 是唯一同时满足\"输入态人体工学 + 编写处类型安全 + 运行期校验\"三项的写法;裸 `: XInput` 只满足前两项。\n\n## 建议落地方式(两个 PR)\n\n- **PR 1 — spec**:为上述 16 个域新增 `defineX` 工厂(每个约 3 行,与现有 19 个机械同构),并补齐 6 个缺失的 `XInput` 别名。根 `index.ts` 按现有约定 re-export。带 `minor` changeset(`@objectstack/spec`)。\n- **PR 2 — 示例迁移**:把 example apps(crm/showcase/todo)里相关域改用新工厂,作为参考示范。#2023 的 typecheck + ESLint 闸门兜底。\n\n## 成本 / 取舍\n\n- 公共 API 面增长(纯增量、零设计风险,照搬现有写法)。\n- 流入 `defineStack` 的域会双重 parse —— 开销可忽略,换来更早/就地校验。\n- 不动 object/field 的构建器路径(它们已有良好入口)。\n- `TranslationBundle` 是 `z.record`,`defineTranslationBundle` 形态略特殊但仍成立。\n\n## 验收标准\n\n- [ ] 16 个域均有 `defineX` 工厂并从根 re-export\n- [ ] 6 个缺失的 `XInput` 别名补齐\n- [ ] 示例应用相关域迁移到工厂写法\n- [ ] `pnpm --filter './examples/*' typecheck` 与 `pnpm lint` 全绿\n- [ ] `@objectstack/spec` changeset 已添加\n\n---\n🤖 由本次 #2023/#2026/#2029 排查衍生,Claude Code 整理\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 2170,
+  "kind": "pull_request",
+  "title": "fix(spec): make GanttConfigSchema forward-compatible via .passthrough()",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T03:57:42Z",
+  "updated_at": "2026-06-22T04:12:15Z",
+  "closed_at": "2026-06-22T04:12:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T04:12:13Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2170",
+  "body": "## What\n\n`GanttConfigSchema` (`packages/spec/src/ui/view.zod.ts`) is a closed `z.object` — it strips any field it doesn't explicitly declare. This change appends `.passthrough()` so unknown fields survive validation.\n\n## Why\n\nThe gantt renderer (objectui `plugin-gantt`) keeps adding view-config knobs ahead of this schema — e.g. `lockField` / `defaultCollapsedDepth` from [objectui#1870](https://github.com/objectstack-ai/objectui/pull/1870), and previously `parentField`/`typeField` (#2030).\n\nThe console validates a view's `config.gantt` against a **bundled copy** of this schema before handing it to the renderer. So every field not declared here is silently dropped — meaning each new renderer knob requires a spec release **and** a console rebuild before it can take effect. Downstream this forces local `patch-package`-style patches that re-add `.passthrough()` to the bundled schema.\n\n`.passthrough()` decouples renderer releases from spec releases: unknown fields flow through to the renderer (which still only reads what it understands), while all declared fields keep their validation.\n\n## Tests\n\n- New forward-compat case in `view.test.ts`: unknown fields (`lockField`, `defaultCollapsedDepth`) survive `parse()`.\n- Full spec suite: 6602 passing. Typecheck clean."
+}

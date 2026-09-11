@@ -1,0 +1,33 @@
+{
+  "number": 2110,
+  "kind": "pull_request",
+  "title": "feat(dogfood): ADR-0060 D5 — flow trigger-type conformance ledger (4th surface)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T07:46:56Z",
+  "updated_at": "2026-06-21T07:52:33Z",
+  "closed_at": "2026-06-21T07:52:31Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T07:52:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2110",
+  "body": "ADR-0060 (#2103) D5 in action — extend the conformance-ledger pattern to a **fourth** surface, on the same `checkLedger` helper.\n\n## Why flow triggers\nA `Flow.type` declares **how** a flow is triggered. A declared trigger type with no runtime that fires it = a flow that's authorable but never runs — the flow-shaped #1887, and flows are heavily AI-authored.\n\n## What\nOne row per `Flow.type` enum value, all **enforced** with their runtime + a proof:\n- `record_change` → trigger-record-change · `api` → trigger-api · `schedule` → trigger-schedule\n- `autolaunched` → engine subflow/programmatic start · `screen` → builtin screen executor + suspended-run store (server runs, resumes on UI input)\n\nThe ratchet re-discovers the `Flow.type` enum from `flow.zod.ts` and fails the build if a new flow type is added with no runtime. Verified to bite.\n\n## The pattern holds\nFour surfaces now share one helper — authz / expression / validation-rule / flow-trigger — proving ADR-0060 D5: a new surface is a filled-in table, not a re-derived discipline. Full build 75/75 · dogfood 137. dogfood-private → no changeset.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

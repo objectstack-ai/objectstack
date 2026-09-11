@@ -1,0 +1,32 @@
+{
+  "number": 1982,
+  "kind": "issue",
+  "title": "ADR-0053 Phase 2 · Slice 5: timezone-aware analytics date bucketing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T16:00:30Z",
+  "updated_at": "2026-06-17T04:37:59Z",
+  "closed_at": "2026-06-17T04:37:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1982",
+  "body": "**Part of ADR-0053 Phase 2.** Design: #1975 · Parent: #1928.\n\n**Slice 5 of 6 — compute-tz, highest risk (dialect).** Make analytics date bucketing timezone-aware.\n\n### Decision D2 (see #1975)\nBucket **in-memory (JS), uniformly**; do **not** emit dialect-specific `date_trunc … AT TIME ZONE`. SQLite has no tz database and MySQL needs tz tables loaded → splitting by dialect produces different bucket boundaries for the same data (a correctness landmine the sqlite-heavy test matrix wouldn't catch).\n\n### Scope\n- Swap `getUTC*` for the shared `partsInTz` util (from slice 3) in:\n  - `packages/services/service-analytics/src/preview-evaluator.ts:69-89` (`bucketDate`)\n  - `packages/services/service-analytics/src/dimension-labels.ts:64-87` (`formatDateBucket`)\n- Feed the reference tz through the dataset query — the seam already exists (hard-coded `'UTC'`): `packages/services/service-analytics/src/dataset-executor.ts:264` and `:317`.\n- Keep the DB-side UTC fast path when reference tz is unset or `'UTC'`; still push the date-range **filter** to the DB, only bucket in memory when tz ≠ UTC — `objectql-strategy.ts:29-52`.\n\n### Acceptance criteria\n- [ ] Day/week/month/quarter buckets align to the reference tz, identically on SQLite and Postgres.\n- [ ] tz unset / `'UTC'` → DB-side fast path, behavior unchanged.\n- [ ] Test: a row near a tz day-boundary lands in the correct bucket under a non-UTC reference tz.\n\n### Depends on\nSlices 1 (timezone) and 3 (shared `partsInTz` util).\n"
+}

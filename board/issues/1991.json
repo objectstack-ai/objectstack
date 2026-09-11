@@ -1,0 +1,32 @@
+{
+  "number": 1991,
+  "kind": "pull_request",
+  "title": "feat(reports): report schedules honor cron_expression + timezone",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T22:56:17Z",
+  "updated_at": "2026-06-17T00:47:54Z",
+  "closed_at": "2026-06-17T00:47:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-17T00:47:52Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1991",
+  "body": "Closes #1983. Self-contained slice of [ADR-0053 Phase 2](https://github.com/objectstack-ai/framework/pull/1975).\n\n## What\n\n`sys_report_schedule` has long carried `cron_expression` and `timezone` fields, but `ReportService` only ever advanced `next_run_at` by `interval_minutes` — both fields were **stored and ignored** (author-facing but runtime-dead). This activates them.\n\nScheduling now computes `next_run_at` from the cron expression (when present) **in the schedule's timezone**, via `croner` — the same library the job scheduler (`CronJobAdapter`) already uses. So \"every weekday at 09:00 local\" is finally expressible. `interval_minutes` remains the fallback.\n\n## Behavior\n\n- `cron_expression` **wins over** `interval_minutes` when set (the field's documented contract).\n- Evaluated in `timezone` (default `UTC`).\n- `scheduleReport` **validates the cron eagerly** and rejects an invalid one with `VALIDATION_FAILED`, instead of silently degrading at sweep time. A cron that later has no next occurrence is logged and falls back to the interval — it **never throws into the dispatch sweep**.\n- A shared `nextRunAt()` helper drives both the initial schedule and `advanceSchedule`.\n\nThe DB-polling dispatch model (`next_run_at <= now` sweep) is **unchanged** — only the next-run computation became cron-aware. This fits report-service's architecture far better than the in-process croner-job model, and works across multi-instance deployments.\n\n## Why self-contained\n\nReport schedules run under a system context (no user), so the timezone source is the schedule's **own** `timezone` field — same model as `sys_job`. So this slice needs **none** of the reference-timezone resolver (#1978) and can land independently.\n\n## Testing\n\n- New: cron drives/overrides interval; honors timezone (`09:00 America/New_York` = `14:00Z`); invalid cron → `VALIDATION_FAILED`; `dispatchDue` advances to the next cron occurrence.\n- Full `@objectstack/plugin-reports` suite green — **29 tests**; DTS build + typecheck clean.\n- Updated the `sys_report_schedule` doc comment (no longer \"reserved\"). Changeset: `minor` (new capability).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

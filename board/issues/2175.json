@@ -1,0 +1,33 @@
+{
+  "number": 2175,
+  "kind": "pull_request",
+  "title": "fix(showcase): mount the Recalculate Estimate api endpoint",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T05:42:54Z",
+  "updated_at": "2026-06-22T06:01:59Z",
+  "closed_at": "2026-06-22T06:01:56Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T06:01:56Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2175",
+  "body": "Follow-up to the [#2169](https://github.com/objectstack-ai/framework/pull/2169) / [#2171](https://github.com/objectstack-ai/framework/pull/2171) action audit. While reviewing the showcase task actions I found a live #2169 **sibling**:\n\n## Problem\n\n`showcase_recalc_estimate` is a `type: 'api'` action whose `target` is `/api/v1/showcase/recalc` — but **no such route was ever registered**, so clicking \"Recalculate Estimate\" 404'd. The schema guard from #2171 can't catch this: an `api` action only needs a target *string*, and an arbitrary HTTP endpoint's existence isn't statically verifiable (flow/modal targets get cross-ref validation; raw URLs don't).\n\n## Fix\n\nMount the route imperatively against the `http.server` service in `onEnable`, on the `kernel:ready` hook — the service is available by then, and Hono's route matcher only freezes later on `kernel:listening`, so the route lands in time. It recomputes `estimate_hours` from the schedule window (working at 8h/day) and persists it; the action's `refreshAfter: true` repaints the value. Adds a `successMessage` and unit coverage.\n\n## Verification\n\n- **Live server, end-to-end:** `POST /api/v1/showcase/recalc` → HTTP 200; `estimate_hours` went 40 → 136 for a 17-day window (16-Jun → 02-Jul, inclusive × 8h), persisted.\n- Endpoint mount probe: unauthenticated `POST` with no body → `400 {recordId required}` (route reached, not a 404 passthrough).\n- `pnpm verify` (app-showcase): typecheck + **30 tests** (incl. 4 new `recalc-endpoint` tests).\n\n## Not included (deliberately)\n\nTwo related issues I found root-cause to the **built console renderer** (objectui), not framework metadata, so they're out of scope here and need an objectui change + vendored-console bump:\n\n- **\"Mark Done shows on already-done records\"** — gating the action with `visible` is not honored for record-header actions in the shipped console (any record-field predicate hides the button entirely), so a metadata-only fix would make it worse. Needs the renderer to evaluate header-action `visible` with record context.\n- **\"Log Time does nothing\"** — objectui's `ActionRunner` has no `case 'form'`, so `type: 'form'` actions fall through and no-op. Needs a `form` handler in the renderer.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

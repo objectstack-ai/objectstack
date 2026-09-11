@@ -1,0 +1,33 @@
+{
+  "number": 2241,
+  "kind": "pull_request",
+  "title": "fix(driver-sql): honor tenancy.enabled:false in driver org-scoping (ADR-0066)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-23T11:57:41Z",
+  "updated_at": "2026-06-23T12:01:56Z",
+  "closed_at": "2026-06-23T11:59:19Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-23T11:59:19Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2241",
+  "body": "## Problem\n\n`SqlDriver` auto-detects `organization_id` as a tenant-isolation column and, when the caller passes `DriverOptions.tenantId`, injects `WHERE organization_id = <tenantId>` on reads/updates/deletes (and the column on inserts) — **inside the query builder, not the AST**. The detection had two branches: a declarative one that correctly respected `tenancy.enabled !== false`, and an implicit `organization_id`-column fallback that did **not**. So an object that explicitly opts **out** of tenancy still got org-scoped whenever it happened to carry an `organization_id` column.\n\n### Impact (surfaced verifying ADR-0066 Phase 1)\n\n`sys_license` is platform-global (`tenancy.enabled:false`) but keeps an optional, often-NULL `organization_id` owner FK. A platform admin with an active org reads it through the data API with `ctx.tenantId = <org>`, which the engine threads into `DriverOptions`, so the driver silently filtered to `organization_id = <org>` — excluding the NULL-org rows. Net: the admin saw **zero** licenses while an unscoped/anonymous read still returned them. Because the filter lives in the driver's query builder (not the AST), it presented as an empty result with no visible RLS `where` (`astWhere=undefined`) — easy to misdiagnose as a datasource-routing bug. It is neither routing nor the ADR-0066 security layer (which correctly applies no filter / fires the RLS read-bypass); it's purely the driver's tenant-column detection.\n\n## Fix\n\nExtract a single `computeTenantField()` helper (shared by `initObjects` and `registerExternalObject`, which had drifted) that returns `null` for any schema with `tenancy.enabled === false`, **before** the implicit column heuristic. Genuine org-scoped objects (no tenancy decl, or `enabled:true`) are unaffected.\n\n`TursoDriver extends SqlDriver` and delegates `initObjects` to `super`, so the prod control plane (Neon/Postgres **and** libsql) is covered by the same fix.\n\n## Tests\n\nAdds regression coverage to `sql-driver-tenant-scope.test.ts`: a tenancy-disabled object registers no tenant field, reads are unscoped regardless of `tenantId`, scoped/unscoped reads agree, and inserts don't auto-inject `organization_id`.\n\n- `pnpm --filter @objectstack/driver-sql test` → **207/207 pass** (incl. the 4 new cases).\n- Standalone repro confirms: `tenantFieldByTable['sys_license']` is now `null`, the admin (with `tenantId`) reads the NULL-org row, and a genuine org-scoped object (`sys_environment`) is still scoped — no regression to real tenant isolation.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 2233,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0066 unified authorization model",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-23T07:58:21Z",
+  "updated_at": "2026-06-23T08:03:59Z",
+  "closed_at": "2026-06-23T08:03:57Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-23T08:03:57Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2233",
+  "body": "Consolidates ObjectStack's authorization layers and fills four gaps surfaced by the `sys_license` case (a platform-global, super-admin-only, secret-bearing control object that the current model couldn't express cleanly).\n\n### Three-way separation (principle)\n- **Capability** — *what can be done* (defined by platform/package).\n- **Assignment** — *who holds it* — permission sets / roles / bindings (**admin-maintained runtime records, [existing]**).\n- **Requirement** — *what a resource needs* — the resource **references** a capability (a contract, **not** an assignment).\n\n### Four additions (each reuses existing vocabulary; all tagged [existing]/[new])\n- **D1 capability registry** — capabilities become first-class records (not bare strings); admins/packages add new ones; existing strings seeded for back-compat.\n- **D2 secure-by-default posture** — an object/field can opt out of the allow-by-default wildcard grant (`access:{default:'private'}`), like Salesforce \"new object = no access until granted\". A data-model posture (like `tenancy`), names no principal.\n- **D3 resource→capability requirement** — extend `requiredPermissions` (today only on App) to Object/Field/Action.\n- **D4 dual-surface action gates** — one declaration gates both the UI (ActionRunner) and the server.\n- **D5 package-seeded, admin-maintainable policies** — a package locks its sensitive objects on install; admins tune in Setup.\n\n### Kept (existing strengths)\nPermission sets/roles/bindings (assignment), full RLS spectrum (ownership/hierarchy ADR-0057/tenant/sharing/CEL), `tenancy`, `App.requiredPermissions`, anti-escalation, union grants.\n\n`sys_license` worked example included. Open-core: mechanism in framework; policies are data. Phased (D2+D3 object first — the minimal unblock).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

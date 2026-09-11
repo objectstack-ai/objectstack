@@ -1,0 +1,35 @@
+{
+  "number": 2150,
+  "kind": "pull_request",
+  "title": "feat: gate Setup Org/Invitations nav on multi-org, server-side (ADR-0057 D10)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T02:05:24Z",
+  "updated_at": "2026-06-22T02:47:14Z",
+  "closed_at": "2026-06-22T02:47:12Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T02:47:12Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2150",
+  "body": "PS-2 of the **ADR-0057 addendum** (#2141) — **D10**, narrowed per review. Completes the addendum (D9–D12 + D10).\n\n## What\n\nGates the Setup app's **Organizations / Invitations** nav on multi-org, **server-side**. Leaves **Business Units visible** in all editions.\n\n## How\n\n- `rest-server`'s `filterAppForUser` (which served only `requiredPermissions` filtering) now also enforces **`NavigationItem.requiresService`** — entries whose named kernel service isn't registered are dropped from the served app metadata. **Fail-open** when the kernel can't be probed. This field already existed in spec as a frontend-only hint; PS-2 gives it server-side teeth (ADR-0049: enforced, not just declared).\n- Applies `requiresService: 'org-scoping'` to `nav_organizations` / `nav_invitations`. `org-scoping` is the canonical multi-org probe (SecurityPlugin already uses it), registered only in multi-tenant mode → single-tenant hides both.\n\n## Why BU is *not* gated (narrowed from the original D9/D10)\n\nThe only available signal for BU would be `hierarchy-security` (the **paid** rollup resolver). Gating on it would hide the management UI for functionality that is **open**: BU as owning-unit, the explicit `business_unit` sharing recipient, and the D12 \"pick people by BU\" projection. The \"ceiling\" in D9 is the **rollup capability**, not BU's data surface. With Organizations hidden in single-tenant and the `kind='team'` collision removed (D11, #2143), the residual community menu is **Users + Teams + Business Units** — two distinct, legitimately co-present concepts, which was never the ambiguity we set out to remove. The ADR D10 note records this refinement; a future `business-units` opt-in can hide BU if vanilla clutter ever becomes a real complaint.\n\n## Notes\n\n- `requiresObject` (the pre-existing capability gate) is a **client-side** (objectui) concern, not enforced in this repo — so server-enforcing `requiresService` doesn't change its behavior.\n- No spec field added (`requiresService` already existed). No existing nav item uses `requiresService`, so blast radius = the two entries here.\n\nProof: a rest nav-serving dogfood test — single-tenant omits Organizations/Invitations; multi-org shows them; Business Units present in both.\n\nChangeset: `@objectstack/rest` + `@objectstack/platform-objects` **minor**.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

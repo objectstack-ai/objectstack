@@ -1,0 +1,35 @@
+{
+  "number": 1976,
+  "kind": "pull_request",
+  "title": "fix(spec): rating/vector builders emit live props; promote flat `dimensions`",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T16:00:00Z",
+  "updated_at": "2026-06-16T16:00:36Z",
+  "closed_at": "2026-06-16T16:00:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T16:00:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1976",
+  "body": "## What\n\nFollow-up to #1973. That PR fixed the **showcase's** authored dead props; this fixes the **`Field` builders** that emit them, so *any* app using `Field.rating` / `Field.vector` is clean — not just the showcase.\n\nThe `Field.rating(n)` / `Field.vector(n)` builders emitted properties the spec-liveness ledger classifies as **dead** (silent runtime no-ops), tripping the `liveness-dead-property` author lint:\n\n| Builder | Was emitting (dead) | Now emits (live) | Renderer reads |\n|---|---|---|---|\n| `Field.rating(n)` | `maxRating` | `max` | `RatingField.tsx:13` → `field.max` |\n| `Field.vector(n)` | nested `vectorConfig` block | flat `dimensions` | `VectorField.tsx:11` → `field.dimensions` |\n\n## The latent bug this also fixes\n\n`dimensions` was only valid **nested inside `vectorConfig`** — it was *not* a declared top-level `FieldSchema` property. So a hand-authored flat `dimensions` (including the one #1973 just merged into the showcase) was **silently stripped during compile** (Zod drops unknown keys), leaving the renderer with no dimensionality.\n\nThis PR promotes `dimensions` to a **declared, `live`** top-level schema property and classifies it in the liveness ledger. Verified against the showcase artifact: `f_vector.dimensions = 1536` now survives (previously absent), `f_rating.max = 5`.\n\n## Back-compat\n\n`maxRating` and `vectorConfig` remain accepted by the schema (still `dead` + `authorWarn`), so existing hand-authored usages keep getting the advisory warning rather than a type error.\n\n## Verification\n\n- Spec liveness gate: green — `field` 53 classified (all classified), no stale evidence\n- `field.test.ts`: 115/115 pass\n- Showcase `compile`: exit 0, zero `liveness-dead-property` warnings, `f_vector.dimensions=1536` present in artifact\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

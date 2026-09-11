@@ -1,0 +1,32 @@
+{
+  "number": 2056,
+  "kind": "pull_request",
+  "title": "feat(spec): interface base filterBy uses the unified filter-builder widget",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-20T04:57:22Z",
+  "updated_at": "2026-06-20T04:57:43Z",
+  "closed_at": "2026-06-20T04:57:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-20T04:57:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2056",
+  "body": "## Why\n\nThe page form rendered `interfaceConfig.filterBy` (the always-on base filter) as a generic `type:'repeater'` — a different, clunkier editor than the polished FilterBuilder the list toolbar uses.\n\n## What\n\nSwitch the base `filterBy` field to `widget:'filter-builder'` with `dependsOn:'source'`, so the Studio renders the **same popout visual builder** for the base filter as for the per-tab presets — one consistent filter UX everywhere.\n\nThe widget is implemented in objectui (SchemaForm widget registry, companion PR [objectui#1813](https://github.com/objectstack-ai/objectui/pull/1813)). Stored format is unchanged (`ViewFilterRule[]`).\n\n## Verification\n\nVerified in the studio (`:5181`) against `showcase_task_triage` after `pnpm --filter @objectstack/spec build` + backend restart: the base **Filter By** now shows the \"+ Add filter…\" popout builder, conditions apply live to the preview, and round-trip to the runtime works.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

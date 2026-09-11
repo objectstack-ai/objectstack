@@ -1,0 +1,35 @@
+{
+  "number": 2046,
+  "kind": "pull_request",
+  "title": "feat(autonumber): document tokens in data skill + lint unrecognized format tokens",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-19T10:33:11Z",
+  "updated_at": "2026-06-19T10:55:07Z",
+  "closed_at": "2026-06-19T10:55:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-19T10:55:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2046",
+  "body": "Follow-up to #2043. The runtime guards landed there; this closes the **AI-authoring** gap, per the AI-authoring-guardrails north star (templates are AI-written, so the fix belongs in the skill the AI reads + a deterministic build lint).\n\n## Why\n\nAfter #2043 the `objectstack-data` skill's `field-types` rules still documented autonumber as just `CASE-{0000}` — no mention of the new date / `{field}` / per-scope tokens, and none of the rules that prevent silent mis-numbering. An AI modeling from that skill would neither use the new capability nor avoid the footguns.\n\n## Changes\n\n**Skill rules (`skills/objectstack-data/rules/field-types.md`)** — expanded the autonumber section:\n- token table (`{0000}` counter, `{YYYY}`/`{MM}`/`{DD}`/`{YYYYMMDD}` date, `{field}` interpolation) + per-scope reset explanation\n- four authoring rules: interpolated `{field}` must be `required`; delimiter between adjacent variable tokens; pad width is a **minimum** (grows, never wraps); date tokens are exact & case-sensitive\n- an incorrect → correct example\n- updated the field-type summary table row\n\n**Compile lint (`lint-autonumber-formats.ts`)** — new advisory rule `autonumber-unrecognized-token`: an autonumber `{...}` group that is not a counter/date/`{field}` token renders **literally** into the record number. The existing `{field}`-reference checks catch identifier-shaped typos (they parse as \"unknown field\" errors), but miss non-identifier cases — `{ YYYY }` (spaces), `{YYYY-MM}` (punctuation), and a second `{0..0}` slot. These now warn.\n\n## Scope notes\n\n- No new skill and no separate docs-site page — the deterministic build lint + existing skill rules are the right mechanism (guardrails in the build, not just advisory), matching `lintFlowPatterns` / `lintLivenessProperties`.\n- Warnings only (fragile, not broken) — they never fail the build.\n\n## Tests\n\n`lint-autonumber-formats.test.ts`: +3 cases (unrecognized token, second sequence slot, valid date tokens stay clean). CLI suite 496/496; package builds (`tsc`) clean.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

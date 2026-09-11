@@ -1,0 +1,34 @@
+{
+  "number": 2143,
+  "kind": "pull_request",
+  "title": "feat(platform-objects): drop unused `team` kind from sys_business_unit (ADR-0057 D11)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T15:51:00Z",
+  "updated_at": "2026-06-21T15:58:35Z",
+  "closed_at": "2026-06-21T15:58:33Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T15:58:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2143",
+  "body": "First implementation increment of the **ADR-0057 addendum** (#2141) — **PS-1 / D11**.\n\n## What\n\nDrops the unused `team` value from `sys_business_unit.kind`:\n`company | division | department | ~~team~~ | office | cost_center`.\n\n## Why\n\n`kind='team'` collided head-on with the first-class **`sys_team`** object — a\n`kind='team'` business unit walks the hierarchical `BusinessUnitGraphService`, while\n`sys_team` is the flat better-auth collaboration grouping served by `TeamGraphService`.\nTwo \"team\" concepts with different semantics and no UI distinction; this was the single\nlargest source of the \"teams vs business units feel redundant\" ambiguity the addendum\nset out to remove.\n\n## Safety\n\n- `kind` is a **display-only categorisation hint** (\"does not change graph semantics\").\n- **Zero** `kind: 'team'` usages anywhere in the repo (seeds, showcase, tests) → no data migration.\n- `bu-rename-consistency.test.ts` is scoped to labels and **explicitly excludes** `kind`, so it is unaffected.\n- The `team` picklist labels are removed from the 4 generated locale bundles (en/zh-CN/ja-JP/es-ES), matching what `os i18n extract --merge` produces.\n\nChangeset: `@objectstack/platform-objects` **minor** (schema narrowing, non-breaking in practice).\n\n## Follow-ups (not in this PR)\n\n- **PS-2 / D10** — relocate `nav_business_units` to the hierarchy-security capability + gate `nav_organizations`/`nav_invitations` on `multiOrgEnabled` (needs a `visible`/`requiresFeature` predicate on `NavigationItem` first; the nav-render side may touch the console repo).\n- **PS-3 / D12** — `sys_user.primary_business_unit_id` projection for \"pick people by BU\".\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

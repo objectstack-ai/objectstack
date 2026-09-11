@@ -1,0 +1,32 @@
+{
+  "number": 2098,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0059 — third-party backward-compatibility validation gates (#2035)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T06:42:58Z",
+  "updated_at": "2026-06-21T06:49:41Z",
+  "closed_at": "2026-06-21T06:49:39Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T06:49:39Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2098",
+  "body": "Central, authoritative write-up of the third-party validation strategy built this cycle (#2088 / #2089 / #2092 / #2093 / #2095 / #2097) — recommendation #3 from the #2035 follow-up discussion.\n\n## What it documents\n\n- **Why in-repo consumers can't witness backward compatibility** — they (examples, `@objectstack/dogfood`, the platform apps) co-evolve with the spec in the same commit, so a break for a *lagging* third party (hotcrm) is invisible until release.\n- **The six gates and each one's job** — author-time factories + lint guard, load-time `objectstack validate`, the depth fixture, the breadth snapshot, and the pre-publish live-hotcrm smoke.\n- **The freeze contract** (§4) — a change that requires editing the fixtures, or removes a snapshot entry, is *by definition* a breaking change: bump major, don't edit-to-pass. This is what makes the witnesses real.\n- Formalizes **`objectstack validate`** as the third party's authoritative self-gate.\n\nFollows the ADR-0054 house style (it's the direct neighbour — prove-it-runs for the authorable surface; this is the backward-compat dimension). ADR-only, no code, intra-links verified.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

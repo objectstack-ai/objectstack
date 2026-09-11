@@ -1,0 +1,36 @@
+{
+  "number": 2207,
+  "kind": "pull_request",
+  "title": "refactor(runtime): unify standalone default-driver construction via the shared factory (ADR-0062)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T13:00:20Z",
+  "updated_at": "2026-06-22T13:06:10Z",
+  "closed_at": "2026-06-22T13:06:08Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T13:06:07Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2207",
+  "body": "## ADR-0062 follow-up — unify the `default`-driver **construction** (Variant A)\n\nThe deferred \"default-driver refactor\", done as the **low-risk, debt-killing slice** (not the full pre-engine rewrite).\n\n### What & why\n`createStandaloneStack` hand-mirrored the driver-construction switch that `createDefaultDatasourceDriverFactory` already implements — so adding a dialect or changing connection/pool defaults meant editing **two** places that drift. This routes the user-facing kinds (**memory / better-sqlite3 / postgres / mongodb**) through the **same factory** used for declared + runtime-admin datasources: one \"driver kind → instance\" path.\n\n- URL→config translation, `mkdir`, and pre-engine `DriverPlugin` registration **stay in the stack** (unchanged) — the factory only *constructs* the driver.\n- The pure-JS **WASM sqlite** driver stays bespoke in the stack: it's the standalone-specific, CI-safe default and **not** a user-creatable datasource type, so it already has a single construction site (routing it through the factory would've pulled `driver-sqlite-wasm` into `service-datasource`, which it shouldn't depend on).\n- Deliberately **not** done: routing `default` through the post-engine `DatasourceConnectionService.connect()` / policy path. That fights the bootstrap ordering (DriverPlugin is pre-engine) for a trusted local primary DB with no payoff — explicitly out of scope (see the ADR D5 note + the long-term rationale).\n\n### No behavior change\nSame driver instances for the same inputs. Adds `@objectstack/service-datasource` as a `runtime` dependency — **no cycle** (that package depends only on `core`/`spec`; full-repo build 76/76).\n\n### Tests / validation\n- New per-kind driver test (`standalone-stack.test.ts`): extracts the constructed driver from the stack's `DriverPlugin` and does **connect → syncSchema → create → find** for `memory` (→ InMemoryDriver), `file:` (→ better-sqlite3 SqlDriver), and `databaseDriver:sqlite-wasm` (→ SqliteWasmDriver). Existing artifact-RBAC tests still pass (8/8).\n- Full repo build **76/76**, `runtime` **413**, `service-datasource` **85** (zero net diff there — the factory already supported these kinds).\n- Real `os dev` boot: factory-built default `SqlDriver(sqlite)` serves the live app (`showcase_project` returns data); external auto-connect (`showcase_ext_customer`) still works.\n\nCloses #2163 (the final, optional consolidation item).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

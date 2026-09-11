@@ -1,0 +1,33 @@
+{
+  "number": 2174,
+  "kind": "pull_request",
+  "title": "fix(cloud-connection): don't refuse upgrading an orphaned marketplace install",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T05:18:18Z",
+  "updated_at": "2026-06-22T06:00:29Z",
+  "closed_at": "2026-06-22T06:00:27Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T06:00:27Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2174",
+  "body": "## Problem\n\n`findConflict` treated **any** manifest present in the engine registry but absent from the on-disk ledger as `user-code`. The install endpoint then refused the upgrade:\n\n> manifest_id \"app.objectstack.template.project\" is already defined by this runtime's local code. Refusing to overwrite. Uninstall the local definition first.\n\n…and pointed the user at `objectstack.config.ts`, where it isn't defined.\n\nBut a marketplace package is **both** hot-registered **and** recorded in the ledger. If the ledger entry drifts out of sync — a half-finished upgrade that left a `.bak`, a manual cleanup, a corrupted file — the manifest stays registered while `ledger.has()` returns `false`. It's now an **orphaned marketplace install**, not local code, yet every reinstall/upgrade was blocked.\n\n**Hit live** while fixing a showcase: a stale `app.objectstack.template.project.json.bak-0.1.0` made the runtime refuse to install the corrected version with this exact misleading error.\n\n## Fix\n\nDisambiguate by **source**, not by \"is it registered\":\n\n- At `kernel:ready`, **before** rehydrating the ledger, snapshot the manifest ids the engine registry already holds — those are genuine AppPlugin / `objectstack.config.ts` code.\n- `findConflict`:\n  - live ledger entry ⇒ `marketplace`\n  - in the boot snapshot ⇒ `user-code` (**still protected** — real authored code is never overwritten)\n  - registered but in neither ⇒ **orphaned marketplace install** ⇒ `marketplace` (allow the upgrade) instead of `user-code`\n\n## Tests\n\n`marketplace-install-local-conflict.test.ts` (3 cases): genuine user code refused (409), orphaned install allowed (no 409), fresh install clean. Full `cloud-connection` suite green (51 tests); package builds clean (0 TS errors).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

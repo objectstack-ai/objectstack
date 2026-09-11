@@ -1,0 +1,33 @@
+{
+  "number": 2164,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0063 — two kernel agents (ask/build); skills are the third-party extension primitive",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T03:14:32Z",
+  "updated_at": "2026-06-22T03:19:47Z",
+  "closed_at": "2026-06-22T03:19:45Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T03:19:45Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2164",
+  "body": "Adds **ADR-0063**, settling the platform agent model and **superseding [ADR-0040](https://github.com/objectstack-ai/framework/blob/main/docs/adr/0040-unified-assistant-and-agent-binding.md) §3/§4**.\n\n**Decision:** the kernel keeps **exactly two platform-owned agent shells**, split by *what they mutate*:\n\n| shell | mutates | packaging |\n|---|---|---|\n| `ask` (Claude-Chat analogue) | records | open-source · free (`@objectstack/service-ai`) |\n| `build` (Claude-Code analogue) | metadata | cloud-only · paid (`../cloud/service-ai-studio`) |\n\nEverything else — domain depth, persona, playbooks, external reach — is a **skill** (+ tools/MCP). **Third parties extend via `*.skill.ts`, never `*.agent.ts`.** ADR-0040's 'custom agents are a builder feature' is withdrawn.\n\n**Why:** the platform is metadata-driven so the domain ontology is already shared with `ask` for free (a custom agent to 'teach the industry' is a category error — the leftover *is* a skill); skills compose and scale, agents don't (Claude Code is hugely capable with zero user-authored agents); the records-vs-metadata seam carries the architectural, governance, and commercial boundary on one cut.\n\n**Contents:** two-shell table · skills+tools/MCP as the only third-party primitive · skill→shell affinity (`surface: ask|build|both`) · naming (`ask`/`build` canonical, `data_chat`/`metadata_assistant` silent aliases) · tier-aware routing · cleanup checklist (tracked as a separate issue).\n\nDocs-only; no code changes.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1985,
+  "kind": "issue",
+  "title": "[security][P0] Broken access control — any authenticated member can read AND modify other users' records",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "priority:p0",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T16:01:36Z",
+  "updated_at": "2026-06-17T01:40:15Z",
+  "closed_at": "2026-06-17T01:40:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1985",
+  "body": "## ⚠️ Corrected + escalated (was mis-titled \"fail-open on zero permission sets\")\n\nMy first diagnosis was **wrong**. `member_default` **is** applied (the `fallbackPermissionSet` baseline works). The real, **verified** issue is more serious: a non-admin member can **read and *mutate*** any other user's records.\n\n## Verified repro (live CRM, two fresh users)\n\n```\nadmin signs up (user A, auto-promoted to admin_full_access)\nmember signs up (user B → member_default)\nA creates crm_account \"ADMIN-ORIGINAL\"\nB  PATCH /data/crm_account/<A's id>  {\"name\":\"HIJACKED-BY-MEMBER\"}   → 200\nA  GET   /data/crm_account/<A's id>  → name == \"HIJACKED-BY-MEMBER\"   ← actually mutated\nB  DELETE /data/crm_account/<A's id> → 200\n```\nConfirmed by re-reading the row: the member's write **persisted**. Not a silent no-op.\n\n## Root cause (3 interacting gaps)\n\n`member_default` grants `objects: { '*': {read,create,edit,delete} }` and **relies on RLS to scope** via two policies: `tenant_isolation` (`organization_id = current_user.organization_id`) and `owner_only_writes/deletes` (`owner_id = current_user.id`). All three of these fail on a real app:\n\n1. **owner-scoping is inert on author objects.** The middleware only auto-injects `owner_id` on insert *if the object declares an `owner_id` field* (`security-plugin.ts:397-414`). Author objects (e.g. `crm_account`) don't — the engine injects `created_by`/`updated_by`/`organization_id`, **not** `owner_id`. So `owner_only_writes` references a missing column and contributes no real constraint.\n2. **tenant isolation doesn't bind on sign-up.** Both fresh users had `activeOrganizationId = None`, so `current_user.organization_id` doesn't scope and the wildcard org policy doesn't isolate them.\n3. **RLS does not gate by-id writes.** Even setting (1)/(2) aside, the member's `PATCH`/`DELETE` by id succeeded and persisted — so the owner/tenant predicate is not enforced as a guard on update/delete-by-id (it's effective on the read/find path only).\n\n## Why it's not auto-fixed\n\nI tried the obvious one-liner — repoint `owner_only_writes/deletes` from `owner_id` to the always-injected `created_by` — and **re-tested: the member could still mutate the admin's record**. So the column was a red herring; the binding gap is the write-path RLS enforcement (gap 3). Reverted. This is core security architecture (write-path authorization + org-on-signup), high blast radius, and needs design + thorough 2-user/2-org e2e coverage — not a speculative patch.\n\n## Recommended fix (focused security workstream)\n\n- **Enforce RLS predicates on update/delete-by-id** (pre-image check: load the row, verify it satisfies the owner/tenant predicate, else `PermissionDeniedError`) — this is the load-bearing fix.\n- **Bind ownership to a column that always exists** — key owner-scoping on `created_by` (engine-guaranteed), or universally auto-inject `owner_id`. (Necessary but, per the test, not sufficient alone.)\n- **Assign an organization on sign-up** so `tenant_isolation` actually scopes (or make the wildcard org policy fail-closed when `current_user.organization_id` is absent).\n- Ship with a 2-user × 2-org e2e matrix: member edits own ✓, member edits other's ✗, cross-tenant read/write ✗, admin unrestricted ✓.\n\nSeverity: **P0** — authenticated horizontal privilege escalation (and likely cross-tenant once orgs differ). Discovered driving app-crm end-to-end (alongside the now-merged #1984)."
+}

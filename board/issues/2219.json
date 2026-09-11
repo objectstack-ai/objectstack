@@ -1,0 +1,33 @@
+{
+  "number": 2219,
+  "kind": "pull_request",
+  "title": "feat(service-job): leader-elect scheduled cron/interval jobs across the cluster",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T15:16:57Z",
+  "updated_at": "2026-06-22T15:29:15Z",
+  "closed_at": "2026-06-22T15:29:13Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T15:29:13Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2219",
+  "body": "## Why\n`CronJobAdapter` fired every scheduled tick on **every replica** → a cron job runs **N times** in an N-node cluster (duplicate invoices / emails / charges). This is the core multi-node correctness gap for scheduled work (cloud ADR-0018).\n\n## What\n- Scheduled fires (cron / interval / once timers) now go through `runScheduled(name)`, which acquires a **per-job cluster lock** (`job:<name>`, `waitMs:0` fail-fast) before running; only the winner runs the handler, peers skip.\n- **Single-node unchanged**: with no cluster wired or the in-memory driver, the lock always succeeds → fires normally. Cross-node dedup only activates with a remote driver (EE).\n- **Manual `trigger()` bypasses** the gate (explicit, node-local invocation).\n- `JobServicePlugin` injects the cluster service (`getService('cluster')`, undefined → single-node).\n- 5 unit tests (leader runs / non-leader skips / no-cluster runs / manual-trigger bypasses / lock released). Verified locally: strict DTS build + `@objectstack/service-job` tests green (36).\n\n## Scope / notes\nOpen-core mechanism; EE remote driver activates cross-node election. Best-effort per-fire leader election suited to timer-scheduled jobs; for strict exactly-once use the DB job queue (`sys_job_queue`, transactional CAS). Tightens cluster-semantics.mdx §7.4 (the deferred `leader-elected` scheduler).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

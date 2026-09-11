@@ -1,0 +1,35 @@
+{
+  "number": 2018,
+  "kind": "pull_request",
+  "title": "fix(analytics): make organization timezone drive date-dimension bucketing (#1982)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-18T04:06:16Z",
+  "updated_at": "2026-06-18T04:55:49Z",
+  "closed_at": "2026-06-18T04:55:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-18T04:55:47Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2018",
+  "body": "## Problem\n\nA follow-up to ADR-0053 Phase 2 (#1982) browser verification: setting a non-UTC **organization timezone** (localization manifest, #2006) did **not** change a date-bucketed analytics chart. The unit tests for the tz bucketing engine passed, but the result never reached the API — the classic \"passes build / silent at runtime\" gap.\n\nTracing it revealed **three independent broken seams**, all required for an org timezone to actually drive a date bucket:\n\n1. **`@objectstack/service-analytics` — wrong strategy won.** `NativeSQLStrategy` (priority 10) handled every cube/dataset query on a SQL driver, but it groups by the raw column (`GROUP BY <col>`, no `date_trunc`) and references `timezone` nowhere. So date dimensions never bucketed (one row per raw timestamp) and a non-UTC zone was silently dropped. It now **declines** queries carrying a `timeDimensions[].granularity`, handing them to the lower-priority `ObjectQLStrategy` → `engine.aggregate` (native bucketing when UTC-safe, uniform in-memory bucketing when non-UTC).\n\n2. **`@objectstack/objectql` — count-all returned 0 in-memory.** The Cube `count` measure and a fieldless dataset `count` both compile to `sql: '*'`. The in-memory `count` branch treated `'*'` as a column name and counted non-null of a non-existent property → **0 for every bucket**. The driver's `COUNT(*)` masked it, but the in-memory path (non-UTC date buckets, `driver-rest`/`driver-memory`) returned zeros. `'*'` is now counted as all rows.\n\n3. **`@objectstack/rest` — context had no timezone.** `resolveExecCtx` never resolved the localization timezone/locale, so `/analytics/dataset/query` always ran with `timezone: 'UTC'`. It now resolves them through the `settings` service (honouring the 4-tier cascade incl. the `OS_LOCALIZATION_TIMEZONE` env override), mirroring the dispatcher path's `resolveLocalization`.\n\n## Verification\n\nEnd-to-end against `example-crm` with a lead created at `…T03:5x:…Z` (UTC day `06-18`, LA day `06-17`):\n\n| Scenario | Before | After |\n|---|---|---|\n| org tz = UTC (settings) | `06-18` cnt 5 | `06-18` cnt 5 |\n| org tz = `America/Los_Angeles` (settings) | `06-18` cnt 5 ❌ | **`06-17` cnt 5** ✅ |\n| explicit `selection.timezone=America/LA` | `06-17`×… cnt **0** ❌ (uncollapsed) | **`06-17` cnt 5** ✅ |\n\n## Tests\n\n- New regression `native-sql-granularity-decline.test.ts` — pins the **production capability shape** (`nativeSql: true` AND `objectqlAggregate: true`); a granularity query must route to `executeAggregate`, not raw SQL. (The pre-existing granularity test forced `nativeSql:false`, which masked the bug.)\n- New `in-memory-aggregation` cases for the `'*'` count-all sentinel (ungrouped + per tz bucket).\n- Full suites green: objectql 660, service-analytics 127, rest 121.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

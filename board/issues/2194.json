@@ -1,0 +1,34 @@
+{
+  "number": 2194,
+  "kind": "pull_request",
+  "title": "docs(skills): sweep objectstack-ai SKILL.md to the ask/build two-agent model (ADR-0063/0064)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T09:32:37Z",
+  "updated_at": "2026-06-22T09:39:53Z",
+  "closed_at": "2026-06-22T09:39:51Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T09:39:51Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2194",
+  "body": "Finishes the documentation tail of **ADR-0063 / ADR-0064**. The code split landed in #2181 (+ cloud#417), but the third-party **skill-authoring contract** — `skills/objectstack-ai/SKILL.md` — was never swept and still described the old ADR-0040 *unified `data_chat` assistant* model. This closes that gap and lands the two #2165 doc items that had no home.\n\n## What changed\n- **`skills/objectstack-ai/SKILL.md`** — replaced the `### Built-in Unified Assistant (ADR-0040)` section with `### Built-in agents: \\`ask\\` & \\`build\\` (ADR-0063 / ADR-0064)`:\n  - Two surface-bound agents: `ask` (data product, OSS/free) and `build` (authoring product, cloud/paid). No per-turn intent classifier.\n  - `data_chat` / `metadata_assistant` now appear **only** in the alias-table note, never as vocabulary (per #2165).\n  - Documents the `surface: 'ask' | 'build' | 'both'` skill field, the built-in skills' affinities (table), and that an agent's tools = the **union of its surface-compatible skills' tools** (no global fall-through; affinity is a load error — ADR-0064).\n  - Documents that **`surface:'build'` skills are inert on OSS — intentional tiering, not a bug**, and that a build-intent turn degrades gracefully (#2165 item 8 / tier-aware routing).\n- **`docs/adr/PRIORITIZATION.md`** — reconciled the stale `0040 unified assistant` gap row (tool-scoping shipped via #2181; only the blueprint scale gate remains; 0063/0064 supersede 0040).\n\n## Verification\n- Skill-docs generator (`build-skill-docs.ts`) reruns with **no diff** — it reads frontmatter only, which is untouched, so the body rewrite is safe.\n- Only remaining `data_chat`/`metadata_assistant` occurrences are inside the alias-table note (verified by grep).\n\n## Issue hygiene (separate, see comments)\n- #2168 stays the single live tracker for ADR-0063/0064.\n- #2165 to be closed as superseded by #2168, with its 3 doc items satisfied here.\n\nRefs #2165 #2168\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

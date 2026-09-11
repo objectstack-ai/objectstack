@@ -1,0 +1,35 @@
+{
+  "number": 2104,
+  "kind": "pull_request",
+  "title": "feat(verify): ADR-0060 P1 — reusable conformance-ledger helper + unify two ledgers",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T07:08:36Z",
+  "updated_at": "2026-06-21T07:19:02Z",
+  "closed_at": "2026-06-21T07:19:00Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T07:19:00Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2104",
+  "body": "ADR-0060 (#2103) P1: promote the conformance-ledger discipline to a reusable platform capability.\n\n`@objectstack/verify` now exports `checkLedger(rows, opts): string[]` + `ConformanceRow` — the static complement to its runtime harness, encoding the invariants the platform hand-wrote twice (ADR-0056 D10 authz + ADR-0058 D7 expression): unique ids, valid state, enforced-has-site, experimental/removed-has-note, proof-file-exists, high-risk-has-proof, exactly-one-cover, and the discover **ratchet** (fail on unclassified/stale surfaces). Both existing ledgers are refactored onto it (the expression `site` field unified to `enforcement`; `ExprSurface extends ConformanceRow`).\n\nVerification: full build 75/75 · dogfood 133 (incl. 16 conformance tests). Ratchet verified still has teeth. Next: P2 — validation-rule-surface ledger (pins ADR-0020 state_machine).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

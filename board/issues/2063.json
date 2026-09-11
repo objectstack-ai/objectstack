@@ -1,0 +1,32 @@
+{
+  "number": 2063,
+  "kind": "pull_request",
+  "title": "polish(app-showcase): i18n labels, My Work layout, nav IA, history via feed",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-20T07:04:02Z",
+  "updated_at": "2026-06-20T07:04:18Z",
+  "closed_at": "2026-06-20T07:04:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-20T07:04:13Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2063",
+  "body": "## Why\n\nPolish pass on the enterprise surfaces ([#2059](https://github.com/objectstack-ai/framework/pull/2059) / [#2060](https://github.com/objectstack-ai/framework/pull/2060) / [#2061](https://github.com/objectstack-ai/framework/pull/2061)) — fixing rough edges found while browser-verifying.\n\n## What\n\n**i18n field labels** — account / invoice / preference fields rendered as uppercased machine names (`WEBSITE` / `TAX_ID` / `THEME`) on Account 360 + Settings because the bundle only covered task/project. Added en + zh-CN labels for all three; now 网站 / 税号 / 主题 resolve.\n\n**My Work layout**\n- KPI tiles now sit in a **horizontal row** via a `flex` container. (Heads-up: the obvious `grid` type is aliased to **ObjectGrid** by plugin-grid, so it 404s with \"object name required\" — `flex` is the right layout primitive.)\n- Sidebar uses plain `element:text` Shortcuts lines (region containers don't render nested `page:card` bodies — direct components are reliable).\n- Dropped the role-gated card: page-component `visible` expressions get **no `current_user`** in the renderer eval context, so true per-role gating belongs in object/field permissions + sharing.\n\n**History** — `record:history` reads an audit store `trackHistory` doesn't populate, so its tab was always \"No history yet\". Removed the redundant tab; field changes already surface in the synthesized **discussion feed** (verified live: *\"Industry: Retail → Finance\"*). Kept `trackHistory` on `account.status` + `industry` since that feeds those entries.\n\n**Nav IA** — new **Workspace** group (My Work / Approvals / New Project / Settings) at the top, separate from the demo Pages gallery.\n\n## Verification\n\nBrowser-verified on `:5181`: Account 360 + Settings show localized labels; My Work KPI row is horizontal with a rendered Shortcuts sidebar; the Workspace nav group renders; an account industry change appears in the discussion feed. `typecheck` + **20** showcase tests pass.\n\n> Honest scope note: rendering + i18n + field-change tracking verified. Pure platform round-trips not click-through-tested (rely on standard behavior): record:details inline-save, Mark-Done execution, wizard final submit, dashboard global-filter re-scoping.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

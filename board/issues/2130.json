@@ -1,0 +1,35 @@
+{
+  "number": 2130,
+  "kind": "pull_request",
+  "title": "test(platform-objects): regression guard for the ADR-0057 BU rename (i18n)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T14:25:50Z",
+  "updated_at": "2026-06-21T14:32:21Z",
+  "closed_at": "2026-06-21T14:32:19Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T14:32:19Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2130",
+  "body": "Follow-up to #2129. The BU rename once **half-landed** (object label \"业务单元\" but field labels still \"上级部门\"). This adds a vitest that asserts the `sys_business_unit` / `sys_business_unit_member` object + field **labels** across en/zh/ja/es carry no stale \"department\" term — so the next rename can't silently leave field labels behind.\n\nScope is labels only (intentionally not field descriptions/help, the `kind` enum value `department`, or the multi-concept node descriptions — those keep the word legitimately). Test-only; empty changeset.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

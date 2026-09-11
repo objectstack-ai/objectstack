@@ -1,0 +1,30 @@
+{
+  "number": 2074,
+  "kind": "pull_request",
+  "title": "chore: version packages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-20T10:35:55Z",
+  "updated_at": "2026-06-20T14:18:44Z",
+  "closed_at": "2026-06-20T14:18:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2074",
+  "body": "This PR was opened by the [Changesets release](https://github.com/changesets/action) GitHub action. When you're ready to do a release, you can merge this and the packages will be published to npm automatically. If you're not ready to do a release yet, that's fine, whenever you add more changesets to main, this PR will be updated.\n\n\n# Releases\n\n> The changelog information of each package has been omitted from this message, as the content exceeds the size limit.\n\n## @objectstack/cli@9.11.0\n\n\n## @objectstack/objectql@9.11.0\n\n\n## @objectstack/driver-sql@9.11.0\n\n\n## @objectstack/plugin-security@9.11.0\n\n\n## @objectstack/plugin-sharing@9.11.0\n\n\n## @objectstack/spec@9.11.0\n\n\n## @objectstack/verify@9.11.0\n\n\n## @objectstack/express@9.11.0\n\n\n## @objectstack/fastify@9.11.0\n\n\n## @objectstack/hono@9.11.0\n\n\n## @objectstack/nestjs@9.11.0\n\n\n## @objectstack/nextjs@9.11.0\n\n\n## @objectstack/nuxt@9.11.0\n\n\n## @objectstack/sveltekit@9.11.0\n\n\n## @objectstack/account@9.11.0\n\n\n## @objectstack/setup@9.11.0\n\n\n## @objectstack/studio@9.11.0\n\n\n## @objectstack/client@9.11.0\n\n\n## @objectstack/client-react@9.11.0\n\n\n## @objectstack/cloud-connection@9.11.0\n\n\n## @objectstack/connector-mcp@9.11.0\n\n\n## @objectstack/connector-openapi@9.11.0\n\n\n## @objectstack/connector-rest@9.11.0\n\n\n## @objectstack/connector-slack@9.11.0\n\n\n## @objectstack/core@9.11.0\n\n\n## @objectstack/formula@9.11.0\n\n\n## @objectstack/mcp@9.11.0\n\n\n## @objectstack/metadata@9.11.0\n\n\n## @objectstack/metadata-core@9.11.0\n\n\n## @objectstack/metadata-fs@9.11.0\n\n\n## @objectstack/observability@9.11.0\n\n\n## @objectstack/platform-objects@9.11.0\n\n\n## @objectstack/driver-memory@9.11.0\n\n\n## @objectstack/driver-mongodb@9.11.0\n\n\n## @objectstack/driver-sqlite-wasm@9.11.0\n\n\n## @objectstack/embedder-openai@9.11.0\n\n\n## @objectstack/knowledge-memory@9.11.0\n\n\n## @objectstack/knowledge-ragflow@9.11.0\n\n\n## @objectstack/plugin-approvals@9.11.0\n\n\n## @objectstack/plugin-audit@9.11.0\n\n\n## @objectstack/plugin-auth@9.11.0\n\n\n## @objectstack/plugin-dev@9.11.0\n\n\n## @objectstack/plugin-email@9.11.0\n\n\n## @objectstack/plugin-hono-server@9.11.0\n\n\n## @objectstack/plugin-msw@9.11.0\n\n\n## @objectstack/plugin-org-scoping@9.11.0\n\n\n## @objectstack/plugin-reports@9.11.0\n\n\n## @objectstack/plugin-webhooks@9.11.0\n\n\n## @objectstack/rest@9.11.0\n\n\n## @objectstack/runtime@9.11.0\n\n\n## @objectstack/service-ai@9.11.0\n\n\n## @objectstack/service-analytics@9.11.0\n\n\n## @objectstack/service-automation@9.11.0\n\n\n## @objectstack/service-cache@9.11.0\n\n\n## @objectstack/service-cluster@9.11.0\n\n\n## @objectstack/service-cluster-redis@9.11.0\n\n\n## @objectstack/service-datasource@9.11.0\n\n\n## @objectstack/service-i18n@9.11.0\n\n\n## @objectstack/service-job@9.11.0\n\n\n## @objectstack/service-knowledge@9.11.0\n\n\n## @objectstack/service-messaging@9.11.0\n\n\n## @objectstack/service-package@9.11.0\n\n\n## @objectstack/service-queue@9.11.0\n\n\n## @objectstack/service-realtime@9.11.0\n\n\n## @objectstack/service-settings@9.11.0\n\n\n## @objectstack/service-storage@9.11.0\n\n\n## @objectstack/trigger-api@9.11.0\n\n\n## @objectstack/trigger-record-change@9.11.0\n\n\n## @objectstack/trigger-schedule@9.11.0\n\n\n## @objectstack/types@9.11.0\n\n\n## @objectstack/console@9.11.0\n\n\n## create-objectstack@9.11.0\n\n\n## objectstack-vscode@9.11.0\n\n\n## @objectstack/example-showcase@0.2.0\n\n\n## @objectstack/example-crm@4.0.54\n\n\n## @objectstack/example-todo@4.0.54\n\n\n## @objectstack/dogfood@0.0.2\n\n"
+}

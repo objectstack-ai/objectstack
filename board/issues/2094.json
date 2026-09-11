@@ -1,0 +1,33 @@
+{
+  "number": 2094,
+  "kind": "pull_request",
+  "title": "chore(spec): drop the dead agent memory.shortTerm config (ADR-0013 D3, cloud#339)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T06:31:36Z",
+  "updated_at": "2026-06-21T07:06:14Z",
+  "closed_at": "2026-06-21T07:06:12Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T07:06:12Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2094",
+  "body": "## What\nRemoves the agent `memory.shortTerm` config (`{maxMessages, maxTokens}`) — a schema field that declared a working-memory window **nothing in the runtime ever consumed**. Per cloud **ADR-0013 D3** (\"stop declaring an unwired memory strategy\"): cross-turn grounding is done by tools reading live state, and the context budget is governed by the per-request token guardrail — not by this field. It was a config that lies.\n\n## Changes\n- `packages/spec/src/ai/agent.zod.ts` — remove `shortTerm` from the agent `memory` schema. **Kept** `longTerm` (off by default) and `reflectionInterval` — those are forward-looking/optional, not actively misleading.\n- `packages/services/service-ai/src/agents/data-chat-agent.ts` — remove the dead `memory.shortTerm` declaration (its only set site).\n- `packages/spec/src/ai/agent.test.ts` — update the memory-config test to the remaining fields.\n\n## Safety\n- **No runtime behavior change** — confirmed nothing reads `memory.shortTerm` (only `agent.model.maxTokens` is consumed). The sole set site (data-chat-agent) is removed.\n- **Public API surface unchanged** — `pnpm --filter @objectstack/spec check:api-surface` ✓ (the gate tracks exported names/kinds; a zod object's internal field is not a public export name).\n- Spec agent tests **45/45** pass; spec builds clean.\n\nRelates to cloud#339 / cloud ADR-0013 D3. The `sys_audit_log` actor-attribution half (cloud#340) is a separate, larger security/audit-path change and will come in its own PR.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

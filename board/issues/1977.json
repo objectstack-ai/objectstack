@@ -1,0 +1,35 @@
+{
+  "number": 1977,
+  "kind": "pull_request",
+  "title": "feat(automation): object-form screen-flow steps + CRM lead→customer/opportunity wizard",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T16:00:01Z",
+  "updated_at": "2026-06-16T16:22:06Z",
+  "closed_at": "2026-06-16T16:03:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T16:03:50Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1977",
+  "body": "## What\n\nExtends the screen-flow runtime so a `screen` node can render a target object's **full create/edit form — including inline master-detail child grids** — instead of a flat field list, and ships a CRM lead-conversion wizard that uses it.\n\nA step that declares `config.objectName` emits an `object-form` `ScreenSpec`. The client (objectui `FlowRunner`, companion PR) renders the real `ObjectForm`, persists the record (and its children, atomically), and resumes the run with the new record's id bound to `config.idVariable` so a later step can reference it. Model: *the form persists itself, the flow orchestrates the sequence and threads the new ids.*\n\n## CRM example — Convert Lead → Customer + Opportunity\n\n`convert-lead.flow` is now a two-step wizard:\n\n1. **Step 1** — a full **Customer (Account)** form, prefilled from the lead (name ← company).\n2. **Step 2** — a full **Opportunity** form *with an editable product line-item grid* (new `crm_opportunity_line_item`, `master_detail` + `inlineEdit: 'grid'`; Opportunity gains a `line_total` rollup). Account FK prefilled with Step 1's new id.\n\nThe flow then marks the lead `converted` and links it to the new account + opportunity.\n\n## Bug fix bundled here\n\n`get_lead` used `config.recordId`, but the `get_record` node only reads `config.filter` — so it silently returned the **first** lead regardless of the record acted on. Now filters by `{ id: '{recordId}' }`. (The old wizard never surfaced this because it never visibly used the loaded record.)\n\n## Changes\n\n- **spec**: `ScreenSpec` gains `kind` / `objectName` / `mode` / `recordId` / `defaults` / `idVariable`.\n- **service-automation**: the `screen` node emits object-form specs and now interpolates `title` / `description` / field `defaultValue` / object-form `defaults` against live flow variables (the engine does not pre-interpolate node config).\n- **app-crm**: new `crm_opportunity_line_item` object, `Opportunity.line_total` summary, rewritten `convert-lead` wizard; smoke test updated for the 6th object.\n\n## Verification\n\nEnd-to-end in the browser (objectui console against `app-crm`): Convert Lead → full Customer form (prefilled) saves → full Opportunity form + product grid (prefilled, live amount calc) saves → lead `converted`, linked to account + opportunity, `line_total` rolled up. `app-crm` smoke test (29 cases) passes; `service-automation` builds clean.\n\n> Requires the objectui companion PR (`feat/flow-object-form-screen`) for the renderer side.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

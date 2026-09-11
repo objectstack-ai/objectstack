@@ -1,0 +1,32 @@
+{
+  "number": 2108,
+  "kind": "pull_request",
+  "title": "fix(example-crm): author SalesByAccountReport via defineReport (lint #2035)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T07:41:19Z",
+  "updated_at": "2026-06-21T07:42:56Z",
+  "closed_at": "2026-06-21T07:42:55Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T07:42:55Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2108",
+  "body": "## What\n\nFollow-up to [#2107](https://github.com/objectstack-ai/framework/pull/2107). The new `SalesByAccountReport` fixture was authored as a bare `: UI.ReportInput` typed literal, which the `no-restricted-syntax` rule (#2035) disallows — metadata must go through its `defineX` factory so it validates at parse time (a broken value import fails loudly instead of degrading to `any`).\n\nI copied the pattern from `sales-by-stage.report.ts`, but that file had **already migrated** to `defineReport` — my reference was stale. Since CI ESLint only lints **changed** files, #2107 merged with the violation; this corrects it on `main`.\n\n## Change\n`export const SalesByAccountReport: UI.ReportInput = {…}` → `export const SalesByAccountReport = defineReport({…})`. Same export, same fields — no behavior change.\n\n## Verified\n- `eslint` on the file → **clean**.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 2113,
+  "kind": "pull_request",
+  "title": "docs(security): RLS predicates SQL → canonical CEL + fix non-compilable examples",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T07:57:23Z",
+  "updated_at": "2026-06-21T08:03:27Z",
+  "closed_at": "2026-06-21T08:03:25Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T08:03:25Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2113",
+  "body": "Follow-up audit after #2099 (RLS using → canonical CEL): the docs and the **objectstack-data skill** still taught the old SQL-ish grammar, so they now mislead AI authors relative to main.\n\n## Fixes\n- **`skills/objectstack-data/SKILL.md`** (highest priority — it shapes AI output): drop \"**restricted grammar (not arbitrary CEL)**: `field = current_user.x`, `IN(...)`, `1=1`\". RLS predicates are now **canonical CEL** (`==`, `in`, comparisons, `&&`/`||`/`!`, `== null`); no subqueries/cross-object (compile error, ADR-0055); legacy SQL still compiles via the deprecated bridge.\n- **`protocol/objectql/security.mdx`**: \"SQL-like\" → CEL; all `using`/`check` examples → CEL; and **fixed three examples that never compiled** — an `IN (SELECT …)` subquery, `current_user.region` (a non-exposed variable), and a `NOW()`/`AND` time window (functions aren't pushdown-able) — replaced with pre-resolved §7.3.1 membership sets / honest app-layer notes.\n- **guides/security.mdx, guides/metadata/permission.mdx, concepts/implementation-status.mdx**: `=`/`IN` → `==`/`in`.\n\nDoc/skill-only · `check:skill-docs` in sync · no runtime change.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

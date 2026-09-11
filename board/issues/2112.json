@@ -1,0 +1,33 @@
+{
+  "number": 2112,
+  "kind": "pull_request",
+  "title": "docs(service-datasource): list REST routes + Studio/Setup-nav integration",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T07:50:49Z",
+  "updated_at": "2026-06-21T07:56:04Z",
+  "closed_at": "2026-06-21T07:56:02Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T07:56:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2112",
+  "body": "## What\nRefresh `packages/services/service-datasource/README.md` to match what shipped:\n- **REST routes** section enumerating lifecycle (list/create/update/delete), `drivers` catalog, by-name `test`, `GET :name` detail, and introspection/sync (`remote-tables`, `object-draft`) — plus the credential-split note (`format:password` → top-level `secret`, never in `config`).\n- **Studio integration** section: `datasource` is administered through the generic metadata-admin engine (Setup → Integrations → Datasources), runtime records persist to `sys_metadata` and rehydrate pools on restart.\n\nDocs-only; reflects #2083, #2085, #2086, #2091, #2096.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

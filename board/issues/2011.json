@@ -1,0 +1,35 @@
+{
+  "number": 2011,
+  "kind": "pull_request",
+  "title": "feat(auth): password-policy & session settings — live, enforced (P0 security)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-17T07:09:45Z",
+  "updated_at": "2026-06-17T07:13:55Z",
+  "closed_at": "2026-06-17T07:13:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-17T07:13:52Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2011",
+  "body": "**P0 base-settings, item 3 of 3.** Per the agreed scope, this **extends the existing `auth` manifest** with the security-policy keys that are **genuinely enforced today** — rather than standing up a `security` namespace full of non-functional toggles (IP allowlist / SSO / SCIM / rate-limit), which would be **false surface** and trip the platform's own liveness gate.\n\n## What's added (all live)\nExisting `auth` manifest (global scope), new groups:\n- **Password policy** — `password_min_length` (default 8), `password_max_length` (default 128). better-auth enforces these on sign-up and password reset.\n- **Sessions** — `session_expiry_days` (default 7, absolute lifetime), `session_refresh_days` (default 1, refresh threshold).\n\n## How they take effect (existing tested path)\nThey ride `AuthPlugin.bindAuthSettings` → `AuthManager.applyConfigPatch`:\n- Read from the `settings` service on `kernel:ready` and **re-applied live** via `settings.subscribe('auth')`.\n- `applyConfigPatch` deep-merges into config and **nulls the cached better-auth instance**, so the next request rebuilds with the new policy.\n- Days → seconds for `session.{expiresIn,updateAge}`. Unset (`source: 'default'`) and malformed/non-positive values are ignored so the provider default holds.\n\n## Deliberately out of scope (no enforcement exists → NOT declared)\nMFA-required, IP allowlist, SSO/SAML, SCIM, API rate limits, password complexity/rotation/history. These are real features to build, not settings toggles. Recorded so the gap is explicit.\n\n## Tests\n- `auth.manifest.test.ts` — new number fields parse with bounds/defaults; `password_policy`/`sessions` groups present.\n- `auth-plugin.test.ts` — bindAuthSettings applies length bounds + session lifetime (days→seconds); ignores default-source and malformed/non-positive values.\n- Suites green: service-settings 124, plugin-auth 120. DTS builds clean.\n- en + zh-CN translations.\n\n## P0 complete\n1. ✅ `localization` (#2006). 2. ✅ `company` (#2010). 3. **this PR** auth security policy.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

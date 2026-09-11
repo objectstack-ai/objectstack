@@ -1,0 +1,32 @@
+{
+  "number": 1996,
+  "kind": "pull_request",
+  "title": "feat(crm): working Web-to-Lead public form example",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-17T01:49:56Z",
+  "updated_at": "2026-06-17T01:50:06Z",
+  "closed_at": "2026-06-17T01:50:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-17T01:50:00Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1996",
+  "body": "## What\n\nAdd a **working** Web-to-Lead public-form example to `app-crm`.\n\nThe example previously demonstrated Web-to-Lead only via `customer.portal` `anonymousEntry` — a spec property with **no runtime consumer** (404, verified). So the canonical CRM example shipped a non-functional public form. This adds the mechanism that actually works and makes the example coherent.\n\n- **lead.view.ts** — `web_to_lead` form view with `sharing.allowAnonymous` → live `GET/POST /api/v1/forms/contact-us` (+ `/submit`).\n- **sales-roles.ts** — `GuestPortalProfile` (isProfile, INSERT-only on `crm_lead`, keyed by the **full** object name — the anonymous permission path requires it).\n- **lead.object.ts** — `status` gets `defaultValue: 'new'` so a minimal public create satisfies `required` (option-level `default` is only a UI preselect).\n- **customer.portal.ts** — drop the dead `anonymousEntry` routes; point to the working form view (re-add when the runtime mounts `anonymousEntry`).\n- security barrel + config: export + register the guest profile.\n\n## Why it matters\n\nBuilds against the workspace, so it's also a **CI regression test** for the public-form path — the [#1989](https://github.com/objectstack-ai/framework/pull/1989) flattened-metadata resolution bug would have been caught here.\n\n## Verified end-to-end (app-crm, no auth)\n\n- `GET /api/v1/forms/contact-us` → **200** (form spec)\n- `POST /api/v1/forms/contact-us/submit` → creates a `crm_lead` (`status=new`)\n- `GET /api/v1/data/crm_lead` → **401** (guests can't read — INSERT-only enforced)\n\nvalidate ✓, app-crm tests 29/29. (Pre-existing example typecheck drift in unrelated files — `UI`/`Cube`/`ApiEndpoint` spec exports — is untouched.)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

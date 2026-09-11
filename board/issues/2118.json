@@ -1,0 +1,33 @@
+{
+  "number": 2118,
+  "kind": "pull_request",
+  "title": "docs(security): document scope-depth (ADR-0057 D1) + open/paid boundary (ADR-0016)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T09:28:41Z",
+  "updated_at": "2026-06-21T09:34:04Z",
+  "closed_at": "2026-06-21T09:34:02Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T09:34:02Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2118",
+  "body": "Audit follow-up after cloud #401 (security-enterprise / hierarchy rollup landed): **scope-depth + the open/paid boundary were undocumented** in both the `objectstack-data` skill and the security guide.\n\n## Why it matters\n`readScope`/`writeScope` (own / own_and_reports / unit / unit_and_below / org) is the **core declarative ERP authz axis** (ADR-0057 D1). Undocumented, an AI author:\n- doesn't know it exists → falls back to hand-written RLS (exactly what ADR-0057 removes);\n- doesn't know the **open/paid boundary** → uses `unit` in open-source, where it **silently fails closed to `own`**.\n\n## What\n- **skills/objectstack-data**: new \"Access depth (scope-depth)\" section before RLS — the 5-value table, a usage example, and the **ADR-0016 open-core boundary** (hierarchy-relative scopes need the paid `@objectstack/security-enterprise`; fail closed to `own` without it; `defineStack` requires `['hierarchy-security']`).\n- **guides/security.mdx**: matching scope-depth section under Object Permission Levels.\n\nDoc/skill-only · check:skill-docs in sync · docs build green (1113 pages).\n\n**showcase deliberately NOT touched** — it's open-source, so a `unit` scope there would fail-closed to `own` and mislead; the `showcase-scope-depth` dogfood already proves the capability with a reference resolver.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

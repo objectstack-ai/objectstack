@@ -1,0 +1,35 @@
+{
+  "number": 1965,
+  "kind": "pull_request",
+  "title": "feat(cli): lint ```metadata doc embeds — body + reference liveness (ADR-0051 P1)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T15:11:08Z",
+  "updated_at": "2026-06-16T15:35:59Z",
+  "closed_at": "2026-06-16T15:26:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T15:26:32Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1965",
+  "body": "Completes the **ADR-0051 P1 publish lint** — the last P1 item after the ADR (#1940), spec (#1942), renderer ([objectui#1774](https://github.com/objectstack-ai/objectui/pull/1774)), and showcase doc (#1951), all merged.\n\n`collectAndLintDocs` (run by `os compile` / `os lint`, which already pass the assembled stack) now also validates every ` ```metadata ` fence:\n\n- **Body shape**: `type` ∈ {state_machine, flow, permission} (did-you-mean on a typo'd type), `name` required, `object` required for `state_machine`.\n- **Reference liveness** against the package's *own* metadata: the object + named `state_machine` rule, the flow, or the permission set must exist in this stack. A dead same-package reference is a build **error** (same posture as `docs/broken-link`), with did-you-mean hints. Cross-package embeds are out of v1 scope.\n\n### Notes\n\n- Scans share `stripCode()`, which **deletes** fenced blocks — so the embed scan walks raw lines instead. The body parser mirrors the objectui-side one so build-time and render-time agree.\n- **No CLI build fix was needed.** The \"prerequisite breakage\" turned out to be stale/unbuilt local `dist`: a clean dependency-ordered build — `turbo run build --filter=@objectstack/cli` — passes **52/52** (incl. `cli:build`). `@objectstack/formula`'s current source already has the `scope`/`warnings` API the `validate-expressions.ts` errors referenced, and the adr-0048 test resolves once `studio`/`setup`/`account` are built. So this PR is purely the lint.\n\n### Verification\n\n- `vitest run collect-docs` → **44 passed** (8 new lint cases: valid trio, unknown type, missing name/object, dead object/rule/flow/permission refs, non-metadata fences ignored, locale variants).\n- `pnpm --filter @objectstack/cli build` → exit 0.\n- Ran the lint against the **real `app-showcase` doc**: 0 issues (no false positives); a typo'd-ref negative control correctly flags `docs/metadata-embed-ref`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

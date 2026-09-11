@@ -1,0 +1,33 @@
+{
+  "number": 2176,
+  "kind": "issue",
+  "title": "SQL driver 升级时列类型不符被静默跳过（无任何安装期提示）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T05:43:55Z",
+  "updated_at": "2026-06-22T09:19:17Z",
+  "closed_at": "2026-06-22T09:19:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2176",
+  "body": "## 问题描述\n\nSQL driver 的自动 schema 同步（`initObjects` / `syncSchema`）是 **only-additive**：表已存在时只对\"元数据声明了、但物理表里还没有的列\"执行 `createColumn`，**已存在的列一律跳过，且不比较类型**。\n\n当一个列名在物理表里已存在、但其物理类型与新版本元数据声明的类型不一致时（典型场景：先删字段 `f2`、残留了旧列 → 后续版本又加回同名 `f2` 但类型不同），同步逻辑会**静默跳过**该列：\n\n- 不会 `ALTER` 列类型\n- 不打任何 warn / log\n- 安装/升级**照常显示成功**\n\n类型不符要到**运行时**才暴露：读出的值类型不对、过滤/排序结果异常、或写入触发 PgSQL 类型错误，而且没有任何线索指回\"这是残留列类型未对齐\"，排查成本高。\n\n## 代码定位\n\n`packages/plugins/driver-sql/src/sql-driver.ts`（约 L1477–L1492，`initObjects` 表已存在分支）：\n\n```ts\nconst columnInfo = await this.knex(tableName).columnInfo();\nconst existingColumns = Object.keys(columnInfo);   // 只取列名\n\nawait this.knex.schema.alterTable(tableName, (table) => {\n  for (const [name, field] of Object.entries(obj.fields)) {\n    if (!existingColumns.includes(name)) {           // 只判断列名是否存在\n      this.createColumn(table, name, field);\n    }\n    // 没有 else：列已存在则什么都不做——不比类型、不报警\n  }\n});\n```\n\n`columnInfo[name].type` 携带了真实物理类型，但当前只用 `Object.keys()` 取了列名，类型信息被完全忽略。\n\n相关：`packages/metadata/src/migration/executor.ts` 的 `modify_field` 分支仅 `console.warn('Not fully implemented')`，且未接入自动装包路径。\n\n## 复现步骤\n\n1. PgSQL datasource，部署 v1：对象 `o1` 含字段 `f2`（如 `type: 'text'`）。\n2. v2：从 `o1` 删除 `f2`（物理列 `f2` 残留，数据保留——见 only-additive 行为）。\n3. v3：`o1` 重新加入字段 `f2`，但类型改为 `number`。\n4. 安装 v3 → 提示成功；但物理列 `f2` 仍是旧 `text` 类型，与元数据声明的 `number` 不一致，无任何提示。\n\n## 期望行为\n\n至少要**让类型漂移可见**，不能静默。\n\n## 解决方案建议\n\n按成本从低到高，建议先做 1，再视情况推进 2/3：\n\n**1.（必做）安装期检测 + 告警 —— drift detection**\n在 `initObjects` 表已存在分支，对每个\"列名已存在\"的字段，比较 `columnInfo[name].type` 与该字段映射后的期望物理类型（复用现有 `JSON_COLUMN_TYPES` / `NUMERIC_SCALAR_TYPES` / DDL 类型 switch 作为单一真相源），不一致则发出结构化告警：\n- `logger.warn`，包含 `{ datasource, table, column, expectedType, actualType }`；\n- 默认不阻断安装（保持向后兼容），保证至少留下排查线索。\n注意跨方言归一化（PgSQL/MySQL/SQLite 的 `columnInfo().type` 表述不同，SQLite 类型亲和性更宽松），避免误报。\n\n**2.（推荐）`os doctor` / 安装报告里汇总 schema drift**\n把检测结果汇总进 `os doctor`（或安装结束的 summary），列出所有\"列已存在但类型不符 / 元数据已无此字段的孤儿列\"，并给出建议的修复 DDL（`ALTER ... TYPE` / `DROP COLUMN` / `RENAME`），让运维在部署前/后能一眼看到。\n\n**3.（可选，需谨慎设计）受控的类型迁移**\n为 `modify_field` 提供真正实现，但**仅在显式授权下执行**（如 `--allow-destructive` 或受 ADR-0015 DDL gate 约束的 `schemaMode: 'managed'`）。类型变更可能丢数据/失败（如 text→number 含非数字值），必须：\n- 默认 dry-run 输出将执行的 DDL；\n- 提供归档残留列的选项（`RENAME COLUMN f2 -> f2__archived_<ts>` 再建新列），而非直接 `ALTER TYPE`；\n- 全程结构化日志 + 安装报告。\n\n**最小可行**：先落地方案 1 的 warn，即可消除\"静默\"这个最大的坑。\n\n## 影响\n\n- 标签建议：`bug`, `protocol:data`\n- 优先级：建议 `priority:p1`（涉及生产数据正确性，且失败完全无提示）\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 2139,
+  "kind": "pull_request",
+  "title": "feat(app-showcase): add an end-to-end external datasource + federated object example (#2111)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T15:36:05Z",
+  "updated_at": "2026-06-21T16:06:36Z",
+  "closed_at": "2026-06-21T16:06:34Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T16:06:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2139",
+  "body": "Closes #2111.\n\n## What\n\nA runnable, self-contained example of the ADR-0015 **external datasource → federated objects** flow in `app-showcase`, with **no external server** — `os dev` just works.\n\n- `src/datasources/showcase-external.datasource.ts` — a second, read-only SQLite datasource (`schemaMode:'external'`, `onMismatch:'warn'` so a fixture hiccup never bricks the showcase boot). Includes a commented Postgres+`secret` variant for the masked-secret widget.\n- `src/objects/external/{customer,order}.object.ts` — federated objects whose names (`showcase_ext_customer`/`order`) deliberately differ from their remote tables (`customers`/`orders`), bound via `external.remoteName`.\n- `src/datasources/external-fixture.ts` — the stack `onEnable` hook: idempotently provisions the fixture SQLite, registers a live read-only driver under the datasource name, and registers the federated objects' read metadata (`ql.syncObjectSchema`).\n- README section + `test/external-datasource.test.ts` smoke test.\n\nBuilds on the ADR-0015 federation read-path fix (#2138), which makes `external.remoteName` honored by queries.\n\n## Verified live (`os dev`)\n\n- `GET /api/v1/data/showcase_ext_customer` → 200, 3 rows (queried live from external table `customers`).\n- `GET /api/v1/data/showcase_ext_order` → 200, 4 rows.\n- `?region=EU` / `?region=APAC` filters push down to the remote table correctly.\n- `os dev` boots zero-config; the external SQLite fixture is auto-provisioned.\n\n## Known follow-up (not this PR)\n\nIn the dev config-load path, a **code-defined** datasource is not yet surfaced by `GET /api/v1/datasources` / `GET /api/v1/meta/datasource` (the admin list reads persisted records; `getMetaItems` doesn't surface in-memory registrations). This affects any code-defined datasource (e.g. app-crm), and is tracked separately. The federation read path itself works end-to-end.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

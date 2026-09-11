@@ -1,0 +1,32 @@
+{
+  "number": 2131,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0061 record search architecture + liveness audit",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T14:39:24Z",
+  "updated_at": "2026-06-21T14:44:43Z",
+  "closed_at": "2026-06-21T14:44:41Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T14:44:41Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2131",
+  "body": "Records the architecture decision for **record search**, which a grounded liveness sweep showed is a **declared-but-unenforced** capability (cf. ADR-0049): `$search` / `FullTextSearchSchema` is defined and sent by every client surface (lookup picker, list quick-search, ⌘K), but **no engine or driver executes it** — a silent no-op. Only the public-form picker filters; `$searchFields` is already sent by the client (undocumented, unhonored → drift); three object/view search-metadata shapes have zero data-layer consumers.\n\nThis came out of the lookup-picker UX work (#2125 / #2128 and objectui #1860 / #1863): \"multi-field lookup search\" turned out to be one symptom of a platform-wide gap, which warranted an ADR rather than a renderer patch.\n\n## Contents\n- **`docs/audits/2026-06-record-search-liveness.md`** — evidence base: every search surface with `file:line` and LIVE/DEAD/PARTIAL, across spec / objectql / rest / drivers / services and objectui.\n- **`docs/adr/0061-record-search-architecture.md`** — the decision: enforce search as **one metadata-driven, server-resolved** capability. Client sends the query text; the server resolves fields from object metadata; a single resolver feeds all surfaces behind a **two-tier executor** (driver `contains` now; native FTS / external engine / relevance later); **additive** migration.\n\n### Decisions (D1–D7)\n1. Contract — client sends `$search`; server resolves fields; `$searchFields` becomes a server-validated override.\n2. Single source — `object.searchableFields` canonical; `searchable` boolean gate; view override; auto-default; collapse duplicate metadata.\n3. Two-tier executor — Tier 1 driver `contains` + engine in-memory fallback; Tier 2 trigram/tsvector/external + relevance.\n4. label↔value + ranking — server-side (select label→value Tier 1; lookup display Tier 2; per-object rank server, cross-object merge client).\n5. Security — over RLS + ADR-0045 visibility; secret/PII never searchable; override subset-validated; public projection+cap.\n6. Global `searchAll` — client fan-out now; unified server endpoint is Tier 2; knowledge/vector stays separate.\n7. Migration — one resolver; additive (no-op → filter); strip client field-guessing; phased P1–P4.\n\nPlus a normative default-behaviour table, a conformance proof aligned with ADR-0060 (`$search` is \"landed\" iff a driver executes it and a dogfood proof asserts a multi-field match), and rejected alternatives (incl. the renderer `$or` hack — kept only as a throwaway P0 stopgap).\n\n**Status: Proposed** — recommended for acceptance; no code changes in this PR. Docs only."
+}

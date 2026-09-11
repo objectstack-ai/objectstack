@@ -1,0 +1,36 @@
+{
+  "number": 2090,
+  "kind": "pull_request",
+  "title": "feat(expr): ADR-0058 P1–P4 — canonical CEL→FilterCondition compiler, RLS/sharing cutover, check enforcement, conformance ledger",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T05:13:19Z",
+  "updated_at": "2026-06-21T06:30:07Z",
+  "closed_at": "2026-06-21T06:30:05Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T06:30:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2090",
+  "body": "Implements ADR-0058 (expression & predicate surface) P1–P4. The ADR was merged in #2087; this is the implementation.\n\n## The problem (ADR-0058 audit)\nObjectStack had ONE authoring language (CEL) + ONE good interpreter, but a **fragmented compile-to-filter path**: three disconnected front-ends (plugin-security's 4-form regex, plugin-sharing's `celToFilter`, the ObjectUI array-AST path). That divergence is the root of #1887 — a sharing `condition` the interpreter understands but no compiler lowers, so it never enforces.\n\n## What landed\n\n**P1 — canonical compiler** (`@objectstack/formula`)\n`compileCelToFilter` lowers the **same `@marcbachmann/cel-js` AST the interpreter uses** to a Mongo-style `FilterCondition` — the one shape both backends already consume (ObjectQL `where` + analytics `read-scope-sql`). Supported subset (D2): `== != > < >= <=`, `in`, `&& || !`, `== null`, string methods. Hard boundaries (ADR-0055): single-column field paths only; arithmetic / functions / cross-object / subqueries are an **authoring compile error**, never silently dropped. `isPushdownableCel` (shape gate) + `lowerCelAst` (one-AST-two-backends, D6). 52-case matrix.\n\n**P2 — cut over the two front-ends**\n`rls-compiler.ts` (`compileExpression` + `isSupportedRlsExpression`) and plugin-sharing's `celToFilter` now delegate to the canonical compiler. A thin `sqlPredicateToCel` bridges the legacy SQL-ish RLS `using` subset (`=`→`==`, `IN`→`in`). `compileFilter` orchestration (membership merge, null→deny aggregation) and the empty-membership parity are preserved. Output parity verified: plugin-security 119, plugin-sharing 65, service-analytics 137.\n\n**P3/D3 — close #1887**\nSharing `condition` now compiles to a compound `criteria_json` and enforces e2e: a `record.amount >= 100000 && record.name == \"Big1\"` shares ONLY the full-AND match. The `⚠️ EXPERIMENTAL — NOT ENFORCED` block on `SharingRuleSchema` is removed; only `owner`-type + `group`/`guest` remain experimental.\n\n**P3/D4 — enforce RLS `check`**\nNew `matchesFilterCondition` (formula) — the single-record backend for the canonical filter shape (D6). security-plugin step 3.6 validates the **post-image** (insert → new row; by-id update → pre-image ∪ change) against the compiled `check`; violating writes fail closed (D5). Scoped to policies that explicitly declare `check` → zero blast radius (no seeded policy declares one). 7 proof cases.\n\n**P4/D7 — conformance ledger + CI ratchet**\n`expression-conformance.ledger.ts` classifies all 27 expression surfaces (dialect / mode / state / fail-policy / site / proof). The companion test re-discovers every `ExpressionInputSchema` field in `packages/spec/src` (+ RLS using/check) and **fails the build if any surface is unclassified** — the #1887 class can't recur silently. Compile-mode rows must be compiler-reachable + carry an existing proof.\n\n## Verification (local, all green)\nFull workspace build 75/75 · formula 201 · plugin-security 119 · plugin-sharing 65 · service-analytics 137 · spec 6599 · dogfood 130.\n\nCloses #1887.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

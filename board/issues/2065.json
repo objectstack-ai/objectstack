@@ -1,0 +1,35 @@
+{
+  "number": 2065,
+  "kind": "pull_request",
+  "title": "feat(security): ADR-0056 D1 (canonical OWD vocab) + D2 (anonymous deny posture)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-20T07:52:56Z",
+  "updated_at": "2026-06-20T08:34:39Z",
+  "closed_at": "2026-06-20T08:32:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-20T08:32:43Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2065",
+  "body": "Two ADR-0056 decisions, both verified, both non-breaking.\n\n## D1 — canonical OWD vocabulary on `object.sharingModel`\n\nReconciles the three-way naming mismatch to one vocabulary: `private | public_read | public_read_write | controlled_by_parent` (canonical) **plus** legacy `read / read_write / full` aliases (kept, non-breaking). The sharing runtime maps them onto the three enforced behaviours; unknown values stay enum-rejected (authoring-time fail-closed). The showcase `announcement` now declares the canonical `public_read`, exercised end-to-end.\n\n- `plugin-sharing` 32 unit tests (+4 D1); OWD dogfood 8/8 with the canonical name; liveness green.\n\n## D2 — secure-by-default anonymous posture (warn → enforce)\n\nThe deny *capability* already exists: `api.requireAuth=true` rejects anonymous via `enforceAuth`, and share-link / `guest_portal` / control-plane routes are **exempt** (so public functionality survives). But the **default is fail-open** (`requireAuth=false`) — an object with no OWD/RLS is world-readable with no signal.\n\n**Expert judgment (long-term):** the right move is *not* to flip the global default in a code merge — that would 401 every deployment relying on anonymous reads, and public access already has dedicated declared channels (share-links / `publicSharing`). Instead this lands the **warn** of warn→enforce: a boot-time WARN when running fail-open, making the posture explicit (consistent with D4/D8 honesty). The actual default flip stays a release-gated, announced decision.\n\n- Proven by `showcase-anonymous-deny` (4/4): anonymous read+write → 401, authenticated → 200, control-plane (`/auth`) open.\n\n## ADR-0056 status after this\n\nDone + merged/merging: OWD scenarios (#2062), D4+D8 (#2064), **D1+D2** (this). Remaining: D7 default Profile (additive; turnkey already met by member_default), D6 role hierarchy (P4), D10 conformance matrix (CI artifact), and the eventual release-gated `requireAuth` default flip.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

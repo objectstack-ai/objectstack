@@ -1,0 +1,32 @@
+{
+  "number": 2044,
+  "kind": "pull_request",
+  "title": "fix(deps): override undici >=7.28.0 to close GHSA-vmh5-mc38-953g",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-19T09:01:14Z",
+  "updated_at": "2026-06-19T09:05:39Z",
+  "closed_at": "2026-06-19T09:05:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-19T09:05:37Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2044",
+  "body": "## What\n\nClose HIGH-severity advisory **GHSA-vmh5-mc38-953g** (undici TLS certificate validation bypass via dropped `requestTls` in the SOCKS5 `ProxyAgent`) that is failing the **Validate Package Dependencies** CI gate (`pnpm audit --audit-level=high`).\n\nThe vulnerable `undici@7.27.2` is pulled in transitively through the VS Code extension's publish tooling only:\n\n```\npackages/vscode-objectstack > @vscode/vsce > cheerio > undici\n```\n\nThis is repo-wide and pre-existing (it red-flags the dependency-validation gate for everyone, not just one PR).\n\n## How\n\nAdd a single transitive pin to **`pnpm-workspace.yaml`** `overrides` — the repo's canonical location (pnpm v10 silently ignores `pnpm.overrides` in `package.json`, as documented in that file alongside the existing `esbuild` / `form-data` / `tar` / `minimatch` pins):\n\n```yaml\n'undici@>=7.23.0 <7.28.0': '^7.28.0'\n```\n\n- Advisory range is `>=7.23.0 <7.28.0`, patched `>=7.28.0`.\n- `cheerio@1.2.0` declares `undici: ^7.19.0`, so the override targets **only the vulnerable range** and forces `^7.28.0`, which resolves to **7.28.0** — the patched line within the **7.x major cheerio supports**. A bare `>=7.28.0` would resolve to undici **8.5.0**, an out-of-range major bump for cheerio; this stays minimal and in-range.\n\n`package.json` is intentionally untouched. Change is just the override + lockfile.\n\n## Verification\n\n- `pnpm audit --audit-level=high` → **0 high** (exit `0`), gate passes. (Before: `1 high` = undici.)\n- All pre-existing security pins preserved in the lockfile (`esbuild`, `minimatch`, `tar`, `form-data`).\n- `turbo run build --filter=objectstack-vscode` → succeeds.\n- Lockfile diff: only `undici 7.27.2 → 7.28.0` + the override line.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 2208,
+  "kind": "pull_request",
+  "title": "feat(spec,cli): validate dataset measure aggregation by field semantics",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T13:14:16Z",
+  "updated_at": "2026-06-22T13:19:42Z",
+  "closed_at": "2026-06-22T13:19:39Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T13:19:39Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2208",
+  "body": "## Why\n\nA dataset measure that **SUMs a `percent`/rate field** produces a meaningless total (it routinely exceeds 100%) — rates must **AVG**. Nothing at author time knew this, so a hand-authored *or AI-authored* dataset could declare a win-probability measure as `sum` and pass `os validate`/`compile` clean. (Surfaced on a live AI-built CRM dashboard: a probability column summed to 145%, 200%.)\n\n## What\n\n- **`@objectstack/spec/data` — new `aggregation-policy`** (the single source of truth for field→aggregation semantics, shared by authoring and validation so they can't drift):\n  - `defaultAggregateFor(fieldType)` — rates (`percent`) AVG, additive amounts SUM.\n  - `isIncoherentAggregate(aggregate, fieldType)` — true only for genuinely meaningless cases (today: SUM/`count_distinct` of a percent); never raises when the type is unknown.\n- **`@objectstack/cli` `validateWidgetBindings` — new `measure-aggregate-incoherent` advisory**: checks every dataset's measures against its bound object's field types and flags an incoherent aggregation. Runs at validate/compile/build through the existing widget-binding pass; **never false-positives without the object's field types** (e.g. cross-package datasets).\n\n## Notes\n\n- Severity is **warning** (the page still renders, the number is just wrong) — suppressible per measure via `suppressWarnings: ['measure-aggregate-incoherent']`.\n- This is the open-mechanism half of the fix. The AI build's generator fix (cloud) derives the correct aggregation up front; this gives the same guarantee to **hand-authored** apps and is where a cloud follow-up will consume `isIncoherentAggregate` to replace its local copy.\n\n## Tests\n\n- spec: `aggregation-policy.test.ts` (policy + coherence matrix).\n- cli: `validate-widget-bindings.test.ts` — sum-on-percent flagged, avg clean, currency-sum clean, `count_distinct`-of-percent flagged, no-objects no-op. **33/33 in that file**; 6612 spec tests green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

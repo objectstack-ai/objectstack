@@ -1,0 +1,34 @@
+{
+  "number": 2214,
+  "kind": "pull_request",
+  "title": "feat(spec): responsiveStyles on the UI page-component envelope (ADR-0065)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T14:52:45Z",
+  "updated_at": "2026-06-22T15:03:04Z",
+  "closed_at": "2026-06-22T15:03:02Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T15:03:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2214",
+  "body": "Implements the spec half of **ADR-0065** (SDUI styling model).\n\n## What\n\n- `responsive.zod.ts` — `StyleMapSchema` (CSS property→value map, camelCase) + `ResponsiveStylesSchema` (`large`/`medium`/`small`/`xsmall` maps, desktop-first).\n- `page.zod.ts` — `PageComponentSchema` gains an optional `responsiveStyles` field.\n\nThis is the **preferred, build-independent, collision-free** styling channel for metadata-authored pages, compiled to id-scoped CSS at render by objectui's `SchemaRenderer` (objectstack-ai/objectui#1912). Explicitly **distinct** from the existing `responsive` (`ResponsiveConfigSchema`), which configures *layout* (grid columns / visibility / order) on the Tailwind `xs..2xl` axis — `responsiveStyles` styles a node's own box.\n\n## Verification\n\n- `pnpm build` (tsc DTS) clean; `api-surface.json` refreshed (adds `ResponsiveStyles`/`ResponsiveStylesSchema`/`StyleMap`/`StyleMapSchema`).\n- Spec suite **6612 passed / 245 files** — additive optional field, no regression.\n\nConsumed by objectui (renderer, merged) and cloud (migrates built-in pages off raw className).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

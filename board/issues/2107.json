@@ -1,0 +1,33 @@
+{
+  "number": 2107,
+  "kind": "pull_request",
+  "title": "test(example-crm): lookup-dimension report fixture (sales by account)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T07:36:15Z",
+  "updated_at": "2026-06-21T07:39:04Z",
+  "closed_at": "2026-06-21T07:39:02Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T07:39:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2107",
+  "body": "## Why\n\nCompletes the example coverage for the dataset-render work. The **raw-value lookup drill** (ADR-0021 D2) — fixed client-side in objectui [#1842](https://github.com/objectstack-ai/objectui/pull/1842) and gated correctly server-side — had **no example exercising it**. Paired with the currency propagation from #2102, this makes both high-risk render paths demonstrable in one report.\n\n## What\n\n- **`opportunity_metrics`** gains an `account` **LOOKUP** dimension. The analytics layer resolves the FK to the account's display name in `rows`, but exposes the raw FK via `drillRawRows` + `dimensionFields` — so a report drill filters by the **stored id**, not the (possibly non-unique) display name.\n- **`SalesByAccountReport`** (new) groups `total_amount` (USD, currency-aware via #2102) by `account`. One report now exercises **both** paths: `Intl` currency formatting **and** raw-value lookup drill.\n- **service-analytics test** (+1): a LOOKUP dimension is drillable — the mirror of the existing date-dimension *exclusion* test. Asserts `object` + `dimensionFields` + the raw FK in `drillRawRows`.\n\n## Tests\n- `service-analytics` query-dataset → **11 passed** (+1 lookup-drillable).\n- `app-crm` typecheck → **0 errors** (dataset parses, report type valid).\n\n## Notes\n- Example is private; the service-analytics change is test-only (no shipped API change) — no changeset.\n- Together with the merged objectui #1830/#1841/#1842/#1845 and framework #2102, the dataset currency/label/i18n/drill chain is now correct **and** fully exercised by examples.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

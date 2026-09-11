@@ -1,0 +1,32 @@
+{
+  "number": 1989,
+  "kind": "pull_request",
+  "title": "fix(rest): resolve public forms from flattened view metadata",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T22:36:18Z",
+  "updated_at": "2026-06-16T22:36:38Z",
+  "closed_at": "2026-06-16T22:36:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T22:36:21Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1989",
+  "body": "## What\n\nFix `findPublicFormView` so the public-form endpoints (`/forms/:slug`, `/forms/:slug/submit`) actually resolve standard form views.\n\n## Bug\n\nThe resolver only matched the **authoring** view shape (`view.form.sharing`, `view.formViews.{key}.sharing`). But `getMetaItems({type:'view'})` returns the **registered/flattened** shape — one item per view: `{ name: 'crm_lead.web_to_lead', object: 'crm_lead', viewKind: 'form', config: { data, sections, sharing } }`. The `sharing` (allowAnonymous + publicLink) sits under `config`, which the resolver never inspected.\n\nResult: **every** standard Web-to-Lead / Web-to-Case form returned `FORM_NOT_FOUND` — the capability was fully declared (profile + view + spec + UI component) but non-functional at runtime. An unenforced/untested surface.\n\n## Fix\n\nAdd a third candidate: a `viewKind === 'form'` item whose `config` carries `sharing`. Object name resolves via `config.data.object` (or the item's `object`).\n\n## Verification (HotCRM, end-to-end)\n\n- `GET /api/v1/forms/contact-us` (no auth) → **200** form spec\n- `POST /api/v1/forms/contact-us/submit` (no auth) → creates a `crm_lead`\n- `POST /api/v1/forms/support/submit` (no auth) → creates a `crm_case`\n- `GET /api/v1/data/crm_lead` (no auth) → **401** (guests still can't read — INSERT-only enforced)\n\n`@objectstack/rest` 121/121 tests pass.\n\n> Found by browser-verifying web-to-lead. Note: a *separate* app-side bug also blocked it — guest profiles must key the **full** object name (`crm_lead`, not `lead`) for the anonymous permission path; the short-name path that works for authenticated profiles does not resolve here (possible follow-up: normalize short→full names consistently in the explicit-permission-set path).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

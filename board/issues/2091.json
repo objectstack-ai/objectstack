@@ -1,0 +1,32 @@
+{
+  "number": 2091,
+  "kind": "pull_request",
+  "title": "feat(datasource): Setup-app \"Datasources\" nav entry → metadata-admin engine",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T05:22:08Z",
+  "updated_at": "2026-06-21T05:27:47Z",
+  "closed_at": "2026-06-21T05:27:46Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T05:27:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2091",
+  "body": "## What\nAdds a **Datasources** entry to the Setup app's left menu (Integrations group). It opens the generic **metadata-admin engine** route for the `datasource` type — datasource is a metadata type, so it's administered by the same engine as every other type, not a bespoke page.\n\nThe `datasource-admin` plugin registers the navigation contribution itself (into the capability-owned `group_integrations` slot), per ADR-0029 D7 — core `setup-nav.contributions.ts` must not fill capability-plugin slots (enforced by the platform-objects nav invariant test). Entry is `type:'url'` → `/apps/setup/component/metadata/resource?type=datasource` (a datasource is a definition, not business data, so not an object view).\n\n## Pairs with\nobjectui PR (datasource registered as a metadata-admin engine resource: list/create/edit/test/sync + bespoke page removed).\n\n## Verification\n- Live: Setup app left menu shows **Datasources** under Integrations → opens the engine-hosted manager.\n- `platform-objects` 55/55 + `service-datasource` 63/63 tests green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 2050,
+  "kind": "pull_request",
+  "title": "feat(spec): interface pages own their view metadata directly (revise ADR-0047 iron rule)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-19T14:05:59Z",
+  "updated_at": "2026-06-19T14:07:21Z",
+  "closed_at": "2026-06-19T14:07:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-19T14:07:19Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2050",
+  "body": "## Summary\n\nValidating the Studio config panel against Airtable's Interface Designer surfaced that **Airtable has no \"inherit from a separate view\" concept** — an interface page defines its data surface (columns, sort, base filter, visualizations, toolbar) **directly**. This brings ObjectStack to parity and removes the confusing \"Source View\" picker.\n\n### Spec (`packages/spec/src/ui`)\n- **page.zod.ts** — `InterfacePageConfigSchema` gains its own **`columns`** (`string[] | ListColumnSchema[]`) and **`sort`**; `filterBy` is the always-on base filter. **`sourceView` is now `@deprecated`**, kept only as a runtime back-compat fallback.\n- **page.form.ts** — the inspector now follows Airtable's IA:\n  `Data (Source → Columns → Filter By → Levels) · Appearance · User filters · User actions`.\n  The **Source View picker is removed**, replaced by a **Columns** field picker (`widget: field-multi`, `dependsOn: source`). Iron-rule helptext rewritten.\n\n### ADR\n- **0047** revised: the \"iron rule\" (pages reference views, never restate them) is **superseded**. The page is now the single place columns/sort/filter live.\n\n### Showcase migrated to the new model\n- `task-triage.page.ts`, `task-workbench.page.ts` define `columns` directly and drop `sourceView`.\n\n## Verification (browser, live backend)\n- Page editor shows **Source / Columns / Filter By** — no Source View.\n- Picking columns in the inspector **re-renders the preview live** (`# / 标题 / 状态 / 优先级`).\n- Both showcase pages render their **own** column sets — task-workbench shows **Estimate (h)**, which the object's default view omits, proving the page defines columns independently (not inherited).\n\nPairs with the objectui runtime PR (InterfaceListPage reads page-owned `columns`/`sort` with a view→object fallback).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

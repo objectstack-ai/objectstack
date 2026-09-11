@@ -1,0 +1,32 @@
+{
+  "number": 2061,
+  "kind": "pull_request",
+  "title": "feat(app-showcase): Settings page + preference object",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-20T06:29:01Z",
+  "updated_at": "2026-06-20T06:29:15Z",
+  "closed_at": "2026-06-20T06:29:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-20T06:29:13Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2061",
+  "body": "## Why\n\nThe last of the selected enterprise surfaces (after [#2059](https://github.com/objectstack-ai/framework/pull/2059) and [#2060](https://github.com/objectstack-ai/framework/pull/2060)). Every enterprise app needs a settings/preferences page; the showcase had none.\n\n## What\n\n- New `showcase_preference` object — theme / default landing / email digest / rows-per-page / notifications / density — with one seeded singleton (\"My Preferences\").\n- `showcase_settings` record page grouping it into **Appearance / Notifications** sections. `record:details` is inline-editable, so it's a working preferences surface (click a value to change it).\n- Reached via **Pages → Settings**.\n\n## Verification\n\nBrowser-verified on `:5181`: the seeded preferences render in both sections (Theme = Light, Default landing = My Work, Rows = 50, Digest = Daily, notifications on) and are inline-editable. `typecheck` + **20** showcase tests pass.\n\nThis completes the enterprise-surfaces set: Delivery Operations dashboard, Account 360, My Work home, Approvals queue, New Project wizard, and Settings.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

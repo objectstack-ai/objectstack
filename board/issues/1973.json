@@ -1,0 +1,32 @@
+{
+  "number": 1973,
+  "kind": "pull_request",
+  "title": "fix(showcase): drop dead props f_rating.maxRating / f_vector.vectorConfig",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T15:47:36Z",
+  "updated_at": "2026-06-16T15:48:50Z",
+  "closed_at": "2026-06-16T15:48:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T15:48:48Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1973",
+  "body": "## What\n\nThe spec-liveness author-warning lint (`packages/cli/src/utils/lint-liveness-properties.ts`, run during `objectstack compile`) flagged two genuine **dead-property** usages in `examples/app-showcase` — props that compile fine but do nothing at runtime.\n\nIn `examples/app-showcase/src/objects/field-zoo.object.ts`:\n\n| Field | Was | Now | Why |\n|---|---|---|---|\n| `f_rating` | `Field.rating(5, …)` → emits `maxRating` | `{ type: 'rating', label: 'Rating', max: 5 }` | `RatingField` reads the flat `max` prop, not `maxRating` |\n| `f_vector` | `Field.vector(1536, …)` → emits nested `vectorConfig` | `{ type: 'vector', label: 'Embedding Vector', dimensions: 1536 }` | `VectorField` reads the flat `dimensions` sibling; nothing consumes `vectorConfig` (no vector-index DDL) |\n\nBoth switched from the builder helpers to raw literals — matching the style of other raw-literal fields already in this file (`f_progress`, `f_time`, etc.) — so the showcase, our exemplary reference app, authors **zero dead props**.\n\n## Verification\n\n`node ../../packages/cli/bin/run.js compile` from `examples/app-showcase`:\n- exit 0, `✓ Build complete`\n- no `liveness-dead-property` warnings\n- no new errors\n\n## Follow-up (out of scope)\n\nThe `Field.rating` / `Field.vector` **builders themselves** still emit the dead `maxRating` / `vectorConfig` (`packages/spec/src/data/field.zod.ts:701,727`), so any other app using those helpers trips the same lint. Worth a separate fix to align the builders with what renderers read.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 2034,
+  "kind": "pull_request",
+  "title": "fix(analytics,driver-sql): coerce datetime filter comparands to storage form",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-18T12:23:49Z",
+  "updated_at": "2026-06-18T12:35:53Z",
+  "closed_at": "2026-06-18T12:35:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-18T12:35:50Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2034",
+  "body": "## Problem\n\nDashboard time-series charts and \"last N months/days\" KPIs that filter or group by a `Field.datetime` column silently returned **0 rows** on SQLite, even though the data existed (charts on `Field.date` columns worked).\n\nRoot cause: the analytics `NativeSQLStrategy` builds raw SQL and runs it via `engine.execute`, which **bypasses the driver's dialect-aware filter coercion** (`coerceFilterValue` in `driver-sql`). Dashboard relative-date tokens (`{12_months_ago}`, …) resolve to ISO date **strings** (`\"2025-06-18\"`); `Field.datetime` under better-sqlite3 stores an **integer epoch (ms)**, and in SQLite an INTEGER always sorts before any TEXT, so `epoch >= 'ISO'` is **always false**. This is the `datetime` analogue of the `date` write/filter asymmetry that [ADR-0053](docs/adr/0053-date-and-datetime-semantics.md) Phase 1 fixed — on the analytics-raw-SQL path ADR-0053 didn't reach (same bug family #1874).\n\n## Fix\n\nThe **driver is the single source of dialect truth** for filter-value coercion; the analytics raw-SQL path now routes through it instead of re-deriving types from value shape.\n\n- `driver-sql`: gate the datetime→epoch coercion behind `isSqlite` (native-timestamp dialects leave the ISO/Date comparand intact → Postgres/MySQL correct), and expose `temporalFilterValue(object, field, value)` delegating to the existing `coerceFilterValue` (one code path).\n- `service-analytics`: `NativeSQLStrategy` resolves the real `(object, column)` each member binds against and coerces temporal filter values via the driver, threaded into `buildFilterClause` (`gte/lte/gt/lt/equals`, `in/notIn`) and the `dateRange` BETWEEN path. New `StrategyContext.coerceTemporalFilterValue` hook wired from the data engine.\n- `spec`: added the `coerceTemporalFilterValue` contract hook.\n\nNo `CAST(col …)` is emitted (indexes preserved). When the hook is absent, behaviour is byte-for-byte identical to before.\n\n## Verification\n\n- Real-SQLite E2E: `assessed_at >= '2025-06-18'` (datetime) **0 → 4** after driver coercion; `Field.date` text path unchanged (4). \n- New regression tests assert SQLite **is** epoch-coerced and Postgres/MySQL/`date` are **not** (no regression).\n- Post-rebase onto current `main`: `driver-sql` 169 passed, `service-analytics` 134 passed; spec/driver-sql/service-analytics build green.\n\n## ADR\n\nRecords this as the first increment in a new **Addendum** to ADR-0053 (driver-as-single-source-of-dialect-truth; formalize `temporalFilterValue` onto the `IDataDriver` contract; add a `type × operator × token × driver` conformance matrix as the runtime regression backstop).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 2238,
+  "kind": "pull_request",
+  "title": "feat(authz): ADR-0066 D4 — action dual-surface gates (server source of truth)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-23T11:22:06Z",
+  "updated_at": "2026-06-23T11:36:35Z",
+  "closed_at": "2026-06-23T11:36:33Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-23T11:36:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2238",
+  "body": "Implements **ADR-0066 D4**: an action declaring `requiredPermissions` is enforced from **one declaration on both surfaces** — the **server** (action route) rejects the call when the caller lacks the capability (the source of truth), and the objectui **ActionRunner** hides/disables it from the same field (UI gating PR follows). Removes the \"UI-gated but server-open\" footgun (and the inverse).\n\n### Changes\n- **spec** (`ui/action.zod.ts`): `ActionSchema.requiredPermissions: string[]` (optional; mirrors `App.requiredPermissions` / Object `requiredPermissions`).\n- **runtime** (`http-dispatcher.ts` `handleActions`): before executing, resolve the action def from the object schema and enforce `action.requiredPermissions ⊆ ctx.systemPermissions` → **403** otherwise. `isSystem` (engine self-invocation) bypasses; an unauthenticated caller holds no capabilities and is denied for a gated action. Schema unresolved ⇒ no declared gate (handler-only action) — fail-safe to the data layer.\n- **liveness** ledger: `action.requiredPermissions` classified `live`. **api-surface unchanged** (field add, no new export).\n\n### Tests\n- spec `action.test.ts` (+2): accepts `requiredPermissions`; optional.\n- runtime `http-dispatcher.test.ts` (+5): deny (403) / allow / system-bypass / un-gated / anonymous-deny. Full 126-test dispatcher suite green; full-DTS build green.\n\nFollow-up: objectui `ActionRunner` derives the UI hide/disable from `requiredPermissions` (separate objectui PR).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

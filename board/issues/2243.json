@@ -1,0 +1,32 @@
+{
+  "number": 2243,
+  "kind": "pull_request",
+  "title": "fix(service-ai): stamp agent_id on auto-created chat conversations",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-23T13:54:54Z",
+  "updated_at": "2026-06-23T13:55:29Z",
+  "closed_at": "2026-06-23T13:55:26Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-23T13:55:26Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2243",
+  "body": "## What\n`/api/v1/ai/agents/:agentName/chat` auto-creates its conversation (when the client sends no `conversationId`) via `autoCreateConversation()`, which only set `userId` + `metadata` — leaving **`ai_conversations.agent_id` NULL**. Every chat conversation looked agent-less, so per-agent attribution (analytics + cloud's per-agent AI metering) was impossible.\n\n## Change\nThread the agent end-to-end (additive, backward-compatible):\n- **spec**: add optional `ToolExecutionContext.agentId`.\n- **agent-routes**: set `agentId: agentName` in the request's `toolExecutionContext`.\n- **ai-service**: forward `ctx.agentId` into `conversationService.create({ agentId })` in `autoCreateConversation`.\n\n`undefined → null`, so the general `/api/v1/ai/chat` route and system invocations are unchanged.\n\n## Why (downstream)\ncloud's AI token guardrail meters **build vs data-Q&A separately** by joining `ai_messages → ai_conversations.agent_id`. With agent_id null, everything classified as `build` (fail-safe but the data-Q&A meter stayed inert). This populates the field so the split actually works for new conversations.\n\n## Test\n`ai-service` › *auto-creates the conversation with the agentId from the execution context*. Full `service-ai` suite green (104 + 130).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

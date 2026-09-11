@@ -1,0 +1,32 @@
+{
+  "number": 2242,
+  "kind": "pull_request",
+  "title": "feat(showcase): SDUI big-screen \"Command Center\" 大屏 page (+ objectui bump)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-23T12:50:08Z",
+  "updated_at": "2026-06-23T12:54:44Z",
+  "closed_at": "2026-06-23T12:54:42Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-23T12:54:42Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2242",
+  "body": "Adds a full-bleed, **theme-following** \"交付运营数据大屏 / Delivery Operations Command Center\" page to the showcase — a worked example that an SDUI micro-page can compose a real data-screen / 大屏.\n\n- **KPI hero strip** (6 metrics) + **gradient** bar/area charts + a **container-scaled donut** + a live **work-queue grid**.\n- **Theme-adaptive**: clean light dashboard in a light console; one cohesive dark 大屏 when the console is switched to dark (no dark-island mismatch).\n- Cohesive chart palette via a per-page `--chart-1..5` override.\n- Nav: Analytics → Command Center (大屏).\n\n### Depends on objectstack-ai/objectui#1922\nBumps `.objectui-sha` → `c9a3fc8db` for the three renderer capabilities the page relies on (full-bleed `width:'full'` pages, container-scaled donuts, gradient fills). **Merge objectui#1922 first.**\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

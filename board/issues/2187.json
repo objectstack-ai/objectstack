@@ -1,0 +1,35 @@
+{
+  "number": 2187,
+  "kind": "pull_request",
+  "title": "feat(cli): validate all flat record-scoped predicates at build time",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T08:17:50Z",
+  "updated_at": "2026-06-22T08:27:59Z",
+  "closed_at": "2026-06-22T08:27:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T08:27:56Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2187",
+  "body": "Follow-up to framework#2185 (action predicates). Extends the ADR-0032 build-time check to the remaining **flat record-scoped** predicate sites — the same \"bare field ref silently mis-behaves at runtime\" class, in higher-stakes places.\n\n## Now validated (record-scoped, bare-ref → build error)\n\n| Site | Where | Why it matters |\n|---|---|---|\n| field `requiredWhen` / `readonlyWhen` / `conditionalRequired` / `visibleWhen` | `obj.fields[]` | server-enforced; a broken predicate is **fail-open** — the required/readonly rule silently never fires |\n| sharing-rule `condition` | `stack.sharingRules[]` | **security** — decides which rows a principal sees |\n| lifecycle hook `condition` | `stack.hooks[]` | skips the handler when false; broken → runs on every record or none |\n| nested `when` on `conditional` validation rules | `obj.validations[]` | previously only the top-level rule predicate was checked |\n\n(Already covered before this PR: flows, validation-rule predicates, field formulas, action `visible`/`disabled`.)\n\n## `@objectstack/formula`\n\nAdds `parent` to the record-scope namespace roots. Master-detail inline grids inject the header record as `parent` for a child field's `readonlyWhen`/`requiredWhen` (ADR-0036, #1581) — so `parent.status == 'paid'` is legitimate, not a bare ref. (Caught as a \"false positive\" by the first build run; this is the correct resolution.)\n\n## Verification\n\n- **Full monorepo build (`turbo build`, 76 tasks): clean** — zero false positives across every example + platform bundle.\n- cli validator suite: **25 cases** (5 new: field rule bare-ref flagged + `record.`/`parent.` accepted; sharing bare-ref; hook bare-ref; nested `when` bare-ref).\n\n## Deferred (separate follow-up)\n\nDeeply-**nested UI visibility** predicates — `view` element/section `visibleOn`/`condition`, `page` component `visibility`, object field-group `visibleOn`, app-nav `visible`. These need a **recursive view/page tree walker** plus **per-node scope classification** (app-nav is user/feature-scoped not record-scoped; object field-group `visibleOn` examples use bare fields by design). Rushing record-scope onto them would false-positive platform-wide, so they warrant their own design rather than a mechanical add.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

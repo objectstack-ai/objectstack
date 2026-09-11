@@ -1,0 +1,34 @@
+{
+  "number": 2184,
+  "kind": "pull_request",
+  "title": "feat(spec+showcase): add 'tree' view type + business_unit org-chart example",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T07:18:30Z",
+  "updated_at": "2026-06-22T07:41:36Z",
+  "closed_at": "2026-06-22T07:41:34Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T07:41:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2184",
+  "body": "## What\n\nAdds a **`tree` view type** to the `@objectstack/spec` ListView schema and exercises it in the showcase with a self-referencing `business_unit` org chart.\n\nThis is the metadata/data half of the tree-grid feature; the renderer lives in objectui ([plugin-tree](https://github.com/objectstack-ai/objectui/pull/_)). Pairs with objectui#1885.\n\n## Why\n\nSelf-referencing, **arbitrary-depth** hierarchies (org charts, category trees, BOMs, nested comments) can't be expressed by fixed-depth `grouping`. A tree view nests records by a single-parent pointer field. ObjectStack's `tree`/lookup self-reference is unambiguous (unlike Airtable's many-to-many links), so the nesting is well-defined.\n\n## Changes\n\n**Spec** (`packages/spec/src/ui/view.zod.ts`)\n- `'tree'` added to `VisualizationTypeSchema` and the `ListView.type` enum.\n- New `TreeConfigSchema` (`parentField` / `labelField` / `fields` / `defaultExpandedDepth`, passthrough) + `tree` key on `ListViewSchema`. Without this the runtime Zod-validates view metadata and silently drops `type:'tree'`.\n\n**Showcase** (`examples/app-showcase`)\n- New `showcase_business_unit` object (self-referencing `parent` lookup).\n- 3-level org-chart seed (company → division → department → team).\n- `BusinessUnitViews`: grid + an `Organization Chart` tree view, wired into nav + config.\n\n## Verification\n\nRan the showcase backend with this branch and confirmed `GET /api/v1/meta/view/showcase_business_unit.org_chart` serves `type:\"tree\"` with the full `tree` block intact and `_diagnostics.valid:true`; the objectui console renders the indented tree-grid with working expand/collapse over the seeded hierarchy.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

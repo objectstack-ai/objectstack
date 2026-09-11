@@ -1,0 +1,33 @@
+{
+  "number": 2032,
+  "kind": "pull_request",
+  "title": "feat(dogfood): multi-user harness + RLS cross-owner proof runner (#1994)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-18T12:14:09Z",
+  "updated_at": "2026-06-18T12:23:46Z",
+  "closed_at": "2026-06-18T12:23:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-18T12:23:44Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2032",
+  "body": "## Why\n\nThe verifier ([#2027](https://github.com/objectstack-ai/framework/pull/2027)) proves CRUD fidelity, but the most expensive class of metadata bug is **authorization** — exactly [#1994](https://github.com/objectstack-ai/framework/pull/1994), a by-id write that skipped the row-level predicate, letting a member edit a record it couldn't even see. This adds the machinery to derive that proof.\n\n## What\n\n- **harness** — `signUp(email)` mints a fresh member (the first user is the seeded admin, so a sign-up is a plain member with no grants — exactly what cross-owner proofs need). Also registers `SharingServicePlugin` so apps declaring `requires: ['sharing']` have their record-share grants enforced instead of silently inert (a **harness-fidelity fix**: the verifier was under-testing authorization).\n- **`src/rls.ts`** — the app-agnostic invariant: *\"a user who cannot READ a record must not be able to WRITE it.\"* Per object: admin creates a record; a fresh member tries to read it, then mutate it by id; re-reading as admin is the ground truth for whether the row actually changed. **member-can't-read + row-changed = the #1994 hole**, regardless of the app's sharing config.\n- **`test/rls-runner.test.ts`** — unit-proves the classifier: flags a hole / passes when consistent / reports member-visible. The detection logic is guaranteed correct.\n- **`test/auto-verify-rls.dogfood.test.ts`** — live smoke over CRM + showcase with a real second user.\n\n## Honest current state (and the next step)\n\nThe harness boots **single-tenant**, so org-scoped RLS is stripped and a fresh member falls back to `member_default` (broad read). So both the example apps **and hotcrm** report every object `member-visible` — the #1994 by-id-write path **isn't exercised live yet**. I'm not dressing that up as a working gate.\n\nA hard, **revert-provable** gate needs an owner-scoped fixture: a private-default object + a member permission set carrying `RLS.ownerPolicy('obj','created_by')` + `SecurityPlugin({ fallbackPermissionSet })`. The runner is **unit-proven and ready**; the live invariant (zero holes) still guards against a regression that makes a member able to mutate a record it can't read. The fixture is tracked as a follow-up.\n\nThis is itself a finding worth stating: **the verifier must register an app's required security plugins (and a tenancy mode that doesn't strip RLS) or it silently under-tests authorization** — which is why a \"member sees everything\" result must be read as \"not yet isolated here,\" not \"secure.\"\n\n## Notes\n- Private package — no changeset. Full dogfood suite: `37 passed | 1 skipped`, 0 failures.\n- Scope per ADR-0054 ([#2024](https://github.com/objectstack-ai/framework/pull/2024)).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

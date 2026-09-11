@@ -1,0 +1,33 @@
+{
+  "number": 2123,
+  "kind": "pull_request",
+  "title": "docs(currency): document field→tenant resolution chain; fix currencyMode; showcase demo",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T10:53:11Z",
+  "updated_at": "2026-06-21T11:43:57Z",
+  "closed_at": "2026-06-21T11:43:55Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T11:43:55Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2123",
+  "body": "## Docs / skills / showcase for the currency-resolution work\n\nBrings the skills + showcase in line with the now-implemented chain (#2102 / #2119 / #2121 / #2122).\n\n- **objectstack-ui** SKILL: document `DatasetMeasure.currency` (ISO 4217) + its resolution order (measure → field `currencyConfig` → tenant default).\n- **objectstack-data** field-types: **fixes a real doc bug** — `currencyMode` was documented as `'multi'/'single'`, but the schema is **`'fixed'/'dynamic'`**; adds a \"Currency resolution (ADR-0053)\" note (field default → tenant default → plain number, never a hardcoded `$`).\n- **objectstack-i18n** SKILL: note the workspace regional defaults (timezone / locale / **currency**) — the `localization` settings, resolved onto `ExecutionContext` and exposed at `/auth/me/localization`.\n- **showcase**: declare a fixed `currencyConfig.defaultCurrency` on field-zoo's currency field (demonstrates + smoke-covers the symbol path); refresh the chart-gallery `budget`/`spent` comment that claimed an unspecified-currency amount *\"must not show a $\"* — it now falls back to the tenant default.\n\n## Verified\n- `app-showcase` builds (the new field config + dataset parse through spec).\n- `check:skill-docs` in sync (body edits only; frontmatter unchanged).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

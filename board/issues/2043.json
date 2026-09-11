@@ -1,0 +1,35 @@
+{
+  "number": 2043,
+  "kind": "pull_request",
+  "title": "feat(autonumber): date, {field} & per-scope counter reset for autonumber formats",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-19T02:30:36Z",
+  "updated_at": "2026-06-19T10:12:56Z",
+  "closed_at": "2026-06-19T10:07:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-19T10:07:44Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2043",
+  "body": "## 背景\n\n`autonumberFormat` 此前只认一个 `{0000}` 序列槽 + 固定字面前缀 + 单一全局计数器,无法表达真实 MES/eHR 的编码规则(按日期重置、把记录字段拼进前缀、按父计划/分组独立编号)。\n\n## 方案\n\n把格式 tokenize 进一个放在 `@objectstack/spec` 的**纯函数渲染器**(`parseAutonumberFormat` / `renderAutonumber`),engine 内存兜底与 SQL driver 共用它,保证两条路径产出**逐字节一致**(#1603 parity)。\n\n四类 token:\n\n| token | 例子 | 效果 |\n|---|---|---|\n| 日期段 | `AD{YYYYMMDD}{0000}` | 按**业务时区** `execCtx.timezone` 取日历日(ADR-0053,UTC 兜底),每日重置 |\n| 字段插值 | `{section}{island_zone}{000}` | 把记录字段值拼进前缀 |\n| 父级/分组 | `{plan_no}{000}` | 按父计划号独立编号 |\n| 固定前缀 | `CASE-{0000}` | scope 为空 → 单一全局计数器,**完全向后兼容** |\n\n**核心设计**:计数器 scope = 序列槽之前渲染出的前缀。于是「每日重置 / 每组编号 / 每父编号」全部由同一机制自然得出,无需额外 reset 配置。\n\n## 改动\n\n- 新增 `packages/spec/src/data/autonumber-format.ts` — 共享渲染器\n- `driver.zod.ts` 新增 `DriverOptions.timezone`;`engine.ts` 经 `buildDriverOptions` 从 `execCtx.timezone` 注入\n- `sql-driver.ts` — `_objectstack_sequences` 加 `scope` 列,PK 拓宽为 `(object, tenant_id, field, scope)`;遗留三列表**首次使用时就地迁移**,旧计数器并入 `scope=''`\n- `field.zod.ts` — 文档 / `.describe()` 说明三类 token 与 scope/重置语义\n\n## 测试\n\n- spec `autonumber-format.test.ts` — 11 例(含时区咬合:上海 vs UTC)\n- driver-sql `sql-driver-autonumber-tokens.test.ts`(新)7 例 + 原有 autonumber 套件 12 例,**含遗留表迁移 + 旧计数器续号**\n- objectql `engine-autonumber-defer.test.ts` 补 2 例(fallback 的 `{field}` 分组 + 日期段),全套 667 例通过\n\n向后兼容:固定前缀格式 scope 为空,既有序列不变;sequences 表迁移把所有遗留行带到 `scope=''`。\n\nchangeset:`@objectstack/spec` / `@objectstack/objectql` / `@objectstack/driver-sql` minor。"
+}

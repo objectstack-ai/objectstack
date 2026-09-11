@@ -1,0 +1,33 @@
+{
+  "number": 2126,
+  "kind": "pull_request",
+  "title": "docs(ui): document dashboard drill-in (drill-through + drill-to-record chain)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T12:47:12Z",
+  "updated_at": "2026-06-21T12:50:20Z",
+  "closed_at": "2026-06-21T12:50:17Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T12:50:17Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2126",
+  "body": "Documents the dashboard drill-in behavior, which the guide/skill didn't cover — the `objectstack-ui` skill even had a \"Drilldown\" section header with no content, and the guide overclaimed that *every* dataset widget has \"drill-down affordances\".\n\nPairs with the ObjectUI renderer work in objectstack-ai/objectui#1859 and objectstack-ai/objectui#1861.\n\n## What's documented\n- **`table` / `pivot` dataset widgets drill through** to the underlying records (the dataset preserves raw group keys, so the filter matches the exact records).\n- **The drilled record list drills to record** — clicking a row opens that record, completing the **group → records → record** chain.\n- **`metric` / `chart` dataset widgets are not click-drillable** — surface detail via a `table`/`pivot` widget. (Corrects the prior overclaim.)\n- A **renderer note** on the ObjectUI `options.drillDown` block for object/record-backed surfaces (`mode: 'filter' | 'record'`, drawer/dialog target, column whitelist, scatter/treemap/sankey chart drill).\n\n## Files\n- `skills/objectstack-ui/SKILL.md` — new `### Drilldown` subsection (fills the empty header).\n- `content/docs/guides/metadata/dashboard.mdx` — new `### Drill-down` subsection + fixed the overclaim.\n- `content/docs/concepts/implementation-status.mdx` — note the completed record chain.\n\nDocs/skills only — no code or schema changes.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

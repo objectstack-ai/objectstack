@@ -1,0 +1,32 @@
+{
+  "number": 2039,
+  "kind": "pull_request",
+  "title": "feat(platform): sandbox tx boundary · gantt tree schema · formula date math · RLS §7.3.1",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "size/l"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-18T14:50:09Z",
+  "updated_at": "2026-06-18T22:38:46Z",
+  "closed_at": "2026-06-18T22:38:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-18T22:38:44Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2039",
+  "body": "## 背景\n\n用真实 eHR/MES 生产项目作磨刀石,补齐 ObjectStack 平台四处能力缺口。每项都以\"扩 schema / 接契约\"为主,向后兼容(新增字段全 optional)。\n\n## 改动\n\n### ① `ctx.api.transaction`(P0) — `@objectstack/{spec,objectql,runtime}`\n沙箱 hook/action body 内的事务边界:`ctx.api.transaction(async () => { … })`,回调内所有 `ctx.api` 读写跑在同一个 driver 事务里,返回即 commit、抛错即 rollback、超时残留事务在 dispose 前兜底 rollback。\n- **spec**: 新增 `api.transaction` capability token。\n- **objectql**: `ScopedContext` 增加 `beginTransaction()/commitTransaction(handle)/rollbackTransaction(handle)` 原语,handle **显式穿线**(`resolveTx` 优先于 ambient `txStore`),因为沙箱跨多个事件循环 turn 驱动 body、AsyncLocalStorage 上下文活不过 `setImmediate` 边界。无事务支持的 driver 退化为非事务执行。\n- **runtime**: QuickJS runner 用三个 deferred-promise host leaf(begin/commit/rollback)接出 `ctx.api.transaction`,事务内操作走 tx 作用域上下文。\n\n### ② Gantt 扩 schema(P0) — `@objectstack/spec`\n`GanttConfigSchema` 补上渲染器**早已支持**、却被 spec 边界 `z.object` 静默剥掉的 11 个字段:`parentField`(项目→产品→排产计划→派工单 4 级树)、`typeField`、`baselineStart/EndField`、`resourceView`+`assignee/effort/capacity`、`quickFilters`、`tooltipFields` 等。原 5 字段不变,全部新增 optional。\n\n### ③ formula 日期运算 — `@objectstack/formula`\nCEL stdlib 新增 `addDays(date, n)` / `addMonths(date, n)`(UTC;`n` 为 `dyn` 规避 record number 字段以 double 到达时的 `no such overload` #1928;`addMonths` 钳到目标月末:Jan 31 +1mo → Feb 28)。\n\n### ④ RLS 收敛文档 + 接 §7.3.1(P1) — `@objectstack/{spec,plugin-security}`\n- **收敛文档**:`rls.zod.ts` 从\"承诺通用 SQL\"收敛到编译器真正实现的 **4 种形式**(`field = current_user.<prop>` / `field = 'literal'` / `field IN (current_user.<array>)` / `1 = 1`),删除过度承诺的 `subquery / AND·OR·NOT / LIKE·ILIKE / regex / ANY·ALL / NOT IN / IS NULL / NOW()` 表面,显式写明 fail-closed。\n- **接 §7.3.1 动态成员**:把硬编码的 `org_user_ids` 泛化为 `ExecutionContext.rlsMembership: Record<string, string[]>` 预解析成员袋(团队/辖区/共享记录);编译器把各键并入 user context(仅数组、不覆盖具名字段),于是任意 `field IN (current_user.<key>)` 都能解析、空集仍 fail-closed。顺手把 `1 = 1` 识别为 always-true,让 `RLS.allowAllPolicy` 名实相符(此前反向 deny-all 暗雷)。\n\n## 验证\n- `@objectstack/spec` 6566 ✅\n- `@objectstack/plugin-security` 77 ✅(含 5 个新 RLS 测试)\n- `@objectstack/runtime` 395 ✅ · `@objectstack/objectql` 667 ✅(① 上轮验证)\n- `@objectstack/formula` 129 ✅\n- 相关包均构建通过。\n\n## changesets\n`sandbox-ctx-api-transaction`(spec/objectql/runtime minor)· `gantt-config-tree-resource-fields`(spec minor)· `formula-add-days-months`(formula minor)· `rls-converge-docs-dynamic-membership`(spec/plugin-security minor)\n\n## 后续(不在本 PR)\n- objectui 侧 `GanttConfigEx` 收敛进 spec `GanttConfig`,待 `@objectstack/spec` 发版后跟进(已挂 task)。\n- ⑤ 序列自增号、⑥ 移动端响应式 — P2 延后。"
+}

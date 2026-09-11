@@ -1,0 +1,35 @@
+{
+  "number": 2146,
+  "kind": "pull_request",
+  "title": "feat: sys_user.primary_business_unit_id projection — pick people by BU (ADR-0057 D12)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T01:01:51Z",
+  "updated_at": "2026-06-22T01:38:11Z",
+  "closed_at": "2026-06-22T01:38:09Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T01:38:09Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2146",
+  "body": "Final implementation increment of the **ADR-0057 addendum** (#2141) — **PS-3 / D12**. Builds on PS-1 (#2143).\n\n## What\n\nAdds a denormalised `sys_user.primary_business_unit_id` lookup, maintained by **plugin-sharing** as a projection of `sys_business_unit_member.is_primary`.\n\n## Why\n\n\"Pick people by business unit\" — the Dataverse **filtered lookup** / ServiceNow **reference qualifier** interaction — is a baseline ERP need that requires **no** hierarchy rollup. But it wasn't expressible: lookup fields filter only on the *target object's own columns*, `sys_user` had no BU column, and ObjectQL can't traverse the `sys_business_unit_member` junction in a single filter. Denormalising the primary BU onto `sys_user` makes `where: { primary_business_unit_id: X }` (and thus a `lookupFilters` picker filter) work with **zero** query-engine change.\n\n## How\n\n- **Field** on `sys_user` (mirrors `manager_id`, #2133) + en/zh/ja/es labels.\n- **plugin-sharing** binds `afterInsert`/`afterUpdate`/`afterDelete` hooks on `sys_business_unit_member` that recompute the owner's projection, plus a boot-time backfill for pre-existing rows. `afterDelete` exposes neither `previous` nor the deleted row, so `user_id` is captured in `beforeDelete` via the shared `hookContext`.\n- **Home = plugin-sharing** (always loaded, owns `BusinessUnitGraphService`), *not* plugin-org-scoping — that plugin is multi-tenant-only, and BU membership is usable single-tenant. So picker-filtering by BU is an **open** capability; only hierarchy *rollup* stays paid.\n\n## Notes / scope\n\n- `sys_business_unit_member` remains the effective-dated, matrix source of truth; the column is a maintained **projection** of `is_primary`, not a second source. Matrix/multi-BU pickers still use the two-step junction expansion.\n- `lookupFilters` is a client-side picker hint (no server enforcement), so the dogfood proves the *server-verifiable* deliverable: the column is maintained on insert/update/delete and filterable. Test: insert sets it, query filters by it, primary-flag move follows, delete clears.\n\nChangeset: `@objectstack/platform-objects` + `@objectstack/plugin-sharing` **minor**.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 2128,
+  "kind": "pull_request",
+  "title": "feat(spec,showcase): allowCreate flag for inline lookup quick-create",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T13:41:40Z",
+  "updated_at": "2026-06-21T13:51:51Z",
+  "closed_at": "2026-06-21T13:51:49Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T13:51:49Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2128",
+  "body": "Exposes the opt-in **inline quick-create** that the objectui record picker supports (companion to objectui **#1863**). When no match exists, the user creates a record straight from the typed text via an optimistic `dataSource.create` with the display field — Airtable/Notion-style. Best for simple objects whose only required field is the display field.\n\n## Changes\n- **spec** — add `allowCreate` to `FieldSchema` (flows through `Field.lookup` via `FieldInput`); classified `live` in the liveness ledger (objectui consumer, reads `allowCreate || allow_create`).\n- **showcase** — enable it on `showcase_category.parent`. Category requires only `name`, so quick-create succeeds end-to-end.\n- **test** — assert `allowCreate` survives `FieldSchema.parse`.\n\n## Verification\n- `packages/spec` tests: **117 passed**.\n- Liveness gate: ✓ all field props classified (field: 60, live 52).\n- `app-showcase` typecheck: clean in changed files (only pre-existing connector/objectql module-resolution noise remains).\n- Renderer quick-create path is unit-covered in objectui #1863."
+}

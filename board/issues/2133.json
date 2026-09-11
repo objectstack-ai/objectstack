@@ -1,0 +1,35 @@
+{
+  "number": 2133,
+  "kind": "pull_request",
+  "title": "feat(platform-objects): add sys_user.manager_id to back the own_and_reports scope (ADR-0057)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T14:45:09Z",
+  "updated_at": "2026-06-21T14:51:57Z",
+  "closed_at": "2026-06-21T14:51:55Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T14:51:55Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2133",
+  "body": "## What\nThe ADR-0057 `own_and_reports` hierarchy scope (caller + everyone down their manager chain) was **implemented in the resolver** (it walks `sys_user.manager_id`) but **unbacked** — nothing on `sys_user` modelled a manager, so the scope silently degraded to owner-only. This adds the missing field and proves the scope end-to-end.\n\n## Changes\n- **`sys_user.manager_id`** — a self-lookup (`Field.lookup('sys_user')`) in a new `Organization` group. The reporting chain `own_and_reports` walks.\n- **i18n** — `manager_id` label in en / zh / ja / es (Manager / 经理 / マネージャー / Gerente).\n- **Dogfood** — `showcase-scope-depth.dogfood.test.ts` now covers `own_and_reports`: a user sees their own records plus everyone down their `manager_id` chain (alice ← bob ← carol), not off-chain peers; a leaf report sees only their own. **7/7 green** (was 5).\n\n## Why now\nSurfaced while rounding out the enterprise hierarchy-authz verification: `unit` / `unit_and_below` are proven (here + the cloud security-enterprise conformance test), but `own_and_reports` had no data model behind it. This makes all three scopes real and tested.\n\n> Follow-up (separate, cloud repo): extend the cloud `security-enterprise` conformance test to assert `own_and_reports` against the **real** resolver — needs a `.framework-sha` bump to include this field.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 2012,
+  "kind": "pull_request",
+  "title": "docs: clone endpoint, required-FK delete, Field.time, owner-scoped writes",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-17T07:13:34Z",
+  "updated_at": "2026-06-17T07:20:01Z",
+  "closed_at": "2026-06-17T07:19:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-17T07:19:58Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2012",
+  "body": "Targeted hand-written-doc updates so the docs match the runtime behavior shipped this cycle (clone, delete-cascade, time validation, owner-scoped member writes).\n\n| Doc | Update |\n|---|---|\n| `guides/api-reference.mdx` + `concepts/implementation-status.mdx` | Document `POST /data/:object/:id/clone` — gated by `enable.clone` (`403 CLONE_DISABLED` when off), optional `{ overrides }`, `201 { object, id, sourceId, record }`. (`enable.clone` was already listed as a capability but had no runtime/endpoint until #1961.) |\n| `protocol/objectql/types.mdx` | `deleteBehavior`: a **required** lookup FK escalates a *defaulted* `set_null` to `restrict` → `409 DELETE_RESTRICTED` (with `dependentObject`/`dependentCount`), instead of a misleading \"&lt;field&gt; is required\" error (#1984). `Field.time` accepts `HH:MM`/`HH:MM:SS` and is validated as a time-of-day, not a date (#2004). |\n| `guides/security.mdx` | `member_default` writes are **owner-scoped** (`created_by`) and now actually enforced on by-id `update`/`delete` via a pre-image authorization check — a member can't modify another user's record (`403`); `modifyAllRecords`/admin bypass; audit-opt-out objects fail closed (#1994). |\n\nDocs-only; no package version impact.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

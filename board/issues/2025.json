@@ -1,0 +1,35 @@
+{
+  "number": 2025,
+  "kind": "pull_request",
+  "title": "fix(driver-sql): round-trip rating/slider/toggle with type fidelity",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-18T06:33:48Z",
+  "updated_at": "2026-06-18T06:44:18Z",
+  "closed_at": "2026-06-18T06:44:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-18T06:44:17Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2025",
+  "body": "## Problem\n\nThe dogfood field-zoo round-trip test (`#2022`) surfaced three authorable field types that **persist but read back with the wrong JS type** over the REST data API:\n\n| field | write | read back (before) |\n|---|---|---|\n| `rating` | `4` | `'4'` (string) |\n| `slider` | `25` | `'25'` (string) |\n| `toggle` | `true` | `'1'` (string) |\n\nThe value is not lost — only the **type** leaks. On a low-code platform where an AI authors arbitrary field types, a field that silently returns the wrong type is a runtime-fidelity trap the static gates and value-loss tests don't catch.\n\n## Root cause (`packages/plugins/driver-sql/src/sql-driver.ts`)\n\nTwo coupled gaps:\n\n1. **Wrong column affinity.** `createColumn`'s DDL switch had no case for `rating`/`slider`/`toggle`/`progress`, so they fell to `default → table.string` = TEXT affinity. SQLite then coerced the written number/boolean to a string on storage. `number`/`currency`/`percent` worked only because of explicit `table.float` cases; `boolean` because of a `table.boolean` case + read coercion.\n2. **Missing read coercion.** `formatOutput` re-types boolean columns via the `booleanFields` registry, keyed on `type === 'boolean'` only — `toggle` was never registered.\n\n## Fix\n\n- `rating`/`slider`/`progress` → REAL (numeric) column.\n- `toggle` → boolean column **and** registered in `booleanFields` so stored `1`/`0` coerce back to a real JS boolean.\n- Audit of the other raw-literal types: `vector`/`composite`/`repeater` were already JSON-safe; `record`/`video`/`audio` were the same latent leak (object → TEXT), now folded into the shared `JSON_COLUMN_TYPES` set. `tree` stores a reference id (string→string, no leak — unchanged).\n- The DDL `default` case now derives JSON-vs-string from `JSON_COLUMN_TYPES`, so the column-type switch and `isJsonField` (read side) **can no longer drift**.\n\n## Verification\n\n- New driver-layer unit test `sql-driver-numeric-fidelity.test.ts` asserts `typeof` fidelity for rating/slider/progress/toggle + record/video/audio. **Red-proof done**: all 3 fail without the fix, pass with it.\n- Full driver-sql suite: **158 passed, no regressions**.\n- Lifted the `xfail` quarantine on rating/slider/toggle in the dogfood matrix → real-HTTP round-trip test now **22 passed** (the formerly-quarantined three turn green — exactly the signal the `it.fails` quarantine was designed to force).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

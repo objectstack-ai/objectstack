@@ -1,0 +1,35 @@
+{
+  "number": 2009,
+  "kind": "pull_request",
+  "title": "feat(cli): auto-wire marketplace from @objectstack/cloud-connection when a cloud URL resolves",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-17T05:51:41Z",
+  "updated_at": "2026-06-17T05:52:05Z",
+  "closed_at": "2026-06-17T05:52:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-17T05:52:04Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2009",
+  "body": "## What\n\nThe framework CLI (`objectstack serve`/`dev`/`start`) auto-wires the marketplace again — `MarketplaceProxyPlugin` + `MarketplaceInstallLocalPlugin` + the same-origin cloud-connection surface + `RuntimeConfigPlugin` (single-env, `installLocal: true`) — gated on `resolveCloudUrl()` being truthy. Imported from the open `@objectstack/cloud-connection` package.\n\n## Why\n\n- **ADR-0006 Phase 4** removed the CLI's marketplace plugins because they were *duplicate* copies living in `@objectstack/runtime`.\n- **ADR-0008** then open-sourced the canonical client into the Apache-2.0 `@objectstack/cloud-connection` package (framework-side).\n- After 0008 there is no longer a cloud-only copy to duplicate, so the CLI can wire the single canonical open implementation **without crossing the open-core boundary**. The serve.ts comment claiming the canonical impl is cloud-only (`@objectstack/objectos-runtime`) was stale.\n\n### The concrete bug this fixes\n\n`objectstack start` empty-boot (`OS_BOOT_EMPTY=1`) advertises *\"boot an empty kernel against your marketplace\"* — but with no config and no artifact, there is **no host to carry the marketplace wiring**, so the only place it can come from is the CLI itself. Post-ADR-0006 the CLI mounted nothing, so empty-boot was silently marketless. This restores it.\n\n## Behavior\n\n| Scenario | Result |\n|---|---|\n| `OS_CLOUD_URL` resolves | proxy + install-local + cloud-connection + runtime-config mounted; Browse Marketplace + Installed Apps nav reappear (plugins self-register their Setup nav bundles) |\n| `OS_CLOUD_URL=off` / unset | nothing mounts — vanilla marketplace-less `objectstack dev` preserved |\n| Runtime/host-kernel mode | skipped (the cloud `objectos-stack` wires its own proxy on the host kernel; detected via `ObjectOSEnvironmentPlugin`, mirroring the existing AuthPlugin guard — avoids double-mount) |\n\n## Changes\n\n- `packages/cli/package.json` — add `@objectstack/cloud-connection: workspace:*`\n- `packages/cli/src/commands/serve.ts` — conditional wiring block (replaces the ADR-0006 \"REMOVED\" comment)\n- `.changeset/cli-marketplace-autowire.md` — minor\n\n## Verification\n\n- `tsc -p tsconfig.build.json` (real typecheck with declarations) — 53/53 pass, no errors in the changed block.\n- Lint not runnable locally (no `eslint` binary in repo `node_modules`); code mirrors the existing `5c`/`5d` auto-inject blocks.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

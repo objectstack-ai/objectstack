@@ -1,0 +1,36 @@
+{
+  "number": 2227,
+  "kind": "pull_request",
+  "title": "fix(runtime): mount GET /ready so the readiness probe is reachable over HTTP",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-23T02:01:14Z",
+  "updated_at": "2026-06-23T02:06:34Z",
+  "closed_at": "2026-06-23T02:06:32Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-23T02:06:32Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2227",
+  "body": "## Problem\n\nSeam #2 (PR #2217) added a `GET /ready` readiness handler inside the dispatcher's `dispatch()` (next to `/health`) plus a passing unit test. But in a **real running server** `/ready` returned 404 (`{\"error\":\"Not found\"}`) and was unreachable, while `/api/v1/health` returned 200.\n\nRoot cause: the dispatcher mounts routes on the HTTP server **explicitly — there is no catch-all**. `${prefix}/health` is registered in `dispatcher-plugin.ts`; `${prefix}/ready` never was. So `GET /api/v1/ready` matched no route and fell through to HonoServerPlugin's `notFound` handler before reaching `dispatch()`. This is the exact class of bug that shipped `/mcp` and `/keys` broken — the unit test passed because it called `dispatch()` directly.\n\n## Fix\n\nMount `${prefix}/ready` next to `${prefix}/health`, routing to `dispatch('GET', '/ready', …)`. The 200 (`running`) / 503 (booting or draining) handler logic was already correct and is untouched. This is the contract the EE multi-node rolling-restart drain gate polls (cloud ADR-0018) so a load balancer stops routing to a replica before it closes.\n\n## Tests\n\n- **`dispatcher-plugin.routes.test.ts`** — assert both `/health` and `/ready` are mounted (registration-level guard that would have caught this gap).\n- **`dispatcher-plugin.ready.integration.test.ts`** (new) — boot a real `HonoServerPlugin` + dispatcher on a socket and use `fetch` (not `dispatch()`):\n  - `/api/v1/ready` → 200 `{state:\"running\"}`\n  - `/api/v1/ready` → 503 while draining (`kernel.getState()` → `stopping`)\n  - a bogus path → the prod `{\"error\":\"Not found\"}` 404, proving the harness reproduces the pre-fix failure (not a vacuous pass)\n  - adds a test-only devDependency on `@objectstack/plugin-hono-server` (no cycle; not in the build/publish graph).\n\n## Verification\n\n- `pnpm --filter @objectstack/runtime build` → strict DTS success\n- Full runtime suite → 29 files / 420 tests pass\n- CLI boot + curl: `/api/v1/ready` 404 → **200** `{\"success\":true,\"data\":{\"status\":\"ready\",\"state\":\"running\"}}`\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

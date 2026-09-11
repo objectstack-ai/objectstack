@@ -1,0 +1,32 @@
+{
+  "number": 2093,
+  "kind": "pull_request",
+  "title": "ci(release): pre-publish backward-compat smoke against live hotcrm (#2035)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T06:23:17Z",
+  "updated_at": "2026-06-21T06:28:59Z",
+  "closed_at": "2026-06-21T06:28:58Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T06:28:58Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2093",
+  "body": "Follow-up to #2035 / #2088 / #2089 / #2092 — the final layer of the third-party validation strategy. You chose to run the live-hotcrm gate in the **pre-publish / release workflow**; this implements exactly that.\n\n## What\n\n`scripts/downstream-smoke.sh`:\n1. clones `objectstack-ai/hotcrm` at a pinned tag (`v1.2.0`),\n2. installs it against the **published** `@objectstack/*` packages,\n3. overlays the freshly-built — i.e. **unreleased** — `@objectstack/spec` dist,\n4. runs hotcrm's own `typecheck` + `objectstack validate`.\n\nIf the about-to-publish spec breaks a real, independently-authored consumer, the release is blocked.\n\nWired into `release.yml` between the build and the changesets publish step — so it runs **only in the release pipeline**, never on a feature PR. It mirrors the existing console-SPA step that already clones an external repo (objectui) at a pinned ref, so the pattern is established.\n\n## Where it sits\n\n| Layer | Gate | Runs | PR |\n|---|---|---|---|\n| floor (deterministic) | `downstream-contract` fixture | every PR | #2089 |\n| floor (deterministic) | api-surface snapshot | every PR | #2092 |\n| **ceiling (live)** | **hotcrm smoke** | **pre-publish only** | **this** |\n\nThe fixture and snapshot are fast and run on every PR; this heavy, live check is the pre-publish backstop for anything they miss — at the cost of coupling to one external repo, which is why it's release-only and pinned to a tag (override via `HOTCRM_REF`).\n\n## Verified end-to-end (locally, real clone)\n\nRan the actual script: cloned `hotcrm@v1.2.0` → `pnpm install` → overlaid the current spec build → `typecheck` (0 errors) + `objectstack validate` (✓ — 15 objects / 297 fields / 15 pages / 10 reports / 11 actions / 17 flows / 10 roles). Exit 0. (The only output warnings are hotcrm's own pre-existing dashboard-widget notices, unrelated to the spec.)\n\n## Notes\n\n- hotcrm is public, so no token needed; `pnpm install` falls back to `--no-frozen-lockfile` if hotcrm's lockfile drifts from current published versions.\n- CI/release-infra only — no consumer-facing change, no changeset.\n- Possible follow-up: retry-wrap the clone for transient network resilience.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

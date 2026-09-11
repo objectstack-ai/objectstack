@@ -1,0 +1,34 @@
+{
+  "number": 2016,
+  "kind": "pull_request",
+  "title": "fix(i18n): add view form end_user_controls translations",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-18T02:32:28Z",
+  "updated_at": "2026-06-18T13:18:20Z",
+  "closed_at": "2026-06-18T13:18:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-18T13:18:18Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2016",
+  "body": "## Problem\n\nIn the view editor (\\`编辑视图\\`), the **End-user controls** section (ADR-0047, Airtable Interface parity) and its six fields rendered in English even under non-English locales (zh-CN / ja-JP / es-ES).\n\nRoot cause: the generated metadata-forms translation bundles were stale relative to [\\`packages/spec/src/ui/view.form.ts\\`](packages/spec/src/ui/view.form.ts). The \\`end_user_controls\\` section and its fields (\\`userFilters\\`, \\`tabs\\`, \\`appearance\\`, \\`userActions\\`, \\`addRecord\\`, \\`showRecordCount\\`) had no entries under \\`metadataForms.view\\`, so the server-side localization (\\`rest-server.ts\\` → \\`translateMetadataDocument\\`) had nothing to apply and the form fell back to the raw English spec strings.\n\n## Fix\n\nAdd the missing \\`end_user_controls\\` section (label + description) and its six fields (label + helpText) to all four generated locale bundles:\n\n- \\`en.metadata-forms.generated.ts\\`\n- \\`zh-CN.metadata-forms.generated.ts\\`\n- \\`ja-JP.metadata-forms.generated.ts\\`\n- \\`es-ES.metadata-forms.generated.ts\\`\n\nThe \\`view\\` form's section/field key set now matches the spec exactly (verified by diffing section/field names in \\`view.form.ts\\` against the generated keys). These generated files are hand-editable per \\`metadata-translations/index.ts\\`.\n\n## Verification\n\n- \\`pnpm --filter @objectstack/platform-objects build\\` — success\n- \\`pnpm --filter @objectstack/platform-objects test\\` — 55 passed\n- view-form section/field keys in the en bundle now match \\`view.form.ts\\` 1:1"
+}

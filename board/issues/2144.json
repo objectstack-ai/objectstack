@@ -1,0 +1,35 @@
+{
+  "number": 2144,
+  "kind": "pull_request",
+  "title": "feat(service-ai)!: rename data agent data_chat → ask (Path A) with back-compat alias",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T15:56:29Z",
+  "updated_at": "2026-06-22T01:47:18Z",
+  "closed_at": "2026-06-22T01:47:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T01:47:16Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2144",
+  "body": "## Why\nPart of the **Path A** console AI surface split ([objectui#1868](https://github.com/objectstack-ai/objectui/pull/1868)): the two assistants get their own pages at friendly routes `/ai/ask` and `/ai/build`. For the route to equal the real identifier (no permanent alias-indirection layer), the built-in agents are renamed. This PR renames the framework's data agent `data_chat` → `ask`. The cloud rename (`metadata_assistant` → `build`) is a separate PR; this one is independently safe.\n\n## What\n- `DEFAULT_DATA_AGENT_NAME = 'ask'` (was `data_chat`); `LEGACY_DATA_AGENT_NAME` kept for migrations/diagnostics.\n- **Alias registry** (`agents/agent-aliases.ts`): seeds `data_chat → ask`; `AgentRuntime.loadAgent` normalizes a requested name through it, so `/agents/data_chat/chat` and any persisted `ai_conversations.agent_id = 'data_chat'` keep resolving. Aliases are **resolution-only** (not records), so `GET /ai/agents` still lists each agent once.\n- `registerAgentAlias(legacy, canonical)` is exported so each package registers its **own** rename — the cloud AI Studio plugin will register `metadata_assistant → build`. This decoupling is what makes the two renames independently safe: neither alias points at an id its owning package hasn't registered yet.\n- On upgrade, the plugin prunes the stale `data_chat` registry entry so the catalog isn't doubled (idempotent on fresh installs).\n\n## Verification\n- New unit tests (5): alias table behavior + `loadAgent` resolving a legacy name to the renamed record + unknown-name passthrough.\n- The objectui console already resolves **both** legacy and renamed catalogs (its `agentAliases` layer was verified live against this rig and is unit-tested), so no client change is required by this PR.\n- Pre-existing unrelated `tsc` errors exist in some `__tests__` files on `main`; none are touched here.\n\n## Breaking change\nThe built-in data agent's canonical name is now `ask`. The legacy `data_chat` name remains accepted via the alias table, so existing clients/links/conversations keep working.\n\n## Related / follow-ups\n- [objectui#1868](https://github.com/objectstack-ai/objectui/pull/1868) — console routing/UX (already resolves `ask`/`build`).\n- cloud `service-ai-studio`: rename `metadata_assistant` → `build` (+ `registerAgentAlias`), update the Studio app `defaultAgent`.\n- optional one-time migration of `ai_conversations.agent_id` old→new (not required for function — aliases handle legacy values).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

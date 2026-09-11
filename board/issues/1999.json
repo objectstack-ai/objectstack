@@ -1,0 +1,32 @@
+{
+  "number": 1999,
+  "kind": "pull_request",
+  "title": "chore(crm): surface Reassign Lead on the record header",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-17T03:27:11Z",
+  "updated_at": "2026-06-17T03:27:45Z",
+  "closed_at": "2026-06-17T03:27:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-17T03:27:44Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1999",
+  "body": "## What\n\nExtends the CRM \"Reassign Lead\" demo action so it appears on the **record\nheader** in addition to the list row:\n\n- `locations: ['list_item', 'record_header']`\n- adopts the `record.status == \"converted\"` predicate convention so the CEL\n  `disabled` greys out consistently on both surfaces (the row menu now exposes\n  both `record.*` and bare-field scopes).\n\nParam collection, `dataSource.update`, and the Undo toast now all drive from the\nheader too.\n\n## Why\n\nPairs with [objectui#1788](https://github.com/objectstack-ai/objectui/pull/1788),\nwhich fixes `evaluateCondition` so a bare-CEL `disabled` actually evaluates\n(instead of being silently always-truthy). Before that fix, a param-collecting\n`api` action on the record header was treated as permanently disabled and never\nopened its param dialog.\n\n## Verification\n\nBrowser E2E on the lead record page: header **Reassign Lead** → param dialog →\ncustom **\"Lead reassigned.\"** toast → **Undo** → **\"Change undone.\"**\n\nExample-only; no shipped-package changes.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

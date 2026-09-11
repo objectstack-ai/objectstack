@@ -1,0 +1,32 @@
+{
+  "number": 1981,
+  "kind": "issue",
+  "title": "ADR-0053 Phase 2 · Slice 4: render datetime in reference timezone (formatters + email)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T16:00:26Z",
+  "updated_at": "2026-06-17T05:03:42Z",
+  "closed_at": "2026-06-17T05:03:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1981",
+  "body": "**Part of ADR-0053 Phase 2.** Design: #1975 · Parent: #1928.\n\n**Slice 4 of 6 — render-tz.** Show `datetime` instants in the reference timezone at the presentation boundary. Storage stays UTC.\n\n### Scope\n- **Centralized path (low blast radius):** the template engine `date`/`datetime` formatters already take `locale` from `EvalContext` — add a `timeZone` option to their `Intl.DateTimeFormat` calls — `packages/formula/src/template-engine.ts:88-106` (locale plumbing at `:233-236`).\n- **Outlier (architectural):** email templates **bypass the formatter pipeline entirely** — `renderTemplate` does naive `String()` with no formatter/locale/tz — `packages/plugins/plugin-email/src/email-service.ts:336-340` and `plugin-email`'s `template-engine.ts`. Route email rendering through the formula template engine (or port the formatters). This is the real cost of this slice — not a parameter add.\n\n### Acceptance criteria\n- [ ] `{{ value | datetime }}` renders in the reference tz when set; UTC when unset.\n- [ ] An email template containing a datetime renders in the reference tz (not raw UTC/ISO).\n- [ ] `date` (calendar-day) rendering is unaffected (already tz-naive after Phase 1).\n\n### Depends on\nSlice 1 (timezone value).\n"
+}

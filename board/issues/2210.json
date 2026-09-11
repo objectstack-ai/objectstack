@@ -1,0 +1,34 @@
+{
+  "number": 2210,
+  "kind": "pull_request",
+  "title": "ADR-0065: SDUI styling model — scoped style-objects over arbitrary Tailwind",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T14:18:25Z",
+  "updated_at": "2026-06-22T14:24:36Z",
+  "closed_at": "2026-06-22T14:24:34Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T14:24:34Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2210",
+  "body": "## What\n\nProposes **ADR-0065**: metadata-authored SDUI styling is a **scoped style-object with model-owned responsive breakpoints** (token-constrained values), compiled to **per-component id-scoped CSS at render time** — **not** arbitrary Tailwind class strings. Arbitrary `className` is demoted to a gated, runtime-engine-only escape hatch.\n\n## Why (three independent failure axes of arbitrary Tailwind-in-metadata)\n\n1. **Compilation** — Tailwind JIT scans *source* at build; the shipped renderer's CSS scans only objectui's own `src`, never page metadata, and there's no safelist → a class works only if it *coincidentally* exists in objectui source. (The cloud Pricing page renders today purely by luck — all 16 of its classes happen to be common ones.)\n2. **Two-build cascade + responsive inversion** — customer metadata builds independently from the renderer → two Tailwind sheets → equal-specificity source-order conflicts; `@layer` fixes the flat case but **outranks media queries**, so a higher layer's unconditional utility silently defeats a lower layer's `md:` at all breakpoints.\n3. **AI authorship** — arbitrary Tailwind is a maximal footgun for a (often cheap-model) AI author; correctness must be designed in.\n\n## Precedent\n\nMirrors **Builder.io** (`responsiveStyles` style-objects + `createCssClass` id-scoped CSS + `@media (max-width)` breakpoints; `className` only an optional passthrough) — the battle-tested \"author separately, render in arbitrary hosts\" model. We add **token-constrained values** on top (the consistency/AI-safety layer Builder lacks).\n\n## Proof (runnable, in `examples/app-showcase`)\n\n- `test/sdui-styling/compile-block-styles.ts` — reference compiler (style-object + breakpoints → id-scoped CSS), the open mechanism prototype.\n- `test/sdui-styling/pricing-showcase.ts` — the authoring shape (a pricing card via `responsiveStyles` + design tokens).\n- `test/sdui-styling.test.ts` — asserts the four properties the decision rests on: **id-scoping**, **generated `@media`**, **arbitrary-value passthrough** (build-independence), **token resolution**. **5/5 green.**\n\n## Status / follow-ups (in the ADR)\n\n`Proposed`. Productionization is staged: add `style`/`responsiveStyles` to `@objectstack/spec` UI envelope → promote the compiler → objectui renderer consumes it → define the token palette → migrate cloud's built-in `*.page.ts` off raw className → cloud tier policy + render/VLM gate for the escape hatch.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

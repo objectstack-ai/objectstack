@@ -1,0 +1,35 @@
+{
+  "number": 1993,
+  "kind": "pull_request",
+  "title": "feat(runtime): resolve a reference timezone onto ExecutionContext",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-17T00:54:01Z",
+  "updated_at": "2026-06-17T01:53:39Z",
+  "closed_at": "2026-06-17T01:53:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-17T01:53:37Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1993",
+  "body": "Closes #1978. Foundation slice of [ADR-0053 Phase 2](https://github.com/objectstack-ai/framework/pull/1975).\n\n## What\n\nAdds `ExecutionContext.timezone` (optional IANA zone) and resolves it **once per request** in `resolveExecutionContext`, with precedence **user preference → org default → `UTC`**:\n\n- **User override** — `sys_user_preference` row `(user_id, key='timezone')`.\n- **Org default** — the tenant-scoped `sys_setting` `(namespace='localization', key='timezone', scope='tenant')`. One org per physical tenant (ADR-0002), so the row needs no `tenant_id` filter.\n- An invalid IANA zone is ignored and resolution falls through. Every read goes through the existing defensive `tryFind`, so timezone resolution **never blocks auth**.\n\n## Why it's safe (pure plumbing, zero behavior change)\n\nNothing reads `ctx.timezone` yet, and an absent value resolves to `'UTC'` — exactly today's behavior. This is the keystone the rest of Phase 2 consumes:\n\n- #1980 — tz-aware `today()`/`daysFromNow()`/`daysAgo()`\n- #1981 — datetime rendering in the reference zone\n- #1982 — tz-aware analytics bucketing\n\n(Those slices depend on this one for the `timezone` value.)\n\n## Notes\n\n- A discoverable `localization` settings **manifest** for the org default is a small follow-up — the resolver already reads the row if present, so this lands without it.\n- Resolution adds at most two cheap reads per authenticated request, consistent with the resolver's existing `sys_member` / permission-set lookups. A caching pass can come later if needed.\n\n## Testing\n\n- New: user preference wins over org default; tenant-scoped org default used when no user pref; `UTC` when neither; an invalid zone falls through; anonymous requests leave it unset.\n- Full `@objectstack/runtime` suite green — **387 tests**; `@objectstack/spec` kernel green — **682**; DTS build + typecheck clean.\n- Changeset: `minor` (new optional `ExecutionContext` field + resolver).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 1983,
+  "kind": "issue",
+  "title": "ADR-0053 Phase 2 · Slice 6: activate report-schedule cron + timezone (liveness enforce)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T16:00:34Z",
+  "updated_at": "2026-06-17T00:47:53Z",
+  "closed_at": "2026-06-17T00:47:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1983",
+  "body": "**Part of ADR-0053 Phase 2.** Design: #1975 · Parent: #1928. Liveness tie-in: ADR-0049 enforce-or-remove.\n\n**Slice 6 of 6 — self-contained; doubles as liveness cleanup.** Activate report-schedule cron + timezone.\n\n### Decision D3 (see #1975)\nWire report schedules onto the **existing** `CronJobAdapter` (croner + per-job timezone, already used by `sys_job`) — do **not** delete the dormant fields.\n\n### Problem\n`sys-report-schedule.object.ts:12-15` documents `cron_expression` as \"reserved for the next milestone when a cron-capable scheduler adapter is available, it wins over `interval_minutes`.\" That adapter exists — `packages/services/service-job/src/cron-job-adapter.ts:55-59`. But `report-service.ts` `advanceSchedule` reads only `interval_minutes` and ignores both `cron_expression` (`sys-report-schedule.object.ts:72-76`) and `timezone` (`:80`) — `packages/plugins/plugin-reports/src/report-service.ts:462-467`. Both are author-facing-but-runtime-dead.\n\n### Scope\n- When `cron_expression` is present, schedule the report via `CronJobAdapter` with the schedule's `timezone`; keep `interval_minutes` as the tz-agnostic fallback.\n- Report schedules run `SYSTEM_CTX` (no user) — tz source is the schedule's **own** `timezone` field, same model as `sys_job`. Off the resolver's critical path.\n- Update the spec-liveness ledger: mark `cron_expression` + `timezone` **live**, with this PR as evidence (enforce, not remove).\n\n### Acceptance criteria\n- [ ] A report with `cron_expression: '0 9 * * 1'` + `timezone: 'America/New_York'` fires Mondays 09:00 ET.\n- [ ] `interval_minutes`-only schedules unchanged.\n- [ ] Liveness ledger reflects the two fields as live; no `authorWarn` regression.\n"
+}

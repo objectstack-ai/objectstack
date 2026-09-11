@@ -1,0 +1,33 @@
+{
+  "number": 1997,
+  "kind": "pull_request",
+  "title": "fix(spec): cross-validate permission object grants against declared objects",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-17T02:20:37Z",
+  "updated_at": "2026-06-17T03:27:52Z",
+  "closed_at": "2026-06-17T03:27:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-17T03:27:50Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1997",
+  "body": "## What\n\nAdd the missing permission/profile → object cross-reference check to `validateCrossReferences`.\n\n## Bug\n\n`validateCrossReferences` validated hook/view/seed/app-nav/action references against the declared object set — but **not** `permissions[].objects` grants. So a profile that grants on a **non-existent** object passed `build` / `validate` / `test` **silently**:\n\n```ts\n// objects are crm_lead / crm_case, but the profile grants on short names:\nobjects: { lead: { allowCreate: true }, case: { allowCreate: true } }  // ← no such objects\n```\n\nThe grant then applies to **nothing**. The authenticated path may namespace-resolve the short name, but the **anonymous / explicit-permission-set path does not** — so e.g. a public Web-to-Lead INSERT is denied for `\"roles []\"`, with no diagnostic anywhere. (This is exactly what blocked HotCRM's web-to-lead; see hotcrm#399.)\n\n`validateNamespacePrefix`'s own doc already **assumed** this check existed here (\"…sharing rules, permissions) — but those are checked by the existing `validateCrossReferences`…\"). It didn't. This makes the code match the documented intent.\n\n## Fix\n\nEvery `permissions[].objects` key must reference a declared object, or strict validation fails loudly at build time.\n\n## Tests\n\n`stack.test.ts` +2 cases: short/undefined object name → throws; full name → passes. **82/82 spec stack tests pass.** Framework examples (app-crm, showcase) already key full names, so unaffected.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

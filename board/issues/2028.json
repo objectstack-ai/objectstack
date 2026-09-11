@@ -1,0 +1,35 @@
+{
+  "number": 2028,
+  "kind": "pull_request",
+  "title": "fix(driver-sql): self-heal numeric type fidelity on legacy SQLite columns + extend dogfood matrix",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-18T06:52:39Z",
+  "updated_at": "2026-06-18T07:01:11Z",
+  "closed_at": "2026-06-18T07:01:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-18T07:01:10Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2028",
+  "body": "Follow-up to #2025. Two gaps that fix left open:\n\n## 1. Legacy columns don't get the fix\n\n`#2025` mapped `rating`/`slider`/`progress` to numeric columns — but only for **newly created** columns. SQLite never alters a column's type in place, and the schema reconciler ([sql-driver.ts](packages/plugins/driver-sql/src/sql-driver.ts) `initObjects`) only ADDS missing columns. So a column created *before* the fix keeps its TEXT affinity and would still read back `'4'` instead of `4` forever. (`toggle`/`record`/`video`/`audio` already self-heal because their fix routes through the read-side `booleanFields`/`jsonFields` registries — the numeric scalars were the odd ones out, relying on column affinity alone.)\n\n**Fix:** a read-side numeric coercion — the new `numericFields` registry, single-sourced from `NUMERIC_SCALAR_TYPES` — coerces numeric-looking stored strings back to numbers on read, mirroring how `dateFields` already repairs legacy timestamp-typed `Field.date` rows. Fidelity no longer depends on column affinity alone.\n\n- Only strings are touched — a fresh REAL/INTEGER column already yields a number (no-op).\n- `null` stays `null` (not `0`); genuinely non-numeric junk is preserved (not `NaN`).\n- SQLite-gated (Postgres/MySQL return typed numerics natively).\n\n## 2. progress/record/video/audio were only unit-tested\n\nThe audit in #2025 also fixed `progress` (numeric) and `record`/`video`/`audio` (object→JSON), but those were only covered by the driver unit test. Extended the dogfood field-zoo HTTP matrix to guard them over real HTTP too.\n\n## Verification\n\n- New unit test reproduces a legacy TEXT column (pre-create as TEXT → `initObjects` must not alter it) and proves a stored `'4'` reads back as `4`; a sibling test asserts `null`/`'n/a'` are left intact.\n- Full driver-sql suite: **160 passed** (was 158).\n- Dogfood field-zoo HTTP round-trip: **26 passed** (was 22) — progress/record/video/audio now guarded end-to-end.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

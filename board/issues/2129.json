@@ -1,0 +1,34 @@
+{
+  "number": 2129,
+  "kind": "pull_request",
+  "title": "fix(platform-objects): complete ADR-0057 BU rename — Setup menu + i18n (Departments → Business Units / 业务单元)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T14:15:26Z",
+  "updated_at": "2026-06-21T14:23:27Z",
+  "closed_at": "2026-06-21T14:23:25Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T14:23:25Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2129",
+  "body": "## What\nCompletes the ADR-0057 `sys_department` → `sys_business_unit` rename in the **Setup app and the object's i18n** — the prior rename left the user-facing surface half-renamed.\n\n### Setup menu\n- The \"People & Organization\" nav entry was hidden/stale: `nav_departments` / label \"Departments\" pointing at `sys_business_unit`. Renamed to `nav_business_units` / \"Business Units\" and aligned all four locale nav bundles.\n\n### Object labels & descriptions (the real root)\n- The **object definition itself** (`sys-business-unit.object.ts`) still said \"department\" in field labels (`Parent Department`, `Department Head`, `Department ID`) and descriptions — while the generated `en` labels had been hand-updated ahead of it, making the def a silently-stale source. Fixed at the source.\n- All four locales' generated object translations (`en`/`zh`/`ja`/`es`) aligned to **业务单元 / ビジネスユニット / Unidad de negocio** across labels, help text, and the `sys_business_unit_member` object.\n\n### Intentionally preserved (not over-renamed)\n- The `kind` enum value `department` — a business unit can be *of kind* department.\n- The multi-concept node descriptions that list kinds (`company / division / department / …`).\n- The unrelated `部署` = \"deployment\" strings (same characters as Japanese 部署=\"department\" — a blind replace would have corrupted them).\n\n## Verification\n- Browser-verified in the console: Setup → 人员与组织 → **业务单元** (→ `sys_business_unit`); the object list/form headers and field labels render the new term.\n- Cross-locale scan of both object blocks is clean; old strings remain only in unrelated stale worktrees.\n\n> Note: field *help* text can still render the old term from a prebuilt `@objectstack/console` bundle (a dev-bundle cache, not a source gap) until the console is rebuilt.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

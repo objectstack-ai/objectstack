@@ -1,0 +1,35 @@
+{
+  "number": 2102,
+  "kind": "pull_request",
+  "title": "feat(analytics): propagate a measure's declared currency to the result field",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T06:52:48Z",
+  "updated_at": "2026-06-21T07:13:00Z",
+  "closed_at": "2026-06-21T07:12:57Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T07:12:57Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2102",
+  "body": "## The gap\n\nA dataset measure can declare a `format` (carried onto the analytics result field so the client renders `$616,000`), but there was **no way to declare a currency CODE**. The result enrichment in `analytics-service` set `label` + `format` on each measure field but **never `currency`**:\n\n```ts\nif (f.label == null && typeof m.label === 'string') f.label = m.label;\nif (f.format == null && m.format) f.format = m.format;\n// ← no currency\n```\n\nSo the client's currency-aware formatting (Intl symbol from a declared currency — ADR-0021; objectui `DatasetWidget` and the dataset report renderer) **could never fire against real data**. Every amount fell back to a plain number, or to a `$` literal baked into `format` — regardless of the actual currency. The client feature was effectively inert end-to-end.\n\n(Found while verifying the objectui dataset-render currency work — no example ever rendered an `Intl` currency symbol, which traced back to here.)\n\n## The fix — symmetric with `format`\n\n- **spec**: `DatasetMeasure.currency` (ISO 4217, optional). Declared on the semantic layer when the aggregated field is a fixed-currency amount.\n- **service-analytics**: carry `measure.currency` onto the result field alongside `label`/`format`.\n- **example (app-crm)**: `opportunity_metrics` total/avg amount now declare `currency: 'USD'` (and drop the legacy `$` from `format`), so the pipeline reports render a locale-correct symbol via Intl.\n\n## Tests\n- `service-analytics` → **138 passed** (+1: a measure's declared currency rides onto its result field).\n- Spec builds (with dts); the new field is additive + optional, so no existing dataset breaks.\n\n## Notes\n- The two pre-existing `tsc` warnings in `service-analytics` test files (`timezone`, unused `DriverCapabilities`) are untouched by this PR.\n- This unblocks the objectui currency-aware rendering merged in objectui #1830 / #1841 / #1845 — together they make currency amounts render correctly from declaration → server → UI.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

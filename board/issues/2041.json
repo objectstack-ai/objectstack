@@ -1,0 +1,37 @@
+{
+  "number": 2041,
+  "kind": "pull_request",
+  "title": "feat(verify): extract dogfood engine into public @objectstack/verify + CLI",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-18T23:39:18Z",
+  "updated_at": "2026-06-19T00:16:18Z",
+  "closed_at": "2026-06-19T00:16:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-19T00:16:16Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2041",
+  "body": "## Why\n\nObjectStack is a platform where third parties have an **AI author arbitrary metadata**. The real risk isn't \"a platform change broke the CRM example\" — it's \"the AI used a valid primitive the examples don't exercise, and it silently breaks at runtime\" (the #2018 timezone-bucketing class: green on build / 900+ unit tests / spec-liveness / CodeQL, only visible when the real engine + services + HTTP run together).\n\nThe internal `@objectstack/dogfood` package already contained an **app-agnostic** `objectstack verify` engine in embryo (its `derive`/`verify` comments literally say *\"point it at any app … a third-party app like hotcrm\"*). This PR productizes that engine so **third-party and template authors can run the same runtime proofs against their own apps**.\n\n## What changed\n\n**New public library `@objectstack/verify`** (`packages/verify`)\n- `bootStack` (was `bootDogfoodStack`), `deriveCrudCases`, `runCrudVerification`, `runRlsProofs` + report types — moved & generalized out of `packages/dogfood/src`.\n- tsup ESM+CJS+DTS, `publishConfig.access: public`, third-party-facing README.\n\n**New `objectstack verify` CLI command** (`packages/cli/src/commands/verify.ts`)\n- oclif command reusing the existing `loadConfig`; flags `--app/--rls/--multi-tenant/--json`.\n- **Exit-code contract** (CI-usable): `create-failed` / `read-failed` / `fidelity-gaps` / `rls-hole` → exit 1; inconclusive verdicts (`needs-fixture` / `skipped` / `member-visible`) warn and exit 0.\n\n**`@objectstack/dogfood` kept, slimmed** (single source of truth)\n- now consumes `@objectstack/verify`; deps 14 → 6.\n- drops 3 now-redundant auto-verify tests, **replaced by an `objectstack verify --rls` CI step** over the example apps (Dogfood Regression Gate job).\n- keeps the hand-written golden regressions the generic verifier can't auto-derive: #2018 tz bucketing, #1994 cross-owner RLS (incl. the automated red proof), #2004 field fidelity.\n\n**Release plumbing**\n- `@objectstack/verify` added to the changeset `fixed` group (`@objectstack/dogfood` stays private/excluded); `check-changeset-fixed.mjs` passes (73 packages in sync). Changeset added for verify + cli.\n\n## Validated end-to-end on a real third-party app (hotcrm)\n\nRan the built CLI against `../hotcrm` (a standalone marketplace CRM on published `@objectstack@^9.9.1`, with real sharing / territory / role-hierarchy rules — *not* in this repo):\n\n- **Booted hotcrm's full 14-object stack** through the real HTTP surface and verified data fidelity.\n- **Demonstrated the exit-1 red path on a real app** — `crm_product.sku` reads back uppercased (an intentional normalization hook), correctly flagged as a `fidelity-gaps` mismatch → exit 1.\n- **#1994 authorization invariant holds on hotcrm**: `--rls --multi-tenant` → **8 consistent / 0 holes** (a fresh member can neither read `404` nor mutate `403` cross-org records) across its real sharing rules.\n\nThe exercise also surfaced two `@objectstack/verify` **tool-quality** issues (not hotcrm bugs), both addressed here:\n1. **Fixed** — the CLI ran fidelity + RLS proofs on the *same* in-process stack, so the RLS phase's admin-creates collided with the fidelity phase's rows on unique-constrained fields (a 409 that silently skipped those objects). The RLS phase now boots a separate pristine stack (hotcrm `--rls --multi-tenant`: 5-consistent/3-skipped → **8-consistent/0-skipped-by-409**).\n2. **Documented** — fields normalized on write (uppercase/trim hooks, canonicalizing formulas) read back as `fidelity-gaps` even when working as designed; the report shows the `wrote → read` diff. A declared-transform allowlist is a planned enhancement.\n\n## Validated across the template corpus (9 apps)\n\nRan the CLI across all 9 apps in `../templates` (the AI-authored starter corpus: expense, contracts, content, compliance, todo, project, procurement, hr, helpdesk), on an older `@objectstack` than this branch — a cross-version run:\n\n- **Data fidelity: 0 gaps / 0 failures** across the corpus (~18 objects auto-verified).\n- **RLS `--multi-tenant`: 0 holes** — every auto-exercised object is `rls-consistent`; the #1994 invariant holds across all 9 AI-authored apps.\n- The verifier handled the whole corpus cleanly — no crashes, no false 409s after the stack-isolation fix.\n\nCoverage caveat: the auto-derive skips objects whose required fields it can't synthesize (lookups / master-detail), so relational-heavy templates have ~half their objects skipped — \"0 holes\" is over the auto-exercised subset. Auto-synthesizing related records in topological order to reach those objects is a planned enhancement.\n\n## Verification\n\n- `@objectstack/verify` builds (ESM+CJS+DTS).\n- **dogfood: 5 files / 57 tests green** after the extraction *and* after rebasing onto the latest `main` (which carries spec/RLS schema changes) — zero behavior change.\n- `objectstack verify` against the framework examples: crm `4 verified / 2 skipped / exit 0`, crm `--rls` `0 holes`, showcase `exit 0`; clean process exit (fixed a hang: the in-process stack leaves handles open after `stop()`, so the command forces `this.exit()`).\n- `objectstack verify` against **hotcrm** (real third-party): boots, verifies, proves exit-1 and the #1994 invariant (above).\n- canonical lint, `check-changeset-fixed.mjs`, and `ci.yml` YAML all green/valid.\n\n## Fix found along the way\n\nThe harness used a **port-less loopback inject origin** (`http://localhost`) which fails better-auth's default dev trusted-origins (`http://localhost:*`) → `objectstack verify` got a 403 on dev-admin sign-in in a bare `node` CLI (the dogfood tests passed only because turbo's strict-env run masked it). Switched to a **ported loopback base** so sign-in is deterministic across the node CLI and the test runner.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

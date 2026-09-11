@@ -1,0 +1,33 @@
+{
+  "number": 2124,
+  "kind": "pull_request",
+  "title": "docs(skills): author the 16 factory domains via defineX, not bare literals (#2035)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T11:12:05Z",
+  "updated_at": "2026-06-21T11:17:36Z",
+  "closed_at": "2026-06-21T11:17:33Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T11:17:33Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2124",
+  "body": "Follow-up to the #2035 epic. The examples were migrated to `defineX` factories (#2088/#2095) and a lint guard keeps them clean — but the **skills and hand-written docs still taught the old bare-literal pattern**. Since skills are the corpus AI authors from, that directly undercut the whole point: AI would keep copying `: Action = {}` (the output-type footgun) from the very guide meant to teach the right way.\n\n## What changed\n\nConverted every bare metadata literal for the 16 factory domains to its `defineX(...)` call:\n\n| File | conversions |\n|---|---|\n| `skills/objectstack-ui/SKILL.md` | 8 — Page / Action / Report / Cube |\n| `content/docs/guides/security.mdx` | 8 — PermissionSet / SharingRule |\n| `content/docs/guides/standards.mdx` | 2 |\n| `content/docs/concepts/index.mdx` | 2 |\n| `content/docs/concepts/architecture.mdx`, `getting-started/architecture.mdx`, `protocol/objectui/record-alert.mdx` | 1 each |\n\nBlock-aware migration: imports are rewritten **in place** (preserving each block's import source — root `@objectstack/spec` vs subpath) or **injected** where the snippet had none. Pre-existing `defineView`/`defineFlow` examples are left untouched.\n\n## Verification\n\n- 0 bare `: <Domain> = {` literals remain in `skills/` or `content/docs/`.\n- 23 conversions, all closers balanced; multi-imports (`ConvertLeadAction`, `P`) preserved.\n- `pnpm --filter @objectstack/spec check:skill-docs` → ✅ in sync (generated references come from frontmatter, unchanged).\n- examples/apps were already clean (lint guard) — confirmed 0 there.\n\n## Notes\n\n- Docs-only — no package code, no changeset (the gate's pending-changeset count is already > 0).\n- **Root cause**: MDX/skill code blocks are not type-checked by any gate, so they drifted while examples (which are) stayed clean. A lightweight MDX code-block lint would prevent recurrence — noted as a separate follow-up, not in this PR.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

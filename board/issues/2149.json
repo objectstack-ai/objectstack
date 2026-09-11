@@ -1,0 +1,35 @@
+{
+  "number": 2149,
+  "kind": "pull_request",
+  "title": "feat(driver-sql): honor external.columnMap on federated objects (ADR-0015)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T01:59:37Z",
+  "updated_at": "2026-06-22T02:07:35Z",
+  "closed_at": "2026-06-22T02:07:33Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T02:07:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2149",
+  "body": "## Why\n\nFollow-up to ADR-0015 federation (#2138/#2139). When a federated (external) object's remote table has **column names that differ from the local field names**, you express the mapping with `external.columnMap` ({ remoteColumn → localField }). The spec accepted it, but the SQL driver's query pipeline ignored it — WHERE/ORDER BY/SELECT used the local field names as physical columns, so a columnMap'd object couldn't be queried correctly.\n\n## What\n\nScoped, **additive, gated on `external.columnMap` being present** — managed objects and external objects without a columnMap are byte-for-byte unchanged.\n\n- `registerExternalObject` inverts `columnMap` to `localField → remoteColumn` (and keeps the inverse for read remap).\n- A `remoteColumn(object, field, fallback)` helper resolves the physical column, **falling back to each call-site's existing resolution** when there's no columnMap.\n- **WHERE** (object / array / mongo-operator forms) and **ORDER BY** translate the local field to its remote column; value **coercion stays keyed by the local field**.\n- **`formatOutput`** renames remote-column keys back to local field names on read (no-op without a columnMap), so coercion and callers see local names.\n- **Write** payloads are key-remapped after `formatInput`.\n\n## Tests\n\n`sql-driver-external-columnmap.test.ts`: reads return local field names from differently-named remote columns; WHERE (object/array/`$gte`), ORDER BY, and date-coercion all translate through the columnMap; a managed control object is unaffected. Full `driver-sql` suite green (189/189); `sql-driver.ts` reports 0 type errors. ADR-0015 §18 updated.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

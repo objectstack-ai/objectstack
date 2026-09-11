@@ -1,0 +1,33 @@
+{
+  "number": 2213,
+  "kind": "pull_request",
+  "title": "fix(security): invalidate metadata-derived caches on runtime metadata change",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T14:38:14Z",
+  "updated_at": "2026-06-22T14:53:48Z",
+  "closed_at": "2026-06-22T14:53:46Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T14:53:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2213",
+  "body": "## Why\n`SecurityPlugin` 的 `fieldNamesCache` / `tenancyDisabledCache` / `cbpRelCache` 从元数据惰性填充,但**从不失效**。\"元数据在 kernel 生命周期内不变\"的假设在**运行时改元数据**(Studio / AI Studio 在线建模)时被打破——schema/RLS 会读到旧值直到重启,**单节点也如此**。\n\n## What\n- 在 `start()` 订阅 `metadata.watch('*')`,元数据变更时清这三个缓存。\n- 通用开源机制(对可选的 `watch` API 做了 guard)。配合 cluster pub/sub 驱动时,`metadata.changed` 会跨节点传播 → 这也是 EE 多节点跨节点缓存失效的铺底(见 cloud ADR-0018)。\n- 新增针对性单测;本地验证全绿(plugin-security 123 passing)。\n\n## 影响\n- 单节点:修了一个 latent 正确性 bug(运行时改元数据后缓存陈旧)。\n- 多节点:为 EE 的跨节点失效提供本地钩子(跨节点激活由 EE 的 cluster 驱动完成,不在本 PR)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

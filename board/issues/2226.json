@@ -1,0 +1,32 @@
+{
+  "number": 2226,
+  "kind": "pull_request",
+  "title": "feat(cli): forward env-driven cluster driver to the runtime in os serve",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T16:39:45Z",
+  "updated_at": "2026-06-22T16:45:28Z",
+  "closed_at": "2026-06-22T16:45:26Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T16:45:26Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2226",
+  "body": "## Why\n`os serve` built the Runtime with **no cluster config**, so it always used the in-memory cluster driver. A multi-replica deployment therefore couldn't coordinate, and the split-brain guard (correctly) blocked it. This is the missing **enabler** that lets the EE distribution activate the cluster seams cross-node (cloud ADR-0018).\n\n## What\n- `os serve` reads **`OS_CLUSTER_DRIVER`** (+ `OS_REDIS_URL`), **dynamically imports** the matching `@objectstack/service-cluster-<driver>` package (so it works in both config-boot and compiled-artifact mode), and forwards `{ driver, url }` to the `Runtime`.\n- **Open-core ships only the in-memory driver**; remote drivers (redis) come from the EE distribution. Absent ⇒ graceful fallback to in-memory (warns, doesn't crash). Mirrors the existing `OS_DATABASE_URL` driver-by-env pattern.\n\n## Verification (A/B boot, local redis)\n- `OS_CLUSTER_DRIVER=redis` + `OS_CLUSTER_REPLICAS=2` → **boots** (split-brain guard passes ⇒ redis active).\n- no `OS_CLUSTER_DRIVER` + `OS_CLUSTER_REPLICAS=2` → process **exits** with the split-brain guard (in-memory driver). \n\nClean A/B proves the forwarding wires redis into the Runtime. Build Core type-checks the change (serve.ts has no unit-test harness).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

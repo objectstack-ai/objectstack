@@ -1,0 +1,33 @@
+{
+  "number": 1962,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0053 — date is a tz-naive calendar day, datetime is an instant (#1928)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T10:10:37Z",
+  "updated_at": "2026-06-16T11:07:08Z",
+  "closed_at": "2026-06-16T11:07:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T11:07:05Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1962",
+  "body": "Proposes the industry-standard `date`/`datetime` split to **root-fix** the silent date-equality bug from #1874/#1928 (the one templates hit and we mitigated with day-window ranges + the #1950 lint).\n\n## Problem (verified, file:line in the ADR)\n- **Silent equality miss**: the write path stores a `Field.date` as a full timestamp (`formatInput` doesn't normalize), but the filter path coerces query values to `YYYY-MM-DD` (`coerceFilterValue`). So `date == daysFromNow(N)` compares `\"2026-08-15T17:24Z\"` vs `\"2026-08-15\"` → never matches. Ranges work only by lexicographic ISO accident.\n- **Timezone off-by-one**: a date stored as UTC-midnight renders as the *previous day* for negative-offset users.\n- `daysFromNow`/`daysAgo` keep wall-clock time (unlike `today()`); `today()` is UTC, not user/org TZ — and `sys-user-preference.timezone` exists but is never read.\n\n## Decision (staged by risk)\n- **Phase 1 (low risk, do first)**: `Field.date` becomes a `YYYY-MM-DD` string end-to-end via driver write/read normalization — aligns storage with the filter layer's *already-existing* date-only contract. Fixes equality with **no new semantics**; read-normalization repairs legacy rows with no migration.\n- **Phase 2 (needs review)**: a reference-timezone model (org default + user override) so `today()`/`daysFromNow()` and `datetime` rendering are timezone-aware.\n\nIncludes a mainstream-platform comparison (Salesforce / Postgres / java.time / Temporal / Airtable — all converge on the same split), migration/rollback, non-goals, and rejected alternatives.\n\nDocs-only; no code change in this PR.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

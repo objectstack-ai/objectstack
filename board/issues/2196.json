@@ -1,0 +1,35 @@
+{
+  "number": 2196,
+  "kind": "pull_request",
+  "title": "feat: schema-drift detection + dev auto-reconcile + os migrate (#2186)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T11:00:07Z",
+  "updated_at": "2026-06-22T11:35:44Z",
+  "closed_at": "2026-06-22T11:35:41Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T11:35:41Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2196",
+  "body": "Closes #2186.\n\n## Problem\nThe metadata→DB schema sync is **additive-only**: it creates tables and adds columns but never alters/drops existing ones. Any non-additive metadata change (relax `required`, change type/length, drop/rename a field) silently diverges from an existing DB, and the physical column wins at write time.\n\n## Diagnosis correction\nThe issue attributed the repro's `400 \"organization_id is required\"` to a \"two sources of truth\" bug in the validator. It isn't: [`record-validator`](packages/objectql/src/validation/record-validator.ts) reads `required` from metadata and **passes** once the field is optional. The 400 is a DB `NOT NULL` violation that [`rest-server` paraphrases](packages/rest/src/rest-server.ts) as \"is required\". So the AC item *\"validation derives required from metadata\"* was already satisfied; the real fix is reconciling the physical schema + de-misleading the message.\n\n## What's here\n**P1 — detection + warnings.** New [`schema-drift.ts`](packages/plugins/driver-sql/src/schema-drift.ts) diffs metadata vs physical columns (reusing `SchemaDiffEntry`), categorising **safe / needs_confirm / destructive**. `SqlDriver.initObjects` warns once per divergence with an actionable `os migrate` hint. `rest-server`'s NOT NULL branch now carries a drift-aware `hint` — the `VALIDATION_FAILED`/`fields` envelope is unchanged for back-compat.\n\n**P2 — dev auto-reconcile.** New `SqlDriverConfig.autoMigrate: 'safe'` (wired into `serve`/`dev` **in dev only**) auto-applies the *loosening* subset (relax `NOT NULL`, widen varchar) so an existing dev DB self-heals on restart. Never destructive; force-disabled under `NODE_ENV=production`.\n\n**P3 — `os migrate plan` / `apply`.** Categorised dry-run + reconcile, `--allow-destructive` gate, confirm prompt, `--json`. SQLite reconciles via the official table-rebuild (copy→swap, data preserved); Postgres/MySQL alter in place. Only examines objects in the loaded artifact (**run `os build` first**); never auto-drops a table absent from metadata.\n\n## Acceptance criteria\n- [x] Boot warns for every metadata↔physical divergence (P1)\n- [x] In dev, `required:true→false` reflects in an existing DB after restart, no reset (P2)\n- [x] `os migrate plan/apply` reconciles non-additive changes with preview + destructive guardrail (P3)\n- [x] Validation derives `required` from metadata — already true; reframed (see diagnosis)\n- [x] SQLite verified live; Postgres/MySQL DDL covered by generation tests\n\n## Tests\n- driver-sql **+12** (incl. the #2178 repro self-healing with data preserved, prod guard, destructive gating, PG/MySQL DDL generation)\n- cli integration: real `createStandaloneStack` boot → detect → apply → in-sync\n- rest: drift-aware hint\n- Full build 76/76; driver-sql 201 / rest 127 / cli 518 green\n\n## Caveats\n- Postgres/MySQL `ALTER` path is standard SQL but validated via generated-DDL assertions (no live PG in CI — matches the repo's SQLite-only DDL test posture).\n- `os migrate` destructive ops assume the full app/plugin set is loaded; a column that looks \"orphaned\" under a partial build is reported but a table absent from metadata is never dropped.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

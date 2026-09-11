@@ -1,0 +1,35 @@
+{
+  "number": 2195,
+  "kind": "pull_request",
+  "title": "fix(release): push version tags in one atomic push (avoid commit_refs race)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T10:50:21Z",
+  "updated_at": "2026-06-22T11:28:05Z",
+  "closed_at": "2026-06-22T11:28:03Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T11:28:02Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2195",
+  "body": "## Problem\n\nThe Release job failed on #2191 with `remote: fatal error in commit_refs` and ~half the version tags `[remote rejected] ... (failure)`.\n\n**Root cause:** `changeset publish` publishes every package to npm and creates one git tag per package. `changesets/action` then pushes those tags by firing **one `git push origin <tag>` per tag concurrently** (every `[command]/usr/bin/git push` in the log shares the same millisecond timestamp). With our large Changesets `fixed` group (~73 packages bumping in lockstep), that burst of simultaneous ref-creation pushes races GitHub's ref backend → `fatal error in commit_refs` → ~half the tags rejected. **npm publishing had already fully succeeded** by then, so the job fails *after* the artifacts are live.\n\nConcrete fallout on `10.0.0`: all 73 packages published to npm, but only 54/73 git tags reached the remote — 19 are missing and no future release run will recreate them (changeset only tags what it publishes).\n\n> Note: the follow-up run (#2193) went green only because everything was already on npm, so it published nothing and pushed no tags. The bug is masked, not fixed, and recurs on the next multi-package bump.\n\n## Fix\n\nRoute the publish command through `scripts/release-publish.sh`:\n\n```sh\nchangeset publish\ngit push origin --tags\n```\n\nAll new tags go up in a **single atomic `git push`** = one ref transaction, so there's no concurrency to race. The action's subsequent per-tag pushes become harmless no-ops (every tag already exists on the remote at the same SHA).\n\n## Files\n- `scripts/release-publish.sh` — new, documented wrapper (publish + atomic tag push)\n- `package.json` — `release` script now ends in the wrapper instead of bare `changeset publish`\n- `.github/workflows/release.yml` — comment explaining why\n\n## Not covered here\nBackfilling the 19 `10.0.0` tags already missing from the remote is a separate one-time op (these packages are published, so changeset won't re-tag them).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 2047,
+  "kind": "pull_request",
+  "title": "feat(app-showcase): demonstrate the two list-view navigation modes (ADR-0053)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-19T10:56:28Z",
+  "updated_at": "2026-06-19T10:56:45Z",
+  "closed_at": "2026-06-19T10:56:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-19T10:56:43Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2047",
+  "body": "## Summary\n\nBrings the showcase in line with the post-refactor list-view navigation model (ADR-0053), giving each of the two **orthogonal** list-nav modes a clean, AI-authorable example and removing the now-deprecated in-view `tabs` mechanism.\n\n| Mode | Surface | Mechanism | Example |\n|------|---------|-----------|---------|\n| **Views** (Salesforce-style saved views) | object default list → view switcher | `listViews.*` with a base `ListView.filter` | `task.view.ts`: All Tasks / In Progress / Urgent / Done |\n| **Filters** (Airtable \"User filters\") | interface page | `userFilters.element: 'dropdown' \\| 'tabs'` | Task Workbench (dropdown) ↔ **Task Triage (tabs, new)** |\n\n### Changes\n- **`src/views/task.view.ts`** — status presets moved from a default-view `list.tabs` row to **named views** (`listViews.in_progress / urgent / done`) each carrying a base `filter`. The object list now surfaces them in its view switcher with no redundant second tab row.\n- **`src/pages/task-triage.page.ts`** (new) — interface page demonstrating `userFilters.element: 'tabs'`: a row of pure filter presets (`{ name, label, filter }`) over a **locked grid** visualization. Direct counterpart to Task Workbench's `dropdown` element.\n- Registered the new page in `src/pages/index.ts`, the explicit `pages: [...]` array in `objectstack.config.ts`, and as a `Task Triage (Tabs)` nav entry in `src/apps/index.ts`.\n\n### Verification\nBrowser-verified against the live showcase backend:\n- **Task Triage tabs** filter correctly: All `10` → In Progress `2` (all status=in_progress) → Done `2` → All `10`; selected tab persists to the URL (`?uf__tab=...`).\n- **Object task list** view switcher shows the named views; In Progress filters `10 → 2`.\n- Neither surface renders a redundant second tab/filter row.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

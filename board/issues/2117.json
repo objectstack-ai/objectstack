@@ -1,0 +1,33 @@
+{
+  "number": 2117,
+  "kind": "pull_request",
+  "title": "ci(release): run Release job on Node 22 for the hotcrm downstream smoke",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T09:25:14Z",
+  "updated_at": "2026-06-21T09:31:06Z",
+  "closed_at": "2026-06-21T09:31:05Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T09:31:05Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2117",
+  "body": "## Problem\n\nThe `Release` workflow is red on `main`. The **Downstream backward-compat smoke (live hotcrm)** step fails immediately:\n\n```\n→ Installing hotcrm (published @objectstack/* deps) ...\n ERR_PNPM_UNSUPPORTED_ENGINE  Unsupported environment (bad pnpm and/or Node.js version)\n Your Node version is incompatible with \".../hotcrm\".\n Expected version: >=22\n Got: v20.20.2\n```\n\nhotcrm@v1.2.0's manifest pins `engines.node >=22`, but the Release job sets up Node **20**. `pnpm install` aborts before any spec backward-compat is exercised — a false red that blocks every publish.\n\n## Fix\n\nBump the Release job to Node **22** (matching `showcase-smoke.yml`, which already runs on 22). The framework builds and publishes fine on 22 — root `engines.node` is `>=18`. Only `release.yml` runs `scripts/downstream-smoke.sh`, so no other workflow needs the bump. Added an inline comment so the divergence from the other workflows' Node 20 is self-documenting.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

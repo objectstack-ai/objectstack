@@ -1,0 +1,34 @@
+{
+  "number": 2235,
+  "kind": "pull_request",
+  "title": "feat(authz): ADR-0066 Phase 1 — secure-by-default object posture + requiredPermissions (D2/D3)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-23T09:46:27Z",
+  "updated_at": "2026-06-23T11:06:21Z",
+  "closed_at": "2026-06-23T11:06:19Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-23T11:06:19Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2235",
+  "body": "Implements **ADR-0066 Phase 1** (D2 + D3 + engine enforcement) — the minimal unblock so a sensitive object like cloud `sys_license` can be expressed: platform-global, secure-by-default, platform-admin-only.\n\n### What's here\n1. **ADR refinement** (`docs/adr/0066-...`): generalizes the private RLS exemption into one explainable rule — `viewAllRecords` bypasses read RLS / `modifyAllRecords` bypasses write RLS, **gated by the object's platform-global/private posture** (Salesforce *View/Modify All Data*); adds an explicit **Precedence / combination semantics** section (AND-gates → union grants → RLS OR-within/AND-with-global → deny overrides); author guidance for `private` (posture) vs `requiredPermissions` (capability); a **Future refinements** roadmap (deny-by-default target, per-op requiredPermissions, capabilities in CEL, PSG muting).\n2. **spec** (`packages/spec`): `access: { default: 'public' | 'private' }` object posture + object-level `requiredPermissions: string[]` (mirrors `App.requiredPermissions`). Both optional; absent ⇒ public / no gate (no migration for existing objects).\n3. **plugin-security** (engine):\n   - **D2 CRUD**: a `private` object is not covered by a non-super-user `'*'` wildcard grant (`resolveObjectPermission`); access needs an explicit per-object grant **or** a View/Modify-All-Data wildcard. Explicit grants always honored.\n   - **D3 capability AND-gate**: object `requiredPermissions` checked *before* the CRUD grant — caller's `systemPermissions` union must cover it, else deny.\n   - **① posture-gated super-user RLS bypass**: on a `private`/platform-global object, the super-user bit skips wildcard RLS (incl. pre-image + post-image write checks) so a platform admin who is *also* an org admin sees all rows — without ever leaking cross-tenant data on ordinary tenant business objects.\n   - authz conformance ledger (dogfood) gets 3 new enforced rows.\n\n### Tests\n- spec: +5; plugin-security: +10 (evaluator units + full-middleware integration proving the platform-admin-sees-all / non-admin-denied behavior); authz ledger green. Full strict-DTS build green for `@objectstack/spec` and `@objectstack/plugin-security`.\n\n### Follow-ups (separate PRs)\n- cloud: `sys_license` adopts the posture + `.framework-sha` bump to this PR's merge SHA (browser-verified on the local stack).\n- Later ADR phases: D4 (action dual-surface gates), D1 (capability registry), D3-field + D5.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

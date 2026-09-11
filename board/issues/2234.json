@@ -1,0 +1,36 @@
+{
+  "number": 2234,
+  "kind": "pull_request",
+  "title": "fix(cli): extend better-sqlite3 → wasm SQLite auto-fallback to the persistent-file / --artifact dev path",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-23T08:25:18Z",
+  "updated_at": "2026-06-23T09:58:23Z",
+  "closed_at": "2026-06-23T09:58:21Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-23T09:58:21Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2234",
+  "body": "Closes #2229.\n\n## Problem\n\nThe native-`better-sqlite3` → wasm SQLite → in-memory auto-fallback only existed in the **zero-config `:memory:`** branch of `serve` (the `else if (isDev)` default-dev branch). A normal `objectstack dev` run never reaches it:\n\n- `dev` injects a persistent `file:` DB by design (so AI-authored metadata/records survive restarts) → routes into the explicit `sqlite`/`file:` branch in `serve.ts`, which did `new SqlDriver({ client: 'better-sqlite3', … })` directly — **no probe, no fallback**.\n- `--artifact` boots resolve sqlite through `default-datasource-driver-factory.ts` (via `standalone-stack`) — also `new SqlDriver({ client: 'better-sqlite3', … })` with no probe/fallback.\n\n`better-sqlite3` loads its native `.node` addon **lazily** (at the first pool-connection acquire / first query, not at `require` or knex construction). So an ABI mismatch (e.g. a cached prebuilt binary built for a different Node version — `NODE_MODULE_VERSION` mismatch) was invisible at boot and surfaced later as a runtime `Find operation failed` on the first query.\n\n## Fix\n\nHoist the probe-by-connect + step-down into a shared **`resolveSqliteDriver`** helper in `@objectstack/service-datasource` and apply it to **both** previously-unguarded sqlite construction sites:\n\n- the explicit `sqlite`/`file:` branch in `serve.ts`, and\n- the sqlite branch of the default datasource driver factory.\n\nThe existing default-dev `:memory:` branch is refactored onto the same helper, so there is now a single implementation.\n\nThe helper:\n- Forces the native addon to load with `connect()` + a cheap `SELECT 1` (`connect()` alone is not a reliable probe — for SQLite it only does `mkdir` + a `PRAGMA` whose error it swallows; the raw `SELECT 1` propagates the load error).\n- **In dev**, on a native load/ABI failure, steps down to **wasm SQLite** (real SQL semantics + on-disk persistence — the same `file:` keeps working) preserving the `filename`, then to **`InMemoryDriver`** as a dev-only last resort, emitting the existing warning verbatim:\n  > `⚠ native better-sqlite3 unavailable (ABI mismatch or not built) — dev using wasm SQLite (real SQL, slower).`\n- **In production**, returns the native driver **unprobed** — a load failure surfaces loudly (fail-closed) instead of silently degrading to a different engine. Dev is plumbed explicitly through `StandaloneStackConfig` / `serve.ts` (with a `NODE_ENV==='development'` fallback for programmatic callers).\n\n## Tests / verification\n\n- New co-located unit test `packages/services/service-datasource/src/sqlite-driver-fallback.test.ts` (8 cases) simulates a `NODE_MODULE_VERSION`-style load failure and asserts: wasm fallback + the exact warning, `on-write`/`on-disconnect` persistence selection, in-memory last resort, `autoMigrate`/`schemaMode` pass-through, **prod fail-closed** (native returned, never degraded), and the `NODE_ENV` dev-gate default. `pnpm test --filter @objectstack/service-datasource` → **93 passed**.\n- `turbo run build` for `@objectstack/service-datasource`, `@objectstack/runtime`, and `@objectstack/cli` all green (DTS typecheck included).\n- Real-driver sanity (no mocks): `resolveSqliteDriver` on `:memory:`, a persistent `file:` (with a real `INSERT`/`SELECT` round-trip), and `dev: false` all resolve to native `better-sqlite3` with **no warning** — confirming **no behavior change on the happy path**.\n\n## Changeset\n\n`patch` for `@objectstack/service-datasource`, `@objectstack/cli`, `@objectstack/runtime`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

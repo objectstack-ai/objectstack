@@ -1,0 +1,33 @@
+{
+  "number": 2106,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0060 P3 — landed-bar in force; status Accepted",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T07:31:10Z",
+  "updated_at": "2026-06-21T07:37:48Z",
+  "closed_at": "2026-06-21T07:37:46Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T07:37:46Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2106",
+  "body": "ADR-0060 (#2103) P3 — the documentation collar that closes the loop.\n\n**D5 (in force)**: a declaration surface is **landed iff it has a conformance ledger whose `checkLedger` ratchet is green**. Adding a new authorable surface without a ledger row is, by construction, an unclassified-surface CI failure — ADR-0049's 'enforce or remove' with a mechanical third leg.\n\nAdds an **Implementation status** section recording the three ledgers now sharing the one ADR-0060 helper (authz / expression / validation-rule), and flips status Proposed → **Accepted** (P1 #2104, P2 #2105 merged).\n\n**D6 (CI aggregate): explicitly deferred** — each ledger already self-gates in CI; an aggregate adds a registry-of-registries with little marginal value until the surface count grows.\n\ndoc-only.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

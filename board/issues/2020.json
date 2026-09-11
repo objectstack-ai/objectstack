@@ -1,0 +1,37 @@
+{
+  "number": 2020,
+  "kind": "pull_request",
+  "title": "feat(dogfood): in-process runtime regression gate",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-18T05:29:31Z",
+  "updated_at": "2026-06-18T05:36:13Z",
+  "closed_at": "2026-06-18T05:36:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-18T05:36:12Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2020",
+  "body": "## Why\n\nStatic gates — `build`, unit tests, spec-liveness, CodeQL — verify each layer in isolation, usually against mocks. They cannot catch a break that only appears when the **real engine + strategies + services + HTTP context run together**.\n\n[#2018](https://github.com/objectstack-ai/framework/pull/2018) (\"org timezone drives analytics date bucketing\") is the canonical case: it was **green on every static gate** — 900+ unit tests included — because each of its three broken seams (analytics strategy routing, in-memory count, REST execution-context) was individually correct and individually mocked. The break was only visible by booting the app and comparing a date bucket under UTC vs a non-UTC org timezone. Unit tests that mock the protocol/server (e.g. `rest.test.ts`) structurally cannot catch it.\n\n## What\n\n`@objectstack/dogfood` (private, never published): a harness that boots **real example apps in-process** against in-memory SQLite — wired with the same service plugins `objectstack dev` loads — and exercises them through the **real HTTP surface** via Hono request-injection (no ports, no sockets, CI-stable). Tests act as a browser client: sign in, hit `/api/v1/...`, assert on real responses.\n\n- **`src/harness.ts`** — `bootDogfoodStack(config)` → `{ kernel, api, raw, signIn, apiAs, stop }`. Registers ObjectQL + SQLite + HonoServer + App + Settings + Analytics + Auth + Security + REST + Dispatcher, runs `kernel.bootstrap()` (seed + dev-admin + route registration), and injects requests through the live Hono app.\n- **`test/analytics-timezone.dogfood.test.ts`** — golden regression for #1982/#2018. Inserts leads at a tz-boundary instant (`2024-03-01T03:00:00Z`), sets the org timezone through the **real settings route**, and asserts the date bucket shifts (`UTC → 2024-03-01`, `America/Los_Angeles → 2024-02-29`) with the correct count.\n- **CI** — new `Dogfood Regression Gate` job (gated on the `core` paths filter); also runs under `turbo run test`.\n\n## Proof it's a real gate\n\nReverting **just one** of the three #2018 seams (NativeSQLStrategy routing) and rebuilding turns the LA assertion red (`expected undefined to be 3` — the bucket didn't shift). Restoring it → green. A gate that stays green on the bug is not a gate; this one fails on it.\n\nBoot-to-assert ≈ 2s. Private package — no changeset.\n\n## Notes\n- Pre-existing (out of scope): example apps' standalone `tsc --noEmit` is already red (they import `Theme`/`Webhook`/etc. from `@objectstack/spec` root, which the built dist re-exports only via subpaths). CI only type-checks `@objectstack/spec`, so this gate is unaffected.\n- Next dogfood golden tests (follow-ups): array-field writes (#2004), form-section crash, member-edit RLS (#1994).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

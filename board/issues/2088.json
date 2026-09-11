@@ -1,0 +1,34 @@
+{
+  "number": 2088,
+  "kind": "pull_request",
+  "title": "feat(spec): defineX factories + XInput aliases for the 16 remaining writable domains (#2035)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T04:38:45Z",
+  "updated_at": "2026-06-21T04:48:26Z",
+  "closed_at": "2026-06-21T04:48:24Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T04:48:24Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2088",
+  "body": "Closes #2035.\n\n## What\n\nGives every writable domain **one** type-safe authoring entry, closing the third (bare-literal) idiom that #2023 tripped over.\n\n**PR 1 — spec (`feat(spec)`)**: 16 new `defineX` factories + the 6 missing `XInput` aliases.\n\n| Added | |\n|---|---|\n| Factories (16) | `defineDatasource` · `defineConnector` · `definePolicy` · `defineSharingRule` · `defineRole` · `definePermissionSet` · `defineEmailTemplateDefinition` · `defineReport` · `defineWebhook` · `defineObjectExtension` · `defineCube` · `defineMapping` · `defineTheme` · `defineTranslationBundle` · `definePage` · `defineAction` |\n| Input aliases (6) | `PolicyInput` · `CubeInput` · `MappingInput` · `ThemeInput` · `TranslationBundleInput` · `PageInput` |\n\nEach is the canonical 3-line shape `XSchema.parse(z.input<typeof XSchema>)`, mechanically identical to the 19 existing factories, re-exported from root `index.ts` (and already flowing through each subpath barrel via `export *`). Purely additive.\n\n**PR 2 — examples (`refactor(examples)`)**: migrated **36** authoring files across crm/showcase/todo from bare output-type literals (`: Page`, `: UI.ActionInput`, …) to the factory. Now every metadata object is `.parse()`-validated at module load.\n\n**PR 3 — lint guard (`feat(lint)`)**: an AST-only `no-restricted-syntax` rule that bans bare `: DomainType` exported-const literals in `examples/**`, turning the convention into an invariant. It earned its keep immediately — **it surfaced 15 authoring files the `*.{domain}.ts` filename scan missed** (`reports/index.ts`, `actions/index.ts`, `security/sales-roles.ts`, the connector/mapping/email/extension/policy/webhook files, …), all of which are migrated here.\n\n## Why\n\n- Makes the #2023 class of bug structurally impossible: `defineX` is a **value** import — a broken import hard-errors instead of degrading to `any`.\n- One idiom for AI authors (the examples are the corpus AI learns from).\n- Field-level authoring errors at `.parse()` time instead of a structural TS wall.\n\n## Verification (local, worktree)\n\n- `pnpm --filter './examples/*' typecheck` → **green** (all 3 apps)\n- `pnpm lint` → **green**\n- `@objectstack/spec` tests → **6599 passed**\n- Runtime smoke: dynamically imported all 58 factory-using example modules → **0 parse failures** (confirms migrated metadata is valid, not just type-shaped)\n- `@objectstack/spec` `tsc --noEmit` → clean\n\nChangeset: `@objectstack/spec` **minor**.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 2197,
+  "kind": "pull_request",
+  "title": "fix(cli): track live major in console-resolve test fixtures (10.0.0 fallout)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T11:07:53Z",
+  "updated_at": "2026-06-22T11:17:20Z",
+  "closed_at": "2026-06-22T11:17:18Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T11:17:18Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2197",
+  "body": "## Problem\n\n`Test Core` is red on `main`. The only failing test:\n\n```\nFAIL packages/cli/test/console-resolve.test.ts > resolveConsolePath version guard\n     > accepts a same-major install climbed to from the project cwd\nAssertionError: expected [ Array(1) ] to deeply equal []\n+   \"  ⚠ Ignoring @objectstack/console@10.0.0 at .../packages/console — major version\n       does not match this CLI (9.2.0). ...\"\n```\n\n**Root cause:** the test hardcoded `CLI_VERSION = '9.2.0'`. `resolveConsolePath()` intentionally also discovers the real, version-locked workspace `@objectstack/console` via the CLI's own module location (`createRequire(import.meta.url)`). The `10.0.0` release (ADR-0057, `sys_department → sys_business_unit`) bumped that package from `9.x` to `10.0.0`, so the live console now mismatches the test's stale `9.x` reference → the guard emits a real warning → the \"no warnings\" assertion fails.\n\nIt surfaced only now because the version-bump commits touched just `package.json`/`CHANGELOG`, which the CI path filter excludes — so `Test Core` never ran post-bump. It blocks **every** PR that runs Test Core.\n\n## Fix\n\nDerive the reference major from the CLI's own `package.json` and express the \"matching\" / \"stale\" fixtures relative to it, so the suite tracks the live major and won't go stale on the next major bump:\n\n```ts\nconst CLI_MAJOR = Number.parseInt(createRequire(import.meta.url)('../package.json').version, 10);\nconst CLI_VERSION = `${CLI_MAJOR}.2.0`;\nconst MATCHING_VERSION = `${CLI_MAJOR}.0.0`;   // healthy, version-locked install\nconst STALE_VERSION = `${CLI_MAJOR - 1}.8.0`;  // out-of-workspace stale install\n```\n\nThe `isConsoleVersionCompatible` unit tests keep their explicit literals — they test the function directly and are version-independent.\n\n**Verified locally:** `console-resolve.test.ts` → 7/7 pass.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

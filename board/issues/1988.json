@@ -1,0 +1,35 @@
+{
+  "number": 1988,
+  "kind": "pull_request",
+  "title": "fix(objectql): thread execution context into read-time formula evaluation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T22:22:52Z",
+  "updated_at": "2026-06-16T22:48:44Z",
+  "closed_at": "2026-06-16T22:48:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T22:48:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1988",
+  "body": "Closes #1979.\n\n## What\n\n`applyFormulaPlan` — which computes `Field.formula` virtual fields after `find`/`findOne` — evaluated each expression with only `{ record }`:\n\n```js\nconst r = ExpressionEngine.evaluate(fp.expression, { record: rec });\n```\n\nSo:\n- a formula using `now()`/`today()` ran against a **fresh wall-clock read on every evaluation** — no determinism within one read;\n- a formula referencing the caller (`os.user.id`, `os.org.id`) **faulted and fell back to `null`**, because user/org were never in scope.\n\n## Fix\n\nBuild the eval context exactly the way `applyFieldDefaults` already does — a `now` **pinned once per operation** (every row and every formula field in one read observes the same instant) plus `os.user` / `os.org` resolved from the `ExecutionContext`:\n\n```js\nconst now = nowSnapshot ?? new Date();\nconst user = execCtx?.userId ? { id: String(execCtx.userId), role: execCtx?.roles?.[0] } : undefined;\nconst org  = execCtx?.tenantId ? { id: String(execCtx.tenantId) } : undefined;\n// …evaluate(fp.expression, { now, user, org, record: rec })\n```\n\nThe two call sites in `find()`/`findOne()` pass `opCtx.context` (already in scope). Read-time formulas now behave consistently with default-value expressions.\n\n## Scope\n\nThis is the **read-path slice of ADR-0053 Phase 2** ([#1975](https://github.com/objectstack-ai/framework/pull/1975)), but it is **independent of timezone** and valuable on its own (determinism + caller-aware computed fields). #1980 will additionally thread `timezone` here once `ExecutionContext.timezone` exists.\n\n## Testing\n\n- New: a read-time formula resolves `os.user.id` / `os.org.id` from the execution context; `now()` is pinned identically across all rows in one `find`.\n- Full `@objectstack/objectql` suite green — **639 tests**; DTS build + typecheck clean.\n- Changeset: `patch` (lockstep fixed group).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

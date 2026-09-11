@@ -1,0 +1,32 @@
+{
+  "number": 2229,
+  "kind": "issue",
+  "title": "better-sqlite3 → wasm auto-fallback doesn't cover the persistent-file / --artifact dev path (only the zero-config :memory: branch)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-23T04:55:53Z",
+  "updated_at": "2026-06-23T09:58:22Z",
+  "closed_at": "2026-06-23T09:58:22Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2229",
+  "body": "**TL;DR (中文)**：`serve` 里 better-sqlite3 加载失败时降级到 wasm 的自动回退，**只覆盖\"零配置 + `:memory:`\"那条默认 dev 分支**。一旦用了持久化 `file:` 数据库或 `--artifact`（正是 `objectstack dev` 的默认用法），就走显式 sqlite 分支 / 数据源工厂，那里直接 `new SqlDriver({ client: 'better-sqlite3' })`，没有探测、没有回退 —— 原生 ABI 不匹配时不会降级，而是拖到第一次查询才以 `Find operation failed` 崩出来。\n\n## Summary\n\nThe native-`better-sqlite3` → wasm → in-memory auto-fallback only exists in the **default-dev branch** of `serve` (the case where *no* database URL/driver is configured, defaulting to `:memory:`). The two paths that a real `objectstack dev` run actually takes — an explicit `file:` URL, and an `--artifact`-declared datasource — instantiate `better-sqlite3` directly with **no probe and no fallback**. So a native ABI mismatch (e.g. after a Node version change) is **not** caught at boot and instead surfaces as a runtime `Find operation failed` on the first query.\n\n## Repro\n\nOn a machine where the cached `better-sqlite3` prebuilt binary targets a different Node ABI than the running Node (e.g. binary built for `NODE_MODULE_VERSION 141` / Node 25, running under Node 22 / `127`):\n\n```\nobjectstack dev all --artifact dist/objectstack.json -p 4000 --fresh\n```\n\n**Actual:** boot banner prints `Driver: SqlDriver(better-sqlite3) → …/dev.db` (no warning), server reports `✓ Server is ready`, then every query fails:\n\n```\nERROR Find operation failed {\"object\":\"helpdesk_customer\",\"error\":{\"message\":\n\"The module '…/better_sqlite3.node' was compiled against a different Node.js version\nusing NODE_MODULE_VERSION 141. This version of Node.js requires NODE_MODULE_VERSION 127. …\"}}\n```\n\n**Expected:** same graceful degradation the default-dev branch already implements — step down to the wasm SQLite driver and print\n`⚠ native better-sqlite3 unavailable (ABI mismatch or not built) — dev using wasm SQLite (real SQL, slower).`\n\n## Root cause\n\nThe probe-and-fallback is only in the `else if (isDev)` (no-URL / `:memory:`) branch, which \"probes by connect\" (`await sqliteDriver.connect()` → `SELECT 1`) so a native load failure is caught and downgraded:\n\n- `packages/cli/src/commands/serve.ts:661` — fallback branch (better-sqlite3 → wasm → memory), correct behavior.\n\nThe paths a normal `dev` run hits have no such guard:\n\n1. **Explicit `sqlite` / `file:` URL branch** — `packages/cli/src/commands/serve.ts:615` — directly `new SqlDriver({ client: 'better-sqlite3', connection: { filename } })`, label `SqlDriver(sqlite)`, no probe.\n2. **Default-datasource factory** (used when booting an `--artifact` whose datasource resolves to sqlite) — `packages/services/service-datasource/src/default-datasource-driver-factory.ts:142-146` — `new SqlDriver({ client: 'better-sqlite3', … })`, no probe. (This is the path that yields the `SqlDriver(better-sqlite3)` banner label observed above.)\n\nAnd `dev` **always** routes into one of these, because it injects a persistent `file:` DB by design so AI-authored metadata/records survive restarts:\n\n- `packages/cli/src/commands/dev.ts:222-248` — sets `OS_DATABASE_URL=file:…/dev.db` (or, with `--fresh`, a tempdir `dev.db`) before spawning `serve --dev`.\n\nSo `dev` can never reach the `:memory:` fallback branch — knex's client loads lazily at first query, and nothing forces/catches the load earlier on these two paths.\n\n## Suggested fix\n\nHoist the existing probe-by-connect + step-down logic so it also wraps:\n- the explicit `sqlite`/`file:` branch in `serve.ts` (line 615), and\n- the sqlite instantiation in `default-datasource-driver-factory.ts` (line 142).\n\ni.e. for any sqlite-via-better-sqlite3 construction, attempt `connect()` (or a cheap `SELECT 1`) and, on a native load/ABI failure, fall back to `SqliteWasmDriver` with the same `⚠ native better-sqlite3 unavailable` warning (then `InMemoryDriver` as last resort, dev-only). The wasm driver already preserves real SQL semantics + on-disk persistence, so a persistent `file:` DB can keep working through wasm.\n\n## Workarounds (today)\n\n- Force wasm: `objectstack dev … --database-driver sqlite-wasm` or `OS_DATABASE_DRIVER=sqlite-wasm` (already suggested by the existing warning text in `serve.ts`).\n- Rebuild the native module: `npm_config_build_from_source=true npx node-gyp rebuild` in the `better-sqlite3` package dir.\n\n## Environment\n\n- framework @ `53f146e07`\n- Surfaced while upgrading the `templates` repo's `all` env to `@objectstack/* 10.2.0` (Node 22.22.3, `better-sqlite3@12.11.1`)."
+}

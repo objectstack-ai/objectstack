@@ -1,0 +1,33 @@
+{
+  "number": 2096,
+  "kind": "pull_request",
+  "title": "fix(datasource): persist runtime datasources across restart",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T06:39:26Z",
+  "updated_at": "2026-06-21T06:44:39Z",
+  "closed_at": "2026-06-21T06:44:37Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T06:44:36Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2096",
+  "body": "## Problem\nA UI-created (runtime) datasource **vanished on backend restart**. Root cause: `datasource-admin` persists via `MetadataManager.register()`, which is **in-memory only** unless a writable `datasource:` loader is wired — and standalone `serve` wires none. (Runtime *objects* survive because the protocol writes them straight to `sys_metadata`; datasources never used that durable path.)\n\n## Fix\nSelf-contained in the `datasource-admin` plugin — no change to global `register()` semantics, no protocol surgery:\n- **On write:** also persist the record to the durable `sys_metadata` table via the data engine (same store + row shape runtime objects use); remove the row on delete. Only the opaque `external.credentialsRef` is stored — **never credential cleartext**.\n- **On boot** (`start()`, before pool rehydration): restore persisted runtime datasources from `sys_metadata` back into the registry, so `listDatasources()` + pool rebuild see them. Code-defined (artifact) datasources are unaffected.\n- Degrades gracefully to the prior in-memory behavior when no data engine is present.\n\n## Verification\n- Unit: +2 tests (create → simulated restart → restored; delete removes the durable row); `service-datasource` **65/65** green.\n- **Live:** created a runtime sqlite datasource, confirmed it's written to `sys_metadata`, **restarted the backend**, and it survived (`PERSISTED ACROSS RESTART: True`).\n\n## Pairs with\nThe Studio datasource-via-metadata-admin-engine work (objectui #1846 + framework #2091).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

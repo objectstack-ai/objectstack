@@ -1,0 +1,35 @@
+{
+  "number": 2138,
+  "kind": "pull_request",
+  "title": "fix(driver-sql,objectql): honor external.remoteName/remoteSchema in the federation read path (ADR-0015)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T15:22:45Z",
+  "updated_at": "2026-06-21T15:34:57Z",
+  "closed_at": "2026-06-21T15:34:55Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T15:34:55Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2138",
+  "body": "## Why\n\nADR-0015 external datasource federation declares that an object's `external.remoteName` / `external.remoteSchema` specify the remote table it binds to (remoteName defaults to `object.name`). The spec, introspection, boot validation, and the write-gate all honored this — **but the query-execution path ignored it**, resolving the physical table from the object name. So a federated object bound to a differently-named remote table failed with `no such table`, and ADR-0015's own canonical example (`wh_order` → `mart.fact_orders`) was broken.\n\nVerified with the real engine + a real better-sqlite3 driver: object `ext_customer` with `external.remoteName='remote_customers'` → `no such table: ext_customer`; only naming the object `remote_customers` returned rows.\n\n## What\n\n- **`SqlDriver.registerExternalObject()`** — a DDL-free counterpart to `initObjects()` (which is gated off for `schemaMode !== 'managed'`). Records the physical remote table (`physicalTableByObject` / `physicalSchemaByObject`) and populates the read-coercion maps, keyed by **object name**, with no DDL.\n- **`getBuilder()`** resolves the physical remote table (+ `.withSchema()` for pg/mysql; SQLite no-op). Coercion re-keyed via `coercionKey()` so date/datetime filters still resolve after the table switch. **Managed path unchanged** (one `undefined` lookup).\n- **engine/plugin** route objects with `external != null` to `registerExternalObject` in both the boot schema-sync and the on-demand `syncObjectSchema` path (so a late-registered external driver can be made queryable).\n- **`IDataDriver.registerExternalObject?()`** declared optional (non-SQL drivers skip).\n- ADR-0015 **§18 addendum** documents the gap, the fix, and the follow-up scope.\n\n## Scope\n\n`remoteName` (all dialects) + `remoteSchema` (pg/mysql). `external.columnMap`, native-analytics SQL over external objects, and auto-connecting declared datasources are tracked follow-ups (ADR-0015 §18).\n\n## Tests\n\n- New `sql-driver-external-remote-name.test.ts`: remoteName remap read/find/count/filter, boolean/json/**date+datetime** coercion without DDL, no table-creation leakage.\n- Added a `registerExternalObject`-is-DDL-free case to `sql-driver-ddl-gate.test.ts`.\n- Local: **driver-sql 185/185, objectql 670/670, spec contracts 232/232**; `tsc` at baseline (0 new errors).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

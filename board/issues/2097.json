@@ -1,0 +1,32 @@
+{
+  "number": 2097,
+  "kind": "pull_request",
+  "title": "ci(lint): extend the authoring-entry guard to packages/apps (#2035)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T06:39:51Z",
+  "updated_at": "2026-06-21T06:49:11Z",
+  "closed_at": "2026-06-21T06:49:09Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T06:49:09Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2097",
+  "body": "Follow-up to #2088. The author-time lint guard (ban bare `: DomainType` exported-const literals; require the `defineX` factory) was scoped to `examples/**`. This broadens it to `packages/apps/**` (the platform's own account/setup/studio apps) so the convention holds across every authoring surface, not just the example corpus AI learns from.\n\nExplicitly **excludes** `packages/downstream-contract/**` — its bare literals are an intentional frozen backward-compat fixture (#2089).\n\n## Notes\n\n- No migrations: the apps author no bare-literal metadata today, so this is future-proofing (a clean scope extension, not a fix).\n- Teeth verified: a probe `export const X: Page = {...}` under `packages/apps` is flagged by the guard; removed after the check.\n- `pnpm lint` → green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

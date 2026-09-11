@@ -1,0 +1,33 @@
+{
+  "number": 2145,
+  "kind": "pull_request",
+  "title": "test(runtime): stabilize standalone-stack RBAC test cold-start timeout",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T00:49:27Z",
+  "updated_at": "2026-06-22T00:56:39Z",
+  "closed_at": "2026-06-22T00:56:38Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T00:56:38Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2145",
+  "body": "补 #2133 漏带的超时修复。\n\n核心修复(createStandaloneStack 浮出 permissions/roles,让 artifact 启动路径 honor app 默认 profile,ADR-0056 D7)已随 #2133 进入 main。但 #2133 带的是 `standalone-stack.test.ts` 的早期版本——其首个用例在冷 CI(Node 20)上首次 createStandaloneStack 冷加载重型依赖会超过 vitest 默认 5s 超时,导致 flaky 失败(见原 #2132 的 CI:401 中 1 failed,Test timed out in 5000ms)。\n\n本 PR 把一次性 boot 移入 `beforeAll`(60s 超时),断言用例复用结果(并去掉 4 次重复 boot)。test-only,本地 5/5 通过。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

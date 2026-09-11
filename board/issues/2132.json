@@ -1,0 +1,35 @@
+{
+  "number": 2132,
+  "kind": "pull_request",
+  "title": "fix(runtime): honor app-declared default profile on the artifact-serve path (ADR-0056 D7)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T14:42:28Z",
+  "updated_at": "2026-06-22T00:58:12Z",
+  "closed_at": "2026-06-22T00:57:45Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2132",
+  "body": "## 问题\n\n`objectstack dev`/`serve`/`start` 从编译产物(`dist/objectstack.json`,无 host `objectstack.config.ts`)启动时,**不会应用 app 声明的默认权限集 profile**(`isProfile: true, isDefault: true`),而带 config 启动时会。表现:一个默认 profile 携带 `readScope`(如 ADR-0057 `unit_and_below`)的 app,在 artifact 启动路径下被忽略,所有用户回退到内置仅 owner 的 `member_default`,层级 scope fail-closed。\n\n## 根因\n\n`dev` 没有独立启动路径,它把 `serve --dev` 当子进程拉起;无 config 时走 **artifact 启动路径**。产物本身保留了 `permissions`/`isDefault`,但 `createStandaloneStack`(`packages/runtime`)只把 `objects`/`requires`/`manifest` 浮到顶层,**漏掉了 `permissions[]` 和 `roles[]`**。于是 `serve.ts` 的 `appDefaultProfileName(config.permissions)` 拿到 `undefined`,`SecurityPlugin` 回退到 `member_default`。config 加载路径未受影响,仅因 `originalConfig.permissions` 在展开时幸存。\n\n## 修复\n\n在 `createStandaloneStack` 中把产物 bundle 的 `permissions[]` 和 `roles[]` 一并浮到顶层,与现有 `objects`/`requires`/`manifest` 处理方式一致。这样 artifact 启动路径对 app 默认 profile 的处理与 config 路径完全相同(也修复了 artifact 模式下 app org roles 未注册到 Better-Auth 的同类缺口)。\n\n## 验证\n\n- **新增 runtime 回归测试** `packages/runtime/src/standalone-stack.test.ts`(5/5):artifact 路径现在浮出 permissions/roles(含 `readScope`),并驱动 `appDefaultProfileName`。\n- **新增 dogfood 端到端** `packages/dogfood/test/showcase-scope-depth-fallback.dogfood.test.ts`(4/4):profile 按名字作为 `fallbackPermissionSet` 解析(正是修复所喂入的 CLI 接线),可见性矩阵按 `unit_and_below` 放宽(配合参考层级 resolver),无 resolver 时 fail-closed 退回 owner-only。对齐参考用例 `showcase-scope-depth.dogfood.test.ts` 的矩阵。\n- 全量:runtime **401 通过**,dogfood **145 通过**;CLI 冒烟确认 artifact-fallback 启动加载 permissions/roles 且 Security 正常注册。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

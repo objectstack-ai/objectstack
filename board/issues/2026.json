@@ -1,0 +1,36 @@
+{
+  "number": 2026,
+  "kind": "pull_request",
+  "title": "chore(examples): rename @example/app-todo to @objectstack/example-todo",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-18T06:36:14Z",
+  "updated_at": "2026-06-18T06:41:59Z",
+  "closed_at": "2026-06-18T06:41:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-18T06:41:56Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2026",
+  "body": "## What\n\nRename the Todo example package `@example/app-todo` → `@objectstack/example-todo` for scope consistency with the other two example apps (`@objectstack/example-crm`, `@objectstack/example-showcase`).\n\nThis is the follow-up flagged in #2023: the inconsistent scope meant a `--filter @objectstack/example-*` glob **silently skipped** app-todo. (CI itself is safe — #2023 deliberately uses the path filter `./examples/*`, which catches all three regardless of name. This just removes the foot-gun for anyone using the scope glob.)\n\n## Changes\n\n- `examples/app-todo/package.json` — package name.\n- Root `package.json` — `dev:todo` filter.\n- Current docs — root `README.md` (2×) and `examples/app-todo/README.md` (3×).\n- `// Run via:` comments in `examples/app-todo/test/*.test.ts` (7 files).\n- **CHANGELOGs left untouched** — historical record of what the commands were at the time.\n\n## Notes\n\n- **No lockfile churn** — pnpm keys importers by path, not name.\n- **No changeset** — the package is `private` (never published), so there's no version/changelog to bump. Labeled `skip-changeset` accordingly.\n\n## Verification\n\n```\npnpm --filter @objectstack/example-todo typecheck   # new name resolves\npnpm --filter '@objectstack/example-*' typecheck     # now catches all 3:\n  examples/app-todo      typecheck: Done\n  examples/app-crm       typecheck: Done\n  examples/app-showcase  typecheck: Done\n```\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

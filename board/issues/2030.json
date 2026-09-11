@@ -1,0 +1,35 @@
+{
+  "number": 2030,
+  "kind": "pull_request",
+  "title": "fix(spec): declare extended Gantt config fields the renderer reads",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-18T10:04:08Z",
+  "updated_at": "2026-06-18T13:19:13Z",
+  "closed_at": "2026-06-18T13:19:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-18T13:19:11Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2030",
+  "body": "## Problem\n\n`GanttConfigSchema` (`packages/spec/src/ui/view.zod.ts`) declared only the 5 core timeline fields as a plain `z.object` with **no `.passthrough()`**:\n\n```ts\nz.object({ startDateField, endDateField, titleField, progressField, dependenciesField })\n```\n\nThe Gantt renderer (`@object-ui/plugin-gantt`), however, reads many more fields — `parentField`/`typeField` (the two-level summary→step hierarchy), `colorField`, `groupByField`, `tooltipFields`, `baselineStartField`/`baselineEndField`, `resourceView`/`assigneeField`/`effortField`/`capacity`, `quickFilters`, `autoZoomToFilter`.\n\nBecause zod strips undeclared keys on `.parse()`, those fields were dropped on **both** seams this schema guards:\n\n1. `objectstack compile` protocol validation before writing the dist artifact, and\n2. the runtime metadata service re-validating the view on `GET /api/v1/meta/view/:object`.\n\nNet effect: the API data and view config were correct, but the renderer received `parentField`/`typeField === undefined` and the Gantt degraded to a flat list (no parent/child rows, no summary bars, no expand/collapse). Downstream apps had to patch the bundled spec copy to work around it.\n\n## Fix\n\nDeclare the fields the renderer actually consumes, explicitly and with `.describe()` annotations (matching the surrounding `*ConfigSchema` idiom — none of them use `passthrough`). Also adds a small `GanttQuickFilterSchema` for the `quickFilters` entries. Core-field validation is unchanged.\n\n## Test\n\n`packages/spec/src/ui/view.test.ts` — added a case asserting a full extended config (hierarchy, baseline, grouping, resource view, tooltip fields, quick filters) parses and round-trips `parentField`/`typeField`. Full spec suite: **179 passed**.\n\nA changeset is included (`@objectstack/spec` patch)."
+}

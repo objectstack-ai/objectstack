@@ -1,0 +1,33 @@
+{
+  "number": 1971,
+  "kind": "pull_request",
+  "title": "docs(skill): teach the `metadata` doc embed in objectstack-ui (ADR-0051)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T15:37:37Z",
+  "updated_at": "2026-06-16T15:44:22Z",
+  "closed_at": "2026-06-16T15:44:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T15:44:19Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1971",
+  "body": "The ADR-0051 ` ```metadata ` doc-embed feature shipped (P1 fully merged), but the **AI-authoring skill never learned about it** — an author guided by `objectstack-ui` wouldn't know the capability exists. Worse, its \"Docs — Package Documentation\" section actively said the opposite:\n\n> ~~Don't try to embed a live component … there is no inline SDUI.~~\n\nThis updates `skills/objectstack-ui/SKILL.md`:\n\n- **Rewrites that callout** into the correct distinction: link *live instances* (dashboards, reports, record tables) by URL; embed *structural views* (state machine / flow / permission) inline.\n- **Adds an \"Inline metadata views\" subsection** teaching the ` ```metadata ` fence: the three `type`s, required vs optional fields (table), the `os build` lint (body shape + same-package reference liveness, did-you-mean), and the **`permission` P3 caveat** (matrix not yet projected to the reader — keep it out of docs reachable by less-privileged/anonymous readers until P3).\n\n### Notes\n\n- The auto-generated `references/_index.md` already point at `ui/component.zod.ts`, so `element:metadata_viewer` is version-aligned automatically — no reference regeneration needed.\n- Body-only change; `skills/README.md` + `content/docs/guides/skills.mdx` stay in sync (`check:skill-docs` passes locally).\n\nCompletes the \"build it / teach it\" loop for ADR-0051.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

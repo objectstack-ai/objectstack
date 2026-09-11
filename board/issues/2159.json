@@ -1,0 +1,33 @@
+{
+  "number": 2159,
+  "kind": "pull_request",
+  "title": "fix(objectql): honor $searchFields override sent as a comma-string (ADR-0061)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T02:30:15Z",
+  "updated_at": "2026-06-22T02:37:02Z",
+  "closed_at": "2026-06-22T02:37:00Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T02:37:00Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2159",
+  "body": "The $searchFields override (the view-level 'narrow search to these fields' signal list views send) arrives over REST/OData as a comma-separated STRING ('name,industry'), not an array. The engine only applied it when Array.isArray was true, so it was a silent no-op — search=tech&searchFields=name still searched the default fields. Coerce a string requestedFields to an array in resolveSearchFields (single seam); engine.find passes the raw value through. Verified e2e over HTTP: search 'tech' with searchFields=name → only Initech (name); searchFields=industry → the 4 Technology accounts (label→value). Unit test added. Pairs with #2134/#2142 and objectui #1872; closes the override path of ADR-0061 D1."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 2014,
+  "kind": "pull_request",
+  "title": "chore(console): refresh vendored Console SPA to objectui@e6fd254",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-17T07:36:15Z",
+  "updated_at": "2026-06-17T08:02:30Z",
+  "closed_at": "2026-06-17T08:02:28Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-06-17T08:02:28Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2014",
+  "body": "Bumps the pinned `.objectui-sha` from `6d4cc09` → `e6fd254` (14 upstream commits) and adds a changeset so `@objectstack/console` (and the fixed group) version-bumps on release. CI rebuilds the vendored SPA at publish time.\n\n## Verified locally\n- `objectui:refresh` (bump + `build-console.sh`) — console build 32/32 successful, `dist/index.html` produced (~39 MB) from `objectui@e6fd254`.\n\n## Notable upstream changes pulled in\n- feat: book metadata display UI + book-driven documentation portal (ADR-0046 §6)\n- feat: object fieldGroups as collapsible form sections; full object forms in screen-flow wizard steps\n- feat: action progress + Undo affordance; action/flow completion messaging\n- feat: CEL on action buttons; i18n for sort/filter builders and view/manage-views menus\n- fix: public share link URL + ShareDialog audiences; grouped-view pagination\n- fix: docs ToC scrolls in JS so `<base href>` no longer bounces to home\n\n## Release path\nStandard changesets two-pass: merge this → CI opens `version packages` PR → merge that → CI builds + publishes to npm."
+}

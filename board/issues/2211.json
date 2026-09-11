@@ -1,0 +1,33 @@
+{
+  "number": 2211,
+  "kind": "pull_request",
+  "title": "docs(datasource): external-datasource federation guide + objectstack-data skill rule (ADR-0062)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T14:29:53Z",
+  "updated_at": "2026-06-22T14:34:32Z",
+  "closed_at": "2026-06-22T14:34:29Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T14:34:29Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2211",
+  "body": "## Docs + skill for the ADR-0062 federation runtime\n\nFollow-up to the merged ADR-0062 epic (#2163). The headline capability — **declare an external datasource → it's visible, auto-connected, validated, and queryable with zero app code** — had **no narrative documentation**. This adds it.\n\n> Nothing was *stale* (no doc told users to use the now-removed `onEnable` bridge), and the new `datasource.autoConnect` field already auto-appears in the **generated** `references/data/datasource.mdx` (from the spec `.describe()`) — not hand-edited. This PR is purely the missing *narrative*.\n\n### Added\n- **`content/docs/guides/external-datasources.mdx`** — a how-to guide:\n  - `defineDatasource({ schemaMode: 'external', external: {...} })`\n  - object binding via `datasource` + `external.remoteName`/`remoteSchema`/`columnMap`\n  - **auto-connect** (D2 gate: external / explicit `object.datasource` / `autoConnect:true`; a mapping-only managed datasource stays metadata-only) — **no `onEnable` needed**\n  - `onEnable` + `ctx.drivers.register` as the dynamic-driver **escape hatch** only\n  - **`credentialsRef` fail-closed** (D3)\n  - **❌ no `field.columnName` on external objects → use `external.columnMap`** (D7, build-rejected)\n  - writes double opt-in; analytics over external; multi-tenant connect policy\n  - Listed in the **Integration** nav after *Database Drivers*. **Browser-verified rendering** (TOC + Callouts + code blocks).\n- **`skills/objectstack-data/rules/datasources.md`** (+ linked from `SKILL.md`) — the same rules in the authoring skill, leading with the `columnMap`-not-`columnName` guardrail.\n\n### Not changed\n- The generated datasource reference (auto-includes `autoConnect`).\n- No code change → docs/skills only.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

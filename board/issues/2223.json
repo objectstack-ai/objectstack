@@ -1,0 +1,35 @@
+{
+  "number": 2223,
+  "kind": "pull_request",
+  "title": "fix(analytics): log scalar auto-inferred cubes at debug, not warn",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T15:38:34Z",
+  "updated_at": "2026-06-22T15:46:28Z",
+  "closed_at": "2026-06-22T15:46:25Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T15:46:25Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2223",
+  "body": "## Problem\n\nService logs spammed at boot/first-render with:\n\n```\nWARN [Analytics] No cube registered for \"showcase_project\"; auto-inferred a minimal cube (sql=\"showcase_project\", measures=count, dimensions=(none)). Define an explicit Cube in your stack for full control.\n```\n\n(repeated for `showcase_task`, `showcase_account`).\n\n**Root cause:** `object-metric` KPI tiles — the showcase home page (`examples/app-showcase/src/pages/index.ts`) and My Work page — bind directly to raw objects with `aggregate: count`. Each tile issues an analytics query keyed by the **raw object name** with a bare aggregate and **no grouping**. The ADR-0021 datasets register cubes named `showcase_*_metrics` (not the bare object), so the service auto-infers a trivial count cube and warns once per object. The counts are correct — this is the intended \"metric over an object\" path — so the warn is noise for a non-problem.\n\n## Change\n\nIn `AnalyticsService.ensureCube`, choose the log level by query shape:\n\n- **Scalar metric** (measures only, no `dimensions`/`timeDimensions`) → `debug`. This is the first-class `object-metric` path; auto-inference is expected.\n- **Grouped query** (explicit dimension / time bucket) over an unregistered cube → keeps `warn`, since a forgotten cube registration there is a real mistake worth surfacing.\n\nPlatform-wide, so every `object-metric` consumer benefits — not just the showcase. Behavior change is log verbosity only; the auto-inferred cube and query results are unchanged.\n\n## Tests\n\n- Added 2 tests pinning both branches (scalar → debug, grouped → warn).\n- Full `@objectstack/service-analytics` suite green: **149/149**.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

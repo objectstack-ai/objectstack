@@ -1,0 +1,33 @@
+{
+  "number": 2142,
+  "kind": "pull_request",
+  "title": "fix(objectql): normalize OData $search/$searchFields so the search executor runs (ADR-0061)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T15:47:10Z",
+  "updated_at": "2026-06-21T15:56:07Z",
+  "closed_at": "2026-06-21T15:56:05Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T15:56:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2142",
+  "body": "Follow-up to the `$search` executor (#2134). Browser/HTTP end-to-end testing revealed the executor **never ran over the REST/OData path**: `protocol.findData()` normalizes `$`-prefixed OData params (`$top`/`$skip`/`$orderby`/`$select`/`$count`) to bare names, but **not `$search`/`$searchFields`**. So `$search=retail` fell through to the implicit-field-filter pass and became `where.$search = 'retail'` (a non-existent column) → the SQL driver silently returns `[]`. The engine's `expandSearchToFilter` (which reads `ast.search`) therefore never fired — `$search` looked like a no-op over HTTP even though the engine logic was correct and unit-tested.\n\n## Fix\n- Add `['$search','search']` and `['$searchFields','searchFields']` to the dollar→bare normalization loop in `findData`.\n- Add `'searchFields'` to `knownParams` so the bare form isn't swept into implicit filters.\n- Test: `findData` normalizes `$search`/`$searchFields` to bare `search`/`searchFields` and never leaks them into `where`.\n\n## Verification (real HTTP API, dev backend with the executor)\n- `?$search=retail` → **3 retail-industry accounts** (Acme Retail / Northwind / Wonka Brands), matched by the industry **label→value**, not by name.\n- `?$search=technology` → 4 (by industry label) · `?$search=Contoso` → 1 (by name) · `?$search=zzqq` → 0 · baseline → 13.\n- Browser console (pointed at the dev backend) renders the same backend's data.\n\nThis is the missing link that makes ADR-0061 P2 actually work end-to-end over REST. Unit tests: protocol-data (34) green; objectql typecheck clean."
+}

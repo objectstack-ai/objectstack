@@ -1,0 +1,33 @@
+{
+  "number": 2000,
+  "kind": "pull_request",
+  "title": "fix(service-ai): estimate non-zero token usage in MemoryLLMAdapter",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-17T03:35:11Z",
+  "updated_at": "2026-06-17T05:46:05Z",
+  "closed_at": "2026-06-17T05:46:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-17T05:46:03Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2000",
+  "body": "## Problem\n\n`MemoryLLMAdapter` is the money-free stand-in for a real LLM in dev, CI, and local E2E. But it hardcoded `usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 }` on **every** return path (`chat`, `complete`, `streamChat` finish, `generateObject`, tool-call and error branches).\n\nConsequence: any feature that meters tokens — cloud's AI quota guardrail, free-tier lifetime caps, paid monthly hard cap, usage dashboards, cost self-stop — could not be exercised end-to-end without a paid provider key. You literally had to spend real API money to test a cost-control feature.\n\n## Fix\n\nEstimate usage crudely from the prompt messages + echoed output (~4 chars/token, the standard ballpark) and return it on all paths via two small helpers (`estimateTokens` / `estimateUsage`).\n\nThis is **intentionally not provider-accurate** — it only needs to be non-zero, additive (`total = prompt + completion`), and grow with input size, so usage-driven behaviour is testable money-free.\n\n## Test\n\nAdds a unit test asserting the new usage is non-zero, additive, and monotonic in input size. Full file: 103/103 pass.\n\n## Verification\n\nConfirmed live in local E2E: assistant `ai_messages` rows now meter ~5000 tokens each (previously 0), which lets the cloud token guardrail actually accumulate toward its caps using the echo adapter.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

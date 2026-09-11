@@ -1,0 +1,35 @@
+{
+  "number": 2029,
+  "kind": "pull_request",
+  "title": "ci: run ESLint in CI to enforce the @objectstack/spec import guard",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-18T06:56:36Z",
+  "updated_at": "2026-06-18T07:06:49Z",
+  "closed_at": "2026-06-18T07:06:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-18T07:06:47Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2029",
+  "body": "## What\n\nActually run ESLint in CI so the existing import guard takes effect.\n\n## Why\n\nThe repo already had an ESLint flat config whose only rule — `no-restricted-imports`, banning `@objectstack/spec` root namespace imports (the documented ~1.2GB RSS regression vector) — but it was **completely dormant**:\n\n- `eslint` wasn't even a devDependency (the config's own comment said *\"To enable: `pnpm add -DW eslint`\"*).\n- There was no root `lint` script.\n- The workflow named `lint.yml` only ran `tsc`.\n\nSo the guard that should have instantly caught the root-import drift fixed in #2023 had never run. This wires it up.\n\n## Changes\n\n- Add `eslint` + `@typescript-eslint/parser` devDeps; wire the parser into the flat config so `.ts` files parse.\n- Add root `lint` script: `eslint . --no-inline-config`. The flag ignores **orphaned `eslint-disable` directives** scattered in source (for `@typescript-eslint/*`, `no-console`, etc.) left over from a fuller rule set this minimal config no longer registers — without it, `eslint .` errors on \"rule definition not found\". The only active rule (the spec import guard) should never need a local opt-out anyway.\n- Add a fast `lint` job to `lint.yml` (syntactic only — no build step).\n\n## Coverage note\n\nThis guard bans the 15 **namespace names** (`Data`, `UI`, `System`, `Identity`, `Security`, …) from the spec root. It does **not** yet catch concrete-type root imports (`Datasource`, `Theme`, `Job`, …) — those are covered by the example-app typecheck gate added in #2023. Together: typecheck catches concrete-type drift, ESLint catches namespace-name drift with a faster signal. Broadening the rule to an `allowImportNames` allowlist (catching all type imports) is a sensible follow-up but needs a complete enumeration of legitimate root exports, so it's deliberately out of scope here.\n\nTwo pre-existing items surfaced (not addressed here, to keep this focused):\n- Orphaned `eslint-disable` directives across ~10 files referencing an unregistered rule set.\n- The minimal config only registers one rule; a future fuller TS-lint setup could re-home those directives.\n\n## Verification\n\n```\npnpm lint   # clean, exit 0\n```\nRule confirmed firing on a deliberate `import { UI } from '@objectstack/spec'`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

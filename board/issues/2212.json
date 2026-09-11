@@ -1,0 +1,30 @@
+{
+  "number": 2212,
+  "kind": "issue",
+  "title": "findData 列表分页失效:total 永远等于本页条数、hasMore 恒为 false",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T14:32:07Z",
+  "updated_at": "2026-06-23T04:12:25Z",
+  "closed_at": "2026-06-23T04:12:25Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2212",
+  "body": "## 问题现象\n\n通过 `GET /api/v1/data/:object` 拉列表时,分页拿不到真实总数,导致前端表格无法翻页。\n\n一张有 **3125** 条记录的表为例:\n\n| 请求 | 实际返回 | 期望 |\n|---|---|---|\n| 不带 limit | `total: 3125`,返回全部 3125 条 | ✓ |\n| `?$top=100&$skip=0` | `records: 100`,但 `total: 100` | `total` 应为 3125 |\n| `?$top=100&$count=true` | `total: 100`(`$count` 被忽略) | `total` 应为 3125 |\n| 任意请求 | `hasMore` 恒为 `false` | 后面还有数据时应为 `true` |\n\n**直接后果:** 前端表格(console / objectui grid)拿不到匹配总数,只能用「本批条数 ÷ 每页行数」当总页数。于是一张 3000+ 行的表显示「共 10 页」,翻到第 11 页就没有数据——**无法翻页到第 101 条之后**。\n\n## 根因\n\n`packages/objectql/src/protocol.ts` 的 `findData()`:\n\n- 入口已解析 `$count`(`protocol.ts:2023` 把 `$count → count`);\n- 但收尾时没用它,`total` 直接写成本批条数、`hasMore` 写死 `false`:\n\n```ts\n// protocol.ts:2179-2187\nconst records = await this.engine.find(request.object, options);\nreturn {\n    object: request.object,\n    records,\n    total: records.length,   // ← 只是本页条数,不是匹配总数\n    hasMore: false           // ← 恒为 false\n};\n```\n\n聚合分支 `protocol.ts:2171-2176` 同样如此。看起来是没写完的占位实现:契约层 `spec/api/contract.zod.ts:84-91` 已定义完整分页字段、引擎 `engine.ts` 已有 `count(object, query)` 方法,唯独 `findData` 没调用。\n\n## 期望\n\n带 `limit` 时,`findData` 返回真实分页元数据:`total` = 满足 `where` 的匹配总数(复用现成的 `engine.count`),`hasMore` = `offset + records.length < total`;不带 limit 时维持现状。\n\n**环境:** ObjectStack 10.0.0(`@objectstack/objectql@10.0.0`)\n"
+}

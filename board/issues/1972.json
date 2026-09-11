@@ -1,0 +1,35 @@
+{
+  "number": 1972,
+  "kind": "pull_request",
+  "title": "fix(runtime): sandbox host calls via deferred promises, deadline-bounded pump",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T15:46:21Z",
+  "updated_at": "2026-06-16T22:01:50Z",
+  "closed_at": "2026-06-16T22:01:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T22:01:48Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1972",
+  "body": "## Problem\n\nProduction error from `POST /api/v1/actions/mtc_lead/lead_apply_convert`:\n\n```\naction 'lead_apply_convert' did not resolve after 1000 pump iterations\n```\n\n## Root cause\n\nThe QuickJS sandbox exposed `ctx.api.object(x).find/update/...` via `newAsyncifiedFunction`. Asyncify unwinds the WASM stack for each host call and **forbids a second call while the first is unwound** (\"the stack cannot be unwound twice\").\n\nA script that awaits two host calls in sequence — the real `lead_apply_convert` action does `findOne()` then `update()` — hits exactly that: the second call is driven from a resumed continuation inside `executePendingJobs` (a non-async frame). That corrupts the wasm heap (`memory access out of bounds` / `Assertion failed: p->ref_count == 0`, the偶发 crash already noted in tianshun-mtc's test log) and, when it limps along instead, exhausts the fixed 1000-iteration pump budget — the production error above.\n\nI verified empirically that asyncify **cannot** drive 2+ host calls per invocation under any driver (manual `executePendingJobs` pump *or* module top-level await) — both crash with \"cannot handle error in suspended function\".\n\n## Fix\n\n1. **Host API methods → deferred QuickJS promises** (`vm.newPromise()`) instead of asyncified functions. Sequential `await`s become ordinary promises with no stack unwinding, so any number of host calls compose safely. Host method calls now require `await` (every real action already does; the `.object(name)` proxy getter stays synchronous).\n2. **Pump loop bound by `timeoutMs`** instead of a magic 1000-iteration cap. A slow-but-progressing script (many sequential writes, or one write that synchronously drives a downstream record-change automation) finishes within its timeout; a stuck / never-settling host call is cut off with a clear timeout error (the interrupt handler can't fire while parked on a host promise, so the deadline check is the backstop).\n\n## Tests\n\nNew regression tests in `quickjs-runner.test.ts`:\n- a host call settling after **>1000 event-loop turns** (one long write),\n- **>1000 sequential host calls** (previously crashed the wasm),\n- a **never-settling** host call that must time out (previously hung).\n\n`body-runner.test.ts` updated: its `ctx.api.object(\"opportunity\").count()` now uses `await` (it previously relied on asyncify's magic-sync, the exact fragile behavior removed).\n\nAll 31 sandbox tests pass. The one unrelated `publish-drafts seed rows` failure in this package is pre-existing (fails identically on `main` without these changes)."
+}

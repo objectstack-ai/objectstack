@@ -1,0 +1,33 @@
+{
+  "number": 2083,
+  "kind": "pull_request",
+  "title": "feat(datasource): expose driver catalog with config JSON Schema",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T01:56:40Z",
+  "updated_at": "2026-06-21T02:20:34Z",
+  "closed_at": "2026-06-21T02:20:33Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T02:20:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2083",
+  "body": "## Summary\n\n`DriverDefinitionSchema.configSchema` (\"Used by the UI to generate the connection form\") shipped empty for every driver, so the Studio datasource editor could only offer a raw-JSON editor for `config`. This adds **`GET /api/v1/datasources/drivers`** — a curated catalog of connection drivers (memory / sqlite / postgres / mysql / mongo), each with a JSON-Schema `configSchema` describing its connection options.\n\n- New `driver-catalog.ts` with `DRIVER_CATALOG` (JSON-Schema `configSchema` per driver, e.g. sqlite → `{ filename }`, postgres → host/port/database/user/password/ssl/schema).\n- New `GET /datasources/drivers` route in `service-datasource` admin routes — static metadata, no `datasource-admin` service dependency (always available).\n\nThis unblocks the objectui Studio datasource connection form (a follow-up consumer PR). A future runtime driver registry can supersede the curated catalog without changing the route contract.\n\n## Verification\n`service-datasource` tests pass (6/6 in admin-routes), including a new case asserting `GET /drivers` returns the catalog with sqlite's `filename` config schema.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

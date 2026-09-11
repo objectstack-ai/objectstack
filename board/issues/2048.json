@@ -1,0 +1,32 @@
+{
+  "number": 2048,
+  "kind": "pull_request",
+  "title": "feat(app-showcase): task default list switches across every record visualization",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-19T13:35:38Z",
+  "updated_at": "2026-06-19T13:36:10Z",
+  "closed_at": "2026-06-19T13:36:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-19T13:36:07Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2048",
+  "body": "## Summary\n\nMakes the showcase task object's default **All Tasks** list the \"switch every view\" case — Airtable *Visualizations* parity: the **same** task records re-shaped on demand via the toolbar visualization switcher.\n\nAdds the per-visualization binding blocks to the default list and widens `appearance.allowedVisualizations`:\n\n| Visualization | Binding | Verified |\n|---|---|---|\n| Grid | — | ✅ |\n| Kanban | `groupByField: status`, summarize hours | ✅ board columns |\n| Gallery | `coverField: cover`, title + fields | ✅ card grid |\n| Calendar | `startDateField: due_date` | ✅ month view, tasks on due dates |\n| Timeline | `startDateField: created_at` | ✅ time buckets |\n| Gantt | `start_date → end_date`, progress | ✅ bars + start/end columns |\n\nSeed data already carries `status / due_date / created_at / start_date / end_date / progress / location`, so each of the six renders with real content.\n\n## Scope note — why not map / chart in this switcher\n\nComprehensive testing surfaced a real boundary, captured here honestly rather than faked:\n\n- **map** — the spec `ListViewSchema` has **no `MapConfigSchema`** (no `locationField`), and the runtime switcher only offers map when `options.map.locationField` resolves (no field-type inference). So map can't be offered in an object-list switcher today; it stays as its own `listViews.map` named view (which infers the `location` field). Making it switchable needs a spec + runtime addition — proposed as a follow-up.\n- **chart** — aggregates a *dataset*, not records, so it's a named view + dashboard element by design, not a record-list visualization.\n\n## Verification\n\nBrowser-tested against the live showcase backend (fresh DB): switching the default list to Kanban / Gallery / Calendar / Timeline / Gantt each renders the 10 task records correctly; the switcher offers exactly those six (no phantom map/chart). Screenshots in the session.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 2037,
+  "kind": "pull_request",
+  "title": "feat(dogfood): owner-isolated RLS fixture — hard, revert-provable #1994 gate",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-18T12:45:17Z",
+  "updated_at": "2026-06-18T12:53:04Z",
+  "closed_at": "2026-06-18T12:50:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-18T12:50:56Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2037",
+  "body": "## Why\n\nThe cross-owner RLS proof runner (`src/rls.ts`, from #2032) was unit-proven but had **nothing live to exercise it**. The harness boots single-tenant, so the org `tenant_isolation` policy is stripped and a fresh member falls back to `member_default` (broad read) — every object reports `member-visible`, so the #1994 invariant (*\"a user who cannot READ a record must not be able to WRITE it\"*) never actually fired against an app.\n\n> Note: #2032's branch was removed before this work, so this PR **also carries the #2032 runner commit** (`c3492faee`) it builds on.\n\n## What\n\nTwo faithful ways to create real cross-owner isolation, both now live:\n\n### 1. Owner-scoped fixture — the hard gate\n`test/rls-fixture.dogfood.test.ts` + `test/fixtures/rls-owner-fixture.ts`: a one-object app (`rls_note`) whose member fallback permission set carries `RLS.ownerPolicy('rls_note','created_by')`. The predicate keys on `created_by`/`current_user.id` (not `organization_id`), so it **survives single-tenant stripping** — a fresh member genuinely can't read the admin's note.\n\n- **GREEN**: owner policy on `all` ops → `rls-consistent` (the #1994 pre-image check denies the by-id write).\n- **AUTOMATED RED**: a `select`-only variant → `rls-hole` on every CI run (read scoped, no write policy applies, by-id write lands) — the #1994 hole class reproduced at the policy layer. A gate that can't go red isn't a gate.\n- **MANUAL REVERT PROOF** (documented in README): disabling the pre-image check in `plugin-security` flips the green fixture to `GET 404 yet MUTATED it by id (PATCH 200)`. Verified, then restored.\n\n### 2. Org-scoped / multi-tenant\n`test/rls-multitenant.dogfood.test.ts`: `bootDogfoodStack` now takes `{ multiTenant: true }`, registering `plugin-org-scoping` **before** `SecurityPlugin` so `organization_id` policies apply. CRM flips from *every object `member-visible`* (single-tenant) to **4 consistent / 0 holes / 0 member-visible** — confirming the `member-visible` result was single-tenant RLS-stripping, **not** a broad-read default (the model real apps like hotcrm rely on). hotcrm isn't in this repo, so this validates against the in-repo CRM example and documents the path.\n\n### Harness\n`BootOptions` gains `security?` (SecurityPlugin override for the fixture fallback) and `multiTenant?`. README documents both gates + the revert proof; the stale \"next step\" note in the single-tenant smoke now points at the two new tests.\n\n## Verification\n- Full dogfood suite green: **43 passed, 1 skipped** (pre-existing skip).\n- Manual #1994 revert confirmed red, then restored.\n- `tsc --noEmit` clean; `@objectstack/spec` import guard compliant.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

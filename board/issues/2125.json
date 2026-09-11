@@ -1,0 +1,33 @@
+{
+  "number": 2125,
+  "kind": "pull_request",
+  "title": "feat(spec,showcase): lookup record-picker authoring metadata + demo",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T12:32:28Z",
+  "updated_at": "2026-06-21T13:18:26Z",
+  "closed_at": "2026-06-21T13:18:24Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T13:18:24Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2125",
+  "body": "## Why\n\nThe objectui record picker can render multi-column, scoped, and dependent lookup results, but `FieldSchema` exposed **none** of the authoring surface for it. Anything an author set (e.g. `lookupColumns`) was silently dropped by `defineStack`'s Zod parse — so the picker always degraded to a single name column. This is the same class of gap the [FieldSchema property-liveness audit](../tree/HEAD/docs/audits/2026-06-fieldschema-property-liveness.md) flags (e.g. `referenceFilters` reaching the renderer under a different key, `lookup_filters`).\n\nCompanion to objectui **#1860** (renderer: zero-config column derivation, i18n, accepts both key casings, applies `lookupFilters` in the popover).\n\n## Changes\n\n**spec — `packages/spec/src/data/field.zod.ts`**\nAdd the forward record-picker props to the lookup / master_detail surface, all genuinely wired to the renderer:\n- `displayField` — candidate label field\n- `descriptionField` — secondary line in the popover\n- `lookupColumns` — curated picker table columns (auto-derived when omitted)\n- `lookupPageSize` — rows per page\n- `lookupFilters` — structured, picker-honoured scoping filters (the structured form of `referenceFilters`)\n- `dependsOn` — dependent / cascading lookups\n\nThey flow through `Field.lookup()` automatically via `FieldInput`. Tests assert the props survive `FieldSchema.parse` (the path `defineStack` uses) and that the builder carries them through.\n\n**showcase — `examples/app-showcase`**\n- Account seed expanded 3 → 13 (varied industry / revenue / lifecycle incl. churned) so the picker exercises search, sort, pagination and scoping.\n- `showcase_invoice.account` configured with curated `lookupColumns` (name / industry / lifecycle / revenue), a `descriptionField`, and a `lookupFilters` rule hiding churned accounts — a rep can't invoice a churned customer.\n\n## Verification\n- `packages/spec` unit tests: **117 passed** (incl. 2 new — props parse without being stripped; builder carries them through).\n- `app-showcase` typecheck: no errors in the changed files (`invoice.object.ts`, `data/index.ts`); remaining errors are pre-existing unbuilt-workspace-dep noise (connectors / objectql), unrelated to this change.\n- Renderer side proven live in #1860 against this showcase."
+}

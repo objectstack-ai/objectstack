@@ -1,0 +1,32 @@
+{
+  "number": 2052,
+  "kind": "pull_request",
+  "title": "feat(app-showcase): expand page-capability coverage (visualizations, config depth, record components)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-20T01:14:04Z",
+  "updated_at": "2026-06-20T01:14:34Z",
+  "closed_at": "2026-06-20T01:14:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-20T01:14:32Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2052",
+  "body": "## Summary\n\nRounds out the showcase so it demonstrates the **full page surface**, not just a couple of grid interface pages. Answers \"what's the most complete way to show off page capabilities\".\n\n### P1 — every record visualization as its own interface page\n`task-visualizations.pages.ts`: **Task Board** (kanban) · **Task Calendar** · **Task Gallery** · **Team Schedule** (gantt) · **Activity Timeline** · **Work Map** · **All Views** (one page whose switcher spans all 7). Each whitelists one visualization and relies on runtime auto-derive for the bindings; each page's `columns` include the binding fields so the data is actually fetched.\n\n### P2 — deeper interface config\n`active-projects.page.ts`: `filterBy` always-on base filter (hide completed) · default `sort` (budget desc) · `addRecord` toolbar **form** entry point · dropdown user-filters · grid+kanban.\n\n### P3 — record-layout component set\n`task-detail.page.ts` (full record page): `record:path` status stepper · `record:alert` with a `visible` expression (shows only In Review) · `record:quick_actions` (object actions) · highlights · details.\n\n### P4 — data\nCover images on tasks (gallery), reusing the existing lat/lng locations (map).\n\n## Verification (browser, live showcase)\n- All 7 visualization pages render — **Work Map** shows 10 pins, **Task Gallery** 10 covers, **Team Schedule** gantt bars, plus calendar/timeline/kanban; **All Views** switcher offers all 7.\n- **Active Projects** hides the completed project (filterBy) and sorts by budget desc.\n- **Task** record page shows the path stepper (Backlog→…→Done), the In-Review alert, and quick actions.\n\n## Deferred (follow-up — heavier/uncertain renderers)\n- Hierarchy `levels` (needs a self-referencing object + tree renderer).\n- A `utility`-type panel page.\n\nPairs with objectstack-ai/objectui#1811 (gantt/map auto-derive).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

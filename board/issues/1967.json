@@ -1,0 +1,35 @@
+{
+  "number": 1967,
+  "kind": "pull_request",
+  "title": "docs(skill): sync CEL function tables to 9.8.0 stdlib + drift-guard",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T15:15:58Z",
+  "updated_at": "2026-06-16T15:25:10Z",
+  "closed_at": "2026-06-16T15:25:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T15:25:07Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1967",
+  "body": "Platform follow-up to #1949 — closes the last surface of the catalog/runtime alignment: the AI-facing **skill**.\n\n## Problem\nThe authoring skills (objectstack-formula / -automation) are what an AI author reads to know which CEL functions exist. They listed ~6 functions and capped with *\"only the stdlib above\"*, **omitting the 14 registered in 9.8.0** (`daysBetween`, `abs`, `round`, `min`, `max`, `upper`, `lower`, `contains`, `startsWith`, `endsWith`, `matches`, `len`, `isEmpty`, `date`/`datetime`). So the AI never reached for `daysBetween` (days-remaining) and kept hand-rolling.\n\n## Changes\n- **objectstack-formula**: rewrite the stdlib table (grouped Dates/Numbers/Strings/Collections + the CEL built-ins). Fix the `daysFromNow`/`daysAgo` note — they keep the **wall-clock time**, not midnight (the doc previously said `today()+n*24h`).\n- **objectstack-automation**: rewrite the \"time-relative rule\" anti-pattern to the precise one-day **window** (`$gte daysFromNow(N)` / `$lt daysFromNow(N+1)` + `$or`) instead of the imprecise `BETWEEN TODAY and TODAY+N`; note the date-equality filter footgun (build warns `flow-date-equality-filter`); add `daysBetween` for days-remaining.\n- **drift-guard**: a test in `@objectstack/formula` asserts every `CEL_STDLIB_FUNCTIONS` entry is documented in the skill, so the AI-facing list can't fall behind the runtime catalog again (mirrors the runtime drift-guard in #1949).\n\n`check:skill-docs` green; drift-guard 1/1.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 2140,
+  "kind": "pull_request",
+  "title": "fix(objectql): honor expand `where` filter on lookup/master_detail expansion",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T15:37:15Z",
+  "updated_at": "2026-06-21T15:49:26Z",
+  "closed_at": "2026-06-21T15:49:24Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T15:49:24Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2140",
+  "body": "## Problem\n\nThe ObjectQL `expand` post-processor batch-loads related records with an `id $in [...]` query but **never merged the nested QueryAST `where`** — so a `where` filter inside `expand` was silently ignored, returning *all* related records regardless of the filter. This was documented as supported in both the spec schema and `query-syntax.mdx`:\n\n```ts\nexpand: {\n  assignee: { object: 'user', where: { active: { $eq: true } } }, // ← filter dropped\n}\n```\n\n## Fix\n\nMerge the nested filter into the related query via an explicit **`$and`** group rather than a shallow spread:\n\n```js\nconst idFilter = { id: { $in: uniqueIds } };\nconst where = nestedAST.where ? { $and: [idFilter, nestedAST.where] } : idFilter;\n```\n\nA shallow `{ id: {$in}, ...nestedAST.where }` would **clobber** the `id` constraint when the nested filter also keys `id`, and is ambiguous for a top-level `$or`/`$and`. The `$and` wrapper is correct for every `FilterCondition` shape and is executed by the in-memory matcher and the SQL/mongo filter compilers. When there is no nested `where`, the emitted query is unchanged.\n\n## `limit` / `offset` / `orderBy` — intentionally not propagated\n\nThis path batch-loads **every** parent's related records in a single `$in` query, so a *per-parent* `limit`/`offset` can't be expressed — forwarding it would globally cap the batch and silently drop records other parents need. `orderBy` is likewise not observable (records are re-keyed by FK on injection). These are documented as not-honored (docs + schema `.describe()`), and a guard test asserts `limit`/`offset` are not pushed into the expand query.\n\n## Tests\n\n- New: nested `where` is AND-merged into the `$in` query; filtered-out FK stays raw.\n- New: `$or` logical group preserved (no shallow clobber).\n- New: `limit`/`offset` guard.\n- objectql engine **40 passed** · objectql package **673 passed** · spec **6601 passed** · `tsc --noEmit` clean.\n\n## Docs\n\n- `query-syntax.mdx` \"Filtered Expand\": old example used a reverse/related-list relationship (`account.opportunities`, not expanded by this forward-lookup path) and promised `limit`. Replaced with an accurate forward-lookup example + a caveat callout.\n- `query.zod.ts` schema `.describe()` updated to match.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

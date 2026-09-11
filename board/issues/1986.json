@@ -1,0 +1,32 @@
+{
+  "number": 1986,
+  "kind": "pull_request",
+  "title": "feat(runtime): dispatch /api/v1/share-links to per-env shareLinks service",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T22:09:27Z",
+  "updated_at": "2026-06-17T05:51:42Z",
+  "closed_at": "2026-06-17T05:51:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-17T05:51:40Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1986",
+  "body": "Mounts the share-link REST surface for the multi-tenant runtime by adding a `/share-links` branch + `HttpDispatcher.handleShareLinks` that resolves the per-env `shareLinks` service (env from hostname) — mirroring `handleI18n`/`handleAI`. Per-env kernels have no HTTP server, so a plugin's own `http.post()` routes are invisible; this is the dispatch seam they need.\n\n- `POST/GET/DELETE /share-links` (authenticated) + public `GET /:token/resolve` and `/:token/messages`.\n- Whitelists the public resolve/messages paths in `enforceProjectMembership` (a signed-in non-member opening a public link must not 403).\n- `SharingServicePlugin.start` now registers the `shareLinks` service regardless of the `enforce` flag (it previously early-returned on `enforce:false` before reaching it).\n- Record/messages are fetched from `this.kernel` (the request's resolved per-env kernel) — the same engine the service is bound to — not `resolveService('objectql', env)`, which could return a host/scoped engine lacking the rows.\n\nPairs with objectstack-ai/objectui#feat-share-links-public-page and objectstack-ai/cloud (per-env `SharingServicePlugin` registration). Verified browser-E2E on the full local stack: create→link, public `/s/:token` renders an AI conversation read-only with no login.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 2221,
+  "kind": "pull_request",
+  "title": "docs(skill,showcase): SDUI styling (ADR-0065) — skill section + renderable showcase page",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T15:36:45Z",
+  "updated_at": "2026-06-22T15:43:53Z",
+  "closed_at": "2026-06-22T15:43:51Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T15:43:51Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2221",
+  "body": "Closes the authoring + demonstration gap for **ADR-0065** (SDUI scoped styling). The mechanism (objectstack-ai/objectui#1912) and spec field (#2214) merged; this makes it **usable** (skill) and **demonstrated** (showcase).\n\n## 1. `objectstack-ui` skill — the AI-author contract\n\nThe skill had **zero styling guidance** — so an AI authoring a page either left it unstyled or invented `className` (the exact footgun ADR-0065 exists to kill). Adds a **\"Styling (ADR-0065)\"** section under Pages:\n- style via `responsiveStyles` (per-breakpoint CSS maps), **NOT** `className` — with the explicit \"arbitrary Tailwind classes silently do nothing\" warning;\n- `responsiveStyles`/`id` top-level, children in `properties.children`;\n- design-token values (`var(--space-*)`, `var(--surface)`, `var(--brand)`, …);\n- responsive via breakpoint maps (`large→medium→small`), never `md:`;\n- compose from generic styleable blocks; + a worked card example.\n\nAlso adds `flex` / `element:text` / `element:button` to the Component Catalogue.\n\n## 2. Renderable showcase page\n\n`examples/app-showcase/src/pages/styling-gallery.page.ts` — a real `definePage` (`type: 'app'`) pricing page styled **entirely** via `responsiveStyles` + tokens (zero `className`), wired into nav (\"Styling (ADR-0065)\") + `objectstack.config`.\n\n## Verification\n\n- **Typechecks clean** against the merged spec (`definePage` accepts `responsiveStyles`; `properties.children` is the spec shape).\n- **Browser-verified end-to-end** through the real merged `SchemaRenderer`: the exact page schema renders to **89 per-node scoped `<style>` tags**; the `$29` price computes `font-size: 40px` (unlayered scoped beats layered `text-sm`); \"Most popular\" ring, bottom-aligned CTAs, responsive 4→2→1 grid. Screenshot in the linked thread.\n\n(The showcase's local Console is pinned to an older objectui, so verification used a runner at the merged source — faithful to the real renderer.)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

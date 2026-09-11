@@ -1,0 +1,33 @@
+{
+  "number": 2085,
+  "kind": "pull_request",
+  "title": "feat(datasource): read-only introspection routes + by-name test for Studio sync",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T03:03:40Z",
+  "updated_at": "2026-06-21T03:42:42Z",
+  "closed_at": "2026-06-21T03:42:40Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T03:42:40Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2085",
+  "body": "## Summary\n\nExpose the existing `external-datasource` introspection service over REST so Studio can list a datasource's remote tables and preview the object definition each would become — the backend half of \"sync objects from a datasource\".\n\n- `GET  /api/v1/datasources/:name/remote-tables` → `listRemoteTables()`\n- `POST /api/v1/datasources/:name/object-draft`  → `generateObjectDraft(table)`\n\nBoth are **read-only** (introspect + type-map, no persistence). The Studio caller creates the resulting object through the normal metadata channel (`object` is create-only at runtime), keeping object-creation in the sanctioned path rather than `importObject` (which requires a writable store not wired here). Degrade to 503 when the service isn't wired; 400 when `table` is missing.\n\n## Verification\nVerified **live** against a fresh showcase backend with a seeded SQLite datasource (`customers`/`orders`): `remote-tables` lists both with column counts; `object-draft` for `customers` yields `{ name, fields: [id,name,email,created_at], external:{remoteName} }`. Unit tests cover both routes (list + draft 200 / 400-without-table); service-datasource admin-routes suite green (8/8).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

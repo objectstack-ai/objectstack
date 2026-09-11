@@ -1,0 +1,35 @@
+{
+  "number": 2084,
+  "kind": "pull_request",
+  "title": "feat(security): ADR-0057 ERP authorization core + open/paid hierarchy seam (closes #2077)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T02:40:34Z",
+  "updated_at": "2026-06-21T03:22:27Z",
+  "closed_at": "2026-06-21T03:22:25Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T03:22:25Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2084",
+  "body": "## What\n\nADR-0057 — a **Dataverse-core / Salesforce-discipline** authorization model on top of the existing widening layer, the open/paid seam that keeps hierarchy-relative visibility an enterprise capability, and the close-out of **#2077** (declared `roles`/`sharingRules` now seed at boot).\n\n## Highlights (each with a runtime dogfood proof)\n\n- **D1 scope-depth grants** `own / own_and_reports / unit / unit_and_below / org` — security stashes the grant's depth, sharing widens the owner-match (`owner_id IN …`) and still OR-s in shares. No RLS-compiler change. `showcase-scope-depth` (5/5, incl. fail-closed).\n- **D2 `sys_department` → `sys_business_unit`** clean pre-launch rename (object + member table + graph + recipient enum + fields + i18n).\n- **D4 `sys_user_role`** — platform-owned RBAC assignment, decoupled from better-auth's membership role; merged in `resolve-execution-context`.\n- **D5** `role_and_subordinates` re-homed onto the working BU subtree. `showcase-bu-hierarchy-sharing` (4/4).\n- **D6 / #2077** seed declared roles + sharingRules at boot (CEL→`criteria_json` for field-equality; owner/group rules honestly skipped as experimental). `showcase-declarative-rbac-seeding` (4/4).\n- **Open/paid seam** — hierarchy scopes delegate to a pluggable `IHierarchyScopeResolver`; the open edition ships none and **fails closed to owner-only** (never fail-open); `defineStack` errors if a grant uses a hierarchy scope without `requires: ['hierarchy-security']`. The enterprise resolver lives in the private `@objectstack/security-enterprise`.\n- **Bug fix** — `engine.find({filter})` was silently ignored (driver reads `where`) → over-grant; normalized `filter`→`where` in the engine.\n- **D8** authz-conformance matrix rows for the new primitives (CI-checked).\n\n## Tests\n\nFull build 75/75 · objectql 670 · runtime 395 · plugin-security 112 · plugin-sharing 63 · plugin-approvals 90 · full dogfood 21 files / 123 tests — all green; no blast-radius regression from activating declared rules.\n\n## Notes\n\n- Pre-launch clean rename (no back-compat aliases) — see ADR-0057.\n- Commercial open/paid boundary is documented in the private cloud repo (ADR-0016); this PR is the open-side seam only.\n\nCloses #2077.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

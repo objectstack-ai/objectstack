@@ -1,0 +1,35 @@
+{
+  "number": 2119,
+  "kind": "pull_request",
+  "title": "feat(runtime): resolve tenant default currency onto ExecutionContext",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T09:34:13Z",
+  "updated_at": "2026-06-21T09:43:36Z",
+  "closed_at": "2026-06-21T09:43:34Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T09:43:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2119",
+  "body": "## Phase 1 of unifying currency resolution\n\nAudit finding: the `localization.currency` setting (tenant-scoped, default USD, documented as *\"ISO 4217 code applied when a currency field omits its own\"*) was **declared but had zero runtime consumers**. `resolveExecutionContext` read only `timezone` + `locale`, so no code path could ever reach the tenant default. Likewise `currencyConfig.defaultCurrency` (field-level) has no reader. The whole field→tenant currency fallback exists only as prose.\n\nThis PR lays the **foundation**: carry the tenant default currency on every request context, mirroring `timezone`/`locale` exactly.\n\n## Changes\n- **spec**: `ExecutionContext.currency` (ISO 4217, optional).\n- **runtime** (`resolveExecutionContext`): `resolveLocalization` now reads `localization.currency` — canonical settings-service path **and** the direct `sys_setting` tenant fallback — coerced to a 3-letter ISO code, assigned to `ctx.currency`.\n- **rest**: the REST context mirror reads + carries `currency` too.\n\nUndefined when no tenant default is configured → consumers render a plain number (no behavior change until consumers opt in).\n\n## Why phased\nPer the unified plan (currency is declared everywhere but resolved nowhere, with ~25 divergent client sites): this keystone unblocks the rest. Follow-ups:\n- **1b**: analytics measure-currency chain (measure override → field `currencyConfig` → `ctx.currency`, gated on monetary field type) + template-engine default.\n- **2**: objectui — one shared resolver/formatter + a client context exposing the tenant default; replace the ad-hoc sites.\n- Out of scope (separate ADRs): dynamic per-record currency storage, and FX conversion for multi-currency aggregation.\n\n## Tests\n- `resolve-execution-context` → **17 passed** (+2: canonical + sys_setting-fallback currency resolution; ISO-code upper-casing + junk rejection).\n- spec builds with declarations; runtime/rest build closures green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

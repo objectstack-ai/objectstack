@@ -1,0 +1,33 @@
+{
+  "number": 2086,
+  "kind": "pull_request",
+  "title": "feat(datasource): GET /datasources/:name detail for Studio edit form",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T03:56:37Z",
+  "updated_at": "2026-06-21T04:02:00Z",
+  "closed_at": "2026-06-21T04:01:58Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T04:01:58Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2086",
+  "body": "## What\nAdds `GET /api/v1/datasources/:name` (+ `DatasourceAdminService.getDatasource(name)`) returning a **credential-stripped** datasource detail for the Studio connection/edit form.\n\nThe list endpoint returns only a summary (no `config`), so the edit form had nothing to prefill. This returns:\n- `config` — non-sensitive (credentials live in `sys_secret`, never in config)\n- `origin`, `active`, `schemaMode`, `definedIn`\n- `hasSecret` — so the UI can show \"leave blank to keep the current credential\" without ever receiving the `credentialsRef` or any cleartext\n\n404 on unknown name. Registered after the static `/drivers` route so that segment isn't captured as a `:name`.\n\n## Security\nThe opaque `credentialsRef` and any cleartext are explicitly excluded; a unit test asserts the serialized response contains neither `sys_secret` nor `credentialsRef`.\n\n## Tests\n`service-datasource` 63/63 green (route test + 2 service-level tests added).\n\n## Part of\nThe Studio datasource create/edit form (objectui side, follow-up PR). Builds on #2083 (driver catalog) and #2085 (introspection + by-name test).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 2127,
+  "kind": "pull_request",
+  "title": "ci(docs): guard skills/docs against bare metadata literals (#2035)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T13:00:10Z",
+  "updated_at": "2026-06-21T13:05:17Z",
+  "closed_at": "2026-06-21T13:05:15Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T13:05:15Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2127",
+  "body": "Follow-up to #2124 — closes the **drift root cause** found while updating the docs.\n\n## Why\n\nThe example apps are kept on the `defineX` factories by an ESLint `no-restricted-syntax` rule. But TypeScript code blocks inside Markdown/MDX are **not type-checked or ESLinted by anything** — which is exactly how `skills/` and `content/docs/` drifted back to teaching `: Page = {}` while the examples stayed clean (the 23 stale spots fixed in #2124). Skills are the corpus AI authors from, so a stale sample there is the worst place for it. Without a guard, it drifts again.\n\n## What\n\n`scripts/check-doc-authoring.mjs` (dependency-free, ~70 lines) scans every ` ```ts / ```typescript / ```tsx ` fenced block under `skills/` and `content/` for an exported metadata literal annotated with one of the 16 factory domains (or its `Input` alias) instead of the `defineX(...)` factory, and fails with `file:line` + guidance. Generated files (`references/`, the frontmatter-generated `skills.mdx`) are skipped.\n\nWired into **lint.yml's ESLint job** via `pnpm check:doc-authoring` — no build, no new dependency, mirrors the existing standalone-check pattern (`check:api-surface`, `check:skill-docs`).\n\n## Verification\n\n- `pnpm check:doc-authoring` → **160 files clean** on current main (confirms the #2124 migration holds).\n- **Teeth**: a temp doc with `export const MyPage: Page = {` → exit 1 with `file:line`; `definePage({...})` in the same file → not flagged; clean after removal.\n\n## The gate family this completes\n\n| layer | guard | scope |\n|---|---|---|\n| app code | ESLint `no-restricted-syntax` | `examples/**`, `packages/apps/**` |\n| **docs corpus** | **`check:doc-authoring`** | **`skills/**`, `content/**`** |\n| spec API | `check:api-surface` (names + signatures) | `@objectstack/spec` exports |\n| live consumer | `downstream-smoke.sh` | hotcrm, pre-publish |\n\nCI-only — no package code, no changeset.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

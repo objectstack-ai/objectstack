@@ -1,0 +1,30 @@
+{
+  "number": 2163,
+  "kind": "issue",
+  "title": "Epic: External Datasource Runtime — implement ADR-0062 (auto-connect, credentials, analytics, cleanup)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T02:46:15Z",
+  "updated_at": "2026-06-22T13:06:09Z",
+  "closed_at": "2026-06-22T13:06:09Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2163",
+  "body": "Tracking/epic issue to drive **ADR-0062 — External Datasource Runtime** to completion.\n\n- ADR: `docs/adr/0062-external-datasource-runtime.md` (merged in #2162)\n- Builds on ADR-0015 (federation). Goal: **declare an external datasource → it's visible, auto-connected, validated, and queryable with zero app boilerplate**, through one connection mechanism shared by code- and runtime-origin datasources, backward-compatible (existing managed apps unchanged).\n\n## Phase 0 — shipped ✅\n- [x] Read path honors `remoteName` / `remoteSchema` — #2138\n- [x] Read path honors `external.columnMap` (remote col ≠ local field) — #2149\n- [x] Canonical showcase example + `objectstack verify` skip for read-only external — #2139\n- [x] Code-defined datasources visible in `/api/v1/datasources` + `/meta/datasource` + Setup — #2157\n\n## Phase 1 — `DatasourceConnectionService` + auto-connect (D1, D2, D5) — **core**\n- [ ] **D1** New `DatasourceConnectionService`: given a datasource def, build a driver via the **injected** factory, connect, and `engine.registerDriver` under the datasource name. One \"definition → live driver\" path (extract from `standalone-stack.ts`, call from `app-plugin.ts`).\n- [ ] **D2** Opt-in-safe gating: connect only when the datasource is `external`, **or** an object/`datasourceMapping` routes to it, **or** `autoConnect: true`. A managed+unrouted datasource stays metadata-only. **`examples/app-crm` and other existing apps must be byte-for-byte unchanged.**\n- [ ] **D5** Lifecycle: connect/disconnect (graceful shutdown), per-datasource pool, optional health probe in the admin list; connect **before** the `kernel:ready` validation gate; fail-fast for `external` + `onMismatch:'fail'`, degrade-with-warning otherwise.\n- [ ] Refactor the single `default`-driver bootstrap onto the same service **last** (highest-risk; behind tests).\n- **Acceptance**: a stack that only *declares* an external datasource (no `onEnable`) can query its federated objects via REST; full dogfood gate green (every example app boots); app-crm behavior unchanged.\n\n## Phase 2 — credentials at connect (D3)\n- [ ] Resolve `external.credentialsRef` / `secret` config via `SecretBinder` over `ICryptoProvider` **before** building the driver; converge with the runtime-admin \"Add Datasource\" secret path.\n- [ ] Fail-closed (clear boot error, datasource left unconnected) when the host can't decrypt; open-core default `InMemoryCryptoProvider`.\n- **Acceptance**: a Postgres external datasource with `credentialsRef` connects using the decrypted secret; missing/undecryptable secret fails closed with a clear message (no silent skip).\n\n## Phase 3 — native-analytics SQL over external objects (D6)\n- [ ] Route the analytics native-SQL strategy's `FROM`/column references through the driver's physical-table/column resolution (`remoteName`/`remoteSchema`/`columnMap`) — reuse, don't re-implement.\n- [ ] Until done, analytics over external objects stays disabled rather than querying the wrong table.\n- **Acceptance**: a dashboard/report over a federated object aggregates against the correct remote table/columns.\n\n## Phase 4 — reconciliation + cleanup (D7, D8)\n- [ ] **D7** For external objects, `columnMap` is authoritative; reject `field.columnName` on external objects at validation (no silent dual-source) until a unified column-resolution model exists. Managed `field.columnName` untouched.\n- [ ] **D8** Drop the `onEnable` driver-registration bridge from `examples/app-showcase` (fixture provisioning may remain); keep `onEnable` + `ctx.drivers.register` documented as the escape hatch.\n- **Acceptance**: showcase declares its external datasource with no `onEnable` driver wiring and still works end-to-end.\n\n## Notes\n- Each phase = its own PR + changeset (published packages are in the fixed group).\n- Phase 1's `default`-driver refactor is the riskiest single step (hot boot path for all apps) — land declared-datasource auto-connect first, refactor `default` last, behind the dogfood gate.\n- Coordinate with the already-shipped visibility work (#2157) — both are \"declared datasource as a runtime first-class citizen\".\n\n## References\n- ADR-0062 (#2162), ADR-0015 (+ §18 addendum)\n- Sites: `packages/runtime/src/{standalone-stack,app-plugin}.ts`, `packages/objectql/src/engine.ts`, `packages/services/service-datasource/*`, `packages/plugins/driver-sql/src/sql-driver.ts`"
+}

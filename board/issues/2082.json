@@ -1,0 +1,33 @@
+{
+  "number": 2082,
+  "kind": "pull_request",
+  "title": "fix(app-showcase): surface Task Detail quick actions in the record_section bar",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-20T16:58:16Z",
+  "updated_at": "2026-06-20T17:09:22Z",
+  "closed_at": "2026-06-20T17:09:19Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-20T17:09:19Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2082",
+  "body": "While QA-ing the showcase workspace, the Task Detail drawer leaked a dev placeholder into the business UI:\n\n> `record:quick_actions — no actions configured`\n\n### Root cause\nThe Task Detail page's `record:quick_actions` bar is configured with `location: 'record_section'` and `actionNames: ['showcase_mark_done', 'showcase_log_time']`. The renderer resolves those named actions, then location-filters them via `getActionsForLocation('record_section')` — but neither action declared `record_section` in its `locations` (mark_done was `list_item`/`record_header`; log_time was `record_header`/`record_related`), so both were filtered out.\n\nThis is the platform's intended contract: the platform's own `sys-user.page.ts` uses the identical pattern, and every action it names in a `record_section` bar (`change_my_password`, `delete_my_account`, …) declares `record_section` in its object definition.\n\n### Fix\nAdd `record_section` to the `locations` of `showcase_mark_done` and `showcase_log_time` (metadata only), matching the platform convention.\n\n### Testing\nVerified in the browser (showcase backend rebuilt from this branch): the Task Detail drawer now renders the **Mark Done** and **Log Time** buttons instead of the placeholder.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

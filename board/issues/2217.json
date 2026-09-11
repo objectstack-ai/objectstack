@@ -1,0 +1,33 @@
+{
+  "number": 2217,
+  "kind": "pull_request",
+  "title": "feat(runtime): add GET /ready readiness probe for graceful rolling restarts",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T15:08:33Z",
+  "updated_at": "2026-06-22T15:17:40Z",
+  "closed_at": "2026-06-22T15:17:37Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T15:17:37Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2217",
+  "body": "## Why\nThe dispatcher exposed only `/health` (always 200). Multi-replica deployments need a **readiness** signal distinct from liveness: a load balancer must stop routing to a replica **before** its in-flight requests are force-closed on shutdown, and must not route to a replica that is still booting.\n\n## What\n- `GET /ready` → **200** only when `kernel.getState() === 'running'`; **503** while booting (`idle`/`initializing`) or shutting down (`stopping`/`stopped`).\n- Added `/ready` to the membership-skip paths (like `/health`) so it's reachable without auth/environment scoping.\n- Pairs with the **existing** in-flight drain in `HonoHttpServer.close()` (P1-3): `/ready` 503 → LB drains → in-flight finish → close.\n- Unit test added (200 running / 503 booting+stopping). Verified locally: strict DTS build of `@objectstack/runtime` + tests green.\n\n## Scope\nGeneric open-core production-hygiene mechanism (benefits any deployment, single- or multi-node). No cluster dependency. Part of the multi-node readiness groundwork (cloud ADR-0018).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

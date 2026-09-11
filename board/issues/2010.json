@@ -1,0 +1,35 @@
+{
+  "number": 2010,
+  "kind": "pull_request",
+  "title": "feat(settings): company settings — legal organization identity (P0)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-17T05:53:26Z",
+  "updated_at": "2026-06-17T06:06:54Z",
+  "closed_at": "2026-06-17T06:06:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-17T06:06:51Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2010",
+  "body": "**P0 base-settings, item 2 of 3.** Adds a `company` SettingsManifest for the workspace's **legal entity** identity — distinct from `branding` (public-facing name/logo/theme).\n\n## Keys (organization-level, all optional for v1)\nGrouped **Identity / Registered address / Contact**:\n- Identity: `legal_name`, `registration_number`, `tax_id`\n- Address: `address_line1`, `address_line2`, `city`, `state`, `postal_code`, `country`\n- Contact: `phone`, `website` (url), `primary_contact_name`, `primary_contact_email` (email)\n\nBenchmarked against Salesforce \"Company Information\" and Stripe's business profile.\n\n## Why\nFeeds invoices/receipts, **email footers (CAN-SPAM requires a physical postal address)**, contracts, and compliance exports — the legal-entity data a platform needs but ObjectStack had nowhere to store.\n\n## Tests\n- `company.manifest.test.ts` — schema parse, namespace/scope/version, group structure, url/email/country-pattern specifier types, all-optional invariant.\n- Ships en + zh-CN translations.\n- service-settings suite green (123). DTS build clean.\n\n## P0 progress\n1. ✅ `localization` (#2006, merged). 2. **this PR** `company`. 3. ⬜ `security` (next).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

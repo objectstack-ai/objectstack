@@ -1,0 +1,36 @@
+{
+  "number": 2203,
+  "kind": "pull_request",
+  "title": "feat(datasource): reject field.columnName on external + drop showcase onEnable bridge (ADR-0062 Phase 4, D7/D8)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T11:49:56Z",
+  "updated_at": "2026-06-22T12:21:07Z",
+  "closed_at": "2026-06-22T12:21:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T12:21:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2203",
+  "body": "## ADR-0062 Phase 4 — reconciliation + cleanup (D7, D8)\n\n**Stacked on #2200 (Phase 3) → #2199 → #2198.** Merge those first.\n\n### D7 — `columnMap` is authoritative; reject `field.columnName` on external objects\n`os compile`/`build` (`validateStackExpressions`) now errors when a federated object (one declaring an `external` binding) has a field with `columnName`. The driver's query pipeline does **not** apply `field.columnName` for external objects — `external.columnMap` (remoteColumn → localField) is the single source of truth — so allowing both is a silent dual-source ambiguity. The error message points to `external.columnMap`. **Managed objects are untouched.**\n\n### D8 — drop the `onEnable` driver bridge from the canonical example\n`examples/app-showcase` now declares its external datasource with **no** `onEnable` driver registration. `onEnable` only provisions the \"remote\" fixture tables; the declared datasource **auto-connects** at boot (Phase 1, D1). `onEnable` + `ctx.drivers.register` stays documented as the escape hatch for drivers built dynamically at runtime.\n\nTo cover this end-to-end in the dogfood gate, the **`@objectstack/verify` harness** now wires the datasource-admin plugin (registering `'datasource-connection'`) **when an app declares datasources** — so the harness mirrors `objectstack dev`/serve. Previously the harness imported only an app's default export, so `onEnable` never ran there and external objects were never read; now auto-connect handles the driver and a new dogfood test reads the federated objects through the real REST stack.\n\n### Tests / validation\n- D7: 4 unit tests (external field.columnName → error; map-shaped field; managed untouched; clean external passes). `cli` validate-expressions suite green (29).\n- D8: new `showcase-external-autoconnect.dogfood.test.ts` — reads `showcase_ext_customer`/`_order` (incl. `remoteName` remap `customers`/`orders` + `?region=EU` pushdown), with **no** `onEnable` driver wiring. ✅\n- Local CLI dogfood: `objectstack verify --app examples/app-showcase --rls` ✅ and `--app examples/app-crm --rls` ✅ (D2 gate keeps app-crm metadata-only — byte-for-byte unchanged under the harness change).\n\nCloses #2163 — Phase 4 (final functional phase; the `default`-driver bootstrap refactor is the remaining standalone follow-up).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

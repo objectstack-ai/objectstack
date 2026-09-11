@@ -1,0 +1,34 @@
+{
+  "number": 2122,
+  "kind": "pull_request",
+  "title": "feat(server): GET /auth/me/localization — tenant regional defaults for every user",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T09:58:44Z",
+  "updated_at": "2026-06-21T10:04:22Z",
+  "closed_at": "2026-06-21T10:04:20Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T10:04:20Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2122",
+  "body": "## Phase 2a — expose regional defaults to the client\n\nThe `localization` settings (currency / locale / timezone) are gated to `setup.access`, and the `discovery` endpoint is static / context-free. So a regular user's client has **no way** to learn the tenant's default currency or locale to format values consistently — which is why every objectui currency renderer falls back to a hardcoded `$`/`¥`/`USD` or a bare number (see the cross-repo currency audit).\n\nThis adds **`GET /api/v1/auth/me/localization`** → `{ authenticated, currency, locale, timezone }` resolved off the request `ExecutionContext` (the values #2119 wired in), exposed to every **authenticated** user without the `setup.access` gate on the underlying settings.\n\n## Why\nIt's the prerequisite for Phase 2 (objectui): a `LocalizationProvider` fetches this once and feeds a single currency/number formatter the tenant default + locale, replacing the ~20 ad-hoc per-site currency-resolution paths (2 divergent `formatCurrency`, 3 Intl locales, hardcoded symbols).\n\n## Notes\n- Thin passthrough of `resolveCtx(c)`; the ctx resolution (incl. currency) is covered by `resolve-execution-context` tests (#2119). The hono-plugin test harness has no `/me`-route integration fixture, so no bespoke route test is added.\n- Additive route — no behavior change until the client consumes it.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

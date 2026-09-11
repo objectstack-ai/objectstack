@@ -1,0 +1,32 @@
+{
+  "number": 2105,
+  "kind": "pull_request",
+  "title": "feat(dogfood): ADR-0060 P2 — validation-rule conformance ledger (pins ADR-0020 state_machine)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T07:23:42Z",
+  "updated_at": "2026-06-21T07:28:36Z",
+  "closed_at": "2026-06-21T07:28:33Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T07:28:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2105",
+  "body": "ADR-0060 (#2103) P2 — the **third** instance of the reusable conformance-ledger pattern, on the same `checkLedger` helper from P1 (#2104). Proves the pattern composes: a new surface is a filled-in table, not a re-derived discipline.\n\n## What\nOne row per `validations` union rule type — `state_machine` / `script` / `cross_field` / `format` / `json_schema` / `conditional` — all **enforced** on the engine write path via `rule-validator.ts` (ADR-0020 wired the union in), each carrying the `rule-validator.test.ts` runtime proof. The **ratchet** re-discovers every rule type from `validation.zod.ts`'s discriminator and fails the build if one is unclassified — so a new validation rule type added without runtime enforcement (the exact pre-ADR-0020 `state_machine` disease) can't ship silently.\n\n## Verification\nFull build 75/75 · dogfood 135 (24 files; the validation/authz/expression/helper conformance tests all green on the one shared helper). Ratchet verified to bite. dogfood-private → no changeset.\n\nNext: P3 — document the 'landed = has a green ledger' bar (ADR-0060 D5).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

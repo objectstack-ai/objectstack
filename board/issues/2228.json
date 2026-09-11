@@ -1,0 +1,35 @@
+{
+  "number": 2228,
+  "kind": "pull_request",
+  "title": "fix(messaging): store outbox audit timestamps as datetime for Postgres",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-23T02:27:18Z",
+  "updated_at": "2026-06-23T02:32:39Z",
+  "closed_at": "2026-06-23T02:32:38Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-23T02:32:38Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2228",
+  "body": "## Problem\n\nOn Postgres (not SQLite), the messaging retention sweep failed:\n\n```\nERROR Delete operation failed {\"object\":\"sys_notification_delivery\",\"error\":{\"message\":\n\"delete from \\\"sys_notification_delivery\\\" where \\\"created_at\\\" < $1 - date/time field value out of range: \\\"1774402794228\\\"\"}}\n```\n\nSurfaced during the 2-node Postgres+Redis E2E for the multi-node work.\n\n## Root cause (deeper than just the cutoff)\n\n`created_at`/`updated_at` are **builtin audit columns**: the SQL driver *always* provisions them as native `TIMESTAMP` columns (`table.timestamp(...)` in `driver-sql`), **regardless of the object's declared field type**. The notification and HTTP outboxes were the *only* objects in the repo that declared them as `Field.number` and wrote epoch-ms via `Date.now()`.\n\nSo on Postgres a bare epoch-ms number is compared to (and inserted into) a timestamp column → `date/time field value out of range`. This broke **both** the `enqueue` insert **and** the retention sweep; the sweep surfaced first because its timer runs the `WHERE` type-check even on an empty table. SQLite's lenient NUMERIC affinity silently tolerated it, hiding the bug.\n\nJust ISO-ifying the cutoff isn't enough: with rows stored as epoch integers, an ISO cutoff would mis-compare on SQLite. The write and the prune had to be made consistent.\n\n## Fix\n\n- **Objects** (`sys_notification_delivery`, `sys_http_delivery`): `created_at`/`updated_at` → `Field.datetime`. Matches the real column type *and* registers them in the driver's `datetimeFields`, so the ISO cutoff is coerced per dialect. (Declaring them doesn't double-create the column — the builtin-column skip handles that.)\n- **Outboxes**: `enqueue` writes `new Date()`; `toRecord` normalises read-back to epoch ms via a new `toEpochMs()` helper, so the record contract (`createdAt: number`) is unchanged across dialects.\n- **Retention sweep**: one ISO-8601 cutoff for every target — dropped the `format: 'epoch'` special case.\n\n## Scope notes\n\n- **`service-job` was already correct** — `job-run-retention.ts` uses an ISO cutoff and `sys_job_run.created_at` is written as `new Date().toISOString()`. No change; the report's suspicion there was a false lead.\n- **Also fixed the webhook outbox** (`sys_http_delivery`), which had the identical latent insert bug (no retention sweep, so it hadn't surfaced yet) — the multi-node HTTP path would have hit it next.\n\n## Tests\n\n- `retention.test.ts`: asserts every target's cutoff is an ISO-8601 **string** (regex-locked), never a bare epoch-ms number.\n- New `sql-driver-retention-prune.test.ts`: runs a real `deleteMany` prune against a builtin `created_at` timestamp column written as a `Date` — the closest local repro of the Postgres-style timestamp column.\n\nVerified locally: service-messaging **128/128** (incl. full build + DTS typecheck), driver-sql **203/203**.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

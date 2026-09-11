@@ -1,0 +1,33 @@
+{
+  "number": 2087,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0058 — expression & predicate surface audit + consolidation (closes #1887)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T04:20:49Z",
+  "updated_at": "2026-06-21T04:25:33Z",
+  "closed_at": "2026-06-21T04:25:31Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T04:25:31Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2087",
+  "body": "## What\n\nA whole-surface audit + consolidation of every authorable **expression** on the platform (the expression-layer analogue of ADR-0056's permission landing). Decision-only ADR; implementation follows in phased PRs.\n\n## The finding\n\nOne authoring language (`ExpressionInput`/CEL, ~50 declarations) but **two runtime backends**: a unified per-record CEL **interpreter** (`@objectstack/formula`, works) and a **fragmented compile-to-filter** path (`rls-compiler` 4-form regex + sharing `celToFilter` field-equality + `read-scope-sql` rich backend) that **shares no AST**. That fragmentation is the root of the predicate-honesty debt: sharing `condition` never compiled (**#1887**), RLS `check` declared-but-unenforced, and inconsistent silent-fail policies (formula→null unlogged, hook→false, validation→skip, flow→throw, RLS→drop+warn, sharing→silent-empty).\n\n## The decision\n\nOne canonical **CEL→FilterCondition pushdown compiler** on the interpreter's AST (retiring the regex + `celToFilter`, feeding the existing rich SQL backend); the supported pushdown subset (no subqueries, ADR-0055); reconcile #1887 + RLS `check`; one fail-policy matrix (compile-error / fail-closed-security / fail-soft-but-logged); a durable Expression Surface Conformance ledger. Non-expression experimental subsystems stay under ADR-0056 D8 (scoped out).\n\nPhasing: P1 compiler → P2 cutover + fail-policy → P3 close #1887 + RLS check → P4 conformance ledger.\n\nCloses #1887.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

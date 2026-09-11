@@ -1,0 +1,35 @@
+{
+  "number": 2080,
+  "kind": "pull_request",
+  "title": "feat(analytics): dimension labels + drill-through metadata for dataset reports",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-20T15:44:27Z",
+  "updated_at": "2026-06-20T16:19:59Z",
+  "closed_at": "2026-06-20T16:19:57Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-20T16:19:57Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2080",
+  "body": "## Why\nReviewing the Chart Gallery report page surfaced gaps in the dataset-bound analytics path. Two are server-side:\n\n1. **Headers showed raw field names.** `queryDataset` enriched only *measure* result fields with a display `label`; dimension columns came back bare, so renderers fell back to `status`/`priority`/`account` instead of `Status`/`Priority`/`Account`.\n2. **No data drill-through.** There was no way for a host to drill a grouped bucket back to its records — and crucially, label resolution overwrites `row[dim]` with the display label, so the raw stored value needed for an exact-match filter was lost.\n\n## What\n- Enrich **dimension** result fields with their dataset display label (match by dimension name or underlying field).\n- Attach drill metadata to the result: base `object`, a drillable `dimensionFields` map, and a **parallel `drillRawRows` array** holding each row's RAW grouped values (snapshotted *before* label resolution). Rows themselves are untouched (no shape change for existing consumers). Date dimensions are excluded — a humanized bucket can't be exact-matched.\n- Showcase: `budget_sum`/`spent_sum` are currency fields with **no declared currency**, so the hardcoded `$0,0` format misrepresented the amount → changed to plain `0,0`.\n\nAll carried as extra props on the result (no spec-contract change; `res.json(result)` serializes verbatim).\n\n## Tests\n`query-dataset.test.ts`: drill metadata shape, raw-values array, dimension label enrichment, date-dimension exclusion. Full service-analytics suite green.\n\n## Companion\nConsumed by objectui PR `fix/dashboard-report-ux` (renders the labels, currency, i18n, and drill UI).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

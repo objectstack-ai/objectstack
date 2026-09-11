@@ -1,0 +1,33 @@
+{
+  "number": 2240,
+  "kind": "pull_request",
+  "title": "feat(authz): ADR-0066 D3 field-level requiredPermissions (+ D5 confirmation)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-23T11:40:36Z",
+  "updated_at": "2026-06-23T11:50:35Z",
+  "closed_at": "2026-06-23T11:50:32Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-23T11:50:32Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2240",
+  "body": "Implements **ADR-0066 D3 field-level** `requiredPermissions` and confirms **D5** (package-seeded policies) needs no new code.\n\n### D3 field-level (new)\n- **spec** `FieldSchema.requiredPermissions: string[]` — passes through the `Field.*` builders.\n- **plugin-security**: a field whose `requiredPermissions` aren't all covered by the caller's `systemPermissions` is **masked on read** and **denied on write** — an AND-gate, strictest-wins over permission-set field grants. `getObjectSecurityMeta` now also reads per-field requirements; `foldFieldRequiredPermissions` folds unmet ones into the FieldMasker map as `{readable:false, editable:false}`, **reusing** `maskResults` + `detectForbiddenWrites` (no masker signature change).\n- **liveness**: `field.requiredPermissions` classified `live`. **api-surface unchanged**.\n\n### D5 (confirmed — no code)\n`stack.permissions` already seeds permission sets into `sys_permission_set` (incl. per-object and per-field grants), admin-editable in Setup. It composes with **D2** (`access:'private'`) + **D1** (capability registry) to express a package's per-object secure default that's locked on install and tunable thereafter — **cloud `sys_license` is the worked example**. Delegated admin (#9) stays **future** per the ADR.\n\n### Tests\nspec field (+3: accepts/passthrough/optional) + middleware (+4: read-mask when capability missing / no-mask when held / write-deny / write-allow). plugin-security + spec full-DTS builds green; liveness ✓.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

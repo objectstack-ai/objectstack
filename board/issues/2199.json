@@ -1,0 +1,36 @@
+{
+  "number": 2199,
+  "kind": "pull_request",
+  "title": "feat(datasource): fail-closed credential resolution at connect (ADR-0062 Phase 2, D3)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T11:24:27Z",
+  "updated_at": "2026-06-22T12:32:13Z",
+  "closed_at": "2026-06-22T12:32:11Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T12:32:11Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2199",
+  "body": "## ADR-0062 Phase 2 — credentials at connect (D3)\n\n**Stacked on #2198 (Phase 1)** — review/merge that first; this PR's base is the Phase 1 branch, so its diff is only the Phase 2 delta.\n\nMakes credential resolution in `DatasourceConnectionService` **fail-closed**. Phase 1 already wired the `credentialsRef` → `SecretBinder.resolve` hook (happy path); this PR adds the safety semantics the ADR requires:\n\n- A declared `external.credentialsRef` **must** resolve to a cleartext secret **before** the driver is built. An absent secret store, an unresolvable/undecryptable ref (missing `sys_secret` row, rotated key), or a throwing resolver now leaves the datasource **unconnected with a clear message** — never a silent build-without-secret (which would connect with no/wrong auth, or fail later with a confusing driver error).\n- Resolution happens *before* the build try-block, so a fail-fast verdict propagates correctly (a code-defined `external` + `onMismatch:'fail'` auto-connected at boot bricks boot; runtime-admin create/update + rehydration degrade-with-warning — a UI action never bricks the server).\n- Convergence (D3): code- and runtime-origin secrets use the **same** `SecretBinder` threaded through the one shared connection service. Open-core default crypto provider is unchanged (serve.ts already wires one).\n- New `failed-credentials` connect status.\n\n### Tests\n- 5 new unit tests: no-secret-store → fail-closed, unresolvable → fail-closed, throwing resolver → fail-closed, declared-auto external+`fail` unresolvable → re-throws, resolves → connected with secret. (`service-datasource` 85 total.)\n- 1 new runtime integration test: a declared external datasource with an unresolvable `credentialsRef` + `onMismatch:'fail'` **bricks boot with a clear message** end-to-end through `AppPlugin`. (`runtime` datasource-autoconnect 6 total.)\n\nCloses (partially) #2163 — Phase 2.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

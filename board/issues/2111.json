@@ -1,0 +1,30 @@
+{
+  "number": 2111,
+  "kind": "issue",
+  "title": "examples/app-showcase: add an end-to-end external datasource + federated object example",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T07:47:53Z",
+  "updated_at": "2026-06-21T16:06:35Z",
+  "closed_at": "2026-06-21T16:06:35Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2111",
+  "body": "## Why\n\nThe runtime **datasource** experience now ships end-to-end:\n- Studio manages datasources through the generic metadata-admin engine, reachable from the Setup app's left menu (**Setup → Integrations → Datasources**) — objectstack-ai/objectui#1846, framework #2091.\n- Read-only introspection + sync routes: `GET /datasources/drivers` (#2083), `GET /datasources/:name/remote-tables`, `POST /datasources/:name/object-draft`, `POST /datasources/:name/test`, `GET /datasources/:name` (#2085, #2086).\n- Runtime datasources now persist across restart (#2096).\n- Generic `secret` + `dynamic-config` SchemaForm widgets (objectui#1853).\n\nBut **`examples/app-showcase` has no external-datasource example** — its only datasource is the managed in-memory sqlite. So there is nothing in the canonical example app that demonstrates (or regression-guards) the federation + datasource-admin flow. New users can't *see* \"connect an external DB → introspect → query its tables as objects\", and contributors have no fixture to dogfm against.\n\nThis example is considered high-value: the datasource story is a flagship capability and the showcase is where people learn the platform.\n\n## Goal\n\nA runnable, self-contained example in `app-showcase` that demonstrates the full external-datasource path **without requiring an external server** (so `os dev` just works):\n\n1. A **code-defined external datasource** (`*.datasource.ts`, `schemaMode: 'external'`) pointing at a second, pre-seeded sqlite file (or equivalent) so there are real remote tables to introspect.\n2. One or more **external/federated objects** bound to that datasource's remote tables (`external: { remoteName, remoteSchema? }`), queryable through the normal ObjectQL/REST surface.\n3. Wiring in `objectstack.config.ts` (+ a `datasourceMapping` rule if needed) and a short README/comment explaining the flow.\n\nEnd state: boot showcase → the external datasource shows in **Setup → Datasources**; its objects appear and are queryable; and an admin can also reproduce the runtime flow (Setup → Datasources → **Sync objects**) against it.\n\n## Proposed shape (minimal, no external server)\n\n- `examples/app-showcase/src/datasources/<name>.datasource.ts` — sqlite, `schemaMode: 'external'`, filename = a seeded fixture db (e.g. created at boot / committed fixture).\n- `examples/app-showcase/src/objects/<remote>.object.ts` — external object(s) binding the fixture's tables (e.g. `customers`, `orders`).\n- `objectstack.config.ts` — import the datasource + objects (+ mapping).\n- Decide how the fixture tables get created (open question below).\n\n## Open questions / decisions for the implementer\n\n- **Fixture provisioning**: how does the \"external\" sqlite get its tables at dev time? Options: a committed `.db` fixture; a tiny boot/seed step that creates+populates a side sqlite; or a memory driver pre-seeded via a hook. Pick the one that keeps `os dev` zero-config.\n- **Showcase vs a dedicated example app**: add to `app-showcase` (conditionally imported so the default stays in-memory) vs. a new `examples/app-showcase-external/`. Lean toward in-showcase + clearly isolated, unless it muddies the default.\n- **Scope**: code-defined only, or also document the runtime/UI sync flow (the wizard already exists)? At minimum the code-defined example; optionally a README note pointing at the Setup → Datasources sync UI.\n- **Secret demo**: optionally include a driver that exercises a `secret` credential field (e.g. a commented postgres variant) to showcase the masked secret widget — without making the default example require a real server.\n\n## Acceptance criteria\n\n- `os dev` on app-showcase boots with no extra setup; the external datasource + its federated objects are present.\n- The external datasource appears in **Setup → Datasources** and `GET /api/v1/datasources` / `GET /api/v1/meta/datasource`.\n- The federated objects are listable/queryable via REST.\n- Short docs/comment explaining the example and pointing at the sync UI.\n- (Nice) a smoke test asserting the external objects resolve.\n\n## References\n- ADR-0015 (external datasource federation) + Addendum (runtime admin).\n- `packages/services/service-datasource/README.md` (Federation + Runtime admin halves).\n- PRs: framework #2083, #2085, #2086, #2091, #2096; objectui #1846, #1853."
+}

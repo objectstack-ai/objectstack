@@ -1,0 +1,35 @@
+{
+  "number": 2004,
+  "kind": "pull_request",
+  "title": "fix: array field types persist + Field.time accepts time-of-day",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-17T05:18:21Z",
+  "updated_at": "2026-06-17T05:26:21Z",
+  "closed_at": "2026-06-17T05:26:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-17T05:26:19Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2004",
+  "body": "Two field-type **runtime** gaps found driving `app-showcase`'s field-zoo end-to-end. The showcase's coverage test is green because it asserts every field type is *declared* — but field-zoo has **no seed data**, so no field type was ever exercised with a real value. Both bugs are pure \"passes build / silent at runtime.\"\n\n## 1. Array/object field types broke every write (`driver-sql`)\n\n`multiselect` / `checkboxes` / `tags` / `repeater` / `vector` were missing from the SQL driver's JSON-field classification. Their array values reached the better-sqlite3 binder un-serialized:\n\n```\n500 — SQLite3 can only bind numbers, strings, bigints, buffers, and null\n```\n\nThis hit common field types on **insert and update** — even `task.labels` on an ordinary object (`labels: ['red','blue']` → 500). Root cause: the DDL column-type switch and `isJsonField` had drifted into **two separate type lists**; the array types were in neither.\n\n**Fix:** one shared `JSON_COLUMN_TYPES` source used by both the DDL switch and `isJsonField`, now covering the array/object types (so the columns are created as JSON and round-trip as arrays/objects). Plus a `formatInput` safety net that serializes any *stray* array/object value, so an unclassified field degrades to a stored string instead of a hard 500.\n\n## 2. `Field.time` rejected every valid value (`objectql`)\n\nThe validator reused the `date`/`datetime` branch (`Date.parse`), which is `NaN` for any bare time string — so a `time` field could never accept `14:30` or `09:05:30`.\n\n**Fix:** `time` now validates a time-of-day (`HH:MM` / `HH:MM:SS`, optional fractional seconds + `Z`/offset) and still accepts a full ISO datetime; `date`/`datetime` unchanged. (`Date.parse('14:60')` returns a bogus number in Node, so the lenient fallback requires a real date component — malformed times like `14:60`/`25:00` are correctly rejected.)\n\n## Verification\n\n- **Live app-showcase:** the full field-zoo specimen (all input-able field types) now persists and round-trips — `multiselect`/`tags`/`checkboxes`/`repeater`/`vector` come back as arrays/objects, `time` as `14:30`. `task.labels` array persists.\n- **Tests:** new `sql-driver-array-fields.test.ts` (round-trip + update + empty-array) → `@objectstack/driver-sql` **155** green; time-validator cases (accept HH:MM/HH:MM:SS/ISO, reject malformed, no date/datetime regression) → `@objectstack/objectql` **652** green.\n\n## Follow-ups (separate, showcase-side)\n- field-zoo + invoice ship **no seed data** — adding a seed specimen would demonstrate every field type *and* guard these fixes. (Next PR.)\n- `showcase_warn_over_budget` hook references a nonexistent `record.spent` field (fires a \"no such key\" warning). (Next PR.)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

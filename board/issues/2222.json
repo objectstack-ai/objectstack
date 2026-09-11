@@ -1,0 +1,35 @@
+{
+  "number": 2222,
+  "kind": "pull_request",
+  "title": "fix(objectql): findData 返回真实 total/hasMore (#2212)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T15:37:11Z",
+  "updated_at": "2026-06-23T04:12:26Z",
+  "closed_at": "2026-06-23T04:12:24Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-23T04:12:24Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2222",
+  "body": "Closes #2212\n\n## 问题\n`ObjectStackProtocolImplementation.findData` 返回的分页元数据是占位值:\n- `total` 永远等于**本页**记录数,而非匹配总数\n- `hasMore` 恒为 `false`\n\n因此前端表格认为结果集永远只有一页,永远不会请求第一批之后的记录(例如第 51 条及以后无法翻到)。REST 路由 `/api/v1/data/:object` 直接把该结果原样返回给前端,问题就此暴露。\n\n## 修复\n`packages/objectql/src/protocol.ts` `findData`:\n\n- **普通查询**:当带 `limit` 时,响应是单页,`records.length` 是页大小而非总数。对相同的 `where` 跑一次 `engine.count()` 得到真实 `total`,并由 `offset + 本页长度 < total` 推导 `hasMore`,实现真正的服务端分页。`engine.count()` 只认 `where`,无法复现 `search`/`distinct`,这类查询退化为页内估计(满页即可能有更多)而非给出错误总数。不带 `limit` 时返回全量,长度即总数。\n- **聚合/分组分支**:原先 slice 到 `limit` 却把 slice 后的长度当 total、`hasMore=false`。改为以完整分组数为 `total`,`hasMore` 取决于 slice 是否丢弃了分组。\n\n## 测试\n`packages/objectql/src/protocol-data.test.ts` 新增 5 个分页用例,**39/39 全部通过**。\n\n### 真机验证(天顺 EHR,同一 3125 行对象)\n| `$skip` | 修复前 | 修复后 |\n|---|---|---|\n| 0   | total=50, hasMore=false | 50 行, total=3125, hasMore=true |\n| 100 | total=50, hasMore=false | 50 行(#101–150), total=3125, hasMore=true |\n| 3100 | — | 25 行, total=3125, hasMore=false |\n| 3125 | — | 0 行, total=3125, hasMore=false |\n\n> 前端配套改动见 objectui 仓库 PR(ObjectGrid 服务端分页 + DataTable manual pagination)。"
+}

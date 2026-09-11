@@ -1,0 +1,36 @@
+{
+  "number": 2023,
+  "kind": "pull_request",
+  "title": "fix(examples): typecheck example apps clean + gate in CI",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-18T06:17:59Z",
+  "updated_at": "2026-06-18T06:26:58Z",
+  "closed_at": "2026-06-18T06:26:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-18T06:26:56Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2023",
+  "body": "## Problem\n\nThe example apps (`app-crm`, `app-showcase`, `app-todo`) failed their own `tsc --noEmit`, and nothing in CI caught it — the typecheck job only ran `tsc` on `@objectstack/spec`.\n\nThe task looked like \"~12 `TS2305` import errors,\" but those were masking the real damage: app-crm imported types from the root `@objectstack/spec`, which **intentionally exports no types** (packages/spec/src/index.ts:8, enforced by ESLint `no-restricted-imports`). Those imports resolved to `any`, which **silently suppressed all object-literal type checking** in those files. Fixing the imports unmasked **~30 real type-conformance errors** that had never been checked. tsup transpiles the apps without a full typecheck, so the build stayed green the whole time.\n\n## Fix\n\n**Import direction — Option B (subpath imports), the canonical one:**\n- Repoint all app-crm type imports to subpaths (`@objectstack/spec/data`, `/ui`, `/security`, `/integration`, ...).\n\n**Output-vs-input types (the bulk of the unmasked errors):**\n- Examples annotated literals with the Zod *output* type (`z.infer`), where every `.default()` field becomes *required* and CEL/Expression fields reject bare strings.\n- Follow the spec's existing `XInput` convention (`FieldInput`, `ActionInput`, `ReportInput`, `PortalInput`) — add the 9 missing aliases (`DatasourceInput`, `ConnectorInput`, `SharingRuleInput`, `JobInput`, `WebhookInput`, `EmailTemplateDefinitionInput`, `RoleInput`, `PermissionSetInput`, `ObjectExtensionInput`) and type the examples with them. Keeps templates clean instead of padding them with default values.\n\n**Genuine content bugs (also previously masked):**\n- Removed unsupported `description` on agent / Action / PermissionSet (schemas don't define it; `label` kept).\n- `parentRole` -> `parent` on roles.\n- app-todo: dropped unmodeled `Field.color({colorFormat, presetColors})` options; guarded `input.subject.includes` on an `unknown` value; added the missing `vitest` devDep its `src/**/*.test.ts` needs.\n\n**CI gate (.github/workflows/lint.yml):**\n- Build workspace packages (examples need built dist for cross-package type resolution), then `pnpm --filter './examples/*' run typecheck`.\n- Uses the **path filter `./examples/*`**, not `@objectstack/example-*` — `app-todo` is named `@example/app-todo`, so the scope glob silently skips it.\n\n## Verification\n\n```\n@objectstack/spec       tsc --noEmit: clean\nexamples/app-crm        typecheck: Done\nexamples/app-showcase   typecheck: Done\nexamples/app-todo       typecheck: Done\n```\n\n> [!NOTE]\n> Follow-up (not in this PR): `@example/app-todo` should probably be renamed `@objectstack/example-todo` for scope consistency. The path-based CI filter sidesteps the need for now.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

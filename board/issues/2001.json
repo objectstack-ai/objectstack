@@ -1,0 +1,35 @@
+{
+  "number": 2001,
+  "kind": "pull_request",
+  "title": "feat(analytics): timezone-aware date bucketing (ADR-0053 Phase 2) (#1982)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-17T04:29:48Z",
+  "updated_at": "2026-06-17T04:38:00Z",
+  "closed_at": "2026-06-17T04:37:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-17T04:37:58Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2001",
+  "body": "**Part of ADR-0053 Phase 2 (Slice 5 of 6 — compute-tz).** Closes #1982. Design: #1975 · Parent: #1928.\n\nMakes analytics date bucketing **timezone-aware**: day/week/month/quarter/year buckets resolve on a reference timezone's calendar days, so a row near a tz day-boundary lands in the bucket a user in that zone would expect — identically on SQLite and Postgres.\n\n## Decision D2 — bucket in-memory, uniformly\nNative driver date bucketing (`date_trunc`) is UTC-only: SQLite has no tz database and MySQL needs tz tables loaded, so pushing tz-aware bucketing down splits boundaries per dialect. So `engine.aggregate({ timezone })` **forces the in-memory aggregation path** when a non-UTC reference tz is set — the date-range `where` still goes to the driver (only matching rows are fetched), but bucketing runs uniformly in JS. **UTC / unset keeps the native driver fast path unchanged.**\n\n## Changes\n- **`@objectstack/core`** — new shared `calendarPartsInTz` / `calendarPartsInTzOrUtc` util (the y/m/d an instant falls on in a zone). DST-safe via `Intl.DateTimeFormat().formatToParts()` — never hand-rolled offset math. Falls back to the UTC calendar day for an unset / `'UTC'` / invalid zone. Lives in core because both objectql and service-analytics need it and both already depend on core.\n- **`@objectstack/objectql`** — `bucketDateValue` / `applyInMemoryAggregation` take a `timezone`; `engine.aggregate` routes non-UTC tz through the in-memory path and threads tz down.\n- **`@objectstack/spec`** — `EngineAggregateOptions.timezone` + `StrategyContext.executeAggregate({ timezone })`.\n- **`@objectstack/service-analytics`** — `ObjectQLStrategy` forwards `query.timezone`; the auto-bridge passes it to `engine.aggregate`; the draft-preview evaluator's `bucketDate` is tz-aware. `formatDateBucket` stays UTC by design (it re-labels values already bucketed upstream; re-applying tz there would shift a correct day bucket).\n\n## Acceptance criteria\n- [x] Day/week/month/quarter buckets align to the reference tz, identically on SQLite and Postgres (uniform in-memory path).\n- [x] tz unset / `'UTC'` → DB-side fast path, behavior unchanged.\n- [x] Test: a row near a tz day-boundary lands in the correct bucket under a non-UTC reference tz (week boundary crossing a Monday covered too).\n\n## Tests\n- `in-memory-aggregation.test.ts` — tz day/month/quarter/week bucketing + grouping; UTC/invalid fallback.\n- `engine-aggregate-timezone.test.ts` — routing: UTC/unset take native path, non-UTC forces in-memory with correct buckets.\n- `preview-evaluator.test.ts` — `bucketDate` reference-zone resolution.\n- Full suites green: objectql 645, core 284, service-analytics 125. DTS builds type-check clean.\n\n## Depends on\nSlices 1 (timezone resolver #1978) and 3 (#1980) — both merged.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

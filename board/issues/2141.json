@@ -1,0 +1,33 @@
+{
+  "number": 2141,
+  "kind": "pull_request",
+  "title": "docs(adr-0057): addendum — org-structure surfacing & edition tiering",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T15:38:37Z",
+  "updated_at": "2026-06-21T15:44:52Z",
+  "closed_at": "2026-06-21T15:44:50Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T15:44:50Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2141",
+  "body": "## What\n\nAppends an addendum to **ADR-0057** settling how the three org-shaped objects are **surfaced** in the Setup app and tiered across editions — a gap ADR-0057 left open (it settled the authorization *model*, not the UI surfacing). **Docs-only, no behaviour change.**\n\n## Why\n\n`sys_organization` (tenant), `sys_business_unit` (partition tree), and `sys_team` (flat collaboration) currently land flat in the Setup `group_people_org` menu and read as three competing \"organisation\" concepts — worst in single-tenant, where `sys_organization` is a single un-creatable row.\n\n## Decisions (D9–D12)\n\n- **D9 — Edition tiering:** `floor=teams` (all editions) / `ceiling=BU` (enterprise) / `tenant=org` (multi-org only). Teams is the auth-native flat primitive with no structural substitute; BU's distinguishing rollup is paid; the tenant container is degenerate in single-tenant.\n- **D10 — Nav surfacing follows the capability (ADR-0029 K2); objects stay registered open.** Move `nav_business_units` to the hierarchy-security capability (today's `requiresObject` gate is inert — the object is registered unconditionally); gate `nav_organizations`/`nav_invitations` on `multiOrgEnabled`. Flags that `NavigationItem` needs a `visible`/`requiresFeature` predicate first (ADR-0049: gated or not claimed).\n- **D11 — Drop `team` from `sys_business_unit.kind`** (0 repo usages, no migration) — removes the head-on collision with the first-class `sys_team`.\n- **D12 — Add denormalised `sys_user.primary_business_unit_id`** (mirrors `manager_id`, #2133), maintained from `sys_business_unit_member.is_primary`, so \"pick people by BU\" becomes a config-only `lookupFilters` filter with **zero** query-engine change (lookups filter only target-object fields; the junction can't be traversed in one filter today).\n\nPlus: a forward note on `feat/slim-remove-multitenant-runtime` compatibility (why the `multiOrgEnabled` gate is kept), surfacing-conformance proofs (extends D8), and phasing PS-1/2/3.\n\n## Scope\n\nDocumentation only. Implementation lands in follow-up PRs (PS-1: D11 + org gate; PS-2: BU nav relocation; PS-3: `primary_business_unit_id`).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

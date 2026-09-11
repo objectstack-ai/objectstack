@@ -1,0 +1,35 @@
+{
+  "number": 2225,
+  "kind": "pull_request",
+  "title": "feat(lint): SDUI styling validator (ADR-0065) — the deterministic enforcement floor",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-22T16:05:43Z",
+  "updated_at": "2026-06-22T16:11:36Z",
+  "closed_at": "2026-06-22T16:11:33Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-22T16:11:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2225",
+  "body": "The enforcement layer for **ADR-0065**. The skill (#2221) *guides*; this *enforces*. `validateResponsiveStyles` is a pure `(stack) => Finding[]` rule in `@objectstack/lint`, wired into **`os validate` AND `os compile`** so hand-authored and **AI-generated** pages are held to the same bar (ADR-0019) — the floor that catches the deterministic mistakes an AI author makes, *before* render, with hints it can self-correct on.\n\n## Rules\n\n| rule | severity | catches |\n|---|---|---|\n| `style-node-missing-id` | **error** | a node with `responsiveStyles` but no `id` → CSS can't be scoped → silently dropped |\n| `style-classname-tailwind` | warning | `className` with Tailwind utilities → never compiled from metadata, silently dead |\n| `style-responsive-no-base` | warning | a smaller breakpoint with no `large` base → unstyled at desktop |\n| `style-unknown-css-property` | warning | typo'd CSS property (`flexDirektion`) |\n| `style-unknown-token` | warning | typo'd / unknown design token (`var(--spcae-6)`) |\n\nTuned for precision — the Tailwind detector does **not** trip on ordinary custom classes (`my-custom-scope`, the renderer's own `os-s-*` scope classes).\n\n**Out of scope (by design):** whether the result *looks good*. Visual/semantic quality is only catchable by render + a VLM gate (ADR-0065 §Decision-5) — the cloud-side companion.\n\n## Verification\n\n- **Unit tests 9/9** (each rule + clean-page-passes + nested recursion + no-false-positive) — full `@objectstack/lint` suite **42 passed**.\n- **Loop-verified on the real `app-showcase` styling-gallery page** (the one browser-verified to render): it is **lint-CLEAN (0 findings)**; a mutated variant (dropped id + Tailwind className + no-base + typo token) is **caught on all 4 defects**. The lint and the renderer agree on the same page.\n- CLI wiring (`validate.ts` / `compile.ts`) typechecks clean.\n\nThis completes the ADR-0065 defense-in-depth: **skill (guidance) → lint (deterministic floor) → [VLM gate (semantic ceiling, cloud, next)]**.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

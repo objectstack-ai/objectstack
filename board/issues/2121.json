@@ -1,0 +1,35 @@
+{
+  "number": 2121,
+  "kind": "pull_request",
+  "title": "feat(analytics): resolve a monetary measure's currency via field config + tenant default",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-21T09:45:06Z",
+  "updated_at": "2026-06-21T09:55:26Z",
+  "closed_at": "2026-06-21T09:55:25Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-21T09:55:25Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2121",
+  "body": "## Phase 1b — analytics measure-currency chain\n\nBuilds on #2119 (`ExecutionContext.currency`). The dataset measure-currency enrichment honored **only** an explicit measure `currency` literal (the original #2102 behavior) — so a measure summing a currency field, or any measure on a tenant with a configured default currency, rendered symbol-less unless the author restated the code on every measure.\n\nNow a **monetary** measure resolves through the documented chain:\n```\nexplicit measure `currency`\n  → source-field `currencyConfig.defaultCurrency`\n  → tenant default (`ctx.currency`, from the localization setting wired in #2119)\n```\nA measure is **monetary iff** it declares a currency **or** aggregates a `currency`-type field — so `count` / avg-of-a-number measures never receive a (wrong) currency code.\n\n## Changes\n- **analytics-service**: `AnalyticsServiceConfig.measureCurrency(object, field)` → source-field `{ type, defaultCurrency }`; the enrichment applies the chain, gated on monetary type.\n- **plugin**: wires `measureCurrency` from the data engine's `getObject().fields` — the same accessor the dimension label resolver already uses (no new dependency).\n\n## Tests\n`query-dataset` → **15 passed** (+4):\n- currency-field measure with no explicit currency → inherits field `defaultCurrency`\n- currency field with no default → falls back to `ctx.currency`\n- explicit measure currency wins over field default + tenant ctx\n- a **non-currency** field measure stays code-less even with a tenant default\n\n## Follow-ups\n- Template-engine (`{{ x | currency }}`) still hard-defaults to `USD`; threading `ctx.currency` there is a small separate change (different package).\n- **Phase 2** (objectui): one shared resolver/formatter + a client context exposing the tenant default; replace the ~20 ad-hoc client sites.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}
