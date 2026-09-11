@@ -7,13 +7,16 @@
 // single-write now reports, and (b) thread the caller's execution `context` to
 // the engine so RLS/FLS/`readonlyWhen` run under the caller — a gap the
 // pre-#3455 `updateManyData`/`batchData` loops had. Channels:
-//   - updateManyData / batchData → per-row `droppedFields` on each result row;
-//   - insertManyData            → per-row `droppedFields` on each outcome;
-//   - createManyData            → aggregated top-level `droppedFields` (its
-//     response has no per-row slot, so a union is the only view it can
-//     represent; read a name there as "at least one row dropped this field",
-//     never "every row dropped the same set" — ruling C (#14147) exempts keys a
-//     `beforeInsert` hook assigned, recorded per row, so rows CAN differ).
+//   - updateManyData / batchData → per-row `droppedFields` on each result row,
+//     earned mechanically: one engine call per row, so that call's events are
+//     that row's;
+//   - createManyData / insertManyData → aggregated top-level `droppedFields`.
+//     `createManyData`'s response has no per-row slot, so a union is the only
+//     view it can represent. `insertManyData` HAS one (`outcomes[i]`) and still
+//     reports at the top level, because ruling C (#14147) exempts keys a
+//     `beforeInsert` hook assigned — recorded per row — so rows CAN differ and
+//     the union cannot be resolved back to rows. Read a name in either as "at
+//     least one row dropped this field", never "this row dropped it".
 
 import { describe, it, expect, vi } from 'vitest';
 import { assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
@@ -130,22 +133,48 @@ describe('createManyData — aggregated top-level droppedFields (#3455)', () => 
   });
 });
 
-describe('insertManyData — per-row droppedFields on outcomes (#3455)', () => {
-  it('attaches the create strip to the matching outcome row only', async () => {
-    // [#14147] The engine's listener carries no row index — it reports the
-    // batch UNION — so row precision here is recovered by asking which row
-    // SUPPLIED each dropped name. That recovery is what this case pins.
-    const insertMany = vi.fn(async (object: string, rows: any[], options?: any) => {
-      if (rows.some((r) => r && 'approval_status' in r)) {
+describe('insertManyData — BATCH-LEVEL droppedFields that names no row (#3455)', () => {
+  // This block used to pin the opposite: a per-row `droppedFields` on each
+  // outcome, reconstructed from the batch union by asking which row SUPPLIED
+  // each dropped name. Ruling C (#14147) falsifies that reconstruction — the
+  // strip runs after `beforeInsert` and exempts keys a hook assigned, per row —
+  // so the cases are REPLACED rather than amended. The engine double below
+  // models the exemption, which the old one had no concept of; that is why the
+  // old case stayed green through exactly the shape it was written for.
+
+  /**
+   * `hookStamps` names the rows whose `beforeInsert` hook re-assigns
+   * `approval_status`. Those rows KEEP it (ruling C); the others are stripped.
+   * Either way the engine reports ONE event, the union over the batch, with no
+   * row index — which is the real `engine.insert` contract this stands in for.
+   */
+  function makeInsertMany(hookStamps: ReadonlySet<number> = new Set(), dead: ReadonlySet<number> = new Set()) {
+    return vi.fn(async (object: string, rows: any[], options?: any) => {
+      const strippedAny = rows.some((r, i) => r && 'approval_status' in r && !hookStamps.has(i) && !dead.has(i));
+      if (strippedAny) {
         options?.onFieldsDropped?.({ object, fields: ['approval_status'], reason: 'readonly' });
       }
       return rows.map((r, i) => {
-        const { approval_status: _forged, ...kept } = r ?? {};
-        return { ok: true, record: { id: `rec-${i + 1}`, ...kept } };
+        if (dead.has(i)) return { ok: false, error: { code: 'VALIDATION_FAILED' } };
+        const { approval_status: forged, ...kept } = r ?? {};
+        // A stripped `readonly` field falls back to its `defaultValue` (#3043),
+        // so the key is present on the row that DID lose the caller's value —
+        // the reason a post-hoc check against `outcomes[i].record` cannot
+        // recover row precision either.
+        const value = hookStamps.has(i) ? forged : SCHEMA.fields.approval_status.defaultValue;
+        return { ok: true, record: { id: `rec-${i + 1}`, ...kept, approval_status: value } };
       });
     });
+  }
+
+  function makeProtocol(insertMany: ReturnType<typeof makeInsertMany>) {
     const engine = { registry: { getObject: () => SCHEMA }, insertMany };
-    const p = new ObjectStackProtocolImplementation(engine as any);
+    return new ObjectStackProtocolImplementation(engine as any);
+  }
+
+  it('surfaces the batch union on the response and hangs nothing on any outcome', async () => {
+    const insertMany = makeInsertMany();
+    const p = makeProtocol(insertMany);
 
     const res: any = await p.insertManyData({
       object: 'approval_case',
@@ -156,14 +185,70 @@ describe('insertManyData — per-row droppedFields on outcomes (#3455)', () => {
       context: { userId: 'u1' },
     });
 
-    expect(res.outcomes[0]).not.toHaveProperty('droppedFields');
-    expect(res.outcomes[1].droppedFields).toEqual([
+    expect(res.droppedFields).toEqual([
       { object: 'approval_case', fields: ['approval_status'], reason: 'readonly' },
     ]);
+    for (const o of res.outcomes) expect(o).not.toHaveProperty('droppedFields');
     // [#14147] The ingress hands the caller's row over WHOLE — judging it is
     // the engine's job now, and this assertion is what would catch a
     // reintroduced second strip at this seam.
     expect(insertMany.mock.calls[0][1][1]).toHaveProperty('approval_status');
+  });
+
+  it('a hook exempts one row of the batch: the row that KEPT the value is not named', async () => {
+    // Row 0 and row 1 both forge `approval_status`. Row 1's `beforeInsert` hook
+    // re-assigns it, so ruling C keeps row 1's value and only row 0 is
+    // stripped. `f in supplied` — the reconstruction this response shape
+    // replaces — is true for BOTH, so it reported a dropped field on an outcome
+    // whose record carries the value that was written.
+    const p = makeProtocol(makeInsertMany(new Set([1])));
+
+    const res: any = await p.insertManyData({
+      object: 'approval_case',
+      records: [
+        { title: 'A', approval_status: 'approved' },
+        { title: 'B', approval_status: 'approved' },
+      ],
+      context: { userId: 'u1' },
+    });
+
+    expect(res.outcomes[1].record.approval_status, 'the hook wrote it — ruling C keeps it').toBe('approved');
+    expect(res.outcomes[1], 'a written value must never be reported as dropped').not.toHaveProperty('droppedFields');
+    expect(res.outcomes[0], 'and the stripped row is not named either — the set is batch-level')
+      .not.toHaveProperty('droppedFields');
+    expect(res.droppedFields).toEqual([
+      { object: 'approval_case', fields: ['approval_status'], reason: 'readonly' },
+    ]);
+  });
+
+  it('a row the batch culled supplied the name and is still not named', async () => {
+    // The engine's strip loop skips a row that already failed, so a dead row
+    // dropped nothing — but it supplied the key, which was enough for the
+    // reconstruction to name it on an outcome that carries no record at all.
+    const p = makeProtocol(makeInsertMany(new Set(), new Set([0])));
+
+    const res: any = await p.insertManyData({
+      object: 'approval_case',
+      records: [
+        { title: 'A', approval_status: 'approved' },
+        { title: 'B', approval_status: 'approved' },
+      ],
+    });
+
+    expect(res.outcomes[0].ok).toBe(false);
+    expect(res.outcomes[0]).not.toHaveProperty('droppedFields');
+    expect(res.droppedFields).toEqual([
+      { object: 'approval_case', fields: ['approval_status'], reason: 'readonly' },
+    ]);
+  });
+
+  it('nothing dropped ⇒ the key is absent, keeping the omit-when-empty shape', async () => {
+    const p = makeProtocol(makeInsertMany());
+    const res: any = await p.insertManyData({
+      object: 'approval_case',
+      records: [{ title: 'A' }],
+    });
+    expect(res).not.toHaveProperty('droppedFields');
   });
 });
 

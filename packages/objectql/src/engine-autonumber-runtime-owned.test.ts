@@ -305,9 +305,15 @@ describe('#5503 — autonumber is runtime-owned: bulk-create surfaces', () => {
     expect((res.droppedFields ?? []).flatMap((e: DroppedFieldsEvent) => e.fields)).toContain('account_number');
   });
 
-  it('insertManyData keeps ROW precision — only the forging row is reported', async () => {
+  it('insertManyData reports the union at BATCH level and names no row', async () => {
     // The import runner prefers this partial-success surface, so it is the one
-    // that has to stay honest about which row lost its record number.
+    // that has to stay honest — and honest here means naming no row: the
+    // engine's event carries no row index, and the two facts that would let a
+    // caller resolve it are both unavailable at the protocol seam. The row
+    // records below are the second one: BOTH come back carrying
+    // `account_number`, because the strip is followed by `applyAutonumbers`.
+    // So "is the key still on the row?" answers the same for the row that was
+    // stripped and the row that was not.
     const rig = await makeEngine();
     const res: any = await rig.protocol.insertManyData({
       object: 'an_account',
@@ -317,8 +323,8 @@ describe('#5503 — autonumber is runtime-owned: bulk-create surfaces', () => {
       ],
     });
     expect(res.outcomes.map((o: any) => o.record.account_number)).toEqual(['ACC-0001', 'ACC-0002']);
-    expect(res.outcomes[0].droppedFields).toBeUndefined();
-    expect(res.outcomes[1].droppedFields.flatMap((e: DroppedFieldsEvent) => e.fields)).toEqual(['account_number']);
+    for (const o of res.outcomes) expect(o).not.toHaveProperty('droppedFields');
+    expect((res.droppedFields ?? []).flatMap((e: DroppedFieldsEvent) => e.fields)).toEqual(['account_number']);
   });
 });
 
