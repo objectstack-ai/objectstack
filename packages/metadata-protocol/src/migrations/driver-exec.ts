@@ -151,3 +151,39 @@ export function resolveDriverExec(driver: IDataDriver | null | undefined): Drive
     }
     return undefined;
 }
+
+/**
+ * [#17175] The knex client name `driver` speaks, or `undefined`.
+ *
+ * Re-homed here from `seed-tenancy-backfill.ts`'s private `resolveClientName`
+ * when a SECOND site needed it: `sys-setting-identity-index.ts` has to compile a
+ * dialect-specific catalog statement through `read-probe.ts`, and a second copy
+ * of this walk is the duplication this module exists to prevent — the same
+ * argument its header makes for the three copies of the exec resolution.
+ *
+ * ⚠️ Three lookups, in this order, because the answer sits in a different place
+ * depending on how the driver was built: its own `config.client`, then the knex
+ * instance's (`knex.client.config.client`), then a knex bound to a context
+ * (`knex.context.client.config.client`). Each read is individually guarded, so a
+ * getter that throws yields `undefined` rather than escaping into a boot hook.
+ *
+ * `undefined` is a REAL answer — "this host did not say" — and its consumers
+ * must treat it as one. ⛔ It is never defaulted to a dialect: guessing is what
+ * `read-probe.ts`'s fence is written against.
+ */
+export function resolveDriverClientName(driver: unknown): string | undefined {
+    const candidate = driver as any;
+    const read = (fn: () => unknown): string | undefined => {
+        try {
+            const v = fn();
+            return typeof v === 'string' && v.length > 0 ? v : undefined;
+        } catch {
+            return undefined;
+        }
+    };
+    return (
+        read(() => candidate?.config?.client) ??
+        read(() => candidate?.knex?.client?.config?.client) ??
+        read(() => candidate?.knex?.context?.client?.config?.client)
+    );
+}

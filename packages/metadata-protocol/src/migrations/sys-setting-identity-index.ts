@@ -152,10 +152,12 @@ import {
     logProblem,
     probeThenReplaceIndex,
     resolveIndexExecForTable,
+    resolveIndexSeamForTable,
     type IndexExec,
     type IndexMigrationLogger,
     type PartialIndexStatus,
 } from './partial-index-probe.js';
+import { readTablePresence } from './read-probe.js';
 
 /** The one table this migration touches. */
 export const SYS_SETTING_TABLE = 'sys_setting';
@@ -419,20 +421,60 @@ export function resolveSysSettingIndexExec(engine: unknown): IndexExec | undefin
 }
 
 /**
+ * [#17175] The same seam PLUS the dialect, which the presence probe needs to
+ * pick a catalog arm. @see resolveIndexSeamForTable
+ */
+export function resolveSysSettingIndexSeam(
+    engine: unknown,
+): { exec: IndexExec; client?: string } | undefined {
+    return resolveIndexSeamForTable(engine, SYS_SETTING_TABLE);
+}
+
+/**
  * Is `sys_setting` present on the other end of this seam?
  *
- * A thrown error is read as "not present". That is wider than absence strictly
- * warrants — a permission error lands here too — and it is the right width: on
- * any host where the framework cannot even SELECT from the table, it certainly
- * cannot rebuild its index, and reporting one unactionable finding per boot is
- * how the actionable ones stop being read.
+ * [#17175] This used to ASK by running {@link buildSysSettingPresenceSql} and
+ * reading the refusal as "not present" — which is correct, and which made
+ * `SqlDriver.execute()` write one `[sql-driver] DATABASE_ERROR … no such table:
+ * sys_setting` line to the operator's log on EVERY boot of every kernel that
+ * does not register the optional `service-settings`. The docblock above states
+ * the cost of that in its own words ("reporting one unactionable finding per
+ * boot is how the actionable ones stop being read") — while paying it.
+ *
+ * The question is now asked of the CATALOG, which answers "no" with zero rows
+ * instead of a refusal. The statement above still runs, unchanged, on a dialect
+ * `read-probe.ts` has no catalog arm for.
+ *
+ * ⛔ What is NOT kept is the old width. "A thrown error is read as not present"
+ * folded a permission denial and a dropped connection into absence; those now
+ * answer `'unreadable'`, and this migration REPORTS them instead of no-opping
+ * in silence. The previous index is kept either way — the difference is whether
+ * anyone is told the tightening did not even look.
+ *
+ * A seam that accepts the statement and answers nothing ({@link 'no-answer'})
+ * keeps this seam's own long-standing reading: only a REFUSAL was ever
+ * information here, so a no-answer still proceeds, exactly as before.
  */
-async function tableIsPresent(exec: IndexExec): Promise<boolean> {
-    try {
-        await exec(buildSysSettingPresenceSql());
-        return true;
-    } catch {
-        return false;
+async function tableIsPresent(
+    exec: IndexExec,
+    client?: string,
+): Promise<{ verdict: 'present' | 'absent' | 'unreadable'; detail?: string }> {
+    const presence = await readTablePresence(exec, {
+        table: SYS_SETTING_TABLE,
+        client,
+        fallbackSql: buildSysSettingPresenceSql(),
+    });
+    switch (presence.verdict) {
+        case 'absent':
+            return { verdict: 'absent' };
+        // ⛔ Never folded into 'absent' — see the note above and read-probe.ts's
+        // fence. "Could not look" is a report, not an answer.
+        case 'unreadable':
+            return { verdict: 'unreadable', detail: presence.detail };
+        // 'present' and 'no-answer' both proceed: on THIS seam only a refusal
+        // was ever information.
+        default:
+            return { verdict: 'present' };
     }
 }
 
@@ -448,9 +490,25 @@ async function tableIsPresent(exec: IndexExec): Promise<boolean> {
 export async function ensureSysSettingIdentityIndex(
     exec: IndexExec | undefined,
     logger?: EnsureSysSettingIndexLogger,
+    opts: { client?: string } = {},
 ): Promise<EnsureSysSettingIndexResult> {
     if (!exec) return { status: 'no-driver' };
-    if (!(await tableIsPresent(exec))) return { status: 'absent' };
+    const presence = await tableIsPresent(exec, opts.client);
+    if (presence.verdict === 'absent') return { status: 'absent' };
+    if (presence.verdict === 'unreadable') {
+        // [#17175] Not 'absent'. The tightening did not run, the previous index
+        // is kept, and — unlike absence, which is normal and silent — an
+        // operator is told, because nothing here looked at anything.
+        logProblem(
+            logger,
+            `[metadata-protocol] could not read whether "${SYS_SETTING_TABLE}" exists, so the row-identity ` +
+            `index tightening (#8629) did NOT run and the table keeps whatever unique index it had. ` +
+            `⛔ This is not the table being absent, which is a normal, silent no-op on a kernel without ` +
+            `service-settings. Verify by hand with: ${buildSysSettingPresenceSql()} (#17175).`,
+            presence.detail ?? '',
+        );
+        return { status: 'failed', detail: presence.detail };
+    }
 
     // The probe-first order — prove the NULL-safe form is possible under a
     // throwaway name, and only THEN drop the declared name and rebuild it —

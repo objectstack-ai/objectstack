@@ -140,7 +140,19 @@ import { operatorFacingErrorText, resolveTenancyPosture } from '@objectstack/typ
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { DATA_MIGRATION_FLAG_OBJECT, type DataMigrationFlag } from '@objectstack/spec/system';
 import type { IndexMigrationLogger } from './partial-index-probe.js';
-import { driverCanRunSql, resolveDriverExec } from './driver-exec.js';
+import { driverCanRunSql, resolveDriverClientName, resolveDriverExec } from './driver-exec.js';
+import {
+  SEAM_NO_ANSWER_DETAIL,
+  isResultSet,
+  normalizeRows,
+  readTablePresence,
+} from './read-probe.js';
+
+// [#17175] The result-set primitives moved to './read-probe.js' so the shared
+// non-raising presence probe could be built on them without importing from one
+// of its own callers. Re-exported unchanged: 'normalizeRows' is what the package
+// index publishes, and 'runtime-index-preflight.ts' imports both from here.
+export { isResultSet, normalizeRows };
 
 /** The driver-private counter table (`SqlDriver.SEQUENCES_TABLE`). */
 export const SEQUENCES_TABLE = '_objectstack_sequences';
@@ -210,7 +222,26 @@ export type SeedTenancyBackfillStatus =
   /** A split exists but the install holds SEVERAL organizations — no derivable owner. */
   | 'skipped-ambiguous-organization'
   /** The backfill ran. */
-  | 'applied';
+  | 'applied'
+  /**
+   * [#17175] ⛔ The counter table's presence could not be READ — distinct from
+   * {@link 'absent'}, which is an ANSWER.
+   *
+   * Reached only when the presence probe itself was refused for a reason that is
+   * not "no such table": a catalog statement `read-probe.ts` compiled wrong for
+   * this dialect, a permission denial, a dropped connection. Folding it into
+   * `'absent'` — which is where every such refusal used to land — is how a
+   * stored-row repair turns into a SILENT no-op on a dialect nobody exercised,
+   * and it is the one way the non-raising probe can go wrong. `detail` carries
+   * the backend's own text, and the run is reported at `warn` as well as
+   * returned: nothing was lost, but nothing was looked at either.
+   *
+   * ⛔ The name is `runtime-index-preflight.ts`'s, deliberately: that module
+   * already draws this exact line ("'found nothing' and 'never looked' must not
+   * read the same") and two spellings of one distinction is how the distinction
+   * stops being read.
+   */
+  | 'unreadable';
 
 /** One object/field whose counter is split across two partitions. */
 export interface SeedTenancySplit {
@@ -363,21 +394,12 @@ export function resolveSeedTenancySeam(engine: unknown): SeedTenancySeam | undef
  * that keeps its config elsewhere. Anything unreadable is `undefined`, which
  * means "quote the ANSI way" — today's behaviour, unchanged.
  */
-function resolveClientName(driver: any): string | undefined {
-  const read = (fn: () => unknown): string | undefined => {
-    try {
-      const v = fn();
-      return typeof v === 'string' && v.length > 0 ? v : undefined;
-    } catch {
-      return undefined;
-    }
-  };
-  return (
-    read(() => driver?.config?.client) ??
-    read(() => driver?.knex?.client?.config?.client) ??
-    read(() => driver?.knex?.context?.client?.config?.client)
-  );
-}
+/**
+ * [#17175] Moved to `./driver-exec.js` as `resolveDriverClientName` when
+ * `sys-setting-identity-index.ts` needed the same walk to compile its own
+ * catalog statement. Same three lookups, same order, same guards.
+ */
+const resolveClientName = resolveDriverClientName;
 
 /**
  * The exec half alone, for callers that resolve the dialect themselves.
@@ -389,30 +411,6 @@ function resolveClientName(driver: any): string | undefined {
  */
 export function resolveSeedTenancyExec(engine: unknown): SeedTenancyExec | undefined {
   return resolveSeedTenancySeam(engine)?.exec;
-}
-
-/**
- * Flatten the three result shapes the supported dialects return from a raw
- * SELECT into one row list.
- *
- * `better-sqlite3` (through knex) returns a bare row array; `pg` returns
- * `{ rows, rowCount, … }`; `mysql2` returns the tuple `[rows, fields]`. A
- * migration that read only one of them would silently see zero rows on the other
- * two — and "zero rows" is this module's every-branch no-op, so the failure
- * would look exactly like a healthy install.
- */
-export function normalizeRows(result: unknown): Record<string, unknown>[] {
-  if (!result) return [];
-  if (Array.isArray(result)) {
-    // mysql2's `[rows, fields]`: the first element is itself the row array.
-    if (result.length > 0 && Array.isArray(result[0])) {
-      return result[0] as Record<string, unknown>[];
-    }
-    return result as Record<string, unknown>[];
-  }
-  const rows = (result as { rows?: unknown }).rows;
-  if (Array.isArray(rows)) return rows as Record<string, unknown>[];
-  return [];
 }
 
 /**
@@ -442,35 +440,13 @@ export function normalizeRows(result: unknown): Record<string, unknown>[] {
  */
 
 /**
- * Is `result` one of the result-set shapes a raw SELECT can come back as?
- *
- * The same three {@link normalizeRows} flattens, asked as a yes/no: a bare row
- * array (better-sqlite3 through knex), `{ rows }` (pg), and the `[rows, fields]`
- * tuple (mysql2). An empty result set in any of those spellings is still a
- * result set, and still `true` — that is what keeps a healthy install's
- * `no-split` intact, and it is the half of this change that stops it being a
- * rename.
- *
- * This cannot lose a split that {@link normalizeRows} would have found: every
- * shape it rejects is one already flattened to `[]`, so the only change is
- * "reported as unreadable" replacing "reported as zero rows".
- *
- * ⛔ NOT exported from the package index. It has no consumer outside this
- * module, and the CLI's `migrate/duplicates.ts` carries its own copy for its own
- * probes (#10677) — unifying the two is a separate decision, exactly as
- * `quoteIdent` records for the same pair.
+ * [#17175] {@link isResultSet}, {@link normalizeRows} and
+ * `SEAM_NO_ANSWER_DETAIL` now live in `./read-probe.js` and are imported at the
+ * top of this file — the first two re-exported from here so the package index
+ * and `runtime-index-preflight.ts` see no change. They moved because the shared
+ * non-raising presence probe is built on them and must not import from one of
+ * its own callers; their bodies and their doc are unchanged.
  */
-export function isResultSet(result: unknown): boolean {
-  if (Array.isArray(result)) return true;
-  if (typeof result === 'object' && result !== null) {
-    return Array.isArray((result as { rows?: unknown }).rows);
-  }
-  return false;
-}
-
-/** Why a probe was treated as unreadable — the `detail` an operator reads. */
-const SEAM_NO_ANSWER_DETAIL =
-  'the raw-SQL seam returned no result set — a seam that cannot answer is not a seam that answered "no rows"';
 
 /**
  * Run one READ probe and flatten it, failing when the seam answered nothing.
@@ -529,7 +505,20 @@ function quoteIdent(name: string, client?: string): string {
   return `"${name.replace(/"/g, '""')}"`;
 }
 
-/** Probe statement: does the counter table exist at all? */
+/**
+ * Probe statement: does the counter table exist at all?
+ *
+ * [#17175] ⚠️ No longer what {@link backfillSeedTenancy} runs first. The boot
+ * path now asks the CATALOG through `read-probe.ts`, because this statement
+ * cannot answer "no" without being REFUSED, and the driver writes every refusal
+ * of a raw statement to the operator's log — one `DATABASE_ERROR … no such
+ * table` line per boot on every install that has never allocated an autonumber.
+ *
+ * It is still live, and deliberately unchanged, in two places: it is the
+ * `fallbackSql` the shared probe runs when the connected dialect has no catalog
+ * arm, and it is what the live-MySQL pin and `packages/runtime`'s integration
+ * test issue to reach the same table. ⛔ Do not re-point the boot path at it.
+ */
 export function buildSequencesPresenceSql(client?: string): string {
   return `SELECT ${quoteIdent('tenant_id', client)} FROM ${quoteIdent(SEQUENCES_TABLE, client)} WHERE 1 = 0`;
 }
@@ -1223,20 +1212,42 @@ export async function backfillSeedTenancy(
   // 1. Is there a counter table at all? Absent on a memory engine, and on any
   //    install that has never allocated an autonumber.
   //
-  //    TWO ways this probe fails to find one, and the second is #10789. The
-  //    table can be missing — the driver raises, and the `catch` reports it. Or
-  //    the SEAM can be one that accepts the statement and never runs it: a no-op
-  //    `execute` that returns `null` neither throws nor is absent, so this
-  //    branch was unreachable on a memory engine despite the comment above
-  //    saying it was the case it existed for. Both mean "no counter table was
-  //    read", which is what `absent` says; `detail` separates the reasons.
-  try {
-    if (!isResultSet(await exec(buildSequencesPresenceSql(client)))) {
-      return { status: 'absent', ...empty, detail: SEAM_NO_ANSWER_DETAIL };
-    }
-  } catch {
-    return { status: 'absent', ...empty };
+  //    [#17175] This used to ASK by running `buildSequencesPresenceSql` — a
+  //    statement that cannot succeed when the answer is no — and reading the
+  //    refusal as the answer. It worked, and it made `SqlDriver.execute()` write
+  //    one `[sql-driver] DATABASE_ERROR … no such table` line to stderr on every
+  //    boot of every install with no counter table. Nothing was broken and the
+  //    operator was told something was. The question is now asked of the
+  //    CATALOG, which answers "no" with zero rows instead of a refusal; the
+  //    statement above is kept and is still what runs on a dialect
+  //    `read-probe.ts` has no catalog arm for.
+  //
+  //    FOUR verdicts, and the third and fourth are the two #10789 named. A seam
+  //    that accepts the statement and never runs it (a memory engine's no-op
+  //    `execute`) answers nothing — still `absent`, still separated by
+  //    `detail`, exactly as ruled. ⛔ But `'unreadable'` is NOT folded in with
+  //    them: a probe that was refused for a reason other than "no such table"
+  //    looked at nothing, and calling that "the table is not there" is how this
+  //    repair would decline in silence on a dialect nobody exercised.
+  const presence = await readTablePresence(exec, {
+    table: SEQUENCES_TABLE,
+    client,
+    fallbackSql: buildSequencesPresenceSql(client),
+  });
+  if (presence.verdict === 'unreadable') {
+    logger?.warn?.(
+      `[metadata-protocol] the seed/API tenancy repair (#8686) could not read whether ` +
+        `"${SEQUENCES_TABLE}" exists, so it did NOT run and nothing was changed. This is not the ` +
+        `table being absent — that answer is silent and normal. Verify by hand with: ` +
+        `${buildSequencesPresenceSql(client)} (#17175).`,
+      { error: presence.detail, probe: presence.probe },
+    );
+    return { status: 'unreadable', ...empty, detail: presence.detail };
   }
+  if (presence.verdict === 'no-answer') {
+    return { status: 'absent', ...empty, detail: presence.detail ?? SEAM_NO_ANSWER_DETAIL };
+  }
+  if (presence.verdict === 'absent') return { status: 'absent', ...empty };
 
   // 2. Which objects are split? Probed FIRST so a healthy install — the
   //    overwhelming majority, including every fresh boot before sign-up — pays
