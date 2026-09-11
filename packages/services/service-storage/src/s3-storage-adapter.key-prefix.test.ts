@@ -235,10 +235,12 @@ describe('two adapters on one bucket are two disjoint namespaces', () => {
     expect((await one.list('')).items.map((i) => i.key)).toEqual(['invoice.pdf']);
     expect((await one.download('invoice.pdf')).toString()).toBe('tenant 1');
     expect((await ten.download('invoice.pdf')).toString()).toBe('tenant 10');
-    // Both objects exist, under distinct bucket keys.
+    // Both objects exist, under distinct bucket keys. Sorted by UTF-8 byte, in
+    // which `/` (0x2F) precedes `0` (0x30) — which is also WHY the delimiter
+    // separates the two namespaces rather than nesting one inside the other.
     expect([...fakeS3.objects.keys()].sort()).toEqual([
-      'tenant_10/invoice.pdf',
       'tenant_1/invoice.pdf',
+      'tenant_10/invoice.pdf',
     ]);
   });
 });
