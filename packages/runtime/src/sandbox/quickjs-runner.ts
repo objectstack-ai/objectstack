@@ -395,11 +395,19 @@ export class QuickJSScriptRunner implements ScriptRunner {
           // the 400 a denial used to get — and the client sees the capability
           // text without the `SandboxError: ` debug prefix.
           if (info?.sandboxFault) {
-            throw new SandboxError(sandboxFaultMessage(String(errStr)));
+            throw new SandboxError(withoutSandboxErrorPrefix(String(errStr)));
           }
+          // [#17265] The `.message` wrapper keeps the WHOLE flattened chain for
+          // the log — `action 'x' threw: SandboxError: hook 'g' threw: <msg>`
+          // names every frame that refused. The client-facing sentence drops the
+          // inner `SandboxError: ` token by the same rule the fault branch above
+          // applies: the VM's name prefix is a debug artefact and never reached
+          // the wire before a nested refusal stopped being classified as a
+          // fault, so this repair moves the STATUS and leaves the sentence a
+          // caller receives byte-identical to what it was.
           throw new SandboxError(
             `${args.origin.kind} '${args.origin.name}' threw: ${errStr}`,
-            userFacingMessage(String(errStr)),
+            userFacingMessage(withoutSandboxErrorPrefix(String(errStr))),
             info,
           );
         }
@@ -1291,7 +1299,19 @@ function hostErrorToVm(vm: QuickJSContext, err: unknown): QuickJSHandle {
     }
     // [#4431] Mark the sandbox's OWN faults so the pump loop can tell them
     // apart from a user throw after the VM has flattened both to a string.
-    if (err instanceof SandboxError) {
+    //
+    // [#17265] …asked as a QUESTION about the error, never as a bare
+    // `instanceof`. A NESTED sandboxed body's refusal is a `SandboxError` too:
+    // the `beforeUpdate` hook that `engine.update()` dispatched underneath this
+    // body's `ctx.api` write was wrapped by this very runner one level down. So
+    // the type test marked a deliberate business refusal as the sandbox
+    // faulting, the pump branch that reads the marker then dropped its
+    // `innerMessage` (and its `code`/`status`/`fields`), and
+    // `domains/actions.ts` read that absence as a CRASH — answering
+    // `500 INTERNAL_ERROR` for a refusal `/data` has answered `400` with the
+    // sentence verbatim since #11588. {@link sandboxRefusalMessage} is that
+    // door's own question, so the two doors answer one refusal once.
+    if (err instanceof SandboxError && sandboxRefusalMessage(err) === undefined) {
       const h = vm.true;
       vm.setProp(errH, SANDBOX_FAULT_PROP, h);
     }
@@ -1346,6 +1366,59 @@ function hostErrorToVm(vm: QuickJSContext, err: unknown): QuickJSHandle {
 const SANDBOX_FAULT_PROP = '__objectstackSandboxFault';
 
 /**
+ * [#17265] The ECMA-262 native error constructors, plus SpiderMonkey's
+ * `InternalError` which QuickJS also raises — the third copy of one pattern,
+ * and deliberately a copy.
+ *
+ * `packages/rest`'s `isScriptFaultMessage` (`error-response.ts`) is the
+ * original and `packages/objectql`'s `isScriptCrash`
+ * (`hook-withheld-readonly-fault.ts`) already keeps its own, for the reason
+ * stated there: the importing package must not take a dependency on
+ * `@objectstack/rest` for a regex. This package's reason is one step narrower —
+ * `@objectstack/runtime` DOES depend on `@objectstack/rest`, but that package
+ * declares exactly one export subpath (`"."`) and re-exports nothing from
+ * `error-response`, so importing the predicate would mean WIDENING rest's
+ * published surface for an internal read.
+ *
+ * ⛔ Same deliberate omission of a bare `Error:` as both siblings: a body's
+ * plain `Error` is the documented way to AUTHOR a refusal, so it is never a
+ * crash.
+ */
+const NATIVE_ERROR_NAME_RE =
+  /^(?:Type|Reference|Range|Syntax|URI|Eval|Internal|Aggregate)Error(?::|$)/;
+
+/**
+ * [#17265] The caller-addressed BUSINESS sentence a sandboxed body threw, or
+ * `undefined` when this error is not a body's deliberate refusal.
+ *
+ * This is `packages/rest`'s `sandboxBusinessMessage` (#11588) — the read the
+ * `/data` door and, since #11684, the `/analytics/dataset/query` door both make
+ * instead of open-coding a local opinion. Both of its conditions travel, in the
+ * same order, because both are load-bearing HERE:
+ *
+ *  - a non-empty string `.innerMessage` — the sandbox's own mark for "user code
+ *    threw this deliberately", and by {@link SandboxError}'s contract the thing
+ *    a capability denial, a timeout and a marshalling failure all lack. Its
+ *    absence is what keeps every #4431 case marked as a fault;
+ *  - NOT a native error name (#7543). A nested body that CRASHED arrives in the
+ *    identical shape carrying `TypeError: …`, which is an internal fault and
+ *    not a sentence addressed to anyone. Dropping this half would turn a nested
+ *    crash into a 400 and move the `an unexpected FAULT is a 500` line that
+ *    `domains/actions-fault-vs-rejection.test.ts` pins.
+ *
+ * ⛔ A READ of the field the runner populated, never a pattern-strip of the
+ * `<kind> '<name>' threw:` wrapper off `.message` — the sibling's rule, for the
+ * sibling's reason: a plain error whose own prose contains `threw:` must not be
+ * rewritten.
+ */
+function sandboxRefusalMessage(error: unknown): string | undefined {
+  const inner = (error as { innerMessage?: unknown } | null | undefined)?.innerMessage;
+  if (typeof inner !== 'string' || !inner) return undefined;
+  if (NATIVE_ERROR_NAME_RE.test(inner.trim())) return undefined;
+  return inner;
+}
+
+/**
  * [#4431] Throw a sandbox-internal fault OUT OF a host function so it reaches
  * the VM carrying {@link SANDBOX_FAULT_PROP}.
  *
@@ -1371,8 +1444,15 @@ function throwSandboxFault(vm: QuickJSContext, message: string): never {
  * for a sandbox fault there is no business message at all, so what reaches the
  * client is this text — the capability, the origin and the call that tripped
  * the gate — with the debug prefix removed.
+ *
+ * [#17265] Named for the OPERATION rather than for one of its callers, because
+ * it now has two: the same flattened prefix appears on the REJECTION path once
+ * a nested body's refusal stops being marked a fault, and the prefix belongs in
+ * the log there for exactly the same reason. One strip, two readers — the
+ * alternative was a second helper doing the same thing, which is the
+ * local-opinion shape this card exists to remove.
  */
-function sandboxFaultMessage(raw: string): string {
+function withoutSandboxErrorPrefix(raw: string): string {
   return raw.startsWith('SandboxError: ') ? raw.slice('SandboxError: '.length) : raw;
 }
 
