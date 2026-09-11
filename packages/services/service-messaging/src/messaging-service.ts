@@ -181,6 +181,8 @@ export class MessagingService {
     private readonly resolver: RecipientResolver;
     private readonly preferences: PreferenceResolver;
     private outbox?: INotificationOutbox;
+    /** [#17610] Fired after an `emit()` enqueues deliveries — see {@link setOutbox}. */
+    private onDeliveriesEnqueued?: () => void;
     private httpOutbox?: IHttpOutbox;
     /** [#8069] Producer vetoes over redelivery, keyed by `HttpDelivery.source`. */
     private readonly redeliverGuards = new Map<string, RedeliverGuard>();
@@ -204,9 +206,17 @@ export class MessagingService {
      * Attach the durable delivery outbox after construction. The plugin wires
      * this once the data engine is resolvable (kernel:ready), switching `emit()`
      * from inline fan-out to the reliable enqueue → dispatcher path.
+     *
+     * [#17610] `onEnqueued` fires once per `emit()` that enqueued at least one
+     * delivery. The plugin points it at `NotificationDispatcher.wake()`: the
+     * dispatcher backs its tick interval off while the outbox is idle, and rows
+     * this process just wrote should go out on the next tick, not the next
+     * backed-off one. It belongs to the outbox it was attached with — attaching
+     * another outbox replaces (or clears) it.
      */
-    setOutbox(outbox: INotificationOutbox): void {
+    setOutbox(outbox: INotificationOutbox, options: { onEnqueued?: () => void } = {}): void {
         this.outbox = outbox;
+        this.onDeliveriesEnqueued = options.onEnqueued;
     }
 
     /**
@@ -904,6 +914,8 @@ export class MessagingService {
             // retroactively. `failed` keeps its meaning — an enqueue that threw
             // never reached the outbox at all.
             const enqueued = deliveries.filter((d) => d.ok).length;
+            // [#17610] Wake the dispatcher — see `setOutbox`.
+            if (enqueued > 0) this.onDeliveriesEnqueued?.();
             return {
                 notificationId, deduped: false, deliveries,
                 delivered: 0, enqueued, failed: deliveries.length - enqueued,

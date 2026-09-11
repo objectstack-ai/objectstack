@@ -7,7 +7,7 @@ import { MessagingService } from './messaging-service.js';
 import { createInboxChannel } from './inbox-channel.js';
 import { SqlNotificationOutbox } from './sql-outbox.js';
 import { SqlHttpOutbox } from './sql-http-outbox.js';
-import { NotificationDispatcher, type DispatchCluster } from './dispatcher.js';
+import { DEFAULT_MAX_IDLE_INTERVAL_MS, NotificationDispatcher, type DispatchCluster } from './dispatcher.js';
 import { HttpDispatcher } from './http-dispatcher.js';
 import { createEmailChannel } from './email-channel.js';
 import { createSmsChannel } from './sms-channel.js';
@@ -45,8 +45,19 @@ export interface MessagingServicePluginOptions {
     reliableDelivery?: boolean;
     /** Outbox/dispatcher partition count (default 8). */
     partitionCount?: number;
-    /** Dispatcher tick interval in ms (default 500). */
+    /** Dispatcher tick interval in ms while there is work (default 500). */
     dispatchIntervalMs?: number;
+    /**
+     * [#17610] Ceiling in ms for the notification dispatcher's idle backoff
+     * (default 30000). Consecutive ticks that claim nothing double the interval
+     * from `dispatchIntervalMs` up to this; a tick that claims work snaps it
+     * back, and an `emit()` that enqueues deliveries wakes the dispatcher at
+     * once. While idle it bounds how late the dispatcher notices work nobody
+     * woke it for: a deferred delivery coming due (retry, quiet hours, digest
+     * window), a row enqueued by another process, a crashed node's claim passing
+     * its timeout. A value at or below `dispatchIntervalMs` disables the backoff.
+     */
+    dispatchMaxIdleIntervalMs?: number;
     /**
      * Topics that bypass the per-user preference matrix (ADR-0030 P2) — e.g.
      * security/system alerts users must not be able to mute. Exact match, or a
@@ -99,6 +110,7 @@ export class MessagingServicePlugin implements Plugin {
             reliableDelivery: true,
             partitionCount: 8,
             dispatchIntervalMs: 500,
+            dispatchMaxIdleIntervalMs: DEFAULT_MAX_IDLE_INTERVAL_MS,
             mandatoryTopics: [],
             ...options,
         };
@@ -281,7 +293,9 @@ export class MessagingServicePlugin implements Plugin {
                     return;
                 }
                 const outbox = new SqlNotificationOutbox(engine, { partitionCount: this.options.partitionCount });
-                service.setOutbox(outbox);
+                // [#17610] Resolved at call time: the dispatcher is constructed
+                // below, and after destroy() the hook is a no-op.
+                service.setOutbox(outbox, { onEnqueued: () => this.dispatcher?.wake() });
 
                 let cluster: DispatchCluster | undefined;
                 try {
@@ -298,11 +312,12 @@ export class MessagingServicePlugin implements Plugin {
                     cluster,
                     partitionCount: this.options.partitionCount,
                     intervalMs: this.options.dispatchIntervalMs,
+                    maxIdleIntervalMs: this.options.dispatchMaxIdleIntervalMs,
                     logger: ctx.logger,
                 });
                 this.dispatcher.start();
                 ctx.logger.info(
-                    `[messaging] reliable delivery on (outbox + dispatcher, ${this.options.partitionCount} partitions${cluster ? ', clustered' : ', single-node'})`,
+                    `[messaging] reliable delivery on (outbox + dispatcher, ${this.options.partitionCount} partitions${cluster ? ', clustered' : ', single-node'}, idle backoff up to ${Math.max(this.options.dispatchIntervalMs, this.options.dispatchMaxIdleIntervalMs)}ms)`,
                 );
 
                 // ADR-0018 M3: generic outbound-HTTP outbox + dispatcher. Backs
