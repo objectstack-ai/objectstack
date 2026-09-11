@@ -25,10 +25,15 @@
  * `updateMany` and its spy below records `SqlDriver.updateMany`. Its
  * CLASSIFICATION is unchanged — declared global, now via
  * `dispatcherAckCasOptions` — which is the point of pinning the two
- * separately: the op moved, the warrant did not. Of the three sites only
- * `SqlHttpOutbox.ack` still writes by id.
+ * separately: the op moved, the warrant did not.
  *
- * The `ack` pair is declared global (`dispatcherAckOptions`, warrant in
+ * [#17634] `SqlHttpOutbox.ack` has since made the same move: handed the claim
+ * credential — which `HttpDispatcher` always hands it — its ownership test is
+ * a compare-and-set, so its op is `updateMany`, via `dispatcherAckCasOptions`,
+ * with the classification unchanged. Only its deprecated credential-less arity
+ * still writes by id, and no dispatcher tick reaches it.
+ *
+ * The `ack` pair is declared global (`dispatcherAckCasOptions`, warrant in
  * `outbox-dispatcher-scope.ts`). `redeliver` is NOT: it is served to any
  * authenticated user, so it threads the caller's tenant instead. ⛔ A
  * `bypassTenantAudit` on that third site would convert a detectable hole into
@@ -56,9 +61,9 @@
  * ## The vacuity traps closed explicitly
  *  1. **"the audit was never armed."** Every silence assertion is followed by
  *     a positive control on the SAME object through the SAME driver: an
- *     unscoped by-id `update` that MUST produce the line. The gate throttles
- *     one warning per `${object}:${op}`, so the control runs last and only
- *     fires if the production path consumed no `update` warning of its own.
+ *     unscoped write on the SAME op that MUST produce the line. The gate
+ *     throttles one warning per `${object}:${op}`, so the control runs last and
+ *     only fires if the production path consumed no warning on that op itself.
  *  2. **"a fix that touches nothing."** Row state is pinned after every write.
  *  3. **"a refusal that refuses everything."** The cross-tenant refusal is
  *     paired with a still-works leg: an in-tenant redeliver still succeeds.
@@ -84,12 +89,8 @@ let driver: SqlDriver;
 let warns: Array<{ msg: string; meta: any }>;
 /** Every `options` bag that reached `SqlDriver.update` — the `update` op only. */
 let driverUpdates: Array<{ object: string; id: unknown; options: any }>;
-/** Every `options` bag that reached `SqlDriver.updateMany` — `redeliver`'s op since #11009, and the notification `ack`'s since #11453. */
+/** Every `options` bag that reached `SqlDriver.updateMany` — `redeliver`'s op since #11009, the notification `ack`'s since #11453, and the HTTP `ack`'s since #17634. */
 let driverUpdateManys: Array<{ object: string; where: unknown; options: any }>;
-
-/** The audit line for the SINGLE-RECORD op, matched on object + op. */
-const auditedUpdate = (object: string): boolean =>
-    warns.some((w) => w.msg.includes(`[tenant-audit] update on tenant-scoped object "${object}"`));
 
 /** The audit line for the PREDICATE op — `redeliver`'s write since #11009, the notification `ack`'s since #11453. */
 const auditedUpdateMany = (object: string): boolean =>
@@ -146,30 +147,6 @@ afterEach(async () => {
 });
 
 /**
- * The positive control for the `update` op. A by-id write with no `tenantId`
- * and no bypass MUST produce the audit line on `object`, or this file cannot
- * tell "classified" from "the gate was never armed". Run AFTER the assertion
- * it guards — the gate throttles one warning per `${object}:${op}`.
- */
-async function controlUnscopedUpdate(object: string, existingId: string): Promise<void> {
-    // `where: { id }` with a scalar id routes through `driver.update`
-    // (`resolveEngineUpdateDispatch` → `by-id`), exactly as the production
-    // paths under test do.
-    //
-    // ⚠️ It must name a row that EXISTS. The engine's by-id branch raises
-    // `Record <id> not found` before it ever reaches the driver, so a control
-    // pointed at a missing id never arms the gate it is meant to prove is
-    // armed — it fails as an error rather than reporting a vacuous suite,
-    // which is the only reason that mistake was visible here.
-    await engine.update(object, { attempts: 99 }, { where: { id: existingId } } as any);
-    expect(
-        auditedUpdate(object),
-        `positive control failed: an unscoped by-id update on ${object} produced no [tenant-audit] `
-            + 'line, so every "no finding" assertion in this file is vacuous',
-    ).toBe(true);
-}
-
-/**
  * The positive control for the `updateMany` op — `redeliver`'s op since
  * #11009. An unscoped predicate write with no bypass MUST produce the
  * `updateMany` audit line, or the silence assertions on that op are vacuous.
@@ -221,7 +198,7 @@ async function seedDeadRow(id: string, org: string): Promise<void> {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-describe('ack — the two dispatcher sites are a classified global sweep (update + updateMany ops)', () => {
+describe('ack — the two dispatcher sites are a classified global sweep (updateMany op)', () => {
     it('SqlHttpOutbox.ack records a REAL delivery in every organization, without a finding', async () => {
         // The gate's own precondition: this object really is tenant-scoped.
         expect((driver as any).resolveTenantField(SYS_HTTP_DELIVERY)).toBe('organization_id');
@@ -246,14 +223,30 @@ describe('ack — the two dispatcher sites are a classified global sweep (update
         ]);
         // ② Both organizations' rows were acked by one dispatcher — the
         // cross-organization reach is the operation's semantics.
-        const ackWrites = driverUpdates.filter((u) => u.object === SYS_HTTP_DELIVERY);
-        expect(ackWrites.map((u) => u.id).sort()).toEqual(['h_a', 'h_b']);
+        //
+        // [#17634] The dispatcher's ack hands the claim credential, so it is a
+        // compare-and-set on the predicate path and the reading moves to the
+        // `updateMany` spy — the move the notification ack made in #11453. The
+        // claim path writes there too (its reap and its atomic claim), so the
+        // filter names what an ACK write looks like: a scalar id bound to
+        // `in_flight` AND to the claiming node. That predicate IS the
+        // compare-and-set, so matching on it pins that the ack reached the
+        // driver CONDITIONAL rather than as a blind by-id write.
+        const ackWrites = driverUpdateManys.filter(
+            (u) => u.object === SYS_HTTP_DELIVERY
+                && typeof (u.where as any)?.id === 'string'
+                && (u.where as any)?.status === 'in_flight'
+                && (u.where as any)?.claimed_by === 'n1',
+        );
+        expect(ackWrites.map((u) => (u.where as any).id).sort()).toEqual(['h_a', 'h_b']);
         // ③ …under the DECLARED classification, not an accidental silence.
         expect(ackWrites.every((u) => u.options?.bypassTenantAudit === true)).toBe(true);
         expect(ackWrites.every((u) => u.options?.tenantId === undefined)).toBe(true);
-        expect(auditedUpdate(SYS_HTTP_DELIVERY)).toBe(false);
+        // …and no by-id write reached the driver: the dispatcher never takes the deprecated arity.
+        expect(driverUpdates.filter((u) => u.object === SYS_HTTP_DELIVERY)).toEqual([]);
+        expect(auditedUpdateMany(SYS_HTTP_DELIVERY)).toBe(false);
 
-        await controlUnscopedUpdate(SYS_HTTP_DELIVERY, 'h_a');
+        await controlUnscopedUpdateMany(SYS_HTTP_DELIVERY, 'h_a');
     });
 
     it('SqlNotificationOutbox.ack records a REAL delivery in every organization, without a finding', async () => {

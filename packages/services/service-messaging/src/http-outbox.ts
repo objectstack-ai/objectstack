@@ -120,7 +120,8 @@ export interface HttpDelivery {
      * Number of attempts made so far (0 before first attempt).
      *
      * [#8069] **Load-bearing beyond diagnostics.** `ack()` — the only writer of
-     * a terminal status — increments this unconditionally, so a row that is
+     * a terminal status — increments this with every outcome it records
+     * (#17634: never for a claim it no longer holds), so a row that is
      * terminal (`success` / `failed` / `dead`) with `attempts === 0` never came
      * from the dispatch path: it was **parked** by
      * {@link IHttpOutbox.recordUndeliverable} and has never existed on the
@@ -358,6 +359,100 @@ export interface HttpAckFailure {
 export type HttpAckResult = HttpAckSuccess | HttpAckFailure;
 
 /**
+ * [#17634] The claim credential — the (`claimedBy`, `claimedAt`) pair a store
+ * stamps on a row when {@link IHttpOutbox.claim} takes it — handed back to
+ * {@link IHttpOutbox.ack} so the outcome is written only while that claim still
+ * holds the row. It is exactly the pair the notification outbox's
+ * `ClaimedDeliveryRecord` guarantees for `INotificationOutbox.ack` (#11859), with
+ * the same meaning:
+ *
+ *  - ownership is proven by ROUND-TRIPPING what `claim()` returned, never by the
+ *    caller supplying an identity it had to know — hand back the claimed row
+ *    itself, which is structurally one;
+ *  - the pair identifies one CLAIM, not one node: `claimedAt` is what refuses a
+ *    late ack even when the SAME node re-claimed its own reaped row — the
+ *    outcome belongs to the attempt, and a re-claim is a new attempt.
+ *
+ * A credential rather than a claimed-record type because `claim()` keeps
+ * declaring `HttpDelivery[]`, whose `claimedBy` / `claimedAt` are optional:
+ * narrowing that declared return type would stop every subclass override of a
+ * built-in store's `claim()` that declares the old one from compiling.
+ */
+export interface HttpClaimCredential {
+    /** Node id the claim stamped — {@link HttpDelivery.claimedBy} on the claimed row. */
+    claimedBy: string;
+    /** Claim instant (ms) the claim stamped — {@link HttpDelivery.claimedAt} on the claimed row. */
+    claimedAt: number;
+}
+
+/**
+ * [#17634] Error raised by {@link IHttpOutbox.ack} when it is handed a claim
+ * credential and the row is no longer held by that claim — or was never
+ * claimed — so the outcome was NOT recorded.
+ *
+ * `DELIVERY_NOT_ELIGIBLE` is this package's registered ADR-0112 code for "this
+ * delivery row's state does not permit the requested operation", already raised
+ * by {@link HttpRedeliverError} and by the notification outbox's
+ * `NotificationAckError`. Reused, not minted: one concept, one spelling for a
+ * caller to match on.
+ */
+export class HttpAckError extends Error {
+    constructor(
+        message: string,
+        readonly code: 'DELIVERY_NOT_ELIGIBLE',
+    ) {
+        super(message);
+        this.name = 'HttpAckError';
+    }
+}
+
+/**
+ * [#17634] Refuse a claim credential that is not one — the runtime half of
+ * {@link HttpClaimCredential}, for JS callers and casts. In ONE place both
+ * stores call, before any read or write.
+ */
+export function assertHttpClaimCredential(id: string, claimed: HttpClaimCredential): void {
+    if (typeof claimed?.claimedBy !== 'string' || typeof claimed?.claimedAt !== 'number') {
+        throw new HttpAckError(
+            `Delivery row '${id}': the claim credential passed to ack() is incomplete (claimedBy + claimedAt). `
+                + 'ack() proves the claim it completes by handing back the pair claim() stamped on the row. '
+                + 'Nothing was written.',
+            'DELIVERY_NOT_ELIGIBLE',
+        );
+    }
+}
+
+/**
+ * [#17634] The refusal message for a row that is not `in_flight` when a
+ * credentialed ack runs — reaped back to `pending` and not re-claimed yet,
+ * already terminal, or never claimed. In ONE place both stores call, so the two
+ * cannot drift into two wordings for one refusal.
+ */
+export function httpAckNotClaimedMessage(id: string, status: HttpDeliveryStatus | 'unknown'): string {
+    return (
+        `Delivery row '${id}' is '${status}', not 'in_flight': ack() was handed a claim credential and `
+        + 'this row is not claimed, so NOTHING was written. Expected when a slow send outruns `claimTtlMs` '
+        + 'and the visibility-timeout reap returns the row to the queue: whoever claims it next sends it '
+        + 'again.'
+    );
+}
+
+/**
+ * [#17634] The refusal message for a row that IS `in_flight`, but under a
+ * different claim — reaped and re-claimed while the send ran, by another node
+ * or by this node's own later claim — or that changed between the ownership
+ * read and the conditional write. In ONE place both stores call.
+ */
+export function httpAckLostClaimMessage(id: string, status: HttpDeliveryStatus | 'unknown'): string {
+    return (
+        `Delivery row '${id}' is no longer held by the claim this ack completes (it now reads `
+        + `'${status}'), so the ownership-checked conditional update matched no row and NOTHING was `
+        + 'written — this attempt was not recorded and the row belongs to whoever holds it now. '
+        + 'Expected when a slow send outruns `claimTtlMs` and the row is reaped and re-claimed.'
+    );
+}
+
+/**
  * Error raised by `IHttpOutbox.redeliver` when the requested row is either
  * missing or in a non-terminal state.
  */
@@ -377,8 +472,8 @@ export class HttpRedeliverError extends Error {
  * ## What it refuses, and why that predicate
  * `redeliver` means *send this again*. A terminal row with `attempts === 0` was
  * never sent a first time — {@link IHttpOutbox.ack}, the only writer of a
- * terminal status, increments `attempts` unconditionally, so the pair
- * (terminal, 0 attempts) is reachable only through
+ * terminal status, increments `attempts` with every outcome it records, so
+ * the pair (terminal, 0 attempts) is reachable only through
  * {@link IHttpOutbox.recordUndeliverable}. Such a row is a **record of a
  * delivery that was refused before it ever existed on the wire**, and resetting
  * it to `pending` is not a replay: it is a FIRST delivery conjured by an
@@ -540,11 +635,48 @@ export interface IHttpOutbox {
      * authored header. An implementation whose storage redacts the column
      * recovers it through a privileged read (see `SqlHttpOutbox`) or fails the
      * claim loudly; it must not return the row with the map silently absent.
+     *
+     * [#17634] Every returned row carries its claim credential —
+     * `claimedBy` = `opts.nodeId`, `claimedAt` = the claim instant — exactly as
+     * the claiming write stamped it. {@link ack} takes that pair back to prove
+     * the claim it completes, so an implementation that honours `ack`'s
+     * `claimed` argument MUST stamp it on every row.
      */
     claim(opts: HttpClaimOptions): Promise<HttpDelivery[]>;
 
-    /** Record the outcome of an attempt. */
-    ack(id: string, result: HttpAckResult): Promise<void>;
+    /**
+     * Record the outcome of ONE dispatch attempt.
+     *
+     * [#17634] **Pass `claimed`** — the claim credential on the row {@link claim}
+     * returned (the row itself will do). With it, `ack` is the ownership-checked
+     * completion `INotificationOutbox.ack` performs (#11453, #11859):
+     *
+     * ⛔ **Precondition: the row MUST still be held by that claim.** Two tests,
+     * both re-stated IN the conditional write: the row is `in_flight`, AND its
+     * (`claimed_by`, `claimed_at`) pair equals `claimed`. Otherwise `ack` throws
+     * {@link HttpAckError} (`DELIVERY_NOT_ELIGIBLE`), writes nothing and leaves
+     * `attempts` untouched. That covers the late ack whose claim the
+     * visibility-timeout reap took back while the send ran — re-claimed by
+     * another node that is still sending, or by this node's own later claim
+     * (the credential is the PAIR, so `claimedAt` tells two claims by one node
+     * apart) — and a claim reaped and not yet re-claimed. A `claimed` missing
+     * either member is refused the same way, before any read. An `id` matching
+     * no row stays a silent no-op: no state to corrupt, no claim to lose.
+     * Implementations MUST re-read what they need (e.g. `attempts`) from the
+     * store, and MUST make the ownership test and the write one atomic
+     * operation, never a read-then-write.
+     *
+     * **Without `claimed`** — the arity this method had before #17634 — both
+     * built-in stores write by id with no ownership check, exactly as they always
+     * did, so a late ack overwrites whatever holds the row now. That arity is
+     * deprecated, kept only so callers written against it keep working;
+     * `HttpDispatcher` always passes `claimed`. The parameter is optional —
+     * rather than a new method or a required argument — so an `IHttpOutbox`
+     * implementation written before it keeps compiling and working unchanged (it
+     * simply ignores the dispatcher's extra argument), and so a subclass that
+     * overrides a built-in store's `ack()` keeps seeing every dispatcher ack.
+     */
+    ack(id: string, result: HttpAckResult, claimed?: HttpClaimCredential): Promise<void>;
 
     /**
      * Snapshot accessor for tests / admin tooling. [#8118] Not a dispatch

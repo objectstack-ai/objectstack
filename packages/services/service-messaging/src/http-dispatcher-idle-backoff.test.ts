@@ -23,7 +23,7 @@ import { HttpDispatcher } from './http-dispatcher.js';
 import { DEFAULT_MAX_IDLE_INTERVAL_MS } from './dispatcher.js';
 import { MessagingService } from './messaging-service.js';
 import type { FetchImpl } from './http-sender.js';
-import type { EnqueueHttpInput, HttpAckResult, HttpClaimOptions, HttpDelivery } from './http-outbox.js';
+import type { EnqueueHttpInput, HttpAckResult, HttpClaimCredential, HttpClaimOptions, HttpDelivery } from './http-outbox.js';
 
 const BASE = 500;
 const CAP = 30_000;
@@ -39,9 +39,10 @@ class TickRecordingOutbox extends MemoryHttpOutbox {
         this.tickStarts.push(Date.now());
         return super.claim(opts);
     }
-    override async ack(id: string, result: HttpAckResult): Promise<void> {
+    override async ack(id: string, result: HttpAckResult, claimed?: HttpClaimCredential): Promise<void> {
         if (!result.success && result.nextRetryAt !== undefined) this.retriesDueAt.push(result.nextRetryAt);
-        return super.ack(id, result);
+        // [#17634] Forward the claim credential, so the dispatcher's acks keep their ownership check.
+        return super.ack(id, result, claimed);
     }
 }
 

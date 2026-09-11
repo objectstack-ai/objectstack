@@ -139,12 +139,17 @@ export type {
     HttpAckResult,
     HttpAckSuccess,
     HttpAckFailure,
+    // [#17634] The (claimedBy, claimedAt) pair `claim()` stamps and `ack()`
+    // takes back — the credential its compare-and-set binds.
+    HttpClaimCredential,
     UndeliverableHttpInput,
     RedeliverGuard,
     RedeliverOptions,
 } from './http-outbox.js';
 export {
     HttpRedeliverError,
+    // [#17634] `ack()` refuses a claim it no longer holds with this.
+    HttpAckError,
     assertHttpRedeliverable,
     assertRedeliverAllowed,
     assertEnqueueDeliverable,
