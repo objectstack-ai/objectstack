@@ -32,9 +32,9 @@
 - ③ 边界旗处置:dev 挂旗与 `open_questions` 逐旗答复或升级。
 - 独立性件,spec 席:契约判断真分叉或 dev 挂旗 ⇒ 起上下文隔离的达档复核子代理。
 - 只喂卡片、既有裁决与 PR 本体,⛔ 不喂派发令与派发席自己的结论;简报写成对抗性。
-- 裁决载独立性对(机读):产出 diff 的身份写 `Implemented-by:`,出裁决的席位写 `Reviewed-by:`。
-- `mode:subagent` dev 记其分支 `claude/issue-…`(子代理无自有 session);`mode:remote` dev 记 session id。
-- 两者同 session ⇒ 报 SELF-REVIEW,⛔ 不作独立复核;两行皆无的历史裁决恒静默。
+- 独立性对(机读):`Implemented-by:` 写产 diff 者身份;`mode:subagent` 记分支,`mode:remote` 记 session id。
+- `Reviewed-by:` 写渲染或采纳裁决的席位 session;隔离复核子代理无 session,记采纳它的席位。
+- 两者同 session ⇒ 报 SELF-REVIEW;值紧跟冒号,前置词即不可读;两行皆无的历史裁决恒静默。
 - 清标即落地:PASS ⇒ 同席同笔剥双载体;凡清标同笔留 provenance 评论,引记录 id 与所判 head。
 - 随后按 `landing-operations.md` 走落地前检 → 转 ready → 挂 auto-merge 或入队。
 - 轮次报告设复审清单专节,形状与代裁清单同为强制审计。

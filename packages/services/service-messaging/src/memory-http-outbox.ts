@@ -12,6 +12,7 @@ import {
     type HttpClaimOptions,
     type HttpDelivery,
     type HttpDeliveryStatus,
+    type HttpReapOptions,
     type IHttpOutbox,
     type RedeliverOptions,
     type UndeliverableHttpInput,
@@ -90,22 +91,16 @@ export class MemoryHttpOutbox implements IHttpOutbox {
         return id;
     }
 
+    async reap(opts: HttpReapOptions): Promise<void> {
+        this.reapExpired(opts.now ?? Date.now(), opts.claimTtlMs);
+    }
+
     async claim(opts: HttpClaimOptions): Promise<HttpDelivery[]> {
         const now = opts.now ?? Date.now();
         const claimed: HttpDelivery[] = [];
 
-        for (const row of this.rows.values()) {
-            if (
-                row.status === 'in_flight' &&
-                row.claimedAt !== undefined &&
-                now - row.claimedAt > opts.claimTtlMs
-            ) {
-                row.status = 'pending';
-                row.claimedBy = undefined;
-                row.claimedAt = undefined;
-                row.updatedAt = now;
-            }
-        }
+        // Reap stale in_flight — unless the caller already reaped this pass (#17623).
+        if (!opts.skipReap) this.reapExpired(now, opts.claimTtlMs);
 
         for (const row of this.rows.values()) {
             if (claimed.length >= opts.limit) break;
@@ -122,6 +117,22 @@ export class MemoryHttpOutbox implements IHttpOutbox {
             claimed.push({ ...row });
         }
         return claimed;
+    }
+
+    /** Visibility-timeout recovery: every expired `in_flight` claim reverts to `pending`. */
+    private reapExpired(now: number, claimTtlMs: number): void {
+        for (const row of this.rows.values()) {
+            if (
+                row.status === 'in_flight' &&
+                row.claimedAt !== undefined &&
+                now - row.claimedAt > claimTtlMs
+            ) {
+                row.status = 'pending';
+                row.claimedBy = undefined;
+                row.claimedAt = undefined;
+                row.updatedAt = now;
+            }
+        }
     }
 
     async ack(id: string, result: HttpAckResult): Promise<void> {

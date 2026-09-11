@@ -48,14 +48,17 @@ export interface MessagingServicePluginOptions {
     /** Dispatcher tick interval in ms while there is work (default 500). */
     dispatchIntervalMs?: number;
     /**
-     * [#17610] Ceiling in ms for the notification dispatcher's idle backoff
-     * (default 30000). Consecutive ticks that claim nothing double the interval
-     * from `dispatchIntervalMs` up to this; a tick that claims work snaps it
-     * back, and an `emit()` that enqueues deliveries wakes the dispatcher at
-     * once. While idle it bounds how late the dispatcher notices work nobody
-     * woke it for: a deferred delivery coming due (retry, quiet hours, digest
-     * window), a row enqueued by another process, a crashed node's claim passing
-     * its timeout. A value at or below `dispatchIntervalMs` disables the backoff.
+     * [#17610, #17623] Ceiling in ms for the idle backoff of BOTH dispatchers —
+     * notification and outbound-HTTP — the way `dispatchIntervalMs` and
+     * `partitionCount` already govern both (default 30000). Consecutive ticks
+     * that claim nothing double the interval from `dispatchIntervalMs` up to
+     * this; a tick that claims work snaps it back, and the write that makes work
+     * wakes its dispatcher at once — `emit()` enqueueing deliveries,
+     * `enqueueHttp()` enqueueing a callout, `redeliverHttp()` resetting one.
+     * While idle it bounds how late a dispatcher notices work nobody woke it
+     * for: a deferred delivery coming due (retry, quiet hours, digest window), a
+     * row enqueued by another process, a crashed node's claim passing its
+     * timeout. A value at or below `dispatchIntervalMs` disables the backoff.
      */
     dispatchMaxIdleIntervalMs?: number;
     /**
@@ -324,18 +327,21 @@ export class MessagingServicePlugin implements Plugin {
                 // the Flow `http` node (and, going forward, webhook fan-out) with
                 // the same retry / dead-letter substrate as notifications.
                 const httpOutbox = new SqlHttpOutbox(engine, { partitionCount: this.options.partitionCount });
-                service.setHttpOutbox(httpOutbox);
+                // [#17623] The same seam as `setOutbox` above, resolved at call
+                // time for the same reasons.
+                service.setHttpOutbox(httpOutbox, { onEnqueued: () => this.httpDispatcher?.wake() });
                 this.httpDispatcher = new HttpDispatcher({
                     nodeId: `http-${process.pid}-${randomUUID().slice(0, 8)}`,
                     outbox: httpOutbox,
                     cluster,
                     partitionCount: this.options.partitionCount,
                     intervalMs: this.options.dispatchIntervalMs,
+                    maxIdleIntervalMs: this.options.dispatchMaxIdleIntervalMs,
                     logger: ctx.logger,
                 });
                 this.httpDispatcher.start();
                 ctx.logger.info(
-                    `[messaging] HTTP delivery on (sys_http_delivery outbox + dispatcher, ${this.options.partitionCount} partitions)`,
+                    `[messaging] HTTP delivery on (sys_http_delivery outbox + dispatcher, ${this.options.partitionCount} partitions, idle backoff up to ${Math.max(this.options.dispatchIntervalMs, this.options.dispatchMaxIdleIntervalMs)}ms)`,
                 );
             });
         }

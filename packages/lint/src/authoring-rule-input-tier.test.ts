@@ -476,7 +476,7 @@ describe('security-owd-alias reaches the rule only through the unparsed doors (#
     const result = runRuntimeAuthoringRules({
       type: 'object',
       item: owdObject('full'),
-      context: { objects: [], permissions: [], books: [], datasets: [], pages: [] },
+      context: { objects: [], permissions: [], books: [], datasets: [] },
     });
     expect(aliasFindings(result.errors)).toEqual(['objects.tier_owd.sharingModel']);
   });
@@ -494,7 +494,7 @@ describe('security-owd-alias reaches the rule only through the unparsed doors (#
     const result = runRuntimeAuthoringRules({
       type: 'object',
       item: { ...owdObject('private'), name: 'tier_other' },
-      context: { objects: [storedFull], permissions: [], books: [], datasets: [], pages: [] },
+      context: { objects: [storedFull], permissions: [], books: [], datasets: [] },
     });
     expect(aliasFindings(result.errors)).toEqual([]);
   });

@@ -436,7 +436,6 @@
     "chartAggregateValueKey (function)",
     "checkGlobalFilterDateDefaultValue (function)",
     "checkListViewCalendarVisualization (function)",
-    "checkListViewPageMount (function)",
     "checkPageSourceCompleteness (function)",
     "columnSummaryAlias (function)",
     "compileListViewGroupQuery (function)",
