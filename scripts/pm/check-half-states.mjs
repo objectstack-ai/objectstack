@@ -16471,18 +16471,40 @@ export const CLOSED_ISSUE_WINDOW_PAGE_CEILING = 40;
  * disagree with.
  *
  * ⛔ This is closed-issue UPDATE EVENTS per day, NOT closures per day. The two
- * differ by ~17x on this board and confusing them is precisely the defect this
+ * differ by ~13x on this board and confusing them is precisely the defect this
  * window carried (see the docblock above).
  *
- *   read    2026-09-06T21:59Z, `GET /repos/{repo}/issues?state=closed&sort=updated`
- *   window  400 rows spanning 0.964 days
- *   rate    400 / 0.964 = ~415 closed-issue update events/day
- *   (re-read at depth: 800 rows / 2.051d = ~390/day, 1200 rows / 3.092d = ~388/day)
+ * ⚠️ AND IT IS MEASURED OVER THE STREAM THE PATROL PAGES, which is NOT the one
+ * an agent container gets from the same URL. The scheduled runner's token
+ * declares `contents: read` + `issues: write` and no pull-request scope, and its
+ * `/issues` pages come back CARD-ONLY; the byte-identical request from a proxied
+ * container returns 49.6% pull requests. Measured, not inferred from the
+ * workflow file: the 2026-09-11T01:55Z run reports 5 pages, 428 in-window
+ * closures and ~141.3/day, and replaying THIS pager over a container read of the
+ * same hour gives 5 pages / 426 / ~139.4 on the CARD-ONLY slice against 9 pages /
+ * 426 / ~256.2 on the whole one — and 428 in-window closures cannot come out of 5
+ * PR-inclusive pages at all, since only ~250 of those 500 rows are cards.
+ *
+ * ⛔ So a re-pin read from a container rates a different population than the
+ * sweep it is checked against, and the 0.34 factor the DRIFTED clause has been
+ * printing is TWO things multiplied: a real ~0.64 slowdown of the stream since
+ * 2026-09-06, and a ~0.53 population difference that is not tempo at all.
+ *
+ *   read    2026-09-11T04:22Z, `GET /repos/{repo}/issues?state=closed&sort=updated`
+ *           — card-only rows, the population the runner pages
+ *   window  500 rows spanning 3.586 days — the 5 pages a 3-day horizon costs
+ *   rate    500 / 3.586 = ~139 closed-issue update events/day
+ *   (re-read at depth: 200 rows / 1.352d = ~148/day, 400 rows / 2.769d = ~144/day,
+ *    605 rows / 3.969d = ~152/day)
  */
-export const MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY = 415.1;
+export const MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY = 139.4;
 
-/** WHEN `MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY` was measured. */
-export const MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY_AT = '2026-09-06';
+/**
+ * WHEN `MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY` was measured — and therefore when
+ * it EXPIRES on the calendar whatever a sweep observes: `RATE_PREMISE_STALE_DAYS`
+ * past this date is 2026-10-11.
+ */
+export const MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY_AT = '2026-09-11';
 
 /**
  * H22's premise, in the shape `classifyRatePremise` judges (#16393).
@@ -22702,12 +22724,12 @@ async function selfTest() {
   t('windows: …and 2.73d at the rate measured 8 days later — same cap, 25% more window', Number(windowCoverageDays(300, MEASURED_COMMITS_PER_DAY).toFixed(2)), 2.73);
   t('windows: …which is why H23\'s cap became a TIME cap', COMMIT_WINDOW_DAYS, 3);
   // ⛔ H22's is the one whose DIVISOR was the surprise: its rows are consumed by
-  // closed-issue UPDATE activity, not by closures, and the two differ ~39x at
-  // the divisor re-pinned 2026-09-06, against the ~10.7 closures/day measured
+  // closed-issue UPDATE activity, not by closures, and the two differ ~13x at
+  // the divisor re-pinned 2026-09-11, against the ~10.7 closures/day measured
   // when the defect was found. The old 4-page cap read as a closure window and
   // was nothing of the kind.
-  t('windows: H22\'s old 4-page cap bought only 0.96d of UPDATE recency at the 2026-09-06 rate', Number(windowCoverageDays(400, MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY).toFixed(2)), 0.96);
-  t('windows: …and the honest divisor is ~39x the closure rate it read as', Number((MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY / 10.7).toFixed(1)), 38.8);
+  t('windows: H22\'s old 4-page cap bought 2.87d of UPDATE recency at the 2026-09-11 rate', Number(windowCoverageDays(400, MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY).toFixed(2)), 2.87);
+  t('windows: …and the honest divisor is ~13x the closure rate it read as', Number((MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY / 10.7).toFixed(1)), 13);
   t('windows: …which is why H22\'s cap became a CLOSURE-time cap', CLOSED_ISSUE_WINDOW_DAYS, 3);
   t('windows: …and its horizon is seen by 12 consecutive runs', sweepOverlap(CLOSED_ISSUE_WINDOW_DAYS), 12);
   // #13499 — H8's window is no longer a page cap at all, so the arithmetic that
@@ -22878,10 +22900,13 @@ async function selfTest() {
   t('H22 window: a 1-day-old closure is inside', issueClosedWithinWindow(closed13606(1, 1), CH), true);
   // Direction 2 — the row the OLD 4-page cap structurally could not reach. The
   // cap covered ~0.96d of UPDATE recency at the divisor pinned 2026-09-06
-  // (~2.12d at the one pinned when the repair landed), so a card closed 2.5
-  // days ago and untouched since fell out of it: not late, GONE. Measured cost
-  // at the time of the repair: 19 residue carriers closed within 3 days missed.
-  t('H22 window: the old 4-page cap reached only ~1.0 days of update-recency', windowCoverageDays(400, MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY) < 2.5, true);
+  // (~2.12d at the one pinned when the repair landed, ~2.87d at the one pinned
+  // 2026-09-11), so a card closed 2.5 days ago and untouched since fell out of
+  // it: not late, GONE. Measured cost at the time of the repair: 19 residue
+  // carriers closed within 3 days missed. ⚖️ The days this cap buys move with
+  // every re-pin — which is the whole argument against a page cap — so what is
+  // pinned below is its SHORTFALL against the horizon, not a fixed count of days.
+  t('H22 window: the old 4-page cap reached ~2.9 days of update-recency, still short of the 3-day horizon', windowCoverageDays(400, MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY) < 3, true);
   t('H22 window: …but the 3-day closure horizon admits that card', issueClosedWithinWindow(closed13606(2, 2.5), CH), true);
   // …and the window still HAS an edge; a boundary that admits everything is none.
   t('H22 window: a 4-day-old closure is outside', issueClosedWithinWindow(closed13606(3, 4), CH), false);
@@ -23103,28 +23128,29 @@ async function selfTest() {
   const rateStream16393 = (step) =>
     closedStream(Array.from({ length: 30 }, (_, i) => ratePage16393(step * (i + 1))));
 
-  // 2x the pin: 0.11-day steps, so the horizon falls on page 28 — 2800 rows
-  // read across a 2.97-day span is ~942.8/day against a pin of 415.1.
+  // Well past the band: 0.11-day steps, so the horizon falls on page 28 — 2800
+  // rows read across a 2.97-day span is ~942.8/day against a pin of 139.4.
   const driftedStats16393 = {};
   const driftedRows16393 = await listRecentlyClosedIssues(driftedStats16393, NOW13606, rateStream16393(0.11));
   t('#16393 stream: the pass stops on the first page past the horizon', driftedStats16393.closedPages, 28);
   t('#16393 stream: …and the rate is over the rows READ', Math.round(driftedStats16393.closedRateObserved * 100) / 100, 942.76);
   t('#16393 stream: ⛔ …not over the rows ADMITTED, which is a different number', Math.round(observedRatePerDay(driftedRows16393, 'updated_at') * 100) / 100 === Math.round(driftedStats16393.closedRateObserved * 100) / 100, false);
-  t('#16393 stream: …a board running 2x the pin FIRES the alarm', h22Premise(driftedStats16393.closedRateObserved).state, 'drifted');
-  t('#16393 stream: …and the factor is stated so it can be acted on', h22Premise(driftedStats16393.closedRateObserved).message.includes('a factor of 2.27'), true);
-  t('#16393 stream: …with both rates beside it', h22Premise(driftedStats16393.closedRateObserved).message.includes('observed ~942.8 closed-issue updates/day') && h22Premise(driftedStats16393.closedRateObserved).message.includes('= 415.1/day'), true);
+  t('#16393 stream: …a board running past the band FIRES the alarm', h22Premise(driftedStats16393.closedRateObserved).state, 'drifted');
+  t('#16393 stream: …and the factor is stated so it can be acted on', h22Premise(driftedStats16393.closedRateObserved).message.includes('a factor of 6.76'), true);
+  t('#16393 stream: …with both rates beside it', h22Premise(driftedStats16393.closedRateObserved).message.includes('observed ~942.8 closed-issue updates/day') && h22Premise(driftedStats16393.closedRateObserved).message.includes('= 139.4/day'), true);
   // ⛔ The rule that makes this an alarm rather than a self-healing constant.
-  t('#16393 stream: ⛔ a drifted sweep does NOT rewrite the pin', MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY, 415.1);
-  t('#16393 stream: …nor its date', MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY_AT, '2026-09-06');
+  t('#16393 stream: ⛔ a drifted sweep does NOT rewrite the pin', MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY, 139.4);
+  t('#16393 stream: …nor its date', MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY_AT, '2026-09-11');
 
-  // 1x the pin: 0.25-day steps, horizon on page 13 — 1300 rows over 3.0 days is
-  // ~433.3/day, a factor of 1.04, and the alarm stays silent. ⚖️ It is the very
-  // stream that ran 2x the pin until the 2026-09-06 re-measure: the board moved
-  // by that much in six days, and the fixture did not move at all.
+  // 1x the pin: 0.75-day steps, horizon on page 5 — 500 rows over 3.0 days is
+  // ~166.7/day, a factor of 1.20, and the alarm stays silent. ⚖️ The step is
+  // stated RELATIVE to the hand-pinned rate, so it moves when the pin does — it
+  // was 0.25 against the 415.1 pinned 2026-09-06 — because a fixture asserting
+  // "in band" against a rate nobody re-measured passes for a board nobody read.
   const okStats16393 = {};
-  await listRecentlyClosedIssues(okStats16393, NOW13606, rateStream16393(0.25));
-  t('#16393 stream: an in-band board reaches its horizon in thirteen pages', okStats16393.closedPages, 13);
-  t('#16393 stream: …and observes a rate at the pin', Math.round(okStats16393.closedRateObserved * 100) / 100, 433.33);
+  await listRecentlyClosedIssues(okStats16393, NOW13606, rateStream16393(0.75));
+  t('#16393 stream: an in-band board reaches its horizon in five pages', okStats16393.closedPages, 5);
+  t('#16393 stream: …and observes a rate at the pin', Math.round(okStats16393.closedRateObserved * 100) / 100, 166.67);
   t('#16393 stream: …which raises NO alarm', h22Premise(okStats16393.closedRateObserved).state, 'ok');
   t('#16393 stream: a board with nothing dateable observes no rate at all', (await (async () => { const s = {}; await listRecentlyClosedIssues(s, NOW13606, closedStream([[{ number: 1, updated_at: 'nope' }]])); return s.closedRateObserved; })()), null);
   t('#16393 stream: …and an empty board likewise', (await (async () => { const s = {}; await listRecentlyClosedIssues(s, NOW13606, closedStream([])); return s.closedRateObserved; })()), null);
@@ -23137,13 +23163,13 @@ async function selfTest() {
   const clause16393 = (observed, extra = {}) => h22RatePremiseClause(observed, { nowMs: NOW13606, ...extra });
   t('#16393 clause: a drifted divisor is marked loud', clause16393(942.76).startsWith('⚠️ RATE PREMISE DRIFTED'), true);
   t('#16393 clause: …and names the re-measure act', clause16393(942.76).includes('re-pinned by hand, from a fresh measurement'), true);
-  t('#16393 clause: an expired pin is marked loud too', clause16393(415.1, { nowMs: Date.parse('2026-11-01T00:00:00Z') }).startsWith('⚠️ RATE PREMISE EXPIRED'), true);
+  t('#16393 clause: an expired pin is marked loud too', clause16393(139.4, { nowMs: Date.parse('2026-11-01T00:00:00Z') }).startsWith('⚠️ RATE PREMISE EXPIRED'), true);
   t('#16393 clause: an unobserved rate is marked loud, never silent', clause16393(null).startsWith('⚠️ RATE PREMISE UNOBSERVED'), true);
-  t('#16393 clause: an in-band divisor is NOT marked loud', clause16393(433.33).includes('⚠️'), false);
+  t('#16393 clause: an in-band divisor is NOT marked loud', clause16393(166.67).includes('⚠️'), false);
   // ⛔ …but it still SPEAKS. A check that is only visible when it fires cannot
   // be told apart from a check somebody deleted — `renderRatePremise`'s rule.
-  t('#16393 clause: …and still speaks, so a deleted check cannot pass for a healthy board', clause16393(433.33).startsWith('rate premise OK'), true);
-  t('#16393 clause: …naming both rates even when it agrees', clause16393(433.33).includes('observed ~433.3/day') && clause16393(433.33).includes('= 415.1/day'), true);
+  t('#16393 clause: …and still speaks, so a deleted check cannot pass for a healthy board', clause16393(166.67).startsWith('rate premise OK'), true);
+  t('#16393 clause: …naming both rates even when it agrees', clause16393(166.67).includes('observed ~166.7/day') && clause16393(166.67).includes('= 139.4/day'), true);
 
   // ---- The clause on the summary line. Only time-INDEPENDENT properties are
   // asserted here, for the reason above; the verdict wording is pinned by the
