@@ -143,9 +143,26 @@ export function declaredRegion(steps) {
  *   skippedByCondition   turned off by its OWN `if:` BEFORE the failure -- a
  *                        deliberate, paid-for absence (the gate-family
  *                        selector), not an unmeasured one
- *   neverRan             behind the failure. The API calls these "skipped"
- *                        too, which is precisely why a reader of that surface
- *                        cannot tell them from the line above.
+ *   neverRan             behind the failure. Once the job is over the API calls
+ *                        these "skipped" too, which is precisely why a reader
+ *                        of that surface cannot tell them from the line above.
+ *
+ * ## Behind the failure, POSITION is the authority, not `conclusion`
+ *
+ * ⚠️ Measured, and it cost a wrong number once: this runs while the job is still
+ * in progress, and the runner stamps `skipped` on the steps behind the failure
+ * PROGRESSIVELY. In run 34583803573 of this workflow -- a deliberate
+ * double-failure probe -- the completed job ended with 161 skipped declared
+ * steps, but at the instant this step read the API only 12 of them carried that
+ * word. Counting `conclusion === 'skipped'` therefore reported `never_ran=12`
+ * for a tail of 161: a lower bound on a lower bound, and a number that reads as
+ * precise.
+ *
+ * So the tail is counted by POSITION -- every declared step behind the failing
+ * one -- and `conclusion` is used only to SUBTRACT the steps that demonstrably
+ * did run (an `if: always()`/`if: failure()` step, and this reporter itself,
+ * which is the one step in `in_progress` while this executes). A step the runner
+ * has not reached yet is not evidence of anything, and is not read as one.
  *
  * @param {Array<Record<string, unknown>>} steps a job's `steps[]` from the API
  * @returns {{
@@ -188,23 +205,31 @@ export function judge(steps) {
   }
 
   const nameOf = (s) => String(s?.name ?? '(unnamed step)');
+  const conclusionOf = (s) => String(s?.conclusion ?? '');
+  /** The two conclusions that PROVE a step executed. Everything else does not. */
+  const EXECUTED = new Set(['success', 'failure']);
+
   const before = declared.slice(0, failedIdx);
   const after = declared.slice(failedIdx + 1);
 
-  // A step still `in_progress` is this reporter itself -- it is the only step
-  // that runs after the failure. Counted apart so it can never be mistaken for
-  // an unmeasured gate.
-  const inFlight = after.filter((s) => String(s?.status ?? '') !== 'completed').map(nameOf);
+  // The only step that can be `in_progress` behind the failure is this reporter,
+  // because it is the one running right now. Held apart so it is never counted
+  // as an unmeasured gate.
+  const inFlight = after.filter((s) => String(s?.status ?? '') === 'in_progress').map(nameOf);
 
   return {
     measured: true,
     total: declared.length,
     failedNumber: Number(declared[failedIdx]?.number ?? 0) || null,
     failedName: nameOf(declared[failedIdx]),
-    ran: before.filter((s) => String(s?.conclusion ?? '') !== 'skipped').length,
-    skippedByCondition: before.filter((s) => String(s?.conclusion ?? '') === 'skipped').map(nameOf),
-    neverRan: after.filter((s) => String(s?.conclusion ?? '') === 'skipped').map(nameOf),
-    alsoFailed: after.filter((s) => String(s?.conclusion ?? '') === 'failure').map(nameOf),
+    // Before the failure every conclusion is already final, so it can be read.
+    ran: before.filter((s) => conclusionOf(s) !== 'skipped').length,
+    skippedByCondition: before.filter((s) => conclusionOf(s) === 'skipped').map(nameOf),
+    // Behind it, none of them are. Position decides; `conclusion` only subtracts.
+    neverRan: after
+      .filter((s) => String(s?.status ?? '') !== 'in_progress' && !EXECUTED.has(conclusionOf(s)))
+      .map(nameOf),
+    alsoFailed: after.filter((s) => conclusionOf(s) === 'failure').map(nameOf),
     inFlight,
   };
 }
@@ -467,7 +492,24 @@ function fixtures() {
     step(336, 'Post Checkout repository', 'success'),
     step(337, 'Complete job', 'success'),
   ];
-  return { lintFailedEarly, lintFailedLast, green };
+  // The shape this actually runs against, and the one that produced a wrong
+  // number before the rule above existed: the job is still in progress, so the
+  // runner has stamped `skipped` on only the first slice of the tail and has
+  // written nothing at all for the rest.
+  const midRun = [
+    step(1, INJECTED_HEAD, 'success'),
+    step(2, 'Checkout repository', 'success'),
+    step(3, 'Docs anchors resolve to real headings', 'failure'),
+    step(4, 'ESLint', 'skipped'),
+    step(5, 'Raw control-byte guard', 'skipped'),
+    step(6, 'Slot-lookup ratchet', null, 'queued'),
+    step(7, 'ADR anchors + number uniqueness', null, 'queued'),
+    step(8, 'Duration-shaped spec keys carry their unit in the key name', null, 'queued'),
+    step(9, 'Report how many gates never ran', null, 'in_progress'),
+    step(340, 'Post Checkout repository', 'success'),
+    step(341, 'Complete job', 'success'),
+  ];
+  return { lintFailedEarly, lintFailedLast, green, midRun };
 }
 
 function selfTest() {
@@ -480,7 +522,7 @@ function selfTest() {
     if (a !== e) failures.push(`${label}: expected ${e}, got ${a}`);
   };
 
-  const { lintFailedEarly, lintFailedLast, green } = fixtures();
+  const { lintFailedEarly, lintFailedLast, green, midRun } = fixtures();
 
   // -- the boundary: the post block is not part of the population ------------
   t('declaredRegion drops the runner head and the whole post block',
@@ -507,6 +549,22 @@ function selfTest() {
   // word on the API surface and MUST NOT be the same number here.
   t('a deliberate skip and an unmeasured one are different numbers',
     [early.skippedByCondition.length, early.neverRan.length], [1, 2]);
+
+  // -- mid-run: a not-yet-stamped step is part of the tail, not evidence ------
+  // The regression this pins: counting `conclusion === 'skipped'` answered 12
+  // on a live job whose real tail was 161, because the runner had not reached
+  // the rest yet. Position decides; `conclusion` may only subtract.
+  const mid = judge(midRun);
+  t('a step the runner has not reached yet is counted in the tail',
+    mid.neverRan,
+    ['ESLint', 'Raw control-byte guard', 'Slot-lookup ratchet',
+      'ADR anchors + number uniqueness',
+      'Duration-shaped spec keys carry their unit in the key name']);
+  t('...so the tail is the POSITION count, not the stamped-skipped count',
+    [mid.neverRan.length, midRun.filter((x) => x.conclusion === 'skipped').length], [5, 2]);
+  t('...and this reporter, the one step in flight, is never in it',
+    [mid.inFlight, mid.neverRan.includes('Report how many gates never ran')],
+    [['Report how many gates never ran'], false]);
 
   // -- an empty tail is a real, different answer ------------------------------
   const last = judge(lintFailedLast);
