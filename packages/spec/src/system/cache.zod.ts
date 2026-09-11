@@ -169,10 +169,14 @@ export type CacheAvalanchePreventionParsed = z.infer<typeof CacheAvalanchePreven
 
 // Retired enum-value prescription. Declared with `//` (never `/** */`) so it cannot
 // be mistaken for the warmup schema's own doc blurb by build-docs.
+// The retirement of the cron key this value selected is #16320; the id stays HERE,
+// in an internal comment, and out of the customer-facing string below — that string
+// is printed verbatim at an author who has no tracker to resolve it with, and its
+// durable reference is ADR-0049 (`check:doc-authoring` Rule 3).
 const WARMUP_STRATEGY_SCHEDULED_RETIRED =
   "`CacheWarmup.strategy: 'scheduled'` was removed in @objectstack/spec 18 (ADR-0049 "
   + 'enforce-or-remove) — the cron key it selected, `CacheWarmup.schedule`, was deleted in '
-  + 'this same major (#16320), and no cache-warmup engine has ever existed on the platform, '
+  + 'this same major, and no cache-warmup engine has ever existed on the platform, '
   + 'so the value named a cadence with nothing to configure it and nothing to run it. Use '
   + "`'eager'` to warm at startup or `'lazy'` to warm on first access. For a warmup on a "
   + 'cadence, declare a `job` with `schedule.expression` (`system/job.zod.ts`) whose handler '
