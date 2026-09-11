@@ -17,9 +17,11 @@ inherits its parent record's.** A caller who can read a record can read its
 attachments; a caller who can edit a record can attach to and detach from it.
 Enforcement is layered, and every gate is fail-closed.
 
-`Field.file` / `Field.image` are a **separate** path — those store a file URL
-in the record's own column and never create a `sys_attachment` row, so nothing
-on this page applies to them.
+`Field.file` / `Field.image` are a **separate** path — those store an opaque
+`sys_file` id in the record's own column (ADR-0104 D3; the
+`{ id, name, size, mimeType, url }` shape is derived at read time, never
+stored) and never create a `sys_attachment` row, so nothing on this page
+applies to them.
 
 ## The opt-in gate — `enable.files`
 
