@@ -360,10 +360,34 @@ function defaultListViewKey(object: string, container: any): string | undefined 
 
 /**
  * Emit label / description / emptyState for ONE view under
- * `objects.<object>._views.<viewName>.*` — the convention the runtime resolver
- * reads (`viewLabel` / `viewDescription` / `viewEmptyState` in
- * @object-ui/i18n) and the one the shipped platform bundles already carry
- * (`en.objects.generated.ts`: `sys_user._views.all_users.label`).
+ * `objects.<object>._views.<viewName>.*` — the address the shipped platform
+ * bundles already carry (`en.objects.generated.ts`:
+ * `sys_user._views.all_users.label`).
+ *
+ * **The three tails do not share one reader**, and for `description` the
+ * reader is not in the browser at all. Getting that backwards reads as "this
+ * key is dead" — the inference #15180 drew and #17546 corrected.
+ *
+ *  - **`label` — read on BOTH sides.** `resolveViewLabel`
+ *    (`packages/spec/src/system/i18n-resolver.ts`) through `translateView`,
+ *    which `@objectstack/rest` applies at the REST metadata boundary off
+ *    `TRANSLATABLE_METADATA_TYPES`; and `useObjectLabel().viewLabel` in
+ *    `@object-ui/i18n`, client-side.
+ *  - **`description` — read SERVER-SIDE ONLY**, by `resolveViewDescription`
+ *    in that same resolver and through that same `translateView`. objectui#7219
+ *    removed the `useObjectLabel().viewDescription()` member, so the server
+ *    overlay is this key's ONE reader: the resolved value reaches the screen as
+ *    the `description` the served view document already carries. ⛔ The
+ *    absence of a browser-side helper is not evidence the key is inert.
+ *  - **`emptyState` — read CLIENT-SIDE ONLY**, by
+ *    `useObjectLabel().viewEmptyState` in `@object-ui/i18n`. The spec resolver
+ *    declares no empty-state reader at all, which is why `pushViewEmptyState`
+ *    below is the site that cites the client convention.
+ *
+ * ⚠️ `viewLabel` and `viewEmptyState` were NOT retired alongside
+ * `viewDescription`: objectui kept the `viewSuffixes` helper all three shared
+ * and dropped only the `'description'` tail passed to it. Naming those two
+ * here is current, not residue.
  */
 function pushViewEntries(out: ExpectedEntry[], objectName: string, viewName: string, view: any): void {
   const root = ['objects', objectName, '_views', viewName];
