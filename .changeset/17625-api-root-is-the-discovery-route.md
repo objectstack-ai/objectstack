@@ -1,5 +1,5 @@
 ---
-'@objectstack/runtime': patch
+'@objectstack/runtime': minor
 ---
 
 fix(runtime): the API root is the discovery route, under a second spelling — a gated session's `GET ${prefix}/` reaches discovery again (#17625)
@@ -48,6 +48,19 @@ same document; the named `/discovery` route is untouched; the
 environment-scoped root `${prefix}/environments/<id>` keeps its own answer,
 which matched no allow-listed route before objectstack#7898 either. `//` strips
 to `/`, not to the empty string, so it is not the root and is not canonicalised.
+
+**Why `minor` on a change whose commit type is `fix`.** The two are independent
+and the floor is mechanical, not editorial: this PR's clause ② is declared
+affirmative, and the maintainer's ruling of 2026-09-04 (decision batch #35, on
+objectstack#15294) puts an affirmative clause ② on a package whose
+`packages/**/src/**` the diff moves at AT LEAST `minor` — *the commit type may
+raise a bump but never lower it below what the act requires*, written out under
+"WHICH LEVEL" in the `Check Changeset` step of
+`.github/workflows/pr-automation.yml`. ⛔ So the reading that this is "a 403 that
+should be a 200, therefore a patch" is an argument about INTENT and does not
+reach the level: the act re-admits an input class the merged tree refuses, on an
+authorisation surface, and that is what the level grades. The commit type stays
+`fix(runtime)`, because the type describes the act and the level prices it.
 
 **ADR-0087 disposition: no ledger entry is owed and no marker is required.**
 This changeset declares no breaking change, which is the only condition under
