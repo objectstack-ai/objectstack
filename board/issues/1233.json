@@ -1,0 +1,37 @@
+{
+  "number": 1233,
+  "kind": "pull_request",
+  "title": "fix(service-cloud): tmpdir fallback for default data dir on read-only serverless filesystems",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-08T00:15:53Z",
+  "updated_at": "2026-05-08T01:11:34Z",
+  "closed_at": "2026-05-08T01:11:34Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-05-08T01:11:34Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1233",
+  "body": "- [x] Fix `webcrypto` missing export in studio node polyfill (Vercel studio build)\n- [x] Fix `ENOENT: mkdir '/var/task/.objectstack'` cold-start failure on Vercel/Lambda\n  - [x] Replace silent `/tmp` SQLite fallback with fail-fast error pointing at `TURSO_DATABASE_URL` (Turso is the default ObjectStack pairing for serverless; ephemeral `/tmp` would silently corrupt data across cold starts)\n  - [x] `resolveDefaultDataDir()` throws on Vercel/Lambda/Netlify when `OS_DATA_DIR` is unset\n  - [x] `cloud-stack.ts` control-driver default made lazy so `TURSO_DATABASE_URL` / `OS_CONTROL_DATABASE_URL` short-circuit it\n  - [x] 15 unit tests cover precedence, throw conditions, and error-message contents\n  - [x] `pnpm build` green (51/51 tasks)\n  - [x] CHANGELOG entry updated"
+}

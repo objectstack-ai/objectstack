@@ -1,0 +1,33 @@
+{
+  "number": 1185,
+  "kind": "issue",
+  "title": "重构多租户架构为“每环境单独数据库”高隔离模型",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-19T07:37:39Z",
+  "updated_at": "2026-04-19T08:08:06Z",
+  "closed_at": "2026-04-19T08:08:06Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1185",
+  "body": "## 背景\n当前 `@objectstack/service-tenant` 为“每组织一数据库”,使用 sys_tenant_database,存在如下问题:\n- 多环境(Dev, Test, Prod)不能彻底物理隔离,所有环境混在一库要靠 env_id 逻辑分隔,容易出错。\n- Solution 发布/环境迁移/备份/灾难恢复均操作复杂���有风险。\n- schema 无法随环境升级而独立演化,开发、回滚、测试不便。\n- 一旦 WHERE env_id 条件丢失,存在跨环境数据污染和访问风险。\n- Turso、libSQL、云原生数据库已支持“多库低成本”容器化,社区主流(如 Power Platform)均采用 per-environment db 隔离。\n\n## 目标\n- 架构升级为:每个 environment(环境,如 dev/test/prod/sandbox)拥有一套物理独立数据库。\n- Control Plane 注册所有 Environment 信息及寻址/凭证,Data Plane 每环境独立。\n- Solution 打包/迁移、环境初始化、环境粒度灾备都极简。\n- 支持后续 pipeline 自动化、新环境一键部署、安全隔离管控等能力\n\n## 主要开发内容清单\n\n### A. ADR与文档\n- 编写新的 ADR: `docs/adr/0002-environment-database-isolation.md`,记录为何迁移、取舍、架构权衡(如 cross-env、ops 成本、冷启动等)。\n- 更新 `README.md`、`ROADMAP.md`、`CHANGELOG.md`,明确 breaking change 及兼容策略。\n\n### B. Control Plane Schema\n- 新增 `sys_environment` 环境表:id、organization_id、slug、env_type、region、is_default、status、created_by 等,索引 UNIQUE(org,slug)。\n- 新增 `sys_environment_database` 环境数据库映射表:id、environment_id(唯一)、database_url、driver、region、provisioned_at。\n- 新增 `sys_database_credential` 数据库凭证表,解耦密钥,可轮转。\n- 新增 `sys_environment_member` 环境-用户授权表,字段参考“环境管理员/制作者/只读/访客”。\n- 保留/废弃 `sys_tenant_database`(v4.x shim, v5.0 移除),文档加 warning。\n\n### C. Data Plane Schema(每个环境库)\n- `sys_package_installation`、`sys_solution_history` 等 sys 级表迁移到环境库,无须 environment_id 列,environment 由当前连接隐含。\n- 所有业务表不再要求/创建 environment_id 列。\n- 新环境库初始化带标准 sys 对象。\n\n### D. Service 实现\n- provisioning 逻辑:`provisionOrganization` -> 自动先建 default 环境及独立数据库。\n- `provisionEnvironment` 支持���建 prod/test/dev 环境,自动建库、寻找 driver/region、生成凭证。\n- Control Plane 责任:只做“环境 - 连接元数据与认证”,不负责数据。\n- Data Plane 责任:环境粒度隔离运行,连接切换按 env_id 快速路由。\n\n### E. Auth/Session 集成\n- better-auth session 只挂 active_environment_id,由 sys_environment 反查 organization,无需 active org + env 共存。\n- session 切换环境即变换 DB 连接,物理隔离。\n- 环境粒度 RBAC 授权, sys_environment_member 拿权限。\n\n### F. 兼容/迁移说明\n- v4.x 保留 `sys_tenant_database` deprecation shim 和迁移脚本骨架,不 break 现有客户。\n- v5.0 移除所有旧 tenant 相关代码/表。\n- 编写 `migrations/v4-to-v5-env-migration.ts`:自动把原“组织库”拆为“每环境独立库”,导数据、建新 sys 索引。\n\n### G. 单元测试与流程\n- ADR、schema create/typecheck、provisioning + 新环境用例、DB 连接切换、凭证轮换链路测试、RBAC 授权测试。\n- 多环境切换、Solution 发布、备份恢复一体化用例。\n\n## 细节约束与架构要求\n- 严格 ObjectSchema.create() 全部字段戴 .describe() 注解、sys_ 前缀。\n- Control Plane 所有索引、唯一约束必须明确定义。\n- 多 driver 兼容(turso/postgres/sqlite),未来可插拔。\n- 每个环境库均按标准流程初始化所有 sys 表与索引。\n- 不允许任何环境表复用,不准逻辑隔离混用。\n- 不得简化 breaking change、数据迁移、权限和安全模型等关键步骤。\n\n## 长期演进\n- 该模型完全兼容 future:环境跨区域、业务物理归档、Soluton 打包发布、分环境配额/账单、环境自动清理。\n- 后续分 PR 推进 sys_subscription、sys_quota、sys_audit_log、sys_dlp_policy、sys_solution_history 等系统对象。\n"
+}

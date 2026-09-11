@@ -1,0 +1,33 @@
+{
+  "number": 1231,
+  "kind": "pull_request",
+  "title": "fix(driver-sql): add vitest.config.ts to resolve @objectstack/spec subpath imports",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-07T06:25:16Z",
+  "updated_at": "2026-05-07T06:25:32Z",
+  "closed_at": "2026-05-07T06:25:32Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-05-07T06:25:32Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1231",
+  "body": "`@objectstack/driver-sql#test` fails in CI with `ERR_MODULE_NOT_FOUND: Cannot find package '@objectstack/spec/system'` — all 81 tests fail before executing.\n\nThe package exports in `@objectstack/spec` point to `./dist/` artifacts, but vitest needs source-level resolution. Other packages (e.g. `plugin-hono-server`) already solve this with a `vitest.config.ts` that aliases subpath exports to source entry points. `driver-sql` was missing this config.\n\n- Added `packages/plugins/driver-sql/vitest.config.ts` with resolve aliases for `@objectstack/spec`, `@objectstack/spec/data`, `@objectstack/spec/contracts`, `@objectstack/spec/system`\n\n```ts\nresolve: {\n  alias: {\n    '@objectstack/spec/contracts': path.resolve(__dirname, '../../spec/src/contracts/index.ts'),\n    '@objectstack/spec/data': path.resolve(__dirname, '../../spec/src/data/index.ts'),\n    '@objectstack/spec/system': path.resolve(__dirname, '../../spec/src/system/index.ts'),\n    '@objectstack/spec': path.resolve(__dirname, '../../spec/src/index.ts'),\n  },\n},\n```"
+}

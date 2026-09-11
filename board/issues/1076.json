@@ -1,0 +1,37 @@
+{
+  "number": 1076,
+  "kind": "pull_request",
+  "title": "fix: restore persisted metadata from sys_metadata on ObjectQLPlugin cold start",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-07T04:06:11Z",
+  "updated_at": "2026-04-07T05:42:24Z",
+  "closed_at": "2026-04-07T05:42:24Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-07T05:42:24Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1076",
+  "body": "`protocol.loadMetaFromDb()` exists and works, but was never called during kernel boot. Custom objects/views/apps saved to `sys_metadata` via `protocol.saveMetaItem()` were silently lost on every cold start or redeployment.\n\n### Changes\n\n- **`ObjectQLPlugin.start()` lifecycle** — Added `restoreMetadataFromDb()` call between `driver.init()` and `syncRegisteredSchemas()`, closing the persist→hydrate loop:\n\n```\ndriver.init()              // DB connection ready\n→ restoreMetadataFromDb()  // hydrate SchemaRegistry from sys_metadata  ← NEW\n→ syncRegisteredSchemas()  // create/update tables for ALL registered objects (including restored ones)\n```\n\n- **Graceful degradation** — Non-fatal when protocol service is missing, `loadMetaFromDb` isn't implemented, or `sys_metadata` table doesn't exist yet (first-run / in-memory driver). Logs at `debug` level and continues.\n\n- **Integration tests** — Three new tests: successful restoration from mock DB records, graceful handling of DB errors, and verification that restore runs before schema sync.\n\n- **CHANGELOG** — Entry under `[Unreleased] > Fixed`."
+}

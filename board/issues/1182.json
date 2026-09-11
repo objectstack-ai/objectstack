@@ -1,0 +1,33 @@
+{
+  "number": 1182,
+  "kind": "pull_request",
+  "title": "examples/app-crm: polish dashboard metadata to match objectui reference",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-18T15:00:47Z",
+  "updated_at": "2026-04-18T15:22:42Z",
+  "closed_at": "2026-04-18T15:22:42Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-04-18T15:22:42Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1182",
+  "body": "The CRM example dashboards looked dated compared to the [objectui CRM reference](https://github.com/objectstack-ai/objectui/tree/main/examples/crm/src/dashboards) — they leaned on raw hex strings stuffed into `options.color` and ignored most of the `Dashboard`/`DashboardWidget` schema (no `colorVariant`, `chartConfig`, `header`, `dateRange`, `globalFilters`, descriptions, drill-down actions, or trend indicators).\n\n### Changes\n\n- **New `crm.dashboard.ts`** — unified CRM Overview that mirrors the objectui reference (KPI tiles → area revenue trend + donut → funnel + bar → recent-deals table).\n- **Rewrote `executive` / `sales` / `service` dashboards** to use first-class metadata fields:\n  - Semantic `colorVariant` (`success`/`warning`/`danger`/`blue`/`teal`/`purple`/`orange`) replaces hex `options.color`.\n  - `chartConfig` per chart: axis titles, value formats (`$0,0`, `0%`), color palette, annotations (e.g. quota line on sales trend), brush/zoom interaction.\n  - Richer chart mix: `area` for trends, `donut` for distribution, `funnel` for pipeline, `gauge` for SLA compliance, `horizontal-bar` for rep ranking.\n  - KPI metric widgets carry `icon`, `format`, and a `trend: { value, direction, label }` payload in `options`.\n  - Tables use structured `columns: [{ header, accessorKey, format }]` instead of bare field-name arrays.\n- **Dashboard chrome**: every dashboard declares `header.actions` (New / Reports / Export), `dateRange`, `globalFilters` (owner / industry / priority lookups), `refreshInterval`, per-widget `description`, and `actionUrl`/`actionType`/`actionIcon` for drill-down.\n- **`test/dashboard.test.ts`** — 20 tests parsing each dashboard against `DashboardSchema` and enforcing the new conventions (no raw hex in `options.color`, every widget has a description, header has at least one action, dateRange present).\n- **`CHANGELOG.md`** — entry under `[Unreleased] → Changed`.\n\n### Example: KPI tile, before vs after\n\n```ts\n// Before — hex stuffed into a free-form options blob, no drill-down, no trend\n{\n  id: 'closed_won_this_quarter',\n  title: 'Closed Won This Quarter',\n  type: 'metric',\n  object: 'opportunity',\n  filter: { stage: 'closed_won', close_date: { $gte: '{current_quarter_start}' } },\n  valueField: 'amount',\n  aggregate: 'sum',\n  layout: { x: 3, y: 0, w: 3, h: 2 },\n  options: { prefix: '$', color: '#00AA00' }\n}\n\n// After — semantic colorVariant, drill-down, icon + format + trend indicator\n{\n  id: 'closed_won_qtd',\n  title: 'Closed Won (QTD)',\n  description: 'Revenue closed this quarter',\n  type: 'metric',\n  object: 'opportunity',\n  filter: { stage: 'closed_won', close_date: { $gte: '{current_quarter_start}' } },\n  valueField: 'amount',\n  aggregate: 'sum',\n  colorVariant: 'success',\n  actionUrl: '/reports/closed-won',\n  actionType: 'url',\n  actionIcon: 'ArrowUpRight',\n  layout: { x: 3, y: 0, w: 3, h: 2 },\n  options: {\n    icon: 'Trophy',\n    format: '$0,0',\n    prefix: '$',\n    trend: { value: 14.7, direction: 'up', label: 'vs last quarter' },\n  },\n}\n```\n\nNo schema or runtime changes — the framework already supported all of these fields; the example just wasn't using them.\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> framework 项目的examples/crm 设计的dashboard 不好看，没有 https://github.com/objectstack-ai/objectui/tree/main/examples 这个项目crm dashboard 好看。对dashboard元数据进行优化\n> \n> The user has attached the following file paths as relevant context:\n>  - .github/copilot-instructions.md\n>  - CLAUDE.md\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\nCreated from [VS Code](https://code.visualstudio.com/docs/copilot/copilot-coding-agent)."
+}

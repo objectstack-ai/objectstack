@@ -1,0 +1,33 @@
+{
+  "number": 853,
+  "kind": "pull_request",
+  "title": "fix: pass expand/select through full API chain for populate/lookup support",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-02T02:24:52Z",
+  "updated_at": "2026-03-02T03:21:05Z",
+  "closed_at": "2026-03-02T02:59:49Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-02T02:59:49Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/853",
+  "body": "populate/expand parameters were accepted at the HTTP layer but silently dropped before reaching the ObjectQL engine's `expandRelatedRecords`, so lookup/master_detail fields always returned raw IDs instead of expanded objects.\n\nThe engine implementation is correct — the gaps were in the layers above it:\n\n- **RestServer** (`packages/rest`): `getData` handler ignored `expand`/`select` query params when calling `protocol.getData()`\n- **MSW Plugin**: `ObjectStackServer.getData()` had no way to pass expand/select — added optional `options` param\n- **Broker shims** (studio, client tests): Called `ql.find(object)` directly, bypassing the protocol's expand→populate normalization. Now delegate to the protocol service when available\n\n### Chain before fix\n```\nGET /data/order_item/123?expand=order,product\n  → broker.call('data.get', { object, id })        // expand lost here\n    → ql.findOne(object, { filter: { _id: id } })  // no populate\n      → { order: 'ord_1', product: 'prod_2' }      // raw IDs returned\n```\n\n### Chain after fix\n```\nGET /data/order_item/123?expand=order,product\n  → protocol.getData({ object, id, expand })\n    → engine.findOne(object, { populate: ['order','product'] })\n      → expandRelatedRecords(...)\n        → { order: { _id: 'ord_1', ... }, product: { _id: 'prod_2', ... } }\n```\n\n### Full-chain audit & test coverage\n\nA comprehensive audit was performed across all API entry points to verify expand/populate parameter flow:\n\n- **All adapters verified** (Express, Fastify, Hono) — correctly pass query params to dispatcher\n- **HttpDispatcher `handleData`** — allowlists select/expand for GET by ID, passes full query for list\n- **Protocol `findData`/`getData`** — normalizes expand/$expand/populate → engine\n- **Engine `toQueryAST`** — populate → expand mapping → `expandRelatedRecords`\n\n**Tests added (27 new tests across 3 layers):**\n- **17 protocol-data tests** (`packages/objectql/src/protocol-data.test.ts`) — findData/getData expand/populate/$expand normalization, select normalization, pagination, response shape, error handling\n- **6 HttpDispatcher handleData tests** (`packages/runtime/src/http-dispatcher.test.ts`) — expand/select allowlisting on GET by ID, full query pass-through for list, populate forwarding, body expand for POST query\n- **4 REST server tests** (`packages/rest/src/rest.test.ts`) — getData and findData expand/select forwarding on both single-record and list endpoints\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>[长期] 彻底解决 populate/expand/lookup 字段关联查不到数据等后端根本性问题</issue_title>\n> <issue_description>## 背景\n> 在平台实际环境下，objectui 和 console 项目调用 spec 项目的数据 API 时，通过 populate/expand（或 lookup 字段）无法得到预期的对象展开关联数据。例如：\n> GET /api/v1/data/order_item?populate=order,product 返回的 order/product 字段只是 ID，没有被扩展成对应对象。\n> \n> 本问题不是 studio 或 mock 环境代码导致，而是 spec 仓库主线后端真实实现的系统性缺陷：\n> - populate/lookup/expand 参数被正确地接收，但有多种场景未能深入解析并驱动底层数据引擎展开关联对象。\n> - 除了主 objectql engine 的 expand 功能外，API 层、协议转换适配/ast、driver等链路可能有遗漏或绕行，导致大量真实接口无法获得关联数据。\n> - 案例参考见 objectui 项目相关 PR 和 bug 讨论。\n> \n> ## 长期解决目标\n> - 任何接入 objectstack-ai/spec 的 API（无论 rest/odata/rpc），只要有 populate/expand/lookup 参数，返回内容都应与 schema 及字段定义严格一致：\n>    - lookup/master_detail 字段自动转为对象，并展开 select 指定内容（递归/nested 支持3层+）\n>    - 保证和 objectql find/findOne 直接用 expand 能力效果一致\n> - 彻底补齐 API protocol → objectql → driver 全链路参数流转，杜绝任何场景下参数传递或处理被忽略\n>    - 包括所有 http-dispatcher、broker、protocol implementation、engine toQueryAST 及 schema registry 驱动\n> - 标准化所有 lookup/expand 返回（支持 depth，支持 select，嵌套安全、性能合理）\n> - 完善自动化测试，验证所有 API 入口都能真正返回 fully expanded object\n> - 完整补文档/注释，提升开发集成信心\n> \n> ## 影响范围\n> - /api/v1/data/ 对象的 rest/odata 等接口与协议所有查接口，特别是 lookup、populate、expand（包括 frontend 各种数据适配器）\n> - objectql engine、protocol、http-dispatcher、broker、driver以及 schema 相关\n> - 自动化单测/\u001b[insert test infra]\n> \n> ## 参考资料\n> - objectui PR objectstack-ai/spec#944 与相关试验与复现步骤\n> - 用户实际 API 调用与截图\n> - objectql/src/engine.ts expandRelatedRecords 实现，protocol 二层参数流转与转换\n> \n> ## 路线建议（可增补）\n> 1. 跟踪 populate/expand 全链路流向和覆盖，补齐适配遗漏\n> 2. 对所有类型驱动（rest/odata）实现严格流程参数测试\n> 3. 标准化和补齐嵌套 expand 案例（带多级 select/projection）\n> 4. 完善主对象 expand 代码注释、示范和接口注释\n> 5. 推动社区/前端同步规范，方便 console/objectui 等团队调用\n> </issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#852\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n🔒 GitHub Advanced Security automatically protects Copilot coding agent pull requests. You can protect all pull requests by enabling Advanced Security for your repositories. [Learn more about Advanced Security.](https://gh.io/cca-advanced-security)"
+}

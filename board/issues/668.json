@@ -1,0 +1,33 @@
+{
+  "number": 668,
+  "kind": "pull_request",
+  "title": "fix: resolve DTS build errors in sveltekit, express, and nextjs adapters",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-13T16:06:04Z",
+  "updated_at": "2026-03-23T23:37:58Z",
+  "closed_at": "2026-02-13T16:27:06Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-13T16:27:06Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/668",
+  "body": "Three adapter packages fail DTS generation under TypeScript 5.9, breaking the monorepo build (29 tasks, 3 failing).\n\n- **sveltekit** — `request.json()` returns `unknown` in TS 5.9; added type assertion to match `handleGraphQL` signature\n- **express** — `AuthService.handleRequest` parameter typed as express `Request` (imported), but called with global Fetch API `Request` via `new Request()`; qualified as `globalThis.Request`\n- **nextjs** — Server actions passed `{}` as `HttpProtocolContext`, which requires a `request` property; introduced shared `emptyContext` with `request: undefined`\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

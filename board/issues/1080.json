@@ -1,0 +1,33 @@
+{
+  "number": 1080,
+  "kind": "pull_request",
+  "title": "fix(studio): Route Code tab to CodeExporter instead of always rendering preview",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-07T08:06:44Z",
+  "updated_at": "2026-04-07T09:01:58Z",
+  "closed_at": "2026-04-07T09:00:12Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-07T09:00:12Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1080",
+  "body": "The default-plugin registered a single `json-inspector` viewer claiming `modes: ['preview', 'code']`, but the component unconditionally rendered `<MetadataInspector>` — the `mode` prop was ignored.\n\n### Changes\n\n- **Split single viewer into two contributions** in `default-plugin.tsx`:\n  - `json-inspector` → `modes: ['preview']` → `MetadataInspector` (unchanged)\n  - `code-exporter` → `modes: ['code']` → `CodeExporter` (new)\n- **New `CodeViewerComponent`** loads metadata via `useClient().meta.getItem()` (same pattern as `MetadataInspector`) and renders the existing `<CodeExporter>` with TypeScript/JSON toggle + copy-to-clipboard\n- **Metadata type mapping** from plural Studio types (`objects`, `flows`, `agents`, etc.) to `CodeExporter`'s singular `ExportType`\n\n```tsx\n// Before: one viewer, mode ignored\nmetadataViewers: [{ id: 'json-inspector', modes: ['preview', 'code'] }]\nactivate(api) { api.registerViewer('json-inspector', DefaultViewerComponent); }\n\n// After: two viewers, correct routing\nmetadataViewers: [\n  { id: 'json-inspector', modes: ['preview'] },\n  { id: 'code-exporter', modes: ['code'] },\n]\nactivate(api) {\n  api.registerViewer('json-inspector', PreviewViewerComponent);\n  api.registerViewer('code-exporter', CodeViewerComponent);\n}\n```\n\nNo changes to `plugin-host.tsx` or `CodeExporter.tsx` — the infrastructure already resolved viewers by mode correctly; the default-plugin just wasn't wired up properly."
+}

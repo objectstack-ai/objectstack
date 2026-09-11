@@ -1,0 +1,35 @@
+{
+  "number": 947,
+  "kind": "issue",
+  "title": "[plugin-auth] init 阶段同步获取 'data' 服务导致启动失败（Service 'data' is async - use await）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-03-22T05:56:56Z",
+  "updated_at": "2026-03-23T10:46:35Z",
+  "closed_at": "2026-03-23T10:46:35Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/947",
+  "body": "## 问题描述\nObjectStack `plugin-auth`（`packages/plugins/plugin-auth/src/auth-plugin.ts`）在 `init()` 阶段同步调用 `ctx.getService('data')` 获取数据服务。当前 upstream (@objectstack/core/@objectstack/objectql) 的 kernel/service 体系，如果 'data' 服务为 async factory 注册（如 `registerServiceFactory('data', ...)`），则在初始化阶段通过 sync API 获取时会抛出：\n\n```\nService 'data' is async - use await\n```\n\n这会直接导致整个 Kernel 启动失败，无法进入正常开发或测试。\n\n## 复现步骤\n1. `objectstack.config.ts` 插件列表中，`ObjectQLPlugin` 和 `AuthPlugin` 顺序正常，`AuthPlugin` 总是在 `ObjectQLPlugin` 之后。\n2. 启动开发环境：\n\n   ```bash\n   pnpm dev\n   ```\n3. 启动控制台输出报错：\n\n   ```\n   Service 'data' is async - use await\n   ```\n\n## 问题根因\n- `auth-plugin.ts` 第 85 行（`const dataEngine = ctx.getService('data')`）同步拿 `'data'` 服务。\n- 但 `'data'` 很可能是通过 async factory 注册，只有在所有 init 阶段运行完后，factory 的结果才会同步可用。\n- Kernel 设计上禁止在 init 阶段同步拿异步服务，防止 bug。\n\n## 建议修复方案\n- `init()` 阶段不要 sync 拿 `data`，而是：\n    - 延后到 `start()` 阶段做 dataEngine 注入（start 阶段允许 await service factory 结果）。\n    - 或在 init 里不注入 dataEngine，等 start 阶段 `this.authManager.setDataEngine(...)` 等方法注入。\n- 或者 `auth-plugin.ts` 支持 `dataEngine` 允许为 Promise，内部判定是 async 时，等到实际用到时 await。\n\n## 影响范围\n- 任何使用 `@objectstack/plugin-auth` 且其依赖的 data 服务是 async factory 注册场景，都存在启动失败风险。\n- 严重影响首启、测试、扩展插件的开发效率。\n\n## 相关源代码\n- [auth-plugin.ts](https://github.com/objectstack-ai/spec/blob/main/packages/plugins/plugin-auth/src/auth-plugin.ts#L85)\n- [核心 kernel 服务分解](https://github.com/objectstack-ai/spec/blob/main/packages/core/src/kernel.ts#L96-L103)\n\n## 建议标签\n- bug\n- auth\n- plugin\n\n---\n如需进一步技术细节，请派我建 PR 或详细设计建议。"
+}

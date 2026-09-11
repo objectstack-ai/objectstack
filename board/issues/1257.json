@@ -1,0 +1,37 @@
+{
+  "number": 1257,
+  "kind": "pull_request",
+  "title": "chore: remove apps/cloud (split to objectstack-ai/cloud)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-21T09:48:40Z",
+  "updated_at": "2026-05-21T12:15:20Z",
+  "closed_at": "2026-05-21T12:15:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-05-21T12:15:15Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1257",
+  "body": "Removes the duplicate `apps/cloud` from the public framework repo now that the cloud control plane lives canonically in the private split repo `objectstack-ai/cloud` and serves `cloud.objectos.app` from there.\n\n## What's removed\n- `apps/cloud/` (32 files, ~2.7K LOC)\n- `dev:cloud` script in root `package.json`\n- Cloud target / job / tag triggers in `.github/workflows/deploy.yml` (workflow is now objectos-only)\n\n## What's preserved\n- `packages/services/service-cloud` — still imported by `packages/runtime` and `packages/cli`. Decoupling tracked separately (`framework-decouple-service-cloud` todo).\n\n## Verification\n- `pnpm install` clean (lockfile reduces by 118 lines, only apps/cloud-exclusive deps drop).\n- `cloud.objectos.app/.well-known/openid-configuration` now served by the split repo (verified earlier in this session).\n- No code (TS/TSX/JSON) imports `@objectstack/cloud`.\n- Only docs / README still reference apps/cloud informationally; those can be updated in follow-ups."
+}

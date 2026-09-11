@@ -1,0 +1,38 @@
+{
+  "number": 1125,
+  "kind": "pull_request",
+  "title": "Creating examples for Hono deployment on Vercel",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tooling"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-14T02:20:33Z",
+  "updated_at": "2026-04-14T06:18:19Z",
+  "closed_at": "2026-04-14T06:18:19Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1125",
+  "body": "Pull request created by AI Agent"
+}

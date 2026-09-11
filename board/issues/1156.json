@@ -1,0 +1,33 @@
+{
+  "number": 1156,
+  "kind": "pull_request",
+  "title": "chore: add changeset for patch release",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-15T14:36:22Z",
+  "updated_at": "2026-04-15T14:38:10Z",
+  "closed_at": "2026-04-15T14:36:52Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-15T14:36:52Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1156",
+  "body": "Adds a changeset to trigger a patch version bump across all fixed-group packages.\n\n- Covers recent fixes merged into main: studio CI test failures, metadata protocol mock handler improvements\n- Uses `@objectstack/spec: patch` which cascades to all packages via the `fixed` group in `.changeset/config.json`"
+}

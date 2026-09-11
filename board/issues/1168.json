@@ -1,0 +1,33 @@
+{
+  "number": 1168,
+  "kind": "pull_request",
+  "title": "fix(studio): honor Vite BASE_URL as TanStack Router basepath",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-17T02:11:39Z",
+  "updated_at": "2026-04-17T02:17:55Z",
+  "closed_at": "2026-04-17T02:15:03Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-17T02:15:02Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1168",
+  "body": "When Studio is mounted under `/_studio/` (CLI `--ui`, which sets `VITE_BASE=/_studio/`), TanStack Router matched the full pathname against root-defined routes and interpreted `_studio` as the `$package` param. All sub-routes 404'd (`notFoundError on route \"/$package\"`), e.g. `/_studio/packages` and `/_studio/:package/objects/:name`.\n\n### Changes\n\n- **`apps/studio/src/router.ts`** — derive `basepath` from `import.meta.env.BASE_URL` and pass it to `createRouter`. Normalizes to `'/'` for root deployments and strips the trailing slash for sub-path deployments (`'/_studio/'` → `'/_studio'`). Works transparently for CLI dev mode, Vercel, and standalone — no caller-side config required.\n- **`apps/studio/CHANGELOG.md`** — changelog entry.\n\n```ts\n// apps/studio/src/router.ts\nfunction resolveBasepath(): string {\n  const base = (import.meta.env.BASE_URL ?? '/').trim();\n  if (!base || base === '/' || base === './') return '/';\n  return base.endsWith('/') ? base.slice(0, -1) : base;\n}\n\nexport const router = createRouter({\n  routeTree,\n  basepath: resolveBasepath(),\n});\n```\n\n### Verification\n\nReproduced and validated via Playwright against `vite dev` with `VITE_BASE=/_studio/`:\n\n| URL | Before | After |\n|---|---|---|\n| `/_studio/packages` | \"Not Found\" (matched `/$package=\"_studio\"/packages`) | Package Manager |\n| `/_studio/api-console` | \"Not Found\" | API Console |\n| `/_studio/` | renders, but sub-routes broken | renders, sub-routes resolve |\n\nThe `notFoundError` console warning is gone."
+}

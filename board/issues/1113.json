@@ -1,0 +1,36 @@
+{
+  "number": 1113,
+  "kind": "pull_request",
+  "title": "Fix RemoteTransport HttpClient2 constructor error in Vercel deployment",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "size/s"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-13T07:18:09Z",
+  "updated_at": "2026-04-13T09:11:23Z",
+  "closed_at": "2026-04-13T09:11:23Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 13,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1113",
+  "body": "The `sys_metadata` find operation was failing in production with `RemoteTransport: lazy connect failed: HttpClient2 is not a constructor`. This occurred when TursoDriver's lazy connection factory attempted to dynamically import `@libsql/client`.\n\n**Root cause:** esbuild was bundling `@libsql/client`, which mangled internal class exports like `HttpClient2`, breaking the constructor at runtime.\n\n**Changes:**\n\n- **bundle-api.mjs**: Mark `@libsql/client` as external to prevent bundling\n- **vercel.json**: Add `@libsql/client` to `includeFiles` pattern for serverless function packaging  \n- **build-vercel.sh**: Copy `@libsql/client` from monorepo root to local `node_modules` during build\n\nThis follows the same deployment pattern as other external dependencies like `better-sqlite3`."
+}

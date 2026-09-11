@@ -1,0 +1,35 @@
+{
+  "number": 883,
+  "kind": "issue",
+  "title": "[Bug] Auth 服务 /api/v1/auth/* 路由无法访问（插件注册顺序导致未注册）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-03-09T05:30:37Z",
+  "updated_at": "2026-03-09T06:17:24Z",
+  "closed_at": "2026-03-09T06:17:24Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/883",
+  "body": "## 问题描述\n在 monorepo 根目录运行 `pnpm dev` 启动开发环境后，无法访问 `http://localhost:3000/api/v1/auth/get-session` 等 Auth 服务接口。\n\n- 实际结果：返回 404，未注册 auth 路由。\n- 期望结果：可访问 `api/v1/auth/*` 系列接口，正常获取 session。\n\n## 复现步骤\n1. `pnpm dev`\n2. 打开浏览器访问 `http://localhost:3000/api/v1/auth/get-session`\n3. 出现 404 或无法连接\n\n## 根因分析\n- `objectstack.config.ts` 的 `plugins` 数组中，`AuthPlugin` 在 `HonoServerPlugin` 之前注册。\n- CLI 的 `serve` 命令会先注册所有 `config.plugins`，然后最后才注册 `HonoServerPlugin`，导致 `AuthPlugin` 的路由注册时获取不到 HTTP 服务实例。\n- AuthPlugin.start() 检测不到 http-server，打印 warn：`No HTTP server available — auth routes not registered.`\n\n### 相关代码片段\n```typescript\nimport { defineStack } from '@objectstack/spec';\nimport { AppPlugin, DriverPlugin } from '@objectstack/runtime';\nimport { ObjectQLPlugin } from '@objectstack/objectql';\nimport { InMemoryDriver } from '@objectstack/driver-memory';\nimport { HonoServerPlugin } from '@objectstack/plugin-hono-server';  // ← 新增\nimport CrmApp from './examples/app-crm/objectstack.config';\nimport TodoApp from './examples/app-todo/objectstack.config';\nimport BiPlugin from './examples/plugin-bi/objectstack.config';\nimport { AuthPlugin } from '@objectstack/plugin-auth';\n\nexport default defineStack({\n  manifest: {\n    id: 'dev-workspace',\n    name: 'dev_workspace',\n    version: '0.0.0',\n    description: 'ObjectStack monorepo development workspace',\n    type: 'app',\n  },\n  plugins: [\n    new ObjectQLPlugin(),\n    new DriverPlugin(new InMemoryDriver()),\n    new HonoServerPlugin({ port: 3000 }),  // ← 必须在 AuthPlugin 之前\n    new AuthPlugin({\n      secret: 'dev-secret-please-change-in-production-min-32-chars',\n      baseUrl: 'http://localhost:3000',\n    }),\n    new AppPlugin(CrmApp),\n    new AppPlugin(TodoApp),\n    new AppPlugin(BiPlugin),\n  ],\n});\n```\n\n## 建议修复方案\n1. **优先注册 HonoServerPlugin** —— `objectstack.config.ts` 的 `plugins` 数组必须先注册 HTTP 服务，再注册 AuthPlugin。\n2. CLI 应在遍历 config.plugins 之前注册 HonoServerPlugin。（或检测是否重复注册，避免多次实例化）\n3. AuthPlugin 可用 `kernel:ready` hook 延迟注册路由，兼容不同插件加载顺序。\n"
+}

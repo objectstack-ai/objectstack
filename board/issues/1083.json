@@ -1,0 +1,35 @@
+{
+  "number": 1083,
+  "kind": "issue",
+  "title": "[AI] Studio/Agent聊天未返回Vercel SSE格式，导致AI聊天无内容显示",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-04-08T06:40:42Z",
+  "updated_at": "2026-04-08T07:30:28Z",
+  "closed_at": "2026-04-08T07:30:28Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1083",
+  "body": "## 问题描述\n当前 ObjectStack Studio 的 AI 聊天（AI Chat Panel）与后端 `@ai-sdk/react` / `DefaultChatTransport`（Vercel AI SDK v6）集成存在严重兼容性问题：\n\n- General Chat `/api/v1/ai/chat` 返回的是符合 Vercel Data Stream Protocol (VDSP) 的 SSE 流格式，能正常被 `DefaultChatTransport` 解析渲染。\n- Agent Chat `/api/v1/ai/agents/:agentName/chat` 仅返回 plain JSON，对话内容无法在 UI 中显示（但 API 层收到正确回复）。\n\n表现：API 能响应，但聊天界面无内容渲染。UI 实际期望 Vercel SSE Data Stream。\n\n---\n\n## 问题清单\n\n- [x] General Chat 路由 `/api/v1/ai/chat` ✅ 返回 Vercel SSE（支持流式/非流式）。\n- [ ] Agent Chat 路由 `/api/v1/ai/agents/:agentName/chat` ❌ 只返回 JSON，未实现 SSE 流。\n- [ ] Studio 前端（apps/studio/src/components/AiChatPanel.tsx）需完全遵循 Vercel AI SDK 数据流协议，不能对普通 JSON 兼容做妥协。\n- [ ] 后端 agent-routes 需对 `stream: true` 请求返回 `encodeVercelDataStream` 包裹的 SSE。\n- [ ] 增加/完善自动化测试（Agent chat SSE round-trip & fallback）。\n- [ ] 验证/补充 docs：明确所有 AI Chat 接口都只允许 SSE/Vercel 格式。\n\n---\n\n## 预期方案\n1. agent-routes.ts:\n   - 增加对 `stream !== false` 的判断，优先返回 SSE 流。\n   - 非流式请求应抛出异��或 fallback 明确警告前端该模式不被支持。\n   - 直接复用 general chat 路由返回的流式模式实现，`encodeVercelDataStream` 返回 events。\n2. 前端：\n   - 禁止兼容 plain JSON，遇到非 Vercel SSE 时清晰报错，不 silent fail。\n   - 增强错误态 UI。\n3. 编写端到端（E2E）和单元测试，覆盖 agent chat 的 UI 展示。\n\n---\n\n## 参考与标准\n- Vercel AI SDK [Custom Backend Guide](https://sdk.vercel.ai/docs/guides/custom-backend#response-format)\n- [ai/packages/ai/src/stream/parse-event-stream.ts](https://github.com/vercel/ai/blob/main/packages/ai/src/stream/parse-event-stream.ts)\n"
+}

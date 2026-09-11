@@ -1,0 +1,33 @@
+{
+  "number": 1027,
+  "kind": "issue",
+  "title": "AI chat协议与数据结构完全对齐Vercel/ai（移除自定义协议与类型定义）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-01T01:57:14Z",
+  "updated_at": "2026-04-01T05:02:37Z",
+  "closed_at": "2026-04-01T05:02:37Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1027",
+  "body": "## 背景\n目前 spec/service-ai 层定义了若干自研 AI Chat 协议/类型（如 AIMessage/AiChatRequestSchema/AiChatResponseSchema/AIStreamEvent），主要用于后端与 objectui 前端的对接。但 objectui 前端已全量采用 Vercel AI SDK（@ai-sdk/react/useChat），其消息、SSE协议、ToolCall协议均直接依赖 Vercel 官方包，并且前端不会消费自定义的 Zod schema 或 TypeScript 类型。\n\n对齐 Vercel，要把协议演进/维护责任交给上游，减少冗余和潜在兼容成本。\n\n---\n\n## 需完成的工作\n\n### 1. 移除重复协议/类型定义\n- [ ] 移除 `AIMessage`、`AIToolCall`、`AIStreamEvent`、`AiChatRequestSchema`、`AiChatResponseSchema` 等 TypeScript 和 Zod 定义，转为直接 re-export Vercel/ai 的类型：\n  - `import type { CoreMessage, ToolCall, DataStreamPart } from 'ai'`\n  - 保留对 `IAIService`/`IAIConversationService` 的依赖，但接口方法参数改为 Vercel 类型\n\n### 2. 服务端Handler与SSE协议对齐 \n- [ ] /api/v1/ai/chat 及 /chat/stream，参数/返回值、SSE流式协议改为直接透传 Vercel/ai 标准\n- [ ] Handler 层不再做 message/body 数据结构转换与校验，直接派发给 ai SDK\n- [ ] 出口严格使用 Vercel 官方 Data Stream 响应（StreamingTextResponse/toDataStreamResponse）\n\n### 3. 仅保留/适配 spec 独有内容\n- [ ] 保留/修正 NLQ、Suggest、Insights 协议，这些为 ObjectStack 元数据平台独有\n- [ ] `IAIService`/`IAIConversationService` 继续作为依赖倒置合约，但推荐方法签名参数引入 Vercel aiSDK 类型\n\n### 4. 生态兼容性&风险管控\n- [ ] 检查 platform 依赖 @ai-sdk/* 的升级兼容性\n- [ ] 补充 changelog/roadmap，review 全平台可能依赖链\n- [ ] 【勿快速修复】确保未来协议变更（如 Vercel/ai 推出新数据结构）能无痛升级\n\n---\n\n## 预期效果\n- 让 objectui <-> service-ai 代码零自定义协议桥接，全部统一到 Vercel/ai SDK 及其类型\n- 明显减少二次维护成本和升级出错风险\n- 不破坏 NLQ/元数据独有协议与扩展能力\n"
+}

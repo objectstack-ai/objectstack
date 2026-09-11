@@ -1,0 +1,33 @@
+{
+  "number": 991,
+  "kind": "issue",
+  "title": "将 sys_presence 系统对象定义纳入 service-realtime 软件包，完善 Presence 架构归属",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-03-27T04:06:02Z",
+  "updated_at": "2026-03-31T10:02:05Z",
+  "closed_at": "2026-03-31T10:02:05Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/991",
+  "body": "### 背景\n目前平台运行时在访问 `sys_presence` 时出现 `no such table: sys_presence` 错误。根据系统架构原则，所有以 `sys_` 开头的系统对象都应以业务/协议领域归属到对应的软件包中。例如，`sys_user` 归属于 `plugin-auth`，`sys_audit_log` 归属于 `plugin-audit`。\n\n### 问题\n当前 `sys_presence` 系统对象未正确注册，且归属和实现尚未标准化，影响 presence 相关的实时能力。\n\n### 归属分析\n- Presence（在线状态）为实时协作核心概念，不宜放在 plugin-auth。\n- 参考 `PresenceStateSchema`、`PresenceUpdateSchema` 等协议定义，Presence 的全部协议均来源于 websocket/realtime 领域。\n- `service-realtime` 包名下应纳入 `sys_presence` 对象，作为其核心领域对象，负责 presence 的 schema 与运行时状态管理。\n\n### 方案建议\n1. **在 `packages/services/service-realtime` 下创建/注册 `sys_presence` 对象**\n    - 新建 `src/objects/sys-presence.object.ts`，字段应覆盖 PresenceState 协议定义（`userId`, `sessionId`, `status`, `lastSeen`, `currentLocation`, `device`, `customStatus`, `metadata`）。\n    - 用标准 `ObjectSchema` 注册，注意复用协议字段定义，确保 schema 与前端 presence 协议兼容。\n2. **在 plugin 启动时注册该对象**\n    - 在 RealtimeServicePlugin 启动逻辑中 `ctx.registerService()` 时纳入 `sys_presence`。\n3. **在 `SystemObjectName` 中维护常量**\n    - 给出 `PRESENCE: 'sys_presence'` 常量，文档、API、权限、DSL 查询等均采用该 protocol name。\n4. **ROADMAP.md/CHANGELOG.md 补充记录对象归属和接口清单**\n\n### 验证\n- 完成后运行全量测试以确保 runtime 对 presence 的查询、订阅、变更不会异常\n- ROADMAP.md/CHANGELOG.md 记录此次架构梳理行为\n\n---\n如需协助，可直接 @xuyushun441-sys。\n"
+}

@@ -1,0 +1,40 @@
+{
+  "number": 1101,
+  "kind": "pull_request",
+  "title": "[WIP] Implement user preferences service for scalar and structured data",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "size/xs",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-09T10:04:20Z",
+  "updated_at": "2026-04-10T03:49:36Z",
+  "closed_at": "2026-04-10T03:49:36Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1101",
+  "body": "- [x] Define User Preference Schema in packages/spec/src/identity/user-preference.zod.ts\n- [x] Define IUserPreferencesService contract in packages/spec/src/contracts/user-preferences-service.ts\n- [x] Create UserPreference ObjectQL object schema\n- [x] Create ObjectQL-based User Preferences Service implementation\n- [x] Create User Preferences Service Plugin\n- [x] Define HTTP routes for preferences API\n- [x] Add service to kernel in Studio/CLI\n- [x] Write tests for user preferences service\n- [ ] Update documentation"
+}

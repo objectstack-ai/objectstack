@@ -1,0 +1,33 @@
+{
+  "number": 1082,
+  "kind": "pull_request",
+  "title": "fix(service-ai): support Vercel AI SDK v6 parts format in agent chat endpoint",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-07T09:40:42Z",
+  "updated_at": "2026-04-07T10:16:11Z",
+  "closed_at": "2026-04-07T10:12:13Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-07T10:12:13Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1082",
+  "body": "Agent chat endpoint (`/api/v1/ai/agents/:agentName/chat`) rejects Vercel AI SDK v6 messages that use `parts` arrays instead of `content` strings, returning 400 `\"message.content must be a string\"`. The general chat route already handles this; the agent route was never updated.\n\n### Changes\n\n- **Extract `message-utils.ts`** — Moves `normalizeMessage()` and content validation logic into a shared module, eliminating duplication between `ai-routes.ts` and `agent-routes.ts`\n- **Update `validateAgentMessage`** — Delegates content/parts validation to shared `validateMessageContent()`, accepting `parts` arrays, string `content`, and array `content`\n- **Normalize before AI call** — Agent handler now runs `normalizeMessage()` on raw messages (extracts text from `parts` → `content` string) before passing to `chatWithTools()`\n- **Refactor `ai-routes.ts`** — `validateMessage` and the chat handler now import from the shared module instead of inlining the same logic\n\n```typescript\n// Before: only string content accepted\nif (typeof msg.content !== 'string') {\n  return 'message.content must be a string';\n}\n\n// After: delegates to shared validator (parts, string, array all accepted)\nconst allowEmpty = msg.role === 'assistant';\nreturn validateMessageContent(msg, { allowEmptyContent: allowEmpty });\n```\n\n### Tests\n\n4 new test cases covering: v6 `parts`-only messages, mixed `parts`/`content` conversations, assistant messages with `parts` and no `content`, and rejection of messages with neither."
+}

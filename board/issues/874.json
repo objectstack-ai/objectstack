@@ -1,0 +1,35 @@
+{
+  "number": 874,
+  "kind": "issue",
+  "title": "[CRM Seed Data] Missing Relationship Fields in Contacts, Opportunities, Tasks, etc. ",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-03-04T14:55:25Z",
+  "updated_at": "2026-05-19T01:43:51Z",
+  "closed_at": "2026-05-19T01:43:51Z",
+  "closed_by": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/874",
+  "body": "## Problem\nThe CRM seed data in `examples/app-crm/src/data/index.ts` does not provide relationship (lookup/master_detail) fields in records, causing contacts, opportunities, etc. to be disconnected from parent objects. This breaks ObjectStack conventions and makes demo/test environments not resemble realistic CRM data.\n\n## What To Fix (Checklist)\n- [ ] **Contacts**: Add the `account` field (value should match the Account's `name` which is the externalId).\n- [ ] **Contacts**: For records with management hierarchy, add the `reports_to` field (value = target contact's email).\n- [ ] **Opportunities**: Add `account` field; link each Opportunity to a parent Account (use Account `name`). Also add `owner` (if user assignment modeled).\n- [ ] **Tasks**: Add `account` (when relevant), and possible `owner` field. If the Task is associated with an Opportunity, add `opportunity` field (use Opportunity `name`).\n- [ ] **Leads**: If relevant, add fields to relate Lead to Account/Contact (e.g., add `account` field).\n- [ ] **Quotes and Products**: Link quote line items to Opportunities by field, and Products by name if these objects exist.\n\n## Acceptance Criteria\n- Changes should follow ObjectStack spec: cross-object relationship fields use the target object's externalId value (not internal IDs).\n- All CRM data should demonstrate realistic parent-child and lookup relationships, and allow the seed loader engine to resolve references automatically.\n- No hardcoded internal IDs should be present.\n- Demo app should show correct relational graphs in UI and allow navigation between objects.\n\n## References\n- [Field/master_detail spec](https://github.com/objectstack-ai/spec/blob/main/packages/spec/src/data/field.zod.ts)\n- [Current CRM dataset code](https://github.com/objectstack-ai/spec/blob/main/examples/app-crm/src/data/index.ts)\n\n---\n\n**This issue acts as a data quality bug report. Fixing it improves onboarding, demos, IDE experience, and plugin reliability.**\n\n"
+}

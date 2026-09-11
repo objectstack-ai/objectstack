@@ -1,0 +1,33 @@
+{
+  "number": 1004,
+  "kind": "pull_request",
+  "title": "fix: output Vercel serverless function to dist/api/ to match outputDirectory",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-31T03:45:31Z",
+  "updated_at": "2026-03-31T04:07:18Z",
+  "closed_at": "2026-03-31T03:55:08Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-31T03:55:08Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1004",
+  "body": "All `/api/*` requests on Vercel return SPA HTML instead of invoking the serverless function. `bundle-api.mjs` emits `api/index.js` at the project root, but `vercel.json` sets `outputDirectory: \"dist\"` — so the function is outside the deployment tree and Vercel falls back to the SPA rewrite.\n\n### Changes\n\n- **`apps/studio/scripts/bundle-api.mjs`** — `outfile: 'api/index.js'` → `outfile: 'dist/api/index.js'`\n- **`apps/studio/vercel.json`** — Add explicit `functions` config declaring `api/index.js` with `@vercel/node@3` runtime\n- **`apps/studio/.gitignore`** — Remove `api/index.js` / `api/index.js.map` entries (now under `dist/`, already ignored)\n- **Changeset + CHANGELOG** — Updated to reflect the actual root cause"
+}

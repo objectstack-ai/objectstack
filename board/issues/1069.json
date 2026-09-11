@@ -1,0 +1,33 @@
+{
+  "number": 1069,
+  "kind": "pull_request",
+  "title": "chore(deps)(deps): bump @ai-sdk/provider from 2.0.1 to 3.0.8",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "dependabot[bot]",
+    "id": 49699333,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-06T02:31:41Z",
+  "updated_at": "2026-04-07T04:19:36Z",
+  "closed_at": "2026-04-07T03:48:54Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-07T03:48:54Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1069",
+  "body": "Bumps [@ai-sdk/provider](https://github.com/vercel/ai) from 2.0.1 to 3.0.8.\n<details>\n<summary>Commits</summary>\n<ul>\n<li><a href=\"https://github.com/vercel/ai/commit/08084717343d3db44fb0a36ab17a6df5039f3506\"><code>0808471</code></a> Version Packages (<a href=\"https://redirect.github.com/vercel/ai/issues/12327\">#12327</a>)</li>\n<li><a href=\"https://github.com/vercel/ai/commit/7168375aa2fd660b5acbfa15195857aa26534dad\"><code>7168375</code></a> feat (ai, provider): default global provider video model resolution (<a href=\"https://redirect.github.com/vercel/ai/issues/12315\">#12315</a>)</li>\n<li><a href=\"https://github.com/vercel/ai/commit/7fcff279c2e4da7470dc5c9886fe56deca438ef4\"><code>7fcff27</code></a> Version Packages (<a href=\"https://redirect.github.com/vercel/ai/issues/12325\">#12325</a>)</li>\n<li><a href=\"https://github.com/vercel/ai/commit/aa924c79c619fb1a38aa723c15929b701db6276d\"><code>aa924c7</code></a> feat(provider/alibaba): initial alibaba provider (<a href=\"https://redirect.github.com/vercel/ai/issues/12240\">#12240</a>)</li>\n<li><a href=\"https://github.com/vercel/ai/commit/ff7dd528f3933f67bf4568126db0a81cd4a47a96\"><code>ff7dd52</code></a> Version Packages (<a href=\"https://redirect.github.com/vercel/ai/issues/12323\">#12323</a>)</li>\n<li><a href=\"https://github.com/vercel/ai/commit/471009b4f187bed3131f3c6a55dc7e606dfba71c\"><code>471009b</code></a> fix(ai): pass reasoning text in telemetry (<a href=\"https://redirect.github.com/vercel/ai/issues/12321\">#12321</a>)</li>\n<li><a href=\"https://github.com/vercel/ai/commit/abab9445485635ce7fdd5372e03f0002f536dcdc\"><code>abab944</code></a> fix: unused variable in amazon bedrock anthropic logic (<a href=\"https://redirect.github.com/vercel/ai/issues/12310\">#12310</a>)</li>\n<li><a href=\"https://github.com/vercel/ai/commit/d37d7a668f2dc0aa9e8a1ed166e95d06f42f1f27\"><code>d37d7a6</code></a> Version Packages (<a href=\"https://redirect.github.com/vercel/ai/issues/12309\">#12309</a>)</li>\n<li><a href=\"https://github.com/vercel/ai/commit/5674cc767b07adb0279997ff2f4ff120b09ab465\"><code>5674cc7</code></a> docs(examples): Anthropic adaptive and extended thinking on Google Vertex (<a href=\"https://redirect.github.com/vercel/ai/issues/1\">#1</a>...</li>\n<li><a href=\"https://github.com/vercel/ai/commit/37808f79a316848af20021b73ed49d854dfc05d0\"><code>37808f7</code></a> Version Packages (<a href=\"https://redirect.github.com/vercel/ai/issues/12308\">#12308</a>)</li>\n<li>Additional commits viewable in <a href=\"https://github.com/vercel/ai/compare/@ai-sdk/provider@2.0.1...@ai-sdk/provider@3.0.8\">compare view</a></li>\n</ul>\n</details>\n<br />\n"
+}

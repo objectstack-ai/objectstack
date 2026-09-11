@@ -1,0 +1,33 @@
+{
+  "number": 1015,
+  "kind": "issue",
+  "title": "实现类似 Airtable 的数据对话 Chatbot 全栈开发任务清单",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-31T08:00:28Z",
+  "updated_at": "2026-03-31T08:45:32Z",
+  "closed_at": "2026-03-31T08:45:32Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1015",
+  "body": "## 目标\n开发一个支持自然语言与业务数据对话的 Chatbot，效果对标 Airtable Copilot，用户可用自然语言问业务数据，AI 能理解表结构、查数据、分析统计并结构化友好回复。\n\n<img alt=\"Airtable Copilot 对话 Demo\" width=\"4064\" src=\"https://github.com/user-attachments/assets/924d9ae7-adba-4a53-8ade-aea4faaba83d\" />\n\n## 开发任务拆解\n\n### 1. Tool Call Loop（AIService 核心增强，P0）\n- 实现完整的 LLM-Tool 调用链路：\n   - AIService.chatWithTools: 自动注入 ToolRegistry 工具集合\n   - LLM 返回 tool_calls 时，自动调用 ToolRegistry 的 handler 并将结果以 role:tool 消息追加\n   - 回传给 LLM，实现���轮 tool-calling，最后生成最终回复\n- 支持最大循环轮数，防止死循环\n- 单元测试覆盖 tool call 循环、异常处理、边界场景\n\n### 2. 平台级内置数据工具（Data Tool，P0）\n- `query_records`: 按条件查表\n- `get_record`: 单条详情\n- `describe_object`: 查询表结构\n- `aggregate_data`: 聚合/统计\n- `list_objects`: 列表所有表\n- 工具参数、权限校验、分页/限制\n- handler 实现对接元数据和数据服务\n\n### 3. Agent Runtime（P1）\n- Agent 元数据加载/校验\n- Agent → system prompt 自动注入\n- Agent → model 参数,tools 自动注入 option\n- Agent.tools 结合 ToolRegistry 做映射\n- 上下文增强（自动结合用户当前表、视图、选中的数据记录）\n\n### 4. Agent Chat API 路由（P1）\n- 新增 /api/v1/ai/agents/:agentName/chat 支持 context、Agent 选择\n- 支持上下文参数 objectName、recordId、viewName\n- 错误处理：Agent 未找到/不活跃/无权限\n\n### 5. Data Tool 自动注册与插件化集成（P1）\n- 通过 ai:ready hook 自动注册内置数据工具\n- 支持多数据源/多租户 context\n\n### 6. 数据对话 Agent 规格（P2）\n- data_chat Agent 说明书、role/instructions、工具声明\n- guardrails、maxToken、权限策略\n- 极简 UI 文案和答复格式建议\n\n### 7. 完善单测集成测试（P2）\n- Agent、Tool、API 端到端测试\n- 异常与边界 case\n\n"
+}

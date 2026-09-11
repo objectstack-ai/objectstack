@@ -1,0 +1,33 @@
+{
+  "number": 1179,
+  "kind": "pull_request",
+  "title": "fix(hono-adapter): always expose `set-auth-token` via CORS",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-17T11:38:39Z",
+  "updated_at": "2026-04-17T11:39:11Z",
+  "closed_at": "2026-04-17T11:39:10Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-04-17T11:39:10Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1179",
+  "body": "Follow-up to #1177 and #1178. Those fixed CORS preflight and wildcard origin matching across the three Hono-based code paths, but cross-origin auth was still broken on Vercel: `createHonoApp()` defaulted `exposeHeaders` to `[]`, diverging from `plugin-hono-server` (which sets `['set-auth-token']` since `151dd19c`). Since `apps/server` routes all traffic through `createHonoApp()` on Vercel, browsers stripped `set-auth-token` from every response, preventing the better-auth `bearer()` plugin from delivering rotated session tokens — sessions silently broke on any cross-origin refresh even though preflight and the request both succeeded.\n\n### Changes\n\n- **`packages/adapters/hono/src/index.ts`** — always include `set-auth-token` in `exposeHeaders`, merged and deduped with user-supplied values; mirrors `plugin-hono-server` lines 155–161.\n- **`packages/adapters/hono/src/hono.test.ts`** — three new cases: default exposes `set-auth-token`, user-supplied exposeHeaders are merged (not replaced), no duplication when both include it.\n- **`CHANGELOG.md`** — Unreleased / Fixed entry.\n\n```ts\n// Before\napp.use('*', cors({\n  exposeHeaders: corsOpts.exposeHeaders || [],\n  ...\n}));\n\n// After — matches plugin-hono-server invariant\nconst exposeHeaders = Array.from(new Set([\n  'set-auth-token',\n  ...(corsOpts.exposeHeaders ?? []),\n]));\napp.use('*', cors({ exposeHeaders, ... }));\n```\n\n### Invariant worth preserving\n\nAll three Hono-based CORS sites must default `exposeHeaders` to include `set-auth-token`:\n\n1. `packages/plugins/plugin-hono-server/src/hono-plugin.ts`\n2. `packages/adapters/hono/src/index.ts` — `createHonoApp()` ← **this PR**\n3. Any future adapter wrapping Hono's `cors()`\n\n`apps/server/server/index.ts` is unaffected — its short-circuit handles OPTIONS only, and `Access-Control-Expose-Headers` applies to actual responses, which flow through `createHonoApp()`."
+}

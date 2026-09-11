@@ -1,0 +1,33 @@
+{
+  "number": 1026,
+  "kind": "pull_request",
+  "title": "fix: add missing Field.json() helper",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-31T11:05:27Z",
+  "updated_at": "2026-03-31T11:54:11Z",
+  "closed_at": "2026-03-31T11:52:20Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-31T11:52:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1026",
+  "body": "`@objectstack/service-realtime` fails to build because `Field.json()` doesn't exist. The `json` type is defined in the `FieldType` enum but had no corresponding factory helper on the `Field` object.\n\n- **`packages/spec/src/data/field.zod.ts`**: Add `Field.json()` helper, matching the pattern of other simple field helpers\n\n```typescript\n// Now works in sys-presence.object.ts (and anywhere else)\nmetadata: Field.json({\n  label: 'Metadata',\n  description: 'Arbitrary JSON metadata',\n}),\n```\n\n- **`content/docs/references/`**: Include pending doc updates for `tool`/`skill` metadata types and agent `skills`/`permissions` fields that were added to source but not yet reflected in reference docs\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> fix all ci build and test errors\n\n\n</details>\n\n"
+}

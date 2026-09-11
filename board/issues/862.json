@@ -1,0 +1,35 @@
+{
+  "number": 862,
+  "kind": "issue",
+  "title": "AuthPlugin should be loaded in both server and MSW modes, and gracefully handle missing HTTP server (support universal auth endpoints simulation)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-03-03T05:21:15Z",
+  "updated_at": "2026-03-03T08:13:33Z",
+  "closed_at": "2026-03-03T08:13:33Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/862",
+  "body": "## Problem\n\nCurrently, ObjectStack runtime (in both server and MSW/mock modes) does NOT load AuthPlugin by default in the kernel or in the configuration of most app examples (e.g., objectstack-ai/objectui, etc).\n\n- In server mode (HonoServerPlugin active), AuthPlugin works and registers /api/v1/auth/* endpoints and integrates better-auth backend.\n- In MSW/mock mode (pnpm dev), the kernel does not load AuthPlugin at all, and HttpDispatcher.handleAuth() cannot simulate /api/v1/auth/* endpoints, leading to 404 errors for registration and sign-in flows.\n- There is no fallback built into runtime for better-auth endpoints when AuthPlugin is not present.\n\n## Expected\n- AuthPlugin is loaded in both server and MSW/browser test environments wherever user authentication is needed.\n- In MSW mode, AuthPlugin should gracefully skip HTTP route registration if HonoServerPlugin/http-server is missing, BUT it should still register the 'auth' service so HttpDispatcher.handleAuth() can mock/simulate auth flows (sign-up, sign-in, etc.) using in-memory ObjectQL.\n- Most app scaffolds (.config.ts and kernel factories) should include AuthPlugin by default (unless explicitly testing an unauthenticated app).\n- As fallback for legacy cases, HttpDispatcher.handleAuth() should provide a mock implementation for core better-auth endpoints if AuthPlugin is missing (for high-fidelity MSW mock environments).\n\n## Solution\n- Update AuthPlugin to make route registration optional/graceful when no HonoServer/http-server is available (allow mock/test environments to proceed without errors).\n- Update kernal factories (e.g., in objectui, studio, etc) and config scaffolds to include AuthPlugin by DEFAULT.\n- Document MSW/mock usage patterns with AuthPlugin, and clarify minimal required configuration for mock mode (secret, ObjectQL driver, etc).\n- Optionally: extend HttpDispatcher.handleAuth() to provide safe mock fallback for registration/sign-in flows if 'auth' service is not present.\n\n## Impact\n- Developers can run server OR pnpm dev (MSW mode) and still register/authenticate test users (sign-up, sign-in, sign-out, get-session, etc.).\n- End users no longer encounter 404s for registration flows in Mock Console.\n\n---\nPlease see details in objectstack-ai/objectui issue for how the frontend expects MSW mode to behave.\n\n"
+}

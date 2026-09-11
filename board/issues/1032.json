@@ -1,0 +1,33 @@
+{
+  "number": 1032,
+  "kind": "pull_request",
+  "title": "fix: semantic error codes, handler readiness tracking, and route coverage schemas for multi-adapter API routing",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-01T02:44:20Z",
+  "updated_at": "2026-04-01T06:05:58Z",
+  "closed_at": "2026-04-01T06:05:57Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-01T06:05:57Z",
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1032",
+  "body": "Discovery declares routes as `available` without verifying HTTP handlers exist, dispatcher returns bare 404 for all failure modes (no handler, stub, service down), and Studio displays endpoints that will 404. This makes the entire API surface unreliable and undiagnosable.\n\n### Protocol schemas (`packages/spec`)\n\n- **`discovery.zod.ts`** — New `ServiceStatus` enum adds `'registered'` (route declared, handler unverified). New optional `handlerReady` boolean on `ServiceInfoSchema` (omitted means unverified). New `RouteHealthReportSchema` for startup coverage diagnostics.\n- **`dispatcher.zod.ts`** — `DispatcherErrorResponseSchema` with semantic `type` field (`ROUTE_NOT_FOUND` / `METHOD_NOT_ALLOWED` / `NOT_IMPLEMENTED` / `SERVICE_UNAVAILABLE`) and `hint` string. `/health` added to `DEFAULT_DISPATCHER_ROUTES`.\n- **`plugin-rest-api.zod.ts`** — Optional `handlerStatus` field on `RestApiEndpointSchema` (`implemented` | `stub` | `planned`; omitted implies `implemented`). `RouteCoverageReportSchema` for adapter-generated coverage reports.\n\nBoth `handlerReady` and `handlerStatus` are defined as `.optional()` rather than `.default()` to avoid requiring downstream packages (e.g., `@objectstack/objectql`) to include them in every object literal that satisfies the inferred type.\n\n### Runtime (`packages/runtime`)\n\n- **`http-dispatcher.ts`** — `dispatch()` fallback returns typed 404 instead of `{ handled: false }`. New `routeNotFound()` (404) helper. `/health` handler. `getDiscoveryInfo()` emits `handlerReady: true/false`.\n- **`dispatcher-plugin.ts`** — `sendResult()` returns `ROUTE_NOT_FOUND` with hint. Registers `/health` handler.\n\n### Studio (`apps/studio`)\n\n- **`use-api-discovery.ts`** — Filters service endpoints by `handlerReady` (with backward-compat fallback to `status === 'available' | 'degraded'`), not just `enabled`.\n\n```typescript\n// Before: any enabled service shows endpoints (even if handler doesn't exist)\nif (isEnabled) { serviceEndpoints.push(...) }\n\n// After: requires handler confirmation\nconst hasHandler = serviceInfo?.handlerReady\n  ?? (serviceInfo?.status === 'available' || serviceInfo?.status === 'degraded');\nif (isEnabled && hasHandler) { serviceEndpoints.push(...) }\n```\n\n18 new tests added, all 121 tests pass."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1041,
+  "kind": "pull_request",
+  "title": "feat(studio): collapsible right-side AI Chat panel (VS Code style)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-01T06:37:05Z",
+  "updated_at": "2026-04-01T07:39:11Z",
+  "closed_at": "2026-04-01T07:36:14Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-01T07:36:14Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1041",
+  "body": "Adds a global floating AI Chat panel to Studio, docked to the right edge. Collapsed: 48px edge button. Expanded: 380px panel with streaming chat via Vercel AI SDK.\n\n### New files\n\n- **`components/AiChatPanel.tsx`** — Panel UI with header, scrollable message list, text input. Uses `@ai-sdk/react` `useChat` + `DefaultChatTransport` pointed at `/api/v1/ai/chat`. Renders `UIMessage.parts[]` (AI SDK v6 format). Enter to send, Shift+Enter for newline.\n- **`hooks/use-ai-chat-panel.ts`** — Panel open/close state + message history persisted to localStorage. Global keyboard shortcut `Ctrl+Shift+I` / `Cmd+Shift+I`. Uses functional state updates to avoid stale closures in the keydown handler.\n- **`test/ai-chat-panel.test.tsx`** — 9 tests covering `loadMessages`/`saveMessages` edge cases (empty, invalid JSON, quota exceeded), panel state keys, and toggle behavior.\n\n### Modified files\n\n- **`App.tsx`** — Mounts `<AiChatPanel />` inside `<SidebarProvider>`, alongside left sidebar\n- **`package.json`** — Adds `ai@^6.0.142`, `@ai-sdk/react@^3.0.144`\n\n### API surface\n\n```tsx\n// Hook API\nconst { isOpen, setOpen, toggle } = useAiChatPanel();\n\n// Chat uses AI SDK v6 transport pattern (not legacy v2 api string)\nconst transport = new DefaultChatTransport({ api: '/api/v1/ai/chat' });\nconst { messages, sendMessage, status } = useChat({ transport, messages: initialMessages });\n```\n\n### localStorage keys\n\n| Key | Value |\n|---|---|\n| `objectstack:ai-chat-messages` | `UIMessage[]` JSON |\n| `objectstack:ai-chat-panel-open` | `\"true\"` / `\"false\"` |"
+}

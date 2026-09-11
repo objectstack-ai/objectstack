@@ -1,0 +1,33 @@
+{
+  "number": 1170,
+  "kind": "pull_request",
+  "title": "fix(studio): resolve router basepath at runtime for sub-path mounts",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-17T03:09:57Z",
+  "updated_at": "2026-04-17T03:36:26Z",
+  "closed_at": "2026-04-17T03:36:26Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-04-17T03:36:26Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1170",
+  "body": "## Summary\n\nTwo fixes in this PR, both affecting Studio deployment/navigation:\n\n### 1. Fix duplicate sidebar in `/$package/*` routes\n\n**Reported:** clicking an object (or any metadata item) in the left sidebar showed the sidebar again inside the right content pane instead of the metadata detail.\n\n**Cause:** With TanStack Router's flat file routing, `$package.objects.$name.tsx` and `$package.metadata.$type.$name.tsx` auto-nest under `$package.tsx` (confirmed in `routeTree.gen.ts`: `getParentRoute: () => PackageRoute`). The parent `$package.tsx` rendered `<AppSidebar>` + `<main>` + `<SiteHeader>` + `<Outlet>`, and each child *also* rendered its own full shell — which ended up painted inside the parent's `<Outlet>`.\n\n**Fix:** split responsibilities:\n- `$package.tsx` → bare layout (`<AppSidebar>` + `<main className=\"...\"><Outlet/></main>`). No `SiteHeader`.\n- New `$package.index.tsx` leaf → handles the exact `/$package` URL, rendering `<SiteHeader selectedView=\"overview\">` + `<DeveloperOverview>`.\n- `$package.objects.$name.tsx`, `$package.metadata.$type.$name.tsx` → render only their `<SiteHeader>` + `<PluginHost>`, shell is inherited from the parent layout.\n\nVerified in Chrome against the new Vercel layout:\n\n![Studio object detail after fix](https://github.com/user-attachments/assets/a02f4b7f-d29a-4f33-b27e-127b093c54e8)\n\n| URL | Before | After |\n|---|---|---|\n| `/_studio/crm/objects/crm__Campaign` | Left sidebar duplicated in main pane | Object Designer detail (Preview / Code / Data, Schema / Data / API tabs) |\n| `/_studio/crm` | Empty right pane | Developer Console overview |\n| `/_studio/crm/metadata/dashboards/x` | Duplicate shell | PluginHost for that metadata item |\n\n### 2. Unify Studio mount path to `/_studio/` (prior commit)\n\n`apps/studio/vite.config.ts` default `base` changed from `'./'` to `'/_studio/'`. Every bundle now bakes in absolute `/_studio/...` asset URLs and `import.meta.env.BASE_URL === '/_studio/'`. Removed the runtime `window.__OBJECTSTACK_STUDIO_BASEPATH__` injection workaround. `apps/server/vercel.json` + `scripts/build-vercel.sh` updated so studio serves under `/_studio/` on Vercel as well — `/` redirects to `/_studio/`, `/_studio/:path*` SPA rewrite maps to `/_studio/index.html`, `VITE_BASE=/_studio/` in build env, dist copied to `public/_studio/`.\n\n### Files changed\n\n- `apps/studio/vite.config.ts` — `base: '/_studio/'` default.\n- `apps/studio/src/router.ts` — simplify `resolveBasepath()` to read only `BASE_URL`.\n- `apps/studio/src/routes/$package.tsx` — bare layout (AppSidebar + main + Outlet).\n- `apps/studio/src/routes/$package.index.tsx` — **new**, package overview leaf.\n- `apps/studio/src/routes/$package.objects.$name.tsx` — drop duplicate shell.\n- `apps/studio/src/routes/$package.metadata.$type.$name.tsx` — drop duplicate shell.\n- `apps/studio/src/routeTree.gen.ts` — regenerated.\n- `packages/cli/src/utils/studio.ts` — `createStudioStaticPlugin` serves dist verbatim (no rewriting, no script injection).\n- `apps/server/vercel.json` — `/_studio/:path*` rewrite, `/` → `/_studio/` redirect, `VITE_BASE=/_studio/`, cache scoped to `/_studio/assets/*`.\n- `apps/server/scripts/build-vercel.sh` — copy dist to `public/_studio/`.\n- Changelogs: `apps/studio/`, `apps/server/`, `packages/cli/`.\n\n### Tests\n\n- `@objectstack/studio` — 41/41 passing tests still pass. The 8 pre-existing failing suites (`api.test.ts`, `verify-*.test.ts`, `AppSidebar.test.tsx`, etc. — module-export and missing-source issues) are **unrelated and pre-existing** (confirmed by rerunning tests on `HEAD` with changes stashed).\n- `@objectstack/cli` — 83/83 pass.\n- `@objectstack/server` — runner exits clean.\n- `pnpm build --filter @objectstack/studio` — 26/26 tasks succeed.\n\n## Plan\n\n- [x] Diagnose duplicate-shell bug (parent + child each rendering AppSidebar)\n- [x] Refactor `$package.tsx` into bare layout\n- [x] Add `$package.index.tsx` leaf for package overview\n- [x] Simplify `$package.objects.$name.tsx` and `$package.metadata.$type.$name.tsx`\n- [x] Rebuild studio, regenerate route tree\n- [x] Chrome-test: object detail, metadata detail, package overview, root redirect\n- [x] Confirm pre-existing test failures are unrelated\n- [x] Update `apps/studio/CHANGELOG.md`\n\n(Prior Vercel `/_studio/` unification changes also included in this PR.)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1022,
+  "kind": "pull_request",
+  "title": "refactor(service-ai): auth metadata, user context, ownership, enhanced tool-call loop",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-31T09:41:36Z",
+  "updated_at": "2026-03-31T10:57:09Z",
+  "closed_at": "2026-03-31T10:57:09Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-31T10:57:09Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1022",
+  "body": "Adds route-level auth/permissions declarations, user context propagation, conversation ownership enforcement, and improved tool-call orchestration with error handling and streaming support.\n\n### Route auth/permissions metadata\n\n- `RouteDefinition` gains `auth?: boolean` and `permissions?: string[]`\n- All routes declare explicit permission scopes: `ai:chat`, `ai:complete`, `ai:read`, `ai:conversations`, `ai:agents`\n\n### User context on RouteRequest\n\n- New `RouteUserContext` type (`userId`, `displayName`, `roles`, `permissions`)\n- `RouteRequest.user` populated by auth middleware upstream\n\n### Conversation ownership\n\n- `POST /conversations` binds `userId` from authenticated context; validates request body is a non-null object (returns 400 on invalid payloads)\n- `GET /conversations` scopes listing to current user\n- `POST /conversations/:id/messages` and `DELETE /conversations/:id` verify ownership, return 403 on mismatch\n- Backward-compatible: requests without user context and conversations created without a `userId` remain accessible under existing behavior\n\n### Enhanced tool-call loop\n\n- `ChatWithToolsOptions.onToolError` callback: return `'continue'` or `'abort'` per tool failure\n- Error tracking across iterations with `toolCallId`-based matching (not index)\n- Distinct log messages for user-driven abort (`onToolError` → `'abort'`) vs max-iterations exhaustion\n- New `streamChatWithTools()`: streaming tool-call loop yielding SSE events, resolving intermediate tool calls server-side without double model invocation on the final round\n\n```typescript\nconst result = await ai.chatWithTools(messages, {\n  maxIterations: 5,\n  onToolError: (toolCall, error) => {\n    logger.error(`Tool ${toolCall.name} failed: ${error}`);\n    return toolCall.name === 'critical_tool' ? 'abort' : 'continue';\n  },\n});\n```\n\n### Tests\n\n28 new tests: 7 auth metadata, 11 ownership enforcement (including body validation), 6 tool-call error handling, 4 streaming tool loop. All 158 service-ai tests and 6773 spec tests pass."
+}

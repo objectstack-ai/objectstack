@@ -1,0 +1,33 @@
+{
+  "number": 887,
+  "kind": "pull_request",
+  "title": "fix: resolve multiple CI test failures across client, objectql, hono-server, and plugin-dev",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-09T07:43:19Z",
+  "updated_at": "2026-03-09T10:07:05Z",
+  "closed_at": "2026-03-09T08:56:38Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-09T08:56:38Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/887",
+  "body": "Several packages had failing tests in CI due to async misuse, incorrect API assumptions, unimplemented plugin features, and integration tests running without a server.\n\n## `@objectstack/objectql` — `plugin.integration.test.ts`\n- All `kernel.use(plugin)` calls were missing `await`. `ObjectKernel.use()` is async; without it, plugins weren't registered before `bootstrap()` called `resolveDependencies()`.\n- Fixed wrong assertions: `metadata` service is a `MetadataFacade` instance (not the `objectql` instance), and `SchemaRegistry.getAllObjects()` is the correct API (not `listObjects()`).\n\n## `@objectstack/client` — `src/index.ts`\n- Permission routes were incorrectly mapped to `/api/v1/auth`. Fixed:\n  - Base route: `/api/v1/auth` → `/api/v1/permissions`\n  - `getObjectPermissions`: path `permissions/${obj}` → `objects/${obj}`\n  - `getEffectivePermissions`: path `permissions/effective` → `effective`\n  - `check`: changed from `POST` with body to `GET` with query params\n\n## `@objectstack/plugin-hono-server` — `registerStandardEndpoints`\n- The `registerStandardEndpoints: true` option was defined but never implemented. Added:\n  - `GET /.well-known/objectstack` and `GET /api/v1` — discovery endpoints returning standard route map\n  - `POST /api/v1/data/:object`, `GET /api/v1/data/:object/:id`, `GET /api/v1/data/:object` — CRUD endpoints delegating to `kernel.broker`\n- Fixed `port || 3000` → `port ?? 3000` so `port: 0` (\"random port\") is no longer coerced to 3000.\n\n## `@objectstack/client` — `vitest.config.ts` (new)\n- `pnpm test` was picking up `tests/integration/**` which require a live server. Added a default vitest config to exclude them; they remain runnable via `test:integration`.\n\n## `@objectstack/plugin-dev` — dev stubs\n- `createMemoryCache`, `createMemoryQueue`, `createMemoryJob` from core return `_fallback: true`, but tests assert `_dev: true`. Wrapped each factory to merge `_dev: true`.\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> fix ci errors\n> \n> The user has attached the following file paths as relevant context:\n>  - .github/copilot-instructions.md\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\nCreated from [VS Code](https://code.visualstudio.com/docs/copilot/copilot-coding-agent).\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1019,
+  "kind": "pull_request",
+  "title": "feat(ai): Agent→Skill→Tool three-tier metadata protocol",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-31T08:45:42Z",
+  "updated_at": "2026-03-31T09:35:38Z",
+  "closed_at": "2026-03-31T09:27:29Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-31T09:27:29Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1019",
+  "body": "Current `agent.zod.ts` treats tools as inline references only. Industry standard (Salesforce Agentforce, Copilot Studio, ServiceNow) uses Agent→Skill→Tool: Tool as first-class metadata, Skill as reusable ability group, Agent as lightweight config referencing skills.\n\n### New protocols\n\n- **`src/ai/tool.zod.ts`** — `ToolSchema` with JSON Schema parameters/outputSchema, category enum, objectName binding, requiresConfirmation, permissions, builtIn flag. `defineTool()` factory.\n- **`src/ai/skill.zod.ts`** — `SkillSchema` aggregating tool references by domain. Supports `instructions` (injected into system prompt), `triggerPhrases` (intent matching), `triggerConditions` (programmatic activation via field/operator/value). `defineSkill()` factory.\n\n### Agent refactoring\n\n- Added `skills: string[]` as primary capability model\n- Existing `tools: AIToolSchema[]` retained as backward-compatible fallback\n- Added `permissions: string[]` for access control\n\n### Metadata registry\n\n- `tool` and `skill` added to `MetadataTypeSchema` enum and `DEFAULT_METADATA_TYPE_REGISTRY`\n- Load order: tool (85) → skill (88) → agent (90)\n- File patterns: `**/*.tool.{ts,yml}`, `**/*.skill.{ts,yml}`\n\n### Usage\n\n```ts\nconst tool = defineTool({\n  name: 'create_case',\n  label: 'Create Case',\n  description: 'Creates a support case',\n  category: 'action',\n  parameters: { type: 'object', properties: { subject: { type: 'string' } }, required: ['subject'] },\n  objectName: 'support_case',\n  requiresConfirmation: true,\n});\n\nconst skill = defineSkill({\n  name: 'case_management',\n  label: 'Case Management',\n  instructions: 'Use these tools to manage support cases.',\n  tools: ['create_case', 'update_case', 'resolve_case'],\n  triggerPhrases: ['open a ticket', 'create a case'],\n});\n\nconst agent = defineAgent({\n  name: 'support_agent',\n  label: 'Support Agent',\n  role: 'Support Specialist',\n  instructions: 'Help customers resolve issues.',\n  skills: ['case_management', 'knowledge_search'],\n});\n```"
+}

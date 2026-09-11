@@ -1,0 +1,33 @@
+{
+  "number": 999,
+  "kind": "issue",
+  "title": "新增 service-ai：统一 AI 能力服务插件",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-31T02:56:24Z",
+  "updated_at": "2026-03-31T03:52:48Z",
+  "closed_at": "2026-03-31T03:52:48Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/999",
+  "body": "### 背景\n当前 `packages/services` 下已经有 service-analytics、service-automation、service-cache、service-i18n 等标准化能力服务插件，均与相应的 contracts 保持一一对应，实现统一的内核插件化框架，并支持 REST/SSE、自注册路由、标准服务名。\n\n但 AI 相关能力现状分散：已有 contracts (`IAIService` in contracts/ai-service.ts)、数据协议（agent、conversation、model-registry、orchestration、rag-pipeline.zod.ts 等），但缺少一个正式的 AI 服务端插件，导致：\n- 业务/工程层接入 AI（LLM、Tool、Agent）能力没有规范化入口\n- 每个项目容易出现 LLM 直连、会话逻辑散落各处等现象\n- 生态扩展和继承成本高\n\n### 目标\n- 创建 `packages/services/service-ai`，实现内核分层的 AI Service 插件：\n  - 能够注册为 kernel `'ai'` 服务，契合 `IAIService` contract\n  - 支持 REST/SSE 路由自注册（例：/api/v1/ai/conversations、/api/v1/ai/chat 等）\n  - 提供标准的 LLM 适配层+会话及 Tool/Agent 编排逻辑\n  - 工厂化内聚\"ai\"上下游相关协议及风格最佳实践\n\n### 拟议方案\n1. 明确 contract 升级：扩展 `IAIService`，增加 streamChat、多参数、tool调用协议\n2. 增加 `IAIConversationService`，专责会话与 Tool/Agent 执行流\n3. 遵循现有 service-* 体系，参考 service-automation、service-analytics 内部结构：\n   - adapters/（对接 LLM Provider 层，统一 streaming + Tool 调用）\n   - conversation/（多轮会话与消息/上下文持久化）\n   - tools/（元数据/业务工具注册、handler 路由）\n   - routes/（REST+SSE 路由注册，不侵入 global）\n4. 提供基础内存实现和真实 provider 实现，便于本地测试及扩展\n5. 严格对齐 `src/ai/*.zod.ts`、contracts 及 DevKernel 全链路接口测试\n\n### 相关影响\n- 规范所有 AI 能力接入路径，促进行业一流工程标准\n- 为后续所有 Agent、数据智能、RAG、元数据助手等高级功能演进打基础\n\n### 参考\n- [service-analytics 结构](https://github.com/objectstack-ai/spec/tree/main/packages/services/service-analytics)\n- [contracts/ai-service.ts](https://github.com/objectstack-ai/spec/blob/main/packages/spec/src/contracts/ai-service.ts)\n- [ai/agent.zod.ts](https://github.com/objectstack-ai/spec/blob/main/packages/spec/src/ai/agent.zod.ts)\n- [`vercel/ai` SDK 用法（tool、streamText）](https://github.com/vercel/ai)\n\n---\n如无异议，将以此方案推进。"
+}

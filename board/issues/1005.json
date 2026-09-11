@@ -1,0 +1,33 @@
+{
+  "number": 1005,
+  "kind": "pull_request",
+  "title": "feat(studio): populate API console endpoints from discovery service map",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-31T05:37:06Z",
+  "updated_at": "2026-03-31T06:34:58Z",
+  "closed_at": "2026-03-31T06:34:58Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-31T06:34:58Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1005",
+  "body": "Studio API console only showed System, Auth, Metadata, and Data CRUD endpoints. All service endpoints (AI, Workflow, Realtime, Notifications, Analytics, Automation, i18n, UI, Feed, Storage) were missing because the discovery response's `services` map was fetched but never used to generate endpoint entries.\n\n### Changes\n\n- **`use-api-discovery.ts`**: Parse full discovery response (`services` + `routes`) and generate endpoints for each enabled service\n- **`SERVICE_ENDPOINT_CATALOG`**: New exported catalog mapping service names → well-known endpoints, aligned with `plugin-rest-api.zod.ts` `DEFAULT_*_ROUTES`\n- **`buildServiceEndpoints(serviceName, routePrefix)`**: New exported helper to generate `EndpointDef[]` from catalog + discovered route prefix\n- **Group sort order**: Service groups now appear between Auth and Metadata\n\n### How it works\n\nThe hook already fetched `/api/v1/discovery` — it just discarded everything except `routes.auth`. Now:\n\n```ts\n// For each cataloged service, check if discovery reports it as enabled\nfor (const [serviceName, catalog] of Object.entries(SERVICE_ENDPOINT_CATALOG)) {\n  const serviceInfo = discoveredServices[serviceName];\n  if (serviceInfo?.enabled) {\n    const routePrefix = serviceInfo.route ?? discoveredRoutes[serviceName] ?? catalog.defaultRoute;\n    serviceEndpoints.push(...buildServiceEndpoints(serviceName, routePrefix));\n  }\n}\n```\n\nRoute prefix resolution: `serviceInfo.route` → `discoveredRoutes[key]` → `catalog.defaultRoute`.\n\n### Tests\n\nNew `test/service-endpoint-catalog.test.ts` — 11 tests covering catalog completeness, builder correctness, custom route prefixes, unknown service handling, and body template presence."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1122,
+  "kind": "pull_request",
+  "title": "fix: replace pnpm/action-setup@v6 with corepack in all CI workflows",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-13T13:03:15Z",
+  "updated_at": "2026-04-13T13:05:43Z",
+  "closed_at": "2026-04-13T13:03:30Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-13T13:03:30Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1122",
+  "body": "All CI jobs fail with `ERR_PNPM_BROKEN_LOCKFILE: \"expected a single document in the stream, but found more\"` since PR #1117 merge. The lockfile content is valid (verified with the exact `@zkochan/js-yaml@0.0.11` parser bundled in pnpm 10.31.0), and `pnpm install --frozen-lockfile` succeeds locally. The issue is `pnpm/action-setup@v6`'s npm-based self-installer producing a pnpm environment that misparses the lockfile.\n\n### Changes\n\n- **Replace `pnpm/action-setup@v6` → `corepack enable`** across all 5 workflows (`ci.yml`, `lint.yml`, `release.yml`, `validate-deps.yml`, `pr-automation.yml`). Corepack uses the `packageManager` field in `package.json` with SHA-512 verification — identical binary to local dev.\n\n- **Add `pnpm --version` step** after corepack enable for CI debuggability.\n\n- **Bump pnpm store cache keys** `v2` → `v3` to avoid restoring stale caches from the old setup.\n\n- **Regenerate `pnpm-lock.yaml`** from scratch (`rm + pnpm install`) for a clean baseline.\n\n### Before/After\n\n```yaml\n# Before\n- name: Install pnpm\n  uses: pnpm/action-setup@v6\n\n# After\n- name: Enable Corepack\n  run: corepack enable\n\n- name: Verify pnpm version\n  run: pnpm --version\n```"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1200,
+  "kind": "pull_request",
+  "title": "Fix doubly-prefixed FQN for ObjectOS system objects",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-20T14:55:09Z",
+  "updated_at": "2026-04-20T14:55:24Z",
+  "closed_at": "2026-04-20T14:55:24Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-04-20T14:55:24Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1200",
+  "body": "ObjectOS system objects were registering under FQNs like `sys__sys_object`, `sys__sys_view`, `sys__sys_metadata` — the `sys_` prefix was applied twice because each definition hard-coded it into `name` while the owning manifest also declared `namespace: 'sys'`, and `SchemaRegistry.computeFQN` concatenates both as `{namespace}__{name}`.\n\n### Changes\n\n- **`packages/objectos/src/objects/*.ts`** — Drop the `sys_` prefix from `name` so the short name matches the convention used by `plugin-auth`, `plugin-security`, and `@objectstack/metadata`:\n  - `SysObject.name`: `sys_object` → `object` (FQN `sys__object`)\n  - `SysView.name`: `sys_view` → `view` (FQN `sys__view`)\n  - `SysAgent.name`: `sys_agent` → `agent` (FQN `sys__agent`)\n  - `SysTool.name`: `sys_tool` → `tool` (FQN `sys__tool`)\n  - `SysFlow.name`: `sys_flow` → `flow` (FQN `sys__flow`)\n  - `SysMetadata.name`: `sys_metadata` → `metadata`\n- **`packages/objectos/src/registry.ts`** — Remove `SysMetadata` from the auto-registered `SystemObjects` catalog to avoid an ownership collision on `sys__metadata`, which is already owned by `@objectstack/metadata`. `SysMetadata` remains exported for direct import. Record keys updated to the new short names and TSDoc explicitly warns against hard-coding `sys_` into `name`.\n- **`packages/metadata/src/plugin.ts`** — Debug log now reports FQNs (`sys__object`, …) rather than bare short names, which are ambiguous post-fix.\n- **Tests / docs** — `sys-metadata.object.test.ts`, `packages/objectos/README.md`, and `CHANGELOG.md` updated.\n\n### Before / after\n\n```ts\n// Before: FQN = sys__sys_object\nexport const SysObject = ObjectSchema.create({\n  name: 'sys_object',\n  namespace: 'sys',\n  ...\n});\n\n// After: FQN = sys__object\nexport const SysObject = ObjectSchema.create({\n  name: 'object',\n  namespace: 'sys',\n  ...\n});\n```\n\n### Notes for reviewers\n\n- `SysMetadata` and `@objectstack/metadata`'s `SysMetadataObject` model the same envelope with divergent field sets. This PR preserves the status quo (metadata package is the owner) and defers reconciliation. If `SysMetadata` is meant to supersede it, that should be a separate, explicit migration.\n- No callers reference the old `sys__sys_*` FQNs; `plugin-auth`, `plugin-security`, `plugin-audit`, and `http-dispatcher` already use correctly-formed FQNs (`sys__user`, `sys__role`, `sys__audit_log`, `sys__environment`, …)."
+}

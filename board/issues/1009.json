@@ -1,0 +1,33 @@
+{
+  "number": 1009,
+  "kind": "issue",
+  "title": "实现基于 ObjectQL 的持久化 ConversationService",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-31T06:47:54Z",
+  "updated_at": "2026-03-31T07:52:16Z",
+  "closed_at": "2026-03-31T07:52:16Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1009",
+  "body": "\n当前 `InMemoryConversationService` 的代码注释已明确指出：\n\n> *Production environments should replace this with a persistent implementation (e.g., backed by ObjectQL/SQL).*\n\n在单进程/开发模式下 InMemory 实现是合理的，但生产环境中对话历史在服务重启后丢失。\n\n### 任务\n\n1. **新增** `packages/services/service-ai/src/conversation/objectql-conversation-service.ts`\n   - `class ObjectQLConversationService implements IAIConversationService`\n   - 依赖 `IDataEngine`（通过构造函数注入或 kernel service 获取）\n   - 使用 `ai_conversations` object 存储对话元数据\n   - 使用 `ai_messages` object 存储消息（外键关联 conversation）\n2. **新增** 元数据定义（JSON metadata 或 migration）：\n   - `ai_conversations`: `id`, `title`, `agentId`, `userId`, `metadata` (JSON), `createdAt`, `updatedAt`\n   - `ai_messages`: `id`, `conversationId` (FK), `role`, `content`, `toolCalls` (JSON), `toolCallId`, `createdAt`\n3. **更新** `AIServiceConfig` 支持配置 conversation service 类型：\n   ```typescript\n   conversationService?: IAIConversationService; // 已有，可直接注入\n   ```\n4. **更新** `AIServicePlugin` 在 `init` 阶段检测 kernel 中是否有 `IDataEngine`：\n   - 有 → 默认使用 `ObjectQLConversationService`\n   - 无 → fallback 到 `InMemoryConversationService`\n5. **新增单元测试** 使用 `driver-memory` 的 `IDataEngine` 验证 CRUD\n6. **更新** `index.ts` 导出新的 service\n7. **更新** CHANGELOG.md\n\n### 架构要求\n\n- **不要** 硬依赖特定 driver（Turso/Postgres），仅依赖 `IDataEngine` 接口\n- ��持 `InMemoryConversationService` 不变（开发/测试仍需要）\n- 对话消息查询需支持按 `conversationId` 过滤和按 `createdAt` 排序\n\n### 验收标准\n\n- [ ] `ObjectQLConversationService` 实现 `IAIConversationService` 全部 5 个方法\n- [ ] 通过 `IDataEngine` 进行持久化，不绑定具体 driver\n- [ ] plugin 自动检测并选择 conversation service\n- [ ] InMemoryConversationService 行为不变\n- [ ] 新增 ≥10 个测试用例\n- [ ] 全部测试通过"
+}

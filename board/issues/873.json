@@ -1,0 +1,36 @@
+{
+  "number": 873,
+  "kind": "issue",
+  "title": "[Meta-driven Seed Loader] Engine must support dynamic relationship resolution & dependency ordering for seed data initialization",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "enhancement"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-04T14:53:05Z",
+  "updated_at": "2026-03-09T08:35:40Z",
+  "closed_at": "2026-03-09T08:35:40Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/873",
+  "body": "## Problem\nObjectStack currently allows objects and their fields to be defined and loaded entirely via metadata, but the engine's seed data loader does not automatically resolve relationships (lookup/master_detail fields) between records during initialization. Instead, it expects either pre-populated IDs, manual foreign-key mapping, or a fully correct insert order. \n\nThis makes onboarding, demo, and config scenarios fragile, and does not meet the self-driving data onboarding expectation of metadata-driven platforms.\n\n## Detail Checklist\n- [ ] Engine seed loader must, during insert/upsert of seed data, automatically resolve lookup/master_detail references using target object's `externalId` (usually 'name'). This should happen if the field value is not already an internal ID, but is a string matching a unique key in the referenced object.\n- [ ] Topological sort must be performed to determine import order based on object dependency graph, so parent objects are inserted before child objects that reference them.\n- [ ] If circular or delayed references exist, loader must perform a second pass to fill unresolved relationships after all records are inserted.\n- [ ] Engine should respect DatasetSchema's `mode: upsert`, not just blindly insert objects; upsert logic should be honored based on externalId for idempotency.\n- [ ] Any reference resolution failure should generate actionable error messages with: field name, target object, externalId, attempted value, and possible missing referent.\n- [ ] Loader should support dry-run for validation (check relationships before write) to surface broken references before failures.\n- [ ] All logic should be metadata-driven and use SchemaRegistry, supporting hot-reload and dynamic object changes.\n\n## Acceptance Criteria\n- Seed data can be written entirely using references via externalId (natural key).\n- Demo and onboarding environments require no manual ID prep or table pre-sorting.\n- All new objects with relationships work immediately from metadata alone, regardless of schema changes.\n- Error handling and reporting matches the ease-of-use of platforms like Salesforce, Airtable, ServiceNow, etc.\n\n## Impact\nThis makes ObjectStack truly declarative, metadata-first for data onboarding, and closes a gap in platform intelligence compared to major low-code engines."
+}

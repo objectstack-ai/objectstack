@@ -1,0 +1,33 @@
+{
+  "number": 945,
+  "kind": "issue",
+  "title": "实现 service-analytics，支持多数据库驱动的分析服务",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-03-22T03:39:19Z",
+  "updated_at": "2026-03-22T04:47:02Z",
+  "closed_at": "2026-03-22T04:47:02Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/945",
+  "body": "## 背景\n当前 ObjectStack 的 analytics 接口仅有 MemoryAnalyticsService 实现，无法支撑 PostgreSQL/Mongo/SQL 驱动的多数据源分析能力。\n\n## 目标\n- 在 `packages/services/service-analytics` 下实现标准化 `service-analytics` 插件。\n- 提供 IAnalyticsService 的完整实现，支持基于任意 Driver（Postgres、Mongo、Memory）进行分析聚合。\n- 支持自动发现和注册 Cube（支持 manifest 中明确定义和自动从对象推导）。\n- 通过策略模式（Strategy Pattern）根据 driver 能力动态下发分析查询（ObjectQL、原生 SQL、Memory 等）。\n- 提供原生 SQL 解释/生成能力（generateSql）。\n\n## 关键方案\n- 架构分离：AnalyticsService 仅为 orchestrator，实际执行通过策略链（Strategy 模式）委托给不同的实现\n    - P1：NativeSQLStrategy（优先下推原生 SQL）\n    - P2：ObjectQLStrategy（通用逻辑在 driver 支持时回落）\n    - P3：InMemoryStrategy（只限于 Memory/Dev 环境）\n- CubeRegistry 自动收集全部 cubes，支持多 manifest 来源\n- 完善跨驱动能力探测（queryAggregations），以适配当前和未来的多种存储后端\n- 确保与 API 协议 / Kernel 插件机制一致对齐\n- \n## 验收标准\n- [ ] 可以通过 objectql+postgres 或 objectql+mongo 驱动完成 /api/v1/analytics/query 查询（聚合、分组、过滤）\n- [ ] 各驱动的聚合能力可动态探测与切换\n- [ ] dev/test 环境继续兼容 MemoryAnalyticsService ��为\n- [ ] 有单元测试覆盖主要策略分支\n- [ ] ROADMAP.md、CHANGELOG.md 更新\n\n> 本需求为实施多驱动分析能力的基础。相关配套 PR 会同步在 objectui 完成 UI 注册和调用。"
+}

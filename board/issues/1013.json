@@ -1,0 +1,33 @@
+{
+  "number": 1013,
+  "kind": "pull_request",
+  "title": "feat(service-ai): implement ObjectQL-backed persistent ConversationService",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-31T07:09:05Z",
+  "updated_at": "2026-03-31T07:52:15Z",
+  "closed_at": "2026-03-31T07:52:15Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-31T07:52:15Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1013",
+  "body": "`InMemoryConversationService` loses conversation history on restart. This adds a persistent implementation backed by `IDataEngine`, with auto-detection in the plugin.\n\n### Object definitions (`src/objects/`)\n- `ai_conversations` — `id`, `title`, `agent_id`, `user_id`, `metadata` (JSON), `created_at`, `updated_at` (both timestamps `readonly`)\n- `ai_messages` — `id`, `conversation_id` (FK), `role`, `content`, `tool_calls` (JSON), `tool_call_id`, `created_at`\n\n### `ObjectQLConversationService`\n- Implements all 5 `IAIConversationService` methods via `IDataEngine`\n- Snake_case DB columns ↔ camelCase API properties mapping with typed `DbConversationRow`/`DbMessageRow` interfaces\n- JSON serialization for `metadata` and `toolCalls` fields with safe parsing (`safeParse` helper guards against invalid JSON in persisted data)\n- Stable composite `(created_at, id)` ordering for deterministic pagination and message replay\n- `$or`-based cursor pagination to avoid skips/duplicates when timestamps collide\n- Parallel message loading via `Promise.all` in `list()`\n- Cascade delete (messages first, then conversation)\n- UUID generation via explicit `node:crypto` import (`randomUUID`)\n\n### Plugin auto-detection\n```typescript\n// AIServicePlugin.init() resolution order:\n// 1. Explicit options.conversationService\n// 2. ctx.getService<IDataEngine>('data') → ObjectQLConversationService\n// 3. InMemoryConversationService fallback\n```\n\n`AIServicePluginOptions` gains optional `conversationService` for explicit override. Plugin also registers `AiConversationObject` and `AiMessageObject` via `app.com.objectstack.service-ai` for ObjectQL auto-discovery.\n\n### Tests\n- 19 new test cases using an in-memory `IDataEngine` stub — covers CRUD, tool message round-trips, cursor pagination (no skips/duplicates), invalid JSON resilience, error paths, metadata JSON serialization\n- All 79 tests pass (60 existing + 19 new)"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 940,
+  "kind": "issue",
+  "title": "ObjectQL未自动同步所有注册对象的表结构（驱动未调用init/ syncSchema）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-03-21T06:00:24Z",
+  "updated_at": "2026-03-21T06:06:29Z",
+  "closed_at": "2026-03-21T06:06:29Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/940",
+  "body": "## 问题描述\n当插件（如 plugin-auth）通过 `registerService('app.<id>', manifest)` 注册对象元数据后，`ObjectQLPlugin` 能正确调用 `ql.registerApp()` 并将对象写入 `SchemaRegistry`。\n\n但 `ObjectQL` 的 `init()` 实现只调用了 `driver.connect()`，没有取出 SchemaRegistry 里的所有对象并调用驱动的 `init(objects)` 或 `syncSchema(objects)` 来同步表结构。导致如 sys_user 等对象即使注册了，表结构也不会自动变更或创建。\n\n表现为启动后访问用户表时报错：\n```\nSQLITE_ERROR: no such table: sys_user\n```\n\n## 影响范围\n- 任何通过 `registerService('app.<id>', manifest)` 注册对象（如 plugin-auth，plugin-audit 等系统插件）的表结构都不会自动被 driver 初始化/创建\n- 使用 Turso/SQLite 驱动时尤其明显\n\n## 期望行为\n- `ObjectQL.init()` 除了调用所有 driver 的 `connect()` 外，还应自动：\n  1. 统计 SchemaRegistry.getAllObjects() 返回的全部对象定义\n  2. 遍历所有 driver，调用 `driver.init(objects)` 或 `driver.syncSchema(objects)` 方法完成表结构同步（**幂等**）\n- 这样所有注册到元数据系统的对象/表都能被自动创建，使用即有，无需手动 migration。\n\n## 建议修复（设计参考）\n```typescript\n// packages/objectql/src/plugin.ts — ObjectQLPlugin.start() 中\n// 在 await this.ql?.init() 之后添加：\n\n// Sync all registered object schemas to drivers (idempotent)\nconst allObjects = this.ql?.registry?.getAllObjects?.() ?? [];\nif (allObjects.length > 0) {\n  ctx.logger.info('Syncing schema for registered objects', { count: allObjects.length });\n  for (const obj of allObjects) {\n    try {\n      const driver = this.ql!['getDriver'](obj.name);\n      await driver.syncSchema(obj.name, obj);\n      ctx.logger.debug('Schema synced', { object: obj.name });\n    } catch (e) {\n      ctx.logger.error('Failed to sync schema', e as Error, { object: obj.name });\n    }\n  }\n}\n```\n\n## 兼容性与幂等性说明\n- 多次调用 `init`/`syncSchema` 必须保持幂等，driver 必须自行判断无需重复建表。\n- 建议所有新 driver 均支持 `syncSchema(objects)`，并有注释说明其行为。\n\n## 相关 issue\n- #939"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1167,
+  "kind": "pull_request",
+  "title": "docs: add AI Skills documentation pages and navigation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-16T10:37:33Z",
+  "updated_at": "2026-04-16T10:37:57Z",
+  "closed_at": "2026-04-16T10:37:57Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-04-16T10:37:57Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1167",
+  "body": "The official docs site was missing coverage of the Skills System — the 10 domain-specific knowledge modules in `skills/` that teach AI assistants (Copilot, Claude Code, Cursor) the ObjectStack protocol. The `concepts` section was also not wired into top-level navigation.\n\n### New pages\n\n- **`content/docs/concepts/skills.mdx`** — Conceptual overview: why skills exist, three-layer architecture (SKILL.md → rules → evals), skill boundary/delegation diagram, design philosophy\n- **`content/docs/guides/skills.mdx`** — Complete reference for all 10 skills (Quickstart, Schema, Query, API, UI, Automation, AI Agent, Plugin, I18n, Hooks) with coverage summary, usage guidance, boundary tables, and example prompts\n\n### Navigation updates\n\n- `content/docs/meta.json` — Added `concepts` to top-level nav (was missing)\n- `content/docs/concepts/meta.json` — Added `skills` between `architecture` and `core`\n- `content/docs/guides/meta.json` — Added `skills` after `ai-capabilities`\n- `content/docs/index.mdx` — Added \"AI Skills System\" card to Build section\n- `content/docs/guides/index.mdx` — Added skills row to Building Applications table"
+}

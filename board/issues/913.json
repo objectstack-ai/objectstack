@@ -1,0 +1,35 @@
+{
+  "number": 913,
+  "kind": "issue",
+  "title": "i18n 路由和服务注册机制需修正，开发和生产环境统一自动化/健壮化",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-03-11T10:05:27Z",
+  "updated_at": "2026-03-11T12:08:49Z",
+  "closed_at": "2026-03-11T12:08:49Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/913",
+  "body": "# i18n 插件注册机制需修正，生产/开发环境均需架构优化\n\n## 背景\n当前 ObjectStack 平台在 `objectstack.config.ts` 中注册多应用时，i18n 路由和翻译数据的加载存在关键问题：\n\n- 没有显式注册 `I18nServicePlugin` 时，DevPlugin 会用简易 stub 替代，导致路由与数据流不一致；\n- DispatcherPlugin 为 `/api/v1/i18n/*` 路由注册 handler，但 handler 访问到的 `i18n` 服务不是正确的数据源；\n- 翻译数据虽然在 AppPlugin 启动时从元数据 bundle（manifest/translations）自动加载，但 REST 路由 handler 获取不到这些数据；\n- locale code 不匹配时没有 fallback 或提示，容易导致误判数据缺失；\n- 生产环境下如果没有注册 `I18nServicePlugin`，同样会导致 i18n 路由空数据（或直接 404）——这不是开发模式独有问题。\n\n## 复现方式\n1. 在 monorepo 根配置中注册多个 App（如 Todo/CRM），但未添加 `I18nServicePlugin`。\n2. 启动 `pnpm dev`（或 serve --dev）后访问：\n   - `/api/v1/i18n/locales` 返回空数组。\n   - `/api/v1/i18n/translations/zh-CN` 返回空 {}。\n   - `/api/v1/i18n/translations/en` 也可能为空。\n3. 如果手动添加 `I18nServicePlugin`，但包导入路径有问题（ESM/CJS），直接报错：\n   `Cannot find module '@objectstack/service-i18n/dist/index.mjs'`\n\n## 问题分析\n- i18n 插件没有自动检测或兜底注册；\n- DevPlugin/生产环境都依赖 Dispatcher 的 handler，但 handler 并不保证 i18n 数据源一致；\n- 翻译数据的加载过程与 REST 路由注册过程解耦，不易于故障排查。\n\n## 期望修正\n- **平台层应自动检测并优先注册 `I18nServicePlugin`**——只要有多语言配置/翻译数据即自动启用 file-i18n 或 fallback；\n- DevPlugin 应检测 stack definition 是否有 i18n/translations，自动用 `I18nServicePlugin`（不是 stub）注册 i18n 服务和路由；\n- 生产环境应明确提示缺失 i18n 服务的风险（路由缺失/数据为空），并建议手动注册或提供 fallback adapter；\n- REST 路由 handler 与 i18n 服务实例始终保持一致，避免实例冲突（多插件/多实例时）；\n- locale code 应增强健壮性，支持 fallback 和错误提示（如 zh→zh-CN、es→es-ES）。\n\n## 验收标准\n- 无论开发还是生产，配置中未注册 i18n 插件时能有清晰错误提示或自动 fallback。\n- 路由 handler 获取到的 i18n 数据与 bundle translations 保持一致。\n- 访问 `/api/v1/i18n/locales` 与 `/api/v1/i18n/translations/*` 均正确展示翻译数据。\n- 文档和 CHANGELOG 增加 i18n 插件注册机制说明及故障排查建议。\n\n---\n备注：如有需要，可协助提交 PR。\n"
+}

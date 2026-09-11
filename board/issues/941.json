@@ -1,0 +1,36 @@
+{
+  "number": 941,
+  "kind": "issue",
+  "title": "[ObjectQL] 未自动同步所有注册对象 schema 至数据库（缺失 syncSchema 调用）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "enhancement"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-03-21T06:06:24Z",
+  "updated_at": "2026-03-21T06:24:22Z",
+  "closed_at": "2026-03-21T06:24:22Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/941",
+  "body": "## 问题描述\nObjectQL 引擎当前的 `init()` 方法只负责调用所有数据驱动（driver）的 `connect()`，但**不会自动同步步骤中注册到 SchemaRegistry 的对象定义（object schema）到实际数据库表结构**。这导致 app 插件（如 plugin-auth、plugin-audit 等）注册的对象（如 `sys_user` 等）虽然元数据已加载，但数据表可能未被自动创建��更新——首次访问时会出现 `SQLITE_ERROR: no such table: sys_user` 等报错。\n\n## 影响范围\n- 所有通过 `registerService('app.<id>', manifest)` 注册的对象无法保证表结构自动同步到数据库\n- plugin-auth、plugin-audit 等系统插件下的用户/审计等核心表不会自动初始化\n- 使用 SQLite/Turso 等\"需自动建表\"的驱动时表现尤为明显\n\n## 期望行为\n- ObjectQL 应在启动流程中，**自动遍历所有注册对象（SchemaRegistry.getAllObjects()）并调用各 driver 的 `syncSchema(object, schema)`** 方法完成表结构同步\n- 同步操作需保证**幂等**（多次 sync 不会重复建表或报错，兼容字段/索引新增）\n- 该逻辑应在 Plugin 层（即 ObjectQLPlugin.start() 的 init() 之后）实现，**逐对象调用 syncSchema**，而不是批量传递对象数组（符合[协议定义](https://github.com/objectstack-ai/spec/blob/main/packages/spec/src/contracts/data-driver.ts#L157)）\n\n## 推荐修复方案\n```typescript\n// packages/objectql/src/plugin.ts\n// ObjectQLPlugin.start() 中 await this.ql?.init() 后新增：\nconst allObjects = this.ql?.registry?.getAllObjects?.() ?? [];\nif (allObjects.length > 0) {\n  for (const obj of allObjects) {\n    const driver = this.ql!.getDriver(obj.name);\n    await driver.syncSchema(obj.name, obj); // 符合 syncSchema 单对象签名\n  }\n}\n```\n- 若 driver 不支持 syncSchema，需有容错日志\n- 不建议将 schema 同步逻辑下沉到 ObjectQL.init()，应保持边界分明（Plugin/Kernel 层负责 orchestrate，Engine 层只负责 registry+connect）\n\n## 协议兼容性检查\n- syncSchema(idempotent) 方法已在 [data-driver.ts 协议定义](https://github.com/objectstack-ai/spec/blob/main/packages/spec/src/contracts/data-driver.ts#L157) 和 Zod schema 中声明\n- 多驱动、插件动态注册均适配（按需调用 getDriver）\n- 完全符合\"Data as Code/幂等基建\"理念\n\n## 相关链接\n- [#939](https://github.com/objectstack-ai/spec/issues/939)（注册 app/objects 问题，已解决）\n- [syncSchema 协议签名](https://github.com/objectstack-ai/spec/blob/main/packages/spec/src/contracts/data-driver.ts#L157)\n- [ObjectQLPlugin.start 源码](https://github.com/objectstack-ai/spec/blob/main/packages/objectql/src/plugin.ts)\n\n---\n> 注：本 Issue 属于 runtime/实现补丁，不涉及协议定义变更。\n"
+}

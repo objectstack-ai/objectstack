@@ -1,0 +1,33 @@
+{
+  "number": 946,
+  "kind": "pull_request",
+  "title": "feat: implement @objectstack/service-analytics with multi-driver strategy pattern",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-22T03:56:18Z",
+  "updated_at": "2026-03-22T04:52:36Z",
+  "closed_at": "2026-03-22T04:46:59Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-22T04:46:59Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/946",
+  "body": "Analytics only had `MemoryAnalyticsService` — no path to Postgres/Mongo/SQL-backed aggregation. This adds `@objectstack/service-analytics` as the production `IAnalyticsService` implementation with driver-aware strategy dispatch.\n\n### Architecture\n\n- **AnalyticsService** — Orchestrator that walks a priority-ordered strategy chain:\n  - **P1 NativeSQLStrategy** — Pushes native SQL to SQL-capable drivers (Postgres, MySQL)\n  - **P2 ObjectQLStrategy** — Translates to `engine.aggregate()` AST for any ObjectQL driver\n  - **P3 FallbackDelegateStrategy** (internal) — Auto-added when `fallbackService` is configured; delegates to any pre-registered `IAnalyticsService`\n- **InMemoryStrategy** — Defined in `@objectstack/driver-memory` (not in service-analytics), for explicit use with the memory driver\n- **Strategy contract types** (`AnalyticsStrategy`, `StrategyContext`, `DriverCapabilities`) — Defined in `@objectstack/spec/contracts/analytics-service.ts` following Protocol First principle\n- **CubeRegistry** — Collects cube definitions from manifests + auto-infers from object schemas (numeric → sum/avg measures, date → time dimensions)\n- **AnalyticsServicePlugin** — Kernel plugin lifecycle; auto-detects pre-registered analytics service as fallback via `replaceService`. Analytics service registration is owned by `service-analytics`, not by any driver.\n- **DriverCapabilities** probing (`nativeSql`, `objectqlAggregate`, `inMemory`) drives strategy selection at runtime\n\n### Usage\n\n```ts\nconst kernel = new LiteKernel();\nkernel.use(new AnalyticsServicePlugin({\n  cubes: [ordersCube],\n  queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: true, inMemory: false }),\n  executeRawSql: (obj, sql, params) => pgPool.query(sql, params).then(r => r.rows),\n}));\nawait kernel.bootstrap();\n\nconst analytics = kernel.getService<IAnalyticsService>('analytics');\nawait analytics.query({ cube: 'orders', measures: ['orders.count'], dimensions: ['orders.status'] });\nawait analytics.generateSql({ cube: 'orders', measures: ['orders.total_amount'] }); // dry-run\n```\n\n### Files\n\n- `packages/services/service-analytics/` — Orchestrator, NativeSQLStrategy, ObjectQLStrategy, cube registry, plugin, barrel exports\n- `packages/plugins/driver-memory/src/in-memory-strategy.ts` — InMemoryStrategy (moved here from service-analytics per architectural feedback)\n- `packages/spec/src/contracts/analytics-service.ts` — Strategy contract types added alongside IAnalyticsService\n- 30 unit tests in service-analytics covering strategy branches, registry inference, orchestrator fallback chain\n- `ROADMAP.md` — Analytics service status updated from 🟡 → ✅\n- `CHANGELOG.md` — Documented under `[Unreleased]`\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>实现 service-analytics，支持多数据库驱动的分析服务</issue_title>\n> <issue_description>## 背景\n> 当前 ObjectStack 的 analytics 接口仅有 MemoryAnalyticsService 实现，无法支撑 PostgreSQL/Mongo/SQL 驱动的多数据源分析能力。\n> \n> ## 目标\n> - 在 `packages/services/service-analytics` 下实现标准化 `service-analytics` 插件。\n> - 提供 IAnalyticsService 的完整实现，支持基于任意 Driver（Postgres、Mongo、Memory）进行分析聚合。\n> - 支持自动发现和注册 Cube（支持 manifest 中明确定义和自动从对象推导）。\n> - 通过策略模式（Strategy Pattern）根据 driver 能力动态下发分析查询（ObjectQL、原生 SQL、Memory 等）。\n> - 提供原生 SQL 解释/生成能力（generateSql）。\n> \n> ## 关键方案\n> - 架构分离：AnalyticsService 仅为 orchestrator，实际执行通过策略链（Strategy 模式）委托给不同的实现\n>     - P1：NativeSQLStrategy（优先下推原生 SQL）\n>     - P2：ObjectQLStrategy（通用逻辑在 driver 支持时回落）\n>     - P3：InMemoryStrategy（只限于 Memory/Dev 环境）\n> - CubeRegistry 自动收集全部 cubes，支持多 manifest 来源\n> - 完善跨驱动能力探测（queryAggregations），以适配当前和未来的多种存储后端\n> - 确保与 API 协议 / Kernel 插件机制一致对齐\n> - \n> ## 验收标准\n> - [ ] 可以通过 objectql+postgres 或 objectql+mongo 驱动完成 /api/v1/analytics/query 查询（聚合、分组、过滤）\n> - [ ] 各驱动的聚合能力可动态探测与切换\n> - [ ] dev/test 环境继续兼容 MemoryAnalyticsService ��为\n> - [ ] 有单元测试覆盖主要策略分支\n> - [ ] ROADMAP.md、CHANGELOG.md 更新\n> \n> > 本需求为实施多驱动分析能力的基础。相关配套 PR 会同步在 objectui 完成 UI 注册和调用。</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#945\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n⚡ Quickly spin up Copilot coding agent tasks from anywhere on your macOS or Windows machine with [Raycast](https://gh.io/cca-raycast-docs).\n"
+}

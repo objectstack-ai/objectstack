@@ -1,0 +1,33 @@
+{
+  "number": 1164,
+  "kind": "pull_request",
+  "title": "fix: align metadata plugin tests with refactored start() implementation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-16T05:56:44Z",
+  "updated_at": "2026-04-16T08:25:40Z",
+  "closed_at": "2026-04-16T08:25:40Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-16T08:25:40Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1164",
+  "body": "`MetadataPlugin.start()` was refactored to bridge ObjectQL via `ctx.getService('objectql')` + `setDataEngine()`, but tests still asserted the old `ctx.getServices()` + `setDatabaseDriver()` pattern — causing 2 test failures.\n\n### Changes\n\n- **Updated test assertions** in `packages/metadata/src/metadata.test.ts` to verify `setDataEngine` instead of `setDatabaseDriver`\n- **Updated mock setup** — tests now mock `ctx.getService('objectql')` instead of `ctx.getServices()` returning a `driver.*` map entry\n- **Added missing methods to `NodeMetadataManager` mock class** — `setDataEngine`, `setRealtimeService`\n\n```typescript\n// Before (stale)\nctx.getServices = vi.fn().mockReturnValue(services); // services.set('driver.mock-driver', ...)\nexpect(manager.setDatabaseDriver).toHaveBeenCalledWith(mockDriver);\n\n// After (matches plugin.ts)\nctx.getService = vi.fn().mockImplementation((name) => name === 'objectql' ? mockObjectQL : null);\nexpect(manager.setDataEngine).toHaveBeenCalledWith(mockObjectQL);\n```\n\nFull test suite passes: 87/87 tasks, 175/175 metadata tests."
+}

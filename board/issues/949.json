@@ -1,0 +1,32 @@
+{
+  "number": 949,
+  "kind": "issue",
+  "title": "[plugin-auth] 插件生命周期和依赖声明缺陷导致 sqlite 表丢失或服务解析失败（sys_user 表缺失）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-03-22T06:28:52Z",
+  "updated_at": "2026-03-23T10:46:24Z",
+  "closed_at": "2026-03-23T10:46:24Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/949",
+  "body": "## 问题描述\n当前 AuthPlugin 存在如下架构性缺陷：\n\n1. **生命周期使用不当**：在 `init()` 阶段同步从上下文获取 'data' 服务，实际上此时服务可能尚未注册或无法保证同步获取到。即使用户手动将 ObjectQLPlugin 放在前面，也有可能因 Kernel 内部 sync/async 路由判别，导致 \"Service 'data' is async - use await\" 启动报错。\n2. **未声明硬性依赖**：AuthPlugin 没有指定 `dependencies = ['com.objectstack.engine.objectql']`，Kernel 无法自动排序，尤其在插件多、用户 config 排序不一致的情况下，极易出现 race condition 或空指针。\n3. **间接后果表现在两种场景**：\n   - 顺序不对时，后续模块实际访问数据库时（如 better-auth 懒初始化时查 session 或 user），会因为 sys_user 还没被 syncRegisteredSchemas 创建而报 `SQLITE_ERROR: no such table: sys_user`。\n   - 顺序调换后，Kernel 检测到同步 getService 要求实际 async factory 结果，又报 \"Service 'data' is async - use await\"。\n\n## 复现方式\n1. objectstack.config.ts 插件加载顺序为：[... AuthPlugin, ObjectQLPlugin ...] 时，首个用户注册或 session 检查可能报 sys_user 表不存在。\n2. 调换顺序后 [ ... ObjectQLPlugin, AuthPlugin ...]，启动时报 Service 'data' is async - use await。\n\n## 建议修复\n- AuthPlugin 必须声明依赖：`dependencies = ['com.objectstack.engine.objectql']`\n- 严格遵循 Kernel 生命周期：所有需要依赖其他插件注册的服务必须延迟到 start() 或 kernel:ready 阶段获取。\n- 推荐将 dataEngine 的依赖注入移动到 start()，并在 init 仅注册 minimal 的元服务。\n- 可用性更优方案，可以让 AuthPlugin 支持 dataEngine 是 Promise 或延后解引用。\n\n## 影响\n所有依赖对象存储与认证的用户场景，都会遇到此类服务 race 问题。严重影响开发体验。\n\n## 相关源码\n- [objectql/src/plugin.ts#L87-L137](https://github.com/objectstack-ai/spec/blob/main/packages/objectql/src/plugin.ts#L87-L137) — 服务发现与表构建\n- [plugin-auth/src/auth-plugin.ts#L59-L85](https://github.com/objectstack-ai/spec/blob/main/packages/plugins/plugin-auth/src/auth-plugin.ts#L59-L85) — 生命周期与依赖声明\n\n---\n如需更详细的调试日志、用例或 PR，可以@我。"
+}

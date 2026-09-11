@@ -1,0 +1,35 @@
+{
+  "number": 1072,
+  "kind": "issue",
+  "title": "ObjectQLPlugin未在启动时自动从数据库(sys_metadata)恢复对象元数据，导致冷启动后自定义对象丢失",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-04-07T02:25:09Z",
+  "updated_at": "2026-04-07T05:42:26Z",
+  "closed_at": "2026-04-07T05:42:26Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1072",
+  "body": "## 问题\n当前在ObjectStack Cloud与其他基于ObjectQL的环境下，用户通过API/控制台新增自定义对象（object/schema），调用协议层（protocol.saveMetaItem）时，能成功将元数据写入sys_metadata表，但内核冷启动时不会自动从数据库恢复这些对象元数据，导致kernel重启或冷启动后，用户自定义对象消失，仅有默认sample objects。此问题影响所有runtime（单租户/多租户/Microkernel Cloud），属于框架级严重持久化缺陷。\n\n## 复现步骤\n1. 在控制台或API添加自定义object schema（如leads、invoice等），保存后在UI可见。\n2. 等待kernel冷启动或重新部署（云环境如Vercel休眠/TSX dev热点重启等）。\n3. 再次访问，同租户下自定义对象schema消失，仅有默认sample objects。\n4. 查看数据库数据，sys_metadata表中实际对象元数据仍在，说明协议层保存正常，只是启动未自动加载。\n\n## 期望行为\n- 内核每次启动时（ObjectQLPlugin.start/Kernel bootstrap），自动从sys_metadata表批量恢复所有type=object/view/app等元数据，注册到SchemaRegistry，实现持久化→内存的完整闭环，无需业务/宿主项目手动干预。\n- 恢复后能自动触发schema sync，确保所有动态注册对象具备表结构。\n- 避免sample objects覆盖租户实际对象。\n\n## 修改需求清单\n1. ❗在ObjectQLPlugin.start()生命周期中：\n    - driver.init()后、syncRegisteredSchemas()前，显式调用protocol.loadMetaFromDb()（已实现于protocol.ts，需通过ctx.getService('protocol')调用）。\n    - 成功后根据loaded数量可log统计，并对新注册object自动schema sync（调用现有syncRegisteredSchemas)。\n2. 保持兼容：如无数据库（内存模式）不抛异常，降级为只使用内存样例对象。\n3. 更新CHANGELOG，标记为修复元数据持久化的严重bug。\n\n## 影响评估\n- 影响所有使用ObjectQL的多租户/云/本地环境。\n- 用户新增object长期丢失，严重影响可信度与低代码使用体验。\n\n## 相关代码片段与关键调用链\n- `protocol.saveMetaItem()` → 正确写入sys_metadata\n- `protocol.loadMetaFromDb()` → 已实现但未自动调用\n- `ObjectQLPlugin.start()` → 缺失调用\n"
+}

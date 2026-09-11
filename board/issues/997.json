@@ -1,0 +1,35 @@
+{
+  "number": 997,
+  "kind": "issue",
+  "title": "[Proposal] Create `plugin-setup` to own and finalize the platform Setup App",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-31T02:28:35Z",
+  "updated_at": "2026-03-31T02:59:55Z",
+  "closed_at": "2026-03-31T02:59:55Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/997",
+  "body": "## Proposal: Add `plugin-setup` to Own and Register the Platform Setup App\n\n### Background\n- Currently, `setup app` (系统设置/Setup) is dynamically composed by the engine, with its title, icon, i18n, default branding, and area skeletons (Administration, Platform, System, AI, etc) scattered in either objectql or spec.\n- It is unclear where the platform Setup App's authority (as an app), lifecycle, and registrations should reside. This creates architectural confusion: protocol and data engine (spec, objectql) should not own system-level app instances or finalize navigation merges.\n- All other major system entities (e.g., users, roles, audit logs) are owned by internal plugins: `plugin-auth` (SysUser), `plugin-security` (SysRole), `plugin-audit` (SysAuditLog), etc.\n\n### Proposal\n- Create a dedicated `plugin-setup` (e.g. `packages/plugins/plugin-setup`) as a first-class internal platform plugin, sibling to `plugin-auth` and `plugin-security`.\n- This plugin should:\n  - Export Setup App identity: name, label (multi-lang), icon, permissions, branding, and all default meta.\n  - Contain the 4 built-in Setup Areas (Administration, Platform, System, AI) as empty group skeletons for other plugins to contribute their settings/navigation.\n  - On kernel/engine `ready`/finalize, collect all `setupNav` contributions, merge areas and groups, filter out empty areas, and register the finalized Setup App as an internal platform app.\n  - Optionally: define platform Setup Home page, handle global Setup search, enforce Setup permissions.\n- Remove all platform Setup App definition and merge logic from `objectql` and `spec`, making those packages protocol- and data-focused only.\n\n### Benefits\n- Architectural clarity: **spec** = protocol only, **objectql** = data/query only, **plugins** = system feature and UI composition.\n- Matches existing extensibility model: all system apps and objects are owned by plugins for encapsulation, modularity, and clear ownership.\n- Greatly simplifies cross-repo and downstream system extension.\n- Foundation for future features: Setup as a visible app, plugin-aware Setup Home, Setup extensibility via plugin-contributed areas/pages/search.\n"
+}

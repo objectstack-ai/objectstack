@@ -1,0 +1,33 @@
+{
+  "number": 1103,
+  "kind": "issue",
+  "title": "在 plugin-auth 中添加 SysUserPreference 系统对象，支持用户偏好存储",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Claude",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-10T03:56:50Z",
+  "updated_at": "2026-04-10T08:40:22Z",
+  "closed_at": "2026-04-10T08:40:22Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1103",
+  "body": "## 背景\n\n框架当前缺少用户偏好（theme、locale、timezone、sidebar 状态等）的持久化能力。Config Resolution 文档（`content/docs/protocol/objectos/config-resolution.mdx`）已定义了 User Preferences 作为配置分层体系的第 2 层（Runtime > **User Preferences** > Tenant > Env），但代码层面尚未落地对应的 object schema。\n\n## 方案\n直接将 `user_preference` 作为系统对象放入 `plugin-auth`——与 `SysUser`、`SysSession` 等同属 identity 领域，遵循已有的 `sys` namespace 规范。\nexport const SysUserPreference = ObjectSchema.create({\n  namespace: 'sys',\n  name: 'user_preference',\n  label: 'User Preference',\n  pluralLabel: 'User Preferences',\n  icon: 'settings',\n  isSystem: true,\n  description: 'Per-user key-value preferences (theme, locale, etc.)',\n  titleFormat: '{key}',\n  compactLayout: ['user_id', 'key'],\n\n  fields: {\n    id: Field.text({\n      label: 'Preference ID',\n      required: true,\n      readonly: true,\n    }),\n\n    created_at: Field.datetime({\n      label: 'Created At',\n      defaultValue: 'NOW()',\n      readonly: true,\n    }),\n\n    updated_at: Field.datetime({\n      label: 'Updated At',\n      defaultValue: 'NOW()',\n      readonly: true,\n    }),\n\n    user_id: Field.text({\n      label: 'User ID',\n      required: true,\n      maxLength: 255,\n      description: 'Owner user of this preference',\n    }),\n\n    key: Field.text({\n      label: 'Key',\n      required: true,\n      maxLength: 255,\n      description: 'Preference key (e.g., theme, locale, plugin.ai.auto_save)',\n    }),\n\n    value: Field.json({\n      label: 'Value',\n      description: 'Preference value (any JSON-serializable type)',\n    }),\n  },\n\n  indexes: [\n    { fields: ['user_id', 'key'], unique: true },\n    { fields: ['user_id'] },\n  ],\n\n  enable: {\n    trackHistory: false,\n    searchable: false,\n    apiEnabled: true,\n    apiMethods: ['get', 'list', 'create', 'update', 'delete'],\n    trash: false,\n    mru: false,\n  },\n});\n\n### 客户端使用方式\n\n```ts\nimport { SystemObjectName } from '@objectstack/spec/system';\n\n// 读取偏好\nconst theme = await engine.findOne(SystemObjectName.USER_PREFERENCE, {\n  where: { user_id: currentUserId, key: 'theme' },\n});\n\n// 写入偏好\nawait engine.upsert(SystemObjectName.USER_PREFERENCE, {\n  user_id: currentUserId,\n  key: 'theme',\n  value: JSON.stringify('dark'),\n});\n\n// 批量读取某用户所有偏好\nconst allPrefs = await engine.find(SystemObjectName.USER_PREFERENCE, {\n  where: { user_id: currentUserId },\n});\n```\n"
+}

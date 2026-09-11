@@ -1,0 +1,35 @@
+{
+  "number": 1096,
+  "kind": "issue",
+  "title": "[Studio] Agent Playground & Tool Playground: 交互式调试与测试插件",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-04-09T03:59:07Z",
+  "updated_at": "2026-04-10T14:56:25Z",
+  "closed_at": "2026-04-10T14:56:25Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1096",
+  "body": "## 背景\n当前 Studio 对 AI Agent 和 Tool 的元数据仅支持基础 JSON 结构查看（MetadataInspector），没有交互式的 Playground：\n- 花名册（侧边栏）只能预览 agent/tool，不能直接试用；\n- Chat Panel 虽支持 agent 选择、tool 调用过程可见，但没有直接链接到元数据树的选中上下文。\n- 对于 Tool，没有低门槛参数填报与一键执行（dry-run）能力，难以交互式验证和调试。\n\n## 目标\n实现两个内置插件：\n### 1. Agent Playground\n- 选中任意 agent 元数据后，主内容区自动渲染「Agent Playground」\n- 包含：\n  - Agent 配置/说明卡片（JSON Inspector + 型号描述）\n  - **内嵌 AI Chat 窗口（useChat/transport 直连该 agent）**\n  - Conversation log 可展开/下载/清空\n\n### 2. Tool Playground\n- 选中 tool 元数据后，主内容区自动渲染「Tool Playground」\n- 包含：\n  - Tool 结构说明（JSON Inspector）\n  - 自动生成参数表单，根据 Tool Schema - type/enum/required\n  - [运行] 按��支持 dry-run 执行（调用 tool handler，但不落库）\n  - 输出/错误区域可查看/复制，支持多次运行，带历史\n\n## 设计要点\n- 应作为 Studio 内置插件，优先级高于 fallback inspector（即命中元数据类型 agent/tool 时覆盖）\n- Playground 必须具备本地开发/在线演练一致体验，设计为与 AiChatPanel 行为解耦\n- 支持通过 QA 测试集模拟批量执行、自动化验证\n"
+}

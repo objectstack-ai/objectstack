@@ -1,0 +1,37 @@
+{
+  "number": 1259,
+  "kind": "pull_request",
+  "title": "chore: remove apps/objectos (split to objectstack-ai/cloud)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-21T12:57:41Z",
+  "updated_at": "2026-05-21T13:10:44Z",
+  "closed_at": "2026-05-21T13:10:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-05-21T13:10:40Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1259",
+  "body": "The tenant runtime serving `*.objectos.app` now lives in the private cloud repo (`objectstack-ai/cloud/apps/objectos`) alongside the control plane. **Production traffic continues uninterrupted** — the new repo deploys to the same Cloudflare Worker name `objectos` under the same CF account, atomically overwriting the framework-deployed image.\n\n## Pre-merge verification\n\n- ✅ Cloud-repo `deploy-objectos.yml` run [26226006054](https://github.com/objectstack-ai/cloud/actions/runs/26226006054) green end-to-end (build → push → wrangler deploy → smoke).\n- ✅ CF Worker `objectos` now serves version `6e385b34` (cloud-repo deploy, 12:49 UTC) vs prior `6f606cec` (framework, 09:00 UTC).\n- ✅ `curl https://9340100-workspace-8c896861.objectos.app/api/v1/health` → 200.\n- ✅ Tenant SSO chain unchanged — sign-in returns `url: https://cloud.objectos.app/api/v1/auth/oauth2/authorize?...`.\n- ✅ Framework: `pnpm install` clean (57 projects), `turbo build` 54/54, `turbo test` 106/106.\n\n## What this removes\n\n- `apps/objectos/` — 38 files, tenant runtime\n- `.github/workflows/deploy.yml` — sole remaining job was objectos; framework no longer deploys to Cloudflare\n- Root `package.json` scripts: `pnpm dev` / `pnpm start` / `pnpm doctor` (aliases of `pnpm --filter @objectstack/objectos …`)\n- README.md + CLAUDE.md mentions\n- 711 stale lines in pnpm-lock.yaml\n\n## Rollback\n\n- Tag [`pre-cloud-split`](https://github.com/objectstack-ai/framework/releases/tag/pre-cloud-split) (@64875c01) restores the framework to pre-split state.\n- For objectos-only rollback, revert this PR and re-trigger the (now-deleted) framework deploy.yml from history.\n\n## Followups (deferred)\n\n- ADR-0006 / ADR-0004 still mention objectos historically — leave as written, those documents are immutable.\n- The cloud repo's `.framework-sha` will need bumping whenever framework changes need to flow to objectos. Existing convention from apps/cloud split applies.\n\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+}

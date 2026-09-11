@@ -1,0 +1,33 @@
+{
+  "number": 969,
+  "kind": "pull_request",
+  "title": "fix(driver-sql): resolve knex DTS build failure via tsconfig paths",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-23T10:18:52Z",
+  "updated_at": "2026-03-23T10:43:37Z",
+  "closed_at": "2026-03-23T10:41:19Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-23T10:41:19Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/969",
+  "body": "`@objectstack/driver-sql` DTS build fails because knex v3.2.3 declares `./types/index.d.mts` in its package.json `exports` (import condition) but the file doesn't exist. With `moduleResolution: \"bundler\"`, TypeScript can't resolve knex types, producing TS7016 and cascading TS7006 errors. This breaks the build of driver-sql and all 16+ downstream packages.\n\n### Fix\n\n- Added `paths` mapping in `packages/plugins/driver-sql/tsconfig.json` to point TypeScript at the correct `knex/types/index.d.ts`:\n\n```json\n\"paths\": {\n  \"knex\": [\"./node_modules/knex/types/index.d.ts\"]\n}\n```\n\nThis is the standard workaround for packages with broken ESM type exports. The mapping is only used at build time and does not affect consumers of the published package.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> fix all ci build and test errors\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

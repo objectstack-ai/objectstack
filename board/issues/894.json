@@ -1,0 +1,33 @@
+{
+  "number": 894,
+  "kind": "pull_request",
+  "title": "fix: camelCase ↔ snake_case field name mapping in ObjectQL adapter",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-09T10:03:25Z",
+  "updated_at": "2026-03-10T02:16:11Z",
+  "closed_at": "2026-03-10T02:16:11Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/894",
+  "body": "better-auth queries using camelCase field names (`providerId`, `accountId`) but ObjectStack schemas define snake_case (`provider_id`, `account_id`). The adapter had no field name conversion, so sign-in queries never matched stored records → `Credential account not found`.\n\n### Changes\n\n- **Added `toSnakeCase` / `toCamelCase` converters** — pure regex, no new dependencies\n- **Write paths** (camelCase → snake_case): `convertWhere` field names, `create`/`update`/`updateMany` data keys, `findOne` select fields, `findMany` sortBy field\n- **Read paths** (snake_case → camelCase): return values from `create`, `findOne`, `findMany`, `update`\n- **Tests**: 14 new tests covering conversion functions and the exact sign-in query pattern (`findOne` by `providerId` + `accountId`)\n\n```typescript\n// Before: field names passed through as-is — query misses\nfilter: { providerId: 'credential', accountId: 'u1' }  // ✗ no match\n\n// After: automatic conversion\nfilter: { provider_id: 'credential', account_id: 'u1' } // ✓ matches stored data\n```\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>[Bug] ObjectQL Adapter field name mapping error: camelCase vs snake_case causes 'Credential account not found' on sign-in</issue_title>\n> <issue_description>## Bug Description\n> 注册用户后，使用邮箱密码登录时出现错误提示：\n> \n> ```\n> 2026-03-09T09:47:20.241Z ERROR [Better Auth]: Credential account not found { email: 'zhuangjianguo@gmail.com' }\n> ```\n> \n> ### 数据库数据示例\n> ```json\n> \"sys_user\": [\n>   {\n>     \"id\": \"sys_user-1773049618228-1\",\n>     \"createdAt\": \"2026-03-09T09:46:58.228Z\",\n>     \"updatedAt\": \"2026-03-09T09:46:58.228Z\",\n>     \"email\": \"zhuangjianguo@gmail.com\",\n>     \"name\": \"建国庄\",\n>     \"emailVerified\": false,\n>     \"created_at\": \"2026-03-09T09:46:58.228Z\",\n>     \"updated_at\": \"2026-03-09T09:46:58.228Z\"\n>   }\n> ],\n> \"sys_account\": [\n>   {\n>     \"id\": \"sys_account-1773049618228-1\",\n>     \"createdAt\": \"2026-03-09T09:46:58.228Z\",\n>     \"updatedAt\": \"2026-03-09T09:46:58.228Z\",\n>     \"userId\": \"sys_user-1773049618228-1\",\n>     \"providerId\": \"credential\",\n>     \"accountId\": \"sys_user-1773049618228-1\",\n>     \"password\": \"36ff5c34c9f42b59ca42bdfbb591848d:6c67ab1e18170a7671840499ba9d632d5e5e140d483c4bc2f4f34ac13493fd10108fe55fca441cc378dc2e5a2805d836048550c530e43933866a8abd7b6f9733\",\n>     \"created_at\": \"2026-03-09T09:46:58.228Z\",\n>     \"updated_at\": \"2026-03-09T09:46:58.228Z\"\n>   }\n> ],\n> ```\n> \n> ### 现象与分析\n> - 注册和登录流程后，账号数据被正确存入数据库，且字段名为 camelCase（如 providerId, accountId）。\n> - ObjectStack 的 auth-account.object.ts schema 定义字段为 snake_case：provider_id, account_id。\n> - Better-auth 查询时使用 camelCase 字段，ObjectQL adapter 无字段名转换，因此 findOne/filter 查询不能正确匹配。\n> \n> **导致登录时无法查找正确的账号记录，出现 'Credential account not found' 错误。**\n> \n> ### 期待行为\n> - ObjectQL adapter 在写入和查询时应实现 camelCase ↔ snake_case 字段名自动转换，保证数据读写一致。\n> - 登录流程可正确查找账号，不再出现 'Credential account not found'。\n> \n> ### 解决建议\n> - 在 objectql-adapter.ts 的 convertWhere 和相关读写函数中增加字段名转换实现。\n> - 可参考 [lodash.camelCase/snakeCase](https://lodash.com/docs/4.17.15#camelCase) 实现双向映射。\n> \n> ---\n> 请确认修复后同步测试并更新相关 issue。\n> \n> ---\n> \n> - [x] 数据库结构与 adapter 字段名映射不一致\n> - [x] 登录流程查找账号失败\n> - [ ] 修复 adapter，实现字段名一致性\n> \n> ---\n> 相关代码：\n> - [objectql-adapter.ts](https://github.com/objectstack-ai/spec/blob/97d5de12339ded4a0c41c6ba99a95513eeae3364/packages/plugins/plugin-auth/src/objectql-adapter.ts)\n> - [auth-account.object.ts](https://github.com/objectstack-ai/spec/blob/97d5de12339ded4a0c41c6ba99a95513eeae3364/packages/plugins/plugin-auth/src/objects/auth-account.object.ts)\n> </issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#893\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n🔒 GitHub Advanced Security automatically protects Copilot coding agent pull requests. You can protect all pull requests by enabling Advanced Security for your repositories. [Learn more about Advanced Security.](https://gh.io/cca-advanced-security)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 948,
+  "kind": "pull_request",
+  "title": "fix(plugin-auth): defer data service acquisition from init() to start() phase",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-22T05:57:08Z",
+  "updated_at": "2026-03-22T07:11:52Z",
+  "closed_at": "2026-03-22T07:11:52Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/948",
+  "body": "`AuthPlugin.init()` synchronously calls `ctx.getService('data')`, which throws `\"Service 'data' is async - use await\"` when the data service is registered via an async factory. This crashes kernel startup.\n\n### Changes\n\n- **`AuthManager.setDataEngine(engine)`** — new method for runtime injection of the data engine, mirroring the existing `setRuntimeBaseUrl()` pattern. No-op after lazy auth instance creation.\n- **`AuthPlugin.init()`** — no longer accesses `data` service. Creates `AuthManager` without `dataEngine`.\n- **`AuthPlugin.start()`** — injects data engine here instead, with sync-first access + `kernel.getServiceAsync()` fallback for async factories.\n- **Tests** — 5 new tests covering the deferred injection path. Also fixes 2 pre-existing failures where `.at(-1)` on `registerService` mock calls returned the system objects registration instead of the auth manager.\n- **Docs** — updated `kernel-services.mdx` plugin pattern example to reflect correct lifecycle usage.\n\n```typescript\n// Before (init phase — breaks with async factory)\nasync init(ctx) {\n  const dataEngine = ctx.getService('data'); // 💥 throws\n  this.authManager = new AuthManager({ ...opts, dataEngine });\n}\n\n// After (start phase — safe)\nasync init(ctx) {\n  this.authManager = new AuthManager({ ...opts });\n  ctx.registerService('auth', this.authManager);\n}\nasync start(ctx) {\n  let dataEngine;\n  try { dataEngine = ctx.getService('data'); }\n  catch { dataEngine = await ctx.getKernel().getServiceAsync('data'); }\n  if (dataEngine) this.authManager.setDataEngine(dataEngine);\n}\n```\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>[plugin-auth] init 阶段同步获取 'data' 服务导致启动失败（Service 'data' is async - use await）</issue_title>\n> <issue_description>## 问题描述\n> ObjectStack `plugin-auth`（`packages/plugins/plugin-auth/src/auth-plugin.ts`）在 `init()` 阶段同步调用 `ctx.getService('data')` 获取数据服务。当前 upstream (@objectstack/core/@objectstack/objectql) 的 kernel/service 体系，如果 'data' 服务为 async factory 注册（如 `registerServiceFactory('data', ...)`），则在初始化阶段通过 sync API 获取时会抛出：\n> \n> ```\n> Service 'data' is async - use await\n> ```\n> \n> 这会直接导致整个 Kernel 启动失败，无法进入正常开发或测试。\n> \n> ## 复现步骤\n> 1. `objectstack.config.ts` 插件列表中，`ObjectQLPlugin` 和 `AuthPlugin` 顺序正常，`AuthPlugin` 总是在 `ObjectQLPlugin` 之后。\n> 2. 启动开发环境：\n> \n>    ```bash\n>    pnpm dev\n>    ```\n> 3. 启动控制台输出报错：\n> \n>    ```\n>    Service 'data' is async - use await\n>    ```\n> \n> ## 问题根因\n> - `auth-plugin.ts` 第 85 行（`const dataEngine = ctx.getService('data')`）同步拿 `'data'` 服务。\n> - 但 `'data'` 很可能是通过 async factory 注册，只有在所有 init 阶段运行完后，factory 的结果才会同步可用。\n> - Kernel 设计上禁止在 init 阶段同步拿异步服务，防止 bug。\n> \n> ## 建议修复方案\n> - `init()` 阶段不要 sync 拿 `data`，而是：\n>     - 延后到 `start()` 阶段做 dataEngine 注入（start 阶段允许 await service factory 结果）。\n>     - 或在 init 里不注入 dataEngine，等 start 阶段 `this.authManager.setDataEngine(...)` 等方法注入。\n> - 或者 `auth-plugin.ts` 支持 `dataEngine` 允许为 Promise，内部判定是 async 时，等到实际用到时 await。\n> \n> ## 影响范围\n> - 任何使用 `@objectstack/plugin-auth` 且其依赖的 data 服务是 async factory 注册场景，都存在启动失败风险。\n> - 严重影响首启、测试、扩展插件的开发效率。\n> \n> ## 相关源代码\n> - [auth-plugin.ts](https://github.com/objectstack-ai/spec/blob/main/packages/plugins/plugin-auth/src/auth-plugin.ts#L85)\n> - [核心 kernel 服务分解](https://github.com/objectstack-ai/spec/blob/main/packages/core/src/kernel.ts#L96-L103)\n> \n> ## 建议标签\n> - bug\n> - auth\n> - plugin\n> \n> ---\n> 如需进一步技术细节，请派我建 PR 或详细设计建议。</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#947\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n📍 Connect Copilot coding agent with [Jira](https://gh.io/cca-jira-docs), [Azure Boards](https://gh.io/cca-azure-boards-docs) or [Linear](https://gh.io/cca-linear-docs) to delegate work to Copilot in one click without leaving your project management tool."
+}

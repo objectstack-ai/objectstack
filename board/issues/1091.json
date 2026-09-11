@@ -1,0 +1,33 @@
+{
+  "number": 1091,
+  "kind": "pull_request",
+  "title": "Merge duplicate list_objects/list_metadata_objects and describe_object/describe_metadata_object tools",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-08T09:23:53Z",
+  "updated_at": "2026-04-08T09:59:56Z",
+  "closed_at": "2026-04-08T09:59:18Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-08T09:59:18Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1091",
+  "body": "`list_objects` and `list_metadata_objects` share the same data source (`metadataService.listObjects()`), with `list_objects` being a strictly weaker subset (no `filter`/`includeFields`). Same duplication exists for `describe_object`/`describe_metadata_object`. This created naming confusion, duplicate `ObjectDef`/`FieldDef` types, and gave `data_chat` agent inferior capabilities.\n\n### Changes\n\n- **Unified tool definitions**: Created `list-objects.tool.ts` and `describe-object.tool.ts` with the richer parameter sets (filter, includeFields, snake_case validation, enableFeatures). Deleted `list-metadata-objects.tool.ts` and `describe-metadata-object.tool.ts`.\n\n- **`data-tools.ts`**: Removed `LIST_OBJECTS_TOOL`, `DESCRIBE_OBJECT_TOOL`, their handlers, and duplicate `ObjectDef`/`FieldDef` types. `DATA_TOOL_DEFINITIONS`: 5 → 3 tools (query_records, get_record, aggregate_data). `DataToolContext` no longer requires `metadataService`.\n\n- **`metadata-tools.ts`**: `METADATA_TOOL_DEFINITIONS` retains 6 tools, now registering `list_objects` and `describe_object` (unified names) with the full-capability handlers.\n\n- **Agents**: `metadata_assistant` references updated from `list_metadata_objects`/`describe_metadata_object` → `list_objects`/`describe_object`. `data_chat` already used these names — no change needed.\n\n- **Exports**: Updated `tools/index.ts` and `src/index.ts` — `listObjectsTool`/`describeObjectTool` replace `listMetadataObjectsTool`/`describeMetadataObjectTool`.\n\n### Registration flow\n\nBoth agents get `list_objects`/`describe_object` from `registerMetadataTools()`, which only requires `metadataService` (always available when data tools are registered):\n\n```\nplugin.start()\n├─ registerDataTools(registry, { dataEngine })          → 3 tools\n└─ registerMetadataTools(registry, { metadataService }) → 6 tools (includes list_objects, describe_object)\n```"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 907,
+  "kind": "issue",
+  "title": "i18n 默认内置为核心服务，自动注册/覆盖机制和多环境兼容",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-03-11T06:57:15Z",
+  "updated_at": "2026-03-11T08:28:50Z",
+  "closed_at": "2026-03-11T08:28:50Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/907",
+  "body": "### 背景与目标\n目前 i18n（国际化）作为低代码平台的核心服务，只在 DevPlugin 或专业插件注册时才可用。这会导致内核在启动时，如果未加载 plugin-i18n，将无法通过 /api/v1/i18n/* 路由获取基本的多语言能力。为保证平台长期可用性、Studio 体验和部署友好，i18n 服务需要成为内置基础服务，采用与 metadata 一致的自动注册机制。 \n\n### 主要开发内容\n1. **内置 i18n 服务注册（ObjectQLPlugin.init）**\n    - 检查当前上下文是否已注册 'i18n' 服务\n    - 如未注册，自动注册 FileI18nAdapter 作为默认实现（defaultLocale: 'en', fallbackLocale: 'en'，不指定 localesDir，纯 in-memory）\n    - 日志记录内置初始化及覆盖行为\n2. **服务重要性调整**\n    - ServiceRequirementDef.i18n 从 'optional' 升级为 'core'\n    - kernel 启动时缺失 i18n 时给出 warn\n3. **plugin-i18n 行为标准化**\n    - 正确覆盖内置服务\n    - 文档说明如何定制 localesDir、defaultLocale\n4. **REST 路由自动注册 i18n**\n    - RestServer.registerRoutes() 动态根据已注册服务追加挂载 i18n 路由\n    - 配合 discovery/api root 保持服务可用性一致\n5. **协议配置同步修正**\n    - protocol.ts SERVICE_CONFIG['i18n'] provider 名统一为 'service-i18n'\n6. **测试与验证**\n    - 单元测试/集成测试：覆盖未注册 plugin-i18n 时的启动与 API 行为\n    - 验证覆盖关系：外部 plugin-i18n 可替换内置 stub 实现\n    - 生产与开发环境测试\n7. **文档与 CHANGELOG 更新**\n    - 体现 i18n 服务变为基础内置能力，API/Studio/部署相关说明\n\n### 风险排查与最佳实践\n- 要避免重复注册导致的冲突\n- 避免 breaking changes（保证 plugin-i18n 仍能优雅覆盖或增强内置实现）\n- 保证 dev/stub/production 多环境一致性\n\n### 验收标准\n- 不安装 plugin-i18n 也可正常通过 discovery 和 /api/v1/i18n/* 访问默认 i18n 服务\n- 安装 plugin-i18n 后表现完全一致或功能增强，不回退为内置实现\n- 文档与测试覆盖所有主要场景\n\n---\n本 Issue 旨在支撑平台演进、Studio 生产力需求和部署无障碍，须稳健设计，确保长期可维护性。"
+}

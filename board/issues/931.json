@@ -1,0 +1,33 @@
+{
+  "number": 931,
+  "kind": "pull_request",
+  "title": "fix: unified catch-all dispatch pattern across all adapters to resolve Vercel 404s",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-18T14:06:29Z",
+  "updated_at": "2026-03-18T14:49:29Z",
+  "closed_at": "2026-03-18T14:42:39Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-18T14:42:39Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/931",
+  "body": "All 7 adapters (Hono, Express, Fastify, Next.js, Nuxt, SvelteKit, NestJS) manually registered individual routes for each API namespace — and all were missing `/packages`, `/analytics`, `/automation`, `/i18n`, and `/ui`. This caused 404s on Vercel (and any other deployment) for those routes.\n\nRather than adding the missing routes one by one to each adapter, this PR introduces a **unified catch-all pattern**: each adapter now delegates to `HttpDispatcher.dispatch()` for all non-framework-specific routes. New routes added to `dispatch()` automatically work in every adapter with zero adapter-side code changes.\n\n### Unified catch-all architecture\n\nEach adapter keeps only routes that require framework-specific handling:\n- **Auth** — needs auth service integration (`getServiceAsync('auth')`)\n- **Storage** — needs framework-specific formData/file parsing\n- **GraphQL** — returns raw result (not `HttpDispatcherResult`)\n- **Discovery** — uses custom response wrapper format (`{ data: ... }`)\n\nEverything else (meta, data, packages, analytics, automation, i18n, ui, openapi, custom API endpoints, and any future routes) goes through a single catch-all that delegates to `dispatcher.dispatch()`.\n\n### Adapters updated\n- `@objectstack/hono` — `createHonoApp()`\n- `@objectstack/express` — `createExpressRouter()`\n- `@objectstack/fastify` — `objectStackPlugin()`\n- `@objectstack/nextjs` — `createRouteHandler()`\n- `@objectstack/nuxt` — `createH3Router()`\n- `@objectstack/sveltekit` — `createRequestHandler()`\n- `@objectstack/nestjs` — `ObjectStackController`\n\n### Tests\n- Hono adapter tests rewritten for catch-all dispatch pattern (37 tests passing)\n- Tests verify correct method, path, body, and query param forwarding through `dispatch()`\n\n### Impact\n- ~290 lines of duplicated route-registration code deleted across adapters\n- Resolves 404 errors for `/api/v1/meta`, `/api/v1/packages`, and all other previously unregistered routes\n- Future-proof: new routes in `HttpDispatcher.dispatch()` are automatically available in all adapters\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>[Bug] Vercel部署后 /api/v1/meta 和 /api/v1/packages 路由404，导致前端无法加载元数据和包列表</issue_title>\n> <issue_description>## 问题描述\n> 在部署 ObjectStack Studio 到 Vercel 后，前端在 Server模式下请求 `/api/v1/meta` 和 `/api/v1/packages` 都返回 404，导致元数据及包列表无法正常加载。\n> \n> ### 复现步骤\n> 1. Vercel正确设置：`VITE_RUNTIME_MODE=server` 且 `VITE_SERVER_URL=\"\"`（empty，same-origin）\n> 2. 前端浏览器启动后尝试请求：\n>     - `GET /api/v1/meta` → 404\n>     - `GET /api/v1/packages` → 404\n> \n> ## 核心分析\n> - `/api/v1/meta` 路由虽然在 `@objectstack/hono` 适配器注册，但返回404，说明对应 dispatcher/broker 没有正确桥接 metadata服务。\n> - `/api/v1/packages` 路由根本没有注册；`createHonoApp()` 只覆盖了 discovery, auth, graphql, meta, data, storage 等路由，缺少 packages。\n> \n> ## 影响\n> - 前端无法加载元数据、包列表，核心功能不可用。\n> - 404报错会阻断页面正常渲染，造成用户困扰。\n> \n> ## 推荐修复方案\n> 1. 补齐 `createHonoApp()` 适配器所有标准路由（见 HonoServerPlugin discovery routes），尤其是 packages 等缺失命名空间。\n> 2. 检查并修正 `HttpDispatcher.handleMetadata()` 及 broker shim 的桥接，确保元数据能正确返回。\n> 3. 补充测试，确保 serverless 部署下路由齐全、元数据和包列表可用。\n> \n> \n> ---\n> \n> - 已分析全部问题及相关代码，建议架构级修复，不建议简单patch。\n> </issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#930\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

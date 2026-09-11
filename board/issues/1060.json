@@ -1,0 +1,33 @@
+{
+  "number": 1060,
+  "kind": "issue",
+  "title": "Metadata Versioning & History — 元数据版本历史与回滚 (Phase 4a)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-02T08:34:23Z",
+  "updated_at": "2026-04-02T09:57:30Z",
+  "closed_at": "2026-04-02T09:57:30Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1060",
+  "body": "\n背景\nObjectStack 的元数据系统需要支持 版本历史追踪 和 回滚能力。当 admin 修改对象定义后，需要查看变更历史、比较版本差异、并在出现问题时快速回滚。\n\n✅ 已有基础设施：\n\nMetadataRecordSchema.version — 版本号字段（metadata-persistence.zod.ts:103）\nMetadataRecordSchema.checksum — 校验和字段（metadata-persistence.zod.ts:106）\nDatabaseLoader — 保存时自动递增 version（database-loader.ts:292）\npublishPackage() / revertPackage() — 包级别版本管理\n\n❌ 尚未实现：\n\nsys_metadata_history 表、getHistory(), rollback(), diff()\n任务分解\n1. History 存储层\n 定义 MetadataHistoryRecordSchema\n 创建 sys_metadata_history 系统对象\n2. IMetadataService 接口扩展\n getHistory(type, name, options?) — 版本时间线\n rollback(type, name, version) — 回滚到指定版本\n diff(type, name, v1, v2) — 版本差异\n3. DatabaseLoader 历史追踪\n 保存时自动写入 history 记录\n 实现 getHistory / rollback / diff\n4. Checksum 实现\n 规范化 JSON → SHA-256 校验和\n Checksum 去重（与上一版本相同则跳过 history）\n5. REST API 端点\n GET /api/v1/metadata/:type/:name/history\n POST /api/v1/metadata/:type/:name/rollback\n GET /api/v1/metadata/:type/:name/diff\n6. 历史清理策略\n maxVersions / maxAge 可配置保留策略\n架构对标\n平台\t版本控制\nSalesforce\tSetup Audit Trail, 6 个月变更历史\nServiceNow\tUpdate Sets + Versions 表\n"
+}

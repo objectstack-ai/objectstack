@@ -1,0 +1,35 @@
+{
+  "number": 1081,
+  "kind": "issue",
+  "title": "[Bug] Agent聊天接口不兼容Vercel AI SDK v6的parts消息格式，报\"message.content must be a string\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-04-07T09:40:24Z",
+  "updated_at": "2026-04-07T10:12:15Z",
+  "closed_at": "2026-04-07T10:12:15Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1081",
+  "body": "## 问题描述\n\n在本地运行 `pnpm dev` 并使用 Studio 中的 AI Chat Panel（选择智能体/Agent 时），发送信息会报错：\n\n```\n{\"error\":\"message.content must be a string\"}\n```\n\n表现为：\n- General Chat 正常，Agent Chat 报 400 错误。\n- 提交内容如\"你有哪些对象\"，报上述错误。\n\n## 复现步骤\n1. 启动本地开发环境 `pnpm dev`\n2. 打开 Studio -> AI Chat Panel\n3. 选择任一 Agent，发送消息\n4. 控制台返回 400，错误信息如上\n\n## 问题定位\n\n- agent 路由（`/api/v1/ai/agents/:agentName/chat`）的 `validateAgentMessage` 函数只允许 `content` 为字符串，不支持 Vercel AI SDK v6 的 `{ parts: [...] }` 格式。\n- 前端 Studio 的 `useChat` (Vercel AI SDK v6) 默认发送 `parts` 数组而非 content 字符串，导致服务端拒绝请求。\n- 通用 chat 路由 `/api/v1/ai/chat` 的验证逻辑（`validateMessage`）已适配 v6，支持 parts 和 content，但 agent 路由未升级。\n\n## 预期行为\n- Agent 路由应当支持 Vercel AI SDK v6 的 `parts` 格式，与 chat 路由保持一致。\n- SDK 发送 `parts` 时，后端可以正常解析，聊天功能正常。\n\n## 修复建议\n- 将 `validateAgentMessage` 升级为：\n  - 支持 `parts` 数组（与 `validateMessage` 思路一致），只要 `parts` 存在则通过。\n  - 或允许 `content` 为字符串。\n  - 如需构建 ModelMessage，参照 `normalizeMessage` 实现。\n- Handler 中传递给 AI 核心推理的消息数组应映射 `parts`→`content`（如 `normalizeMessage`）。\n- 可将校验与消息标准化工具提取为 `message-utils.ts` 进行复用。\n\n---\n\n受影响文件：\n- `packages/services/service-ai/src/routes/agent-routes.ts`\n\n相关参考：\n- `packages/services/service-ai/src/routes/ai-routes.ts` (`validateMessage`, `normalizeMessage`)\n- Vercel AI SDK v6 [迁移说明](https://vercel.com/docs/ai/migration/v6)"
+}

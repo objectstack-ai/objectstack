@@ -1,0 +1,33 @@
+{
+  "number": 1011,
+  "kind": "issue",
+  "title": "feat(spec): Promote LLMAdapter interface to @objectstack/spec/contracts",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-31T06:48:55Z",
+  "updated_at": "2026-03-31T07:38:43Z",
+  "closed_at": "2026-03-31T07:38:43Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1011",
+  "body": "\n\n当前 `LLMAdapter` 接口定义在 `packages/services/service-ai/src/adapters/types.ts`（service-ai 内部），而非 `@objectstack/spec/contracts`。这导致：\n\n1. 第三方 adapter 实现（OpenAI / Anthropic / Ollama）无法仅依赖 `@objectstack/spec` 就完成类型对齐\n2. adapter 接口与 `IAIService` 的方法签名 1:1 镜像，天然属于协议层定义\n3. 其他 spec contracts（`IDataDriver`、`IHttpServer`）均定义在 spec 中，`LLMAdapter` 是唯一例外\n\n### 任务\n\n1. **新增** `packages/spec/src/contracts/llm-adapter.ts`，将以下接口从 service-ai 迁移到 spec：\n   - `LLMAdapter` interface\n   - 保留 `name`, `chat`, `complete`, `streamChat?`, `embed?`, `listModels?` 签名不变\n2. **更新** `packages/spec/src/contracts/index.ts`，导出 `LLMAdapter`\n3. **更新** `packages/services/service-ai/src/adapters/types.ts`：\n   - 改为 `export type { LLMAdapter } from '@objectstack/spec/contracts'` re-export\n   - 或直接删除本地定义，改 import 路径\n4. **更新** service-ai 所有引用 `LLMAdapter` 的文件 import 路径\n5. **更新** `ROADMAP.md` Contract Implementation Matrix，在 AI Service 行备注中补充 `LLMAdapter`\n6. **运行全量测试**确保无回归\n\n### 验收标准\n\n- [ ] `LLMAdapter` 定义在 `@objectstack/spec/contracts` 中\n- [ ] `import type { LLMAdapter } from '@objectstack/spec/contracts'` 可编译\n- [ ] service-ai 所有 52 个测试通过\n- [ ] spec contracts 类型测试通过\n- [ ] CHANGELOG.md 更新\n\n**Labels:** `enhancement`, `spec`, `ai`\n**Priority:** P2\n"
+}

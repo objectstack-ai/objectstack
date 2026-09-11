@@ -1,0 +1,33 @@
+{
+  "number": 1042,
+  "kind": "pull_request",
+  "title": "[WIP] Fix CI build and test errors",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-01T07:48:37Z",
+  "updated_at": "2026-04-01T08:10:46Z",
+  "closed_at": "2026-04-01T08:04:06Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-01T08:04:06Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1042",
+  "body": "- [x] Investigate CI failures — identified `@objectstack/client#test` as the only failing job\n- [x] Identify root cause: `client.ai.chat()` method was removed (line 1210 comment) but test still called it\n- [x] Fix the failing test in `packages/client/src/client.test.ts` to match the current API\n- [x] Verify all 88 client tests pass locally\n- [x] Verify full test suite passes (83/83 turbo tasks successful)\n- [x] Update CHANGELOG.md\n- [x] Code review — no issues found\n- [x] CodeQL security scan — no alerts"
+}

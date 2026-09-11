@@ -1,0 +1,33 @@
+{
+  "number": 1029,
+  "kind": "issue",
+  "title": "服务端 AI Chat API 协议升级：对齐 Vercel/ai Data Stream Protocol 以支持 objectui 前端",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-01T02:19:54Z",
+  "updated_at": "2026-04-01T07:59:39Z",
+  "closed_at": "2026-04-01T07:59:39Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1029",
+  "body": "## 背景\nobjectui 前端已全量采用 Vercel AI SDK（@ai-sdk/react/useChat），其消息/流式协议、ToolCall协议等与 Vercel 官方标准强绑定，要求服务端完全兼容 Vercel/ai 的API格式与响应协议。\n目前 service-ai 虽已具备丰富API能力（chat、stream、tools、agents、conversations等），但协议细节与 Vercel 官方（Data Stream Protocol）有显著差异，导致 objectui 前端无法直接对接。\n\n---\n\n## 调整目标\n- 服务端 `/api/v1/ai/chat` 能作为 objectui/console 的唯一 AI API，兼容 Vercel AI Data Stream 协议，可被 @ai-sdk/react/useChat 直接消费，无需自定义适配。\n- 支持双模式：JSON 响应（非流式）、Data Stream 响应（流式，默认）\n- 请求体与字段自动兼容 Vercel 用例（平铺、systemPrompt、stream 字段等）\n- 向下兼容 service-ai SDK 客户端/CLI/旧前端等原有用法\n- 不破坏现有 tool calling/多轮会话/agent/自定义工具能力\n\n---\n\n## 技术方案\n1. **新增 Vercel LLM Adapter**：实现 `VercelLLMAdapter`，直接用 Vercel AI SDK（streamText/generateText）作为生产 adapter。MemoryAdapter 作为本地测试。\n2. **路由层协议转换**：在 `/api/v1/ai/chat` handler 内部，自动支持 Vercel useChat 的平铺格式，通过 `systemPrompt` 字段 prepend system message，并按 `stream` 字段选择 Data Stream 响应。\n3. **Vercel Data Stream 输出**：新增 `vercel-stream-encoder.ts`，将 service-ai 的 `AsyncIterable<AIStreamEvent>` 转为 Vercel Data Stream 帧格式（0:文本, 9:tool, e:结束等）。作为 HTTP Server 层的输出路径。\n4. **保持核心服务协议不变**：所有变更限定在 adapter/路由/HTTP 响应层，`AIService` 与 `contracts` 类型完全兼容历史实现。\n5. **补充测试**：adapter、stream encoder、路由平铺兼容性单测，保障所有原有路由和新协议全量覆盖。\n\n---\n\n## 影响范围\n- `/api/v1/ai/chat` 可兼容 objectui useChat 及所有 Vercel AI 客户端\n- 保持原 /chat/stream 及非流式 JSON 响应接口不变，向下兼容 CLI/SDK 用户\n- agent/tool 多轮调用流程统一升级，无破坏性调整\n\n---\n\n## 步骤清单\n- [ ] 新增 VercelLLMAdapter\n- [ ] 新增 vercel-stream-encoder 工具\n- [ ] 改造 ai-routes 支持平铺 body + systemPrompt + stream Data Stream 响应\n- [ ] HTTP Server 层根据 RouteResponse.vercelDataStream 标志输出 Vercel 帧格式 SSE\n- [ ] 所有功能补充单元测试/集成测试\n- [ ] Update CHANGELOG.md, 补充 migration 指南\n\n---\n\n## 预期效果\n- Console Floating Chatbot/AI Chat 直接对接新版 /api/v1/ai/chat，无中间协议桥接/代码冗余\n- Vercel AI SDK 新特性上线后即可低成本升级\n- 服务端协议和核心能力抽象更加清晰，便于未来多模式（非 Vercel 客户端）扩展\n"
+}

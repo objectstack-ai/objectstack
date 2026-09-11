@@ -1,0 +1,33 @@
+{
+  "number": 1246,
+  "kind": "pull_request",
+  "title": "chore(deps)(deps-dev): bump the development-dependencies group with 2 updates",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "dependabot[bot]",
+    "id": 49699333,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-18T02:39:31Z",
+  "updated_at": "2026-05-18T15:33:18Z",
+  "closed_at": "2026-05-18T15:33:15Z",
+  "closed_by": {
+    "login": "dependabot[bot]",
+    "id": 49699333,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1246",
+  "body": "Bumps the development-dependencies group with 2 updates: [@tanstack/router-plugin](https://github.com/TanStack/router/tree/HEAD/packages/router-plugin) and [@cloudflare/workers-types](https://github.com/cloudflare/workerd).\n\nUpdates `@tanstack/router-plugin` from 1.168.5 to 1.168.6\n<details>\n<summary>Release notes</summary>\n<p><em>Sourced from <a href=\"https://github.com/TanStack/router/releases\">@​tanstack/router-plugin's releases</a>.</em></p>\n<blockquote>\n<h2><code>@​tanstack/router-plugin</code><a href=\"https://github.com/1\"><code>@​1</code></a>.168.6</h2>\n<h3>Patch Changes</h3>\n<ul>\n<li>\n<p>Fix route mismatch warnings, HMR route index refresh, and generated route type preferences for duplicate pathless/index routes. (<a href=\"https://redirect.github.com/TanStack/router/pull/7422\">#7422</a>)</p>\n</li>\n<li>\n<p>Updated dependencies [<a href=\"https://github.com/TanStack/router/commit/b60eb36e59e8a468ee0742cbcf7f47aca1ff1c67\"><code>b60eb36</code></a>]:</p>\n<ul>\n<li><code>@​tanstack/router-core</code><a href=\"https://github.com/1\"><code>@​1</code></a>.171.2</li>\n<li><code>@​tanstack/router-generator</code><a href=\"https://github.com/1\"><code>@​1</code></a>.167.5</li>\n<li><code>@​tanstack/react-router</code><a href=\"https://github.com/1\"><code>@​1</code></a>.170.4</li>\n</ul>\n</li>\n</ul>\n</blockquote>\n</details>\n<details>\n<summary>Changelog</summary>\n<p><em>Sourced from <a href=\"https://github.com/TanStack/router/blob/main/packages/router-plugin/CHANGELOG.md\">@​tanstack/router-plugin's changelog</a>.</em></p>\n<blockquote>\n<h2>1.168.6</h2>\n<h3>Patch Changes</h3>\n<ul>\n<li>\n<p>Fix route mismatch warnings, HMR route index refresh, and generated route type preferences for duplicate pathless/index routes. (<a href=\"https://redirect.github.com/TanStack/router/pull/7422\">#7422</a>)</p>\n</li>\n<li>\n<p>Updated dependencies [<a href=\"https://github.com/TanStack/router/commit/b60eb36e59e8a468ee0742cbcf7f47aca1ff1c67\"><code>b60eb36</code></a>]:</p>\n<ul>\n<li><code>@​tanstack/router-core</code><a href=\"https://github.com/1\"><code>@​1</code></a>.171.2</li>\n<li><code>@​tanstack/router-generator</code><a href=\"https://github.com/1\"><code>@​1</code></a>.167.5</li>\n<li><code>@​tanstack/react-router</code><a href=\"https://github.com/1\"><code>@​1</code></a>.170.4</li>\n</ul>\n</li>\n</ul>\n</blockquote>\n</details>\n<details>\n<summary>Commits</summary>\n<ul>\n<li><a href=\"https://github.com/TanStack/router/commit/ee8a6753da78590e3f8659db6d96403604394f34\"><code>ee8a675</code></a> ci: Version Packages (<a href=\"https://github.com/TanStack/router/tree/HEAD/packages/router-plugin/issues/7423\">#7423</a>)</li>\n<li><a href=\"https://github.com/TanStack/router/commit/b60eb36e59e8a468ee0742cbcf7f47aca1ff1c67\"><code>b60eb36</code></a> fix: fix route mismatch warnings and HMR route indexes (<a href=\"https://github.com/TanStack/router/tree/HEAD/packages/router-plugin/issues/7422\">#7422</a>)</li>\n<li>See full diff in <a href=\"https://github.com/TanStack/router/commits/@tanstack/router-plugin@1.168.6/packages/router-plugin\">compare view</a></li>\n</ul>\n</details>\n<br />\n\nUpdates `@cloudflare/workers-types` from 4.20260517.1 to 4.20260518.1\n<details>\n<summary>Commits</summary>\n<ul>\n<li>See full diff in <a href=\"https://github.com/cloudflare/workerd/commits\">compare view</a></li>\n</ul>\n</details>\n<br />\n\n\nDependabot will resolve any conflicts with this PR as long as you don't alter it yourself. You can also trigger a rebase manually by commenting `@dependabot rebase`.\n\n[//]: # (dependabot-automerge-start)\n[//]: # (dependabot-automerge-end)\n\n---\n\n<details>\n<summary>Dependabot commands and options</summary>\n<br />\n\nYou can trigger Dependabot actions by commenting on this PR:\n- `@dependabot rebase` will rebase this PR\n- `@dependabot recreate` will recreate this PR, overwriting any edits that have been made to it\n- `@dependabot show <dependency name> ignore conditions` will show all of the ignore conditions of the specified dependency\n- `@dependabot ignore <dependency name> major version` will close this group update PR and stop Dependabot creating any more for the specific dependency's major version (unless you unignore this specific dependency's major version or upgrade to it yourself)\n- `@dependabot ignore <dependency name> minor version` will close this group update PR and stop Dependabot creating any more for the specific dependency's minor version (unless you unignore this specific dependency's minor version or upgrade to it yourself)\n- `@dependabot ignore <dependency name>` will close this group update PR and stop Dependabot creating any more for the specific dependency (unless you unignore this specific dependency or upgrade to it yourself)\n- `@dependabot unignore <dependency name>` will remove all of the ignore conditions of the specified dependency\n- `@dependabot unignore <dependency name> <ignore condition>` will remove the ignore condition of the specified dependency and ignore conditions\n\n\n</details>"
+}

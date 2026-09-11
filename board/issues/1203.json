@@ -1,0 +1,33 @@
+{
+  "number": 1203,
+  "kind": "issue",
+  "title": "Studio 布局重构：Supabase 风格的 TopBar + LeftSidebar + Content",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-21T05:45:57Z",
+  "updated_at": "2026-04-21T07:02:54Z",
+  "closed_at": "2026-04-21T07:02:54Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1203",
+  "body": "\n## Context\n\n当前 Studio 的布局是 Shadcn `SidebarProvider` + 左侧边栏（`GlobalSidebar` 或 `AppSidebar`）+ 每个页面内部再自行 `<SiteHeader />` 的模式。问题：\n\n1. Org / Env / Package 切换分散在 `SiteHeader`（Org、Env）和 `AppSidebar` 头部（Package），同一认知层级被切成两处。\n2. 每个路由都要手动 import `SiteHeader`，重复且容易漂移（breadcrumb 逻辑、操作按钮样式都不一致）。\n3. 视觉上缺少 Supabase 那种\"顶部全局 chrome + 左侧功能导航 + 右侧纯内容区\"的清晰三段式。\n\n目标：改造为 **顶部栏（全局 chrome）+ 左侧栏（保留 metadata 树）+ 右侧内容区**，让全局身份上下文集中在顶部，页面只关注 body。\n\n<img width=\"1832\" height=\"1073\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/9b002651-f1a5-453f-98db-fd1baa8a2b8e\" />\n\n## 方案\n\n### 1. 新增 `TopBar` 全局组件\n\n文件：`apps/studio/src/components/top-bar.tsx`（新建）\n\n承载：\n- 左段：Logo + `OrganizationSwitcher`（复用 `components/organization-switcher.tsx`）+ `EnvironmentSwitcher`（复用 `components/environment-switcher.tsx`）+ Package 切换器（从 `app-sidebar.tsx` 里 SidebarHeader 的 DropdownMenu 抽出，命名为 `PackageSwitcher`，放到 `components/package-switcher.tsx`）\n- 中段：`SidebarTrigger`（折叠左栏）+ 面包屑（吸收 `SiteHeader` 的 `viewLabels` / `selectedMeta` / API 路径 Badge 逻辑；通过读取 `useLocation` + `useParams` 动态计算，不再需要每页传 props）\n- 右段：全局搜索框（`⌘K` 占位，后续接入；暂用 shadcn `Input` + `kbd` 样式）、环境模式 Badge（`config.mode`）、`ThemeToggle`、`UserMenu`\n\n高度仍为 `h-12`，`border-b`，与现有 `SiteHeader` 对齐以减少视觉跳变。\n\n### 2. 改造 `routes/__root.tsx`\n\n- 在 `RootComponent` 的 `SidebarProvider` 内部、`<Outlet />` 外层加一个 flex 列容器：`<TopBar />` 在上，下方是 `<div className=\"flex flex-1 min-h-0\">{sidebar}{outlet}</div>`。\n- `TopBar` 仅在已登录且非 public 路由时渲染（沿用 `RequireAuth` 的逻辑）。\n- `GlobalSidebar` / `AppSidebar` 的选择逻辑保留（`isGlobalShellPath`），但它们从此只负责\"功能导航 + metadata 树\"，不再承担 Org/Env/Package 切换。\n  - `global-sidebar.tsx`：删除 `OrgHeader`（Org 切换器移到 TopBar），`SidebarHeader` 可直接省略或仅留 Logo。\n  - `app-sidebar.tsx`：删除顶部 Package Switcher `SidebarHeader` 块，把 Package 下拉菜单抽到新的 `PackageSwitcher` 组件给 TopBar 使用。\n\n### 3. 删除每页 `<SiteHeader />`\n\n影响文件（共 11 个路由）：\n- `routes/index.tsx`\n- `routes/api-console.tsx`\n- `routes/orgs.index.tsx` / `orgs.new.tsx` / `orgs.$orgId.tsx`\n- `routes/environments.index.tsx` / `environments.$environmentId.index.tsx` / `environments.$environmentId.packages.tsx`\n- `routes/environments.$environmentId.$package.index.tsx`\n- `routes/environments.$environmentId.$package.objects.$name.tsx`\n- `routes/environments.$environmentId.$package.metadata.$type.$name.tsx`\n\n每个文件：\n- 删除 `import { SiteHeader } ...` 和 `<SiteHeader ... />`。\n- 页面顶层容器 `<div className=\"flex h-svh flex-col ...\">` 去掉 `h-svh`（高度交由根布局的 flex container 接管），或者改成 `flex-1 min-h-0 overflow-auto`。\n- 原 `SiteHeader` 里传入的 `selectedObject` / `selectedMeta` / `selectedView` 信息由 `TopBar` 通过路由参数自行推断，不再需要页面显式传值。\n\n### 4. 删除 `site-header.tsx`\n\n所有用处被 TopBar 吸收后，删除 `apps/studio/src/components/site-header.tsx`。\n\n### 5. `environments.$environmentId.$package.tsx` 调整\n\n当前 `<main className=\"flex min-w-0 flex-1 flex-col h-svh overflow-hidden ...\">` 里的 `h-svh` 会和新的根 flex 冲突，改为 `flex min-w-0 flex-1 flex-col overflow-hidden`。\n\n## 关键文件\n\n| 路径 | 操作 |\n|---|---|\n| `apps/studio/src/components/top-bar.tsx` | 新建 |\n| `apps/studio/src/components/package-switcher.tsx` | 新建（从 app-sidebar 抽出） |\n| `apps/studio/src/routes/__root.tsx` | 加入 TopBar + flex 列布局 |\n| `apps/studio/src/components/global-sidebar.tsx` | 删除 OrgHeader |\n| `apps/studio/src/components/app-sidebar.tsx` | 删除顶部 Package Switcher header |\n| `apps/studio/src/components/site-header.tsx` | 删除 |\n| 上述 11 个路由文件 | 移除 `<SiteHeader />` 引用 & 调整外层高度 class |\n\n## 可复用的既有资产\n\n- `components/organization-switcher.tsx`、`components/environment-switcher.tsx`、`components/environment-badge.tsx`、`components/theme-toggle.tsx`、`components/user-menu.tsx` 全部直接复用。\n- Shadcn `SidebarProvider` / `SidebarTrigger` 保留，继续提供折叠能力。\n- `hooks/useSession`、`useEnvironmentDetail`、`useEnvAwarePackages` 已提供 TopBar 需要的所有上下文。\n- 面包屑渲染可复用 `components/ui/breadcrumb.tsx`。\n\n## 验证\n\n1. `pnpm --filter @objectstack/studio dev` 启动，依次访问：\n   - `/login` → 无 TopBar / Sidebar（public 路由）。\n   - `/environments` → TopBar 显示 Org 切换器 + Env 切换器（Env 未选时 disabled）；左侧 GlobalSidebar 仅剩功能入口，不再有 Org 下拉。\n   - `/environments/:id` → Env 切换器显示当前 env；左侧 GlobalSidebar；无页面级二级 header。\n   - `/environments/:id/:package/objects/:name` → TopBar 出现 Package Switcher + 面包屑 `Package › Object › <name>` + API 路径 Badge；左侧 AppSidebar 的 metadata 树正常展开，顶部不再重复 Package 下拉。\n2. 折叠 `SidebarTrigger`，右侧内容区无抖动。\n3. 切换主题、切换 Org、切换 Env、切换 Package 全部通过 TopBar 触发，并正确更新 URL / session。\n4. `pnpm --filter @objectstack/studio test` 通过；全量 `pnpm build` 通过（TypeScript 校验会捕获未清理的 `<SiteHeader />` 引用）。\n"
+}

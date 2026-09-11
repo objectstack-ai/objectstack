@@ -1,0 +1,33 @@
+{
+  "number": 1056,
+  "kind": "issue",
+  "title": "完善 AI Agent 模式：支持通过对话创建和管理对象",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-02T07:10:51Z",
+  "updated_at": "2026-04-02T09:02:30Z",
+  "closed_at": "2026-04-02T09:02:30Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1056",
+  "body": "## 背景\n\n当前服务端已实现完整的 Agent 模式架构（Agent → Skill → Tool），包括 tool-calling 循环、ToolRegistry、AgentRuntime 等核心组件。元数据操作工具（create_object、add_field、modify_field、delete_field）也已实现，但尚未串联到可用的 Agent 和前端 UI 中。\n\n用户期望能通过 AI 对话直接创建对象、添加字段等元数据操作。\n\n## 当前状态\n\n| 组件 | 状态 | 说明 |\n|------|------|------|\n| 服务端 chatWithTools 循环 | 已完成 | AIService.chatWithTools() 支持多轮工具调用 |\n| 元数据工具 | 已完成 | create_object、add_field、modify_field、delete_field 等 |\n| 数据查询工具 | 已完成 | list_objects、query_records 等 |\n| 默认 Agent 绑定 | 不完整 | data_chat agent 仅绑定查询工具，未绑定元数据工具 |\n| 前端工具调用展示 | 缺失 | Chat 面板无法展示工具调用过程和结果 |\n| 操作确认机制 | 缺失 | requiresConfirmation 字段已定义但前端未实现 |\n\n## 需要完成的工作\n\n### 1. 创建或增强 Agent 绑定元数据工具\n- 创建新的 metadata_assistant agent，或增强现有 data_chat agent\n- 绑定元数据操作工具：create_object、add_field、modify_field、delete_field、list_metadata_objects、describe_metadata_object\n- 设计合适的 system prompt 引导 AI 正确使用这些工具\n\n### 2. 前端展示工具调用过程\n- 在 AiChatPanel 中渲染工具调用状态（调用中、成功、失败）\n- 展示工具调用的参数和返回结果（如：正在创建对象 contracts...）\n- 支持 Vercel AI SDK 的 tool-call / tool-result stream parts\n\n### 3. 实现操作确认机制\n- 对标记 requiresConfirmation: true 的工具（如 create_object、delete_field），在执行前弹出确认\n- 前端展示即将执行的操作详情，用户确认后再执行\n- 支持取消操作\n\n## 相关文件\n\n- Agent 定义：packages/services/service-ai/src/agents/data-chat-agent.ts\n- 元数据工具：packages/services/service-ai/src/tools/metadata-tools.ts\n- 前端面板：apps/studio/src/components/AiChatPanel.tsx\n- 工具注册：packages/services/service-ai/src/tools/tool-registry.ts\n- Agent 路由：packages/services/service-ai/src/routes/agent-routes.ts\n- 流编码器：packages/services/service-ai/src/stream/vercel-stream-encoder.ts"
+}

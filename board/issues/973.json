@@ -1,0 +1,33 @@
+{
+  "number": 973,
+  "kind": "pull_request",
+  "title": "fix: correct ESM/CJS export paths for `\"type\": \"module\"` service packages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-23T11:15:24Z",
+  "updated_at": "2026-03-23T13:21:56Z",
+  "closed_at": "2026-03-23T13:20:22Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-23T13:20:21Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/973",
+  "body": "Vercel deploys fail with `ERR_MODULE_NOT_FOUND` for `@objectstack/service-feed/dist/index.mjs` because the file doesn't exist.\n\nWhen `tsup` builds a `\"type\": \"module\"` package, it emits `dist/index.js` (ESM) and `dist/index.cjs` (CJS). Eight service packages had their exports pointing to `.mjs`/`.js` — the convention for packages *without* `\"type\": \"module\"`:\n\n```jsonc\n// Before (wrong — these files don't exist for \"type\": \"module\")\n\"import\": \"./dist/index.mjs\",\n\"require\": \"./dist/index.js\"\n\n// After (matches actual tsup output)\n\"import\": \"./dist/index.js\",\n\"require\": \"./dist/index.cjs\"\n```\n\nPackages like `core`, `runtime`, `rest`, and `service-i18n` already had the correct paths — this aligns the remaining eight:\n\n- `service-feed` ← the specific Vercel failure\n- `service-automation`\n- `service-cache`\n- `service-realtime`\n- `service-job`\n- `service-queue`\n- `service-storage`\n- `service-analytics`\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>vercel 报错</issue_title>\n> <issue_description>Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/task/apps/studio/node_modules/@objectstack/service-feed/dist/index.mjs' imported from /var/task/apps/studio/api/index.js\n>     at finalizeResolution (node:internal/modules/esm/resolve:280:11)\n>     at moduleResolve (node:internal/modules/esm/resolve:870:10)\n>     at moduleResolveWithNodePath (node:internal/modules/esm/resolve:996:14)\n>     at defaultResolve (node:internal/modules/esm/resolve:1039:79)\n>     at #cachedDefaultResolve (node:internal/modules/esm/loader:718:20)\n>     at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:735:38)\n>     at ModuleLoader.resolveSync (node:internal/modules/esm/loader:764:52)\n>     at #resolve (node:internal/modules/esm/loader:700:17)\n>     at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:620:35)\n>     at ModuleJob.syncLink (node:internal/modules/esm/module_job:143:33) {\n>   code: 'ERR_MODULE_NOT_FOUND',\n>   url: 'file:///var/task/apps/studio/node_modules/@objectstack/service-feed/dist/index.mjs'\n> }\n> Node.js process exited with exit status: 1. The logs above can help with debugging the issue.</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#972\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n📱 Kick off Copilot coding agent tasks wherever you are with [GitHub Mobile](https://gh.io/cca-mobile-docs), available on iOS and Android."
+}

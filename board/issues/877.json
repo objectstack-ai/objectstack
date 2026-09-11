@@ -1,0 +1,37 @@
+{
+  "number": 877,
+  "kind": "pull_request",
+  "title": "Unify ID, audit, and tenant field naming across protocol layer",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-05T05:12:12Z",
+  "updated_at": "2026-03-05T08:09:10Z",
+  "closed_at": "2026-03-05T08:09:10Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-05T08:09:10Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/877",
+  "body": "- [x] Analyze all occurrences of `_id`, `modified_at/by`, `space_id` across the codebase\n- [x] Fix `packages/objectql/src/plugin.ts` — `modified_at`→`updated_at`, `modified_by`→`updated_by`, `space_id`→`tenant_id`, `_id`→`id`\n- [x] Fix `packages/objectql/src/protocol.ts` — `_id`→`id` in all filter/data operations, `modified_at`→`updated_at`\n- [x] Fix `packages/objectql/src/engine.ts` — `_id`→`id` in filters, data access, and ObjectProxy\n- [x] Fix `packages/objectql/src/engine.test.ts` — `_id`→`id` in all test data/assertions\n- [x] Fix `packages/objectql/src/protocol-data.test.ts` — `_id`→`id` in all test data\n- [x] Fix `packages/core/src/qa/http-adapter.ts` — Remove `_id` fallbacks, use only `id`\n- [x] Fix `packages/plugins/driver-memory/src/memory-matcher.ts` — Remove `_id` compatibility shim\n- [x] Fix `apps/studio/src/types.ts` — Remove `_id` from Task interface\n- [x] Fix `apps/studio/src/components/ObjectDataForm.tsx` — Remove `_id` refs, `modified_by`→`updated_by`\n- [x] Fix `apps/studio/src/components/ObjectDataTable.tsx` — Remove `_id` fallbacks\n- [x] Fix `apps/studio/src/mocks/createKernel.ts` — Remove `_id` fallbacks\n- [x] Fix `examples/app-todo/src/actions/task.handlers.ts` — `_id`→`id`\n- [x] Fix `examples/app-crm/src/actions/handlers/*.ts` — `_id`→`id`\n- [x] Fix `packages/spec/src/data/dataset.zod.ts` — Update comment\n- [x] Fix `packages/spec/src/data/mapping.zod.ts` — Update comment\n- [x] Fix `packages/spec/src/data/mapping.test.ts` — `_id`→`id` in test data\n- [x] Fix `packages/spec/src/integration/connector/database.zod.ts` — `_id`→`id`\n- [x] Fix `packages/spec/src/qa/testing.zod.ts` and `testing.test.ts` — `_id`→`id`\n- [x] Fix `packages/rest/src/rest.test.ts` — `_id`→`id`\n- [x] Fix `packages/runtime/src/http-dispatcher.test.ts` — `_id`→`id`\n- [x] Fix `packages/client/src/*.test.ts` — `_id`→`id`\n- [x] Fix `content/prompts/` — Update `_id` refs in prompt files\n- [x] Fix `content/docs/` — Update `_id` refs in documentation (including actions.mdx endpoint templates)\n- [x] Fix `packages/spec/DEVELOPMENT_PLAN.md` — `_id`→`id`\n- [x] Fix `packages/spec/docs/SYNC_ARCHITECTURE.md` — `modified_at`→`updated_at`\n- [x] Update `ROADMAP.md` with unified field naming entry\n- [x] Build all affected packages — all build successfully\n- [x] Run tests — all pass (pre-existing failures unrelated to changes)\n- [x] Full re-audit: no remaining `_id`/`modified_at`/`space_id` in protocol-level code\n\n**Audit Summary:**\n- `modified_at` / `modified_by`: ✅ Zero remaining (only in ROADMAP changelog text)\n- `space_id`: ✅ Zero remaining (only in ROADMAP changelog text)\n- `_id` (standalone): ✅ Zero remaining in protocol code. Only remaining are:\n  - TypeScript unused parameter convention (`_id` as param name) — correct\n  - Documentation comments explaining the rule (\"MUST NOT return `_id`\") — correct\n  - MongoDB `foreignField: '_id'` in storage-layer examples — intentionally preserved\n  - Standards guide text explaining not to use `_id` — correct\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>全仓库统一 ID 字段、系统字段及多租户字段命名规范（消除 _id / space_id / modified_xx 混用）</issue_title>\n> <issue_description>## 背景\n> 现有仓库内关于主键 ID 字段、审计与租户字段命名混杂，存在 `_id` / `id`、`space_id` / `tenant_id`、`modified_at/by` / `updated_at/by` 等并存使用，违反了 SystemFieldName 统一规范，导致 driver、引擎、mock、handler、测试等层面不一致，埋下兼容和维护隐患。鉴于 audit/prompt/mock 多处已传播此问题，需统一整改。\n> \n> ## 需要合并解决的具体问题\n> #### 1. ID 字段统一\n> - ObjectQL、protocol、engine���mock、handler、test、业务类型定义等多处混用 `_id` 和 `id`。\n> - 数据驱动接口规定只返回 `id`，但上下游仍有 `_id` 查询/写入/转换逻辑。\n> - Studio/types/action handlers/示例代码需移除 `_id`，统一投射 `id`。\n> \n> #### 2. 审计字段统一\n> - `created_at`、`updated_at` 应作为标准，部分 audit hook 使用 `modified_at`/`modified_by`。\n> - 所有自动审计挂钩、业务代码、mock、prompt 均应重命名为 `updated_at`/`updated_by`。\n> \n> #### 3. 多租户隔离字段统一\n> - 租户字段只能用 `tenant_id`，ObjectQL 插件/中间件实现和协议层应全部移除 `space_id`。\n> \n> #### 4. Prompt 和开发者文档示例同步\n> - 包含 seed 脚本、示例、testing schema 等，应禁止 `_id`，只用 `id`。\n> \n> #### 5. Mock/插件/devPlugin\n> - 返回类型、filter、insert/update/delete、record capture 等全面清查。\n> \n> #### 6. Testing\n> - 所有相关用例和 scenario 中不再混用 `_id`，只出现 `id`。\n> \n> ## 建议修复方案（合并执行）\n> 1. 全文自动/人工替换 `_id` → `id`，`modified_at` → `updated_at`，`space_id` → `tenant_id`（兼容层/适配器除外）。\n> 2. 引擎、插件、对象协议、mock、action handler、dev-plugin、http-adapter、testing schema、prompt 全面梳理改写。\n> 3. 强制内部和协议文档一致，所有接口入参出参、主数据类型只出现一套规范命名。\n> 4. 提供一次性升级 migration/说明文档。\n> \n> ## 影响面\n> - packages/objectql\n> - packages/core\n> - packages/plugins/driver-memory\n> - examples/\n> - apps/studio/\n> - content/prompts/\n> - packages/spec/\n> - 及所有 demo/test/mock/工具层\n> \n> ## 风险\n> - 第三方驱动或定制插件/适配层如因历史原因必须用 `_id`，需做兼容适配（如 storage column 映射）；主协议层、SDK、API 不再暴露 `_id`。</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#876\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 990,
+  "kind": "pull_request",
+  "title": "feat: unify API query syntax to Spec canonical format across all layers",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-27T03:54:01Z",
+  "updated_at": "2026-03-30T02:14:20Z",
+  "closed_at": "2026-03-30T02:14:19Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-30T02:14:19Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/990",
+  "body": "Normalizes query parameter naming to Spec canonical format (`where`/`fields`/`orderBy`/`limit`/`offset`/`expand`) across Client SDK, React hooks, Studio, HTTP dispatcher, and documentation. Legacy names (`filter`/`select`/`sort`/`top`/`skip`) remain accepted with `@deprecated` markers.\n\n### Client SDK (`packages/client`)\n- New `QueryOptionsV2` interface with canonical field names\n- `find()` accepts both `QueryOptions | QueryOptionsV2`; auto-detects V2 by presence of canonical-only keys\n- `QueryBuilder.offset()` added as canonical alias for deprecated `.skip()`\n\n```typescript\n// Before (legacy)\nawait client.data.find('account', { select: ['name'], filters: { status: 'active' }, sort: ['-revenue'], top: 20, skip: 0 });\n\n// After (canonical)\nawait client.data.find('account', { fields: ['name'], where: { status: 'active' }, orderBy: ['-revenue'], limit: 20, offset: 0 });\n```\n\n### React Hooks (`packages/client-react`)\n- `UseQueryOptions` supports both canonical and legacy names; canonical takes precedence\n- `usePagination` / `useInfiniteQuery` internals switched to canonical calls\n- `UsePaginationOptions` and `UseInfiniteQueryOptions` Omit types updated to include canonical keys\n\n### Studio QueryBuilder (`apps/studio`)\n- `buildQueryJson` output changed from `{select, filters, sort, top, skip}` to `{fields, where, orderBy, limit, offset}`\n\n### HTTP Dispatcher (`packages/runtime`)\n- Pre-normalizes HTTP transport params (`filter→where`, `select→fields`, `sort→orderBy`, `top→limit`, `skip→offset`) before broker dispatch\n- Clarified two-layer normalization: dispatcher (transport) + protocol.ts (deep)\n\n### Documentation\n- `client-sdk.mdx`: all examples and query options table updated to canonical syntax with deprecation callout\n- `http-protocol.mdx`: added canonical equivalent column and normalization explanation\n- `packages/client/README.md`: query options rewritten for canonical names\n\n### Tests\n- 4 new tests covering V2 canonical find, legacy backward compat, `.offset()`, and `.skip()` compat\n- All 66 client tests and 6,723 spec tests pass\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 Send tasks to Copilot coding agent from [Slack](https://gh.io/cca-slack-docs) and [Teams](https://gh.io/cca-teams-docs) to turn conversations into code. Copilot posts an update in your thread when it's finished."
+}

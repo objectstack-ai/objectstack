@@ -1,0 +1,34 @@
+{
+  "number": 995,
+  "kind": "pull_request",
+  "title": "chore(deps)(deps-dev): bump typescript from 5.9.3 to 6.0.2",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "dependabot[bot]",
+    "id": 49699333,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-30T02:22:40Z",
+  "updated_at": "2026-03-30T04:00:34Z",
+  "closed_at": "2026-03-30T04:00:26Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-30T04:00:26Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/995",
+  "body": "Bumps [typescript](https://github.com/microsoft/TypeScript) from 5.9.3 to 6.0.2.\n<details>\n<summary>Release notes</summary>\n<p><em>Sourced from <a href=\"https://github.com/microsoft/TypeScript/releases\">typescript's releases</a>.</em></p>\n<blockquote>\n<h2>TypeScript 6.0</h2>\n<p>For release notes, check out the <a href=\"https://devblogs.microsoft.com/typescript/announcing-typescript-6-0/\">release announcement blog post</a>.</p>\n<ul>\n<li><a href=\"https://github.com/Microsoft/TypeScript/issues?utf8=%E2%9C%93&amp;q=milestone%3A%22TypeScript+6.0.0%22\">fixed issues query for TypeScript 6.0.0 (Beta)</a>.</li>\n<li><a href=\"https://github.com/Microsoft/TypeScript/issues?utf8=%E2%9C%93&amp;q=milestone%3A%22TypeScript+6.0.1%22\">fixed issues query for TypeScript 6.0.1 (RC)</a>.</li>\n<li><a href=\"https://github.com/Microsoft/TypeScript/issues?utf8=%E2%9C%93&amp;q=milestone%3A%22TypeScript+6.0.2%22\">fixed issues query for TypeScript 6.0.2 (Stable)</a>.</li>\n</ul>\n<p>Downloads are available on:</p>\n<ul>\n<li><a href=\"https://www.npmjs.com/package/typescript\">npm</a></li>\n</ul>\n<h2>TypeScript 6.0 Beta</h2>\n<p>For release notes, check out the <a href=\"https://devblogs.microsoft.com/typescript/announcing-typescript-6-0-beta/\">release announcement</a>.</p>\n<ul>\n<li><a href=\"https://github.com/Microsoft/TypeScript/issues?utf8=%E2%9C%93&amp;q=milestone%3A%22TypeScript+6.0.0%22+is%3Aclosed+\">fixed issues query for Typescript 6.0.0 (Beta)</a>.</li>\n</ul>\n<p>Downloads are available on:</p>\n<ul>\n<li><a href=\"https://www.npmjs.com/package/typescript\">npm</a></li>\n</ul>\n</blockquote>\n</details>\n<details>\n<summary>Commits</summary>\n<ul>\n<li><a href=\"https://github.com/microsoft/TypeScript/commit/607a22a90d1a5a1b507ce01bb8cd7ec020f954e7\"><code>607a22a</code></a> Bump version to 6.0.2 and LKG</li>\n<li><a href=\"https://github.com/microsoft/TypeScript/commit/9e72ab71b575e26795d0d9eac3d2d9957beed17c\"><code>9e72ab7</code></a> 🤖 Pick PR <a href=\"https://redirect.github.com/microsoft/TypeScript/issues/63239\">#63239</a> (Fix missing lib files in reused pro...) into release-6.0 (#...</li>\n<li><a href=\"https://github.com/microsoft/TypeScript/commit/35ff23d4b0cc715691323ebe54f523c16fe6e3a5\"><code>35ff23d</code></a> 🤖 Pick PR <a href=\"https://redirect.github.com/microsoft/TypeScript/issues/63163\">#63163</a> (Port anyFunctionType subtype fix an...) into release-6.0 (#...</li>\n<li><a href=\"https://github.com/microsoft/TypeScript/commit/e175b69138038953d4e85bf6529afe88d56d8fbe\"><code>e175b69</code></a> Bump version to 6.0.1-rc and LKG</li>\n<li><a href=\"https://github.com/microsoft/TypeScript/commit/af4caac0e91e838c46b3fdc1c9afacad68800f89\"><code>af4caac</code></a> Update LKG</li>\n<li><a href=\"https://github.com/microsoft/TypeScript/commit/8efd7e8544d8b35c9b33bca44a3124aa2613bf09\"><code>8efd7e8</code></a> Merge remote-tracking branch 'origin/main' into release-6.0</li>\n<li><a href=\"https://github.com/microsoft/TypeScript/commit/206ed1a00ffde637d821bbb3172d1488e3d949e8\"><code>206ed1a</code></a> Deprecate assert in import() (<a href=\"https://redirect.github.com/microsoft/TypeScript/issues/63172\">#63172</a>)</li>\n<li><a href=\"https://github.com/microsoft/TypeScript/commit/e688ac8bc3cbb698c4341ee06401bd6beeb1c4ba\"><code>e688ac8</code></a> Update dependencies (<a href=\"https://redirect.github.com/microsoft/TypeScript/issues/63156\">#63156</a>)</li>\n<li><a href=\"https://github.com/microsoft/TypeScript/commit/29b300deb56c775f19c2f0528012896e4d1db3e0\"><code>29b300d</code></a> Bump the github-actions group across 1 directory with 2 updates (<a href=\"https://redirect.github.com/microsoft/TypeScript/issues/63205\">#63205</a>)</li>\n<li><a href=\"https://github.com/microsoft/TypeScript/commit/0c2c7a358297d66df690230deaed8c98e7d77c04\"><code>0c2c7a3</code></a> DOM update (<a href=\"https://redirect.github.com/microsoft/TypeScript/issues/63183\">#63183</a>)</li>\n<li>Additional commits viewable in <a href=\"https://github.com/microsoft/TypeScript/compare/v5.9.3...v6.0.2\">compare view</a></li>\n</ul>\n</details>\n<br />"
+}

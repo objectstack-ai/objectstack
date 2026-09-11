@@ -1,0 +1,33 @@
+{
+  "number": 1007,
+  "kind": "pull_request",
+  "title": "fix: resolve all CI build and test errors",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-31T06:37:24Z",
+  "updated_at": "2026-03-31T07:18:02Z",
+  "closed_at": "2026-03-31T07:08:41Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-31T07:08:41Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1007",
+  "body": "CI was broken on main due to TypeScript build errors, adapter/test mismatches on discovery endpoints, and incorrect client feed routing.\n\n### ObjectQL build (TS2345)\n\n`SchemaRegistry.registerItem()` calls in `protocol.ts` failed type checking when `T` inferred as `unknown` from `getItem()` return. Applied `'name' as any` cast, consistent with existing pattern in `engine.ts` and `metadata-facade.ts`.\n\n### `loadMetaFromDb` object registration\n\n`registerItem('object', data)` stores in the generic metadata map, but `getItem('object', name)` delegates to `getObject()` which reads from `objectContributors`. Objects registered via `registerItem` were invisible to lookups. Fixed by routing object-type records through `registerObject()`:\n\n```ts\nif (record.type === 'object') {\n    SchemaRegistry.registerObject(data as any, record.packageId || 'sys_metadata');\n} else {\n    SchemaRegistry.registerItem(record.type, data, 'name' as any);\n}\n```\n\n### Adapter discovery endpoints (hono, sveltekit, nuxt, nextjs, fastify)\n\nAll five adapters served discovery at `${prefix}/discovery` but tests expect it at the prefix root (`GET /api`). Updated discovery route and `.well-known/objectstack` redirect to target prefix root.\n\n### Client feed routing\n\n`ObjectStackClient.feed` methods called `getRoute('feed')` → `/api/v1/feed/...`, but feed is a sub-resource of data. Changed to `getRoute('data')` → `/api/v1/data/{object}/{recordId}/feed`, matching server-side routing."
+}

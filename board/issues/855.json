@@ -1,0 +1,35 @@
+{
+  "number": 855,
+  "kind": "issue",
+  "title": "为翻译准确性开发“对象字段/选项完整性约束”与AI友好翻译骨架工具",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-02T03:38:05Z",
+  "updated_at": "2026-05-16T01:38:10Z",
+  "closed_at": "2026-05-16T01:38:10Z",
+  "closed_by": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/855",
+  "body": "## 背景\n\n当前翻译文件（如 `examples/app-todo/src/translations/zh-CN.ts`）使用 `TranslationData` 类型，底层是 `z.record(z.string(), FieldTranslationSchema)` —— **只验证值的形状，不验证 key 的完整性**。\n\n这意味着：\n- AI 生成翻译时漏了 5 个字段，TypeScript 不报错，Zod 也不报错\n- 多写了一个不存在的字段 key，也不报错\n- select/multiselect 的 option 翻译少了几个，同样静默通过\n\n**参考现状：**\n- 对象定义 [`task.object.ts`](https://github.com/objectstack-ai/spec/blob/main/examples/app-todo/src/objects/task.object.ts) 有 18 个字段，3 个 select 共 14 个 option\n- 翻译文件 [`zh-CN.ts`](https://github.com/objectstack-ai/spec/blob/main/examples/app-todo/src/translations/zh-CN.ts) 只有 `TranslationData` 松散类型约束\n\n## 目标\n\n建立三重防线，保证 AI/人工翻译 **字段全覆盖、option 不缺不漏、格式严格合规**：\n\n```\nObject 定义 (task.object.ts)\n    │\n    ├──→ ① TypeScript satisfies 约束    ← tsc 编译报错（少/多字段）\n    │\n    ├──→ ② AI 翻译骨架 JSON（填空题）    ← 结构已锁死，AI 不可能加减 key\n    │\n    └──→ ③ Vitest 完整性测试            ← CI 自动拦截\n```\n\n## 开发任务\n\n### Task 1: 类型工具 `translation-typegen.ts`\n\n**新增文件：** `packages/spec/src/system/translation-typegen.ts`\n\n从 Object 定义自动推导严格翻译类型：\n\n```typescript\n// 核心泛型：把 fields Record 的 key 提取出来，要求翻译必须覆盖每一个\ntype StrictFieldTranslations<Fields> = {\n  [K in keyof Fields]-?:    // -? = 去掉可选，变成必填\n    Fields[K] extends { options: ... }\n      ? { label: string; options: Record<OptionValue, string> }  // select 字段：options 也必填\n      : { label: string; help?: string; placeholder?: string }   // 普通字段：label 必填\n};\n\ntype StrictObjectTranslation<Obj> = {\n  label: string;\n  pluralLabel?: string;\n  fields: StrictFieldTranslations<Obj['fields']>;\n};\n```\n\n**验收标准：**\n- [ ] `StrictObjectTranslation<typeof Task>` 可以正确推导出 18 个字段 key 为必填\n- [ ] select 字段（status/priority/tags）的 option value 全部成为 `options` 的必填 key\n- [ ] 少字段 → TS2741 报错；多字段 → TS2353 报错；少 option → TS2741 报错\n- [ ] 从 `packages/spec/src/system/index.ts` 导出\n- [ ] 有单元测试验证类型推导正确性（利用 `expectTypeOf` 或 `@ts-expect-error`）\n\n### Task 2: 翻译骨架生成器 `translation-skeleton.ts`\n\n**新增文件：** `packages/spec/src/system/translation-skeleton.ts`\n\n从 Object 定义自动生成 AI 友好的 JSON 填空模板：\n\n```typescript\nfunction generateTranslationSkeleton(objectDef: ServiceObject): string\n```\n\n输出示例（task 对象）：\n```json\n{\n  \"label\": \"__TRANSLATE__: \\\"Task\\\"\",\n  \"pluralLabel\": \"__TRANSLATE__: \\\"Tasks\\\"\",\n  \"fields\": {\n    \"subject\": { \"label\": \"__TRANSLATE__: \\\"Subject\\\"\" },\n    \"status\": {\n      \"label\": \"__TRANSLATE__: \\\"Status\\\"\",\n      \"options\": {\n        \"not_started\": \"__TRANSLATE__: \\\"Not Started\\\"\",\n        \"in_progress\": \"__TRANSLATE__: \\\"In Progress\\\"\",\n        \"waiting\": \"__TRANSLATE__: \\\"Waiting\\\"\",\n        \"completed\": \"__TRANSLATE__: \\\"Completed\\\"\",\n        \"deferred\": \"__TRANSLATE__: \\\"Deferred\\\"\"\n      }\n    }\n  }\n}\n```\n\n**验收标准：**\n- [ ] 输入 `task.object.ts` 的对象定义 → 输出包含全部 18 个字段的骨架\n- [ ] select 字段自动提取所有 option value 并生成 `options` 映射\n- [ ] 有 `description` 的字段自动生成 `help` 占位符\n- [ ] 输出是合法 JSON，可直接被 `ObjectTranslationNodeSchema.parse()` 验证（替换占位符后）\n- [ ] 有单元测试\n\n### Task 3: 完整性校验函数 `validateTranslationCompleteness()`\n\n**新增文件：** `packages/spec/src/system/translation-validator.ts`\n\n```typescript\nfunction validateTranslationCompleteness(\n  objectDef: ServiceObject,\n  translation: unknown,\n): { valid: boolean; errors: string[] }\n```\n\n校验维度：\n1. **Zod 结构验证** — `ObjectTranslationNodeSchema.safeParse()`\n2. **字段完整性** — 源 fields 中有但翻译中没有 → 报 `缺失字段`\n3. **字段多余性** — 翻译中有但源 fields 中没有 → 报 `多余字段`\n4. **Option 完整性** — select 字段的每个 option value 都必须有翻译\n5. **残留检查** — 不允许 `__TRANSLATE__` 占位符残留\n\n**验收标准：**\n- [ ] 缺 1 个字段 → errors 包含该字段名\n- [ ] 多 1 个字段 → errors 包含该字段名\n- [ ] 缺 1 个 option → errors 包含 `fields.{name}.options.{value}`\n- [ ] `__TRANSLATE__` 残留 → errors 报告\n- [ ] 有完整单元测试\n\n### Task 4: 改造 Todo 示例作为范例\n\n**修改文件：** `examples/app-todo/src/translations/zh-CN.ts`\n\n```typescript\n// Before:\nimport type { TranslationData } from '@objectstack/spec/system';\nexport const zhCN: TranslationData = { ... };\n\n// After:\nimport type { StrictObjectTranslation } from '@objectstack/spec/system';\nimport { Task } from '../objects/task.object';\ntype TaskTranslation = StrictObjectTranslation<typeof Task>;\n\nexport const zhCN = {\n  objects: {\n    task: { ... } satisfies TaskTranslation,\n  },\n  // ...\n};\n```\n\n**验收标准：**\n- [ ] `tsc --noEmit` 编译通过\n- [ ] 故意删掉一个字段 → `tsc` 报错（在测试中用 `@ts-expect-error` 验证）\n\n### Task 5: Vitest 完整性测试\n\n**新增文件：** `examples/app-todo/src/translations/translation-completeness.test.ts`\n\n```typescript\nconst fieldNames = Object.keys(Task.fields);\nconst selectFields = Object.entries(Task.fields)\n  .filter(([_, f]) => Array.isArray(f.options))\n  .map(([name, f]) => ({ name, values: f.options.map(o => o.value) }));\n\ndescribe.each([['en', en], ['zh-CN', zhCN]])('%s', (locale, t) => {\n  it.each(fieldNames)('field: %s', (name) => {\n    expect(t.objects?.task?.fields?.[name]?.label).toBeTruthy();\n  });\n  it.each(selectFields)('options: $name', ({ name, values }) => {\n    for (const v of values) {\n      expect(t.objects?.task?.fields?.[name]?.options?.[v]).toBeTruthy();\n    }\n  });\n});\n```\n\n**验收标准：**\n- [ ] `pnpm test -- translation-completeness` 全部通过\n- [ ] 故意删掉一个 option 翻译 → 测试失败并明确指出哪个 option 缺失\n\n## 不涉及（Not in scope）\n\n- 不修改现有 Zod Schema（`z.record` 保持不变）\n- 不修改现有 `TranslationData` / `AppTranslationBundle` 类型（向后兼容）\n- 不涉及 views/actions/workflows 的翻译完整性（后续迭代）\n- 不涉及 CLI 包的实际 `objectstack` 命令注册（本期只提供函数，CLI 集成后续）\n\n## 相关文件\n\n| 文件 | 操作 | 说明 |\n|------|------|------|\n| `packages/spec/src/system/translation-typegen.ts` | **新增** | 严格类型推导工具 |\n| `packages/spec/src/system/translation-skeleton.ts` | **新增** | AI 骨架生成函数 |\n| `packages/spec/src/system/translation-validator.ts` | **新增** | 完整性校验函数 |\n| `packages/spec/src/system/index.ts` | **修改** | 新增 export |\n| `examples/app-todo/src/translations/zh-CN.ts` | **修改** | satisfies 范例 |\n| `examples/app-todo/src/translations/translation-completeness.test.ts` | **新增** | 完整性测试 |\n\n## 子任务拆分建议\n\n- [ ] Task 1: `translation-typegen.ts` 类型推导\n- [ ] Task 2: `translation-skeleton.ts` 骨架生成\n- [ ] Task 3: `translation-validator.ts` 校验函数\n- [ ] Task 4: Todo 示例改造 + satisfies 落地\n- [ ] Task 5: Vitest 完整性测试\n- [ ] Task 6: 文档更新（开发者指南）"
+}

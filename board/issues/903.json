@@ -1,0 +1,33 @@
+{
+  "number": 903,
+  "kind": "pull_request",
+  "title": "fix: unify i18n service discovery, handler resolution, and plugin auto-loading",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-11T03:13:47Z",
+  "updated_at": "2026-03-11T04:24:03Z",
+  "closed_at": "2026-03-11T04:18:33Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-11T04:18:33Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/903",
+  "body": "`getDiscoveryInfo()` used synchronous `getServicesMap()` to check service availability, while `handleI18n()` (and all other handlers) used the async `resolveService()` fallback chain (`getServiceAsync → getService → context.getService → services Map`). A service registered via an async factory would be reported as \"unavailable\" in discovery but fully functional via the handler. The `locale` field was also hardcoded rather than sourced from the actual i18n service. Additionally, `AppPlugin` did not coordinate i18n translation loading from app bundles, leaving server/dev/mock environments with inconsistent i18n state.\n\n### Core fix — `http-dispatcher.ts`\n\n- `getDiscoveryInfo()` is now `async` and resolves all 15 services via `Promise.all(resolveService(...))` — same chain handlers use\n- `locale` is populated from `i18nSvc.getDefaultLocale()` / `i18nSvc.getLocales()` when available, with sensible defaults when not\n\n```typescript\n// Before: sync Map lookup — misses async-factory services\nconst hasI18n = !!services[CoreServiceName.enum.i18n];\n\n// After: same resolution chain as handleI18n()\nconst [authSvc, ..., i18nSvc, ...] = await Promise.all([\n    this.resolveService(CoreServiceName.enum.auth),\n    ...\n    this.resolveService(CoreServiceName.enum.i18n),\n    ...\n]);\n```\n\n### AppPlugin i18n auto-loading — `app-plugin.ts`\n\n- `AppPlugin.start()` now auto-loads translation bundles from app configs (`translations` array) into the kernel's i18n service\n- Sets default locale from `i18n.defaultLocale` config via `i18nService.setDefaultLocale()`\n- Gracefully skips when no i18n service is registered (no errors, debug log only)\n- Per-locale error handling: a failure loading one locale does not block others\n\n### Callers updated to `await`\n\n- **Adapters**: Hono, Express, Fastify, Next.js, NestJS, Nuxt, SvelteKit\n- **Plugins**: `dispatcher-plugin.ts`, `plugin-msw`\n- **Internal**: `dispatch()` root discovery path\n\n### Documentation\n\n- Added comprehensive i18n section to `content/docs/guides/kernel-services.mdx` covering service registration patterns across production/dev/mock environments, discovery consistency, AppPlugin auto-loading behavior, and REST endpoint reference\n\n### Tests\n\n- 17 new tests covering: async-factory detection in discovery, locale populated from i18n service, discovery↔handler agreement, fallback defaults, dev stub behavior, MSW catch-all dispatch, context-based resolution, 501 consistency, AppPlugin translation auto-loading (6 tests), and error handling\n- NestJS mock updated from `mockReturnValue` → `mockResolvedValue`; test made `async`\n- All 138 runtime + 190 adapter + 6668 spec tests pass\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>i18n 服务注册与状态不一致问题评估</issue_title>\n> <issue_description>### 背景\n> 发现国际化服务（i18n）在 ObjectStack spec 项目中存在如下核心问题：\n> \n> 1. Discovery API 检测 i18n 状态和实际 REST 路由处理使用了不同的查找逻辑，导致有时发现状态为 \"unavailable\"，但接口却可用。\n> 2. handleI18n 路由查找 i18n 服务时采用异步多层 fallback，而 Discovery 只查同步 Map，导致状态和功能不一致。\n> 3. 插件注册阶段没有统一 i18n 的加载规范，导致不同环境下中断或状态混淆（如未注册则直接 501/404）。\n> 4. server/dev/mock 三种运行模式下 i18n 的数据加载策略和注册机制并未融合。\n> \n> ### 建议\n> - 统一 i18n 服务的注册与状态检测逻辑，Discovery 和路由应使用同等查找链。\n> - 明确插件注册规范，在 AppPlugin/ConsolePlugin 注册时自动协调 i18n 数据加载。\n> - 增强 i18n 相关测试覆盖 server/MSW/mock 环境。\n> - 补充文档和 API 文档，明确 i18n 接口行为的差异与期望。\n> \n> ### 影响\n> 对 spec 项目的服务发现、客户端适配、以及多环境部署有直接影响，影响国际化的可靠性和一致性。\n> \n> ---\n> （本 issue 由 Copilot 自动生成，建议由维护者补充具体场景和采集现状。）\n> </issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#902\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

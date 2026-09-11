@@ -1,0 +1,33 @@
+{
+  "number": 983,
+  "kind": "pull_request",
+  "title": "Deprecate DataEngineQueryOptions, converge Engine/Protocol/Client to QueryAST standard parameters",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-25T06:24:08Z",
+  "updated_at": "2026-03-25T12:48:20Z",
+  "closed_at": "2026-03-25T12:48:19Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-25T12:48:19Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/983",
+  "body": "The data layer maintained two parallel parameter vocabularies — `DataEngineQueryOptions` (filter/select/sort/skip/populate) at the Engine layer and `QueryAST` (where/fields/orderBy/offset/expand) at the Driver layer — with a mechanical `toQueryAST()` translation between them. This added zero semantic value while creating maintenance debt and `as any` proliferation across Protocol/Client/SDK/Hooks.\n\nThis PR eliminates the translation layer by making the Engine accept QueryAST-standard parameters directly.\n\n### Spec schemas (`packages/spec/src/data/data-engine.zod.ts`)\n- New QueryAST-aligned schemas: `EngineQueryOptionsSchema`, `EngineUpdateOptionsSchema`, `EngineDeleteOptionsSchema`, `EngineAggregateOptionsSchema`, `EngineCountOptionsSchema`\n- Old `DataEngine*` schemas marked `@deprecated`, kept for backward compat\n- RPC request schemas (`DataEngineFindRequestSchema`, etc.) accept **both** new and legacy parameter names via shared `RpcLegacyFilterMixin` and `RpcQueryOptionsSchema` — legacy payloads are validated rather than silently stripped\n- `DataEngineVectorFindRequestSchema`: `filter`→`where`, `select`→`fields`\n- Aggregate: `method`→`function` (aligns with `AggregationNodeSchema`)\n\n### IDataEngine interface (`packages/spec` + `packages/core`)\n- `find`/`findOne` accept `EngineQueryOptions` (where/fields/orderBy/offset/expand)\n- `update`/`delete` accept `EngineUpdateOptions`/`EngineDeleteOptions` (where instead of filter)\n- `count`/`aggregate` accept `EngineCountOptions`/`EngineAggregateOptions`\n\n### Engine implementation (`packages/objectql/src/engine.ts`)\n- **Removed `toQueryAST()`** — the entire translation layer is gone\n- `find`/`findOne` spread query directly into QueryAST: `{ object, ...query }`\n- `find` normalizes OData `top` → `limit` before calling the driver\n- `update`/`delete` extract ID from `options.where` using proper `'id' in options.where` type narrowing (no `as any` casts or unreachable string-ID branches)\n- `aggregate` passes `query.aggregations` directly (no method→function remapping)\n\n### Protocol handler (`packages/objectql/src/protocol.ts`)\n- `findData` normalizes all legacy HTTP params to QueryAST in one pass:\n  - `filter`/`filters`/`$filter` → `where`\n  - `select` → `fields`\n  - `sort`/`orderBy` → `orderBy`\n  - `skip` → `offset`\n  - `top` → `limit`\n  - `populate`/`expand`/`$expand` → `expand` (Record<string, QueryAST>)\n- Fixed populate/expand precedence: non-object `expand` is cleaned up before populate-to-Record conversion, so `populate` names are preserved even when a legacy string `expand` is also present\n\n### Client SDK (`packages/client`)\n- `QueryOptions` and `find()` marked `@deprecated`, recommend `query()` with `Partial<QueryAST>`\n\n### Downstream consumers\n- `plugin-auth`, `runtime/seed-loader`, `studio/broker-shim` updated to use QueryAST parameters\n- Documentation (`data-engine.mdx`) updated\n- Changeset added (`.changeset/queryast-convergence.md`)\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>架构统一：废除 DataEngineQueryOptions，Engine/Protocol/Client 全面收敛到 QueryAST 标准参数</issue_title>\n> <issue_description>## 问题现状\n> ObjectStack 数据协议目前存在两套接入参数命名体系：\n> - Engine 层/协议参数为 DataEngineQueryOptions（filter/sort/top/skip/populate）\n> - Driver 层/真正底层只认标准 QueryAST（where/orderBy/limit/offset/expand ...）\n> - Engine 层维护手动转换逻辑（toQueryAST），Protocol/Client 需各类 alias 适配，增加维护负债\n> \n> ### 不良后果\n> - 代码分层间存在纯粹的机械转译，无任何语义增值，易出错，工程复杂度上升\n> - Protocol/Client 不断需要兼容两套词汇（filter/orderBy, skip/offset, sort/orderBy），`as any` 泛滥\n> - Hooks/插件/SDK/测试数据/低代码平台全都及其容易混淆\n> \n> ## 目标\n> 系统所有入口（protocol、engine、client）只接受标准 QueryAST（where/orderBy/limit/offset/expand ...），彻底停止 DataEngineQueryOptions 相关 alias。\n> \n> ## 路线建议\n> \n> **A. Engine 层接口切换**\n> - `IDataEngine.find/findOne`/update/delete... 统一全部参数为 QueryAST\n> - 所有 toQueryAST 类型转换工具删除\n> - DataEngineQueryOptionsSchema 标记为 deprecated\n> \n> **B. Protocol 层参数吸收统一**\n> - 接收到任何 legacy query param（filter/sort/top/skip/orderBy...）时，只做升级合并到 QueryAST 一处\n> - 全协议只用 QueryAST\n> \n> **C. Client SDK 更新**\n> - 推荐 client.data.query() 作为唯一 API，参数就是 QueryAST（官方统一 QueryBuilder 输出即 IR）\n> - client.data.find() 等历史方法加 deprecated 注释，内部仅做兼容适配\n> \n> **D. 工具链统一**\n> - 文档与前端模版同步收敛 QueryAST\n> - 代码生成、低代码平台生成的 CRUD/query 代码直接吐出标准 IR\n> </issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#966\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n⚡ Quickly spin up Copilot coding agent tasks from anywhere on your macOS or Windows machine with [Raycast](https://gh.io/cca-raycast-docs).\n"
+}

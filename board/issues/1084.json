@@ -1,0 +1,37 @@
+{
+  "number": 1084,
+  "kind": "pull_request",
+  "title": "fix(agent-routes): return Vercel SSE Data Stream for agent chat",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-08T06:41:17Z",
+  "updated_at": "2026-04-08T07:31:56Z",
+  "closed_at": "2026-04-08T07:30:26Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-08T07:30:26Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1084",
+  "body": "Agent chat (`/api/v1/ai/agents/:agentName/chat`) returned plain JSON while the Studio frontend expects Vercel AI SDK v6 UI Message Stream Protocol (SSE). Result: API responds correctly, but `DefaultChatTransport` can't parse the response and the chat panel renders nothing.\n\n### Backend — `agent-routes.ts`\n\n- Default to SSE streaming (`stream !== false`), matching the general chat route\n- Uses `streamChatWithTools()` + `encodeVercelDataStream()` — same codepath as `/api/v1/ai/chat`\n- JSON fallback only when `stream: false` is explicitly set\n\n```typescript\n// Before: always JSON\nconst result = await aiService.chatWithTools(fullMessages, opts);\nreturn { status: 200, body: result };\n\n// After: SSE by default, JSON opt-in\nconst wantStream = body.stream !== false;\nif (wantStream) {\n  const events = aiService.streamChatWithTools(fullMessages, opts);\n  return {\n    status: 200, stream: true, vercelDataStream: true,\n    events: encodeVercelDataStream(events),\n  };\n}\n```\n\n### Frontend — `AiChatPanel.tsx`\n\n- Enhanced error UI: shows `ShieldAlert` icon with structured message instead of a flat string\n- Detects SSE/parse-related errors and surfaces a contextual hint about expected wire format\n\n### Tests\n\n- 3 new tests: default SSE mode, explicit `stream: true`, `stream: false` JSON fallback\n- Existing agent route tests updated to pass `stream: false` where they assert on `resp.body`\n- All 282 tests pass"
+}

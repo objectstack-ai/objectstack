@@ -1,0 +1,37 @@
+{
+  "number": 1186,
+  "kind": "pull_request",
+  "title": "Refactor multi-tenant architecture to per-environment database isolation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-19T07:38:12Z",
+  "updated_at": "2026-04-19T08:08:05Z",
+  "closed_at": "2026-04-19T08:08:05Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-04-19T08:08:05Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1186",
+  "body": "The v3.4/v4.0 tenant model provisions one DB per organization and separates environments via an `env_id` column. This couples schema evolution across dev/test/prod, makes backup/DR and solution publishing fragile, and leaves a single missing `WHERE env_id` predicate away from cross-environment data corruption. Turso/libSQL/Neon/D1 have made per-environment databases essentially free, so the isolation boundary should be physical, not logical.\n\nThis PR lands the v4.1 protocol + service foundation for **per-environment database isolation**, with a hard Control Plane ↔ Data Plane split, a v4.x deprecation shim, and a v5.0 migration path. See [`docs/adr/0002-environment-database-isolation.md`](docs/adr/0002-environment-database-isolation.md) for the full rationale.\n\n### Protocol (`packages/spec/src/cloud/environment.zod.ts`)\n- New Zod schemas: `Environment`, `EnvironmentDatabase` (1:1 with environment), `DatabaseCredential` (rotatable, `active`/`rotating`/`revoked`), `EnvironmentMember` (owner/admin/maker/reader/guest), plus `EnvironmentType`/`Status`/`Role` enums and `ProvisionEnvironment*` / `ProvisionOrganization*` request-response schemas.\n- `TenantDatabaseSchema` tagged `@deprecated` with a pointer to the migration.\n\n### Control-plane objects (`packages/services/service-tenant/src/objects/`)\n- `sys_environment` — UNIQUE `(organization_id, slug)`, enforces one default env per org.\n- `sys_environment_database` — UNIQUE `environment_id`, exactly one physical DB per environment.\n- `sys_database_credential` — N:1 with the DB mapping; supports rotation without touching addressing.\n- `sys_environment_member` — UNIQUE `(environment_id, user_id)`; per-environment RBAC.\n- All `sys_`-prefixed, every field `.describe()`-annotated, every uniqueness constraint explicit.\n\n### Service (`packages/services/service-tenant/src/environment-provisioning.ts`)\n- `EnvironmentProvisioningService` with `provisionOrganization()`, `provisionEnvironment()`, `rotateCredential()`.\n- Pluggable `EnvironmentDatabaseAdapter` keyed by driver (`turso` shipped; `libsql`/`sqlite`/`postgres` plug in without core changes) and pluggable `SecretEncryptor` for KMS integration.\n- Default-environment invariant enforced at the service layer before any physical allocation.\n\n```ts\nconst svc = new EnvironmentProvisioningService({\n  controlPlaneDriver,\n  adapters: [new TursoEnvironmentAdapter(tursoConfig)],\n  encryptor: kmsEncryptor,\n});\n\n// Bootstrap a new org → creates `prod` env + dedicated DB + encrypted credential atomically\nawait svc.provisionOrganization({ organizationId: 'org_1', createdBy: 'user_1' });\n\n// Later: allocate a sandbox on its own physical DB\nawait svc.provisionEnvironment({\n  organizationId: 'org_1', slug: 'sandbox', envType: 'sandbox', createdBy: 'user_1',\n});\n```\n\n### Compatibility & migration\n- `createTenantPlugin()` registers the four new objects out of the box; `sys_tenant_database` stays registered as a v4.x shim (opt out via `registerLegacyTenantDatabase: false`) and is scheduled for removal in v5.0.\n- `packages/services/service-tenant/migrations/v4-to-v5-env-migration.ts` — idempotent, non-destructive: reuses each org's existing physical DB as its new `prod` environment DB (no data movement), re-encrypts the legacy auth token with the current KMS key, archives the legacy row.\n- Also fixed a latent `Field.picklist` → `Field.select` bug in the legacy `sys_tenant_database` / `sys_package_installation` object defs that would have crashed plugin init once exercised.\n\n### Tests\n- 22 new tests across three files covering Zod round-trips + rejections, organization bootstrap, environment creation, default-environment invariant, adapter routing (including a custom `postgres` adapter), encryption hook, credential rotation, and object-definition invariants (`sys_` naming, UNIQUE indexes, `.describe()` coverage).\n\n### Follow-ups (out of scope for this PR)\n- better-auth session `active_environment_id` integration.\n- Per-environment quota enforcement via `sys_quota`; solution publishing on env DBs via `sys_solution_history`.\n- v5.0: remove the legacy shim and run the migration on production tenants."
+}

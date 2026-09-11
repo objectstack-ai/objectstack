@@ -1,0 +1,35 @@
+{
+  "number": 1031,
+  "kind": "issue",
+  "title": "多适配器 API 路由声明与 handler 覆盖率系统性缺陷（统一诊断与修复清单）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-04-01T02:39:46Z",
+  "updated_at": "2026-04-01T06:05:59Z",
+  "closed_at": "2026-04-01T06:05:59Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1031",
+  "body": "## 概要\n\n多适配器（Hono、Express、Next.js、Nuxt、Fastify、SvelteKit 等）下，Discovery 返回的所有服务路由与实际 HTTP handler 注册/分发严重脱节，导致大量 API 404、路由声明与实现不一致，协议与多端运行时长期失配，严重影响平台可维护性和开发体验。\n\n---\n\n## 已确认的系统性问题清单\n\n### 1. Discovery 路由虚报（所有适配器通用，协议实现脱节）\n- Discovery/metadata 声明的一批路由（如 analytics、storage、workflow、realtime、notifications、ai）往往只由 service 注册到 Kernel，但没有同步注册 HTTP handler。\n- Discovery 仅依据 service 实例声明 status: 'available'，未检测 handler 是否实现，导致前端/API 控制台显示\"可用\"，实则 404。\n- 多处声明的路由（如 /api/v1/health），全局无对应 handler，实现层无统一标准，部分端甚至完全未实现。\n\n### 2. Dispatcher/Catch-all 机制导致路由不明原因 404\n- Hono/其他适配器统一用 catch-all（如 app.all(`${prefix}/*`) 或 dispatcher.dispatch()），只要 return handled: false 就直接 404，无法诊断到底是无 handler、无方法、还是 service 部分实现。\n- 没有区分 404（未注册）、501（未实现）、503（service 不可用）等语义。\n\n### 3. 各适配器注册标准/方式不一致\n- 各个 adapter（Hono、Express、Next.js 等）对于 service 路由注册、handler 挂载、Discovery 反射机制实现方式无统一规范。\n- 部分 adapter route stub 只作为 metadata，不实际驱动 handler 注册。\n- Plugin manifest 的 contributes.routes 未能自动实现 HTTP handler 注册与健康检测。\n\n### 4. Studio 等前端硬编码不存在/未实现路由\n- apps/studio/src/hooks/use-api-discovery.ts 的 SYSTEM_ENDPOINTS 把 /health 等路由硬编码 UI，但 API 实际无 handler 返回 404。\n- 跟 Discovery 虚报组合，导致开发者迷惑和排查困难。\n\n### 5. 缺少自动化路由/handler覆盖率检测\n- 缺少启动时对适配器/dispatcher 中 declare/实现的 route 进行全量一致性检查与健康检测。\n- 缺乏覆盖率报告和缺失路由警告能力，全靠人工检索。\n\n---\n\n## 推荐统一修复方案\n\n### P0 即刻止血\n- 各 adapter/plugin 与 dispatcher-plugin 保证 Discovery 所声明的路由都实际注册 handler，最少 stub + 501/503，同时统一 /health handler。（见 #984, #909）\n- Dispatcher 层区分 404/501/503，完善诊断输出。\n- Studio 端所有 UI 路由仅展示 Discovery 实际声明 + handler 已就绪的端点。\n\n### P1 架构长期改进\n- 各 adapter/dispatcher 启动时执行路由声明/handler 覆盖率 check，自动出报告。\n- Plugin manifest 的 contributes.routes 强制驱动 handler 自动注册并健康检测。\n- Discovery Schema 增加 status: 'registered'/'available'/'unavailable' 多态。\n- 完善协议、文档及 E2E 测试，发现遗漏路由自动 fail。\n\n---\n\n## 受影响范围\n- /packages/adapters/*/src/index.ts\n- /packages/runtime/src/http-dispatcher.ts\n- /packages/runtime/src/dispatcher-plugin.ts\n- /apps/studio/src/hooks/use-api-discovery.ts\n- /packages/spec/src/api/plugin-rest-api.zod.ts\n\n---\n\n## 验收标准\n- [ ] 所有适配器路由声明与 handler 注册全量对齐且输出健康报告\n- [ ] Studio 等前端仅展示 handler 已就绪的系统/服务端点（无虚报）\n\n## 关联 Issue\n- #984 Discovery API endpoint 路由&协议一致性问题汇总\n- #909 路由覆盖与协议实现一致性问题清单\n"
+}

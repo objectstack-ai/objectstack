@@ -1,0 +1,35 @@
+{
+  "number": 876,
+  "kind": "issue",
+  "title": "全仓库统一 ID 字段、系统字段及多租户字段命名规范（消除 _id / space_id / modified_xx 混用）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-03-05T05:12:01Z",
+  "updated_at": "2026-03-05T08:09:11Z",
+  "closed_at": "2026-03-05T08:09:11Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/876",
+  "body": "## 背景\n现有仓库内关于主键 ID 字段、审计与租户字段命名混杂，存在 `_id` / `id`、`space_id` / `tenant_id`、`modified_at/by` / `updated_at/by` 等并存使用，违反了 SystemFieldName 统一规范，导致 driver、引擎、mock、handler、测试等层面不一致，埋下兼容和维护隐患。鉴于 audit/prompt/mock 多处已传播此问题，需统一整改。\n\n## 需要合并解决的具体问题\n#### 1. ID 字段统一\n- ObjectQL、protocol、engine���mock、handler、test、业务类型定义等多处混用 `_id` 和 `id`。\n- 数据驱动接口规定只返回 `id`，但上下游仍有 `_id` 查询/写入/转换逻辑。\n- Studio/types/action handlers/示例代码需移除 `_id`，统一投射 `id`。\n\n#### 2. 审计字段统一\n- `created_at`、`updated_at` 应作为标准，部分 audit hook 使用 `modified_at`/`modified_by`。\n- 所有自动审计挂钩、业务代码、mock、prompt 均应重命名为 `updated_at`/`updated_by`。\n\n#### 3. 多租户隔离字段统一\n- 租户字段只能用 `tenant_id`，ObjectQL 插件/中间件实现和协议层应全部移除 `space_id`。\n\n#### 4. Prompt 和开发者文档示例同步\n- 包含 seed 脚本、示例、testing schema 等，应禁止 `_id`，只用 `id`。\n\n#### 5. Mock/插件/devPlugin\n- 返回类型、filter、insert/update/delete、record capture 等全面清查。\n\n#### 6. Testing\n- 所有相关用例和 scenario 中不再混用 `_id`，只出现 `id`。\n\n## 建议修复方案（合并执行）\n1. 全文自动/人工替换 `_id` → `id`，`modified_at` → `updated_at`，`space_id` → `tenant_id`（兼容层/适配器除外）。\n2. 引擎、插件、对象协议、mock、action handler、dev-plugin、http-adapter、testing schema、prompt 全面梳理改写。\n3. 强制内部和协议文档一致，所有接口入参出参、主数据类型只出现一套规范命名。\n4. 提供一次性升级 migration/说明文档。\n\n## 影响面\n- packages/objectql\n- packages/core\n- packages/plugins/driver-memory\n- examples/\n- apps/studio/\n- content/prompts/\n- packages/spec/\n- 及所有 demo/test/mock/工具层\n\n## 风险\n- 第三方驱动或定制插件/适配层如因历史原因必须用 `_id`，需做兼容适配（如 storage column 映射）；主协议层、SDK、API 不再暴露 `_id`。"
+}

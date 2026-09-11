@@ -1,0 +1,30 @@
+{
+  "number": 724,
+  "kind": "issue",
+  "title": "[P1] 基础设施与易用性核心服务合并开发（cache、queue、job、file-storage、i18n、realtime、search、notification）",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-02-18T11:48:40Z",
+  "updated_at": "2026-05-04T01:38:49Z",
+  "closed_at": "2026-05-04T01:38:49Z",
+  "closed_by": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/724",
+  "body": "### 背景说明\n根据最新 Roadmap 及代码现状，auth 和 ui 已经就绪，metadata 的 DatabaseLoader 实现后，下一优先级是开发对平台/前端体验有直接提升的一批核心服务。这些均已有 dev-plugin 的 in-memory stub 实现，需尽快提供 MVP 或生产级驱动。\n\n### 目标\n- 批量开发提升平台易用性和生产能力的核心服务插件：\n  - cache（Redis 驱动）\n  - queue（BullMQ 驱动）\n  - job（Cron/任务调度驱动）\n  - file-storage（本地/对象存储/S3驱动）\n  - i18n（Map-backed 翻译及多语言接口）\n  - realtime（WebSocket/SSE 推送，用于 UI/Studio 实时体验）\n  - search（in-memory/Meilisearch/Elastic driver 全文检索）\n  - notification（多通道推送模块）\n- 合并进行调研与开发，采用最小可用（MVP）实现策略，优先 unblock 前端/Studio 场景。\n\n### 需实现内容\n- 每个服务实现标准 plugin/register 接口（参考 dev-plugin 模板与现有实现规范）\n- 插件支持 in-memory stub 回落\n- 路径参考：packages/plugins/\n- 相应协议/接口拓展如必需\n- 文档与测试同步迭代\n\n### 验收标准\n- 任意上述服务缺失不阻碍平台启动，提供 stub\n- Core/Platform/Studio 能无缝联调和自测\n\n---\n【本 Issue 来源于新 Roadmap P1 批量基础服务开发任务（2026-02-18）】"
+}

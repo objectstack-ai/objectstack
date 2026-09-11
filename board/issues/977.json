@@ -1,0 +1,33 @@
+{
+  "number": 977,
+  "kind": "pull_request",
+  "title": "fix(metadata): add `\"type\": \"module\"` to fix ERR_MODULE_NOT_FOUND on Vercel",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-23T16:58:56Z",
+  "updated_at": "2026-03-23T17:32:49Z",
+  "closed_at": "2026-03-23T17:30:31Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-23T17:30:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/977",
+  "body": "Vercel serverless runtime resolves `@objectstack/metadata` to `src/index.ts` instead of compiled `dist/` output, causing `ERR_MODULE_NOT_FOUND` at runtime in `apps/studio/api/index.js`.\n\n### Changes\n\n- **`packages/metadata/package.json`**: Add `\"type\": \"module\"` and update exports from `.mjs`/`.js` to `.js`/`.cjs` — aligning with `@objectstack/core`, `@objectstack/runtime`, and `@objectstack/rest` which all resolve correctly on Vercel\n\n```diff\n+  \"type\": \"module\",\n   \"exports\": {\n     \".\": {\n-      \"import\": \"./dist/index.mjs\",\n-      \"require\": \"./dist/index.js\"\n+      \"import\": \"./dist/index.js\",\n+      \"require\": \"./dist/index.cjs\"\n     },\n```\n\nAll 154 metadata tests and 13 studio tests pass. Build output verified: tsup correctly emits `.js` (ESM) and `.cjs` (CJS) with `\"type\": \"module\"`.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 2026-03-23 16:57:03.244 [error] Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/task/apps/studio/node_modules/@objectstack/metadata/src/index.ts' imported from /var/task/apps/studio/api/index.js\n>     at finalizeResolution (node:internal/modules/esm/resolve:280:11)\n>     at moduleResolve (node:internal/modules/esm/resolve:870:10)\n>     at moduleResolveWithNodePath (node:internal/modules/esm/resolve:996:14)\n>     at defaultResolve (node:internal/modules/esm/resolve:1039:79)\n>     at #cachedDefaultResolve (node:internal/modules/esm/loader:718:20)\n>     at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:735:38)\n>     at ModuleLoader.resolveSync (node:internal/modules/esm/loader:764:52)\n>     at #resolve (node:internal/modules/esm/loader:700:17)\n>     at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:620:35)\n>     at ModuleJob.syncLink (node:internal/modules/esm/module_job:143:33) {\n>   code: 'ERR_MODULE_NOT_FOUND',\n>   url: 'file:///var/task/apps/studio/node_modules/@objectstack/metadata/src/index.ts'\n> }\n> Node.js process exited with exit status: 1. The logs above can help with debugging the issue.\n> Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/task/apps/studio/node_modules/@objectstack/metadata/src/index.ts' imported from /var/task/apps/studio/api/index.js\n>     at finalizeResolution (node:internal/modules/esm/resolve:280:11)\n>     at moduleResolve (node:internal/modules/esm/resolve:870:10)\n>     at moduleResolveWithNodePath (node:internal/modules/esm/resolve:996:14)\n>     at defaultResolve (node:internal/modules/esm/resolve:1039:79)\n>     at #cachedDefaultResolve (node:internal/modules/esm/loader:718:20)\n>     at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:735:38)\n>     at ModuleLoader.resolveSync (node:internal/modules/esm/loader:764:52)\n>     at #resolve (node:internal/modules/esm/loader:700:17)\n>     at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:620:35)\n>     at ModuleJob.syncLink (node:internal/modules/esm/module_job:143:33) {\n>   code: 'ERR_MODULE_NOT_FOUND',\n>   url: 'file:///var/task/apps/studio/node_modules/@objectstack/metadata/src/index.ts'\n> }\n> Node.js process exited with exit status: 1. The logs above can help with debugging the issue.\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

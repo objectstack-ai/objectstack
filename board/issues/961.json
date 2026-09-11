@@ -1,0 +1,33 @@
+{
+  "number": 961,
+  "kind": "pull_request",
+  "title": "Remove legacy query key fallbacks (filters/sort/skip/top) from driver-sql",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-23T04:21:00Z",
+  "updated_at": "2026-03-23T04:46:33Z",
+  "closed_at": "2026-03-23T04:42:28Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-23T04:42:28Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/961",
+  "body": "`SqlDriver` bypassed `QueryAST` type safety via `as any` casts to support deprecated keys (`filters`, `sort`, `skip`, `top`). This blocks downstream protocol enforcement and weakens the `IDataDriver` contract.\n\n### Driver changes (`sql-driver.ts`)\n\n- **`find()`** — Remove fallbacks to `(query as any).filters`, `.sort`, `.skip`, `.top`; use only `query.where`, `query.orderBy`, `query.offset`, `query.limit`\n- **`updateMany()` / `deleteMany()`** — Remove `(query as any).filters || query` pattern; use only `query.where`\n- **`count()`** — Remove `(query as any).filters` fallback; use only `query?.where`\n- **`applyFilters()`** — Remove `filters`, `sort`, `skip` from the object-key skip-list\n\nBefore:\n```ts\nconst filterCondition = query.where || (query as any).filters;\nconst sortArray = query.orderBy || (query as any).sort;\nconst offsetValue = query.offset ?? (query as any).skip;\nconst limitValue = query.limit ?? (query as any).top;\n```\n\nAfter:\n```ts\nif (query.where) this.applyFilters(builder, query.where);\nif (query.orderBy && Array.isArray(query.orderBy)) { /* ... */ }\nif (query.offset !== undefined) builder.offset(query.offset);\nif (query.limit !== undefined) builder.limit(query.limit);\n```\n\n### Test updates\n\n- Converted all existing tests from legacy keys to standard `QueryAST` format (`where`/`orderBy`/`offset`/`limit`)\n- Added 7 tests asserting legacy keys are silently ignored (no filter/sort/pagination applied)\n- 78/78 tests pass\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>【清理遗留】driver-sql 依然冗余支持 legacy 查询 key（filters/sort/skip/top）- 需严格遵循 IDataDriver 协议</issue_title>\n> <issue_description>## 问题描述\n> `packages/plugins/driver-sql/src/sql-driver.ts` 目前依然大量存在 `filters` / `sort` / `skip` / `top` 兼容写法，例如：\n> \n> ```ts\n> const filterCondition = query.where || (query as any).filters;\n> const sortArray = query.orderBy || (query as any).sort;\n> const offsetValue = query.offset ?? (query as any).skip;\n> const limitValue = query.limit ?? (query as any).top;\n> ```\n> \n> 这与 `IDataDriver` 和 `QueryAST` 协议要求冲突：应**只认标准字段如 `where` / `orderBy` / `offset` / `limit`**，不再支持旧 key。\n> \n> 这些兼容实例多见于：\n> - find\n> - updateMany\n> - deleteMany\n> - count\n> \n> ## 影响\n> - **类型安全失效**：`as any` 绕开类型断言，实际允许错用输入被悄然吞掉\n> - **协议弱化**：新插件和 IDE/DevTool 无法强制严格按 `@objectstack/spec` 结构开发\n> - **架构割裂**：声明规范、实现场景两个生态，无法推动整体切换\n> \n> ## 修正建议\n> 1. **全部移除 `filters` / `sort` / `skip` / `top` fallback**：直接报错或忽略旧 key。\n> 3. **类型 check**：`as any` 的地方返回类型错误直接 fail。\n> 4. **完善测试**：确保只填错 key 就报错/无效。\n> \n> ## 验收标准\n> - CI 跑过 type check\n> - 单元测试以纯 `QueryAST` 传参，所有老 key 全失败或无效\n> \n> ---\n> 参考 Issue objectstack-ai/spec#958，当前此遗留清理为阻断下游协议推进的硬性要求。</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#960\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n🔒 GitHub Advanced Security automatically protects Copilot coding agent pull requests. You can protect all pull requests by enabling Advanced Security for your repositories. [Learn more about Advanced Security.](https://gh.io/cca-advanced-security)"
+}

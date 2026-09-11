@@ -1,0 +1,34 @@
+{
+  "number": 1110,
+  "kind": "pull_request",
+  "title": "chore(ci)(deps): bump codelytv/pr-size-labeler from 1.10.3 to 1.10.4",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "dependabot[bot]",
+    "id": 49699333,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-13T02:14:30Z",
+  "updated_at": "2026-04-13T08:05:55Z",
+  "closed_at": "2026-04-13T08:05:47Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-13T08:05:47Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1110",
+  "body": "Bumps [codelytv/pr-size-labeler](https://github.com/codelytv/pr-size-labeler) from 1.10.3 to 1.10.4.\n<details>\n<summary>Release notes</summary>\n<p><em>Sourced from <a href=\"https://github.com/codelytv/pr-size-labeler/releases\">codelytv/pr-size-labeler's releases</a>.</em></p>\n<blockquote>\n<h2>v1.10.4</h2>\n<h2>What's Changed</h2>\n<ul>\n<li>fix: avoid accumulating PR size labeler related labels by <a href=\"https://github.com/alexisribot\"><code>@​alexisribot</code></a> in <a href=\"https://redirect.github.com/CodelyTV/pr-size-labeler/pull/97\">CodelyTV/pr-size-labeler#97</a> solving <a href=\"https://redirect.github.com/CodelyTV/pr-size-labeler/issues/96\">CodelyTV/pr-size-labeler#96</a></li>\n</ul>\n<h2>New Contributors</h2>\n<ul>\n<li><a href=\"https://github.com/manishprivet\"><code>@​manishprivet</code></a> made their first contribution in <a href=\"https://redirect.github.com/CodelyTV/pr-size-labeler/pull/97\">CodelyTV/pr-size-labeler#97</a></li>\n</ul>\n<p><strong>Full Changelog</strong>: <a href=\"https://github.com/CodelyTV/pr-size-labeler/compare/v1.10.3...v1.10.4\">https://github.com/CodelyTV/pr-size-labeler/compare/v1.10.3...v1.10.4</a></p>\n</blockquote>\n</details>\n<details>\n<summary>Commits</summary>\n<ul>\n<li><a href=\"https://github.com/CodelyTV/pr-size-labeler/commit/095a41fca88b8764fd9e008ad269bcdb82bb38b9\"><code>095a41f</code></a> fix: avoid accumulating PR size labeler related labels (<a href=\"https://redirect.github.com/codelytv/pr-size-labeler/issues/97\">#97</a>)</li>\n<li>See full diff in <a href=\"https://github.com/codelytv/pr-size-labeler/compare/v1.10.3...v1.10.4\">compare view</a></li>\n</ul>\n</details>\n<br />\n\n\n[![Dependabot compatibility score](https://dependabot-badges.githubapp.com/badges/compatibility_score?dependency-name=codelytv/pr-size-labeler&package-manager=github_actions&previous-version=1.10.3&new-version=1.10.4)](https://docs.github.com/en/github/managing-security-vulnerabilities/about-dependabot-security-updates#about-compatibility-scores)\n\nDependabot will resolve any conflicts with this PR as long as you don't alter it yourself. You can also trigger a rebase manually by commenting `@dependabot rebase`.\n\n[//]: # (dependabot-automerge-start)\n[//]: # (dependabot-automerge-end)\n\n---\n\n<details>\n<summary>Dependabot commands and options</summary>\n<br />\n\nYou can trigger Dependabot actions by commenting on this PR:\n- `@dependabot rebase` will rebase this PR\n- `@dependabot recreate` will recreate this PR, overwriting any edits that have been made to it\n- `@dependabot show <dependency name> ignore conditions` will show all of the ignore conditions of the specified dependency\n- `@dependabot ignore this major version` will close this PR and stop Dependabot creating any more for this major version (unless you reopen the PR or upgrade to it yourself)\n- `@dependabot ignore this minor version` will close this PR and stop Dependabot creating any more for this minor version (unless you reopen the PR or upgrade to it yourself)\n- `@dependabot ignore this dependency` will close this PR and stop Dependabot creating any more for this dependency (unless you reopen the PR or upgrade to it yourself)\n\n\n</details>"
+}

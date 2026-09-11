@@ -1,0 +1,33 @@
+{
+  "number": 1138,
+  "kind": "issue",
+  "title": "将 examples/app-host 标准化为 apps/server 以统一应用目录及支持 Docker 发布",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Claude",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-14T08:30:24Z",
+  "updated_at": "2026-04-14T08:46:21Z",
+  "closed_at": "2026-04-14T08:46:21Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1138",
+  "body": "## 建议：标准化 `examples/app-host` 为 `apps/server`\n\n### 背景\n当前仓库的 `examples/app-host` 实现了 ObjectStack Server 的参考实现，具备生产级应用结构（独立版本、完整依赖、CI/CD、Vercel 部署、API & Server 规范等），其功能、部署和代码组织已经超出现有\"示例\"的定位。\n\n### 为什么建议迁移：\n- 语义更准确，适配 `apps/*` 主目录结构\n- 支持后期 Docker 化、自动化部署及一体化流水线\n- 区分正式**应用**与轻量**示例**的目录边界\n- CI/CD 及文档、部署 pipeline 更易维护\n\n### 建议方案：\n- 将 `examples/app-host` 迁移为 `apps/server`\n- 保持 `apps/studio`、`apps/docs`、`apps/server` 平行\n- `examples/` 目录仅保留极简 demo 和插件样例（如 `app-crm`、`app-todo`）\n- 迁移时处理依赖路径、Vercel 部署脚本、文档引用等\n\n### 需注意：\n- 更新 `pnpm-workspace.yaml`（当前已支持`apps/*`，但需清查引用路径）\n- 修改 `package.json` 名称与工作目录适配\n- 搜索/替换所有关联脚本与文档中的目录引用\n- 升级一键部署 URL（如 Vercel 按新路径）\n"
+}

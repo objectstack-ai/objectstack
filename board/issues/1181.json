@@ -1,0 +1,33 @@
+{
+  "number": 1181,
+  "kind": "pull_request",
+  "title": "Remove TanStack Router Devtools from Studio UI",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-18T14:49:58Z",
+  "updated_at": "2026-04-18T14:58:37Z",
+  "closed_at": "2026-04-18T14:58:36Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-04-18T14:58:36Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1181",
+  "body": "The Studio interface was rendering the TanStack Router Devtools panel on every page, which is a development debug overlay not intended for production/end-user views.\n\n## Changes\n\n- **`apps/studio/src/routes/__root.tsx`** — Removed the `TanStackRouterDevtools` import and its `<TanStackRouterDevtools />` render from `RootComponent`.\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> studio 界面不应该现实 tanstack 控制台。\n> \n> The user has attached the following file paths as relevant context:\n>  - .github/copilot-instructions.md\n>  - CLAUDE.md\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\nCreated from [VS Code](https://code.visualstudio.com/docs/copilot/copilot-coding-agent)."
+}

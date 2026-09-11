@@ -1,0 +1,35 @@
+{
+  "number": 1049,
+  "kind": "issue",
+  "title": "基于 Tool+Skill 架构新增元数据相关 AI 能力（如创建表、字段）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "tooling"
+  ],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-04-02T01:50:32Z",
+  "updated_at": "2026-04-02T05:36:04Z",
+  "closed_at": "2026-04-02T05:36:04Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1049",
+  "body": "## 背景\n当前项目采用 Agent→Skill→Tool 三层 AI 元数据/能力架构，需要新增元数据管理相关的 AI Tool（如创建表、字段/列、修改 schema 等），实现方式需对齐已存在的 Tool/Skill 元数据定义体系，保证平台可复用、可管控。\n\n## 目标\n- 遵循 `ToolSchema` 在 `packages/spec/src/ai` 新增用于元数据操作的 Tool（如 create_object、add_field 等）\n- 聚合为 `metadata_management` Skill，统一能力曝光，便于 Agent/LLM 挂载与复用\n- Tool 应具备：结构化参数、权限控制、可查询与可测试（Testable）特性\n\n## 主要���务\n1. 在 `tool.zod.ts` 工厂基础上，定义以下 Tool：\n   - create_object（新建对象/表）\n   - add_field（添加字段/列）\n   - modify_field（修改字段定义）\n   - delete_field（删除字段）\n   - list_objects（列出现有对象/表）\n   - describe_object（查看对象及字段详情）\n2. 为上述 Tool 编写结构化 JSON Schema 参数定义与权限描述\n3. 在 `skill.zod.ts` 或新文件中定义 `metadata_management` Skill，并聚合上述 Tool\n4. 添加/完善相关单元测试案例，确保 Tool/Skill 定义有效且健壮\n5. 更新 `index.ts` 导出、新增 CHANGELOG.md/ROADMAP.md 项，保障文档同步\n\n## 验收标准\n- 满足三层元数据（Tool→Skill→Agent）管控思路\n- 每个 Tool 参数具备机器可识别结构化说明和权限字段\n- Skill 能够被 Agent 直接引用并生效\n- 具备完善单元测试\n- 文档同步更新\n\n---\n如需了解此架构方案请参考 `packages/spec/src/ai/tool.zod.ts`、`skill.zod.ts` 及相关单元测试���\n\n> 注意：不要只在 skills 文件夹定义，必须按 Tool+Skill 标准落表，便于统一注册和平台发现。\n"
+}

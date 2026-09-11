@@ -1,0 +1,35 @@
+{
+  "number": 967,
+  "kind": "issue",
+  "title": "[BUG] auth 登陆报错 'no such table: sys_user' 时序与 schema 同步异常导致数据库升级失败",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-03-23T08:48:15Z",
+  "updated_at": "2026-03-23T09:38:17Z",
+  "closed_at": "2026-03-23T09:38:17Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/967",
+  "body": "## 背景\n\n在 `pnpm dev` 或 `objectstack serve` 启动开发环境时，遇到如下严重错误：\n\n```\n[Better Auth]: select * from `sys_user` where `email` = 'user@example.com' limit 1 - no such table: sys_user\n# SERVER_ERROR:  SqliteError: select * from `sys_user` where `email` = 'user@example.com' limit 1 - no such table: sys_user\n    at Database.prepare (...)\n    ...\n[AuthManager] better-auth returned error: 500\n```\n\n---\n\n## 问题复现流程\n\n1. 启动 `pnpm dev` / `pnpm serve`（数据驱动为 Sqlite，better-sqlite3）。\n2. 登录接口报 500 错误，日志显示查询 `sys_user`/`sys_session` 等表不存在。\n\n---\n\n## 排查与分析\n\n### 1. 插件启动顺序\n- ObjectQLPlugin\n- DriverPlugin(SqlDriver)\n- I18nServicePlugin\n- AuthPlugin\n- AppPlugin(CrmApp/Todo/Bi)\n\n### 2. Kernel bootstrap 时序\n- 所有 app/系统对象(schema) 注册于 ObjectQLPlugin.start → `syncRegisteredSchemas()`。\n- ObjectQL 会遍历所有对象，调用对应 driver.syncSchema(tableName, obj)。\n- driver（如 SqlDriver）的 syncSchema 实现忽略了传入的 physical table name，实际用 obj.name （如 sys__user）建表，导致实际创建的表名与查询不一致。\n\n### 3. 触发根因\n- AuthPlugin 逻辑、对象注册无问题，schema 确实被注册到对象仓库。\n- 但数据库物理表创建时，表名错误（sys__user 而非预期的 sys_user）。导致应用和 ORM 查询不到表。\n\n### 4. 代码引用位置\n- `objectql/src/plugin.ts` ： syncRegisteredSchemas → driver.syncSchema(tableName, obj)\n- `driver-sql/src/sql-driver.ts` ：syncSchema 实现未用 tableName，直接用 schema.name\n- 部分对象注册采用 FQN (sys__user) 而不是物理名 (sys_user)\n\n### 5. 其他可能影响\n- 升级时混用老表 (sys_user) 与新表 (sys__user) 可能导致数据丢失/不可见\n- 仅出现于多命名空间/复杂对象名环境，单 app/单对象场景难以触发\n- 物理表名可能因历史版本和 schema 冲突，造成不可恢复的问题\n\n---\n\n## 建议修复方向\n- 参考 industry best practices，所有物理表、索引等 DDL 操作，必须以实际表名（Physical Table Name）为唯一 source of truth。\n- 必须修复 `SqlDriver.syncSchema(tableName, schema)` 用 tableName 作为建表名，同时覆盖 objectDef.name，避免 registry FQN 干扰。\n- 回溯/修复历史脏数据表/表名，需要设计升级脚本。\n\n---\n\n## 影响评估\n- **高**：所有支持 FQN (`namespace__object`) 的对象，auth/用户管理无法正常使用。\n- **高**：无法登录、所有依赖用户表的功能都不可用。\n- **中**：升级过程中可能遗漏数据或丢失权限。\n\n---\n\n## 任务建议\n- [ ] 修复 syncSchema 内部逻辑，规范表名。\n- [ ] 增加升级检测，发现旧表或冲突时给出警告/自动修复指引。\n- [ ] 装配 CI schema 回归用例防止类似问题。\n- [ ] 文档/CHANGELOG 洞察此兼容性变更。"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1021,
+  "kind": "issue",
+  "title": "重构 service-ai，补全鉴权声明与 tool-calling 编排标准",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-03-31T09:41:22Z",
+  "updated_at": "2026-03-31T10:57:10Z",
+  "closed_at": "2026-03-31T10:57:10Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1021",
+  "body": "### 任务来源\n- 参考 [任务](https://github.com/objectstack-ai/spec/tasks/c32c0f69-f76e-44a1-b400-a651e49cea64)\n- 关联 #1008 [AI 路由声明鉴权元数据]、#1010 [AIService/tool-calling 编排]\n\n### 目标\n1. 基于长远可维护的架构，重构 `packages/services/service-ai`，包括不限于：\n   - 路由配置补全 auth/permissions 元数据声明，确保每条路由准确声明是否需要鉴权及所需权限\n   - RouteRequest 增加 user context\n   - 支持 Conversation 路由 ownership 校验（仅返回和操作当前用户的会话）\n   - 完善自动 tool-calling 编排，实现 tool-call loop（包括 streamChat），支持可配置最大轮次，并规范错误处理和结果回溯\n2. 增加完备的测试用例，涵盖上述核心场景，回归全部已有测试确保无回退\n3. 所有修改同步更新 CHANGELOG.md，简要描述本次重构要点\n\n### 验���标准\n- [ ] 路由配置均补全了 auth/permissions 元数据，声明完整\n- [ ] RouteRequest 已支持 user context\n- [ ] Conversation 路由已具备 ownership 语义（仅操作本人数据）\n- [ ] AIService 支持自动 tool-call-loop 和错误处理，配置项齐全\n- [ ] 新增至少 5 个 auth 相关测试、8 个 tool-calling 相关测试\n- [ ] 全量测试通过\n- [ ] CHANGELOG.md 记载本次重构"
+}

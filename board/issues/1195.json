@@ -1,0 +1,33 @@
+{
+  "number": 1195,
+  "kind": "pull_request",
+  "title": "fix(studio): hide AI chat panel before login and center auth loading spinner",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-20T12:55:44Z",
+  "updated_at": "2026-04-20T12:55:59Z",
+  "closed_at": "2026-04-20T12:55:59Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-04-20T12:55:59Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1195",
+  "body": "On Studio's `/login` (and any unauthenticated state) the AI chat toggle was visible, and the pre-auth loading spinner rendered flush to the left edge instead of centered.\n\n### Root causes\n- `<AiChatPanel />` was rendered unconditionally in `__root.tsx`, outside any session gate.\n- `SidebarProvider` wraps children in a row-flex (`flex h-svh w-full`). The loading container used `flex min-h-screen items-center justify-center` with no width, so as a flex item it shrank to content width — `justify-center` centered the spinner only within that shrink-wrapped box.\n\n### Changes (`apps/studio/src/routes/__root.tsx`)\n- **Gate the chat panel on auth**: introduce `AuthedAiChatPanel` that consumes `useSession()` inside the existing `SessionProvider` and returns `null` when `user` is absent. Replaces the direct `<AiChatPanel />` render.\n- **Fix spinner centering**: add `w-full flex-1` to the `RequireAuth` loading container so it fills `SidebarProvider`'s flex row, making `justify-center` effective horizontally.\n\n```tsx\nfunction AuthedAiChatPanel() {\n  const { user } = useSession();\n  if (!user) return null;\n  return <AiChatPanel />;\n}\n\n// loading container\n<div className=\"flex min-h-screen w-full flex-1 items-center justify-center bg-background\">\n  <div className=\"h-8 w-8 animate-spin rounded-full border-4 border-muted border-t-primary\" />\n</div>\n```\n\nThe `RootComponent`-level \"Connecting to ObjectStack…\" spinner renders *outside* `SidebarProvider` and was already correctly centered — left untouched."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1226,
+  "kind": "pull_request",
+  "title": "chore(deps)(deps): bump @hono/node-server from 1.19.14 to 2.0.1",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "dependabot[bot]",
+    "id": 49699333,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-04T02:33:04Z",
+  "updated_at": "2026-05-06T14:13:55Z",
+  "closed_at": "2026-05-06T14:07:13Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-05-06T14:07:13Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1226",
+  "body": "Bumps [@hono/node-server](https://github.com/honojs/node-server) from 1.19.14 to 2.0.1.\n<details>\n<summary>Release notes</summary>\n<p><em>Sourced from <a href=\"https://github.com/honojs/node-server/releases\">@​hono/node-server's releases</a>.</em></p>\n<blockquote>\n<h2>v2.0.1</h2>\n<h2>What's Changed</h2>\n<ul>\n<li>fix: forward Hono response headers during WebSocket upgrade by <a href=\"https://github.com/gentamura\"><code>@​gentamura</code></a> in <a href=\"https://redirect.github.com/honojs/node-server/pull/346\">honojs/node-server#346</a></li>\n</ul>\n<h2>New Contributors</h2>\n<ul>\n<li><a href=\"https://github.com/gentamura\"><code>@​gentamura</code></a> made their first contribution in <a href=\"https://redirect.github.com/honojs/node-server/pull/346\">honojs/node-server#346</a></li>\n</ul>\n<p><strong>Full Changelog</strong>: <a href=\"https://github.com/honojs/node-server/compare/v2.0.0...v2.0.1\">https://github.com/honojs/node-server/compare/v2.0.0...v2.0.1</a></p>\n<h2>v2.0.0</h2>\n<p>Now, we release the second major version of the Hono Node.js adapter 🎉 🎉 🎉</p>\n<h2>The Hono Node.js adapter is now up to 2.3x faster</h2>\n<p>v2 of the <a href=\"https://github.com/honojs/node-server\">Hono Node.js adapter</a> reaches <strong>up to 2.3x the throughput of v1</strong> — that's the peak number, measured on the body-parsing scenario of <a href=\"https://github.com/SaltyAom/bun-http-framework-benchmark\"><code>bun-http-framework-benchmark</code></a>. The other scenarios (Ping, Query) get a smaller but real boost too.</p>\n<p>Install or upgrade with:</p>\n<pre lang=\"bash\"><code>npm i @hono/node-server@latest\r\n</code></pre>\n<h2>v2</h2>\n<p>The Node.js adapter is going through a major version bump to v2. That said, the public API stays the same — the headline of this release is the large performance improvement described above.</p>\n<h2>What does the Node.js adapter do?</h2>\n<p>A quick refresher on what the Node.js adapter actually does — it exists so that Hono applications can run on Node.js. Hono is built on the Web Standards APIs, but you cannot serve those directly from Node.js. The adapter bridges the Web Standards APIs and the Node.js APIs, which is what lets a Hono app — and more generally a Web-Standards-style app — run on top of Node.js.</p>\n<p>If you write the following code and run <code>node ./index.js</code>, a server starts up on <code>localhost:3000</code>. And it really is plain Node.js underneath.</p>\n<pre lang=\"ts\"><code>import { Hono } from 'hono'\r\nimport { serve } from '@hono/node-server'\r\n<p>const app = new Hono()<br />\napp.get('/', (c) =&gt; c.text('Hello World!'))</p>\n<p>serve(app)<br />\n</code></pre></p>\n<h2>The early performance story</h2>\n<p>The very first implementation of the Node.js adapter looked roughly like this in pseudocode:</p>\n<pre lang=\"ts\"><code>export const getRequestListener = (fetchCallback: FetchCallback) =&gt; {\r\n  return async (incoming: IncomingMessage, outgoing: ServerResponse) =&gt; {\r\n    const method = incoming.method || 'GET'\r\n&lt;/tr&gt;&lt;/table&gt; \n</code></pre>\n</blockquote>\n<p>... (truncated)</p>\n</details>\n<details>\n<summary>Commits</summary>\n<ul>\n<li><a href=\"https://github.com/honojs/node-server/commit/9138a80900c3298db29be879f685214a8ee4f536\"><code>9138a80</code></a> 2.0.1</li>\n<li><a href=\"https://github.com/honojs/node-server/commit/0ed7656bfdfbd1695387f7a63420fecb5f42c28b\"><code>0ed7656</code></a> fix: forward Hono response headers during WebSocket upgrade (<a href=\"https://redirect.github.com/honojs/node-server/issues/346\">#346</a>)</li>\n<li><a href=\"https://github.com/honojs/node-server/commit/58c9355998b3b202bf7eb22b1505a2d4d847c3b0\"><code>58c9355</code></a> 2.0.0</li>\n<li><a href=\"https://github.com/honojs/node-server/commit/2d6f1615140ef383c8dc007ec55de507c4eba281\"><code>2d6f161</code></a> Merge pull request <a href=\"https://redirect.github.com/honojs/node-server/issues/316\">#316</a> from honojs/v2</li>\n<li><a href=\"https://github.com/honojs/node-server/commit/94cde954be9df8c99aa30cbb1d1bb4ae16d9af0e\"><code>94cde95</code></a> 2.0.0-rc.2</li>\n<li><a href=\"https://github.com/honojs/node-server/commit/ef43cddf819f25d08aecbe677cf0d1f0cb9ea058\"><code>ef43cdd</code></a> perf: replace Uint8Array lookup tables with regex in buildUrl (<a href=\"https://redirect.github.com/honojs/node-server/issues/345\">#345</a>)</li>\n<li><a href=\"https://github.com/honojs/node-server/commit/1529e41d337b91d3767f902613b0e6685b613924\"><code>1529e41</code></a> fix: improve Response.json() and Response.redirect() spec compliance and effi...</li>\n<li><a href=\"https://github.com/honojs/node-server/commit/25f1674e8b736c1079e35a5e116dd1973d44c6f5\"><code>25f1674</code></a> fix: ensure close handler is attached for Blob/ReadableStream cacheable respo...</li>\n<li><a href=\"https://github.com/honojs/node-server/commit/22dea2206df5e0f5b53a9fc29967ae340f5e2d78\"><code>22dea22</code></a> refactor: improve handling of null body in response (<a href=\"https://redirect.github.com/honojs/node-server/issues/341\">#341</a>)</li>\n<li><a href=\"https://github.com/honojs/node-server/commit/7d83e093816970f2a9618582d34a52dfa56a8b60\"><code>7d83e09</code></a> v2: perf(response,listener): Response fast-paths and responseViaCache improve...</li>\n<li>Additional commits viewable in <a href=\"https://github.com/honojs/node-server/compare/v1.19.14...v2.0.1\">compare view</a></li>\n</ul>\n</details>\n<br />\n"
+}

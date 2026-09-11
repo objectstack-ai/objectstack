@@ -1,0 +1,37 @@
+{
+  "number": 952,
+  "kind": "pull_request",
+  "title": "Fix CI build and test errors",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-22T07:34:47Z",
+  "updated_at": "2026-03-22T08:42:25Z",
+  "closed_at": "2026-03-22T08:38:50Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-22T08:38:50Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/952",
+  "body": "CI pipeline broken on `main` — build fails in service-analytics (TS6133), tests fail in nextjs adapter and plugin-auth due to stale test assertions.\n\n### Build fix\n- **`service-analytics/native-sql-strategy.ts`**: Remove unused `measure` variable that fails `noUnusedLocals: true`. The variable was a leftover from copy-pasting the dimensions block — measures always hardcode type `'number'`.\n\n### Test fixes\n- **`nextjs/metadata-api.test.ts`** (9 tests): Assertions used old `dispatch(subPath, context, method, body)` signature. Updated to match current implementation:\n  ```ts\n  // before\n  expect(mockDispatcher.dispatch).toHaveBeenCalledWith('objects', expect.objectContaining({ request: expect.anything() }), 'GET', undefined);\n  // after\n  expect(mockDispatcher.dispatch).toHaveBeenCalledWith('GET', '/meta/objects', undefined, {}, expect.objectContaining({ request: expect.anything() }));\n  ```\n\n- **`plugin-auth/auth-plugin.test.ts`** (2 tests): `.mock.calls.at(-1)[1]` resolved to the `app.com.objectstack.system` service object (second `registerService` call), not the AuthManager. Added `mockClear()` before `localPlugin.init()` so `mock.calls[0][1]` reliably references the correct AuthManager instance.\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 979,
+  "kind": "pull_request",
+  "title": "Batch schema sync for remote DDL in kernel bootstrap",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-24T03:35:30Z",
+  "updated_at": "2026-03-24T05:07:25Z",
+  "closed_at": "2026-03-24T05:07:25Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-24T05:07:25Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/979",
+  "body": "Sequential `syncSchema()` per object during bootstrap causes N×3 HTTP round-trips on remote drivers. 130 objects × 3 calls × 150ms = 58s cold start — exceeds serverless timeouts.\n\n### Changes\n\n- **`DriverCapabilitiesSchema` / `IDataDriver`** — New `batchSchemaSync` capability flag and optional `syncSchemasBatch(schemas)` method on the driver interface\n- **`RemoteTransport.syncSchemasBatch()`** — Batches all DDL into up to 3 `client.batch()` calls (introspect tables → introspect columns → execute DDL) instead of N×3 sequential `execute()` calls. Extracted shared `buildCreateTableSQL()` helper, added `assertSafeIdentifier()` for DDL injection prevention. Does not implement internal fallback — caller handles fallback to sequential sync.\n- **`TursoDriver`** — Exposes `syncSchemasBatch()` (delegates to RemoteTransport in remote mode, sequential fallback in local/replica mode), sets `batchSchemaSync: true`\n- **`ObjectQLPlugin.syncRegisteredSchemas()`** — Groups objects by driver, detects `supports.batchSchemaSync`, calls `syncSchemasBatch()` when available. Falls back to sequential `syncSchema()` per object if batch is unsupported or throws at runtime\n\n```typescript\n// Before: N sequential round-trips\nfor (const obj of allObjects) {\n  await driver.syncSchema(tableName, obj); // 2-3 HTTP calls each\n}\n\n// After: groups by driver, batched when supported\nif (driver.supports?.batchSchemaSync && typeof driver.syncSchemasBatch === 'function') {\n  await driver.syncSchemasBatch(batchPayload); // up to 3 batch calls total\n}\n```\n\n### Backwards compatibility\n\n- `batchSchemaSync` defaults to `false` — existing drivers unchanged\n- `syncSchemasBatch()` is optional on `IDataDriver`\n- SqlDriver and MemoryDriver set `batchSchemaSync: false` explicitly\n- All capability test fixtures updated with the new field\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>[Performance] Batch schema sync for remote DDL in kernel bootstrap</issue_title>\n> <issue_description>## Problem\n> \n> When running ObjectKernel bootstrap with a large number of objects (such as in world-class business suites), the schema sync (`ObjectQLPlugin.syncRegisteredSchemas`) triggers a remote DDL for each object sequentially. On remote drivers (such as Turso/libSQL in cloud mode), each table creation or alteration incurs a network round-trip per object (130+ registered objects = 260–390+ network calls).\n> \n> This leads to cold start or deploy times that can exceed the default 30s-45s timeout on serverless platforms (e.g., Vercel).\n> \n> ### Key evidence\n> - Each object: 2–3 HTTP calls (check table, create/alter)\n> - Example: 130 objects × 3 × 150ms = 58.5s on high latency\n> - User-facing: Service cold boot frequently fails due to schema DDL timeouts\n> \n> ## Root Cause\n> The current `syncRegisteredSchemas()` loop in `ObjectQLPlugin.start()` performs a sequential await on each object's DDL. When using a remote driver (e.g. libSQL), this is highly inefficient and not tenable at cloud scale.\n> \n> ## Desired Solution\n> - Batch DDL: Refactor `RemoteTransport.syncSchema()` to support batching all/most DDL statements into a single `client.batch()` call if supported by the remote database.\n> - Plugin architecture: Consider a `syncSchemasBatch()` API for remote/modern drivers.\n> - ObjectQLPlugin: `syncRegisteredSchemas()` should detect batch support and submit all schemas in parallel or as a batch where possible.\n> - Backwards compatible: Retain serial fallback for older/local/atomic drivers.\n> \n> ## Acceptance Criteria\n> - Kernel cold bootstrap of 100+ objects with remote driver completes in <10s\n> - No breaking change for local/dev flows\n> \n> ---\n> See also: [HotCRM] kernel.bootstrap timeout bug in downstream product suite.\n> </issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#978\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 Send tasks to Copilot coding agent from [Slack](https://gh.io/cca-slack-docs) and [Teams](https://gh.io/cca-teams-docs) to turn conversations into code. Copilot posts an update in your thread when it's finished."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1154,
+  "kind": "pull_request",
+  "title": "fix(objectql): respect packageId filter when merging MetadataService items",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-15T12:47:50Z",
+  "updated_at": "2026-04-15T13:06:13Z",
+  "closed_at": "2026-04-15T13:06:13Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-04-15T13:06:13Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1154",
+  "body": "Studio sidebar shows the same object list regardless of which package is selected. Root cause: `getMetaItems()` filters via `SchemaRegistry.listItems(type, packageId)`, then unconditionally merges **all** items from `MetadataService.list(type)` — wiping out the package filter.\n\n### Changes\n\n- **`packages/objectql/src/protocol.ts`** — Filter `MetadataService.list()` results by `_packageId` before merging when a `packageId` scope is active\n- **`packages/runtime/src/http-dispatcher.ts`** — Same fix on the MetadataService fallback path in `handleMetadata()`\n\n```typescript\n// Before: merged ALL runtime items regardless of package filter\nconst runtimeItems = await metadataService.list(request.type);\n\n// After: respect package scope\nlet runtimeItems = await metadataService.list(request.type);\nif (packageId && runtimeItems && runtimeItems.length > 0) {\n    runtimeItems = runtimeItems.filter((item: any) => item?._packageId === packageId);\n}\n```"
+}

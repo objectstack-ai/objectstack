@@ -1,0 +1,37 @@
+{
+  "number": 1121,
+  "kind": "pull_request",
+  "title": "fix: regenerate pnpm-lock.yaml to fix broken lockfile CI failures",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-13T11:59:12Z",
+  "updated_at": "2026-04-13T12:04:32Z",
+  "closed_at": "2026-04-13T12:01:59Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-13T12:01:59Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1121",
+  "body": "PR #1117's merge commit carried only the workflow cache key bumps (`v1`→`v2`) but silently dropped the regenerated `pnpm-lock.yaml`. All three CI jobs (`Build Core`, `Test Core`, `Build Docs`) fail at `pnpm install --frozen-lockfile` with `ERR_PNPM_BROKEN_LOCKFILE: expected a single document in the stream, but found more`.\n\n**Changes:**\n- Regenerated `pnpm-lock.yaml` from scratch (`rm pnpm-lock.yaml && pnpm install`), reducing from 14,040 → 13,096 lines by removing corrupted/redundant entries\n- Updated CHANGELOG.md"
+}

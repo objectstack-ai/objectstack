@@ -1,0 +1,33 @@
+{
+  "number": 889,
+  "kind": "pull_request",
+  "title": "fix: resolve plugin-dev test failures in CI",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-09T09:02:49Z",
+  "updated_at": "2026-03-09T10:11:41Z",
+  "closed_at": "2026-03-09T09:15:00Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-09T09:15:00Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/889",
+  "body": "`@objectstack/plugin-dev#test` failing on main with 2 test failures: metadata stub async/sync mismatch and CI timeout.\n\n- **Metadata stub methods made synchronous** — `createMetadataStub()` methods were `async`, so `Array.isArray(metadata.list('object'))` evaluated `Array.isArray(Promise)` → `false`. Removed `async` since these are simple Map operations; `await` on sync return values is still safe for callers.\n\n- **`register()` signature fixed** — stub expected `(type, name, data)` but test calls `register('object', { name: 'account' })`. Now accepts both forms, extracting name from `definition.name` when second arg is an object:\n  ```ts\n  register(type: string, nameOrDef: string | Record<string, any>, data?: unknown) {\n    if (typeof nameOrDef === 'object' && nameOrDef !== null) {\n      const key = nameOrDef.name ?? nameOrDef.id ?? 'unknown';\n      store.get(type)!.set(key, nameOrDef);\n    } else {\n      store.get(type)!.set(nameOrDef, data);\n    }\n  }\n  ```\n\n- **Init test timeout increased** — dynamic imports of real peer-dep plugins are slow in CI; bumped from default 5s to 15s.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 引用: https://github.com/objectstack-ai/spec/actions/runs/22845723380/job/66261500849#step:8\n> \n> fix all ci errors \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n🔒 GitHub Advanced Security automatically protects Copilot coding agent pull requests. You can protect all pull requests by enabling Advanced Security for your repositories. [Learn more about Advanced Security.](https://gh.io/cca-advanced-security)"
+}

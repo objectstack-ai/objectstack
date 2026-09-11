@@ -1,0 +1,33 @@
+{
+  "number": 892,
+  "kind": "pull_request",
+  "title": "feat(studio): Global REST API Console with auto-discovery",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-09T09:39:38Z",
+  "updated_at": "2026-03-09T11:16:31Z",
+  "closed_at": "2026-03-09T11:11:43Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-09T11:11:43Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/892",
+  "body": "Studio's `ObjectApiConsole` only tests CRUD for a single object with hardcoded endpoints. This adds a top-level API Console that auto-discovers all registered REST APIs from platform metadata.\n\n### New files\n\n- **`src/hooks/use-api-discovery.ts`** — Hook that queries `client.meta.getTypes()` and `client.meta.getItems()` to dynamically build the full endpoint tree (CRUD per object + system/auth/metadata endpoints), grouped and sorted by category\n- **`src/components/ApiConsolePage.tsx`** — Three-panel console: collapsible endpoint tree with search/filter, request editor (method selector, URL bar, JSON body), form-based query parameter editor, response viewer with status/timing/copy/history/replay\n- **`test/api-discovery.test.ts`** — 5 tests covering object discovery, endpoint generation, grouping logic, idempotent re-discovery, and query param URL building\n\n### Modified files\n\n- **`App.tsx`** — Added `'api-console'` to `ViewType` union and view routing\n- **`app-sidebar.tsx`** — \"API Console\" entry under System section\n- **`site-header.tsx`** — Breadcrumb support for `api-console` view\n- **`ROADMAP.md`** — Marked Global REST API Console as complete\n\n### Key design decisions\n\n- Endpoints refresh on demand via `refresh()` — no polling, no stale cache\n- Object add/delete is reflected by re-running discovery against live metadata\n- Reuses the same `fetch` + `(client as any).baseUrl` pattern from existing `ObjectApiConsole`\n- History kept in-memory (50 entries), with one-click replay\n- Form-based query parameter editor with add/remove rows, enable/disable toggle per param, OData preset quick-add buttons (`$top`, `$skip`, `$sort`, `$select`, `$count`, `$filter`), and live URL preview showing the full path with appended query string\n- History replay restores query params back into the form table\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>Studio 全局 REST API 控制台：自动发现和测试所有 API</issue_title>\n> <issue_description>\n> \n> > ## 背景\n> > 当前 Studio 的 ObjectApiConsole 只针对单一 Object 提供 CRUD 测试，无法方便浏览和测试所有 REST API（包括自定义、批量、元数据等）。随着服务逐渐丰富，API数目变多，开发/测试/集成场景需要一站式、高效的\"API 控制台\"。\n> >\n> > ## 目标\n> > 实现一个\"全局 REST API 控制台\"，在 Studio 顶级面板提供：\n> > - 自动发现所有已注册的 REST API（Discovery + Meta + Registry）\n> > - 支持分组浏览（如 Data、Metadata、Batch、Auth…），端点树可折叠/搜索/过滤\n> > - 一键填充 method/path/BodyTemplate，快捷编辑并发起请求\n> > - 响应高亮展示（状态/时间/Body）与完整请求历史，支持重放\n> > - 动态 Object 新增/删除后端点自动刷新，不需手写\n> > - 支持 Query Params/Table（OData/数据分页等）表单化填写\n> > - 自动继承平台认证，保障安全\n> >\n> > ## 推荐实现路径\n> > 1. 新增 ApiConsolePage，作为 Studio 顶级入口，支持独立路由\n> > 2. 新增 `ApiConsole/` 组件（EndpointTree + RequestPanel + ResponsePanel + useApiDiscovery），实现左侧分组树+中间请求+右侧响应\n> > 3. 端点来源：基础 Discovery `/api/v1/discovery` + Metadata `/api/v1/meta/object`，可结合 Registry API/Meta数据完善\n> > 4. 复用旧 ObjectApiConsole 的 send/history 逻辑，扩展为全局多 API\n> > 5. UX：分组/折叠/搜索/快速切换，表单式填写参数与 Body（JSON Schema 自动生成可升级为 phase2）\n> > 6. 支持多环境/变量（预留后续能力），初期以 studio session auth/context 为主\n> >\n> > ## 补充\n> > - 中长期目标可参考 Postman、Hoppscotch、Swagger UI，但重点保持 ObjectStack Studio 风格一体化\n> > - 若未来支持 OpenAPI/自定义文档，可接口 Registry/Meta 自动生成（phase2）\n> >\n> > ---\n> >\n> > ### Done Criteria\n> > - [ ] Studio 顶级 API 控制台可自动发现所有 REST API，分组浏览，搜索测试\n> > - [ ] 用户无需手写端点，任意 Object 增删自动刷新、端点自动出现\n> > - [ ] 支持请求/响应查看、历史记录、基本参数/Body表单化填写\n> >\n> > ---\n> >\n> > 完成后请：\n> > - 更新 ROADMAP.md 标记相关 deliverable\n> > - 增强自动测试覆盖\n> > - 关联所有相关 API/Studio/Registry/Meta issues\n> >\n> > 如需后续支持 GraphQL/WebSocket/Batch/SwaggerUI集成/收藏夹，请在此 issue 下讨论扩展方案。\n> </issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#891\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1050,
+  "kind": "pull_request",
+  "title": "feat(ai): add metadata management tools as first-class Tool metadata files",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-02T01:50:44Z",
+  "updated_at": "2026-04-02T05:36:02Z",
+  "closed_at": "2026-04-02T05:36:02Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-02T05:36:02Z",
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1050",
+  "body": "Adds 6 metadata CRUD tools to `@objectstack/service-ai`, each defined as an individual `.tool.ts` metadata file using `defineTool()` from `@objectstack/spec/ai`. Runtime handlers are co-located in `metadata-tools.ts` and bound at `ai:ready` time. No changes to `@objectstack/spec`.\n\n### Tool Metadata Files (`service-ai/src/tools/*.tool.ts`)\n\nEach tool is a first-class `Tool` metadata definition (validated by Zod at creation time) with `name`, `label`, `description`, `category`, `builtIn`, and `parameters`:\n\n| File | Tool Name | Description |\n|:--|:--|:--|\n| `create-object.tool.ts` | `create_object` | Validates snake_case name (object + per-field), checks for duplicates, registers object definition |\n| `add-field.tool.ts` | `add_field` | Validates snake_case objectName/fieldName/reference/option values, verifies object exists, field doesn't exist, merges new field into definition |\n| `modify-field.tool.ts` | `modify_field` | Validates snake_case objectName/fieldName, verifies object/field exist, applies partial patch to field properties |\n| `delete-field.tool.ts` | `delete_field` | Validates snake_case objectName/fieldName, verifies object/field exist, removes field from definition |\n| `list-metadata-objects.tool.ts` | `list_metadata_objects` | Returns object summaries with optional name/label filter and field inclusion (unique name avoids collision with data-tools `list_objects`) |\n| `describe-metadata-object.tool.ts` | `describe_metadata_object` | Returns full schema with field array and feature flags (unique name avoids collision with data-tools `describe_object`) |\n\nTool names are intentionally prefixed with `metadata_` for `list` and `describe` operations to avoid collisions when both `registerDataTools` and `registerMetadataTools` are registered on the same `ToolRegistry`.\n\nThe `reference` parameter in `add_field` is a plain `string` (target object name, e.g. `'account'`), matching the canonical Field schema in `@objectstack/spec`.\n\n### Architecture\n\n- **Tool definitions** live in individual `.tool.ts` files following the repo's `.object.ts` / `.view.ts` metadata file convention\n- **Handler factories** remain in `metadata-tools.ts`, which imports from the individual files and provides `registerMetadataTools()`\n- Each tool is importable independently (e.g. `import { createObjectTool } from '@objectstack/service-ai'`)\n- All tools are aggregated in `METADATA_TOOL_DEFINITIONS` array for bulk access\n\nRegistration follows the same pattern as `registerDataTools`:\n\n```ts\nimport { registerMetadataTools } from '@objectstack/service-ai';\n\nctx.hook('ai:ready', async (aiService) => {\n  const metadataService = ctx.getService<IMetadataService>('metadata');\n  registerMetadataTools(aiService.toolRegistry, { metadataService });\n});\n```\n\n### Tests\n\n79 unit tests in `service-ai/src/__tests__/metadata-tools.test.ts` covering:\n- Individual tool metadata properties (label, category, builtIn, parameters schema)\n- Handler execution and input validation (snake_case for object names, field names, references, and select option values)\n- Error handling (non-existent objects/fields, duplicates, invalid names, duplicate initial fields)\n- Dual registration with data tools (no name collisions)\n- Full create→add→modify→delete→describe lifecycle test"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 908,
+  "kind": "pull_request",
+  "title": "feat: promote i18n to core built-in service with in-memory fallback",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-11T06:57:27Z",
+  "updated_at": "2026-03-11T08:39:33Z",
+  "closed_at": "2026-03-11T08:28:49Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-11T08:28:49Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/908",
+  "body": "i18n was `optional`, meaning the kernel silently ignored its absence and `/api/v1/i18n/*` routes were unavailable unless `plugin-i18n` was explicitly loaded. This broke Studio and deployments that expect baseline i18n capability without extra plugin configuration.\n\n### Spec & Kernel\n\n- `ServiceRequirementDef.i18n`: `'optional'` → `'core'` — kernel now warns and auto-injects fallback\n- New `createMemoryI18n()` in `packages/core/src/fallbacks/memory-i18n.ts` — implements `II18nService` (translation loading, dot-notation key resolution, `{{param}}` interpolation, locale management)\n- Added to `CORE_FALLBACK_FACTORIES` alongside cache/queue/job\n\n### REST API\n\n- Added `enableI18n` flag to `RestApiConfig` schema (default: `true`)\n- `RestServer.registerRoutes()` now mounts `/api/v1/i18n/locales` and `/api/v1/i18n/translations/:locale`\n\n### Protocol fix\n\n- `SERVICE_CONFIG['i18n'].plugin`: `'plugin-i18n'` → `'service-i18n'` to match actual package name\n\n### Override behavior\n\nWhen `I18nServicePlugin` or `DevPlugin` registers `i18n` during `init`, it runs before `validateSystemRequirements()`, so the fallback is never injected — existing plugin behavior is unchanged:\n\n```typescript\n// No plugin needed — kernel auto-injects in-memory fallback\nconst kernel = new ObjectKernel();\nawait kernel.bootstrap(); // i18n service available\n\n// Production override — FileI18nAdapter replaces fallback\nkernel.use(new I18nServicePlugin({ defaultLocale: 'en', localesDir: './i18n' }));\n```\n\n### Tests\n\n- 10 new test cases for `createMemoryI18n` (translation, interpolation, fallback locale, merge)\n- 2 new REST tests (i18n route registration, `enableI18n: false` skip)\n- Updated `core-services.test.ts` expectations\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>i18n 默认内置为核心服务，自动注册/覆盖机制和多环境兼容</issue_title>\n> <issue_description>### 背景与目标\n> 目前 i18n（国际化）作为低代码平台的核心服务，只在 DevPlugin 或专业插件注册时才可用。这会导致内核在启动时，如果未加载 plugin-i18n，将无法通过 /api/v1/i18n/* 路由获取基本的多语言能力。为保证平台长期可用性、Studio 体验和部署友好，i18n 服务需要成为内置基础服务，采用与 metadata 一致的自动注册机制。 \n> \n> ### 主要开发内容\n> 1. **内置 i18n 服务注册（ObjectQLPlugin.init）**\n>     - 检查当前上下文是否已注册 'i18n' 服务\n>     - 如未注册，自动注册 FileI18nAdapter 作为默认实现（defaultLocale: 'en', fallbackLocale: 'en'，不指定 localesDir，纯 in-memory）\n>     - 日志记录内置初始化及覆盖行为\n> 2. **服务重要性调整**\n>     - ServiceRequirementDef.i18n 从 'optional' 升级为 'core'\n>     - kernel 启动时缺失 i18n 时给出 warn\n> 3. **plugin-i18n 行为标准化**\n>     - 正确覆盖内置服务\n>     - 文档说明如何定制 localesDir、defaultLocale\n> 4. **REST 路由自动注册 i18n**\n>     - RestServer.registerRoutes() 动态根据已注册服务追加挂载 i18n 路由\n>     - 配合 discovery/api root 保持服务可用性一致\n> 5. **协议配置同步修正**\n>     - protocol.ts SERVICE_CONFIG['i18n'] provider 名统一为 'service-i18n'\n> 6. **测试与验证**\n>     - 单元测试/集成测试：覆盖未注册 plugin-i18n 时的启动与 API 行为\n>     - 验证覆盖关系：外部 plugin-i18n 可替换内置 stub 实现\n>     - 生产与开发环境测试\n> 7. **文档与 CHANGELOG 更新**\n>     - 体现 i18n 服务变为基础内置能力，API/Studio/部署相关说明\n> \n> ### 风险排查与最佳实践\n> - 要避免重复注册导致的冲突\n> - 避免 breaking changes（保证 plugin-i18n 仍能优雅覆盖或增强内置实现）\n> - 保证 dev/stub/production 多环境一致性\n> \n> ### 验收标准\n> - 不安装 plugin-i18n 也可正常通过 discovery 和 /api/v1/i18n/* 访问默认 i18n 服务\n> - 安装 plugin-i18n 后表现完全一致或功能增强，不回退为内置实现\n> - 文档与测试覆盖所有主要场景\n> \n> ---\n> 本 Issue 旨在支撑平台演进、Studio 生产力需求和部署无障碍，须稳健设计，确保长期可维护性。</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#907\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 935,
+  "kind": "pull_request",
+  "title": "Migrate API layer from catch-all handler to Hono + Vercel adapter",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-19T02:34:44Z",
+  "updated_at": "2026-03-19T03:09:46Z",
+  "closed_at": "2026-03-19T03:06:27Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-19T03:06:27Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/935",
+  "body": "The `api/[...path].ts` catch-all entrypoint causes routing ambiguity and requires path-normalization workarounds in monorepo Vercel deployments. Replace with Hono's native Vercel adapter pattern.\n\n### Entrypoint\n\n- Replace `api/[...path].ts` with `api/index.ts` — a top-level Hono app exported via `handle(app)`\n- Vercel rewrites (`/api/(.*)` → `/api`) handle sub-path routing; no more filename-based catch-all\n\n```ts\n// api/index.ts\nconst app = new Hono();\napp.all('*', async (c) => {\n  const inner = await ensureApp();\n  return await inner.fetch(c.req.raw);\n});\nexport default handle(app);\n```\n\n### Kernel bootstrap\n\n- Rename `getApp()` → `ensureApp()`, `bootKernel()` → `ensureKernel()` (both exported)\n- Cold-start shared-promise lock pattern unchanged\n\n### Vercel config\n\n- Add `/api/(.*)` → `/api` rewrite before the SPA fallback — eliminates path normalization logic that was in the old catch-all\n\n### Tests\n\n- Add deployment smoke tests: `GET /api/v1/meta` and `GET /api/v1/packages` return 200 through outer→inner delegation\n- Update Vercel delegation test suite to match new `api/index.ts` pattern (46 tests, all passing)\n\n### Docs\n\n- Update `deployment-vercel.mdx` code examples and checklist\n- Update both root and studio `CHANGELOG.md`\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>[Refactor] Migrate API layer to Hono + Vercel Edge/Node adapter for long-term monorepo stability</issue_title>\n> <issue_description>## Background\n> \n> Current monorepo Vercel deployment (see PR objectstack-ai/spec#933 and previous 404 diagnostics) relies on a `[...path].ts` API catch-all entrypoint and a Node.js serverless handler written in a way compatible with Vercel's conventions. However, due to monorepo structure, workspace dependencies, and Vercel's framework/SPA routing, serverless routing and bundling issues persist.\n> \n> ## Motivation for Hono + Vercel Adapter Migration\n> - Vercel now recommends using `@hono/vercel` (Edge or Node adapter) for TypeScript frameworks instead of manual catch-all entrypoints.\n> - A single Hono app entrypoint, compatible with Vercel's adapter bootstrap system, is easier to test locally, more portable, and better aligned with both Edge Functions and monorepo dependency resolution with workspaces.\n> - Code will be future-proofed for hybrid edge+node routes or incremental migration to Edge (when upstream deps are ready).\n> - Avoids the routing ambiguity and bundling pitfalls of catch-all handlers with complex monorepo imports.\n> \n> ## Acceptance Criteria\n> - [ ] The API entrypoint is restructured into a proper Hono app (not a vestigial Next.js-style `[...path].ts`).\n> - [ ] Hono is initialized directly at the top-level entry point for API (`api/index.ts` or similar), not as an exported handler.\n> - [ ] The Hono app is exported and wired up via `@hono/vercel` Node adapter, e.g.:\n>   ```ts\n>   import { Hono } from 'hono';\n>   import { handle } from '@hono/vercel';\n>   const app = new Hono();\n>   // ... route wiring ...\n>   export default handle(app);\n>   ```\n> - [ ] Internal kernel/plugin/registry initialization is guaranteed before the app handles any request; all service imports are compatible with esbuild/nft bundling.\n> - [ ] Vercel routes are configured to anticipate Hono's routing (i.e. no catch-all raw handler, just native Node/Edge adapter bootstrap).\n> - [ ] Monorepo dependencies imported by the app can be resolved without custom `includeFiles` hacks in `vercel.json`.\n> - [ ] Add automated tests to ensure `/api/v1/meta` and `/api/v1/packages` return 200 OK after deployment.\n> - [ ] All changes are reflected in CHANGELOG.md (or ROADMAP.md). Related issues updated on each progress.\n> \n> ## Additional Notes\n> - Hono's DX enables hybrid Edge+Node deployment model (future cloud scaling).\n> - This unlocks easier local/testing/dev experience outside Vercel (e.g. with `hono serve`).\n> - All API endpoints (including REST, GraphQL, metadata, and packages) should be exposed via Hono's router.\n> - Kernel boot, broker wiring, and all async service initialization should be moved to top-level `app.ts` as needed. Async wiring must be non-blocking or use Hono's native async context patterns.\n> \n> ## Related\n> - [🐛] https://github.com/objectstack-ai/spec/issues/933\n> - Internal: Vercel monorepo 404 debug / deployment breakdown\n> </issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#934\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n📍 Connect Copilot coding agent with [Jira](https://gh.io/cca-jira-docs), [Azure Boards](https://gh.io/cca-azure-boards-docs) or [Linear](https://gh.io/cca-linear-docs) to delegate work to Copilot in one click without leaving your project management tool."
+}

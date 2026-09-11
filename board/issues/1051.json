@@ -1,0 +1,35 @@
+{
+  "number": 1051,
+  "kind": "issue",
+  "title": "[Bug] studio 部署到 Vercel 后，API 路由返回 HTML 而不是 JSON",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-04-02T03:39:40Z",
+  "updated_at": "2026-04-02T08:15:16Z",
+  "closed_at": "2026-04-02T08:15:16Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1051",
+  "body": "## 问题描述\n在 `apps/studio` 项目部署到 Vercel 后，所有 `/api/*` 路由都返回 HTML（即 SPA 的 `index.html`），而不是期望的 JSON API 响应。项目 `hotcrm` 在同环境下工作正常。\n\n## 原因分析\n- `vercel.json` 中设置 `\"framework\": null`，Vercel 无法识别 `api/` 目录为 Serverless Functions。\n- 没有使用 `outputDirectory` 指定静态文件路径，导致 `/api/index.js` 作为静态文件提供。\n- rewrite 规则 `{ \"source\": \"/api/(.*)\", \"destination\": \"/api\" }` 实际上将 API 路由到静态文件，未匹配时 fallback 到 `/index.html`。\n- 参考 `hotcrm`，Next.js 项目 API routes 能正常被识别为 Function。\n\n## 复现步骤\n1. 部署 studio 项目到 Vercel。\n2. 访问任何 `/api/*` 路径。\n3. 结果均返回 HTML 页面内容，而不是 JSON 响应。\n\n## 期望行为\n- 任何 `/api/*` 路由应由 Serverless Function 处理，Ajax 应返回正确的 JSON 响应。\n\n## 建议修复方案\n- 显式在 `vercel.json` 配置 `outputDirectory: \"public\"` 和 `functions.api/index.js`，让 Vercel 正确识别 serverless 函数。\n- 修改 rewrite，将 `/api/(.*)` 路由到 `/api/index.js` 而不是 `/api`。\n- 样例配置：\n\n```json\n{\n  \"framework\": null,\n  \"outputDirectory\": \"public\",\n  \"functions\": {\n    \"api/index.js\": { \"memory\": 1024, \"maxDuration\": 60 }\n  },\n  \"rewrites\": [\n    { \"source\": \"/api/(.*)\", \"destination\": \"/api/index.js\" },\n    { \"source\": \"/((?!api/).*)\", \"destination\": \"/index.html\" }\n  ]\n}\n```\n\n- 注意在构建脚本 `build-vercel.sh` 中，不要把 `api/` 目录包含进 `public/` 下。\n\n## 补充\n- 请完成修复后务必自测所有 API 路由，并同步更新 CHANGELOG/ROADMAP。\n\n---\n如需协助可 @Copilot 进行进一步分析或 PR。"
+}

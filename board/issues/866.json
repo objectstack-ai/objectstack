@@ -1,0 +1,35 @@
+{
+  "number": 866,
+  "kind": "issue",
+  "title": "[Bug] Filter operators (contains, notContains, isEmpty, between) broken or inconsistent across frontend and server",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-03-03T09:17:11Z",
+  "updated_at": "2026-05-17T01:38:52Z",
+  "closed_at": "2026-05-17T01:38:52Z",
+  "closed_by": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/866",
+  "body": "## Summary\n\nThe `contains` text search filter returns no results while `equals` works correctly (see screenshot). After a thorough code audit, **7 related filter issues** were identified across the `objectui` and `spec` repos.\n\n<img alt=\"Contains operator bug screenshot\" width=\"2732\" src=\"https://github.com/user-attachments/assets/91f7d011-d54a-46e9-8c61-46b7d1bf06ef\" />\n\n## Root Cause Analysis\n\n**Bug 1 (Critical):** `contains` filter returns empty results — Server-side double-conversion\n- Frontend sends AST: `['name', 'contains', 'Evan']`\n- Server `parseFilterAST()` converts to `{ name: { $contains: 'Evan' } }`\n- Driver receives `{ name: { $contains: 'Evan' } }` but does not translate `$contains` → database-native (SQL/Mongo regex)\n- Results are always empty.\n\n**Other issues:**\n- `notContains` operator missing from mapping tables\n- `isEmpty`/`isNotEmpty` only matches null, not empty strings\n- `between` filter renders only one input, needs min/max\n- Case sensitivity inconsistency (`contains`)\n- `in`/`notIn` operator expanded in frontend; drivers support natively\n- Same double-conversion bug for `startsWith`/`endsWith`\n\n## Proposed Fixes\n- Remove or refactor `parseFilterAST()` call and let drivers process raw AST arrays\n- Ensure drivers (esp. Memory & SQL) correctly convert `$contains`, `$startsWith`, `$endsWith`, `$notContains` to native DB queries\n- Update frontend FilterBuilder for correct input rendering & operator mapping\n\n## Reproduction\n1. ListView/Contact, filter Name with Contains, value = 'Evan'\n2. No items found; Equals with exact value works\n\n## Affected Files\n- objectui and spec repos, details in full analysis\n\n## Cross-Repo Impact\nRequires coordinated changes in both objectui and spec repositories (especially data engine drivers)."
+}

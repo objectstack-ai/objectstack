@@ -1,0 +1,33 @@
+{
+  "number": 651,
+  "kind": "pull_request",
+  "title": "docs: restructure documentation site for developer experience",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-12T14:35:47Z",
+  "updated_at": "2026-03-23T23:37:31Z",
+  "closed_at": "2026-02-12T15:28:38Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-12T15:28:38Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/651",
+  "body": "Restructure the documentation site from 5 overlapping sections into a clean 4-section Diátaxis layout. The `concepts/` section overlapped with both `getting-started/` and `protocol/`, and `guides/` was a dumping ground mixing tutorials with cheatsheets.\n\n### Navigation: 5 → 4 sections\n\n```\nBefore: Getting Started → Guides → Concepts → Protocol → References\nAfter:  Getting Started → Guides → Protocol → References\n```\n\n### Merge Concepts into Getting Started\n- New `core-concepts.mdx` — consolidated metadata-driven development + design principles into one page\n- Moved `architecture.mdx` and `glossary.mdx` (née `terminology.mdx`) into getting-started\n- Single onboarding path instead of two overlapping sections\n\n### Organize Guides\n- Moved 10 cheatsheet/reference pages into `guides/cheatsheets/` subdirectory\n- Added labeled nav separators: **Building**, **Integration**, **Operations**\n- Redesigned `guides/index.mdx` with card navigation and structured tables\n\n### Redesign landing page\n- 4-section card layout: **Learn** / **Build** / **Understand** / **Look Up**\n- Streamlined quick start to single command\n\n### Cross-reference updates\n- Updated ~15 internal links from old `concepts/` and cheatsheet paths\n- Fixed quick-start learning path hrefs (were relative `./` resolving incorrectly)\n\nThe old `concepts/` directory remains on disk (removed from nav only) to avoid breaking any external links.\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

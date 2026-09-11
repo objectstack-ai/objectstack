@@ -1,0 +1,33 @@
+{
+  "number": 959,
+  "kind": "pull_request",
+  "title": "Unify DriverInterface/IDataDriver into single authoritative data driver contract",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-23T02:55:25Z",
+  "updated_at": "2026-03-23T04:15:46Z",
+  "closed_at": "2026-03-23T04:11:30Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-23T04:11:30Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/959",
+  "body": "`DriverInterface` (core, 13 methods) and `IDataDriver` (spec, 28 methods) were two competing driver contracts. All plugins implemented the minimal one, leaving protocol gaps undetectable by CI due to `as any` casts.\n\n## Contract unification\n\n- **`spec/contracts/data-engine.ts`**: `DriverInterface` is now `type DriverInterface = IDataDriver` (deprecated alias)\n- **`core/contracts/data-engine.ts`**: Removed duplicate definition; re-exports from spec\n- **`core/index.ts`**: Added `IDataDriver` export alongside deprecated `DriverInterface`\n\n## Driver implementations aligned to `IDataDriver`\n\n- **`driver-sql`**: Added `findStream`, `upsert`, `bulkUpdate`, `bulkDelete`, `commit`, `rollback`, `dropTable`, `explain`. Full `DriverCapabilities` object.\n- **`driver-memory`**: Full `DriverCapabilities` alignment (18 missing capability flags added)\n\n## Breaking return type changes\n\n- `updateMany` / `deleteMany` → return `number` (count), not `{ modifiedCount }` / `{ deletedCount }`\n- `delete` → returns `boolean`, not `any`\n\n## Usage\n\n```typescript\n// Before: minimal interface, many methods optional, no capability descriptor required\nimport type { DriverInterface } from '@objectstack/core';\nclass MyDriver implements DriverInterface { ... }\n\n// After: single authoritative contract with full capability declaration\nimport type { IDataDriver } from '@objectstack/spec/contracts';\nclass MyDriver implements IDataDriver {\n  readonly supports = { create: true, read: true, /* ... all capabilities */ };\n  // All 28 methods must be implemented (4 optional: getPoolStats, updateMany, deleteMany, explain)\n}\n\n// DriverInterface still works as deprecated alias\nimport type { DriverInterface } from '@objectstack/core'; // resolves to IDataDriver\n```\n\n## Backward compatibility\n\n- `DriverInterface` preserved as deprecated type alias — existing imports compile\n- `commitTransaction`/`rollbackTransaction` on SqlDriver preserved as deprecated wrappers\n- `DriverInterfaceSchema` (Zod) in `data/driver.zod.ts` unchanged\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>核心数据接口 DriverInterface / IDataDriver 定义存在分裂，导致所有 Driver 插件实现不一致</issue_title>\n> <issue_description>## 问题描述\n> 目前 `packages/core/src/contracts/data-engine.ts` 中定义的 `DriverInterface` 与 `packages/spec/src/contracts/data-driver.ts` 的 `IDataDriver` 存在明显分裂。迁移和新开发的数据驱动插件（如 driver-sql、driver-memory）的实现对象和测试标准不一致，导致：\n> \n> - 插件实现时不敢只实现 `IDataDriver`（spec），而是 fallback 到 `DriverInterface`（core），漏掉协议方法，实际签名不合规。\n> - 测试可被 `as any` 绕过类型不对齐，CI 测不出实现缺口。\n> - 文档、代码和测试三分天下，生态长期不可持续。\n> \n> ### 主要分歧\n> \n> - `DriverInterface`（core）为最小集合，仅有 connect/disconnect + CRUD + bulk（共13方法），无 supports、upsert、stream、事务、schema 管理、explain等高级能力\n> - `IDataDriver`（spec）为基础协议，28方法（含批量、schema、事务、explain、health、dropTable、capabilities、findStream等）\n> - 两者都是\"权威\"，但所有驱动实际只实现 core 导致协议缺口大量潜伏\n> \n> ## 推荐修复方案\n> \n> 1. **单一权威：** 明确以 `spec` 仓库的 `IDataDriver` 为唯一强制标准，彻底弃用 core/DriverInterface，所有插件以此为唯一实现合同\n> 2. **完整对齐：** 用 Zod Schema + TS interface 驱动，制定签名类型约束不可落空\n> 3. **接口整合：** 如果有历史兼容诉求，拆为\"MinimalDriver\"+\"SpecDriver\"，但 CI 和主流插件只测试 SpecDriver\n> 4. **协议检查工具：** CI强制所有插件类型匹配 IDataDriver，否则构建/测试禁止通过\n> 5. **清理 legacy fallback:** 删除 driver-sql/driver-memory 里对旧协议 key 的容错逻辑 (`filters`/`sort`/`skip` etc)，全部只认标准 key\n> \n> ## 优先级与影响\n> - **优先级：P0**（架构层面红线）\n> - **影响范围：** 所有 Driver 插件实现、协议文档、核心用例、内核注册机制\n> - **影响版本：** v3.x/v4.x\n> \n> ## 期望产出\n> - 技术决策：统一标准接口与实现\n> - 签名重构 PR\n> - 插件/内核/测试/文档同步更新\n> \n> ----\n> 相关文件：\n> - [core DriverInterface](https://github.com/objectstack-ai/spec/blob/main/packages/core/src/contracts/data-engine.ts)\n> - [spec IDataDriver](https://github.com/objectstack-ai/spec/blob/main/packages/spec/src/contracts/data-driver.ts)\n> - [driver-sql](https://github.com/objectstack-ai/spec/tree/main/packages/plugins/driver-sql/)</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#958\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n⌨️ Start Copilot coding agent tasks without leaving your editor — available in [VS Code](https://gh.io/cca-vs-code-docs), [Visual Studio](https://gh.io/cca-visual-studio-docs), [JetBrains IDEs](https://gh.io/cca-jetbrains-docs) and [Eclipse](https://gh.io/cca-eclipse-docs).\n"
+}

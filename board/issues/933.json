@@ -1,0 +1,33 @@
+{
+  "number": 933,
+  "kind": "pull_request",
+  "title": "fix: Vercel 404 on /api/v1/meta and /api/v1/packages — path normalisation, kernel boot resilience, broker-optional metadata",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-18T14:53:45Z",
+  "updated_at": "2026-03-19T02:17:24Z",
+  "closed_at": "2026-03-19T02:13:51Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-19T02:13:51Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/933",
+  "body": "Studio's Vercel deployment returns 404 for `/api/v1/meta` and `/api/v1/packages`. Three independent root causes: no error handling in the serverless catch-all (boot failures silently swallowed), no path normalisation (some runtimes strip `/api/` prefix), and `handleMetadata()` unconditionally calling `ensureBroker()` which throws 500 in lightweight setups.\n\n### `apps/studio/api/[...path].ts` — catch-all handler\n- Wrap `getApp()` + `inner.fetch()` in try-catch; boot failures return structured 500 JSON instead of being swallowed\n- Normalise request path: prepend `/api` if the runtime stripped the function directory prefix\n\n### `apps/studio/api/_kernel.ts` — kernel cold-start\n- Shared boot promise prevents concurrent cold-start requests from racing duplicate initialisations\n- Validate broker shim after `kernel.bootstrap()` — reattach if lost\n- Seed-data failures are non-fatal (logged, not thrown)\n\n### `packages/runtime/src/http-dispatcher.ts` — broker-optional metadata\n- `handleMetadata()` uses `this.kernel.broker ?? null` instead of `this.ensureBroker()`\n- All `broker.call()` sites guarded with `if (broker)` — falls back to protocol service → ObjectQL registry → hardcoded defaults\n- Direct registry path for object lookups when broker is unavailable:\n\n```typescript\n// Before: always throws if broker is null\nconst broker = this.ensureBroker();\n\n// After: graceful degradation\nconst broker = this.kernel.broker ?? null;\n// ...\nif (broker) {\n    const data = await broker.call('metadata.objects', { packageId }, ...);\n    return { handled: true, response: this.success(data) };\n}\n// Fallback: use ObjectQL registry directly\nconst qlService = await this.getObjectQLService();\nif (qlService?.registry) {\n    const objs = qlService.registry.getAllObjects(packageId);\n    return { handled: true, response: this.success({ type: 'object', items: objs }) };\n}\n```\n\n### Tests\n- 5 new Hono tests: Vercel outer→inner delegation for meta, packages, discovery, path normalisation, error propagation\n- 7 new runtime tests: broker-less metadata degradation across all path shapes (root types, object list, single object, published, save)\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>Vercel 部署依然404：/api/v1/meta 和 /api/v1/packages 路由未生效且 broker 未挂载</issue_title>\n> <issue_description>## 复现问题描述\n> 在 Vercel 上部署 ObjectStack Studio 后，`/api/v1/meta` 和 `/api/v1/packages` 路由依然返回 404，控制台持续报错，前端核心元数据与包列表接口不可用。\n> \n> ### 客观现象\n> - 访问 https://play.objectstack.ai/api/v1/meta 与 /api/v1/packages 返回 404\n> - 控制台日志 [Console] Starting in Server mode，尝试 fetch /api/v1/packages 与 /api/v1/meta\n> - HTTP response 多次 404 (Not Found)\n> - 页面无法加载核心功能\n> \n> ### 深度分析\n> 1. **Hono 路由 catch-all 实际是注册了，但 Vercel path prefix 很可能导致路径未命中**\n>    - Vercel 的 `/api/[...path].ts` 路由和内部 createHonoApp 的 prefix `/api/v1` 可能双重叠加，或者存在被截断。\n>    - 若请求传递路径为 /v1/meta，但 Hono 注册路径为 /api/v1/meta，则完全无法匹配，直接 404。\n> 2. **dispatcher.dispatch() 已覆盖 meta/packages 路由，问题多半在于 serverless 环境路径偏移。**\n> 3. **broker shim 挂载虽有实现，但 cold start 时 kernel/app 启动失败未捕获，可能直接甩 500，或者 broker 为 null 抛异常。**\n> 4. **handleMetadata/handlePackages 方法直接 ensureBroker()，一旦 broker 未挂载或初始化失败，会抛 500。**\n> \n> ### 结论\n> - 当前 issue objectstack-ai/spec#930 实际未完全解决，404 问题依然存在。\n> - 路由 catch-all 机制逻辑没问题，问题多半在于 Vercel/FaaS 路径以及应用冷启动与 broker lifecycle 的配合。\n> - 服务端代码需针对 Vercel 路径前缀、Hono 多级 path、以及 kernel/broker 的 robust 初始化机制做架构级修正。\n> \n> ## 推荐修复与长期方案\n> 1. **在 serverless handler 层打印路径/日志，定位请求 path 是否被修正或被截断。**\n> 2. **梳理 prefix 和 handler注册，防止内部 Hono prefix 与 Vercel  catch-all 产生双重前缀或错配。**\n> 3. **kernel/app 的初始化需要更健壮，所有异常都应有日志、并降级到健康提示，不应静默挂死。**\n> 4. **broker shim 强制挂载与 broker 相关依赖初始化需全程校验，并应支持无 broker 降级兼容。**\n> 5. **补充 Vercel/serverless 路由端到端 e2e 测试用例。**\n> \n> ---\n> \n> 相关分析已在 objectstack-ai/spec#930 提供，可附引用。\n> \n> cc @hotlong </issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#932\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n📱 Kick off Copilot coding agent tasks wherever you are with [GitHub Mobile](https://gh.io/cca-mobile-docs), available on iOS and Android."
+}

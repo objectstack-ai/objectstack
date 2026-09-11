@@ -1,0 +1,39 @@
+{
+  "number": 912,
+  "kind": "pull_request",
+  "title": "feat: unified system object architecture with namespace-based auto-derivation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-11T09:55:08Z",
+  "updated_at": "2026-03-12T04:14:35Z",
+  "closed_at": "2026-03-12T04:06:09Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-12T04:06:09Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/912",
+  "body": "System objects were scattered across plugins with inconsistent naming, no namespace convention, and manual `tableName` boilerplate. This unifies all `sys_*` objects under a single architectural pattern.\n\n### ObjectSchema `namespace` property\n\nNew optional field on `ObjectSchemaBase`. When set, `ObjectSchema.create()` auto-derives `tableName` as `{namespace}_{name}`:\n\n```typescript\nconst SysUser = ObjectSchema.create({\n  namespace: 'sys',\n  name: 'user',        // short logical name\n  // tableName auto-derived → 'sys_user'\n  fields: { ... },\n});\n```\n\nExplicit `tableName` still wins. Objects without `namespace` are unaffected.\n\n`StorageNameMapping.resolveTableName()` updated with the same fallback chain: `tableName` → `{namespace}_{name}` → `name`.\n\n### SystemObjectName expansion\n\nAdded 10 constants: `ORGANIZATION`, `MEMBER`, `INVITATION`, `TEAM`, `TEAM_MEMBER`, `API_KEY`, `TWO_FACTOR`, `ROLE`, `PERMISSION_SET`, `AUDIT_LOG` (15 total including existing `USER`, `SESSION`, `ACCOUNT`, `VERIFICATION`, `METADATA`).\n\n### System object definitions by plugin\n\n- **plugin-auth** (11 objects): Migrated 4 existing (`SysUser`, `SysSession`, `SysAccount`, `SysVerification`) to `namespace: 'sys'`. Added `SysOrganization`, `SysMember`, `SysInvitation`, `SysTeam`, `SysTeamMember`, `SysApiKey`, `SysTwoFactor`.\n- **plugin-security** (2 objects): `SysRole`, `SysPermissionSet`.\n- **plugin-audit** (new package, 1 object): `SysAuditLog` — immutable, API read-only.\n\nAll files follow `sys-{name}.object.ts` / `Sys{PascalCase}` convention.\n\n### auth-schema-config.ts unified to use SystemObjectName constants\n\nAll 6 organization plugin schema mappings (`AUTH_ORGANIZATION_SCHEMA`, `AUTH_MEMBER_SCHEMA`, `AUTH_INVITATION_SCHEMA`, `AUTH_TEAM_SCHEMA`, `AUTH_TEAM_MEMBER_SCHEMA`, `AUTH_TWO_FACTOR_SCHEMA`) now reference `SystemObjectName.*` constants instead of hardcoded `'sys_*'` strings, ensuring a single source of truth for all system object names.\n\n### Backward compatibility\n\nOld `auth-*.object.ts` files re-export as deprecated aliases (`AuthUser` → `SysUser`, etc.). Removal planned for v4.0.\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>系统对象架构与命名规范统一升级提案</issue_title>\n> <issue_description># 系统对象架构与命名规范统一提案\n> \n> ## 背景\n> 本项目目前存在系统对象、系统设置相关的元数据、API、权限、命名多处定义分散与不一致的问题：\n> - 系统对象（如 user、role、org、audit_log 等）目前部分定义在 `plugin-auth`、部分定义在 `plugin-security`、部分为业务层（objectui）手动副本。\n> - 命名规范混乱：对象名、表名、文件名、API 路由、权限声明等未有统一设计。\n> - 不同插件/包之间的对象导出、注册与消费方式不一致。\n> \n> 这导致：\n> - 元数据冗余，定义难以追踪、维护。\n> - 新增/变更系统对象时需多处同步，易产生技术债。\n> - 消费端（前端与 API client）难以一致性消费和自动生成界面。\n> - 权限声明、事件、路由等常因命名不统一出现混乱。\n> \n> \n> ## 长期统一架构方案提案\n> \n> ### 1. 系统对象统一归属与结构\n> - 在 `objectstack-ai/spec` 项目的系统插件层（如 plugin-auth、plugin-security、plugin-audit），**所有系统对象统一在 objects 文件夹以 ObjectSchema 定义**。\n> - 每个对象设定 `namespace: 'sys'`，如：\n>   ```typescript\n>   export const SysUser = ObjectSchema.create({\n>     namespace: 'sys',\n>     name: 'user',\n>     tableName: 'sys_user',\n>     // ...\n>   });\n>   ```\n> - 新增/补齐对象：\n>   - sys_user、sys_account、sys_session、sys_verification、sys_org、sys_member、sys_invitation, sys_api_key （plugin-auth, better-auth 内核和插件用到的所有对象）。\n>   - sys_role、sys_permission_set（plugin-security）。\n>   - sys_audit_log（新建 plugin-audit）。\n>   - 等，如有需求补充。\n> - 文件命名全部采用 `sys-{name}.object.ts`，如 `sys-user.object.ts`、`sys-role.object.ts`。\n> - 导出常量全部采用 PascalCase，如 `SysUser`、`SysRole`。\n> \n> \n> ### 2. 命名规范分层与自动推导\n> - ObjectSchema 层：\n>   - `namespace: 'sys'` —— 消费者视角分类统一。\n>   - `name: 'user'` —— 逻辑标识，snake_case，不带前缀。\n>   - `tableName: 'sys_user'` —— 物理表名，自动推导：`{namespace}_{name}`，减少手动冗余。\n> - 文件名：`sys-{name}.object.ts`（全部系统对象统一化）。\n> - 路由与 API：前端统一 `/system/{name}`，API `/api/v1/objects?namespace=sys`。\n> - 权限声明、事件类型、关联关系也统一以 `sys::{name}` 进行辨识和管理。\n> - 消费方无需关心对象来源插件，全部系统对象都属于 `sys` 域。\n> \n> \n> ### 3. 架构分包与对象注册\n> - 保持插件分包：`plugin-auth`、`plugin-security`、`plugin-audit` 等分别注册自己的系统对象（sys 域），避免合并为单一包，保证内聚、可选、解耦。\n> - 每个插件注册时，按 namespace 归类，消费端自动聚合。\n> - 补齐所有遗失的 ObjectSchema 层定义，不再允许只写 Zod/schema 或手动前端副本。\n> \n> Ω\n> \n> ## 收益与影响\n> - 彻底解耦对象名与表名、文件名、插件归属，追求长期维护与自动化的可扩展能力。\n> - 系统对象一眼可见、零冗余，新增/变更只需一处。\n> - 路由、权限声明、API、界面渲染全平台统一，消除技术债。\n> - 推动平台架构与成熟 SaaS/企业平台看齐（Salesforce/Strapi/Payload 的对象体系）。\n> - 为未来自动生成、批量运维、对象 discovery，和 DSL/低代码场景打下基本盘。\n> \n> \n> ## 需要执行的具体工程任务\n> 1. 在各系统插件补齐所有系统对象 ObjectSchema 并统一命名。\n> 2. 扩展 ObjectSchema 协议，明确 namespace/tableName 自动推导规范。\n> 3. 改造对象注册流程 plugin 内统一归档。\n> 4. 前端同步全量消费 sys namespace 对象。\n> 5. 路由、权限、事件等所有系统对象管理统一。\n> 6. 升级文档、ROADMAP，并记录 breaking change。\n> \n> \n> ## 附加参考资料\n> - [plugin-auth 对象定义示例](https://github.com/objectstack-ai/spec/blob/473e77d290c15f5beec476adb1eb6496802ea3af/packages/plugins/plugin-auth/src/objects/auth-user.object.ts)\n> - [plugin-security RBAC 权限模型](https://github.com/objectstack-ai/spec/blob/473e77d290c15f5beec476adb1eb6496802ea3af/packages/spec/src/security/permission.zod.ts)\n> - [系统对象命名规范调整建议](https://github.com/objectstack-ai/spec/issues/)\n> \n> ---\n> 建议本议题为平台长期唯一的系统对象与命名规范架构方案指导，所有相关改动或讨论均以此 issue 为准。</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#906\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 1010,
+  "kind": "issue",
+  "title": "feat(service-ai): Implement automatic tool-call orchestration loop in AIService",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-31T06:48:20Z",
+  "updated_at": "2026-03-31T09:38:24Z",
+  "closed_at": "2026-03-31T09:38:24Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1010",
+  "body": "\n\n\n\n当前 `AIService.chat()` 仅做单次 LLM 调用委托：\n\n```typescript\n// packages/services/service-ai/src/ai-service.ts\nasync chat(messages: AIMessage[], options?: AIRequestOptions): Promise<AIResult> {\n    return this.adapter.chat(messages, options);\n}\n```\n\n当 LLM 返回 `toolCalls` 时（`AIResult` → `AIMessage.toolCalls`），service 层不会自动执行 tool → 将结果追加为 `role: 'tool'` 消息 → 重新调用 LLM。tool-calling 的端到端编排是缺失的。\n\n### Spec 协议已定义的类型支持\n\n- `AIMessage.toolCalls?: AIToolCall[]` — assistant 请求的 tool 调用\n- `AIMessage.toolCallId?: string` — tool 结果对应的 call ID\n- `AIMessage.role: 'tool'` — tool 结果消息角色\n- `AIRequestOptions.tools?: AIToolDefinition[]` — 可用 tool 定义\n- `AIRequestOptions.toolChoice?: 'auto' | 'none' | string` — tool 使用策略\n- `AIToolResult.isError?: boolean` — tool 执行失败标记\n\n### 任务\n\n1. **扩展** `AIService.chat()` 实现 tool-call loop：\n   ```\n   while (result contains toolCalls && roundtrip < maxRoundtrips):\n     1. 解析 result 中的 toolCalls\n     2. 通过 toolRegistry.executeAll(toolCalls) 执行\n     3. 将 AIToolResult 转换为 role='tool' 的 AIMessage\n     4. 追加到 messages 数组\n     5. 重新调用 adapter.chat(messages, options)\n   ```\n2. **新增** `AIRequestOptions` 或 `AIServiceConfig` 中的 `maxToolRoundtrips` 配置（默认 5，与前端 chatbot schema 对齐）\n3. **扩展** `AIResult` 返回值，增加可选的 `toolResults?: AIToolResult[]` 跟踪执行的 tool 结果（需先确认是否需要扩展 spec contract）\n4. **扩展** `streamChat()` 同样支持 tool-call loop（流式模式下收到 `tool-call` 事件后执行 tool 并继续流）\n5. **新增单元测试**：\n   - tool-call 单轮执行\n   - tool-call 多轮编排（LLM 连续调用 tools）\n   - maxRoundtrips 截断\n   - tool 执行失败（`isError: true`）的处理\n   - 无 tools 时行为不变（向后兼容）\n6. **更新** CHANGELOG.md\n\n### 验收标准\n\n- [ ] `AIService.chat()` 在 `options.tools` 存在且 LLM 返回 toolCalls 时自动执行 tool-call loop\n- [ ] loop 最大轮次可配置，默认 5\n- [ ] tool 执行失败时将 `isError: true` 的结果反馈给 LLM\n- [ ] `streamChat()` 同样支持 tool-call 编排\n- [ ] 向后兼容：无 tools 时行为与当前完全一致\n- [ ] 新增 ≥8 个测试用例\n- [ ] 全部测试通过\n\n"
+}

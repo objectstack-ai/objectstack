@@ -1,0 +1,35 @@
+{
+  "number": 871,
+  "kind": "issue",
+  "title": "[BUG] Analytics服务接口方法命名不一致，导致端点功能失效",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-03-04T06:15:54Z",
+  "updated_at": "2026-03-04T07:24:37Z",
+  "closed_at": "2026-03-04T07:24:37Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/871",
+  "body": "## 问题概述\n\nSpec项目中 `IAnalyticsService` 合约接口定义为 `getMeta(cubeName?: string)`，但在 `packages/runtime/src/http-dispatcher.ts` (HttpDispatcher) 的实现和相关测试中，调用的是 `getMetadata`：\n\n- 这导致生产环境 HttpDispatcher 调用 `/analytics/meta` 时无法正常触发服务实现（MemoryAnalyticsService/其他实现均只提供 `getMeta` 方法），最终 analytics/meta 端点的功能实际不可用，也影响了外部如 ObjectUI 的集成和适配复杂度。\n\n## 影响范围\n- 所有通过 `/api/v1/analytics/meta` 访问的服务，无法正确返回 CubeMeta 信息\n- 相关测试方法绑定的是错误名，未能正确检验接口一致性\n- 下游（如 ObjectUI）的集成代码被迫实现额外适配，违背设计初衷\n\n## 参考定位\n- `spec/src/contracts/analytics-service.ts`：合约声明的是 `getMeta()`\n- `runtime/src/http-dispatcher.ts`：实际实现调用 `getMetadata()`，签名不一致，还多传了 context 参数\n- `runtime/src/http-dispatcher.test.ts`：测试mock实现用了错误的方法名\n\n## 修复建议\n1. **统一方法名**：把 `http-dispatcher.ts`/相关测试内所有 `getMetadata` 替换为 `getMeta`，确保遵循合约名称\n2. **对齐方法签名**：移除对 context 的强制传参，遵循合约签名（可后续扩展为可选参数）\n3. **同步测试**：所有测试stub中的方法名同步修正为 `getMeta`，并保持接口行为一致\n4. **（推荐）合约扩展**：如有必要，建议扩展 `IAnalyticsService` 合约允许可选的 context 参数（用于审计/权限扩展），但需保证后兼容\n\n## 变更影响\n- 修复后 downstream 项目的 analytics 适配逻辑可明显简化，无需多层适配\n- 避免未来接口漂移和约定缺失带来隐蔽bug\n- 保证 MSW、测试、生产环境行为一致，降低维护成本\n\n---\n\n请在修复后:\n- 运行全量测试\n- 更新相关下游项目的适配代码（如 ObjectUI）\n- 在 ROADMAP.md 中更新修复记录"
+}

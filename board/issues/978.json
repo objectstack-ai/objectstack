@@ -1,0 +1,33 @@
+{
+  "number": 978,
+  "kind": "issue",
+  "title": "[Performance] Batch schema sync for remote DDL in kernel bootstrap",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-03-24T03:35:17Z",
+  "updated_at": "2026-03-24T05:07:26Z",
+  "closed_at": "2026-03-24T05:07:26Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/978",
+  "body": "## Problem\n\nWhen running ObjectKernel bootstrap with a large number of objects (such as in world-class business suites), the schema sync (`ObjectQLPlugin.syncRegisteredSchemas`) triggers a remote DDL for each object sequentially. On remote drivers (such as Turso/libSQL in cloud mode), each table creation or alteration incurs a network round-trip per object (130+ registered objects = 260–390+ network calls).\n\nThis leads to cold start or deploy times that can exceed the default 30s-45s timeout on serverless platforms (e.g., Vercel).\n\n### Key evidence\n- Each object: 2–3 HTTP calls (check table, create/alter)\n- Example: 130 objects × 3 × 150ms = 58.5s on high latency\n- User-facing: Service cold boot frequently fails due to schema DDL timeouts\n\n## Root Cause\nThe current `syncRegisteredSchemas()` loop in `ObjectQLPlugin.start()` performs a sequential await on each object's DDL. When using a remote driver (e.g. libSQL), this is highly inefficient and not tenable at cloud scale.\n\n## Desired Solution\n- Batch DDL: Refactor `RemoteTransport.syncSchema()` to support batching all/most DDL statements into a single `client.batch()` call if supported by the remote database.\n- Plugin architecture: Consider a `syncSchemasBatch()` API for remote/modern drivers.\n- ObjectQLPlugin: `syncRegisteredSchemas()` should detect batch support and submit all schemas in parallel or as a batch where possible.\n- Backwards compatible: Retain serial fallback for older/local/atomic drivers.\n\n## Acceptance Criteria\n- Kernel cold bootstrap of 100+ objects with remote driver completes in <10s\n- No breaking change for local/dev flows\n\n---\nSee also: [HotCRM] kernel.bootstrap timeout bug in downstream product suite.\n"
+}

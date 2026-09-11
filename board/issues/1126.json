@@ -1,0 +1,36 @@
+{
+  "number": 1126,
+  "kind": "pull_request",
+  "title": "[WIP] Fix deploy to Vercel API error due to missing module",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "size/s"
+  ],
+  "assignees": [
+    "Claude",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-14T02:21:25Z",
+  "updated_at": "2026-04-14T09:56:19Z",
+  "closed_at": "2026-04-14T09:56:19Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1126",
+  "body": "Thanks for asking me to work on this. I will get started on it and keep this PR's description up to date as I form a plan and make progress.\n\n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>deploy to vercel api error</issue_title>\n> <issue_description>\n> {\"timestamp\":\"2026-04-13T09:09:23.657Z\",\"level\":\"error\",\"message\":\"Failed to connect driver\",\"driverName\":\"com.objectstack.driver.turso\",\"error\":{\"message\":\"Cannot find module '@libsql/linux-x64-gnu'\\nRequire stack:\\n- /var/task/apps/studio/api/_handler.js\",\"stack\":\"Error: Cannot find module '@libsql/linux-x64-gnu'\\nRequire stack:\\n- /var/task/apps/studio/api/_handler.js\\n at Module._resolveFilename (node:internal/modules/cjs/loader:1421:15)\\n at defaultResolveImpl (node:internal/modules/cjs/loader:1059:19)\\n at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1064:22)\\n at Module.<anonymous> (node:internal/modules/cjs/loader:1227:37)\\n at /opt/rust/nodejs.js:2:13531\\n at Module.pn (/opt/rust/nodejs.js:2:13909)\\n at Xe.e.<computed>.Ye._load (/opt/rust/nodejs.js:2:13501)\\n at TracingChannel.traceSync (node:diagnostics_channel:328:14)\\n at wrapModuleLoad (node:internal/modules/cjs/loader:245:24)\\n at Module.require (node:internal/modules/cjs/loader:1504:12)\"}} {\"timestamp\":\"2026-04-13T09:09:23.661Z\",\"level\":\"error\",\"message\":\"Find operation failed\",\"object\":\"sys_metadata\",\"error\":{\"message\":\"RemoteTransport: lazy connect failed: HttpClient2 is not a constructor\",\"stack\":\"Error: RemoteTransport: lazy connect failed: HttpClient2 is not a constructor\\n at file:///var/task/apps/studio/api/_handler.js:117013:17\\n at async RemoteTransport.find (file:///var/task/apps/studio/api/_handler.js:116712:5)\\n at async file:///var/task/apps/studio/api/_handler.js:114521:22\\n at async next (file:///var/task/apps/studio/api/_handler.js:114063:22)\\n at async _ObjectQL2.executeWithMiddleware (file:///var/task/apps/studio/api/_handler.js:114066:5)\\n at async _ObjectQL2.find (file:///var/task/apps/studio/api/_handler.js:114510:5)\\n at async ObjectStackProtocolImplementation.loadMetaFromDb (file:///var/task/apps/studio/api/_handler.js:113743:23)\\n at async ObjectQLPlugin.restoreMetadataFromDb (file:///var/task/apps/studio/api/_handler.js:115431:34)\\n at async ObjectQLPlugin.start (file:///var/task/apps/studio/api/_handler.js:115207:7)\\n at async ObjectKernel.startPluginWithTimeout (file:///var/task/apps/studio/api/_handler.js:99550:7)\"}}</issue_description>\n> \n> ## Comments on the Issue (you are @claude[agent] in this section)\n> \n> <comments>\n> </comments>\n"
+}

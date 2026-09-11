@@ -1,0 +1,33 @@
+{
+  "number": 857,
+  "kind": "pull_request",
+  "title": "fix: resolve CI build failures in plugin-msw DTS and docs MDX generation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-02T05:33:38Z",
+  "updated_at": "2026-03-02T06:08:06Z",
+  "closed_at": "2026-03-02T05:57:37Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-02T05:57:37Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/857",
+  "body": "Two independent build failures on `main`:\n\n### plugin-msw DTS build error (TS2345)\n\n`getData` spreads `string | string[]` options directly into protocol's `getData()` which expects `string[]`. Normalize before passing:\n\n```typescript\nconst normalize = (v?: string | string[]) => v == null ? undefined : Array.isArray(v) ? v : [v];\nconst body = await this.getProtocol().getData({\n    object: objectName,\n    id,\n    select: normalize(options?.select),\n    expand: normalize(options?.expand),\n});\n```\n\n### Docs prerender crash on `/en/docs/references/system/translation`\n\n`build-docs.ts` emits schema descriptions into MDX without escaping curly braces. `MessageFormatSchema.describe('...simple {variable} replacement')` causes MDX to evaluate `variable` as a JSX expression → `ReferenceError`. Applied the same `{...}` → `` `{...}` `` escaping already used for property descriptions (line 173) to schema-level descriptions (line 163).\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> fix all ci errors\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

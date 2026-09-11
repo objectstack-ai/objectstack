@@ -1,0 +1,37 @@
+{
+  "number": 1105,
+  "kind": "pull_request",
+  "title": "Add diagnostic logging for AI metadata visibility issue in Vercel deployment",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "size/s"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-10T13:38:19Z",
+  "updated_at": "2026-04-13T01:38:39Z",
+  "closed_at": "2026-04-13T01:38:39Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1105",
+  "body": "After Vercel deployment, Studio sidebar shows incomplete AI metadata (missing agents/tools). Root cause unknown—could be service registry callback failure, metadata service unavailability, or timing issues during bootstrap.\n\n## Changes\n\n- **protocol.ts**: Added console logging in `getMetaTypes()` and `getMetaItems()` to trace:\n  - Services registry availability and size\n  - Metadata service accessibility and method presence  \n  - Runtime types/items retrieval from metadata service\n  - Final merged result counts\n\n- **plugin.ts**: Fixed `ObjectStackProtocolImplementation` initialization to include missing feed service callback (3rd constructor parameter)\n\n## Diagnostic Flow\n\n```typescript\n// protocol.ts - Now logs each step\nasync getMetaTypes() {\n  const services = this.getServicesRegistry?.();\n  console.log('[Protocol] services available:', !!services, 'size:', services?.size);\n  \n  const metadataService = services?.get('metadata');\n  console.log('[Protocol] metadata service:', !!metadataService);\n  \n  if (metadataService?.getRegisteredTypes) {\n    const runtimeTypes = await metadataService.getRegisteredTypes();\n    console.log('[Protocol] runtime types:', runtimeTypes);\n  }\n}\n```\n\nThis will expose whether the issue is in service registry access, metadata service registration, or the metadata itself. Once Vercel logs are available, a targeted fix can be implemented."
+}

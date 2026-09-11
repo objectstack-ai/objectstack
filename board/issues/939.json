@@ -1,0 +1,32 @@
+{
+  "number": 939,
+  "kind": "issue",
+  "title": "[plugin-auth] 插件未自动注册对象元数据，导致表结构未同步",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-03-21T05:36:38Z",
+  "updated_at": "2026-03-21T05:41:55Z",
+  "closed_at": "2026-03-21T05:41:55Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/939",
+  "body": "## 问题描述\n\n当在 ObjectStack 服务启动时，`plugin-auth` 插件没有将认证相关对象（如 `sys_user`、`sys_session` 等）通过 registerService('app.auth', manifest) 的方式注册到 ObjectQL 元数据系统。因此，在 `ObjectQLPlugin` 的 schema 同步阶段，这些认证相关的对象未被包含在需要同步的对象表结构集合内，导致表结构未被自动创建或同步。最终表现为 Better-Auth 查询相关表时报错：`SQLITE_ERROR: no such table: sys_user`。\n\n## 期望行为\n- `plugin-auth` 插件在初始化（init/onEnable）阶段应当按照约定，将认证相关对象（用户、会话、账户、验证码…）打包为 app 服务，通过 `registerService('app.plugin-auth', manifest)` 向核心系统注册。\n- ObjectQLPlugin 在启动时可以自动发现并同步这些对象的表结构，确保 Better-Auth 初始化后表结构已准备好。\n\n## 建议解决方案\n- 在 `plugin-auth` 的初始化阶段，添加对认证对象元数据的注册逻辑，并保证对象定义满足 ObjectQL schema 标准。\n- 遵循 createAppPlugin 的设计模式，将认证实体注册为 app 服务（如 `app.com.objectstack.auth`），使 ObjectQLPlugin 能统一处理 metadata。\n- 对于升级需求，需注意兼容已存在的 `sys_user` 等 legacy 表名。\n\n## 相关参考\n- [objectstack-ai/objectql schema 同步机制](https://github.com/objectstack-ai/objectql)\n- [plugin-auth src/index.ts, src/adapter/index.ts, src/server/index.ts]\n- [ObjectQLPlugin 如何发现 app.* 服务](https://github.com/objectstack-ai/objectql/blob/main/packages/foundation/platform-node/src/app-plugin.ts)\n- [实际出错日志与 stack trace]\n\n---\n\n如有需要，可由平台架构组协助设计标准的对象清单与 schema。"
+}

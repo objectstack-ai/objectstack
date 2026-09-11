@@ -1,0 +1,33 @@
+{
+  "number": 1088,
+  "kind": "issue",
+  "title": "MetadataPlugin 读写功能",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-08T09:22:52Z",
+  "updated_at": "2026-04-08T10:32:35Z",
+  "closed_at": "2026-04-08T10:32:35Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1088",
+  "body": "\n\n### 问题 1：`MetadataPlugin` 没有将数据库 driver 传给 `MetadataManager`\n\n看 `MetadataPlugin` 的构造函数（`plugin.ts` L23-39）：\n\n```typescript name=packages/metadata/src/plugin.ts url=https://github.com/objectstack-ai/framework/blob/0ae9b42f3855930b45352410fc862d2cd42b7d57/packages/metadata/src/plugin.ts#L23-L39\nconstructor(options: MetadataPluginOptions = {}) {\n    this.options = { watch: true, ...options };\n    const rootDir = this.options.rootDir || process.cwd();\n\n    this.manager = new NodeMetadataManager({ \n        rootDir,\n        watch: this.options.watch ?? true,\n        formats: ['yaml', 'json', 'typescript', 'javascript'] \n        // ← 没有传 datasource 和 driver！\n    });\n}\n```\n\n**没有传递 `datasource` 和 `driver`**。所以 `MetadataManager` 构造函数中的自动配置逻辑不会触发：\n\n```typescript\n// metadata-manager.ts L113-115\nif (config.datasource && config.driver) {\n    this.setDatabaseDriver(config.driver);  // ← 永远不会执行\n}\n```\n\n同时 `NodeMetadataManager` 发现没有外部 loaders，就默认只注册 `FilesystemLoader`：\n\n```typescript name=packages/metadata/src/node-metadata-manager.ts url=https://github.com/objectstack-ai/framework/blob/0ae9b42f3855930b45352410fc862d2cd42b7d57/packages/metadata/src/node-metadata-manager.ts#L28-L31\nif (!config.loaders || config.loaders.length === 0) {\n    const rootDir = config.rootDir || process.cwd();\n    this.registerLoader(new FilesystemLoader(rootDir, this.serializers, this.logger));\n}\n```\n\n**结果：系统中只有 `FilesystemLoader`，没有 `DatabaseLoader`。**\n\n### 问题 2：`register()` 无差别广播所有 loader\n\n```typescript name=packages/metadata/src/metadata-manager.ts url=https://github.com/objectstack-ai/framework/blob/0ae9b42f3855930b45352410fc862d2cd42b7d57/packages/metadata/src/metadata-manager.ts#L158-L170\nasync register(type: string, name: string, data: unknown): Promise<void> {\n    // ...写入内存 registry...\n    \n    for (const loader of this.loaders.values()) {\n      if (loader.save) {\n        await loader.save(type, name, data);  // ← FilesystemLoader.save() → 尝试写磁盘 → 崩溃\n      }\n    }\n}\n```\n\n---\n\n## 🏗️ 正确的修复方案（两层）\n\n### 层级 1：`MetadataPlugin` 需要桥接 Kernel 中的数据库 driver\n\n`MetadataPlugin` 在 `init` 阶段注册了自己为 `metadata` 服务，但**从未从 kernel 获取数据库 driver 来配置 `DatabaseLoader`**。\n\nROADMAP 中已经定义了 `setDatabaseDriver(driver)` 是为 \"deferred setup via kernel service registry\" 设计的。`DriverPlugin` 在 `start` 阶段已经把 driver 注册为 `driver.{name}` 服务。但**没有任何代码在 `MetadataPlugin.start()` 中从 kernel 拿到这个 driver 并调用 `manager.setDatabaseDriver()`**。\n\n**修复**：在 `MetadataPlugin.start()` 中，检测 kernel 已注册的 driver，自动完成 `setDatabaseDriver()` 的桥接。\n\n### 层级 2：`register()` 应该只向 `DatabaseLoader` 写入，不向 `FilesystemLoader` 写入\n\n即使修复了层级 1，`register()` 仍然会同时向 `DatabaseLoader` 和 `FilesystemLoader` 广播写入。`FilesystemLoader` 的定位是**只读加载静态元数据文件**，不应参与运行时的 `register()` 持久化。\n\n**修复**：在 `register()` 中区分 loader 的用途，只向 `protocol === 'datasource:'` 的 loader 写入。或者在 `MetadataLoaderContract` 上新增 `persistOnRegister` 标记。\n\n---\n\n### 总结\n\n| 组件 | 状态 | 说明 |\n|------|------|------|\n| `DatabaseLoader` 读写 | ✅ 完整实现 | CRUD + 历史记录 + 自动建表 |\n| `MetadataPlugin` → driver 桥接 | ❌ **缺失** | `start()` 中没有从 kernel 获取 driver |\n| `register()` loader 选择 | ❌ **有缺陷** | 无差别广播所有 writable loader |\n| `FilesystemLoader` 在只读环境 | 💥 **崩溃点** | 尝试写入 `/var/task/object/` |\n\n**metadata 保存就应该进数据库**。`DatabaseLoader` 代码已经 ready，问题是**没人把它接上**。需要在 `MetadataPlugin` 的 `start()` 阶段完成这个桥接，同时让 `register()` 不再盲目向 `FilesystemLoader` 写入。\n"
+}

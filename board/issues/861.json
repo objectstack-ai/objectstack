@@ -1,0 +1,33 @@
+{
+  "number": 861,
+  "kind": "pull_request",
+  "title": "feat: add /i18n route dispatch to HttpDispatcher",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-03T04:57:56Z",
+  "updated_at": "2026-03-03T05:39:55Z",
+  "closed_at": "2026-03-03T05:35:00Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-03T05:35:00Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/861",
+  "body": "`HttpDispatcher.dispatch()` had no `/i18n` prefix routing, so all i18n API requests (`/api/v1/i18n/translations/:locale`, etc.) fell through to 404. The route was already advertised in discovery info and defined in the API protocol spec, but never wired up.\n\n### Changes\n\n- **`dispatch()` method** — Added `/i18n` prefix check alongside existing `/analytics`, `/packages`, etc.\n- **New `handleI18n()` handler** — Routes three endpoints per the API protocol:\n  - `GET /locales` → `i18nService.getLocales()`\n  - `GET /translations/:locale` → `i18nService.getTranslations(locale)`\n  - `GET /labels/:object/:locale` → `i18nService.getFieldLabels(object, locale)` with fallback that derives field labels from the full translation bundle when `getFieldLabels` is not implemented\n- Supports both path params (`/translations/zh-CN`) and query params (`/translations?locale=zh-CN`) for client SDK compatibility\n- **11 new tests** covering all routes, param variants, error cases (400/501), fallback logic, and end-to-end dispatch integration\n\n```typescript\n// Now dispatched correctly instead of 404\nif (cleanPath.startsWith('/i18n')) {\n     return this.handleI18n(cleanPath.substring(5), method, query, context);\n}\n```\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>HttpDispatcher 未分发 /i18n 路径导致 i18n 相关 API 实现不一致（cross-repo）</issue_title>\n> <issue_description>## 问题描述\n> objectstack-ai/objectui 仓库的 Console/前端已经升级 i18n API 请求为 `/api/v1/i18n/translations/:locale`，但根据 objectstack-ai/spec 的 packages/runtime/src/http-dispatcher.ts 源码，HttpDispatcher 的 dispatch 方法并未分发 `/i18n` 路径。导致真实后端环境下所有 `/i18n` 相关 API（如 translations/zh）都无法获得正确处理，页面国际化内容无法被加载，API 404。\n> \n> ## 影响\n> - 任何使用标准 i18n 路径的应用，在未启用 MSW mock 或连接真实服务端时都无法获取 i18n API 响应。\n> - 破坏了与 ObjectStack Spec 协议、文档定义的一致性。\n> - 影响跨仓库联动，如 objectui/console 和其他 i18n consumer。\n> \n> ## 详细排查\n> - HttpDispatcher 当前仅实现了 /auth、/meta、/data、/storage、/ui、/automation、/analytics、/packages 等分发分支\n> - 没有 /i18n 路径分发，标准 API 如 /api/v1/i18n/translations/:locale 获取不到任何内容\n> - 上游 issue: [objectstack-ai/objectui#986](https://github.com/objectstack-ai/objectui/issues/986)\n> \n> ## 建议修复\n> 1. 在 HttpDispatcher.dispatch 方法中，添加 /i18n 路径分发，并调用 i18n plugin/service 的注册接口，实现 locale translations 相关路由处理。\n> 2. 补充 i18n 相关的路由用例和测试。\n> 3. 协议、文档与实现保持一致。\n> \n> ## 参考实现/修复方向\n> - 参照 /data 路径的分发写法，依赖 getService('i18n')，根据 methods 匹配切换 i18n API 分支。\n> - 接口实现：(getLocales, getTranslations, getFieldLabels)\n> \n> 标签：cross-repo、dispatcher、routing、i18n、bug</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#860\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n🔒 GitHub Advanced Security automatically protects Copilot coding agent pull requests. You can protect all pull requests by enabling Advanced Security for your repositories. [Learn more about Advanced Security.](https://gh.io/cca-advanced-security)"
+}

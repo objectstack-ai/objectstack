@@ -1,0 +1,33 @@
+{
+  "number": 925,
+  "kind": "pull_request",
+  "title": "feat(app-host): load plugin-auth on Vercel deployment",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-17T04:41:25Z",
+  "updated_at": "2026-03-17T06:14:38Z",
+  "closed_at": "2026-03-17T06:10:34Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-17T06:10:34Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/925",
+  "body": "`examples/app-host` (the hotcrm reference host) was not loading `plugin-auth`, meaning authentication was absent in Vercel deployments.\n\n## Changes\n\n- **`objectstack.config.ts`** — Import and register `AuthPlugin` in both the default stack and `PreviewHostExample`. Extracted as a shared `authPlugin` constant to avoid duplication. Resolves `baseUrl` from `NEXT_PUBLIC_BASE_URL` → `VERCEL_URL` → localhost fallback.\n\n```ts\nconst authPlugin = new AuthPlugin({\n  secret: process.env.AUTH_SECRET ?? 'dev-secret-please-change-in-production-min-32-chars',\n  baseUrl: process.env.NEXT_PUBLIC_BASE_URL ?? (process.env.VERCEL_URL\n    ? `https://${process.env.VERCEL_URL}`\n    : 'http://localhost:3000'),\n});\n```\n\n- **`package.json`** — Added `@objectstack/plugin-auth: workspace:*` to dependencies.\n- **`vercel.json`** — New Vercel deployment config referencing `@auth_secret` and `@vercel_url` environment secrets.\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

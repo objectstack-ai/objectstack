@@ -1,0 +1,33 @@
+{
+  "number": 951,
+  "kind": "pull_request",
+  "title": "feat: migrate driver-sql from objectql, implement standard SQL Driver plugin",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-22T06:50:49Z",
+  "updated_at": "2026-03-22T07:24:53Z",
+  "closed_at": "2026-03-22T07:19:05Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-22T07:19:05Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/951",
+  "body": "Migrates the Knex-based SQL driver from `objectstack-ai/objectql` into `packages/plugins/driver-sql/` as a first-class plugin, fully aligned with the current spec protocol.\n\n### Driver refactoring\n\n- **Imports**: `@objectql/types` → `@objectstack/core` (DriverInterface) + `@objectstack/spec/data` (QueryInput, DriverOptions)\n- **Interface**: Removed legacy `Driver` interface and `ObjectQLError` — implements `DriverInterface` directly\n- **Schema sync**: Exposes `syncSchema()` per DriverInterface contract, backed by `initObjects()` for batch table init\n- **SQLite dialect**: Unified `isSqlite`/`isPostgres`/`isMysql` getters handle both `sqlite3` and `better-sqlite3` clients\n\n### Plugin structure\n\nFollows `driver-memory` layout exactly:\n\n```\npackages/plugins/driver-sql/\n├── package.json          # @objectstack/driver-sql\n├── tsconfig.json\n└── src/\n    ├── index.ts          # Plugin entry (onEnable + exports)\n    ├── sql-driver.ts     # SqlDriver implements DriverInterface\n    └── *.test.ts         # 5 test suites, 72 tests\n```\n\n### Test coverage\n\nAll tests use in-memory `better-sqlite3`:\n\n| Suite | Tests | Covers |\n|-------|-------|--------|\n| `sql-driver.test.ts` | 9 | Basic CRUD, _id mapping |\n| `sql-driver-advanced.test.ts` | 35 | Aggregation, bulk ops, transactions, window functions, distinct, edge cases |\n| `sql-driver-schema.test.ts` | 9 | Table creation, column migration, constraints, field type mapping |\n| `sql-driver-queryast.test.ts` | 12 | QueryAST format, legacy format, lifecycle methods |\n| `sql-driver-introspection.test.ts` | 7 | Table/column/PK/FK/nullable discovery |\n\n### Usage\n\n```typescript\nimport { SqlDriver } from '@objectstack/driver-sql';\n\nconst driver = new SqlDriver({\n  client: 'better-sqlite3',\n  connection: { filename: './data.db' },\n  useNullAsDefault: true,\n});\n\nawait driver.find('users', {\n  where: { age: { $gt: 18 } },\n  orderBy: [{ field: 'name', order: 'asc' }],\n  limit: 10,\n});\n```\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>Phase 1: 迁入 driver-sql，实现标准 SQL Driver 插件</issue_title>\n> <issue_description>## 目标\n> 将 objectql 的 SQL Driver （Knex驱动）https://github.com/objectstack-ai/objectql/tree/main/packages/drivers/sql 正式迁入 spec 仓库，作为标准 SQL 插件。规范插件结构，并彻底对齐协议。\n> \n> ---\n> \n> ### 步骤详述\n> \n> **1. 在 spec 创建 `packages/plugins/driver-sql/`**\n> - 目录结构参考现有 `driver-memory`，保持统一插件布局。\n> \n> **2. 把 objectql 仓库 `/packages/drivers/sql/src/index.ts` 迁入**\n> \n> **3. 重构：import 从 `@objectql/types` → `@objectstack/core` + `@objectstack/spec`**\n> - 清理所有 legacy 类型，改用 spec 和 core 中的接口与类型定义（如 DriverInterface 等）。\n> - 完全对齐 Zod 协议：TS 类型派生全部指向最新 `spec` 协议。\n> \n> **4. 删掉对旧 Driver interface 的兼容代码，直接实现 DriverInterface**\n> - 移除对 legacy types/interface 的双兼容代码，保证只实现 current DriverInterface。\n> - 清理如\"兼容旧签名\"/\"兼容 objectql/types\"等hack。\n> - 保持方法签名与 spec 中 DriverInterface 协议严格一致（如参数名顺序、options 类型、返回值要求等）。\n> \n> **5. 跑通测试**\n> - 在 spec 仓库下补齐/修复对应的单元测试。\n> - 保证 CI 通过，并与 driver-memory 一起覆盖协议主要路径。\n> </issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#950\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

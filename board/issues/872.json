@@ -1,0 +1,33 @@
+{
+  "number": 872,
+  "kind": "pull_request",
+  "title": "fix: align all HttpDispatcher analytics calls with IAnalyticsService contract",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-04T06:16:14Z",
+  "updated_at": "2026-03-04T07:28:27Z",
+  "closed_at": "2026-03-04T07:24:34Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-04T07:24:34Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/872",
+  "body": "- [x] Fix `http-dispatcher.ts`: rename `getMetadata` → `getMeta` to match `IAnalyticsService` contract\n- [x] Fix `http-dispatcher.ts`: remove extra `{ request: context.request }` from `query()` and `generateSql()` calls\n- [x] Fix `http-dispatcher.ts`: prefix unused `context` param with `_` to fix TS6133 build error (follows existing `_context` convention in `handleI18n`/`handleUi`)\n- [x] Fix `http-dispatcher.test.ts`: rename mock method `getMetadata` → `getMeta`\n- [x] Update `ROADMAP.md` with fix record\n- [x] Build passes — no TypeScript errors\n- [x] All 85 runtime tests pass\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>[BUG] Analytics服务接口方法命名不一致，导致端点功能失效</issue_title>\n> <issue_description>## 问题概述\n> \n> Spec项目中 `IAnalyticsService` 合约接口定义为 `getMeta(cubeName?: string)`，但在 `packages/runtime/src/http-dispatcher.ts` (HttpDispatcher) 的实现和相关测试中，调用的是 `getMetadata`：\n> \n> - 这导致生产环境 HttpDispatcher 调用 `/analytics/meta` 时无法正常触发服务实现（MemoryAnalyticsService/其他实现均只提供 `getMeta` 方法），最终 analytics/meta 端点的功能实际不可用，也影响了外部如 ObjectUI 的集成和适配复杂度。\n> \n> ## 影响范围\n> - 所有通过 `/api/v1/analytics/meta` 访问的服务，无法正确返回 CubeMeta 信息\n> - 相关测试方法绑定的是错误名，未能正确检验接口一致性\n> - 下游（如 ObjectUI）的集成代码被迫实现额外适配，违背设计初衷\n> \n> ## 参考定位\n> - `spec/src/contracts/analytics-service.ts`：合约声明的是 `getMeta()`\n> - `runtime/src/http-dispatcher.ts`：实际实现调用 `getMetadata()`，签名不一致，还多传了 context 参数\n> - `runtime/src/http-dispatcher.test.ts`：测试mock实现用了错误的方法名\n> \n> ## 修复建议\n> 1. **统一方法名**：把 `http-dispatcher.ts`/相关测试内所有 `getMetadata` 替换为 `getMeta`，确保遵循合约名称\n> 2. **对齐方法签名**：移除对 context 的强制传参，遵循合约签名（可后续扩展为可选参数）\n> 3. **同步测试**：所有测试stub中的方法名同步修正为 `getMeta`，并保持接口行为一致\n> 4. **（推荐）合约扩展**：如有必要，建议扩展 `IAnalyticsService` 合约允许可选的 context 参数（用于审计/权限扩展），但需保证后兼容\n> \n> ## 变更影响\n> - 修复后 downstream 项目的 analytics 适配逻辑可明显简化，无需多层适配\n> - 避免未来接口漂移和约定缺失带来隐蔽bug\n> - 保证 MSW、测试、生产环境行为一致，降低维护成本\n> \n> ---\n> \n> 请在修复后:\n> - 运行全量测试\n> - 更新相关下游项目的适配代码（如 ObjectUI）\n> - 在 ROADMAP.md 中更新修复记录</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#871\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

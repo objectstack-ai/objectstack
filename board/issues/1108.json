@@ -1,0 +1,33 @@
+{
+  "number": 1108,
+  "kind": "pull_request",
+  "title": "feat: add MCP Runtime Server Plugin (`plugin-mcp-server`)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-10T14:51:42Z",
+  "updated_at": "2026-04-10T15:03:30Z",
+  "closed_at": "2026-04-10T14:56:50Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-10T14:56:50Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1108",
+  "body": "Bridges all ObjectStack kernel services to the Model Context Protocol so external AI clients (Claude Desktop, Cursor, VS Code Copilot, etc.) can consume platform tools, data, and agent prompts via MCP's standardized interface.\n\n```\nToolRegistry (service-ai)  ──┐\nIMetadataService (metadata) ─┼──→  MCPServerRuntime  ──→  McpServer (@modelcontextprotocol/sdk)\nIDataEngine (objectql)     ──┤                              │\nAgent definitions          ──┘                              └── stdio transport\n```\n\n### Tool Bridge\nAll `ToolRegistry` tools (9 built-in: `list_objects`, `describe_object`, `query_records`, `get_record`, `aggregate_data`, `create_object`, `add_field`, `modify_field`, `delete_field`) automatically exposed as MCP tools with `readOnlyHint`/`destructiveHint` annotations.\n\n### Resource Bridge\nFour MCP resource endpoints:\n- `objectstack://objects` — object list\n- `objectstack://objects/{objectName}` — object schema via `ResourceTemplate`\n- `objectstack://objects/{objectName}/records/{recordId}` — record by ID\n- `objectstack://metadata/types` — registered metadata types\n\n### Prompt Bridge\n`agent_prompt` MCP prompt with Zod-typed args (`agentName`, `objectName`, `recordId`, `viewName`) loads agent instructions + UI context dynamically from `IMetadataService`.\n\n### Plugin Lifecycle\n- `init`: creates `MCPServerRuntime`, registers as `'mcp'` service\n- `start`: auto-detects `ai`, `metadata`, `data` services; gracefully degrades when missing; fires `mcp:ready` hook\n- `destroy`: stops transport\n\n### Configuration\n```bash\nMCP_SERVER_ENABLED=true   # auto-start on bootstrap\nMCP_SERVER_NAME=my-stack  # override server name\nMCP_SERVER_TRANSPORT=stdio # transport mode\n```\n\n```ts\nkernel.use(new MCPServerPlugin({ autoStart: true }));\n```\n\n### Studio frontend unaffected\nStudio AI continues using REST/SSE via Vercel Data Stream Protocol. MCP is a separate channel for external clients.\n\n### Dependencies\n- `@modelcontextprotocol/sdk@^1.29.0` (no advisories)\n- `zod@^4.3.6` (aligned with `@objectstack/spec`)\n- Decoupled from `@objectstack/service-ai` via duck-typed `ToolRegistry` interface in `types.ts`"
+}

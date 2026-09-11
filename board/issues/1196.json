@@ -1,0 +1,34 @@
+{
+  "number": 1196,
+  "kind": "issue",
+  "title": "提升字段分组为ObjectSchema一等公民+规范fieldOrder自愈机制",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-04-20T13:30:17Z",
+  "updated_at": "2026-04-20T13:55:55Z",
+  "closed_at": "2026-04-20T13:55:55Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1196",
+  "body": "## 背景与目标\n\n当前框架（ObjectStack）中，字段分组逻辑存在于 Field.schema 的 group 字段与 Studio 设计器 UI 偏好配置之间。分组本身（组名、顺序、icon、label、描述等）未作为对象元数据结构的独立一等属性持久化，导致：\n- 分组顺序/显示细节在各环境之间不一致，缺少版本化管控\n- 无法原子迁移、回滚或工具化处理\n- 扩展包难以通过 protocol-safe 方式向现有对象扩展新的分组/维护顺序\n\n同时，fieldOrder 字段（用于组内字段排列顺序提示）有可能因新增字段、扩展包���增/删字段、用户在界面添加字段等各种原因变得不完整、过时，需有健壮的“自愈”机制和明确的协议规则避免污染与冲突。\n\n---\n\n## 需求汇总\n\n### 1. 在 ObjectSchema 中引入 fieldGroups 作为一等属性\n- 对象级有序 `fieldGroups: FieldGroup[]`，包含 key/label/desc/icon/expanded/visibleOn/fieldOrder\n- 每组顺序 = 数组顺序（无需显式 order 字段）\n- 每组内支持扩展 `fieldOrder` 提示字段顺序（但允许缺失、不完整、过期）\n- 组 -> 字段 通过 Field.group key 关联，反向兼容\n- group 支持显示属性、排序、可见性表达式等（参考上文 ObjectFieldGroupSchema 示例）\n\n### 2. 完善 fieldOrder 归一化逻辑\n- fieldOrder 视为非权威“hint”，缺失/过期成员不报错\n- 新增字段未纳入时按“append/prepend/alphabetical”等策略自动归位，可 per-group 控制\n- 扩展包通过 field.group 舒服扩展分组与组内顺序，无需直接改 fieldOrder（可另加 groupPlacement 设置 before/after/priority）\n- 提供 normalizeFieldGroups(object) 公用归一化方法供 UI/渲染/导出/比对等场景幂等调用\n\n### 3. 明确编码规则和可扩展性\n- fieldGroupsPolicy 等编解码策略作为协议实现常量或 runtime plugin config，不写进 ObjectSchema\n- Object 层只保留业务流相关的分组定义（fieldGroups），系统规则归 runtime 里集中配置\n\n### 4. ChangeSet & 迁移感知\n- 新增、重命名、排序分组应有对应 migration 操作类型（add_field_group/reorder_field_groups/modify_field_group/remove_field_group/reorder_group_fields 等）\n- 设计器所有对象字段分组操作、拖拽、归属变更都能“可回滚、可 diff”\n\n### 5. 兼容与跨包拓展\n- 旧对象无 fieldGroups 时聚合 field.group 自动生成一组\n- 扩展包仅需为新字段声明字段 group，即可安全扩展分组体系\n\n---\n\n## 实现清单建议\n\n1. 新建 `data/field-group.zod.ts` Schema\n2. 在 `ObjectSchema` 增加 fieldGroups 属性与��验逻辑\n3. 增加 normalizeFieldGroups(object) helper，供渲染/导出/比对等用\n4. system/migration.zod.ts 新增 atomic ops（add/reorder/modify/remove group and order）\n5. object-designer.zod.ts 标注 FieldGroupSchema @deprecated，迁移至 ObjectFieldGroupSchema\n6. 补全自动测试\n7. 更新 CHANGELOG 和相关文档\n\n---\n\n详细技术论证与 protocol 案例见本 Issue 历史讨论。"
+}

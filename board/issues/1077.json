@@ -1,0 +1,33 @@
+{
+  "number": 1077,
+  "kind": "pull_request",
+  "title": "fix: resolve CI test failures across 6 packages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-07T05:43:03Z",
+  "updated_at": "2026-04-07T06:29:54Z",
+  "closed_at": "2026-04-07T06:24:52Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-07T06:24:52Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1077",
+  "body": "Tests were out of sync with production code after recent changes to `HttpDispatcher.dispatch()` signature, `AuthPlugin` dependencies, and workspace dependency graph.\n\n### `dispatch()` prefix argument — nuxt, nextjs, fastify, sveltekit\n\n`HttpDispatcher.dispatch()` now takes a 6th `prefix` argument, but adapter test assertions only checked 5 args. Added `'/api'` to all `toHaveBeenCalledWith` calls:\n\n```ts\nexpect(mockDispatcher.dispatch).toHaveBeenCalledWith(\n  'GET', '/meta/objects', undefined,\n  expect.any(Object),\n  expect.objectContaining({ request: expect.anything() }),\n  '/api',  // ← was missing\n);\n```\n\n### `service-ai` SDK fallback test\n\n`@ai-sdk/openai` is now resolvable as a transitive workspace dependency (via `apps/studio`), so the \"SDK not installed\" fallback test was hitting the success path instead. Fixed by mocking the dynamic imports with `vi.doMock()`.\n\n### `plugin-auth` mock context\n\n- `AuthPlugin.dependencies` changed to `['com.objectstack.engine.objectql']` — updated assertion\n- `AuthPlugin.init()` now calls `ctx.getService('manifest').register()` — added mock manifest service to test context"
+}

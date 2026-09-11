@@ -1,0 +1,33 @@
+{
+  "number": 1000,
+  "kind": "pull_request",
+  "title": "feat: add @objectstack/service-ai — unified AI capability service plugin",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-31T02:57:55Z",
+  "updated_at": "2026-03-31T03:54:05Z",
+  "closed_at": "2026-03-31T03:52:46Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-31T03:52:46Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1000",
+  "body": "AI capabilities lack a standardized kernel service entry point. Contracts exist (`IAIService`), data schemas exist (`agent.zod.ts`, `conversation.zod.ts`, etc.), but no service plugin wires them together — leading to ad-hoc LLM integrations scattered across projects.\n\n### Contract expansion (`packages/spec/src/contracts/ai-service.ts`)\n\n- **Unified `AIMessage`**: The base `AIMessage` type now supports the `tool` role and optional `toolCalls`/`toolCallId` fields directly, eliminating the need for a separate tool-aware message type. `AIMessageWithTools` is kept as a deprecated alias for backward compatibility.\n- **Unified `AIRequestOptions`**: Tool-related fields (`tools`, `toolChoice`) are now on `AIRequestOptions` directly, enabling tool calling in both `chat()` and `streamChat()`. `AIRequestOptionsWithTools` is kept as a deprecated alias.\n- **Streaming**: `AIStreamEvent` + `streamChat?()` on `IAIService` returning `AsyncIterable<AIStreamEvent>`\n- **Conversation management**: `AIConversation` (with unified `AIMessage[]` that carries tool metadata), `IAIConversationService` (CRUD + message append)\n- Fully backward-compatible — deprecated aliases preserve the old type names\n\n### New package: `@objectstack/service-ai`\n\nFollows `service-analytics` / `service-automation` patterns:\n\n- **`adapters/`** — `LLMAdapter` interface + `MemoryLLMAdapter` (deterministic echo adapter for tests/dev)\n- **`tools/`** — `ToolRegistry` with registration, parallel execution, error handling\n- **`conversation/`** — `InMemoryConversationService` implementing `IAIConversationService`\n- **`routes/`** — 8 REST/SSE route definitions (`/api/v1/ai/{chat,chat/stream,complete,models,conversations}`), depending on `IAIService` + `IAIConversationService` contracts (not concrete classes), with full input validation (message role/content, query param parsing)\n- **`ai-service.ts`** — Core `AIService` implementing `IAIService`, delegates to pluggable adapter. `conversationService` typed as `IAIConversationService` for easy injection of custom implementations.\n- **`plugin.ts`** — `AIServicePlugin` registers as kernel `'ai'` service, emits `ai:ready` and `ai:routes` hooks\n\n```ts\nimport { LiteKernel } from '@objectstack/core';\nimport { AIServicePlugin } from '@objectstack/service-ai';\n\nconst kernel = new LiteKernel();\nkernel.use(new AIServicePlugin({ adapter: myOpenAIAdapter }));\nawait kernel.bootstrap();\n\nconst ai = kernel.getService<IAIService>('ai');\n\n// Non-streaming tool calling\nconst result = await ai.chat(\n  [{ role: 'user', content: 'What is the weather?' }],\n  { tools: [weatherTool], toolChoice: 'auto' },\n);\n\n// Streaming\nfor await (const event of ai.streamChat!(messages, { tools })) {\n  if (event.type === 'text-delta') process.stdout.write(event.textDelta!);\n}\n```\n\n### Housekeeping\n\n- Added `@objectstack/service-ai` to changeset fixed group\n- Updated CHANGELOG.md and ROADMAP.md (Phase 7.1 core AI services, service matrix table)\n- 60 service tests + 22 contract tests, all passing"
+}

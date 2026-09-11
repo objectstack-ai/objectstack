@@ -1,0 +1,33 @@
+{
+  "number": 916,
+  "kind": "pull_request",
+  "title": "feat: system object naming architecture — `sys::` convention constants",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-12T04:14:02Z",
+  "updated_at": "2026-03-12T07:29:06Z",
+  "closed_at": "2026-03-12T07:29:06Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/916",
+  "body": "Follow-up to #906. Formalizes protocol-level constants for system permissions, events, routes, and namespace identification so plugins and consumers can stop hardcoding strings.\n\n### New exports in `system-names.ts`\n\n- **`SYSTEM_NAMESPACE`** — canonical `'sys'` literal\n- **`SystemPermissionName`** — 14 `sys::` prefixed permission identifiers (`sys::manage_users`, `sys::view_all_data`, etc.)\n- **`SystemEventName`** — 16 `sys::{object}.{action}` event identifiers (`sys::user.created`, `sys::session.expired`, etc.)\n- **`SystemRoutePath`** — 7 canonical frontend (`/system/objects`) and API (`/api/v1/objects`) route patterns\n- **`SystemRef`** — builder/guard utilities with snake_case input validation\n\n```ts\nimport { SystemPermissionName, SystemEventName, SystemRef } from '@objectstack/spec/system';\n\n// Reference constants instead of hardcoded strings\nconst perms = [SystemPermissionName.MANAGE_USERS, SystemPermissionName.VIEW_ALL_DATA];\n\n// Build identifiers programmatically\nSystemRef.permission('manage_users');     // → 'sys::manage_users'\nSystemRef.event('user', 'created');       // → 'sys::user.created'\n\n// Guards\nSystemRef.isSystemObject('sys_user');     // → true\nSystemRef.isSystemPermission('sys::manage_users'); // → true\n```\n\n### Tests\n\n28 new tests (48 total) covering all new constants, pattern enforcement, and negative cases for invalid input.\n\n### ROADMAP / CHANGELOG\n\nROADMAP updated with completion status table tracking both the done protocol work and the remaining runtime/frontend tasks (Studio consumption, route unification, plugin hardcode elimination, E2E).\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>后续开发：系统对象与命名规范统一架构补完善工程</issue_title>\n> <issue_description>## 背景\n> 基于 objectstack-ai/spec#906 已推动系统对象 namespace/tableName 命名规范与归档方案落地，协议层统一已完成。当前主线开发已合并，但后续仍存在运行时消费和应用层完善任务。\n> \n> ---\n> \n> ## 待办事项\n> 1. **前端与 Studio 全量消费 `sys` namespace 对象**\n>    - Studio 系统对象管理面板需完整支持 sys 域所有对象。\n>    - 通用对象渲染与自动生成 UI（form、table）需按对象协议自动适配。\n>    - 文档和组件示例需同步。\n> \n> 2. **路由统一**\n>    - 前端统一 `/system/{name}`，API `/api/v1/objects?namespace=sys`。当前仅部分路由已适配，需全平台覆盖。\n>    - 管理后台/对象中心应按 namespace/type 自动分组。\n> \n> 3. **权限声明、事件管理与系统对象引用一致性**\n>    - 权限声明、事件类型等需统一以 `sys::{name}` 进行辨识和管理。\n>    - 各插件与消费端（如流程引擎、角色管理、审批）应禁止硬编码对象名，全部引用常量。\n> \n> 4. **E2E 验证与集成测试**\n>    - 完成系统对象相关功能端到端（对象管理、创建、授权、审计）测试。\n> \n> 5. **ROADMAP 与文档补全**\n>    - 明确后续 breaking change 节点。\n>    - 附录核心设计方案与示例代码。\n> \n> ---\n> \n> ## 建议\n> - 本 issue 为 objectstack-ai/spec#906 后续完善型工程任务，建议打入 ROADMAP。\n> - 按优先级拆分为子任务（前端适配、路由统一、权限和事件、测试、文档）。</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#915\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

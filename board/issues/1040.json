@@ -1,0 +1,33 @@
+{
+  "number": 1040,
+  "kind": "issue",
+  "title": "Studio：实现可折叠的右侧 AI Chat 浮动面板（VS Code 风格）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-01T06:36:49Z",
+  "updated_at": "2026-04-01T07:36:16Z",
+  "closed_at": "2026-04-01T07:36:16Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1040",
+  "body": "### 目标\n在 Studio 前端实现一个固定在右侧、全局可见、可收缩/展开的 AI Chat 面板（参考 VS Code Copilot Chat），支持流式对话体验。\n\n### 功能需求\n- 右侧全局浮动 chat 面板，收起时贴边 48px 展开按钮，展开宽度约 380px\n- 支持快捷键 `Ctrl+Shift+I` / `Cmd+Shift+I` 展开/收起 panel\n- 支持 stream 输出，对接 `/api/v1/ai/chat`（Vercel Data Stream Protocol）\n- 消息历史持久化到 localStorage（会话内容仅前端留存）\n- UI合并��� `<SidebarProvider>` 下，与左侧 sidebar 并列\n- Chat 直接采用 `@ai-sdk/react/useChat`，无需自定义后端协议，需在 `package.json` 增加依赖（`ai`、`@ai-sdk/react`）\n- 仅实现基础文本 chat（不含Agent，不含NLQ、元数据等），后续支持独立 issue 跟踪\n\n### 实施建议与架构\n- 主要新增 `components/AiChatPanel.tsx`，负责面板 UI 与状态\n- `hooks/use-ai-chat-panel.ts` 用于存储面板显示/隐藏、快捷键和消息持久化逻辑\n- 需适配项目 tailwind 变量（右侧阴影、暗色/亮色切换、动画）\n- Chat 列表和输入框 UX 参照 VS Code Copilot Chat\n- 需完善基础单测\n\n### 参考\n- VS Code Copilot Chat Panel\n- Notion AI/FlowUs 右侧悬浮对话框\n- ObjectStack PR #1034（AI Chat Protocol升级）\n\n### 受影响范围\n- `apps/studio/src/App.tsx` （入口挂载 ChatPanel）\n- `apps/studio/src/components/`（新增 AiChatPanel 组件）\n- `apps/studio/package.json`（新增依赖）\n"
+}

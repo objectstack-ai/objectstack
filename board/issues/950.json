@@ -1,0 +1,33 @@
+{
+  "number": 950,
+  "kind": "issue",
+  "title": "Phase 1: 迁入 driver-sql，实现标准 SQL Driver 插件",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-22T06:49:53Z",
+  "updated_at": "2026-03-22T07:19:07Z",
+  "closed_at": "2026-03-22T07:19:07Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/950",
+  "body": "## 目标\n将 objectql 的 SQL Driver （Knex驱动）https://github.com/objectstack-ai/objectql/tree/main/packages/drivers/sql 正式迁入 spec 仓库，作为标准 SQL 插件。规范插件结构，并彻底对齐协议。\n\n---\n\n### 步骤详述\n\n**1. 在 spec 创建 `packages/plugins/driver-sql/`**\n- 目录结构参考现有 `driver-memory`，保持统一插件布局。\n\n**2. 把 objectql 仓库 `/packages/drivers/sql/src/index.ts` 迁入**\n\n**3. 重构：import 从 `@objectql/types` → `@objectstack/core` + `@objectstack/spec`**\n- 清理所有 legacy 类型，改用 spec 和 core 中的接口与类型定义（如 DriverInterface 等）。\n- 完全对齐 Zod 协议：TS 类型派生全部指向最新 `spec` 协议。\n\n**4. 删掉对旧 Driver interface 的兼容代码，直接实现 DriverInterface**\n- 移除对 legacy types/interface 的双兼容代码，保证只实现 current DriverInterface。\n- 清理如\"兼容旧签名\"/\"兼容 objectql/types\"等hack。\n- 保持方法签名与 spec 中 DriverInterface 协议严格一致（如参数名顺序、options 类型、返回值要求等）。\n\n**5. 跑通测试**\n- 在 spec 仓库下补齐/修复对应的单元测试。\n- 保证 CI 通过，并与 driver-memory 一起覆盖协议主要路径。\n"
+}

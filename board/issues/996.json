@@ -1,0 +1,33 @@
+{
+  "number": 996,
+  "kind": "pull_request",
+  "title": "fix: TypeScript 6.0 compatibility across all packages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-30T04:01:00Z",
+  "updated_at": "2026-03-30T06:05:52Z",
+  "closed_at": "2026-03-30T06:00:54Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-30T06:00:54Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/996",
+  "body": "The dependabot upgrade to TypeScript 6.0.2 broke CI builds and tests due to stricter type resolution, a new `baseUrl` deprecation, and the `rootDir` requirement when `outDir` is set.\n\n### TypeScript 6.0 type resolution changes\n- Added `\"types\": [\"node\"]` to ~25 package `tsconfig.json` files — TS6 no longer auto-includes `@types/node` from transitive `node_modules/@types`\n- Added `\"lib\": [\"ES2020\", \"DOM\", \"DOM.Iterable\"]` to packages using web API types (`Request`, `Response`, `URLSearchParams`, `ReadableStream`, `Headers`, `fetch`)\n- Added `\"types\": [\"node\", \"react\"]` / `\"types\": [\"node\", \"js-yaml\"]` where packages depend on additional `@types/*`\n\n### `baseUrl` deprecation (TS5101)\n- Added `\"ignoreDeprecations\": \"6.0\"` to root `tsconfig.json` (inherited by most packages)\n- Added it directly to standalone tsconfigs that don't extend root (`plugin-hono-server`, `cli`, `create-objectstack`, `plugin-msw`, `apps/docs`, `apps/studio`)\n\n### `rootDir` now required with `outDir` (TS5011)\n- Added explicit `\"rootDir\": \"./src\"` to example apps and plugin tsconfigs missing it\n\n### Test fix\n- Updated `http-dispatcher.test.ts` expectation: the dispatcher normalizes `top`→`limit` and `skip`→`offset`, but the test was asserting the pre-normalization values\n\n### CLI source fix\n- Cast `fetch()` options to `RequestInit` in `studio.ts` — the Node.js `duplex: 'half'` property isn't in the DOM `RequestInit` type\n\n### Known: `@objectstack/sveltekit` test failures\nTwo discovery tests in `sveltekit.test.ts` fail — this appears pre-existing and unrelated to the TS6 migration.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> fix all ci build and test errors\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n⌨️ Start Copilot coding agent tasks without leaving your editor — available in [VS Code](https://gh.io/cca-vs-code-docs), [Visual Studio](https://gh.io/cca-visual-studio-docs), [JetBrains IDEs](https://gh.io/cca-jetbrains-docs) and [Eclipse](https://gh.io/cca-eclipse-docs).\n"
+}

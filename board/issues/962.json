@@ -1,0 +1,33 @@
+{
+  "number": 962,
+  "kind": "issue",
+  "title": "Phase 2: 标准化迁移和架构升级 driver-turso（libSQL/Turso 驱动插件）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-03-23T05:00:24Z",
+  "updated_at": "2026-03-23T06:58:45Z",
+  "closed_at": "2026-03-23T06:58:45Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/962",
+  "body": "## 目标\n将 objectql Turso（libSQL）驱动 https://github.com/objectstack-ai/objectql/tree/main/packages/drivers/turso 迁移进 spec 仓库，真正实现长期可维护、极简升级、协议完全对齐的插件化架构。\n\n---\n\n### 长远与\"可持续架构\"原则\n- 彻底消除\"复制-粘贴\"或 type hack 迁移；**基础能力一切基于抽象父类/组合/注入**，不走两套实现、两份 schema、两份 filter。\n- 不只追求阶段性\"搬家\"，要保证 2 年、5 年后依然易于迭代和扩展。\n- 保证 turso 后续能力扩展只需 override 极少代码。\n\n---\n\n### 最优迁移方案设计\n**1. 施工前：制定归一架构目标**\n- 对比 driver-sql（Phase 1 成果）、objectql/driver-turso、以及平台协议 spec，先确定 100% 行为与类型的父类继承链、能力分类与跨插件接口点。不要急于动手迁移。\n- 凡是 turso 独有特性（如同步、多租户、透明加密）一律抽象成可覆写的「扩展点」或 service 层，而非重复 CRUD/find 逻辑。\n- 在设计层面，将所有共性能力沉淀到父类 driver-sql，分层组织代码，调整父类 API 使 Turso/SqlDriver/memory 等可等价协作。\n\n**2. 代码迁移与最小实现**\n- 在 `spec/packages/plugins/driver-turso` 下创建项目。\n- 只迁移 turso \"独特值\"，完全复用 Phase 1 SqlDriver：\n  - 连接与 client 初始化：切换到 libSQL，区分 local/remote/hybrid，以及 sync 机制，事务特性等都基于 libsql client 做必要覆写。\n  - 多租户能力用组合而非多 driver 实例（推荐服务对象单例+隔离配置）\n  - 其余一切 query/schema 相关，**全依赖父类，不留复制代码**。\n- 共性能力沉淀到父类 driver-sql 并补测试（如发现有 filter/schema 仍只能靠复制覆盖，必须优化抽象允许 child 0 覆写）。\n\n**3. 协议与开发体验对齐**\n- type 校验与实际返回值一律可静态推断、IDE 智能提示可全补齐，所有 hack 和 as any 语法须解除/消灭。\n- 发现协议分歧及时同步推进 spec（如同步、事务 context、连接属性等），不能\"先用 any 后补 specs\"。\n- 设计层到测试用例到文档，全部与 phase 1/driver-sql/driver-memory 保持体验一致和极简。\n\n**4. 测试和交付标准**\n- 单元测试与 CI 全链路跑通，与 memory/sql 驱动交叉测试。\n- CI 包括多租户、sync、加密的典型覆盖（如有平台 E2E 测试建议接入或文档标明调用示例）。\n- README/CHANGELOG/ROADMAP 文档说明 driver-turso 的继承关系与使用方式。\n\n---\n\n### 验收 & 里程碑\n- PR 评论中说明已沉淀最大程度共性到父类\n- CI 必须无绿 -> 任何多余复制或冗余实现拒绝合并\n- 与 Platform 侧典型场景均测通，技术债务清零\n\n---\n如需补充详细分任务/编码参考，可继续拆分。任务完成后需按要求自测、同步 changelog 和相关文档，杜绝短视搬运方案。\n"
+}

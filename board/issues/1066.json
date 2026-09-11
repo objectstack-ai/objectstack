@@ -1,0 +1,33 @@
+{
+  "number": 1066,
+  "kind": "pull_request",
+  "title": "fix(studio): use getRequestListener() with extractBody() for Vercel POST support",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-02T11:13:10Z",
+  "updated_at": "2026-04-02T13:15:40Z",
+  "closed_at": "2026-04-02T13:11:38Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-02T13:11:38Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1066",
+  "body": "POST/PUT/PATCH API requests on Vercel-deployed Studio time out while GET works fine.\n\n## Cause\n\nThe Vercel handler used `handle()` from `@hono/node-server/vercel` wrapped in an outer Hono app that delegated all requests to the inner ObjectStack Hono app via `inner.fetch(c.req.raw)`. On Vercel's serverless runtime, the `IncomingMessage` stream is already drained by the time the handler runs, so the inner app's lazy `.json()` call hangs indefinitely when trying to read the consumed stream.\n\n## Fix\n\nRewrote the Vercel handler to match the proven [hotcrm reference pattern](https://github.com/objectstack-ai/hotcrm/blob/main/api/%5B%5B...route%5D%5D.ts):\n\n- **`apps/studio/server/index.ts`** — Replaced `handle()` + outer Hono app delegation with `getRequestListener()` from `@hono/node-server`, which exposes the raw `IncomingMessage` via `env.incoming`. For POST/PUT/PATCH requests, the body is extracted from Vercel's pre-buffered `rawBody`/`body` properties using an `extractBody()` helper, and a fresh standard `Request` is constructed for the inner Hono app. Also adds `x-forwarded-proto` URL correction via `resolvePublicUrl()` for proper HTTPS detection behind Vercel's reverse proxy.\n\n```typescript\nexport default getRequestListener(async (request, env) => {\n    const app = await ensureApp();\n    const method = request.method.toUpperCase();\n    const incoming = (env as VercelEnv)?.incoming;\n    const url = resolvePublicUrl(request.url, incoming);\n\n    if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS' && incoming) {\n        const contentType = incoming.headers?.['content-type'];\n        const body = extractBody(incoming, method, contentType);\n        if (body != null) {\n            return await app.fetch(\n                new Request(url, { method, headers: request.headers, body }),\n            );\n        }\n    }\n\n    return await app.fetch(\n        new Request(url, { method, headers: request.headers }),\n    );\n});\n```\n\n- **`packages/adapters/hono/src/hono.test.ts`** — Added POST/PUT/PATCH/DELETE body forwarding tests for the Vercel delegation pattern (previously only GET was covered).\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> vercel 部署的studio，好像只接受 get api, post api 都超时\n\n\n</details>\n\n"
+}

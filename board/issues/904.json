@@ -1,0 +1,33 @@
+{
+  "number": 904,
+  "kind": "issue",
+  "title": "🐛 [Bug] pnpm dev 启动失败：plugin.app.dev-workspace failed to start — 三重问题合并修复",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-11T05:15:42Z",
+  "updated_at": "2026-03-11T06:47:44Z",
+  "closed_at": "2026-03-11T06:47:44Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/904",
+  "body": "## 概述\n\n运行 `pnpm dev` 时，服务器启动失败并退出：\n\n```\n  Loading objectstack.config.ts...\n(node:73691) ExperimentalWarning: CommonJS module .../plugin-auth/dist/index.js is loading ES Module .../better-auth/dist/index.mjs using require().\n\n  ✗ Plugin plugin.app.dev-workspace failed to start - rollback complete\n ELIFECYCLE  Command failed with exit code 1.\n```\n\n经过对启动流程的完整追踪分析，发现这是 **三个相互关联的问题** 共同导致的，需要整体修复。\n\n---\n\n## 问题 1：CLI serve 命令对根聚合配置的误判（核心触发点）\n\n### 分析\n\n`serve.ts` 第 192-201 行存在一个有缺陷的自动注册逻辑：\n\n```typescript\n// packages/cli/src/commands/serve.ts L192-201\nif (config.objects || config.manifest || config.apps) {\n  try {\n     const { AppPlugin } = await import('@objectstack/runtime');\n     await kernel.use(new AppPlugin(config));  // ← 问题所在\n     trackPlugin('App');\n  } catch (e: any) {\n     // silent\n  }\n}\n```\n\n根配置 `objectstack.config.ts` 含有 `manifest` 字段，因此该条件为 `true`。CLI 将**整个 root config（包含 plugins 数组）**包装为一个 `AppPlugin(config)`，生成名为 `plugin.app.dev-workspace` 的插件。\n\n但是，root config 是一个**聚合器/宿主配置**（Host Config），它的 `plugins` 数组中已经包含了实例化的插件对象（ObjectQLPlugin、DriverPlugin、AuthPlugin、AppPlugin(CrmApp) 等）。它**不是**一个普通的 App Bundle，不应被 AppPlugin 包装。\n\n### 后果\n\n在 `kernel.bootstrap()` 的 Phase 2 (Start) 中，`plugin.app.dev-workspace` 的 `start()` 方法尝试：\n1. 获取 ObjectQL 引擎 → 可能失败（因为重复注册冲突）\n2. 调用 `runtime.onEnable()` → root config 没有 onEnable\n3. 处理 seed data → root config 没有 data\n4. 但更严重的是，init 阶段的 `registerService('app.dev-workspace', ...)` 传入了**整个 config 对象（含 plugins 数组实例）**，可能导致序列化或处理错误\n\n同时，**同一批 plugins 被注册了两次**：一次通过 CLI 的 `plugins.forEach(kernel.use)` 循环，一次通过 `AppPlugin(config)` 的服务注册。\n\n### 修复方案\n\n在 `serve.ts` 中增加检测逻辑：当 config 已包含 `plugins` 数组（且数组中存在已实例化的 Plugin 对象），则**跳过** auto-AppPlugin 包装。\n\n```typescript\n// 检测是否为聚合器配置（已有 plugins 数组含实例化插件）\nconst isHostConfig = Array.isArray(config.plugins) && \n  config.plugins.some((p: any) => typeof p?.init === 'function');\n\nif (!isHostConfig && (config.objects || config.manifest || config.apps)) {\n  // 只为纯 App Bundle 创建 AppPlugin 包装\n  const { AppPlugin } = await import('@objectstack/runtime');\n  await kernel.use(new AppPlugin(config));\n  trackPlugin('App');\n}\n```\n\n---\n\n## 问题 2：plugin-auth CJS→ESM 互操作问题（连锁放大器）\n\n### 分析\n\n```\nExperimentalWarning: CommonJS module .../plugin-auth/dist/index.js is loading \nES Module .../better-auth/dist/index.mjs using require()\n```\n\n**根因链条：**\n\n| 层级 | 配置 | 结果 |\n|:---|:---|:---|\n| Root `package.json` | 无 `\"type\": \"module\"` | 默认 CJS |\n| `plugin-auth/package.json` | `\"main\": \"dist/index.js\"`, 无 `\"type\"` | 继承 CJS |\n| 共享 `tsup.config.ts` | `format: ['esm', 'cjs']` | 输出 `.js`(CJS) + `.mjs`(ESM) |\n| `plugin-auth/package.json` | `\"main\": \"dist/index.js\"` | Node.js 加载 CJS 版本 |\n| `better-auth` | 只导出 ESM (`.mjs`) | CJS `require()` 加载 ESM → 实验性警告 |\n\n`plugin-auth` 通过 tsup 构建输出了 CJS 和 ESM 双格式，但 `package.json` 中 `\"main\"` 指向 `.js`（CJS），没有 `\"module\"` 或 `\"exports\"` 字段。Node.js 默认加载 CJS 版本，当它 `require('better-auth')` 时触发 CJS→ESM 互操作，导致实验性警告，**在某些 Node.js 版本下可能直接抛出异常**。\n\n### 修复方案\n\n更新 `plugin-auth/package.json` 添加 `exports` 字段，优先使用 ESM：\n\n```json\n{\n  \"main\": \"dist/index.js\",\n  \"module\": \"dist/index.mjs\",\n  \"types\": \"dist/index.d.ts\",\n  \"exports\": {\n    \".\": {\n      \"import\": \"./dist/index.mjs\",\n      \"require\": \"./dist/index.js\",\n      \"types\": \"./dist/index.d.ts\"\n    }\n  }\n}\n```\n\n这样 `serve.ts` 通过 `await import('@objectstack/plugin-auth')` 加载时，Node.js 会选择 `.mjs`（ESM）版本，避免 CJS→ESM 互操作问题。\n\n---\n\n## 问题 3：与 #893 的关联（better-auth 字段名映射）\n\nIssue #893 报告了 better-auth 的 camelCase↔snake_case 字段映射问题导致登录失败。这个问题与本 Issue 形成了**阻塞链**：\n\n1. 即使修复了问题 1 和 2，AuthPlugin 成功启动后\n2. 用户注册/登录时仍会遇到 #893 的字段映射错误\n3. `objectql-adapter.ts` 需要实现字段名自动转换\n\n本 Issue 修复后，#893 的修复才能被验证，因为服务器必须先能成功启动。\n\n---\n\n## 影响范围\n\n| 文件 | 修改类型 |\n|:---|:---|\n| `packages/cli/src/commands/serve.ts` | 修复自动 AppPlugin 包装逻辑 |\n| `packages/plugins/plugin-auth/package.json` | 添加 ESM exports 字段 |\n| `packages/cli/src/commands/serve.ts` (测试) | 添加聚合器配置测试 |\n| `CHANGELOG.md` | 记录修复 |\n\n---\n\n## 验收标准\n\n- [ ] `pnpm dev` 能够成功启动，不再出现 `plugin.app.dev-workspace failed to start` 错误\n- [ ] `ExperimentalWarning: CommonJS module ... is loading ES Module` 警告消除\n- [ ] Root config 中的 plugins 不会被重复注册\n- [ ] `examples/app-host/objectstack.config.ts` 等聚合器配置也能正常工作\n- [ ] 纯 App Bundle 配置（无 plugins 数组）的 auto-AppPlugin 包装功能不受影响\n- [ ] 所��现有测试通过：`pnpm test`\n- [ ] 更新 CHANGELOG.md\n\n## 相关\n\n- 阻塞: #893 (better-auth 字段名映射 — 需要本 Issue 修复后服务器才能启动)\n- 相关代码:\n  - [`packages/cli/src/commands/serve.ts`](https://github.com/objectstack-ai/spec/blob/main/packages/cli/src/commands/serve.ts#L192-L201)\n  - [`packages/runtime/src/app-plugin.ts`](https://github.com/objectstack-ai/spec/blob/main/packages/runtime/src/app-plugin.ts)\n  - [`packages/core/src/kernel.ts`](https://github.com/objectstack-ai/spec/blob/main/packages/core/src/kernel.ts#L299-L312)\n  - [`packages/plugins/plugin-auth/package.json`](https://github.com/objectstack-ai/spec/blob/main/packages/plugins/plugin-auth/package.json)\n  - [`objectstack.config.ts`](https://github.com/objectstack-ai/spec/blob/main/objectstack.config.ts)\n\n## Labels\n\n`bug`, `P0`, `cli`, `plugin-auth`, `kernel`"
+}

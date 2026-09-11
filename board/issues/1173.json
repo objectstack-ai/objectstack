@@ -1,0 +1,33 @@
+{
+  "number": 1173,
+  "kind": "pull_request",
+  "title": "plugin-auth: always register better-auth `bearer()` for cross-origin / mobile token auth",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-17T04:18:09Z",
+  "updated_at": "2026-04-17T04:19:00Z",
+  "closed_at": "2026-04-17T04:19:00Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-04-17T04:19:00Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1173",
+  "body": "Session cookies are blocked third-party, so cross-origin SPAs (e.g. `localhost:5173` → `demo.objectstack.ai`) and native mobile clients lose sessions on reload. better-auth's `bearer()` plugin solves this by accepting `Authorization: ****** and emitting rotated tokens via the `set-auth-token` response header — but it requires both server-plugin registration and CORS header plumbing.\n\n### Changes\n\n- **`@objectstack/plugin-auth`** — `AuthManager.buildPluginList()` unconditionally prepends `bearer()`. Additive to cookie auth; no config surface change. `AuthConfig.trustedOrigins` was already wired through.\n- **`@objectstack/plugin-hono-server`** — CORS middleware always exposes `set-auth-token` so the client SDK can capture rotated tokens. `HonoCorsOptions` gains `allowHeaders` / `exposeHeaders`; user-supplied `exposeHeaders` are merged (deduped) with the default rather than overriding it, so adding an app header can't accidentally break bearer auth.\n\n```ts\n// Default behavior — no config needed\nnew HonoServerPlugin({ cors: { origins: 'https://app.example.com', credentials: true } });\n// → Access-Control-Expose-Headers: set-auth-token\n// → Access-Control-Allow-Headers:   Content-Type, Authorization, X-Requested-With\n\n// Extend without losing the bearer default\nnew HonoServerPlugin({\n  cors: {\n    exposeHeaders: ['X-Request-Id'],          // merged → [set-auth-token, X-Request-Id]\n    allowHeaders:  ['Content-Type', 'Authorization', 'X-Tenant-Id'],\n  },\n});\n```\n\n### Tests\n\n- `auth-manager.test.ts` — new case asserting `bearer` is registered with no plugin config; existing plugin-count assertions updated (+1).\n- `hono-plugin.test.ts` — new mock of `hono/cors` captures config; 3 cases covering the default expose, expose-header merging, and custom allow-headers."
+}

@@ -1,0 +1,30 @@
+{
+  "number": 1159,
+  "kind": "issue",
+  "title": "studio 优化",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-16T01:11:19Z",
+  "updated_at": "2026-04-18T15:08:12Z",
+  "closed_at": "2026-04-18T15:08:12Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1159",
+  "body": "参考主流低代码平台，考虑到AI编写业务代码，评估完整项目，提出studio长期深度优化计划。"
+}

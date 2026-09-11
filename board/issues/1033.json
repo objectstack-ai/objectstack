@@ -1,0 +1,32 @@
+{
+  "number": 1033,
+  "kind": "issue",
+  "title": "将 Skill 元数据格式切换为 agentskills.io 规范，并更新 CRM 示例",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-04-01T03:12:14Z",
+  "updated_at": "2026-04-01T05:59:07Z",
+  "closed_at": "2026-04-01T05:59:07Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1033",
+  "body": "## 背景\n目前平台 Skill 的定义沿用 .skill.ts (Zod 对象) 文件，但 agentskills.io 已成为行业事实标准：\n- 更易于 LLM 理解和 prompt 注入（Markdown instructions）\n- 易于跨平台（Claude, Copilot, Gemini CLI 等）分发与重用\n- 有更广泛的例子与生态支持\n\n## 需完成事项\n1. **Skill 元数据格式切换**\n   - 在 packages/spec 等相关目录中，将 Skill 的定义和发现规范切换为 agentskills.io 的 SKILL.md 目录结构：\n     - skills/<skill-name>/SKILL.md\n     - scripts/、references/、assets/ 子目录支持\n   - Metadata Loader 做 SKILL.md → 内部模型的适配和验证\n   - 保持原有 SkillSchema（Zod）作为 Loader 解析目标，不再作为用户手写格式\n2. **示例同步**\n   - 更新 CRM 应用/插件包（如 crm-plugin 等）中的全部 skill 示例，统一为 agentskills.io 格式\n   - 每个 skill 必须有规范的 YAML frontmatter（name、description、allowed-tools、license 等）+ Markdown instructions（案例、边界、步骤说明等）\n   - tools 字段强绑定到对应的 tool 定义，loader 验证引用的工具均存在\n   - 清理遗留 .skill.ts 示例\n3. **兼容性工具与文档**\n   - 增加 SKILL.md ↔️ SkillSchema 的 import/export 工具（或 CLI 命令）以方便升级和外部生态导入\n   - 文档、开发指引与 ROADMAP/CHANGELOG 更新\n\n## 目的与价值\n- 融入 agentskills.io 生态，提升 skill 可移植性与行业兼容性\n- 降低 LLM 平台 prompt 注入门槛，降低二次集成难度\n- 利用更丰富的开源 skill 社区资产\n\n---\n负责人: @hotlong\n标签: agentskills.io, skill, metadata, ai, crm\n类型: Feature\n\n【完成后注意】\n- 运行相关单测，检验 skill 加载与路由是否受影响\n- 同步更新 CRM 例子的文档与 README\n- 更新 CHANGELOG/ROADMAP"
+}

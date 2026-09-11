@@ -1,0 +1,33 @@
+{
+  "number": 985,
+  "kind": "pull_request",
+  "title": "Fix discovery API endpoint routing and protocol consistency issues",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-27T02:18:50Z",
+  "updated_at": "2026-03-27T03:43:35Z",
+  "closed_at": "2026-03-27T03:43:35Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-27T03:43:35Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/985",
+  "body": "Fixes discovery API endpoint routing across all framework adapters, unifies protocol schemas, and improves client type safety.\n\n## P0 - Discovery route consistency\n\n- All adapters (Express, Fastify, Hono, NestJS, Next.js, Nuxt, SvelteKit) now mount the discovery endpoint at `{prefix}/discovery` instead of `{prefix}` root\n- `.well-known/objectstack` redirects now point to `{prefix}/discovery`\n- Client `connect()` fallback URL changed from `/api/v1` to `/api/v1/discovery`\n- Runtime dispatcher handles both `/discovery` (standard) and `/` (legacy) for backward compatibility\n\n## P1 - Schema & route alignment\n\n- Added `storage` (service: `file-storage`) and `feed` (service: `data`) routes to `DEFAULT_DISPATCHER_ROUTES`\n- Added `feed` and `discovery` fields to `ApiRoutesSchema`\n- Unified `GetDiscoveryResponseSchema` with `DiscoverySchema` as single source of truth via `.partial().required({ version: true })` with backward-compatible `apiName` alias\n- Client `getRoute('feed')` fallback updated from `/api/v1/data` to `/api/v1/feed`\n\n## P2 - Type safety\n\n- Extracted `ApiRouteType` from `ApiRoutes` schema keys for type-safe client route resolution\n- Added `discovery` and `graphql` to client fallback route map\n- Removed `as any` type casting in client `getRoute()` method\n\n## Tests\n\n- Updated `discovery.test.ts` for new `ApiRoutesSchema` fields (`feed`, `discovery`)\n- Updated `protocol.test.ts` for unified `GetDiscoveryResponseSchema` (hierarchical capabilities, backward compat with `apiName`, full DiscoverySchema-compatible responses)\n- Updated `dispatcher.test.ts` for new `storage` and `feed` routes\n- Updated `http-dispatcher.root.test.ts` for `/discovery` endpoint handling\n- Updated NestJS adapter tests for new `.well-known` redirect target\n- All 6,723 spec tests, 62 client tests, and 57 NestJS adapter tests pass\n\n## Documentation\n\n- Added changeset entry (`.changeset/discovery-route-consistency.md`)\n- CodeQL security scan: 0 alerts\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1175,
+  "kind": "pull_request",
+  "title": "fix(server): preserve CORS headers on Vercel preflight and bootstrap-failure paths",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-17T04:38:17Z",
+  "updated_at": "2026-04-17T04:39:00Z",
+  "closed_at": "2026-04-17T04:39:00Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-04-17T04:39:00Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1175",
+  "body": "Frontend requests to the Vercel-deployed `apps/server` fail with missing `Access-Control-Allow-Origin` on `/api/v1/*`. Two paths in `apps/server/server/index.ts` return raw `Response` objects that bypass the Hono app — and therefore the CORS middleware registered inside `createHonoApp`.\n\n### Root cause\n- **Preflight depends on bootstrap.** `OPTIONS` requests fall through to `ensureApp()`. A slow/failed cold start yields a preflight with no CORS headers, which the browser caches as a failure and then blocks every subsequent `/api/v1/*` GET.\n- **503 bootstrap-failure has no CORS headers.** When `ensureKernel()` throws, the handler returns a raw 503, so the browser surfaces a generic CORS error instead of the real status.\n\n### Changes\n- **`withCorsHeaders(response, request)`** — clones a `Response` and attaches `Access-Control-Allow-Origin` / `-Credentials` / `Vary: Origin`. Mirrors `createHonoApp`'s env-driven defaults (`CORS_ENABLED`, `CORS_ORIGIN`, `CORS_CREDENTIALS`, `CORS_MAX_AGE`) so behaviour is identical whether or not the kernel finished booting.\n- **`buildPreflightResponse(request)`** — produces a 204 preflight with `Allow-Methods`, `Allow-Headers` (echoing `Access-Control-Request-Headers` when sent), `Max-Age`.\n- **Handler rewrite** — short-circuit `OPTIONS` *before* `ensureApp()`, and wrap the 503 bootstrap-failure response with `withCorsHeaders`. Successful responses remain untouched; Hono's `cors()` still owns them.\n- `apps/server/CHANGELOG.md` updated.\n\n```ts\n// apps/server/server/index.ts\nif (method === 'OPTIONS') {\n    return buildPreflightResponse(request); // never touches the kernel\n}\n\ntry {\n    app = await ensureApp();\n} catch (err) {\n    return withCorsHeaders(new Response(/* 503 JSON */), request);\n}\n```\n\n### Notes for reviewers\n- `CORS_ORIGIN` unset + `credentials=true` + no `Origin` header → no `ACAO` emitted (spec-correct: wildcard is illegal with credentials; non-browser callers don't need it).\n- Allowlist (`CORS_ORIGIN=\"a,b\"`) is honoured on both paths; mismatched origins get no `ACAO`.\n- The hono adapter (`createHonoApp`) is unchanged — the fix is scoped to the Vercel entrypoint that sits in front of it."
+}

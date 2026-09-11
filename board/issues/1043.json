@@ -1,0 +1,33 @@
+{
+  "number": 1043,
+  "kind": "pull_request",
+  "title": "feat: Add skills/ directory with agentskills.io-compliant SKILL.md files",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-01T08:20:21Z",
+  "updated_at": "2026-04-01T09:07:23Z",
+  "closed_at": "2026-04-01T08:56:29Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-01T08:56:29Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1043",
+  "body": "Migrate protocol expertise into discoverable Agent Skills following the [agentskills.io specification](https://agentskills.io/specification). Hand-written `SKILL.md` files expose ObjectStack domain knowledge to AI agents (Claude, Cursor, Copilot, etc.) without npm publishing or build steps.\n\n### Skills created\n\n- **`skills/schema-design/`** — Object, Field (48 types), Validation (9 rule types), Index strategy, relationship modelling, naming conventions\n- **`skills/ui-design/`** — Views (7 list + 3 form types), App navigation, Dashboards, Reports, Actions\n- **`skills/automation-design/`** — Flows (18 node types), State Machines, Triggers, Approvals\n- **`skills/ai-agent-design/`** — Agent→Skill→Tool 3-tier architecture, RAG pipelines, Model config\n- **`skills/api-design/`** — REST endpoints (14 operations), Service discovery, Dispatcher, Auth layers\n\n### Structure per skill\n\n```\nskills/{skill-name}/\n├── SKILL.md              # YAML frontmatter + expert instructions\n└── references/           # Quick-lookup tables derived from Zod schemas\n    └── *.md\n```\n\nEach `SKILL.md` includes frontmatter (`name`, `description`, `license`, `compatibility`, `metadata` with `domain`/`tags`), \"when to use\" guidance, domain rules, best practices, common pitfalls, and code examples. Zod sources remain the single source of truth; skills reference them.\n\n### Other changes\n\n- **CHANGELOG.md** — Added entry under `[Unreleased] → Added`\n- **ROADMAP.md** — Added \"Agent Skills Ecosystem\" section with directory table linking all skills\n\n> [!WARNING]\n>\n> <details>\n> <summary>Firewall rules blocked me from connecting to one or more addresses (expand for details)</summary>\n>\n> #### I tried to connect to the following addresses, but was blocked by firewall rules:\n>\n> - `agentskills.io`\n>   - Triggering command: `/home/REDACTED/work/_temp/ghcca-node/node/bin/node /home/REDACTED/work/_temp/ghcca-node/node/bin/node --enable-source-maps /home/REDACTED/work/_temp/copilot-developer-action-main/dist/index.js` (dns block)\n>\n> If you need me to access, download, or install something from one of these locations, you can either:\n>\n> - Configure [Actions setup steps](https://gh.io/copilot/actions-setup-steps) to set up my environment, which run before the firewall is enabled\n> - Add the appropriate URLs or hosts to the custom allowlist in this repository's [Copilot coding agent settings](https://github.com/objectstack-ai/spec/settings/copilot/coding_agent) (admins only)\n>\n> </details>"
+}

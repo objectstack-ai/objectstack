@@ -1,0 +1,35 @@
+{
+  "number": 1003,
+  "kind": "issue",
+  "title": "Vercel API always returns HTML: serverless function entrypoint not found due to outputDirectory mismatch",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-03-31T03:45:10Z",
+  "updated_at": "2026-03-31T03:55:10Z",
+  "closed_at": "2026-03-31T03:55:10Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1003",
+  "body": "## Bug Overview\n\nOn the current deployment, all `/api/*` requests return the Single-Page Application (SPA) HTML instead of invoking the intended serverless API function. This is blocking all API access in production (e.g., `/api/v1/meta`).\n\n---\n\n### Root Cause Analysis\n- `vercel.json` sets `outputDirectory: \"dist\"`, which means Vercel expects all serverless functions (e.g., `api/index.js`) to be emitted under `dist/api/`.\n- Current bundling script (`scripts/bundle-api.mjs`) outputs `api/index.js` **at the project root**, not under `dist/`.\n- As a result, Vercel fails to find the API function and falls back to the SPA route, returning HTML for all API calls.\n\n#### Why the recent code changes (PR #1001) did not help\n- The PR swapped out the request listener for `@hono/node-server/vercel`'s recommended `handle()` function but did **not** address the output path mismatch.\n- None of the recent fixes made the function discoverable under `dist/`.\n\n---\n\n### Evidence\n- Current `vercel.json`:\n  ```json\n  \"outputDirectory\": \"dist\",\n  \"rewrites\": [\n    { \"source\": \"/api/(.*)\", \"destination\": \"/api\" },\n    { \"source\": \"/((?!api/).*)\", \"destination\": \"/index.html\" }\n  ]\n  ```\n- Build script (as of 2026-03-31):\n  ```js\n  // scripts/bundle-api.mjs\n  outfile: 'api/index.js' // should be 'dist/api/index.js'\n  ```\n\n---\n\n## Steps to reproduce\n1. Deploy current `main` branch to Vercel.\n2. Open `/api/v1/meta` or any `/api/*` endpoint.\n3. See HTML response instead of JSON.\n\n## Severity\n- **Critical** — All API functionality in Studio Vercel deployment is broken.\n\n---\n\n## What needs to be fixed\n1. Update `outfile:` in `bundle-api.mjs` to `dist/api/index.js`.\n2. (Optional) Add Vercel `functions` config to be explicit about the function entrypoint.\n3. Ensure all references and docs expect the API output under `dist/api/`.\n\n---\n\n## Acceptance Criteria\n- [ ] API routes return JSON, not HTML, in deployed Vercel preview/prod.\n- [ ] No 404/fallback rewrites for `/api/*` endpoints when API is present.\n- [ ] Build output and function location are consistent with Vercel config.\n\n---\n\n/cc @hotlong"
+}

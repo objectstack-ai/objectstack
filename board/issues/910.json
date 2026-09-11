@@ -1,0 +1,33 @@
+{
+  "number": 910,
+  "kind": "issue",
+  "title": "i18n 路由应由 service-i18n 自注册，RestServer 应移除统一注册职责，保持架构一致性",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-11T09:09:49Z",
+  "updated_at": "2026-03-11T09:52:19Z",
+  "closed_at": "2026-03-11T09:52:19Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/910",
+  "body": "## 问题描述\n当前 RestServer 插件自动注册 `/api/v1/i18n/*` 路由，实际职责和架构不一致：\n- RestServer 设计为协议驱动网关（所有 REST 路由通过 ObjectStackProtocol 实现方法注册），但 i18n 并未通过 Protocol 实现。\n- i18n 路由应由 @objectstack/service-i18n 插件（或者内核 fallback）向 http-server 自注册，而不是由 RestServer 统一注册。\n- 当前 i18n 路由既未完全 Protocol 化，又与其它服务（如 auth、workflow、realtime）的插件自治路由模式不一致，导致架构混乱。 \n\n## 架构分析\n- auth、workflow、realtime 等服务都是各自插件注册自己的 REST 路由，互不依赖 RestServer。\n- RestServer 应只暴露 protocol 层方法（metadata、data、batch、discovery 等）作为 REST endpoint。\n- i18n 服务已通过 kernel 注册（包括自动 fallback），但相关 REST endpoint 不属于 protocol 范畴，应该由 service-i18n 模���（或 fallback 适配器）自行注册。\n- 当前 RestServer/registerI18nEndpoints 造成了「半自动」路由，既不可用，也破坏长期架构一致性。\n\n## 解决建议\n1. 移除 RestServer 的 registerI18nEndpoints 方法及 enableI18n 配置项。\n2. 改为 service-i18n（或内置 fallback）在 start 阶段主动向 http.server 注册 `/api/v1/i18n/*` 路由，类似于 AuthPlugin 的路由注册方案。\n3. 明确文档/代码注释，RestServer 只暴露 protocol 实现方法的 endpoint，不涉及任何单独服务。\n4. 移除或重构 ObjectStackProtocolImplementation 的 i18n 方法桥接逻辑（如果有）。\n\n## 验收标准\n- 所有核心服务（auth、i18n、realtime 等）都通过各自插件注册 REST 路由，无需任何 RestServer 配置。\n- RestServer 仅负责 protocol 方法路由注册。\n- i18n endpoint 能在无 RestServer 的情况下依然正常工作（如 MSW 单测或 core mock server）。\n- 文档、CHANGELOG 及 ROADMAP 有清晰架构说明。\n\n---\n此修正将使平台 REST 路由体系与所有核心服务自治模式以及 Protocol 网关模式一致。\n"
+}

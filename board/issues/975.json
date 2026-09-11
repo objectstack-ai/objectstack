@@ -1,0 +1,33 @@
+{
+  "number": 975,
+  "kind": "pull_request",
+  "title": "feat(studio): switch Vercel deployment from memory driver to Turso",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-23T15:08:51Z",
+  "updated_at": "2026-03-23T15:46:07Z",
+  "closed_at": "2026-03-23T15:42:13Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-23T15:42:13Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/975",
+  "body": "`InMemoryDriver` loses all data between serverless invocations on Vercel. Replace with `TursoDriver` for persistent storage via Turso cloud in the Studio serverless API.\n\n### Changes\n\n- **`apps/studio/api/index.ts`** — Use `TursoDriver` with env-driven config; falls back to `:memory:` for local dev\n- **`apps/studio/package.json`** — Add `@objectstack/driver-turso` dependency (keep `driver-memory` for browser MSW mock)\n- **`apps/studio/vercel.json`** — Add `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` env bindings\n\n```ts\nawait kernel.use(new DriverPlugin(new TursoDriver({\n    url: process.env.TURSO_DATABASE_URL ?? ':memory:',\n    ...(process.env.TURSO_AUTH_TOKEN && { authToken: process.env.TURSO_AUTH_TOKEN }),\n}), 'turso'));\n```\n\nWhen `TURSO_DATABASE_URL` is set (e.g. `libsql://my-db.turso.io`), the driver operates in remote mode via `@libsql/client`. Without it, defaults to ephemeral SQLite — no behavior change for local dev. The browser MSW mock kernel (`src/mocks/createKernel.ts`) remains unchanged on `InMemoryDriver`.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> vercel 部署memory driver 改用 turso driver\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n📍 Connect Copilot coding agent with [Jira](https://gh.io/cca-jira-docs), [Azure Boards](https://gh.io/cca-azure-boards-docs) or [Linear](https://gh.io/cca-linear-docs) to delegate work to Copilot in one click without leaving your project management tool."
+}

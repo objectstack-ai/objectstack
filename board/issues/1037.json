@@ -1,0 +1,33 @@
+{
+  "number": 1037,
+  "kind": "pull_request",
+  "title": "Remove deprecated `value` field from findData response, enforce spec-compliant `records` only",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-01T05:31:10Z",
+  "updated_at": "2026-04-01T06:45:59Z",
+  "closed_at": "2026-04-01T06:45:59Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-01T06:45:59Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1037",
+  "body": "`findData` returned both `records` and `value` pointing to the same array. `value` was an OData legacy alias never defined in `FindDataResponseSchema`, causing triple-fallback patterns (`result.records || result.value || []`) across consumers.\n\n### Protocol implementation\n- **`packages/objectql/src/protocol.ts`** — Removed `value: records` from `findData` return. Only `records` is emitted, matching the spec.\n\n### Studio\n- **`apps/studio/src/components/ObjectDataTable.tsx`** — Removed `result?.value` fallback from 3 call sites\n- **`apps/studio/test/api.test.ts`** — Removed `response?.value` from `extractRecords` helper\n\n### Example app\n- **`examples/app-host/public/index.html`** — `json.value` → `json.records`\n- **`examples/app-host/test/e2e.test.ts`** — `result.value` → `result.records`\n\n### Docs / changelog\n- **`CHANGELOG.md`** — Documented as breaking change under `[Unreleased]`\n- **`apps/studio/ROADMAP.md`** — Marked response normalization task (0.2) as done\n\n### Not changed (intentional)\n- `ODataResponseSchema` retains `value` — that's the OData v4 standard. Protocol-to-OData adaptation belongs in the HTTP dispatch layer.\n- `FindDataResponseSchema` and client `PaginatedResult` type were already correct."
+}

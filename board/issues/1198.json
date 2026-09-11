@@ -1,0 +1,35 @@
+{
+  "number": 1198,
+  "kind": "pull_request",
+  "title": "[WIP] Add field groups metadata layer MVP",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [
+    "Claude",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-20T13:56:10Z",
+  "updated_at": "2026-04-20T15:00:21Z",
+  "closed_at": "2026-04-20T15:00:21Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1198",
+  "body": "Thanks for asking me to work on this. I will get started on it and keep this PR's description up to date as I form a plan and make progress.\n\n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>字段分组（fieldGroups）协议简化版：元数据层MVP</issue_title>\n> <issue_description>### 需求背景\n> - 目前已有对象设计器/协议规划，但字段分组相关协议设计过于复杂，AI生成/多包扩展等情况下难以维护、易错\n> - 需先落地MVP：首步只解决字段与分组的对应关系、分组元信息的有序持久化，顺序取自声明顺序\n> \n> ### 具体开发要求\n> 1. ObjectSchema 上新增可选 `fieldGroups: ObjectFieldGroup[]`，定义分组信息（key/label/icon/description/defaultExpanded/visibleOn），数组顺序即分组顺序\n> 2. FieldSchema 上沿用 `group: string`，表示字段所属分组。扩展包/界面新增字段/运行时���码一致用此分组归属\n> 3. 分组到字段的映射由元数据注册顺序自动得出。组内显示顺序等于 ObjectSchema.fields 的遍历顺序\n> 6. 变更操作迁移设计只需支持新增/重命名/删除/调整分组、字段加分组，组内顺序变更等功能待后续\n> 7. 更新相关测试、文档和 CHANGELOG</issue_description>\n> \n> ## Comments on the Issue (you are @claude[agent] in this section)\n> \n> <comments>\n> </comments>\n"
+}

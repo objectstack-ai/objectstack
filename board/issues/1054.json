@@ -1,0 +1,33 @@
+{
+  "number": 1054,
+  "kind": "issue",
+  "title": "i18n: label 应为纯字符串，key 由框架自动生成",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-02T06:42:56Z",
+  "updated_at": "2026-04-02T07:16:11Z",
+  "closed_at": "2026-04-02T07:16:11Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1054",
+  "body": "## 问题背景\n\n当前 `I18nLabelSchema` 定义为 `string | { key, defaultValue, params }` 联合类型，允许元数据的 `label`/`description` 字段以两种形态存在。这个设计导致了一系列连锁问题。\n\n## 问题清单\n\n### 1. React 渲染崩溃 (P0 — 已修复)\n\n`{ key, defaultValue }` 对象被直接渲染为 React 子节点，触发 React error #31。\n\n**受影响文件：**\n- `apps/studio/src/components/MetadataInspector.tsx` — `label` 和 `description` 渲染\n- `apps/studio/src/components/app-sidebar.tsx` — 元数据列表项 label 渲染\n\n**临时修复：** 添加 `resolveLabel()` helper 将 i18n 对象降级为字符串。但这是 workaround，不是正解。\n\n### 2. 两套翻译系统并行，职责不清\n\n当前存在两套互不关联的 i18n 机制：\n\n| 机制 | 存储位置 | 用于 | 示例 |\n|------|---------|------|------|\n| **TranslationBundle** | 翻译文件 `en.ts`, `zh-CN.ts` | 对象 field label、选项值 | `{ objects: { account: { label: 'Account', fields: { ... } } } }` |\n| **I18nObject** | 内嵌在元数据定义中 | app/view/page 的 label | `{ key: 'setup.app.label', defaultValue: 'Setup' }` |\n\n- TranslationBundle 按 `objects.<name>.fields.<field>.label` 结构化组织，由 `I18nServicePlugin` 加载并通过 REST API 提供\n- I18nObject 散落在代码中，key 由开发者手写，**没有对应的翻译文件**，也没有被任何翻译服务管理\n\n### 3. i18n key 命名无标准化\n\n当前手写的 key 各自为政：\n\n```\nsetup.app.label           → SetupPlugin\nsetup.app.description     → SetupPlugin\nsetup.nav.users           → AuthPlugin\nsetup.nav.roles           → SecurityPlugin\nsetup.nav.audit_logs      → AuditPlugin\n```\n\narea 的 key：\n```\nsetup.area.administration → setup-areas.ts\nsetup.area.platform       → setup-areas.ts\n```\n\n这些 key 没有注册到翻译系统中，没有对应的翻译文件，defaultValue 永远不会被翻译覆盖。\n\n### 4. 客户端没有 i18n resolution 能力\n\nStudio 没有 i18n provider、没有 `useTranslation` hook、没有加载翻译资源。即使有翻译文件，客户端也无法根据 locale 解析 `{ key, defaultValue }` — 只能退化为取 defaultValue。\n\n### 5. API 响应格式不一致\n\n同一个 `GET /api/v1/meta/apps` 接口：\n- CRM app: `label: \"Enterprise CRM\"` (字符串)\n- Setup app: `label: { key: \"setup.app.label\", defaultValue: \"Setup\" }` (对象)\n\n客户端必须对每个 label 做类型判断，增加了所有消费端的复杂度。\n\n### 6. 使用 I18nLabelSchema 的 schema 范围广\n\n以下 spec 中的 schema 都使用了 `I18nLabelSchema`，意味着所有这些元数据的 label 都可能是对象：\n\n- `AppSchema.label`, `.description`\n- `NavigationArea.label`, `.description`\n- `BaseNavItemSchema.label`\n- `PageSchema.label`, `.description`\n- `DashboardWidgetSchema.title`, `.description`\n- `ReportSchema.label`, `.description`\n- `ChartSchema.title`, `.subtitle`\n- `NotificationSchema.title`, `.message`\n- `KeyboardShortcutSchema.description`\n- `AriaPropsSchema.ariaLabel`\n- 以及更多 UI schema\n\n## 建议方案\n\n### 核心原则：label 字段只接受 `string`，i18n key 由框架自动生成\n\n#### Step 1: 标准化 i18n key 命名规则\n\n```\n<type>.<packageId>.<name>.label\n<type>.<packageId>.<name>.description\n<type>.<packageId>.<name>.navigation.<navId>.label\n```\n\n示例：\n```\napps.com.objectstack.setup.setup.label           → \"Setup\"\napps.com.objectstack.setup.setup.description      → \"Platform settings...\"\napps.com.example.crm.crm_app.label               → \"Enterprise CRM\"\nobjects.com.objectstack.system.sys__user.label    → \"User\"\nobjects.com.objectstack.system.sys__user.fields.email.label → \"Email\"\n```\n\n#### Step 2: 注册时自动生成 key 并写入翻译服务\n\n在 `SchemaRegistry.registerApp()` / `registerItem()` 中：\n1. label 存储为纯字符串（即 defaultValue）\n2. 自动生成标准 key，以 defaultValue 作为 fallback 写入 `I18nService`\n\n#### Step 3: API 响应始终返回已解析的字符串\n\nmetadata REST endpoints 根据请求的 `Accept-Language` header 或 `?locale=` 参数，调用 `i18nService.t(key, locale)` 解析后再返回。\n\n#### Step 4: 废弃 I18nLabelSchema 联合类型\n\n- `label`, `description` 等字段改为 `z.string()`\n- 移除 `I18nObjectSchema` 在 metadata schema 中的使用\n- 开发者只需写 `label: 'Setup'`\n- 覆盖翻译通过翻译文件完成，而非内嵌 i18n 对象\n\n### 迁移兼容性\n\n- 现有使用字符串 label 的配置（CRM、Todo 等）无需任何改动\n- 使用 i18n 对象的配置（SetupPlugin、AuthPlugin nav items）改为纯字符串\n- `resolveLabel()` workaround 可在迁移完成后移除\n\n## 受影响的包\n\n- `@objectstack/spec` — I18nLabelSchema 定义和所有 UI schema\n- `@objectstack/objectql` — SchemaRegistry 注册 + Protocol API 响应\n- `@objectstack/plugin-setup` — setup-app.ts, setup-areas.ts\n- `@objectstack/plugin-auth` — nav item labels\n- `@objectstack/plugin-security` — nav item labels\n- `@objectstack/plugin-audit` — nav item labels\n- `@objectstack/studio` — MetadataInspector, app-sidebar 等所有渲染组件\n- `@objectstack/rest` — metadata endpoint 响应格式"
+}

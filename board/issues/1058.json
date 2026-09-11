@@ -1,0 +1,33 @@
+{
+  "number": 1058,
+  "kind": "issue",
+  "title": "CLI: add remote API commands for Data API and Metadata API",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-02T07:37:07Z",
+  "updated_at": "2026-04-02T09:10:19Z",
+  "closed_at": "2026-04-02T09:10:19Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1058",
+  "body": "## Background\n\nThe current CLI (`@objectstack/cli`) has 16 top-level commands + 8 subcommands, but nearly all are **local-only operations** (compile, validate, generate, serve, etc.). The platform defines **80+ API endpoints across 13+ domains**, yet the CLI only makes **1 remote API call** (`plugin publish` → `POST /packages/upload`).\n\nThis issue tracks adding CLI commands that call the remote Data API and Metadata API, enabling developers to interact with a running ObjectStack server from the terminal.\n\n## Current Coverage\n\n| API Domain | Endpoints | CLI Coverage |\n|---|---|---|\n| Data CRUD (`/data`) | 5 | None (only generated SDK) |\n| Data Batch (`/data/:object/batch`) | 4 | None |\n| Data Export (`/data/:object/export`) | 2 | None |\n| Metadata CRUD (`/meta`) | 10 | None |\n| Metadata Query (`/meta/query`) | 1 | None |\n| Metadata Bulk (`/meta/bulk`) | 2 | None |\n| Metadata Overlay (`/meta/:type/:name/overlay`) | 2 | None |\n| Metadata Import/Export (`/meta/export`, `/meta/import`) | 2 | None |\n| Metadata Validate (`/meta/validate`) | 1 | Local only (`validate` command) |\n| Metadata Dependencies (`/meta/:type/:name/dependencies`) | 2 | None |\n| Auth (`/auth`) | 14 | None |\n| Permission (`/auth/check`) | 3 | None |\n| UI Views (`/ui/views`) | 5 | None |\n| Workflow (`/workflow`) | 5 | None |\n| Realtime (`/realtime`) | 6 | None |\n| Notifications (`/notifications`) | 7 | None |\n| AI (`/ai`) | 3 | None |\n| i18n (`/i18n`) | 3 | None |\n| Analytics (`/analytics`) | 2 | None |\n| Automation (`/automation`) | 9 | None |\n| Storage (`/storage`) | 6 | None |\n| Packages (`/packages`) | 8 | 1 (`plugin publish`) |\n| Feed / Chatter (`/data/:obj/:id/feed`) | 14 | None |\n| Discovery (`/discovery`) | 1 | None |\n\n## Proposed Commands (Priority Order)\n\n### P0 — Core\n\n- [ ] **`os data query <object>`** — Query records (`GET /api/v1/data/:object`)\n- [ ] **`os data get <object> <id>`** — Get single record (`GET /api/v1/data/:object/:id`)\n- [ ] **`os data create <object>`** — Create record (`POST /api/v1/data/:object`)\n- [ ] **`os data update <object> <id>`** — Update record (`PATCH /api/v1/data/:object/:id`)\n- [ ] **`os data delete <object> <id>`** — Delete record (`DELETE /api/v1/data/:object/:id`)\n- [ ] **`os meta list [type]`** — List metadata types or items (`GET /api/v1/meta`, `GET /api/v1/meta/:type`)\n- [ ] **`os meta get <type> <name>`** — Get metadata item (`GET /api/v1/meta/:type/:name`)\n- [ ] **`os meta register <type>`** — Register metadata (`POST /api/v1/meta/:type`)\n- [ ] **`os meta delete <type> <name>`** — Delete metadata (`DELETE /api/v1/meta/:type/:name`)\n- [ ] **`os auth login`** — Authenticate and store session/token\n- [ ] **`os auth logout`** — Clear stored credentials\n- [ ] **`os auth whoami`** — Show current session info (`GET /auth/get-session`)\n\n### P1 — Deployment & Metadata Lifecycle\n\n- [ ] **`os meta export`** — Export metadata bundle (`POST /api/v1/meta/export`)\n- [ ] **`os meta import`** — Import metadata bundle (`POST /api/v1/meta/import`)\n- [ ] **`os meta validate`** — Remote validation (`POST /api/v1/meta/validate`)\n- [ ] **`os meta deps <type> <name>`** — Show dependencies (`GET /api/v1/meta/:type/:name/dependencies`)\n- [ ] **`os deploy`** — Deploy metadata to target environment (combine export + import)\n- [ ] **`os package install`** — Install package (`POST /api/v1/packages/install`)\n- [ ] **`os package upgrade`** — Upgrade package (`POST /api/v1/packages/upgrade`)\n- [ ] **`os package list`** — List installed packages (`GET /api/v1/packages`)\n- [ ] **`os package rollback`** — Rollback package (`POST /api/v1/packages/:id/rollback`)\n\n### P2 — Extended Operations\n\n- [ ] **`os data export <object>`** — Export data (`POST /api/v1/data/:object/export`)\n- [ ] **`os data import <object>`** — Bulk create from file (`POST /api/v1/data/:object/createMany`)\n- [ ] **`os automation list`** — List automation flows (`GET /api/automation`)\n- [ ] **`os automation trigger <name>`** — Trigger a flow (`POST /api/automation/:name/trigger`)\n- [ ] **`os automation toggle <name>`** — Enable/disable flow (`POST /api/automation/:name/toggle`)\n- [ ] **`os discover`** — Service discovery & health check (`GET /api/v1/discovery`)\n\n### P3 — Nice to Have\n\n- [ ] **`os ai query`** — Natural language query (`POST /api/v1/ai/nlq`)\n- [ ] **`os storage upload`** — Upload file (`POST /api/v1/storage/upload`)\n- [ ] **`os analytics query`** — Run analytics query (`POST /api/v1/analytics/query`)\n- [ ] **`os i18n`** — Get translations (`GET /api/v1/i18n/translations/:locale`)\n\n## Common Infrastructure Needed\n\nAll remote commands will need:\n\n1. **Server URL resolution** — `--url` flag or `OBJECTSTACK_URL` env var (default: `http://localhost:3000`)\n2. **Authentication** — Bearer token from `os auth login`, stored in `~/.objectstack/credentials.json` or OS keychain\n3. **Output formatting** — `--format json|table|yaml` flag for all data commands\n4. **Error handling** — Consistent HTTP error → CLI error mapping\n\n## Reference\n\n- API spec definitions: `packages/spec/src/api/plugin-rest-api.zod.ts`\n- Metadata API schemas: `packages/spec/src/api/metadata.zod.ts`\n- OpenAPI spec: `packages/spec/json-schema/openapi.json`\n- Current CLI commands: `packages/cli/src/commands/`"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 1094,
+  "kind": "issue",
+  "title": "[Studio] 系统内置 Agent 和 Tool 元数据在 Sidebar 不显示/缺失",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-04-09T03:54:02Z",
+  "updated_at": "2026-04-10T03:11:19Z",
+  "closed_at": "2026-04-10T03:11:19Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1094",
+  "body": "### 复现步骤\n1. 启动 Studio，在左侧元数据侧边栏/AI分组下\n2. 观察\"Agent（系统助理）\"与\"Tool（系统工具）\"并未展示，查不到系统内置内容\n\n### 实际表现\n- AI Protocol分组只显示 `agents`、`ragPipelines`，但**内置Agent工具并未显示/可见**。\n- 查找\"Tool/tool\"元数据时列表为空。即便已启动 service-ai，也无法在 Studio 查看内置 Tool。\n\n### 预期表现\n- 能在 Studio 的 AI protocol 分组下看到所有内置 Agent 和 Tool 元数据定义，包括\"Metadata Assistant\"等系统助理，以及所有内置 Tool（如 create_object, add_field, list_objects...）。\n\n### 根因分析\n1. **类型名未对齐（单复数）**：Sidebar 查询 `agents`/`tools`（复数），但后端实际只注册 `agent`/`tool`（单数）。\n2. **Tool 并未注册为元数据**：registerDataTools/registerMetadataTools 的工具只注册到内存，不会同步写入 metadataService。Studio 数据源实际无\"tool\"类型元数据。\n3. **AI插件 Sidebar 声明缺少 `tool`**：只包含 `agents`、`ragPipelines`，没有把 `tool` 加入分组。\n\n### 修复建议\n- [ ] 在 AIServicePlugin `start` 阶段，将所有工具通过 `metadataService.register('tool', name, def)` 批量注册，确保所有 protocol Tool 可见。\n- [ ] 统一 single/plural 类型名，侧边栏、ProtocolGroup、getMetaItems 查询和注册均使用单数（agent、tool）。\n- [ ] Studio `ai-plugin.tsx` sidebarGroups 加入 `tool` 并确保类型名称与后端一致。\n- [ ] 完善相关文档与测试用例。\n\n### 影响评估\n- 没有这些修复，ObjectStack Studio 用户无法发现或自助使用平台内置 Agent/Tool，影响元数据平台可用性和体验。\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 1085,
+  "kind": "pull_request",
+  "title": "fix: lazy connect in RemoteTransport for serverless cold-start resilience",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-08T07:30:57Z",
+  "updated_at": "2026-04-08T07:37:37Z",
+  "closed_at": "2026-04-08T07:32:23Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-08T07:32:22Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1085",
+  "body": "`RemoteTransport.ensureClient()` throws immediately when `@libsql/client` is null, but `ObjectQL.init()` swallows `driver.connect()` failures. On Vercel cold starts, a transient connect failure leaves the transport uninitialized and `restoreMetadataFromDb()` crashes querying `sys_metadata`.\n\n### RemoteTransport\n- Replace synchronous `ensureClient()` with async `ensureConnected()` that invokes a connect factory when client is null\n- Add `setConnectFactory()` for caller-provided lazy initialization\n- De-duplicate concurrent reconnect attempts via singleton promise\n\n### TursoDriver\n- Register connect factory in constructor so the transport self-heals without requiring an explicit `connect()` call\n\n```typescript\n// Before: throws if connect() failed or was never called\nprivate ensureClient(): Client {\n  if (!this.client) throw new Error('...not initialized...');\n  return this.client;\n}\n\n// After: lazy-connects via factory, de-duplicates concurrent callers\nprivate async ensureConnected(): Promise<Client> {\n  if (this.client) return this.client;\n  if (this.connectFactory) {\n    if (!this.connectPromise) {\n      this.connectPromise = this.connectFactory().then((c) => {\n        this.client = c;\n        this.connectPromise = null;\n        return c;\n      });\n    }\n    return this.connectPromise;\n  }\n  throw new Error('...not initialized...');\n}\n```\n\n### ObjectQL Engine\n- `init()` now tracks failed drivers and emits a warning with the list, instead of silently swallowing connect errors\n\n### Tests\n- 5 new cases: lazy connect on find/create/checkHealth, concurrent de-duplication, recovery after transport client loss"
+}

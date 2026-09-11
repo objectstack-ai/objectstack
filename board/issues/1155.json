@@ -1,0 +1,36 @@
+{
+  "number": 1155,
+  "kind": "pull_request",
+  "title": "fix: studio CI test failures - fix simulateBrowser mock handlers",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-15T13:50:24Z",
+  "updated_at": "2026-04-15T14:18:52Z",
+  "closed_at": "2026-04-15T14:12:56Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-15T14:12:56Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1155",
+  "body": "## Summary\n\nFixes all 9 failing tests in `@objectstack/studio#test` (CI run [#24456193896](https://github.com/objectstack-ai/framework/actions/runs/24456193896/job/71457481001#step:9:1)) by correcting the `simulateBrowser` MSW mock handlers in `apps/studio/src/mocks/simulateBrowser.ts`.\n\n## Root Causes & Fixes\n\n### 1. Data endpoint ignored query parameters (4 test failures)\n\n**Tests:** `api.test.ts` (3 tests), `api-discovery.test.ts` (1 test)\n\nThe `GET /data/:object` handler called `ql.find(params.object)` without passing any query options. The client sends `top`, `skip`, `sort`, `select`, and filter parameters, but all were ignored — returning all records instead of the filtered/paginated subset.\n\n**Fix:** Added `parseQueryOptions()` helper that parses URL search params into ObjectQL `EngineQueryOptions` (`limit`, `offset`, `orderBy`, `fields`, `where`), and passes them to `ql.find()`.\n\n### 2. Metadata types endpoint missing runtime types (2 test failures)\n\n**Tests:** `verify-metadata.test.ts` — \"should include agent/tool in metadata types\"\n\nThe `GET /meta` handler used `ql.registry.getRegisteredTypes()` which only returns SchemaRegistry types (`package`, `data`, `app`, `object`), missing runtime types (`agent`, `tool`, etc.) registered by `AIServicePlugin` via `MetadataService`.\n\n**Fix:** Now uses `protocol.getMetaTypes()` which merges both SchemaRegistry and MetadataService types.\n\n### 3. Metadata items endpoint only queried SchemaRegistry (2 test failures)\n\n**Tests:** `verify-metadata.test.ts` — \"should list registered agents/tools\"\n\nThe `GET /meta/:type` handler used `ql.registry.listItems(type)` which only returns SchemaRegistry items. Agents and tools are registered in MetadataService, not SchemaRegistry.\n\n**Fix:** Now uses `protocol.getMetaItems({ type })` which queries both registries.\n\n### 4. Object list endpoint returned wrong format (1 test failure)\n\n**Test:** `verify-metadata.test.ts` — \"should fetch list of objects\"\n\nThe `GET /meta/object` handler returned `ql.getObjects()` (which doesn't exist, defaulting to `{}`) instead of the spec-compliant `{ type: 'object', items: [...] }` format.\n\n**Fix:** Now uses `protocol.getMetaItems({ type: 'object' })` which returns the correct format.\n\n## Verification\n\n- ✅ All 56 studio tests pass (8/8 test files)\n- ✅ Full monorepo test suite passes (85/85 tasks)"
+}

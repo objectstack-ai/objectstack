@@ -1,0 +1,33 @@
+{
+  "number": 1180,
+  "kind": "pull_request",
+  "title": "Release-readiness documentation pass across all 42 packages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-17T12:59:11Z",
+  "updated_at": "2026-04-17T13:10:26Z",
+  "closed_at": "2026-04-17T12:59:49Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-17T12:59:49Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1180",
+  "body": "Preparing the monorepo for formal npm publication: every `@objectstack/*` package needed consistent publishing metadata, a standardized README, and a corrected footprint in the docs site (which still claimed 27 packages — actual count is 42).\n\n### Standardization\n- New `docs/internal/PACKAGE_README_TEMPLATE.md` — canonical README structure, `package.json` publishing checklist, and pre-release PR gate. Single source of truth for future package additions.\n\n### `package.json` normalization (all 42)\n- Added missing `description`, `keywords` (≥3), full `repository` block with `directory`, `homepage`, `bugs`, `publishConfig.access: public`, `files` whitelist, `engines.node`, `author`.\n- Version-aligned `@objectstack/service-tenant` (0.1.0) and `@objectstack/service-package` (1.0.0) to the `4.0.4` release train.\n\n### READMEs\n- Authored `packages/services/service-package/README.md` (was missing entirely — release blocker).\n- Rewrote thin/stub READMEs to the canonical structure: `core`, `rest`, `driver-memory`, `plugin-security`, and all 7 adapters (`express`, `fastify`, `hono`, `nestjs`, `nextjs`, `nuxt`, `sveltekit`).\n- Pre-existing detailed READMEs (e.g. `service-ai`, `service-storage`, `plugin-audit`, `runtime`, `spec`, `driver-sql`, `driver-turso`) left intact to preserve their depth.\n\n### Docs site & root docs\n- `content/docs/guides/packages.mdx` — corrected package count (27 → 42), added a category summary table, added `service-package` and `service-tenant` entries.\n- `content/docs/concepts/packages.mdx` — corrected package count (25 → 42) and category breakdown.\n- Root `README.md` — Services table now lists all 12; Plugins table gains `plugin-mcp-server`; Codebase Metrics count `27 → 42`.\n- `CHANGELOG.md` — release-prep entry.\n- `RELEASE_NOTES.md` — new `v4.0.4 — Release Readiness` section with full inventory and verification checklist.\n\n### Deferred (release pipeline)\n- `content/docs/references/` regeneration via `pnpm --filter @objectstack/spec gen:docs`.\n- `lychee` link check and `pnpm docs:build` as part of release CI.\n\n### Example: normalized `package.json` tail\n\n```json\n\"repository\": {\n  \"type\": \"git\",\n  \"url\": \"https://github.com/objectstack-ai/framework.git\",\n  \"directory\": \"packages/services/service-package\"\n},\n\"homepage\": \"https://objectstack.ai/docs\",\n\"bugs\": \"https://github.com/objectstack-ai/framework/issues\",\n\"keywords\": [\"objectstack\", \"service\", \"package\", \"registry\", \"marketplace\"],\n\"publishConfig\": { \"access\": \"public\" },\n\"files\": [\"dist\", \"README.md\"],\n\"engines\": { \"node\": \">=18.0.0\" }\n```"
+}

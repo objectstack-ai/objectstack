@@ -1,0 +1,39 @@
+{
+  "number": 963,
+  "kind": "pull_request",
+  "title": "feat: add @objectstack/driver-turso extending SqlDriver with zero CRUD duplication",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-23T05:01:31Z",
+  "updated_at": "2026-03-23T06:58:43Z",
+  "closed_at": "2026-03-23T06:58:43Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-23T06:58:42Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/963",
+  "body": "Migrates the Turso/libSQL driver into the spec repo as a proper SqlDriver subclass. All query, schema, filter, and introspection logic is inherited — TursoDriver only adds connection lifecycle, embedded replica sync, and multi-tenant routing.\n\n### SqlDriver extensibility\n\n- `private` → `protected` for all internal properties and methods (19 members: `knex`, `config`, `getBuilder`, `applyFilters`, `formatInput`, `formatOutput`, introspection helpers, etc.)\n- Widened `name`/`version` type annotations from literal to `string` to support clean subclass override in DTS builds\n- Fixed `count()` returning `NaN` for zero results: `row.count || row['count(*)']` → `row.count ?? row['count(*)'] ?? 0` (logical OR treats `0` as falsy)\n- Removed legacy tuple-style `[field, dir]` indexing in `orderBy` processing — only standard `{ field, order }` (SortNodeSchema) is supported\n\n### TursoDriver (`packages/plugins/driver-turso/`)\n\n- Extends `SqlDriver` — passes `better-sqlite3` Knex config derived from `TursoDriverConfig`\n- Overrides: `connect()` / `disconnect()` for `@libsql/client` lifecycle, `name`, `version`, `supports`\n- Adds: `sync()` for embedded replica, `isSyncEnabled()`, `getLibsqlClient()`\n- Two supported connection modes: local file (`file:./data/app.db` or `:memory:`) and embedded replica (`url` + `syncUrl`)\n- Remote-only URLs (`libsql://` without `syncUrl`) throw a clear error — prevents silent data loss\n- Config options `encryptionKey`, `concurrency`, `timeout` documented as requiring `syncUrl` (embedded replica mode only)\n- Enhanced capabilities vs SqlDriver: FTS5, JSON1, CTE, savepoints, indexes\n\n```typescript\nconst driver = new TursoDriver({\n  url: 'file:./data/replica.db',\n  syncUrl: 'libsql://my-db-orgname.turso.io',\n  authToken: process.env.TURSO_AUTH_TOKEN,\n  sync: { intervalSeconds: 60 },\n});\nawait driver.connect();\n// All SqlDriver methods (find, create, update, syncSchema, ...) inherited\n```\n\n### Multi-tenant router\n\n- `createMultiTenantRouter({ urlTemplate: 'file:./data/{tenant}.db' })` — database-per-tenant with TTL cache\n- `{tenant}` placeholder interpolated in both `urlTemplate` and `driverConfigOverrides.syncUrl`\n- Concurrent `getDriverForTenant()` calls for the same tenant are deduplicated via in-flight promise map — prevents connection leaks\n- Tenant ID validation, `onTenantCreate` / `onTenantEvict` lifecycle callbacks\n- Serverless-safe: lazy expiration, no global intervals\n\n### Test coverage\n\n- 55 new tests (40 driver, 15 multi-tenant) — CRUD, upsert, bulk ops, transactions, schema sync, streaming, pagination, capabilities, remote URL validation, concurrent access guard, edge cases\n- 78 driver-sql regression tests pass unchanged\n- Tests use `os.tmpdir()` + random suffix for cross-platform safety\n- All builds succeed (ESM + CJS + DTS)\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>Phase 2: 标准化迁移和架构升级 driver-turso（libSQL/Turso 驱动插件）</issue_title>\n> <issue_description>## 目标\n> 将 objectql Turso（libSQL）驱动 https://github.com/objectstack-ai/objectql/tree/main/packages/drivers/turso 迁移进 spec 仓库，真正实现长期可维护、极简升级、协议完全对齐的插件化架构。\n> \n> ---\n> \n> ### 长远与\"可持续架构\"原则\n> - 彻底消除\"复制-粘贴\"或 type hack 迁移；**基础能力一切基于抽象父类/组合/注入**，不走两套实现、两份 schema、两份 filter。\n> - 不只追求阶段性\"搬家\"，要保证 2 年、5 年后依然易于迭代和扩展。\n> - 保证 turso 后续能力扩展只需 override 极少代码。\n> \n> ---\n> \n> ### 最优迁移方案设计\n> **1. 施工前：制定归一架构目标**\n> - 对比 driver-sql（Phase 1 成果）、objectql/driver-turso、以及平台协议 spec，先确定 100% 行为与类型的父类继承链、能力分类与跨插件接口点。不要急于动手迁移。\n> - 凡是 turso 独有特性（如同步、多租户、透明加密）一律抽象成可覆写的「扩展点」或 service 层，而非重复 CRUD/find 逻辑。\n> - 在设计层面，将所有共性能力沉淀到父类 driver-sql，分层组织代码，调整父类 API 使 Turso/SqlDriver/memory 等可等价协作。\n> \n> **2. 代码迁移与最小实现**\n> - 在 `spec/packages/plugins/driver-turso` 下创建项目。\n> - 只迁移 turso \"独特值\"，完全复用 Phase 1 SqlDriver：\n>   - 连接与 client 初始化：切换到 libSQL，区分 local/remote/hybrid，以及 sync 机制，事务特性等都基于 libsql client 做必要覆写。\n>   - 多租户能力用组合而非多 driver 实例（推荐服务对象单例+隔离配置）\n>   - 其余一切 query/schema 相关，**全依赖父类，不留复制代码**。\n> - 共性能力沉淀到父类 driver-sql 并补测试（如发现有 filter/schema 仍只能靠复制覆盖，必须优化抽象允许 child 0 覆写）。\n> \n> **3. 协议与开发体验对齐**\n> - type 校验与实际返回值一律可静态推断、IDE 智能提示可全补齐，所有 hack 和 as any 语法须解除/消灭。\n> - 发现协议分歧及时同步推进 spec（如同步、事务 context、连接属性等），不能\"先用 any 后补 specs\"。\n> - 设计层到测试用例到文档，全部与 phase 1/driver-sql/driver-memory 保持体验一致和极简。\n> \n> **4. 测试和交付标准**\n> - 单元测试与 CI 全链路跑通，与 memory/sql 驱动交叉测试。\n> - CI 包括多租户、sync、加密的典型覆盖（如有平台 E2E 测试建议接入或文档标明调用示例）。\n> - README/CHANGELOG/ROADMAP 文档说明 driver-turso 的继承关系与使用方式。\n> \n> ---\n> \n> ### 验收 & 里程碑\n> - PR 评论中说明已沉淀最大程度共性到父类\n> - CI 必须无绿 -> 任何多余复制或冗余实现拒绝合并\n> - 与 Platform 侧典型场景均测通，技术债务清零\n> \n> ---\n> 如需补充详细分任务/编码参考，可继续拆分。任务完成后需按要求自测、同步 changelog 和相关文档，杜绝短视搬运方案。\n> </issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#962\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

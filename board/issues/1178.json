@@ -1,0 +1,33 @@
+{
+  "number": 1178,
+  "kind": "pull_request",
+  "title": "Fix CORS_ORIGIN wildcard patterns in @objectstack/hono adapter",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-17T11:10:31Z",
+  "updated_at": "2026-04-17T11:10:48Z",
+  "closed_at": "2026-04-17T11:10:48Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-04-17T11:10:48Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1178",
+  "body": "PR #1177 unified wildcard matching across the Vercel OPTIONS short-circuit and `plugin-hono-server`, but missed a third path: `createHonoApp()` in `@objectstack/hono`. Since `apps/server` routes all non-OPTIONS traffic through this adapter on Vercel, preflights succeeded but the ensuing POST/GET responses shipped without `Access-Control-Allow-Origin` — the browser blocked every real request.\n\n## Root cause\n\n`createHonoApp()` passed `CORS_ORIGIN` straight into Hono's `cors()` middleware, which does exact-string comparison and treats `*` as a literal character:\n\n```ts\n// CORS_ORIGIN=\"https://*.objectui.org,http://localhost:*\"\napp.use('*', cors({ origin: ['https://*.objectui.org', 'http://localhost:*'] }));\n// → no match for https://app.objectui.org → no Access-Control-Allow-Origin header\n```\n\n## Changes\n\n- **`packages/adapters/hono/src/index.ts`** — detect wildcard patterns via `hasWildcardPattern` and swap in a `createOriginMatcher` function for Hono's `origin` option. Branch logic mirrors `plugin-hono-server` exactly, preserving the single source of truth established in #1177.\n- **`packages/adapters/hono/package.json`** — add workspace dep on `@objectstack/plugin-hono-server` (no cycle; the plugin depends only on `core` + `spec`).\n- **`packages/adapters/hono/src/hono.test.ts`** — 5 new tests covering subdomain wildcards, port wildcards, comma-separated lists, rejection of unmatched origins, and wildcard preflight.\n- **`CHANGELOG.md`** — follow-up entry under Unreleased / Fixed.\n\n## Invariant worth preserving\n\nAll three Hono-based CORS sites must route wildcard handling through `@objectstack/plugin-hono-server`:\n\n1. `apps/server/server/index.ts` — Vercel OPTIONS short-circuit\n2. `packages/plugins/plugin-hono-server/src/hono-plugin.ts`\n3. `packages/adapters/hono/src/index.ts` — `createHonoApp()` ← **this PR**\n\nAny future CORS change needs to touch all three or risk the same split-brain failure mode."
+}

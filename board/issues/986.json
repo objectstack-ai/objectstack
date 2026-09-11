@@ -1,0 +1,32 @@
+{
+  "number": 986,
+  "kind": "issue",
+  "title": "[讨论&决策] 前后端查询协议/OData vs QueryAST 规范化与长期归一方案",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-27T02:55:33Z",
+  "updated_at": "2026-03-27T03:37:11Z",
+  "closed_at": "2026-03-27T03:37:11Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/986",
+  "body": "## 背景与目标\nObjectStack 目前在前后端查询协议、参数语法以及归一化处理上存在多种风格并行（OData-inspired 参数、QueryAST、部分遗留 filter 形式等）。长期来看，这对平台的生态兼容性、社区认知和未来扩展性都有重要影响。\n\n本汇总 Issue 旨在：\n- 明确：平台前后端查询协议长期应遵循的最优路线（OData-inspired 命名，AST/JSON 语义，自主维护，不追求完全 OData 兼容）。\n- 归档：与协议风格相关的演进历史、行业对标经验。\n- 明确：统一归一化入口、文档、Studio 设计、类型等长期一致性方案。\n- 形成社区和产品团队决策共识。\n\n---\n\n## 关键问题汇总\n1. **Studio API Console 预设及文档是否误导为严格 OData 语法？**（如 $filter: \"status eq 'active'\"，实际应是 JSON 对象/AST）\n2. **前后端协议层是否采用统一 AST 规范？**（QueryAST/where/fields/orderBy/expand 等，类型/处理方式和前端、SDK 归一化点需一致）\n3. **QueryAST/参数归一化逻辑是否分散？**（protocol.ts / client.ts / objectql / objectui / types / adapter 是否都各做一份，未来维护和测试难）\n4. **是否需要/是否建议平台对外声称自己兼容/支持 OData？**（行业标杆对比，成本收益、B2B/BI 对接兼容性与限度）\n5. **主流低代码平台（如 Salesforce, Power Platform, ServiceNow, OutSystems, SAP）对查询协议与参数兼容的典型做法？**\n\n---\n\n## 长期最佳路线建议\n### 1. HTTP 层参数命名保留 OData-inspired，值类型规范为 JSON/AST\n- 所有 filter/orderBy/select/expand 参数命名参照 OData 习惯，便于开发者迁移认知。\n- 参数值不支持复杂 OData 字符串，仅接受 JSON 对象或 QueryAST 结构，杜绝 $filter = \"status eq 'active'\" 这样的表达式。\n- Studio/文档/IDE 的 placeholder/demo 示例全部对齐实际协议。\n\n### 2. 统一 AST 结构为唯一内部查询协议\n- Protocol、SDK、Engine 层一律只支持 QueryAST/AST 风格。\n- 覆盖所有归一化转换，暴露公共 util，CI 强制校验。\n- 禁止（deprecated）使用 data.find() 等支持 legacy query 参数的接口，主推 data.query(AST)。\n\n### 3. 明确社区与兼容策略\n- 文档清晰声明：\"本平台采用 OData-inspired 参数命名，仅用于开发体验一致性，不是 OData 严格协议，不支持 $metadata/CSDL 和 OData 字符串表达式。\"\n- 对 BI/B2B 场景可实现协议层 \"垫片\" 转换。\n\n### 4. 行业对标与合理性论证（简要）\n- Salesforce/ServiceNow/Outsystems/Supabase/Retool 皆自研查询/筛选协议（多借鉴 OData/CQL 语义，不做严格对齐），长期维护成本低、易拓展。\n- 只有 Dataverse（Power Platform），SAP Gateway，Mendix 等部分平台自身架构基于 OData，但都为项目专用。\n\n---\n\n## 建议落地事项 Checklist\n- [ ] 明确 Studio/IDE 全面采用一致 OData-inspired+JSON 示例，过滤掉 OData 字符串风格 UI/文档。\n- [ ] 所有 client/protocol/adapter 归一化逻辑统一沉淀 util，定期 refactor，代码 review 检查分层清晰。\n- [ ] 新增 CI 检查和类型校验，禁止 data.find/legacy HTTP params 用法。\n- [ ] 发布正式文档和社区公告，收集外部合作伙伴/B2B 部署需求。\n- [ ] 评审并互相链接所有相关历史协议/filters/field-query 相关 issue。\n\n---\n\n## 参考受影响模块/文件\n- packages/spec/src/api/protocol.zod.ts\n- packages/data-objectstack/src/index.ts\n- packages/objectql/src/protocol.ts\n- packages/client/src/index.ts\n- packages/types/src/data.ts\n- 各 DataSource、主要 UI 组件、平台文档、Studio 配置\n\n---\n\n**欢迎核心团队和社区补充意见！目标：长期做到协议分层清晰、可维护、生态友好、对接主流工具无障碍。**\n\n*相关历史 issue 推荐 @链接：[#866](https://github.com/objectstack-ai/spec/issues/866) [#909](https://github.com/objectstack-ai/spec/issues/909) [#984](https://github.com/objectstack-ai/spec/issues/984) [#915](https://github.com/objectstack-ai/spec/issues/915)\n"
+}

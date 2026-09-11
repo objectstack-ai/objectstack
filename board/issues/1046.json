@@ -1,0 +1,33 @@
+{
+  "number": 1046,
+  "kind": "pull_request",
+  "title": "Fix all CI build and test errors",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-01T10:47:35Z",
+  "updated_at": "2026-04-01T12:58:41Z",
+  "closed_at": "2026-04-01T12:56:24Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-01T12:56:24Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1046",
+  "body": "Fixes all CI build and test errors affecting the `main` branch.\n\n## Root Cause Analysis\n\n**Primary blocker (affects ALL CI workflows):**\n`apps/studio/package.json` has `@objectstack/service-ai@workspace:*` as a dependency, but `pnpm-lock.yaml` was never updated to include this entry in the `apps/studio` section. This causes `ERR_PNPM_OUTDATED_LOCKFILE` on every CI run with `--frozen-lockfile`.\n\n**Secondary issue:**\n`@objectstack/service-ai#test` was failing because `vercel-stream-encoder.test.ts` still expected the old v5 Vercel Data Stream Protocol format (`0:\"text\"\\n`) while the encoder had been upgraded to the v6 SSE UI Message Stream Protocol (`data: {\"type\":\"text-delta\",...}\\n\\n`).\n\n## Changes Made\n\n- **`pnpm-lock.yaml`**: Regenerated to include the missing `@objectstack/service-ai@workspace:*` dependency for `apps/studio`.\n- **`packages/services/service-ai/src/__tests__/vercel-stream-encoder.test.ts`**: Updated all test assertions to match the v6 SSE UI Message Stream Protocol, including the new lifecycle preamble/postamble (`start → start-step → text-start → events → text-end → finish-step → finish → [DONE]`) and SSE frame format.\n\n## Testing\n\n- ✅ Full monorepo build passes (`pnpm run build` — 43/43 tasks)\n- ✅ All tests pass (`pnpm run test` — all packages, including 176 service-ai tests)\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> fix all ci build and test errors\n\n\n</details>\n\n"
+}

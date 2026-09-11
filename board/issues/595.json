@@ -1,0 +1,33 @@
+{
+  "number": 595,
+  "kind": "pull_request",
+  "title": "docs: regenerate reference docs from latest spec schemas",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-10T16:08:39Z",
+  "updated_at": "2026-03-23T21:20:24Z",
+  "closed_at": "2026-02-10T16:20:37Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-10T16:20:36Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/595",
+  "body": "Ran `gen:schema` + `gen:docs` pipeline to sync reference documentation with latest Zod schema implementations.\n\n### New pages\n- **`api/auth-endpoints.mdx`** — `AuthEndpoint` schema split out from `auth.mdx` into its own page\n- **`kernel/execution-context.mdx`** — `ExecutionContext` schema (userId, tenantId, roles, permissions, traceId)\n\n### Updated schemas\n- **`api/protocol.mdx`** — `ApiDiscovery` gained `services` property\n- **`data/data-engine.mdx`** — Added `BaseEngineOptions`; `context` property now surfaces on all engine option types (Aggregate, Count, Delete, Insert, Query, Update)\n- **`api/auth.mdx`** — Trimmed to only `auth.zod.ts` schemas (endpoint docs moved to dedicated page)\n\n### Navigation\n- Updated `meta.json` and `index.mdx` for `api/` and `kernel/` categories\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

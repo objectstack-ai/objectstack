@@ -1,0 +1,33 @@
+{
+  "number": 998,
+  "kind": "pull_request",
+  "title": "Add `plugin-setup` to own the platform Setup App",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-31T02:28:46Z",
+  "updated_at": "2026-03-31T03:01:12Z",
+  "closed_at": "2026-03-31T02:59:53Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-31T02:59:53Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/998",
+  "body": "Setup App definition (identity, areas, navigation merge) had no clear owner — scattered between spec and objectql. This adds `@objectstack/plugin-setup` as a first-class internal plugin (sibling to `plugin-auth`, `plugin-security`, `plugin-audit`) that owns the Setup App lifecycle.\n\n### New package: `packages/plugins/plugin-setup`\n\n- **Setup Areas** (`setup-areas.ts`): Four built-in area skeletons — Administration, Platform, System, AI — with i18n labels, icons, and sort order. Empty by default.\n- **Setup App** (`setup-app.ts`): App identity (name, label, icon, branding, `setup.access` permission). `SetupNavContribution` type for the contribution API.\n- **SetupPlugin** (`setup-plugin.ts`): \n  - `init` → registers `setupNav` service\n  - `start` → merges contributions into area skeletons, filters empties, registers finalized app via `app.com.objectstack.setup` service convention\n- **20 tests** covering area constants, app defaults, plugin lifecycle, contribution merging, ordering, custom areas, immutability of constants.\n\n### Extension model\n\n```typescript\n// Any plugin can contribute to Setup during init:\nasync init(ctx: PluginContext) {\n  const setupNav = ctx.getService<SetupNavService>('setupNav');\n  setupNav.contribute({\n    areaId: SETUP_AREA_IDS.administration,\n    items: [\n      { id: 'nav_users', type: 'object', label: 'Users', objectName: 'sys_user' },\n    ],\n  });\n}\n```\n\n### Housekeeping\n\n- Added `@objectstack/plugin-setup` to `.changeset/config.json` fixed group\n- Updated CHANGELOG.md and ROADMAP.md"
+}

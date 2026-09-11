@@ -1,0 +1,35 @@
+{
+  "number": 1036,
+  "kind": "issue",
+  "title": "【协议一致性问题】data API 同时返回 records 和 value，导致混乱与兼容性债务，建议一次性移除 value 字段",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-04-01T05:30:56Z",
+  "updated_at": "2026-04-01T06:46:00Z",
+  "closed_at": "2026-04-01T06:46:00Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1036",
+  "body": "### 问题背景\n当前 `data api`（如 `/api/v1/data/:object`）返回的数据对象里同时包含了 `records` 和 `value` 两个字段，两者都指向同一个数组。这引发了如下问题：\n\n### 问题清单\n1. **违反协议规范：**\n   - ObjectStack Spec（`FindDataResponseSchema`）标准只定义了 `records` 字段，并未定义 `value` 字段。\n   - `value` 字段仅为 OData/历史兼容遗留，实际协议以及下游类型均未正式支持。\n\n2. **类型/文档与实现不一致：**\n   - TypeScript 客户端（`PaginatedResult` 等类型）只暴露 `records` 字段，不含 `value`。\n   - 开发者文档全链路只推荐（甚至强制）使用 `records`。部分代码与文档出现了分支 fallback 判断：\n     ```js\n     result.records || result.value || []\n     ```\n\n3. **导致前端重复 fallback & 易出错：**\n   - Studio等前端被迫做三重 fallback（`result.records || result.value || ...`），增加心智负担。\n   - 示例代码、集成 SDK 也产生了不一致（部分用 value、部分用 records）。\n\n4. **接口\"冗余\"字段：**\n   - 两个字段完全等价，导致 API payload 带宽/包体增大，序列化多余。\n   - 兼容包袱只会随着代码继续蔓延。\n\n5. **技术债/兼容性混乱：**\n   - 部分仓库下游团队已以 records 作为唯一 source of truth。\n   - 继续混有 value 字段会困扰新项目、新开发者。\n\n### 建议方案\n- **一次性修复方案**，彻底去除 `value` 字段，仅保留 `records`（即与 Spec&TS 类型完全一致）。\n- 全链路排查所有 fallback、示例和测试，只保留针对 `records` 的逻辑，去除对 `value` 的任何兼容分支或示例。\n- 在变更中注明：如果后续某些上层集成必须兼容 OData，可在 HTTP 封装层（如 HttpDispatcher）单独做协议适配，不污染协议实现和下游正式 API。\n\n### 受影响组件/仓库（请务必联动）\n- `objectstack-ai/spec`（协议实现与类型）\n- `objectstack-ai/client`（TS 类型已规范，无需大改，关注 runtime fallback）\n- `examples/app-host`（极少数 Demo 代码使用了 value）\n"
+}

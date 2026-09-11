@@ -1,0 +1,33 @@
+{
+  "number": 958,
+  "kind": "issue",
+  "title": "核心数据接口 DriverInterface / IDataDriver 定义存在分裂，导致所有 Driver 插件实现不一致",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-23T02:55:12Z",
+  "updated_at": "2026-03-23T04:11:31Z",
+  "closed_at": "2026-03-23T04:11:31Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/958",
+  "body": "## 问题描述\n目前 `packages/core/src/contracts/data-engine.ts` 中定义的 `DriverInterface` 与 `packages/spec/src/contracts/data-driver.ts` 的 `IDataDriver` 存在明显分裂。迁移和新开发的数据驱动插件（如 driver-sql、driver-memory）的实现对象和测试标准不一致，导致：\n\n- 插件实现时不敢只实现 `IDataDriver`（spec），而是 fallback 到 `DriverInterface`（core），漏掉协议方法，实际签名不合规。\n- 测试可被 `as any` 绕过类型不对齐，CI 测不出实现缺口。\n- 文档、代码和测试三分天下，生态长期不可持续。\n\n### 主要分歧\n\n- `DriverInterface`（core）为最小集合，仅有 connect/disconnect + CRUD + bulk（共13方法），无 supports、upsert、stream、事务、schema 管理、explain等高级能力\n- `IDataDriver`（spec）为基础协议，28方法（含批量、schema、事务、explain、health、dropTable、capabilities、findStream等）\n- 两者都是\"权威\"，但所有驱动实际只实现 core 导致协议缺口大量潜伏\n\n## 推荐修复方案\n\n1. **单一权威：** 明确以 `spec` 仓库的 `IDataDriver` 为唯一强制标准，彻底弃用 core/DriverInterface，所有插件以此为唯一实现合同\n2. **完整对齐：** 用 Zod Schema + TS interface 驱动，制定签名类型约束不可落空\n3. **接口整合：** 如果有历史兼容诉求，拆为\"MinimalDriver\"+\"SpecDriver\"，但 CI 和主流插件只测试 SpecDriver\n4. **协议检查工具：** CI强制所有插件类型匹配 IDataDriver，否则构建/测试禁止通过\n5. **清理 legacy fallback:** 删除 driver-sql/driver-memory 里对旧协议 key 的容错逻辑 (`filters`/`sort`/`skip` etc)，全部只认标准 key\n\n## 优先级与影响\n- **优先级：P0**（架构层面红线）\n- **影响范围：** 所有 Driver 插件实现、协议文档、核心用例、内核注册机制\n- **影响版本：** v3.x/v4.x\n\n## 期望产出\n- 技术决策：统一标准接口与实现\n- 签名重构 PR\n- 插件/内核/测试/文档同步更新\n\n----\n相关文件：\n- [core DriverInterface](https://github.com/objectstack-ai/spec/blob/main/packages/core/src/contracts/data-engine.ts)\n- [spec IDataDriver](https://github.com/objectstack-ai/spec/blob/main/packages/spec/src/contracts/data-driver.ts)\n- [driver-sql](https://github.com/objectstack-ai/spec/tree/main/packages/plugins/driver-sql/)"
+}

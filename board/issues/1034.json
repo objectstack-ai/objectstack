@@ -1,0 +1,37 @@
+{
+  "number": 1034,
+  "kind": "pull_request",
+  "title": "Upgrade server AI Chat API protocol for Vercel compatibility",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-01T05:04:36Z",
+  "updated_at": "2026-04-01T08:07:49Z",
+  "closed_at": "2026-04-01T07:59:38Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-01T07:59:38Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1034",
+  "body": "Upgrades the `/api/v1/ai/chat` endpoint and service-ai infrastructure to fully support the Vercel AI Data Stream Protocol, enabling direct consumption by `@ai-sdk/react/useChat` without custom adapters.\n\n## Changes Made\n\n- **`VercelLLMAdapter`** — New production adapter wrapping Vercel AI SDK's `generateText`/`streamText` for any compatible model provider (OpenAI, Anthropic, Google, Ollama, etc.)\n- **`vercel-stream-encoder.ts`** — New utilities (`encodeStreamPart`, `encodeVercelDataStream`) to convert `AsyncIterable<TextStreamPart<ToolSet>>` into Vercel Data Stream wire-format frames (`0:` text, `9:` tool-call, `b:` tool-call-start, `c:` tool-call-delta, `a:` tool-result, `d:` finish, `e:` step-finish)\n- **Dual-mode `/api/v1/ai/chat`** — Defaults to Vercel Data Stream Protocol (SSE); falls back to JSON when `stream: false`. Accepts Vercel useChat flat body format (`system`/`systemPrompt`, `model`, `temperature`, `maxTokens` as top-level fields) alongside the legacy `{ messages, options }` format\n- **`RouteResponse.vercelDataStream`** — New flag for HTTP server layer to encode events using Vercel frame-format SSE instead of generic `data:` lines\n- **Message validation** — Now accepts both string content (legacy) and Vercel multi-part array content\n- **CHANGELOG.md** — Updated with migration notes for the Data Stream Protocol upgrade\n\n## Testing\n\n- 176 tests passing across 5 test files (18 new tests added)\n- New `vercel-stream-encoder.test.ts` with 13 tests covering all frame types, round-trip decode, empty streams, and tool-call flows\n- Updated `ai-service.test.ts` with tests for Data Stream default mode, `systemPrompt` prepending, flat Vercel-style options, array content acceptance, and expanded content validation\n- CodeQL security scan: 0 alerts"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1012,
+  "kind": "pull_request",
+  "title": "feat(spec): Promote LLMAdapter interface to @objectstack/spec/contracts",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-31T07:08:48Z",
+  "updated_at": "2026-03-31T07:38:42Z",
+  "closed_at": "2026-03-31T07:38:42Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-31T07:38:42Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1012",
+  "body": "`LLMAdapter` was the only adapter contract defined inside a service package (`service-ai`) rather than in `@objectstack/spec`. This forced third-party adapter authors to depend on `@objectstack/service-ai` for a single interface.\n\n### Changes\n\n- **New contract** `packages/spec/src/contracts/llm-adapter.ts` — identical interface, imports AI types from sibling `ai-service.ts`\n- **Re-export for backward compat** — `service-ai/src/adapters/types.ts` now re-exports from spec instead of defining locally\n- **Updated imports** across `ai-service.ts`, `plugin.ts`, `memory-adapter.ts`, `adapters/index.ts`, `index.ts`, and test file to source from `@objectstack/spec/contracts`\n- **Contract type tests** — 8 tests covering minimal, full, streaming, embed, and listModels implementations\n- **ROADMAP.md / CHANGELOG.md** updated\n\n```ts\n// Third-party adapters can now align on spec alone:\nimport type { LLMAdapter } from '@objectstack/spec/contracts';\n\nexport class MyAdapter implements LLMAdapter {\n  readonly name = 'my-provider';\n  async chat(messages, options?) { /* ... */ }\n  async complete(prompt, options?) { /* ... */ }\n}\n```\n\nAll 60 service-ai tests and 30 spec contract tests pass."
+}

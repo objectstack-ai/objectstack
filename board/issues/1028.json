@@ -1,0 +1,33 @@
+{
+  "number": 1028,
+  "kind": "pull_request",
+  "title": "Align AI chat protocol with Vercel AI SDK — remove custom types and schemas",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-01T01:57:29Z",
+  "updated_at": "2026-04-01T05:07:39Z",
+  "closed_at": "2026-04-01T05:02:36Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-01T05:02:36Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1028",
+  "body": "The spec layer defined custom AI chat types (`AIMessage`, `AIToolCall`, `AIStreamEvent`) and Zod schemas (`AiChatRequestSchema`, `AiChatResponseSchema`) that duplicate what the Vercel AI SDK already provides. Since the frontend uses `@ai-sdk/react/useChat` directly, these custom definitions create maintenance burden and potential drift.\n\n### Re-export Vercel AI SDK types as canonical\n\n- `ModelMessage` replaces `AIMessage`\n- `ToolCallPart` replaces `AIToolCall`\n- `ToolResultPart` replaces `AIToolResult`\n- `TextStreamPart<ToolSet>` replaces `AIStreamEvent`\n- Deprecated type aliases preserved for downstream migration\n\n```typescript\n// Before\nimport type { AIMessage, AIStreamEvent } from '@objectstack/spec/contracts';\n\n// After\nimport type { ModelMessage, TextStreamPart, ToolSet } from 'ai';\n// or use deprecated aliases during migration:\nimport type { AIMessage } from '@objectstack/spec/contracts'; // = ModelMessage\n```\n\n### Update service contracts\n\n- `IAIService.chat()`, `streamChat()`, `chatWithTools()` now accept `ModelMessage[]`\n- `LLMAdapter` methods updated similarly\n- `AIConversation.messages` is now `ModelMessage[]`\n- `ChatWithToolsOptions.onToolError` callback receives `ToolCallPart`\n\n### Remove redundant chat wire protocol\n\n- Removed `AiChatRequestSchema` / `AiChatResponseSchema` from `protocol.zod.ts`\n- Removed `aiChat` from `IObjectStackAPI`, `DEFAULT_AI_ROUTES`, and client SDK\n- NLQ, Suggest, Insights schemas retained (ObjectStack-specific)\n\n### Migrate `packages/services/service-ai` to canonical Vercel types\n\nAll 8 source files and 4 test files in `service-ai` have been migrated from deprecated aliases to canonical Vercel AI SDK types with proper structural alignment:\n\n- **`ToolRegistry`**: `execute()` now accepts `ToolCallPart` (using `toolCallId`, `toolName`, `input`) and returns `ToolExecutionResult` (extends `ToolResultPart` with `isError?: boolean` for error tracking in the tool-call loop)\n- **`AIService.chatWithTools()`**: Constructs proper `AssistantModelMessage` (content as `Array<TextPart | ToolCallPart>`) and `ToolModelMessage` (content as `Array<ToolResultPart>`)\n- **`MemoryLLMAdapter.streamChat()`**: Emits Vercel `TextStreamPart<ToolSet>` events with `{ type: 'text-delta', id, text }` format\n- **Conversation services**: Serialize/deserialize `ModelMessage` discriminated union to/from flat DB columns with backward compatibility for old-format messages\n- **Stream helpers**: `textDeltaPart()` and `finishPart()` utility functions eliminate repeated type casts\n- All 158 service-ai tests updated and passing\n\n### Fix documentation\n\n- Removed `AiChatRequest` / `AiChatResponse` references from `content/docs/references/api/protocol.mdx`"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1057,
+  "kind": "pull_request",
+  "title": "feat: metadata_assistant agent, tool call display, and agent selector UI",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-02T07:11:47Z",
+  "updated_at": "2026-04-02T09:02:29Z",
+  "closed_at": "2026-04-02T09:02:28Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-02T09:02:28Z",
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1057",
+  "body": "The AI Agent architecture (Agent → Skill → Tool) and metadata tools exist but aren't wired to a usable agent, the chat panel doesn't render tool calls, and `requiresConfirmation` has no frontend implementation.\n\n### New `metadata_assistant` agent\n\n- Binds all 6 metadata tools: `create_object`, `add_field`, `modify_field`, `delete_field`, `list_metadata_objects`, `describe_metadata_object`\n- System prompt tuned for schema design: enforces snake_case, verifies existing schemas before mutation, warns on destructive ops\n- `react` planning with 10 iterations and replan enabled for multi-step schema conversations\n\n### Agent and metadata tools auto-registration in AIServicePlugin\n\n- `AIServicePlugin.start()` now registers both the `metadata_assistant` agent and all 6 metadata tools via the metadata service\n- Metadata tools only require `IMetadataService` (not `IDataEngine`), so they are registered independently of data tools\n- Agent is stored as metadata via `metadataService.register('agent', ...)`, making it modifiable at runtime without redeployment\n\n### Agent list endpoint and agent selector UI\n\n- New `GET /api/v1/ai/agents` endpoint returns all active agents with `{ name, label, role }` summaries\n- `AgentRuntime.listAgents()` reads from the metadata service and filters to active agents only\n- AiChatPanel header includes an agent selector dropdown that dynamically switches the chat transport URL:\n  - **General Chat** → `POST /api/v1/ai/chat`\n  - **Data Assistant** → `POST /api/v1/ai/agents/data_chat/chat`\n  - **Metadata Assistant** → `POST /api/v1/ai/agents/metadata_assistant/chat`\n- Agent selection persisted to `localStorage` (`objectstack:ai-chat-agent`)\n- Persisted agent selection is validated against the fetched agent list on load — automatically falls back to General Chat if the previously selected agent is no longer available or inactive\n- Conversation is automatically cleared when switching agents to avoid context confusion\n- Selector is disabled during streaming\n\n### `requiresConfirmation` deferred\n\n- `requiresConfirmation` is intentionally kept at `false` (default) on `create_object` and `delete_field` because the server-side tool-call loop (`AIService.chatWithTools`/`streamChatWithTools`) executes tool calls immediately via `ToolRegistry.executeAll` without checking this flag\n- The flag should only be set once server-side approval gating is implemented to avoid a false sense of safety\n- Read-only and additive tools remain unconfirmed as before\n\n### AiChatPanel tool invocation rendering\n\nRenders Vercel AI SDK v6 `dynamic-tool` message parts with state-driven UI:\n\n| State | Visual |\n|---|---|\n| `input-streaming` / `input-available` | Spinner + tool name + arg summary |\n| `approval-requested` | Yellow card with Approve/Deny buttons |\n| `output-available` | Green success + truncated result |\n| `output-error` | Red error + message |\n| `output-denied` | Muted denied indicator |\n\n- `formatToolArgs()` and `formatToolOutput()` are guarded against `JSON.stringify` edge cases (`undefined` return, `bigint` throws) with try/catch and `String()` fallback to prevent runtime crashes\n\nApproval flow uses `addToolApprovalResponse` from `useChat`:\n\n```tsx\naddToolApprovalResponse({ id: approvalId, approved: true })\n// or\naddToolApprovalResponse({ id: approvalId, approved: false, reason: 'User denied the operation' })\n```\n\n### Tests\n\n- 17 new service-ai tests: agent definition, tool references, guardrails, requiresConfirmation flags, `listAgents` filtering, agent list route\n- 12 new studio tests: tool invocation part persistence round-trip, `chatApiUrl` routing, agent selection persistence"
+}

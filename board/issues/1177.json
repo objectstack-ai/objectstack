@@ -1,0 +1,33 @@
+{
+  "number": 1177,
+  "kind": "pull_request",
+  "title": "Fix CORS_ORIGIN wildcard patterns on Vercel deployments",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-17T09:43:53Z",
+  "updated_at": "2026-04-17T09:44:22Z",
+  "closed_at": "2026-04-17T09:44:22Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-04-17T09:44:22Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1177",
+  "body": "Setting `CORS_ORIGIN=\"https://*.objectui.org,https://*.objectstack.ai,http://localhost:*\"` caused browser CORS errors on Vercel, even though the same value worked behind the Hono plugin's `cors()` middleware.\n\n## Root cause\n\n`apps/server/server/index.ts` short-circuits OPTIONS preflight **before** the Hono app runs (so cold starts / bootstrap failures can't strip CORS headers). Its `resolveAllowOrigin()` matched with a literal `Array.includes(requestOrigin)` — `*` was treated as a plain character, so every preflight from a real subdomain returned 204 with no `Access-Control-Allow-Origin`, blocking all subsequent requests.\n\n```ts\nconst allowed = [\"https://*.objectui.org\", ...];\nallowed.includes(\"https://app.objectui.org\"); // false → null → browser blocks\n```\n\nThe Hono middleware already implemented wildcard matching correctly, but the Vercel bypass path had a divergent, exact-match-only implementation.\n\n## Changes\n\n- **Single source of truth for origin matching** — extracted `matchOriginPattern` / `createOriginMatcher` / `hasWildcardPattern` / `normalizeOriginPatterns` into `packages/plugins/plugin-hono-server/src/pattern-matcher.ts` and exported from the package entry.\n- **`hono-plugin.ts`** — removed inline copies, imports from the shared module.\n- **`apps/server/server/index.ts`** — `resolveAllowOrigin()` now delegates to `createOriginMatcher` / `hasWildcardPattern` when `CORS_ORIGIN` contains `*`, so the Vercel preflight short-circuit and the Hono middleware have identical semantics.\n- **Tests** — `pattern-matcher.test.ts` now imports the real module (no inline duplicate) and adds coverage for `hasWildcardPattern`, `normalizeOriginPatterns`, and empty-origin handling."
+}

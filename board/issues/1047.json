@@ -1,0 +1,35 @@
+{
+  "number": 1047,
+  "kind": "issue",
+  "title": "Studio 左侧切换软件包时元数据未按包过滤",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-04-02T01:20:26Z",
+  "updated_at": "2026-04-02T02:42:54Z",
+  "closed_at": "2026-04-02T02:42:54Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1047",
+  "body": "## 问题描述\n在 Studio 左侧切换不同软件包时，元数据面板仍显示全部包的元数据，并未根据当前选中的软件包进行过滤。\n\n## 期望行为\n切换软件包时，元数据面板应只显示当前包下的元数据。\n\n## 复现步骤\n1. 打开 Studio。\n2. 切换左侧不同软件包。\n3. 观察元数据显示，发现始终全部显示。\n\n## 解决建议\n前端应监听包切换事件，根据当前包唯一标识对元数据做过滤，只展示对应包的内容。后端如有接口调整需求需同步说明。\n"
+}

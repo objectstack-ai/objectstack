@@ -1,0 +1,36 @@
+{
+  "number": 1086,
+  "kind": "issue",
+  "title": "[AI Service][SSE] streamChatWithTools 未 yield tool-result，导致前端无法获取 tool 输出",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "tooling"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-04-08T08:29:25Z",
+  "updated_at": "2026-04-08T09:21:37Z",
+  "closed_at": "2026-04-08T09:21:37Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1086",
+  "body": "## 问题概述\n\n在使用 `data_chat` agent 的 AI Chat 流程下，tool 调用虽然被正常触发，但 SSE 流程里 **缺失 tool-result (tool-output-available) 事件**，前端无法获得 tool 返回的原始输出。这样的现象会严重影响调试、UI 展示、以及开发者理解 agent/AI 工作路径。\n\n### 复现步骤\n1. 打开 AI Chat（如 Studio）\n2. 输入如\"系统中有哪些对象？\"等会触发 `list_objects` tool 的问题\n3. 检查开发者工具的 SSE/log：\n   - 只看到 `tool-input-available` (tool-call)\n   - **没有对应的 `tool-output-available` (tool-result)**\n   - AI 回复中只能看到 model 生成的 summary，无法显示 tool 的原始输出\n\n## 期望\n- tool 调用必须在 SSE stream 中 `yield` 出 `tool-result` 类型事件（编码为 `tool-output-available`）\n- 保证前端、测试等环节可以基于流式消息实时跟踪 tool 响应内容\n\n## 分析与建议\n- 当前 `streamChatWithTools()` 实现中，仅有 tool-call 有 `yield`，但 tool-result 只是推进 conversation：\n  ```ts\n  // 当前行为\n  for (const tr of toolResults) {\n    ...\n    conversation.push({role: 'tool', content: [tr]});\n  }\n  ```\n  应修改为：\n  ```ts\n  for (const tr of toolResults) {\n    yield { type: 'tool-result', ... } as TextStreamPart;\n    conversation.push({role: 'tool', content: [tr]});\n  }\n  ```\n  并确保编码为 `tool-output-available` 的 SSE chunk\n\n## 影响\n- 所有基于 Vercel AI SDK Data Stream Protocol (SSE) 的客户端、调试器、以及自动化测试\n\n## 参考\n- `encodeStreamPart` / `encodeVercelDataStream` 代码段及相关测试用例\n- https://github.com/objectstack-ai/framework/blob/main/packages/services/service-ai/src/stream/vercel-stream-encoder.ts\n\n---\n@hotlong 需讨论最佳处理 timing & 兼容策略。"
+}

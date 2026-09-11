@@ -1,0 +1,33 @@
+{
+  "number": 1018,
+  "kind": "issue",
+  "title": "AI Agent/Skill/Tool 元数据协议重构（对齐主流平台）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-31T08:44:08Z",
+  "updated_at": "2026-03-31T09:27:31Z",
+  "closed_at": "2026-03-31T09:27:31Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1018",
+  "body": "## 背景\n目前 agent.zod.ts 仅支持简化的 tools 引用，tool 本身不是一等元数据类型。行业头部平台（Salesforce、ServiceNow、Microsoft Copilot Studio）均采用 Agent-Skill-Tool 三级架构：Skill 作为能力聚合与分组，Tool 作为全局唯一的可组合元数据。此模式已成 2024-2025 年新标准，有助于平台能力解耦、微服务治理、权限与 UI 管理。\n\n## 目标\n1. Tool 升级为一等元数据（可声明/查询/动态加载/overlay）。\n2. 引入 Skill 概念作为 Ability Group（按领域聚合 tools），每个 skill 可定义激活条件、分组可复用。\n3. Agent 协议聚焦为配置包，引用 skills（可选 tools fallback），结构极简。\n4. 全链路 metadata → handler 联动（Agent → Skill → Tool → 运行时 handler）。\n5. 支持 LLM native function calling、Admin UI、权限分配等最佳实践。\n\n## 具体任务\n\n### 1. Tool 协议定义（src/ai/tool.zod.ts）\n- 字段：name, label, description, category, parameters(JSON Schema), outputSchema(optional), objectName(optional), requiresConfirmation, permissions, active, builtIn。\n- defineTool() 工厂与类型导出。\n- 配套 Tool handler 必须参数校验（符合 JSON Schema）。\n\n### 2. tool 类型注册为元数据（MetadataTypeSchema/Registry）\n- filePatterns: ['**/*.tool.ts', '**/*.tool.yml']，type: 'tool', domain: 'ai'。\n- 支持 metadataService 注册/查询/list。\n\n### 3. Skill 协议定义（src/ai/skill.zod.ts）\n- ���段：name, label, description, instructions, tools(引用 tool 名), triggerPhrases, triggerConditions, active。\n- defineSkill() 工厂与类型导出。\n- 支持技能包跨 agent 复用，支持激活条件/对象名上下文。\n\n### 4. Agent 协议精简/重构\n- skills: string[]；tools?: string[] fallback；knowledge/guardrails 保留。\n- planning/memory/lifecycle/structuredOutput/tenantId 降为可选/冻结。\n- defineAgent() 工厂支持 runtime 校验。\n\n### 5. handler 注册链路标准化\n- Tool handler 注册强制校验与 Tool metadata 绑定。\n- Skill/Tool/Agent 任一元数据变更可热重载 ToolRegistry。\n\n### 6. Admin UI 与权限支持\n- Tool/Skill 元数据支持 UI 配置、启停、授权分配、查找引用。\n- Agent/Skill/Tool 支持全链路权限字段。\n\n### 7. 文档/示例修正\n- CRM 示例使用 agent-skill-tool 结构组织。\n\n## 预期效果\n- LLM 能自动发现可用工具，严格参数校验，支持���件化。\n- 运维治理与平台对标国际最佳实践。\n- 技能（Skill）成为企业内可复制/可控/易用的 AI 资产。\n\n---\n参考：\n- Salesforce Agentforce Metadata API：https://developer.salesforce.com/docs/ai/agentforce/references/agents-metadata-tooling/agents-metadata.html\n- Microsoft Copilot Studio, ServiceNow Now Assist\n- 最新对话设计与 AI 能力治理讨论记录\n"
+}

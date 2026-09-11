@@ -1,0 +1,33 @@
+{
+  "number": 976,
+  "kind": "pull_request",
+  "title": "fix: point @objectstack/metadata exports to compiled dist files",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-23T15:56:30Z",
+  "updated_at": "2026-03-23T16:31:42Z",
+  "closed_at": "2026-03-23T16:29:28Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-23T16:29:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/976",
+  "body": "`@objectstack/metadata` package.json had `main`, `types`, and all `exports` pointing to TypeScript source files (`src/index.ts`). Node.js can't import `.ts` at runtime, causing `ERR_MODULE_NOT_FOUND` on Vercel.\n\n### Changes\n\n- **`packages/metadata/package.json`** — Rewired all export paths to dist output, added `files` field, matching the established `@objectstack/spec` pattern:\n  ```json\n  \"exports\": {\n    \".\": {\n      \"types\": \"./dist/index.d.ts\",\n      \"import\": \"./dist/index.mjs\",\n      \"require\": \"./dist/index.js\"\n    },\n    \"./node\": {\n      \"types\": \"./dist/node.d.ts\",\n      \"import\": \"./dist/node.mjs\",\n      \"require\": \"./dist/node.js\"\n    }\n  }\n  ```\n- **`packages/metadata/tsup.config.ts`** (new) — Local tsup config with both entry points (`src/index.ts`, `src/node.ts`), since the root config only declares a single entry\n- **`CHANGELOG.md`** — Documented the fix\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> vercel studio error 2026-03-23 15:55:18.795 [error] Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/task/apps/studio/node_modules/@objectstack/metadata/src/index.ts' imported from /var/task/apps/studio/api/index.js\n>     at finalizeResolution (node:internal/modules/esm/resolve:280:11)\n>     at moduleResolve (node:internal/modules/esm/resolve:870:10)\n>     at moduleResolveWithNodePath (node:internal/modules/esm/resolve:996:14)\n>     at defaultResolve (node:internal/modules/esm/resolve:1039:79)\n>     at #cachedDefaultResolve (node:internal/modules/esm/loader:718:20)\n>     at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:735:38)\n>     at ModuleLoader.resolveSync (node:internal/modules/esm/loader:764:52)\n>     at #resolve (node:internal/modules/esm/loader:700:17)\n>     at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:620:35)\n>     at ModuleJob.syncLink (node:internal/modules/esm/module_job:143:33) {\n>   code: 'ERR_MODULE_NOT_FOUND',\n>   url: 'file:///var/task/apps/studio/node_modules/@objectstack/metadata/src/index.ts'\n> }\n> Node.js process exited with exit status: 1. The logs above can help with debugging the issue.\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n⚡ Quickly spin up Copilot coding agent tasks from anywhere on your macOS or Windows machine with [Raycast](https://gh.io/cca-raycast-docs).\n"
+}

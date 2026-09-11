@@ -1,0 +1,33 @@
+{
+  "number": 1158,
+  "kind": "pull_request",
+  "title": "Add CLAUDE.md for Claude Code agent integration",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-16T01:06:16Z",
+  "updated_at": "2026-04-16T01:11:52Z",
+  "closed_at": "2026-04-16T01:09:06Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-16T01:09:06Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1158",
+  "body": "Project system prompts exist for GitHub Copilot (`.github/copilot-instructions.md`) but Claude Code has no equivalent configuration.\n\n### Changes\n\n- **`CLAUDE.md`** — Root-level file auto-discovered by Claude Code CLI. Contains the same architectural context as copilot-instructions: prime directives, monorepo structure, protocol domains, kernel standards, coding patterns, context routing rules, and references to `skills/` and `.github/prompts/` for domain-specific context. Adds a quick-reference section for build/test commands (`pnpm build`, `pnpm test`, etc.) since Claude Code operates as a terminal agent.\n- **`.github/copilot-instructions.md`** — Added sync note referencing `CLAUDE.md` so maintainers keep both files aligned.\n- **`CHANGELOG.md`** — Documented the addition under `[Unreleased]`.\n\n### How it works\n\nClaude Code automatically reads `CLAUDE.md` at the repo root on launch — no additional configuration needed:\n\n```bash\n# Just run claude in the repo directory\ncd objectstack-ai/framework\nclaude\n# → CLAUDE.md is loaded as project context automatically\n```"
+}

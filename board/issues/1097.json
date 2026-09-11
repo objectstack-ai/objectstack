@@ -1,0 +1,33 @@
+{
+  "number": 1097,
+  "kind": "issue",
+  "title": "AI Chat Thinking Phase Improvements",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-09T05:07:46Z",
+  "updated_at": "2026-04-09T06:37:37Z",
+  "closed_at": "2026-04-09T06:37:37Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1097",
+  "body": "Current State Analysis\nThe current implementation shows only \"Thinking…\" during the streaming phase (lines 515-520 in AiChatPanel.tsx). The backend uses Vercel AI SDK v6 with streamText and fullStream, but the frontend isn't leveraging all available stream parts.\n\n# Vercel AI SDK Capabilities Available\nBased on Vercel AI SDK v6 and mainstream agent implementations (ChatGPT, Claude.ai, Perplexity), the following capabilities can be added:\n\n1. Reasoning/Thinking Display (DeepSeek R1, o1-style)\nStream Part: reasoning field in stream parts\nDisplay: Show intermediate reasoning steps in a collapsible section\nUI Pattern: Grayed-out expandable section with chain-of-thought reasoning\nBenefit: Transparency into model's decision-making process\n2. Step-by-Step Progress Indicators\nStream Parts: step-start, step-finish events\nDisplay: Show multi-step agentic workflows with progress\nUI Pattern: Step counter with current/total (e.g., \"Step 2 of 5\")\nBenefit: User understanding of complex multi-step operations\n3. Tool Call Preview/Planning\nCurrent: Only shows tool calls when they execute\nEnhancement: Show \"Planning to call...\" before execution\nStream Part: tool-input-start (already handled in encoder)\n\n\n# Implementation Plan\n\nPhase 1: Enhanced Thinking Display\nUpdate stream encoder to pass through reasoning, stepStart, stepFinish events\nAdd UI components for displaying thinking/reasoning steps\nAdd collapsible section for detailed reasoning\nShow step progress indicators\n\nPhase 2: Tool Call Improvements\nDetect tool-input-start and show \"Planning to call...\" state\nAdd estimated time indicators for long-running tools\nShow tool call queue when multiple tools are pending\n\n\n# Technical Changes Required\n\n## Backend (service-ai)\n\nEnsure fullStream properly yields all part types (reasoning, stepStart, stepFinish, sources, warnings)\nUpdate encodeVercelDataStream to handle new part types\nPass through model-specific metadata (reasoning for o1/DeepSeek-R1)\n\n## Frontend (AiChatPanel.tsx)\n\nParse and handle new stream part types\nAdd UI components for:\nReasoning display (collapsible)\nStep progress indicators\nToken usage badges\nCitation links\nWarning alerts\nEnhance accessibility (ARIA labels, keyboard navigation)\nType Definitions (@objectstack/spec)\nExtend TextStreamPart types to include reasoning, sources, warnings\nAdd schema definitions for structured reasoning steps\nDefine citation/source metadata types\n\n## UX Design Guidelines\nThinking/Reasoning Display\nCollapsed by default to avoid overwhelming users\nExpand on click to show full reasoning chain\nSubtle visual style (lighter text, italic) to distinguish from main content\nAnimated ellipsis during active thinking\n\nTool Calls\nColor-coded states: Planning (blue), Executing (yellow), Success (green), Error (red)\nEstimated duration for known slow operations\nCancelable for long-running operations (future enhancement)\n\n"
+}

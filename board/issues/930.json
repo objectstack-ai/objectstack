@@ -1,0 +1,35 @@
+{
+  "number": 930,
+  "kind": "issue",
+  "title": "[Bug] Vercel部署后 /api/v1/meta 和 /api/v1/packages 路由404，导致前端无法加载元数据和包列表",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-03-18T14:06:14Z",
+  "updated_at": "2026-03-18T14:42:42Z",
+  "closed_at": "2026-03-18T14:42:42Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/930",
+  "body": "## 问题描述\n在部署 ObjectStack Studio 到 Vercel 后，前端在 Server模式下请求 `/api/v1/meta` 和 `/api/v1/packages` 都返回 404，导致元数据及包列表无法正常加载。\n\n### 复现步骤\n1. Vercel正确设置：`VITE_RUNTIME_MODE=server` 且 `VITE_SERVER_URL=\"\"`（empty，same-origin）\n2. 前端浏览器启动后尝试请求：\n    - `GET /api/v1/meta` → 404\n    - `GET /api/v1/packages` → 404\n\n## 核心分析\n- `/api/v1/meta` 路由虽然在 `@objectstack/hono` 适配器注册，但返回404，说明对应 dispatcher/broker 没有正确桥接 metadata服务。\n- `/api/v1/packages` 路由根本没有注册；`createHonoApp()` 只覆盖了 discovery, auth, graphql, meta, data, storage 等路由，缺少 packages。\n\n## 影响\n- 前端无法加载元数据、包列表，核心功能不可用。\n- 404报错会阻断页面正常渲染，造成用户困扰。\n\n## 推荐修复方案\n1. 补齐 `createHonoApp()` 适配器所有标准路由（见 HonoServerPlugin discovery routes），尤其是 packages 等缺失命名空间。\n2. 检查并修正 `HttpDispatcher.handleMetadata()` 及 broker shim 的桥接，确保元数据能正确返回。\n3. 补充测试，确保 serverless 部署下路由齐全、元数据和包列表可用。\n\n\n---\n\n- 已分析全部问题及相关代码，建议架构级修复，不建议简单patch。\n"
+}

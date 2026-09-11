@@ -1,0 +1,33 @@
+{
+  "number": 879,
+  "kind": "pull_request",
+  "title": "fix: AuthPlugin silent 500s and broken ObjectQL adapter config",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-08T11:50:17Z",
+  "updated_at": "2026-03-09T02:06:02Z",
+  "closed_at": "2026-03-09T01:59:53Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-09T01:59:53Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/879",
+  "body": "better-auth's `handler()` catches all internal errors and returns `500 Response` objects without throwing — the existing `try/catch` never fires. Separately, `createDatabaseConfig()` returns a raw adapter object, but `getBaseAdapter()` checks `typeof database === \"function\"` to route custom adapters; a plain object falls through to the Kysely path and fails silently.\n\n### Error logging\n\nInspect `response.status >= 500` after `auth.handler()` and log the body:\n\n- `AuthManager.handleRequest()` → `console.error` (standalone usage)\n- `AuthPlugin.registerAuthRoutes()` → `ctx.logger.error` (structured plugin logging)\n\n### Adapter config\n\nWrap the ObjectQL adapter as a `DBAdapterInstance` factory function so better-auth recognizes it:\n\n```typescript\nreturn (_options: any) => ({\n  id: 'objectql',\n  ...adapter,\n  transaction: async (cb) => cb(adapter),\n});\n```\n\n### Documentation & release\n\n- **README.md**: Updated the ObjectQL adapter code example to show the correct factory-based `DBAdapterInstance` pattern instead of the broken raw adapter object, with a note that `AuthManager` handles this wrapping automatically.\n- **ROADMAP.md**: Added v3.x migration note documenting both bug fixes.\n- **Changeset**: Added `@objectstack/plugin-auth` patch changeset for version bump.\n\n### Tests\n\n7 new tests covering error response detection (500/200/400) and adapter factory shape validation.\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>[BUG] AuthPlugin/BETTER-AUTH error handling & adapter config breaks silent: no logs, database errors swallowed</issue_title>\n> <issue_description>### 问题描述\n> \n> 当前 ObjectStack 的 AuthPlugin 集成 better-auth 时，存在两个严重 bug：\n> \n> 1. **better-auth handler 出错不会抛出异常**，导致 catch/日志无法捕获，服务端权限/数据库异常全部 silent。\n> 2. **database 适配器 config 方式不符合 better-auth 设计**，导致数据库适配器无法被正确识别（未提供 provider 字段等），Auth API 一旦出错服务端完全无日志。\n> \n> #### 现象\n> - 浏览器请求 `/api/v1/auth/sign-up/email` 或 `/sign-in/email` 等返回 500（Internal Server Error），但服务端无任何错误日志。\n> - 控制台只有插件加载等 info/warn，没有 auth request error、数据库异常等关键信息。\n> \n> ### 复现步骤\n> 1. 使用 ObjectUI 或其它集成 objectstack-ai/spec 的项目运行 `pnpm dev`\n> 2. 浏览器注册/登录，服务端报 500\n> 3. Server logs 没有任何 error/warn 输出\n> \n> ### 根因分析\n> #### bug1：better-auth handler 不抛异常\n> - AuthPlugin 通过 `handleRequest -> auth.handler(request)`，better-auth 内部 catch error（adapter/database/ORM），直接返回 500 Response 对象，不 throw。\n> - 导致前端报错但 catch 块永远不会触发，error log 永远不会输出到控制台。\n> \n> #### bug2：adapter config 不符合预期\n> - `createDatabaseConfig()` 直接返回裸自定义 adapter，对应 better-auth 的 database 字段，缺少 provider 分组。\n> - better-auth 要求：\n>   ```js\n>   database: {\n>     provider: \"custom\",\n>     adapter: customAdapter\n>   }\n>   ```\n> - 当前方式:\n>   ```js\n>   database: createObjectQLAdapter(dataEngine)\n>   ```\n> - 这样可能导致 adapter 没有被正确加载、错误 silent。\n> \n> ### 建议修复方案\n> \n> #### 1. handleRequest 中主动检测 Response 状态码，补 log\n> ```typescript\n> async handleRequest(request: Request): Promise<Response> {\n>     const auth = this.getOrCreateAuth();\n>     const response = await auth.handler(request);\n>     if (response.status >= 500) {\n>         const body = await response.clone().text();\n>         console.error('[AuthManager] better-auth returned error:', response.status, body);\n>     }\n>     return response;\n> }\n> ```\n> \n> #### 2. database config 适配\n> 将 `createDatabaseConfig()` 返回包装成 factory:\n> ```typescript\n> private createDatabaseConfig(): any {\n>     if (this.config.dataEngine) {\n>       const adapter = createObjectQLAdapter(this.config.dataEngine);\n>       return (options: any) => ({\n>         provider: \"custom\",\n>         adapter,\n>       });\n>     }\n>     // fallback...\n> }\n> ```\n> \n> ### 期望\n> - 出现 Internal Server Error 时，服务端可以打印出更详细的错误日志（包括数据库异常、adapter异常等）。\n> - database adapter 能被正确识别，适配 ORM 或自定义 IDataEngine 方案。\n> \n> ---\n> @hotlong 可直接派发 task 进行修复。有跨仓库依赖请同步 objectui/roadmap。\n> </issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#878\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n🔒 GitHub Advanced Security automatically protects Copilot coding agent pull requests. You can protect all pull requests by enabling Advanced Security for your repositories. [Learn more about Advanced Security.](https://gh.io/cca-advanced-security)"
+}

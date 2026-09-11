@@ -1,0 +1,33 @@
+{
+  "number": 1089,
+  "kind": "pull_request",
+  "title": "fix: MetadataPlugin driver bridging and register() loader filtering",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-08T09:23:06Z",
+  "updated_at": "2026-04-08T10:32:34Z",
+  "closed_at": "2026-04-08T10:32:34Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-08T10:32:33Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1089",
+  "body": "`DatabaseLoader` is fully implemented but never wired up — `MetadataPlugin` doesn't bridge the kernel's driver service to `MetadataManager`, and `register()` blindly broadcasts writes to all loaders including `FilesystemLoader`, crashing in read-only environments.\n\n### MetadataPlugin: bridge driver in `start()`\n\nDiscovers `driver.*` services from the kernel registry and calls `manager.setDatabaseDriver()` to attach `DatabaseLoader`. This is the deferred setup path already designed in `setDatabaseDriver()` but never connected. Driver bridging is deferred until **after** filesystem metadata loading completes, so that system metadata populated via `register()` during bootstrap stays in-memory only and is not persisted to the database on every cold boot.\n\n```typescript\n// plugin.ts — start()\n// 1. Load filesystem metadata first (in-memory only)\nfor (const entry of sortedTypes) { ... }\n\n// 2. Bridge driver AFTER filesystem loading\nconst services = ctx.getServices();\nfor (const [serviceName, service] of services) {\n    if (serviceName.startsWith('driver.') && service) {\n        this.manager.setDatabaseDriver(service);\n        break;\n    }\n}\n```\n\n### MetadataManager: scope `register()`/`unregister()` to writable `datasource:` loaders\n\n- **`register()`** — only persists to loaders with `protocol === 'datasource:'` **and** `capabilities.write === true`, skipping `file:` and `memory:` protocols and respecting read-only datasource loader contracts\n- **`unregister()`** — same dual filter applied for consistency\n\n```typescript\nfor (const loader of this.loaders.values()) {\n    if (loader.save && loader.contract.protocol === 'datasource:' && loader.contract.capabilities.write) {\n        await loader.save(type, name, data);\n    }\n}\n```\n\n### Documentation\n\n- Updated README architecture diagram to say \"DatabaseLoader (datasource-backed storage)\" instead of \"planned\", consistent with the loader status table marking it as \"Implemented\".\n\n### Tests\n\n13 new tests covering protocol + write capability filtering for both `register()`/`unregister()`, driver bridging lifecycle (driver found, no driver, `getServices` error), and call-ordering verification that driver bridging happens after filesystem loading. All 175 tests pass."
+}

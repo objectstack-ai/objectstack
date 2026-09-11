@@ -1,0 +1,36 @@
+{
+  "number": 1038,
+  "kind": "issue",
+  "title": "按 agentskills.io 最佳实践迁移技能方案：skills/ 文件夹 ＋手写 SKILL.md",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "tooling"
+  ],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-04-01T06:04:38Z",
+  "updated_at": "2026-04-01T08:56:30Z",
+  "closed_at": "2026-04-01T08:56:30Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1038",
+  "body": "## 背景\n\n根据最新 agentskills.io 生态，当前主流 Agent Skill 的最佳实现方式不是发布为 npm 包，而是在仓库根目录直接创建 `skills/` 文件夹，并为每个技能编写高质量的手写 `SKILL.md` 文件。现有 Zod 协议文件应只作为校验、推导和写文档时的参考源。\n\n## 目标\n\n1. 在 `objectstack-ai/spec` 仓库根目录下创��� `skills/` 文件夹，每个子技能一个目录，例如：\n   - `skills/schema-design/`\n2. 每个技能目录下至少包含一个高质量手写的 `SKILL.md`，内容包括但不限于：\n   - 前置 YAML frontmatter（name, description 等元数据，符合 [agentskills.io spec](https://agentskills.io/specification)）\n   - 领域规则、经验指令、常见误区与最佳实践，重点强调「何时��」「用了该注意什么」等 AI Agent 可直接执行的\"专家经验\"型指令\n\n## 参考链接\n- [agentskills.io/specification](https://agentskills.io/specification)\n- [最佳实践](https://agentskills.io/skill-creation/best-practices)\n\n## Acceptance Criteria\n- [ ] 仓库根目录有 `skills/`，下含多个技能子目录，每个有 SKILL.md\n- [ ] 所有 SKILL.md frontmatter 合规范、内容以专家经验为主，强调\"何时用、怎么用、注意事项\"\n- [ ] references/ 目录可选存放 Zod Schema 字段表或类型枚举\n- [ ] 禁止直接 npm 发布、禁止全自动 build 生成\n- [ ] 文档及用法发生变化时及时同步\n- [ ] 更新相关 CHANGELOG.md/ROADMAP.md 并通过全部校验、测试\n\n## 价值\n- 遵循开源 Agent 生态通行标准，便于各类智能体（Claude、Cursor、Copilot 等）自动发现和调用协议技能\n- 降低维护和发布复杂度（无需构建/发布包）\n- 强化技能内容质量与 AI 可用性，提高开发协作效率"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 886,
+  "kind": "pull_request",
+  "title": "Fix CI: resolve pnpm version mismatch in workflow files",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-09T06:52:34Z",
+  "updated_at": "2026-03-09T07:15:01Z",
+  "closed_at": "2026-03-09T07:13:21Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-09T07:13:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/886",
+  "body": "All CI workflows fail at the `pnpm/action-setup@v4` step due to conflicting pnpm versions: `10.28.1` hardcoded in workflows vs `10.31.0` in `package.json#packageManager`.\n\n- Removed explicit `version: 10.28.1` from `pnpm/action-setup@v4` in `ci.yml`, `lint.yml`, `pr-automation.yml`, and `validate-deps.yml`\n- The action auto-reads from `packageManager` in `package.json`, keeping a single source of truth\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> fix all ci errors\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n🔒 GitHub Advanced Security automatically protects Copilot coding agent pull requests. You can protect all pull requests by enabling Advanced Security for your repositories. [Learn more about Advanced Security.](https://gh.io/cca-advanced-security)"
+}

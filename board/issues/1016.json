@@ -1,0 +1,33 @@
+{
+  "number": 1016,
+  "kind": "pull_request",
+  "title": "feat(ai): Tool call loop, built-in data tools, agent runtime &amp; chat API",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-31T08:00:45Z",
+  "updated_at": "2026-03-31T08:45:46Z",
+  "closed_at": "2026-03-31T08:45:31Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-31T08:45:31Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1016",
+  "body": "Implements the core infrastructure for an Airtable Copilot-style data conversation chatbot — users ask natural language questions against business data, the AI resolves them via tool calls to the data engine.\n\n### Contract changes (`@objectstack/spec`)\n\n- `AIResult.toolCalls?: AIToolCall[]` — adapters can now return tool call requests from the LLM\n- `IAIService.chatWithTools?()` + `ChatWithToolsOptions` — optional contract method for tool-augmented chat with `maxIterations` safety\n- Export `Agent` type from `@objectstack/spec` index\n\n### Tool call loop (`AIService.chatWithTools`)\n\nMulti-round LLM ↔ tool execution loop:\n1. Auto-injects `ToolRegistry` definitions into LLM options\n2. Executes returned `toolCalls` via registry, appends results as `role: 'tool'` messages\n3. Loops until model returns final text or `maxIterations` (default 10) exhausted\n4. Forces a tool-free final call if loop limit hit\n5. Strips `maxIterations` from options before forwarding to the adapter to prevent unknown-key errors in provider SDKs\n\n```ts\nconst result = await aiService.chatWithTools(\n  [{ role: 'user', content: 'How many active accounts?' }],\n  { maxIterations: 5 },\n);\n```\n\n### Built-in data tools\n\nFive platform-level tools registered via `registerDataTools(registry, { dataEngine, metadataService })`:\n\n| Tool | Purpose |\n|---|---|\n| `list_objects` | List all available tables |\n| `describe_object` | Schema introspection (fields, types, labels) |\n| `query_records` | Filter/sort/paginate records (limit capped at 200) |\n| `get_record` | Single record by ID |\n| `aggregate_data` | count/sum/avg/min/max with groupBy |\n\nData tool hardening:\n- `query_records` validates `limit`/`offset` as finite positive integers, clamping negatives/NaN to defaults\n- `aggregate_data` validates aggregation function names at runtime against the allowed set (`count`, `sum`, `avg`, `min`, `max`, `count_distinct`), returning a structured error for invalid values\n\n### Agent runtime &amp; chat route\n\n- `AgentRuntime` — loads agent metadata from `IMetadataService` with `AgentSchema.safeParse()` validation (returns `undefined` for malformed metadata), builds system prompt from `instructions` + UI context (`objectName`, `recordId`, `viewName`), resolves agent tool references against the registry\n- `POST /api/v1/ai/agents/:agentName/chat` — agent lookup, active-check, context injection, delegates to `chatWithTools`\n  - Restricts inbound message roles to `user` and `assistant` only — `system` and `tool` messages are rejected to prevent client-side guardrail overrides\n  - Whitelists safe caller option overrides (`temperature`, `maxTokens`, `stop`); silently ignores sensitive keys (`tools`, `toolChoice`, `model`) to prevent tool-definition injection\n- `DATA_CHAT_AGENT` — built-in `data_chat` agent spec with guardrails, planning config, and all 5 data tool references\n\n### Plugin wiring\n\n`AIServicePlugin.start()` auto-registers data tools and the `data_chat` agent when `IDataEngine` + `IMetadataService` are present in the kernel, before firing `ai:ready`. Agent auto-registration is non-destructive — checks `exists()` first to preserve user customizations.\n\n### Tests\n\n51 new test cases covering the tool call loop (sequential, parallel, max iterations, error propagation, maxIterations stripping), all 5 data tool handlers (including limit/offset validation and aggregation function validation), agent runtime (loading, validation of malformed metadata, prompt building, tool resolution), agent route (validation, 404/403, role restriction, options whitelisting, happy path), and agent spec validation. All 130 service-ai tests and 6747 spec tests pass."
+}

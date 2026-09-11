@@ -1,0 +1,33 @@
+{
+  "number": 1128,
+  "kind": "issue",
+  "title": "Skills 模块结构重构（对齐 shadcn-ui 精细化分层，但保持技能独立）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-14T03:34:07Z",
+  "updated_at": "2026-04-14T03:59:47Z",
+  "closed_at": "2026-04-14T03:59:47Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1128",
+  "body": "## 背景\n当前 repo 下的 skills 以每个领域独立子目录呈现，如 objectstack-data, objectstack-api, objectstack-ui 等，每个 skill 的 SKILL.md 内容庞杂，所有细则几乎全部内联，扩展性、可测试性和 AI 理解友好性均有待提升。\n\nhttps://github.com/shadcn-ui/ui/tree/main/skills/shadcn\n\nshadcn-ui/ui 的 skills/shadcn 目录采用了精细化分层的结构：主控 SKILL.md 只写摘要与用例，其它规则、CLI、定制内容拆分成 rules/、cli.md、customization.md 等子文件，且具备 evals/ 目录用于测试。shadcn 此模式极大增强了易维护性、AI 消化能力和用例复用。\n\n但本项目领域远超 shadcn，直接合并所有 skill 为单 skill 或用\"全局路由 skill\"不可行（会影响 plugin/slill 的独立分发与兼容性）。\n\n## 目标\n- 为每个 objectstack-* skill 参考 shadcn 的分层模式（而非将所有技能合并为一个），并将主干内容与规则、用例、测试解耦。\n- 保证每个 skill 保持独立、可单独安装/引用，不需要 skill 之间显式\"路由\"。\n\n## 具体方案（建议）\n\n- [ ] 以 objectstack-data 举例，skill 目录重构如下：\n  ```\n  skills/objectstack-data/\n  ├── SKILL.md          # 精炼主控（摘要/决策树+规则/案例索引+引用）\n  ├── rules/\n  │   ├── naming.md         # 命名规范 error/correct 对比\n  │   ├── relationships.md  # 关系类型/模式最佳实践\n  │   ├── validation.md     # 校验规则（可直接移自现有SKILL.md）\n  │   └── indexing.md       # 索引策略等\n  ├── evals/                # 测试用例（可后续补充）\n  └── references/           # 现有 schema 参考\n  ```\n- [ ] 其它 skills（如 objectstack-kernel, objectstack-ui, objectstack-api, objectstack-automation 等）同样进行 rules/ 与 evals/ 结构补全和拆分\n- [ ] SKILL.md 文件保持\"主控索引\"与\"快速案例/规则小节\"，细节与代码对比、多层场景拆分等内容全部放入 rules/ 或其它子文件，AI 可通过相对路径引导定位详细判据\n- [ ] **不设置全局 skill 路由或统一 skill 入口**——repo 保持每个 skill 自包含，分发 & 选择灵活\n- [ ] 推荐 hooks skill 内容整合到 objectstack-data/rules/hooks.md，减少冗余与领域重叠\n- [ ] 测试用例与 evals/ 内容为可选，可逐步补充\n\n## 验收标准\n- [ ] 每个 skill 的 SKILL.md 都高度聚焦/短小，rules/ 文件内具备 Incorrect/Correct 对比案例\n- [ ] skills 无显式路由依赖，单 skill 安装仍可获得全部原本能力\n- [ ] 结构优化后，AI（Copilot/Cursor/Chatbot）能更精确理解各 skill 使用场景与区别\n\n---\n- 变更需同步 `CHANGELOG.md` 并补充/核对测试用例，如有较大重构应更新 `ROADMAP.md`"
+}

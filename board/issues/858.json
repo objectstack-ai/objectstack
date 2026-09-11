@@ -1,0 +1,35 @@
+{
+  "number": 858,
+  "kind": "issue",
+  "title": "Critical Bug: getService Throws for Async Factory Services ('auth', 'analytics') — Kernel/Dispatcher/Adapters must resolve async services",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-03-03T04:52:28Z",
+  "updated_at": "2026-03-03T05:40:52Z",
+  "closed_at": "2026-03-03T05:40:52Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/858",
+  "body": "# Synchronous getService Error for Async Auth & Analytics Services\n\n## Problem Statement\nCalling `getService('analytics')` or `getService('auth')` via the ObjectStack Kernel (ObjectKernel/LiteKernel) throws the following runtime error if the service was registered with an async factory:\n\n```\nError: Service 'analytics' is async - use await\nError: Service 'auth' is async - use await\n```\n\n## Impacted Components\n- `packages/runtime/src/http-dispatcher.ts` — Dispatcher uses private `getService()` which calls sync `kernel.getService()`\n- Kernel & Dispatcher call chain (`dispatcher.handleAnalytics`, `dispatcher.handleAuth`)\n- All adapter plugins (Fastify, Hono, Next.js, SvelteKit, NestJS) that rely on `kernel.getService('auth')` or `kernel.getService('analytics')`\n- Plugins/services registered via async factory (e.g. PluginLoader)\n\n## Root Cause\n- `getService()` uses the synchronous path but some services (auth, analytics) were registered as async factories (via dependency injection in PluginLoader).\n- When the service lookup resolves to a Promise, kernel throws to avoid returning a Promise from a sync API.\n- Dispatcher and adapters frequently use sync getService, which breaks if consumers are not migrated to async path.\n\n## Code Evidence\n- [`kernel.ts`](https://github.com/objectstack-ai/spec/blob/main/packages/core/src/kernel.ts): Throws when service is async but called via sync API.\n- [`http-dispatcher.ts`](https://github.com/objectstack-ai/spec/blob/main/packages/runtime/src/http-dispatcher.ts): Dispatcher sync service lookup fails for async services.\n- Service interfaces (`IAnalyticsService`, `IAuthService`) are Promise-based, and actual plugin implementations often use async factories for setup.\n- Test files simulate both sync and async scenarios (see `*.test.ts` for dispatcher, adapters).\n\n## Solution Proposal\n- **Refactor `http-dispatcher.ts` and all adapters:**\n    - Use an explicit `getServiceAsync()` method for service registry lookup when factory-based services are possible.\n    - Ensure `dispatcher.handleAuth` and `dispatcher.handleAnalytics` always resolve services asynchronously.\n    - Adapters must also use async resolution for service lookup instead of kernel's synchronous `getService()`.\n- **Best Practice:** Consider deprecating direct `getService()` access for any service interface defined as Promise-based, or add documentation warnings in ObjectStack Kernel and Adapter docs.\n\n## Priority\n- **High:** Breaks dispatch and dynamic service composition for any plugin using async registration.\n\n## References & Context\n- ObjectStack repo: [spec](https://github.com/objectstack-ai/spec)\n- Multiple test examples show async mocks (passing) but production sync lookups fail.\n\n---\n\n**Root cause & solution verified. Please prioritize and coordinate adapter refactor/migration.**\n\n/cc @hotlong @objectstack-ai\n\n---\n\n**(Merged: covers both analytics & auth, all adapters, and dispatcher)**"
+}

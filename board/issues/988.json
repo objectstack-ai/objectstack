@@ -1,0 +1,33 @@
+{
+  "number": 988,
+  "kind": "pull_request",
+  "title": "docs: unify API query syntax with Spec canonical format",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-27T03:39:26Z",
+  "updated_at": "2026-03-27T03:53:51Z",
+  "closed_at": "2026-03-27T03:53:51Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-03-27T03:53:51Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/988",
+  "body": "Documentation for query syntax and IDataEngine contract diverged from the canonical `@objectstack/spec` schemas — using legacy `filters`/tuple/`sort`/`group_by`/`aggregate` naming instead of the actual `QuerySchema` and `EngineQueryOptionsSchema` definitions.\n\n### `query-syntax.mdx` — full rewrite\n\n- All examples use `where` + `$op` object syntax, replacing tuple/三元组 format\n- `sort` → `orderBy`, `group_by` → `groupBy`, `aggregate` → `aggregations` array, `expand` → `Record<string, QueryAST>`\n- Interface definition matches actual `QueryAST` type\n- Added coverage for `search`, `joins`, `windowFunctions`, `cursor`, `distinct`\n\n### `data-engine.mdx` — full rewrite\n\n- Interface matches real `IDataEngine`: `find`/`findOne`/`insert`/`update`/`delete`/`count`/`aggregate`\n- Option types match canonical schemas (`EngineQueryOptions`, `EngineUpdateOptions`, etc.)\n- Documents optional capabilities: `vectorFind`, `batch`, `execute`\n\n### Legacy compatibility sections\n\nBoth docs now include explicit callouts: tuple/`filters` syntax is UI-builder input only — must be converted via `parseFilterAST()` before entering the protocol.\n\n```typescript\n// Before (legacy — UI builder output only)\n{ filters: [['status', '=', 'active'], ['amount', '>', 50000]], sort: [{ field: 'name', order: 'asc' }] }\n\n// After (canonical — protocol format)\n{ where: { status: 'active', amount: { $gt: 50000 } }, orderBy: [{ field: 'name', order: 'asc' }] }\n```\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 Send tasks to Copilot coding agent from [Slack](https://gh.io/cca-slack-docs) and [Teams](https://gh.io/cca-teams-docs) to turn conversations into code. Copilot posts an update in your thread when it's finished."
+}

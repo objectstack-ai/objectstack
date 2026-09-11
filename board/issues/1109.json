@@ -1,0 +1,34 @@
+{
+  "number": 1109,
+  "kind": "pull_request",
+  "title": "chore(ci)(deps): bump pnpm/action-setup from 5 to 6",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "dependabot[bot]",
+    "id": 49699333,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-13T02:14:25Z",
+  "updated_at": "2026-04-13T08:06:05Z",
+  "closed_at": "2026-04-13T08:05:57Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-13T08:05:57Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1109",
+  "body": "Bumps [pnpm/action-setup](https://github.com/pnpm/action-setup) from 5 to 6.\n<details>\n<summary>Release notes</summary>\n<p><em>Sourced from <a href=\"https://github.com/pnpm/action-setup/releases\">pnpm/action-setup's releases</a>.</em></p>\n<blockquote>\n<h2>v6.0.0</h2>\n<p>Added support for pnpm <a href=\"https://github.com/pnpm/pnpm/releases/tag/v11.0.0-rc.0\">v11</a>.</p>\n</blockquote>\n</details>\n<details>\n<summary>Commits</summary>\n<ul>\n<li><a href=\"https://github.com/pnpm/action-setup/commit/08c4be7e2e672a47d11bd04269e27e5f3e8529cb\"><code>08c4be7</code></a> docs(README): update action-setup version</li>\n<li><a href=\"https://github.com/pnpm/action-setup/commit/579891461a117d7c030d0430bbc772562374d9e1\"><code>5798914</code></a> chore: update .gitignore</li>\n<li><a href=\"https://github.com/pnpm/action-setup/commit/ddffd667542d33325b6f1d9bda9cfcc7861fc400\"><code>ddffd66</code></a> fix: remove accidentally committed file</li>\n<li><a href=\"https://github.com/pnpm/action-setup/commit/b43f991918ce53332dce4c15c32ae14261d12d65\"><code>b43f991</code></a> fix: update pnpm to 11.0.0-rc.0</li>\n<li><a href=\"https://github.com/pnpm/action-setup/commit/3852509c9e55070b5aac70d0500b8772d13ed4e6\"><code>3852509</code></a> README.md: bring versions up-to-date (<a href=\"https://redirect.github.com/pnpm/action-setup/issues/222\">#222</a>)</li>\n<li><a href=\"https://github.com/pnpm/action-setup/commit/6e7bdbda5fe05107efc88b23b7ed00aa05f84ca0\"><code>6e7bdbd</code></a> chore: bump bootstrap pnpm to 11.0.0-beta.4-1 and add update script</li>\n<li><a href=\"https://github.com/pnpm/action-setup/commit/6b87c4621a21f802115d27ffcbfb44e28abd1387\"><code>6b87c46</code></a> fix: Windows standalone mode — bypass broken npm shims (<a href=\"https://redirect.github.com/pnpm/action-setup/issues/217\">#217</a>)</li>\n<li><a href=\"https://github.com/pnpm/action-setup/commit/994d756a33d64d79175a2d721a1a1b6976958b2d\"><code>994d756</code></a> feat: read pnpm version from devEngines.packageManager (<a href=\"https://redirect.github.com/pnpm/action-setup/issues/211\">#211</a>)</li>\n<li><a href=\"https://github.com/pnpm/action-setup/commit/738f428026a1f5a72398de22aeed83d859c4a660\"><code>738f428</code></a> docs: upgrade pnpm/action-setup from v4 to v5</li>\n<li><a href=\"https://github.com/pnpm/action-setup/commit/62bce642757454630341df504b8b9ee51f1332da\"><code>62bce64</code></a> fix: extract pnpm version from packageManager field instead of returning unde...</li>\n<li>Additional commits viewable in <a href=\"https://github.com/pnpm/action-setup/compare/v5...v6\">compare view</a></li>\n</ul>\n</details>\n<br />\n\n\n[![Dependabot compatibility score](https://dependabot-badges.githubapp.com/badges/compatibility_score?dependency-name=pnpm/action-setup&package-manager=github_actions&previous-version=5&new-version=6)](https://docs.github.com/en/github/managing-security-vulnerabilities/about-dependabot-security-updates#about-compatibility-scores)\n\nDependabot will resolve any conflicts with this PR as long as you don't alter it yourself. You can also trigger a rebase manually by commenting `@dependabot rebase`.\n\n[//]: # (dependabot-automerge-start)\n[//]: # (dependabot-automerge-end)\n\n---\n\n<details>\n<summary>Dependabot commands and options</summary>\n<br />\n\nYou can trigger Dependabot actions by commenting on this PR:\n- `@dependabot rebase` will rebase this PR\n- `@dependabot recreate` will recreate this PR, overwriting any edits that have been made to it\n- `@dependabot show <dependency name> ignore conditions` will show all of the ignore conditions of the specified dependency\n- `@dependabot ignore this major version` will close this PR and stop Dependabot creating any more for this major version (unless you reopen the PR or upgrade to it yourself)\n- `@dependabot ignore this minor version` will close this PR and stop Dependabot creating any more for this minor version (unless you reopen the PR or upgrade to it yourself)\n- `@dependabot ignore this dependency` will close this PR and stop Dependabot creating any more for this dependency (unless you reopen the PR or upgrade to it yourself)\n\n\n</details>"
+}

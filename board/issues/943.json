@@ -1,0 +1,38 @@
+{
+  "number": 943,
+  "kind": "pull_request",
+  "title": "fix: align sveltekit adapter tests with dispatch() catch-all pattern",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "size/s",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-21T08:15:38Z",
+  "updated_at": "2026-03-21T09:17:35Z",
+  "closed_at": "2026-03-21T09:17:35Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-21T09:17:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/943",
+  "body": "SvelteKit adapter was refactored to use the unified `dispatcher.dispatch()` catch-all (like all other adapters), but tests still mocked the old `handleMetadata`/`handleData` methods — causing 7/19 tests to fail with 500s.\n\n- Replaced `handleMetadata`/`handleData` in mock with `dispatch`\n- Updated assertions for metadata, data, error handling, and toResponse tests to match the catch-all contract\n\n```ts\n// Before (stale mock — dispatch() undefined → throws → 500)\nconst mockDispatcher = {\n  handleMetadata: vi.fn().mockResolvedValue({ ... }),\n  handleData: vi.fn().mockResolvedValue({ ... }),\n};\n\n// After (matches implementation)\nconst mockDispatcher = {\n  dispatch: vi.fn().mockResolvedValue({ handled: true, response: { body: { success: true }, status: 200 } }),\n};\n```\n\nAligned with the hono adapter test conventions, which already use this pattern.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> fix all ci errors\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n📱 Kick off Copilot coding agent tasks wherever you are with [GitHub Mobile](https://gh.io/cca-mobile-docs), available on iOS and Android."
+}

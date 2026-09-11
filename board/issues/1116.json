@@ -1,0 +1,36 @@
+{
+  "number": 1116,
+  "kind": "pull_request",
+  "title": "Fix @libsql/client native dependency resolution for Vercel deployment",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "size/s"
+  ],
+  "assignees": [
+    "Claude",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-13T09:29:31Z",
+  "updated_at": "2026-04-13T09:52:18Z",
+  "closed_at": "2026-04-13T09:52:18Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1116",
+  "body": "Vercel deployment was failing with `Cannot find module '@libsql/linux-x64-gnu'` because the Turso driver's native binaries were not included in the serverless function package.\n\n## Root Cause\n\n`@libsql/client` was marked for bundling in esbuild, but it depends on platform-specific native binaries (e.g., `@libsql/linux-x64-gnu` on Linux x64) that cannot be bundled. The deployment package lacked these runtime dependencies.\n\n## Changes\n\n- **apps/studio/scripts/bundle-api.mjs**: Mark `@libsql/client` as external (native bindings cannot be bundled)\n- **apps/studio/scripts/build-vercel.sh**: Copy entire `@libsql/*` scope to ensure all platform-specific binaries are included\n- **apps/studio/vercel.json**: Add `@libsql` to `includeFiles` pattern for serverless function packaging\n\nThis follows the same pattern already used for `better-sqlite3` and `@ai-sdk` packages."
+}

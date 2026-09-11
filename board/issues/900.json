@@ -1,0 +1,33 @@
+{
+  "number": 900,
+  "kind": "pull_request",
+  "title": "Refactor AuthPlugin to align with better-auth best practices (basePath, handler forwarding)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-10T05:36:06Z",
+  "updated_at": "2026-03-10T06:06:56Z",
+  "closed_at": "2026-03-10T06:03:55Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-10T06:03:55Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/900",
+  "body": "`AuthManager` hardcoded `basePath: '/'` and `AuthPlugin` compensated by manually rewriting request URLs (stripping the prefix, reconstructing a new `Request` with `duplex: 'half'`). This breaks better-auth's assumptions about path matching and is fragile.\n\n### Changes\n\n- **`auth-manager.ts`**: Set `basePath` to `this.config.basePath || '/api/v1/auth'` instead of `'/'`. Added `basePath` to `AuthManagerOptions`.\n- **`auth-plugin.ts`**: Removed 13 lines of URL rewriting. Route handler now forwards directly:\n  ```typescript\n  const response = await this.authManager!.handleRequest(c.req.raw);\n  ```\n- **`auth-manager.test.ts`**: Added tests verifying `basePath` defaults correctly and accepts custom values.\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>Refactor AuthPlugin to align with better-auth best practices (basePath, handler forwarding)</issue_title>\n> <issue_description>## Problem\n> Current AuthPlugin implementation does not fully align with better-auth server integration best practices, causing hidden routing and parsing bugs:\n> \n> - `auth-manager.ts` sets `basePath: '/'` instead of the expected `/api/v1/auth`\n> - `auth-plugin.ts` manually rewrites the request URL, stripping the API prefix. This forces manual path handling and may break better-auth assumptions about basePath\n> \n> ## Recommended Fix\n> \n> **High priority—refactor the integration as follows:**\n> \n> 1. In `auth-manager.ts`, set `basePath` to `/api/v1/auth` (instead of `/`).\n> 2. In `auth-plugin.ts`, remove custom path rewriting. Forward the original request object directly:\n>    ```typescript\n>    return this.authManager.handleRequest(c.req.raw);\n>    ```\n> 3. Ensure that all route registration and forwarding strictly follow better-auth's official usage and expectations.\n> \n> ---</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#899\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

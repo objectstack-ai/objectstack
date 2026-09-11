@@ -1,0 +1,35 @@
+{
+  "number": 1260,
+  "kind": "pull_request",
+  "title": "chore: document cloud-split (changeset + CLI stub comment)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-21T13:15:36Z",
+  "updated_at": "2026-05-21T13:27:13Z",
+  "closed_at": "2026-05-21T13:27:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-05-21T13:27:10Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1260",
+  "body": "Two tiny cleanups closing the loop on the apps/cloud + apps/objectos split (#1257, #1258, #1259):\n\n## Changes\n\n1. **`.changeset/cloud-split-cleanup.md`** — `@objectstack/cli: minor`. The CLI no longer hard-depends on `@objectstack/service-cloud`; cloud-mode is loaded via dynamic import with try/catch. Release notes will explain the impact (and the removed root `pnpm dev/start/doctor` scripts).\n\n2. **`packages/cli/src/types/service-cloud.d.ts`** — refresh the top-of-file comment. The old wording (\"pre-existing typecheck errors in upstream deps\") was from the pre-split era. New comment accurately states: package ships from `objectstack-ai/cloud`, optional dynamic import, `any` is intentional.\n\nNo functional changes. No new tests needed.\n\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+}

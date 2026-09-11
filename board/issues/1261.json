@@ -1,0 +1,33 @@
+{
+  "number": 1261,
+  "kind": "pull_request",
+  "title": "chore: drop @objectstack/service-cloud from changeset fixed list",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-21T13:31:28Z",
+  "updated_at": "2026-05-21T13:35:05Z",
+  "closed_at": "2026-05-21T13:35:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-05-21T13:35:00Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1261",
+  "body": "## Why\nThe package was removed from this repo in #1257 (cloud split) but its entry in `.changeset/config.json`'s `fixed` list was left behind. Every Release workflow run since then has failed with:\n\n```\nValidationError: The package or glob expression \"@objectstack/service-cloud\" specified in the `fixed` option does not match any package in the project.\n```\n\n## What this unblocks\n- `changesets/action` will refresh PR #1256 (`chore: version packages`)\n- 11 pending changesets will be consumed, bumping published packages **4.0.5 → 4.1.0** (minor, driven by the `@objectstack/cli` changeset added in #1260)\n- Merging PR #1256 triggers npm publish\n\n## Verified locally\nRan `pnpm run version` with this fix: ✅ produces clean diff, all fixed packages bump to 4.1.0, CHANGELOGs generated.\n\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+}

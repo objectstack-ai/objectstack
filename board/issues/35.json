@@ -1,0 +1,37 @@
+{
+  "number": 35,
+  "kind": "pull_request",
+  "title": "[WIP] Add query enhancements and advanced validation features",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-20T05:00:49Z",
+  "updated_at": "2026-03-23T21:51:48Z",
+  "closed_at": "2026-01-20T05:34:35Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-01-20T05:34:35Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35",
+  "body": "## Implementation Plan: High Priority Features\n\n### 📊 Query Enhancements (query.zod.ts)\n- [x] Add aggregation support (GROUP BY, HAVING)\n- [x] Add join types (INNER, LEFT, RIGHT, FULL)\n- [x] Add subquery support\n- [x] Add window function support\n- [x] Add tests for query enhancements\n\n### ✅ Advanced Validation (validation.zod.ts)\n- [x] Add cross-field validation schema\n- [x] Add async validation schema\n- [x] Add custom validator function schema\n- [x] Add conditional rules schema\n- [x] Add tests for advanced validation\n\n### 🎨 Theme Configuration (theme.zod.ts - new)\n- [x] Create theme.zod.ts file\n- [x] Add color palette schema\n- [x] Add typography settings schema\n- [x] Add spacing units schema\n- [x] Add border radius and shadows schema\n- [x] Add tests for theme configuration\n- [x] Export from index.ts\n\n### 📝 Enhanced Field Types (field.zod.ts)\n- [x] Add location field type (GPS coordinates)\n- [x] Add address field type (structured)\n- [x] Add richtext field type (WYSIWYG)\n- [x] Add code field type (syntax highlighting)\n- [x] Add color field type (color picker)\n- [x] Add rating field type (stars)\n- [x] Add signature field type (digital signature)\n- [x] Add helper functions for new field types\n- [x] Add tests for enhanced field types\n\n### 🔍 Final Validation\n- [x] Run all tests (434 tests pass)\n- [x] Build package to generate JSON schemas\n- [x] Verify no regressions\n\n## Summary of Changes\n\n### Enhanced Field Types (7 new types)\nAdded 7 new field types to support richer UI components:\n- `location` - GPS coordinates with map display support\n- `address` - Structured address with format options\n- `richtext` - WYSIWYG editor support\n- `code` - Syntax highlighting with language selection\n- `color` - Color picker with format options\n- `rating` - Star rating with configurable max\n- `signature` - Digital signature capture\n\n### Query Enhancements\nSignificantly expanded query capabilities for complex analytics:\n- **Aggregation**: COUNT, SUM, AVG, MIN, MAX, COUNT_DISTINCT, ARRAY_AGG, STRING_AGG\n- **Joins**: INNER, LEFT, RIGHT, FULL with subquery support\n- **Window Functions**: ROW_NUMBER, RANK, DENSE_RANK, LAG, LEAD, etc.\n- **Group By & Having**: Full GROUP BY support with HAVING clause\n- **DISTINCT**: SELECT DISTINCT support\n\n### Advanced Validation\nAdded 4 new validation types for richer data quality controls:\n- **Cross-Field Validation**: Validate relationships between fields (e.g., end_date > start_date)\n- **Async Validation**: Remote validation via API or custom functions\n- **Custom Validator**: User-defined validation functions\n- **Conditional Validation**: Rules that apply based on conditions\n\n### Theme Configuration (New Module)\nComplete theming system for brand customization:\n- **Color Palettes**: Primary, secondary, semantic colors with variants\n- **Typography**: Font families, sizes, weights, line heights, letter spacing\n- **Spacing**: Consistent spacing scale (0-24)\n- **Border Radius**: Rounded corners (none to full)\n- **Shadows**: Box shadow effects\n- **Breakpoints**: Responsive design breakpoints\n- **Animation**: Duration and timing functions\n- **Z-Index**: Layering configuration\n- **Logo**: Light/dark mode logos and favicon\n- **Theme Modes**: light, dark, auto\n\n### Test Coverage\n- Added 28 new tests for query enhancements\n- Added 12 new tests for advanced validation\n- Added 24 new tests for theme configuration\n- Added 14 new tests for enhanced field types\n- Total: 434 tests passing (78 new tests added)\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 📊 High Priority Features (Do Next)\n> \n> Query Enhancements\n> \n> Files: packages/spec/src/data/query.zod.ts\n> Effort: 3-5 days\n> Value: Enables complex analytics and reporting\n> \n> Features:\n> \n> Aggregation (GROUP BY, HAVING)\n> Joins (INNER, LEFT, RIGHT)\n> Subqueries\n> Window functions\n> Advanced Validation\n> \n> Files: packages/spec/src/data/validation.zod.ts\n> Effort: 2-3 days\n> Value: Richer data quality controls\n> \n> Features:\n> \n> Cross-field validation (\"end_date > start_date\")\n> Async validation (remote uniqueness checks)\n> Custom validator functions\n> Conditional rules\n> Theme Configuration\n> \n> Files: packages/spec/src/ui/theme.zod.ts (new)\n> Effort: 2-3 days\n> Value: Brand customization for customers\n> \n> Features:\n> \n> Color palettes\n> Typography settings\n> Spacing units\n> Border radius, shadows\n> Enhanced Field Types\n> \n> Files: packages/spec/src/data/field.zod.ts\n> Effort: 2-3 days\n> Value: More rich UI components\n> \n> New Types:\n> \n> location (GPS coordinates)\n> address (structured)\n> richtext (WYSIWYG)\n> code (syntax highlighting)\n> color (color picker)\n> rating (stars)\n> signature (digital signature)\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

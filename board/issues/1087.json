@@ -1,0 +1,36 @@
+{
+  "number": 1087,
+  "kind": "pull_request",
+  "title": "fix(service-ai): yield tool-result events in streamChatWithTools SSE stream",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-08T08:29:37Z",
+  "updated_at": "2026-04-08T09:29:37Z",
+  "closed_at": "2026-04-08T09:21:35Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-08T09:21:35Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1087",
+  "body": "`streamChatWithTools` emitted `tool-call` (`tool-input-available`) events but never yielded the corresponding `tool-result` — results were only pushed to the conversation array. The encoder already mapped `tool-result` → `tool-output-available`; it just was never invoked.\n\n### Changes\n\n- **`ai-service.ts`**: Yield each `ToolExecutionResult` as a `tool-result` stream part before appending it to the conversation\n\n```typescript\nfor (const tr of toolResults) {\n  // ... error handling ...\n  yield {\n    type: 'tool-result',\n    toolCallId: tr.toolCallId,\n    toolName: tr.toolName,\n    output: tr.output,\n  } as TextStreamPart<ToolSet>;\n  conversation.push({ role: 'tool', content: [tr] } as ModelMessage);\n}\n```\n\n- **`auth-and-toolcalling.test.ts`**: Added assertions for `tool-result` presence/ordering in the existing streaming test; added a dedicated test validating tool output content round-trips correctly"
+}

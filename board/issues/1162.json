@@ -1,0 +1,36 @@
+{
+  "number": 1162,
+  "kind": "pull_request",
+  "title": "Complete Claude Code migration with comprehensive documentation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-16T02:06:14Z",
+  "updated_at": "2026-04-16T02:07:23Z",
+  "closed_at": "2026-04-16T02:07:23Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1162",
+  "body": "Optimizes the project for Claude Code development by adding comprehensive AI-assisted development documentation and configuration files.\n\n## Changes\n\n### New Files\n\n- **`.claudeignore`** — Excludes build outputs, dependencies, generated files, and auto-generated documentation from AI context\n- **`docs/CLAUDE_CODE_GUIDE.md`** — 600+ line comprehensive guide covering:\n  - AI instruction hierarchy (CLAUDE.md → domain prompts → skills → memories)\n  - 8 domain-specific prompt workflows (Data, UI, System, AI, API, Testing, Documentation, Examples)\n  - Development workflows for common tasks (new field types, plugins, view types)\n  - Best practices enforcement (Zod-first, naming conventions, testing)\n  - Troubleshooting and advanced usage patterns\n\n### Updated Files\n\n- **`README.md`** — Added \"AI-Assisted Development\" section with:\n  - Claude Code integration quick start\n  - Key features (10+ prompts, auto-routing, 100+ examples)\n  - GitHub Copilot dual compatibility reference\n\n## Documentation Architecture\n\nThe project now provides a complete 4-level AI instruction system:\n\n```\nCLAUDE.md (root, auto-loaded)\n  ↓\n.github/prompts/*.prompt.md (domain context)\n  ↓\nskills/*/SKILL.md (implementation guides)\n  ↓\nRepository memories (learned patterns)\n```\n\nExample workflow:\n\n```bash\n# Ask Claude Code: \"Create a new field type for encrypted data\"\n# → Uses data-protocol.prompt.md\n# → Follows Zod-first approach\n# → Auto-generates tests and docs\n```\n\nAll documentation maintains sync with `.github/copilot-instructions.md` for dual AI assistant compatibility."
+}

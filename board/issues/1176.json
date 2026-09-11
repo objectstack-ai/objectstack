@@ -1,0 +1,37 @@
+{
+  "number": 1176,
+  "kind": "pull_request",
+  "title": "Add flexible driver configuration for organization databases",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Claude",
+    "id": 242468646,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-17T09:16:04Z",
+  "updated_at": "2026-04-19T08:19:33Z",
+  "closed_at": "2026-04-19T08:19:33Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1176",
+  "body": "Organizations can now specify their database driver type (Turso, Memory, SQL, SQLite, Custom) instead of being limited to hardcoded Turso configuration. This enables flexible deployment scenarios: memory drivers for development/testing, Turso for production cloud, PostgreSQL/MySQL for enterprise on-premise, and custom drivers for proprietary implementations.\n\n## Changes\n\n### Schema Updates (`packages/spec/src/cloud/tenant.zod.ts`)\n- Added `DriverConfigSchema` discriminated union supporting 5 driver types\n- Added type-specific config schemas: `TursoDriverConfigSchema`, `MemoryDriverConfigSchema`, `SQLDriverConfigSchema`, `SQLiteDriverConfigSchema`, `CustomDriverConfigSchema`\n- Updated `TenantDatabaseSchema` to use `driverConfig` field instead of separate `databaseName`, `databaseUrl`, `authToken`, `region` fields\n- Updated `ProvisionTenantRequestSchema` to accept `driverConfig` parameter\n\n### Provisioning Service (`packages/services/service-tenant/src/tenant-provisioning.ts`)\n- Refactored `provisionTenant()` to dispatch based on driver type\n- Added driver-specific provisioning methods: `provisionTursoDatabase()`, `provisionMemoryDriver()`, `provisionSQLDatabase()`, `provisionSQLiteDatabase()`, `provisionCustomDriver()`\n- Updated `storeTenantRecord()` to serialize `driverConfig` as JSON\n\n### Driver Factory (`packages/services/service-tenant/src/driver-factory.ts`)\n- New `DriverFactory` class for managing driver instances with caching\n- Type-safe driver instantiation based on configuration\n- Cache key generation for connection pooling\n\n### Runtime Resolution (`packages/services/service-tenant/src/tenant-context.ts`)\n- Added `getDriverForOrganization()` method to retrieve driver instance for an organization\n- Added `getTenantDatabase()` to query control plane for driver configuration\n- Integrated `DriverFactory` for runtime driver creation\n\n### Database Schema (`packages/services/service-tenant/src/objects/sys-tenant-database.object.ts`)\n- Replaced individual fields with `driver_config` textarea field storing JSON-serialized configuration\n- Removed hardcoded Turso-specific fields\n\n## Usage Example\n\n```typescript\n// Production: Turso cloud database\nawait provisioningService.provisionTenant({\n  organizationId: 'org-prod-001',\n  driverConfig: {\n    driver: 'turso',\n    databaseUrl: 'libsql://uuid.turso.io',\n    authToken: process.env.TURSO_TOKEN!,\n  },\n  plan: 'pro',\n});\n\n// Development: In-memory database\nawait provisioningService.provisionTenant({\n  organizationId: 'org-dev-001',\n  driverConfig: {\n    driver: 'memory',\n    persistent: false,\n  },\n  plan: 'free',\n});\n\n// Enterprise: PostgreSQL\nawait provisioningService.provisionTenant({\n  organizationId: 'org-enterprise-001',\n  driverConfig: {\n    driver: 'sql',\n    dialect: 'postgresql',\n    host: 'localhost',\n    port: 5432,\n    database: 'org_data',\n    username: 'postgres',\n    password: process.env.DB_PASSWORD!,\n  },\n  plan: 'enterprise',\n});\n```\n\n## Testing\n\nAdded comprehensive test coverage:\n- `multi-driver.test.ts`: Integration tests for all 5 driver types\n- `driver-factory.test.ts`: Cache key generation and management tests\n\n## Documentation\n\n- `DRIVER_CONFIG.md`: Complete usage guide with migration path, best practices, and troubleshooting"
+}

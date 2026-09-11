@@ -1,0 +1,37 @@
+{
+  "number": 1153,
+  "kind": "pull_request",
+  "title": "fix: resolve CI test failures in MetadataPlugin, auth trustedOrigins, client Hono test, and docs build",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-15T10:47:06Z",
+  "updated_at": "2026-04-15T12:46:33Z",
+  "closed_at": "2026-04-15T12:46:24Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-04-15T12:46:24Z",
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1153",
+  "body": "CI failures across four packages — fixes all test/build errors introduced or exposed by the better-auth CORS support merge (PR #1152).\n\n### MetadataPlugin driver bridging (`packages/metadata/src/plugin.ts`)\n\nThe `driver.*` service fallback was nested inside a `catch` block, only reached when `ctx.getService('objectql')` threw. When ObjectQL returned `null` (the common case when ObjectQL isn't loaded), execution fell through without ever scanning for driver services.\n\nRestructured to use a `driverBridged` flag so the fallback runs whenever ObjectQL doesn't provide a driver — whether it returns null, doesn't resolve, or throws:\n\n```typescript\nlet driverBridged = false;\ntry {\n    const ql = ctx.getService<any>('objectql');\n    if (ql) {\n        const driver = ql.getDriverForObject?.(tableName);\n        if (driver) { this.manager.setDatabaseDriver(driver); driverBridged = true; }\n    }\n} catch { /* ObjectQL unavailable */ }\n\nif (!driverBridged) {\n    // scan for driver.* services\n}\n```\n\n### Auth trustedOrigins tests (`packages/plugins/plugin-auth/src/auth-manager.test.ts`)\n\nPR #1152 added auto-default `http://localhost:*` to `trustedOrigins` when none are configured (development convenience for CSRF protection). Two tests still expected `trustedOrigins` to be absent in this case, causing `AssertionError: expected { …(11) } to not have property \"trustedOrigins\"`.\n\nUpdated both tests to verify the new default `[\"http://localhost:*\"]` value is correctly set when `trustedOrigins` is not provided or is empty.\n\n### Docs build: lucide-react module resolution (`apps/docs/next.config.mjs`)\n\nMDX content files in `content/docs/` (at the monorepo root) import `lucide-react` icons, but Turbopack resolves modules starting from the file's directory. Since `lucide-react` is only installed in `apps/docs/node_modules/`, it's unreachable from the content directory, causing 33 `Module not found: Can't resolve 'lucide-react'` errors.\n\nAdded `turbopack.resolveAlias` in `next.config.mjs` to alias `lucide-react` to the app's local `./node_modules/lucide-react`, allowing Turbopack to resolve the import from any file location.\n\n### Client Hono test timeout (`packages/client/src/client.hono.test.ts`)\n\nThe `afterAll` hook was hanging in CI because `kernel.shutdown()` awaits `pinoLogger.flush(callback)` internally, and pino's worker-thread transport callback may never fire in CI environments, causing the promise to hang indefinitely.\n\nFixed by racing `kernel.shutdown()` against a 10-second hard deadline using `Promise.race()`. The `afterAll` hook now always completes well within the 30s vitest limit, even when the pino flush hangs:\n\n```typescript\nafterAll(async () => {\n    if (kernel) {\n        await Promise.race([\n            kernel.shutdown(),\n            new Promise<void>((resolve) => setTimeout(resolve, 10_000)),\n        ]);\n    }\n}, 30_000);\n```"
+}

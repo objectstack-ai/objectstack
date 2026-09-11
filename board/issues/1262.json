@@ -1,0 +1,33 @@
+{
+  "number": 1262,
+  "kind": "pull_request",
+  "title": "fix(changesets): sync `fixed` package list with current workspace",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-22T06:19:01Z",
+  "updated_at": "2026-05-22T06:19:20Z",
+  "closed_at": "2026-05-22T06:19:20Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-05-22T06:19:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1262",
+  "body": "The release workflow's `pnpm run version` step failed because `.changeset/config.json` referenced `@objectstack/service-tenant`, which has been removed from the workspace:\n\n> 🦋 error ValidationError: The package or glob expression \"@objectstack/service-tenant\" specified in the `fixed` option does not match any package in the project.\n\nSeveral other packages added since the config was last touched were also missing from the `fixed` group, which would have caused them to drift out of lockstep on the next version bump.\n\n### Changes (`.changeset/config.json`)\n\n- Removed the stale `@objectstack/service-tenant` entry.\n- Added packages present in the workspace but missing from `fixed`: `account`, `console`, `plugin-approvals`, `plugin-email`, `plugin-reports`, `plugin-sharing`, `plugin-webhooks`, `service-settings`.\n- Sorted the plugin and service blocks alphabetically to make future drift easier to spot.\n\nAudit was driven by comparing `fixed` against `jq -r .name` over every `package.json` under `packages/`, `apps/`, and `examples/`."
+}

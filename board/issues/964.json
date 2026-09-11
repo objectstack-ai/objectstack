@@ -1,0 +1,33 @@
+{
+  "number": 964,
+  "kind": "issue",
+  "title": "【架构演进】TursoDriver 支持双 transport：Knex(better-sqlite3)+@libsql/client（纯 remote 场景）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-23T07:14:43Z",
+  "updated_at": "2026-03-23T11:26:45Z",
+  "closed_at": "2026-03-23T11:26:45Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/964",
+  "body": "## 背景\n目前 TursoDriver 只支持本地/embedded-replica/文件/内存这几个场景，所有 CRUD 请求实际都走本地 better-sqlite3/Knex。对于 cloud/serverless/edge-only 的纯 remote (libsql://) 连接，只能 sync 不能直接 query，**无法支持 Turso 云端 DaaS 的主流用法**。\n\n## 问题\n- 现有驱动不支持 `url: libsql://...` 场景，只能配合 syncUrl 做 embedded/hybrid offline 模式。\n- 社区/官方文档主推的 Turso serverless/Cloud（Vercel/CF）实际不能用此 Driver。\n- objectql legacy 版本实际上支持 direct @libsql/client CRUD。\n\n## 目标\n**升级为双 transport 架构：实现 TursoDriver 可根据 URL/config 自动切换：**\n- A. local file / :memory: / embedded-replica: 保持继承 SqlDriver (Knex+better-sqlite3)，所有查询走本地引擎\n- B. remote only（libsql://）: 直接用 @libsql/client SDK（HTTP/WebSocket）做 CRUD/schema/query，无需本地 DB，不依赖 Knex\n- 二者接口完全一致（IDataDriver），外部无需感知差异\n\n## 方案 / 拟实现\n1. TursoDriver 增加 transport 层 strategy：`mode: 'local' | 'replica' | 'remote'`\n2. remote-only 场景实现 find/create/update/delete/aggregate/... 直调 @libsql/client API（objectql 旧版本有实现）\n3. query/schema/filter 编译仍可复用 SqlDriver 逻辑，底层实际执行换为 http fetch\n4. 开放自定义 fallback/bypass，便于 future: proxy/query router/edge 分布式等拓展\n5. 补齐 type test 和 remote-only CI\n\n## 验收标准\n- 支持所有 cloud-only use case，自动根据 URL 选最优实现\n- IDE/SDK/CLI 全部表现为单一 Driver，无需手工区分\n- 支持传入 @libsql/client driver 实例，便于自定义缓存、上层管理\n- 文档更新，roadmap 标出 phased scope"
+}

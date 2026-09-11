@@ -1,0 +1,35 @@
+{
+  "number": 1079,
+  "kind": "issue",
+  "title": "【Studio】Code tab does not show code export (default-plugin viewer always renders preview, not code)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-04-07T08:06:31Z",
+  "updated_at": "2026-04-07T09:00:14Z",
+  "closed_at": "2026-04-07T09:00:14Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1079",
+  "body": "### Bug\n\n**现象（What happens）**\n- 在 Studio 元数据详情页（如 apps > setup），点击顶部 \"Code\" 标签页，没有任何反应，一直是 Preview/属性视图。\n- 实际应当切换为可导出的代码模式（TypeScript/JSON），但内容没有变化。\n\n**期望结果（What should happen）**\n- 切换到 Code 标签时应显示 CodeExporter，导出 TypeScript/JSON、支持一键复制等，而不是 property 预览。\n\n---\n\n### 技术细节 / 根因分析\n- `default-plugin.tsx` 只注册了一个 metadataViewer（`json-inspector`），声明支持 `modes: ['preview', 'code']`，但其组件 (`DefaultViewerComponent`) 并没有根据 `mode` 切换。\n- 目前无论 `preview` 还是 `code`，都只渲染 `<MetadataInspector>`，导致 toolbar 切换模式无法生效。\n- 代码导出组件 `CodeExporter` 已有（支持切 TypeScript/JSON/copy），但没有路由到 `code` 模式。\n\n#### 推荐修复方案：\n1. default-plugin 声明两个 viewer：`json-inspector (preview)` 和 `code-inspector (code)`，分别注册到 `MetadataInspector` 和 `CodeExporter`。\n2. 在 `PluginHost` 下切换 code 模式时，走 `code-inspector`，渲染 `<CodeExporter type=... definition=... />`，类型根据 metadataType 匹配（如 object/view/flow/agent/app）。\n3. 充分利用已有的代码导出 UI（TypeScript/JSON 切换、复制按钮）。\n\n---\n\n### 相关源码位置（关键文件）\n- `apps/studio/src/plugins/built-in/default-plugin.tsx`\n- `apps/studio/src/components/CodeExporter.tsx`\n- `apps/studio/src/plugins/plugin-host.tsx`\n"
+}

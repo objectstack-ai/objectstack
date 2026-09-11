@@ -1,0 +1,33 @@
+{
+  "number": 1212,
+  "kind": "pull_request",
+  "title": "fix(service-tenant): register control-plane objects via manifest service",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-22T08:39:18Z",
+  "updated_at": "2026-04-22T08:43:36Z",
+  "closed_at": "2026-04-22T08:43:36Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-04-22T08:43:36Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1212",
+  "body": "On Vercel, `POST /api/v1/cloud/projects` returns 202 but the subsequent `GET` 404s, while user/org writes (also `sys` namespace) persist normally. Locally under `pnpm dev` everything appears to work — which is itself the smoking gun.\n\n### Root cause\n\n`createTenantPlugin()` declared its schemas via a top-level `objects: [...]` field on the kernel plugin object. The kernel only consumes `plugin.objects` for **nested** plugins inside a parent manifest (`engine.registerPlugin()`); top-level plugins added via `kernel.use(plugin)` must register through the `manifest` service — the convention `AuthPlugin` / `SecurityPlugin` / `SetupPlugin` already follow.\n\nConsequence chain:\n\n1. `sys__project`, `sys__project_credential`, `sys__project_member`, `sys__package*`, `sys__tenant_database` never reached `SchemaRegistry`.\n2. `ObjectQL.getDriver('sys__project')` looked up `undefined`, so the `namespace: 'sys' → turso` `datasourceMapping` rule could not match (`object?.namespace === 'sys'` is false when `object` is `undefined`) and fell through to the `default` rule → `InMemoryDriver`.\n3. `InMemoryDriver` accepts unknown tables, so the insert \"succeeded\" silently.\n   - **Local `pnpm dev`:** single long-lived process, the in-memory `Map` survives across requests → looks fine until the dev server restarts (data then vanishes).\n   - **Vercel:** each lambda isolate has its own memory → row evaporates on cold start / instance switch → 404.\n4. `sys__user` / `sys__organization` were unaffected because `AuthPlugin` registers them through the correct path — same `sys` namespace, but actually routed to Turso.\n\nSame silent-loss applies to package install/upgrade, credential rotation, and project membership reads.\n\n### Changes\n\n- **`packages/services/service-tenant/src/tenant-plugin.ts`** — drop the no-op top-level `objects:`; register the same set inside `init()` via the manifest service. Throw if the manifest service is unavailable so this fails loudly instead of silently routing writes to the default driver.\n- **`CHANGELOG.md`** — Unreleased ▸ Fixed entry documenting the bug, blast radius, and fix.\n\n```ts\n// packages/services/service-tenant/src/tenant-plugin.ts\nctx.getService<{ register(m: any): void }>('manifest').register({\n  id: 'com.objectstack.tenant',\n  name: 'Tenant',\n  version: '0.2.0',\n  type: 'plugin',\n  scope: 'platform',\n  namespace: 'sys',\n  objects: [\n    SysProject, SysProjectCredential, SysProjectMember,\n    SysPackage, SysPackageVersion, SysPackageInstallation,\n    ...(config.registerLegacyTenantDatabase !== false ? [SysTenantDatabase] : []),\n  ],\n});\n```\n\n### Notes for reviewers\n\n- No schema changes — only the registration path. Existing tenant tests (31) still pass; the pre-existing `tenant-integration.test.ts` resolution error in `tenant-schema-initializer.ts` is unrelated.\n- Quick repro to confirm without redeploying: create a project under `pnpm dev`, restart, then `GET` it → 404. Or query the Turso control-plane DB for `sys__project` — the table is currently empty (and may not even exist, since `ObjectQLPlugin.start()`'s auto schema-sync also iterates `SchemaRegistry`).\n- Worth a quick audit of other plugins authored against the same misleading shape; `grep -rn \"^\\s*objects:\\s*\\[\" packages` found no other top-level offenders. A longer-term guard would be a kernel-side warning when `plugin.objects` is set on a non-nested plugin."
+}

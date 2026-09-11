@@ -1,0 +1,33 @@
+{
+  "number": 918,
+  "kind": "pull_request",
+  "title": "feat: enable system objects visibility in Studio sidebar",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-12T04:29:45Z",
+  "updated_at": "2026-03-12T07:01:17Z",
+  "closed_at": "2026-03-12T07:01:17Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-12T07:01:17Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/918",
+  "body": "Studio couldn't display system objects (sys_user, sys_role, sys_audit_log, etc.) because the mock kernel never registered them, the spec defaulted `includeSystem: false`, and the sidebar \"System\" group was static.\n\n### Spec defaults\n- `ObjectFilterSchema.includeSystem`: `false` → `true`\n- `ObjectManagerConfigSchema.defaultFilter.includeSystem`: `false` → `true`\n- `ObjectDesignerConfigSchema.objectManager.defaultFilter.includeSystem`: `false` → `true` (nested `.default()` block aligned to prevent override)\n- Added regression test assertion for `ObjectDesignerConfigSchema.objectManager.defaultFilter.includeSystem`\n\n### Mock kernel — system object registration\n- Imports all 14 system object definitions from plugin-auth, plugin-security, plugin-audit via Vite aliases (resolves to source — avoids pulling in better-auth and other runtime deps)\n- Registers them as a `com.objectstack.system` AppPlugin before user configs\n\n```typescript\n// vite.config.ts — resolve to plugin source objects barrel (no runtime deps)\n'@objectstack/plugin-auth/objects': path.resolve(__dirname, '../../packages/plugins/plugin-auth/src/objects/index.ts'),\n```\n\n### Sidebar — dynamic system objects group\n- `isSystemObject()` helper detects objects by `isSystem === true`, `namespace === 'sys'`, FQN prefix (`sys__`), or legacy prefix (`sys_`)\n- \"System\" group now includes a collapsible \"System Objects\" section populated from metadata\n- Eye/EyeOff toggle on Data group header to show/hide system objects from the main list (with `aria-label` and `type=\"button\"` for accessibility)\n- `filteredMetaItems` memo separates system objects when toggle is off\n- `Collapsible` `onOpenChange` handles open/close explicitly to stay in sync with search state\n\n### Docs\n- CHANGELOG.md, ROADMAP.md, Studio ROADMAP.md, object-designer reference updated\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>Studio 无法显示系统对象（sys_user、sys_role 等）</issue_title>\n> <issue_description>## 问题描述\n> 在 ObjectStack Studio 中无法看到平台内置系统对象（如 sys_user、sys_role、sys_audit_log 等），导致无法管理用户、权限、审计等核心元数据。\n> \n> ### 原因总结\n> 1. Studio Kernel 未注册 plugin-auth、plugin-security、plugin-audit 等系统插件，导致系统对象未被加载。\n> 2. Sidebar 的 ObjectManager 默认过滤掉 isSystem=true 的对象（includeSystem: false）。\n> 3. Sidebar 中\"System\"分组未动态展示系统对象，只显示静态 API Console 和 Packages。\n> \n> ## 复现步骤\n> 1. 启动 Studio，进入对象管理。\n> 2. 仅能看到业务对象，无法看到 sys_xxx 系统对象。\n> \n> ## 期望结果\n> - Studio 左侧对象列表能够列出所有系统对象（sys_user、sys_role、sys_audit_log 等）。\n> - 支持直接查看、编辑、管理系统对象元数据。\n> \n> ## 建议解决方案\n> - [ ] 在 Studio Kernel 初始化时将 plugin-auth、plugin-security、plugin-audit 自动注册。\n> - [ ] Sidebar ObjectManager 默认展示 includeSystem=true 的对象，并提供\"系统对象\"分组。\n> - [ ] \"System\"分组下可动态加载所有 isSystem=true 的对象。\n> - [ ] 对象过滤器可自由切换展示/隐藏系统对象。\n> \n> ## 架构建议\n> - 采用长期可持续的方式，自动注册所有 sys 域对象，确保平台一致性与可维护性。\n> - 修复后同步更新 ROADMAP.md 和 CHANGELOG.md。\n> - 所有设计需保证未来自动化、低代码、DSL 场景可扩展。\n> \n> ---\n> 如需支持，我可提交 PR 完成相关修复。</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#917\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1090,
+  "kind": "issue",
+  "title": "list_objects list_metadata_objects 功能完全一致，应该合并",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-08T09:23:33Z",
+  "updated_at": "2026-04-08T09:59:20Z",
+  "closed_at": "2026-04-08T09:59:20Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1090",
+  "body": "两个 tool 底层数据源完全一致，list_objects 只是 list_metadata_objects 的功能子集。分开维护带来了：\n\n命名混淆（\"避免碰撞\"是人为制造的问题）\n两套重复的 ObjectDef 类型定义\ndata_chat agent 用的是弱化版，无 filter/includeFields 能力\n应当合并为统一的 list_objects tool，同时同步合并 describe_object / describe_metadata_object 这对同类重复。\n\n"
+}

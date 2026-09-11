@@ -1,0 +1,35 @@
+{
+  "number": 1070,
+  "kind": "issue",
+  "title": "AIServicePlugin should auto-detect and initialize LLM provider based on environment variables",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-07T01:46:31Z",
+  "updated_at": "2026-04-07T03:45:50Z",
+  "closed_at": "2026-04-07T03:45:50Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1070",
+  "body": "### Problem\nCurrently, only the CLI server (packages/cli/src/commands/serve.ts) contains logic to auto-detect LLM providers (OpenAI, Anthropic, Google, Vercel AI Gateway) via environment variables and construct a VercelLLMAdapter accordingly. In non-CLI deployments (e.g., Vercel via apps/studio/server/index.ts), AIServicePlugin is always constructed with no `adapter` supplied, so it falls back to the test-only MemoryLLMAdapter.\n\nThis leads to inconsistent behavior: production deployments risk silently using only the echo AI, unless every entrypoint duplicates the CLI detection logic.\n\n### Proposal\nRefactor and move the entire LLM provider auto-detection and adapter selection logic into the core AIServicePlugin. When no `adapter` is supplied in options, AIServicePlugin should:\n1. Detect LLM provider preference and settings from standard environment variables, in priority order:\n    - AI_GATEWAY_MODEL → use @ai-sdk/gateway via VercelLLMAdapter\n    - OPENAI_API_KEY   → use @ai-sdk/openai via VercelLLMAdapter\n    - ANTHROPIC_API_KEY → use @ai-sdk/anthropic via VercelLLMAdapter\n    - GOOGLE_GENERATIVE_AI_API_KEY → use @ai-sdk/google via VercelLLMAdapter\n2. Fallback to the MemoryLLMAdapter only if no config is available\n3. Log which provider is selected or a warning if falling back to memory adapter\n\n**Accept dynamic import failures as a soft error:** optional peer dependencies should not break boot, just emit a warning and try the next provider.\n\n### Benefits\n- No need to repeat auto-detect logic for every serverless or containerized entrypoint\n- All use cases (CLI, Vercel, Docker, custom node) consistently get best-available real AI\n- One place to extend with new providers in the future\n- Reduced operational risk from silent fallback\n\n### Tasks\n- [ ] Refactor LLM adapter auto-detection into AIServicePlugin (private method during init)\n- [ ] Remove redundant LLM detection logic from CLI serve.ts\n- [ ] Add logging to report which adapter/provider is active\n- [ ] Add unit test (mock env) for provider detection logic\n- [ ] Update roadmap and changelog\n"
+}

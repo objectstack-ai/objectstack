@@ -1,0 +1,33 @@
+{
+  "number": 1258,
+  "kind": "pull_request",
+  "title": "docs: post-cloud-split README + CHANGELOG cleanup",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-21T12:17:06Z",
+  "updated_at": "2026-05-21T12:17:21Z",
+  "closed_at": "2026-05-21T12:17:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-05-21T12:17:16Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1258",
+  "body": "Follow-up to #1257. Removes the two stale rows in the README's package tables and adds an Unreleased CHANGELOG entry documenting the extraction.\n\nNo code changes.\n\n- Tag `pre-cloud-split` (already pushed) marks the pre-split anchor.\n- `apps/objectos` stays in framework; only `apps/cloud` + `@objectstack/service-cloud` moved to objectstack-ai/cloud."
+}

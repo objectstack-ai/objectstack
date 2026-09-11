@@ -1,0 +1,37 @@
+{
+  "number": 1020,
+  "kind": "pull_request",
+  "title": "Add sys_presence system object to service-realtime package",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-31T09:38:49Z",
+  "updated_at": "2026-03-31T10:20:37Z",
+  "closed_at": "2026-03-31T10:02:03Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-31T10:02:03Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1020",
+  "body": "Runtime hits `no such table: sys_presence` because the object was never defined or registered. Per system architecture, `sys_`-prefixed objects belong to their domain package — presence belongs to `service-realtime`.\n\n### Changes\n\n- **`SystemObjectName.PRESENCE`** — New `'sys_presence'` constant in `@objectstack/spec/system`\n- **`SysPresence` object definition** — `packages/services/service-realtime/src/objects/sys-presence.object.ts` with fields aligned to `PresenceStateSchema` protocol (`user_id`, `session_id`, `status`, `last_seen`, `current_location`, `device`, `custom_status`, `metadata`)\n- **Plugin registration** — `RealtimeServicePlugin.init()` registers via `app.com.objectstack.service.realtime` convention (same pattern as `MetadataPlugin`, `AIServicePlugin`)\n- **Exports** — `SysPresence` exported from `@objectstack/service-realtime` root\n- **ROADMAP.md / CHANGELOG.md** — Updated system object naming table and changelog\n\n```ts\nimport { SystemObjectName } from '@objectstack/spec/system';\nimport { SysPresence } from '@objectstack/service-realtime';\n\n// Protocol constant\nconst records = await engine.find(SystemObjectName.PRESENCE, { filters: ['status', '=', 'online'] });\n\n// Object definition: namespace='sys', name='presence' → tableName auto-derived as 'sys_presence'\nconsole.log(SysPresence.tableName); // 'sys_presence'\n```"
+}

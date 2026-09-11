@@ -1,0 +1,33 @@
+{
+  "number": 1183,
+  "kind": "pull_request",
+  "title": "fix(studio): refresh sidebar metadata when switching packages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-19T06:36:44Z",
+  "updated_at": "2026-04-19T06:37:35Z",
+  "closed_at": "2026-04-19T06:37:35Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-04-19T06:37:35Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1183",
+  "body": "Switching the active package via the Studio sidebar's dropdown did not refresh the left metadata list — it stayed pinned to the previously selected package.\n\n## Root cause\n\n`apps/studio/src/routes/$package.tsx` wired the dropdown's `onSelectPackage` directly to `setSelectedPackage`. The same layout also runs a URL→state `useEffect` that forces `selectedPackage` to match the `$package` route param. Because the dropdown never changed the URL, that effect reverted `selectedPackage` to the old package on the next render, and `AppSidebar.loadMetadata` (keyed on `selectedPackage`) never re-ran.\n\n## Changes\n\n- **Make the URL the single source of truth for the active package.** The dropdown handler now navigates to `/$newPackage` instead of mutating local state; the existing URL→state sync then updates `selectedPackage`, invalidating `loadMetadata`'s dependency and refetching metadata for the new package.\n- No-op guard when the target id matches the current `$package` param, to avoid a redundant navigation.\n- `CHANGELOG.md` — entry under Unreleased → Fixed.\n\n```tsx\n// apps/studio/src/routes/$package.tsx\nconst handleSelectPackage = useCallback((pkg: InstalledPackage) => {\n  const nextId = pkg.manifest?.id;\n  if (!nextId || nextId === packageId) return;\n  navigate({ to: '/$package', params: { package: nextId } });\n}, [navigate, packageId]);\n\n<AppSidebar ... onSelectPackage={handleSelectPackage} />\n```"
+}

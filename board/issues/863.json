@@ -1,0 +1,33 @@
+{
+  "number": 863,
+  "kind": "pull_request",
+  "title": "feat: universal AuthPlugin — graceful HTTP server handling, mock auth fallback, and browser-safe runtime",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-03T05:42:40Z",
+  "updated_at": "2026-03-03T08:13:32Z",
+  "closed_at": "2026-03-03T08:13:32Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-03-03T08:13:32Z",
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/863",
+  "body": "Enables \"universal\" authentication support across server and MSW/mock environments by making `AuthPlugin` independent of an HTTP server and adding a mock auth fallback tier in `HttpDispatcher.handleAuth()` to prevent 404s in browser-only dev/test flows.\n\n## Changes\n\n- **AuthPlugin**: Removed hard dependency on `com.objectstack.server.hono` — `dependencies` is now `[]`. Gracefully skips HTTP route registration when `http-server` service is missing (warns instead of throwing), while always registering the `auth` service. Only service resolution errors are caught; route registration errors propagate to surface server misconfigurations.\n- **HttpDispatcher**: `handleAuth()` gains a 3-tier fallback chain: auth service handler → legacy broker login → mock fallback for MSW/test mode. Mock endpoints include `sign-up/email`, `sign-in/email`, `login`, `register`, `get-session`, and `sign-out`. Uses browser-safe `globalThis.crypto.randomUUID()` with RFC 4122 v4 fallback (no Node `crypto` import). Broker catch is selective — only broker unavailability falls through to mock; real auth errors propagate.\n- **Studio**: `@objectstack/plugin-auth` is **not** loaded in Studio's browser bundle because `better-auth` is Node-only and cannot be bundled by Vite/Rollup. Studio relies on `HttpDispatcher`'s built-in mock auth fallback for MSW mode instead.\n- **Documentation**: Updated `content/docs/guides/authentication.mdx` with MSW/Mock Mode section, mock fallback endpoint table, and explanation of Studio's browser-only approach.\n- **Tests**: 2 new AuthPlugin tests + 6 new HttpDispatcher mock fallback tests (85 runtime + 24 auth-plugin tests pass). Auth service registration is verified even when HTTP server is unavailable.\n- **Build fixes**: Fixed TS6133 (unused `context` param in `handleI18n`) and TS2345 (logger.warn meta type mismatch in auth-plugin).\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>AuthPlugin should be loaded in both server and MSW modes, and gracefully handle missing HTTP server (support universal auth endpoints simulation)</issue_title>\n> <issue_description>## Problem\n> \n> Currently, ObjectStack runtime (in both server and MSW/mock modes) does NOT load AuthPlugin by default in the kernel or in the configuration of most app examples (e.g., objectstack-ai/objectui, etc).\n> \n> - In server mode (HonoServerPlugin active), AuthPlugin works and registers /api/v1/auth/* endpoints and integrates better-auth backend.\n> - In MSW/mock mode (pnpm dev), the kernel does not load AuthPlugin at all, and HttpDispatcher.handleAuth() cannot simulate /api/v1/auth/* endpoints, leading to 404 errors for registration and sign-in flows.\n> - There is no fallback built into runtime for better-auth endpoints when AuthPlugin is not present.\n> \n> ## Expected\n> - AuthPlugin is loaded in both server and MSW/browser test environments wherever user authentication is needed.\n> - In MSW mode, AuthPlugin should gracefully skip HTTP route registration if HonoServerPlugin/http-server is missing, BUT it should still register the 'auth' service so HttpDispatcher.handleAuth() can mock/simulate auth flows (sign-up, sign-in, etc.) using in-memory ObjectQL.\n> - Most app scaffolds (.config.ts and kernel factories) should include AuthPlugin by default (unless explicitly testing an unauthenticated app).\n> - As fallback for legacy cases, HttpDispatcher.handleAuth() should provide a mock implementation for core better-auth endpoints if AuthPlugin is missing (for high-fidelity MSW mock environments).\n> \n> ## Solution\n> - Update AuthPlugin to make route registration optional/graceful when no HonoServer/http-server is available (allow mock/test environments to proceed without errors).\n> - Update kernal factories (e.g., in objectui, studio, etc) and config scaffolds to include AuthPlugin by DEFAULT.\n> - Document MSW/mock usage patterns with AuthPlugin, and clarify minimal required configuration for mock mode (secret, ObjectQL driver, etc).\n> - Optionally: extend HttpDispatcher.handleAuth() to provide safe mock fallback for registration/sign-in flows if 'auth' service is not present.\n> \n> ## Impact\n> - Developers can run server OR pnpm dev (MSW mode) and still register/authenticate test users (sign-up, sign-in, sign-out, get-session, etc.).\n> - End users no longer encounter 404s for registration flows in Mock Console.\n> \n> ---\n> Please see details in objectstack-ai/objectui issue for how the frontend expects MSW mode to behave.\n> \n> </issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#862\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

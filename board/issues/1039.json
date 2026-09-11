@@ -1,0 +1,33 @@
+{
+  "number": 1039,
+  "kind": "pull_request",
+  "title": "[WIP] Add skills folder and handwrite SKILL.md files per best practices",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-01T06:04:51Z",
+  "updated_at": "2026-04-01T08:18:38Z",
+  "closed_at": "2026-04-01T08:18:38Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1039",
+  "body": "- [x] Analyze repository structure and existing Zod schemas\n- [x] Research agentskills.io specification and Vercel AI SDK skills format\n- [ ] Create `skills/schema-design/SKILL.md` — expert guidance for ObjectStack data schema design (objects, fields, capabilities)\n- [ ] Create `skills/schema-design/references/field-types.md` — reference table of all 48 field types\n- [ ] Create `skills/ai-agent/SKILL.md` — expert guidance for AI agent configuration (skills, tools, planning, memory, guardrails)\n- [ ] Create `skills/ai-agent/references/model-config.md` — reference table for model providers and planning strategies\n- [ ] Create `skills/hooks/SKILL.md` — expert guidance for automation hooks (triggers, flows, workflows, state machines)\n- [ ] Create `skills/hooks/references/flow-node-types.md` — reference table for flow node types\n- [ ] Update CHANGELOG.md with skills/ migration entry\n- [ ] Update ROADMAP.md to reflect skills/ directory\n- [ ] Run tests to ensure nothing is broken"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1232,
+  "kind": "pull_request",
+  "title": "fix(ci): restore native build scripts broken by duplicate pnpm config",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-07T09:15:26Z",
+  "updated_at": "2026-05-07T09:15:44Z",
+  "closed_at": "2026-05-07T09:15:44Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-05-07T09:15:44Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1232",
+  "body": "`@objectstack/driver-sql#test` was failing in CI with `Could not locate the bindings file` for `better-sqlite3`.\n\n### Root cause\n\nCommit `cca9c402` (MongoDB driver) introduced a `pnpm.onlyBuiltDependencies` block in `package.json` containing only `mongodb-memory-server`. In pnpm v10 this **overrides** (not merges with) the same key in `pnpm-workspace.yaml`, so postinstall scripts for `better-sqlite3`, `esbuild`, `msw`, and `sharp` were silently skipped — leaving `better-sqlite3` without its native binding.\n\n### Changes\n\n- **`pnpm-workspace.yaml`** — added `mongodb-memory-server` to the existing `onlyBuiltDependencies` list.\n- **`package.json`** — removed the duplicate `pnpm.onlyBuiltDependencies` block so the workspace-level list is the single source of truth.\n\n```yaml\n# pnpm-workspace.yaml\nonlyBuiltDependencies:\n  - better-sqlite3\n  - esbuild\n  - mongodb-memory-server\n  - msw\n  - sharp\n```"
+}

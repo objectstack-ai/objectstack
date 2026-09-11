@@ -1,0 +1,37 @@
+{
+  "number": 1199,
+  "kind": "pull_request",
+  "title": "feat(spec): add fieldGroups MVP to ObjectSchema",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-20T13:58:23Z",
+  "updated_at": "2026-04-21T05:05:47Z",
+  "closed_at": "2026-04-21T05:05:47Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-04-21T05:05:47Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1199",
+  "body": "## examples/app-crm — showcase `fieldGroups` MVP\n\nWires the new `fieldGroups` protocol (added in this same PR's spec commit) into the CRM reference example so users have a realistic, multi-group starting point when designing forms and detail pages.\n\n- [x] Plan CRM `fieldGroups` showcase\n- [x] `account.object.ts` — 6 groups (basic / financials / contact_info / ownership / branding / system)\n- [x] `contact.object.ts` — 6 groups (identity / account_info / contact_info / mailing_address / additional / preferences)\n- [x] `opportunity.object.ts` — 7 groups (basic / financials / sales_process / classification / competition / notes / forecast)\n- [x] `lead.object.ts` — 9 groups (identity / company_info / contact_info / qualification / assignment / address / additional / preferences / conversion)\n- [x] CHANGELOG `[Unreleased] → Changed` entry\n- [x] `ObjectSchema.safeParse()` on all four objects → `parsed=true`, **0 ungrouped, 0 orphaned** field → group references\n- [x] No new typecheck errors introduced (pre-existing errors in `src/views/lead.view.ts` and `objectstack.config.ts` are unrelated to this change)\n\n### Earlier commits in this PR (context)\n\n- [x] `ObjectFieldGroupSchema` + `ObjectSchema.fieldGroups` added to `packages/spec/src/data/object.zod.ts`\n- [x] 12 round-trip tests in `object.test.ts` (all green; full spec suite 6827/6827)\n- [x] \"Field Groups (MVP)\" section in `skills/objectstack-schema/SKILL.md`\n- [x] \"Field Groups\" section in `content/docs/guides/data-modeling.mdx`\n- [x] Skill Zod references regenerated via `gen:skill-refs`\n\n### Design notes (recap)\n\n- No business logic in `packages/spec` — schema-only.\n- Zod-first, snake_case group keys, TSDoc on every property.\n- **Array order = display order** — no `order` property on groups.\n- `Field.group` is the sole field → group assignment mechanism; in-group display order = `ObjectSchema.fields` traversal order.\n- Supported migrations at this layer: add / rename / delete / reorder groups, assign `Field.group`. Explicit per-field in-group ordering deferred."
+}
