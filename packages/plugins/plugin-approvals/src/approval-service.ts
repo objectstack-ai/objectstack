@@ -4874,11 +4874,31 @@ export class ApprovalService implements IApprovalService {
       // fallback (#4414) warns and evaluates every out-edge, so the flow
       // proceeds with `{decision:'revise'}` where `{resubmitted:true}` was owed.
       //
-      // The discriminator is exact and structural: `action: 'resubmit'` has
-      // exactly ONE writer in this file (`resubmit`), it is inserted before
-      // that resume, and a resubmit opens the next round as a NEW row — so at
-      // most one such action row exists per request, and its presence means
+      // The discriminator's first two clauses are exact and structural:
+      // `action: 'resubmit'` has exactly ONE writer in this file (`resubmit`),
+      // and it is inserted before that resume. Its presence therefore means
       // the last continuation this row issued was the resubmit.
+      //
+      // ⚠️ What does NOT hold is the third clause this comment used to claim —
+      // "a resubmit opens the next round as a NEW row, so at most one such
+      // action row exists per request". A resubmit whose own resume STRANDS
+      // opens no next round at all, so the row stays `returned`; once an
+      // operator re-arms the pause with `restoreConsumedSuspension`, a second
+      // `resubmit` by the same submitter passes every door guard and writes a
+      // SECOND `action: 'resubmit'` row. ⇒ MORE THAN ONE such row CAN exist
+      // for one request. Measured guard by guard, on that very row in that
+      // very state, in `stranded-resubmit-second-door.test.ts` (#17601 probe,
+      // PR #17613) — read it there rather than re-deriving it from here.
+      //
+      // The read below is correct anyway, for a reason that clause never
+      // needed: it is a PRESENCE check (`limit: 1`), so it decides identically
+      // on one row or two — the pin's MEASUREMENT C drives this resolver on
+      // the doubled row and it still answers `resubmit`. What the doubling
+      // costs is the audit trail's one-row-per-advancement shape, ⛔ not the
+      // edge picked here, and that cost is ACCEPTED RESIDUE under the #17601
+      // ruling of 2026-09-11 (option B: scope this prose to what was measured,
+      // narrow no door). Requiring one row per advancement is a new card, ⛔
+      // not a local fix here.
       const resubmitted = await this.engine.find('sys_approval_action', {
         where: { request_id: requestId, action: 'resubmit' }, limit: 1, context: SYSTEM_CTX,
       });
