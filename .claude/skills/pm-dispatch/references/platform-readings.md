@@ -81,8 +81,11 @@
 - 入队事件与队列 ref 迟 1–3 分钟才出现 ⇒ 轮询预算按 3 分钟,⛔ 不按 1 分钟判没挂上。
 - 队列窗口有界:满窗条目 ref 与 `merge_group` run 双缺席,ref 随前一条落地才现,不按计时器。
 - ready 翻转触发检查重跑 ⇒ 入队落在翻转之后约一分钟,那段空窗不是挂载失败。
+- 检查全部完成的 PR 挂 auto-merge 即入队,本仓 28–60 秒 ⇒ 挂载与落地之间无窗口。
+- `mergeable_state` 未落定时挂上的是经典 auto-merge、不入队,落定后再挂才入队。
 - `behind` 的 PR 照常入队:落后于 main 不是入队否决,⛔ 不为它先跑 update-branch。
 - `check_suite.completed` 会命名过期 head,check-run 也只属最后一次 push ⇒ 用前先重读当前 head。
+- 落地相邻的写侧一则:GitHub 标签描述上限 100 字符,超长写回 422,133 字的原文即不可存。
 
 ## API 配额
 

@@ -137,14 +137,38 @@ For logic that belongs in real source files, point `target` at a handler name
 and register it in your config's `onEnable` lifecycle hook:
 
 ```typescript title="src/actions/task.handlers.ts"
-export async function completeTask(ctx: ActionContext): Promise<void> {
-  const { record, engine } = ctx;   // ctx = { record, user, engine, params }
+import type { ActionHandlerContext } from '@objectstack/spec/ui';
+
+export async function completeTask(ctx: ActionHandlerContext): Promise<void> {
+  const { record, engine } = ctx;   // ctx = { record, params, user, session, engine }
   await engine.update('todo_task', record.id as string, {
     status: 'completed',
-    completed_date: new Date().toISOString(),
   });
 }
 ```
+
+Annotate `ctx` with the **published** `ActionHandlerContext`, never a local copy
+of it: a hand-rolled context interface drifts from the contract the moment either
+side moves, and the drift is silent because the copy is what your handler is
+checked against. (The contract's own docblock asks for `ActionHandler`; that is a
+function type, so it fits an arrow-function handler assigned to a `const`, while
+a function *declaration* like the one above annotates its parameter instead.)
+
+Write only the fields the action owns — and read that literally, because a
+handler's `ctx.engine` runs **elevated** (`isSystem`). The read-only strip that
+protects a server-owned column from an ordinary caller is gated on *not* being
+a system write, so it does not run on a handler's write at all. **What a
+handler names, lands.** A server-owned field is therefore more dangerous here
+than in a form PUT, not less.
+
+`completed_date` is the example. It is `readonly` on `todo_task` — the server
+owns it, and the object's `beforeUpdate` hook stamps it on the completion
+**transition**. Adding `completed_date: new Date().toISOString()` to the write
+above looks harmless, and on that transition it is: the hook overwrites it. But
+a completion write that is *not* a transition — re-completing a task that is
+already `completed` — is not stamped, so nothing overwrites the handler's value
+and nothing strips it either, and the action silently replaces the real
+completion timestamp with "now". That is why the snippet sends `status` alone.
 
 <Callout type="warn">
 **`ctx.engine.find(object, filter)` takes a filter, not a query.** The second
@@ -159,6 +183,24 @@ either reading and a handler can look partially alive. The parameter is typed
 refuses a primitive or a mistyped `$and` / `$or` / `$not` but still admits
 `where` as a key — the sentence above is the contract, and a hand-written test
 double must honour it too.
+</Callout>
+
+<Callout type="info">
+**`ctx.engine.delete(object, id)` takes one id — or an array of them.** Both
+spellings are contract: `ActionEngineFacade` in `@objectstack/spec/ui` declares
+the parameter `string | string[]`, so a handler that already holds a list does
+not have to unroll it into a loop to stay on the contract.
+
+```typescript
+await ctx.engine.delete('todo_task', record.id as string);        // one row
+await ctx.engine.delete('todo_task', ['tsk_0001', 'tsk_0002']);   // a set
+```
+
+The array form is a **convenience over the same per-row path** — not a bulk and
+not an atomic delete. The runtime issues one delete per id, in order, with no
+transaction around the set: a failure part-way through leaves the ids before it
+deleted and the ids after it untouched, and the rejection you see is the one that
+stopped it. An empty array deletes nothing and resolves.
 </Callout>
 
 ```typescript title="objectstack.config.ts"

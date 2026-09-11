@@ -15,6 +15,7 @@ import {
     type HttpClaimOptions,
     type HttpDelivery,
     type HttpDeliveryStatus,
+    type HttpReapOptions,
     type IHttpOutbox,
     type RedeliverOptions,
     type UndeliverableHttpInput,
@@ -95,9 +96,10 @@ interface DeliveryRow {
  * **No UPDATE here writes `updated_at`** (#4765) — same rule, same reason as
  * {@link SqlNotificationOutbox}: the platform's `sys_stamp_audit_update` hook
  * owns that column, a caller-supplied value is stripped as `readonly` (#2948)
- * with a WARN per call, and `claim()`'s unconditional reap UPDATE runs on every
- * dispatcher tick — so writing it turned an idle dev server into a console
- * firehose while changing nothing about the stored row.
+ * with a WARN per call, and the visibility-timeout reap is an unconditional
+ * UPDATE that runs on every dispatcher tick (`reap()`, or `claim()` unless told
+ * `skipReap`) — so writing it turned an idle dev server into a console firehose
+ * while changing nothing about the stored row.
  */
 export class SqlHttpOutbox implements IHttpOutbox {
     private readonly objectName: string;
@@ -202,20 +204,16 @@ export class SqlHttpOutbox implements IHttpOutbox {
         }
     }
 
+    async reap(opts: HttpReapOptions): Promise<void> {
+        await this.reapExpired(opts.now ?? Date.now(), opts.claimTtlMs);
+    }
+
     async claim(opts: HttpClaimOptions): Promise<HttpDelivery[]> {
         const now = opts.now ?? Date.now();
 
-        // 1. Reap stale in_flight rows — visibility-timeout recovery.
-        await this.engine.update(
-            this.objectName,
-            { status: 'pending', claimed_by: null, claimed_at: null },
-            // Environment-wide by design: recovers rows a crashed node abandoned,
-            // for every organization. Warrant in `outbox-dispatcher-scope.ts`.
-            dispatcherSweepOptions({
-                status: 'in_flight',
-                claimed_at: { $lt: now - opts.claimTtlMs },
-            }),
-        );
+        // 1. Reap stale in_flight rows — visibility-timeout recovery — unless the
+        //    caller already ran `reap()` for this pass (#17623).
+        if (!opts.skipReap) await this.reapExpired(now, opts.claimTtlMs);
 
         // 2. Pick candidate ids.
         const partitionFilter = opts.partition ? { partition_key: opts.partition.index } : {};
@@ -251,6 +249,24 @@ export class SqlHttpOutbox implements IHttpOutbox {
         const headerColumns = await this.readClaimedHeaderColumns(claimed.map((r) => r.id));
 
         return claimed.map((r) => this.toDelivery(r, headerColumns));
+    }
+
+    /**
+     * The visibility-timeout reap: ONE predicate UPDATE returning every expired
+     * `in_flight` claim to `pending`. No partition in the predicate — it spans
+     * the whole table by construction.
+     */
+    private async reapExpired(now: number, claimTtlMs: number): Promise<void> {
+        await this.engine.update(
+            this.objectName,
+            { status: 'pending', claimed_by: null, claimed_at: null },
+            // Environment-wide by design: recovers rows a crashed node abandoned,
+            // for every organization. Warrant in `outbox-dispatcher-scope.ts`.
+            dispatcherSweepOptions({
+                status: 'in_flight',
+                claimed_at: { $lt: now - claimTtlMs },
+            }),
+        );
     }
 
     /**

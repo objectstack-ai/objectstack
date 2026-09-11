@@ -733,7 +733,40 @@ export const CEILINGS = new Map([
   // line-neutral folds among this file's adjacent rule pairs, and re-wrap
   // funding is refused per the 2026-08-17 rule in any case. Landed count,
   // headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 422],
+  // Raised 422 → 425 by the TENTH readings increment, again under the STANDING
+  // one-file exception quoted above rather than a fresh decision card, and again
+  // recorded as a `ruledRaises` record citing it. Spent at ONE line per
+  // deduplicated reading, each written in this file's voice: arming auto-merge on
+  // a PR whose checks are ALL complete enqueues AT ONCE — 28–60 s from the enable
+  // call to `added_to_merge_queue` measured here, 17–20 s enqueue→merge across a
+  // dozen PRs on the sibling repo the carrier card was filed from — so no window
+  // stands between arming and landing (+1); a call made before mergeability
+  // settles arms CLASSIC auto-merge WITHOUT enqueueing, and the settled call is
+  // the one that enqueues (+1); and a GitHub label description is capped at 100
+  // CHARACTERS, a longer one refused with `422`, measured on a maintainer ruling
+  // fixed verbatim at 133 characters and therefore unstorable (+1) = +3 exactly.
+  //
+  // ⚠️ The candidate set was FOUR, and the cut is the exception's own dedup
+  // condition doing its work rather than an author trimming. The fourth reading —
+  // that an `enable_pr_auto_merge` success line carrying an EMPTY method and
+  // timestamp is a real arming and not the documented graceful no-op — is already
+  // on the tree in a stronger and more general form, at the two rows reading
+  // 「`enable_pr_auto_merge` 对已 `mergeable_state: clean` 的 PR 照样成功,与工具描述
+  // 的优雅失败相反」 and 「回显两向不可靠,空回显不等于未挂上」. The carrier card's own
+  // measurement was taken against `:13–:14` alone, which carry the FIELD's
+  // instability rather than the ECHO's, so the reading it drew — that the
+  // disambiguation is absent — was falsified on the tree before any line was
+  // written. Candidates 4 / landed 3 / already present 1 / refused 0.
+  //
+  // ⛔ The carrier card's who-flips half lands NO line here in any form: it is
+  // closed by `references/landing-operations.md`, which already holds it, and a
+  // second copy is what the consolidation ruling above exists to refuse.
+  //
+  // Nothing was paid in place: the fourth increment MEASURED zero line-neutral
+  // folds among this file's adjacent rule pairs, and re-wrap funding is refused
+  // per the 2026-08-17 rule in any case. Landed count, headroom 0, same
+  // convention.
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 425],
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing
@@ -1271,6 +1304,23 @@ export const CROSS_FILE_MOVES = new Map([
         },
         {
           // The NINTH increment, under the same STANDING exception — the same
+          // words again, for the same reason: a record that quotes no ruling is
+          // RED and each record stands alone. The +3 is accounted for line by
+          // line beside this entry's ceiling above, and the exception's own
+          // conditions (per-item verification and the candidate / landed /
+          // already-present / refused counts) are carried by the raising PR's
+          // dedup table and the seat's ACCEPT.
+          ruling:
+            'the standing one-file exception for'
+            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — pm-dispatch'
+            + ' SKILL.md, verbatim and untranslated: 「唯一例外:`platform-readings.md`'
+            + ' 增量抬上限到落地行数,免决策卡,记 `ruledRaises` 引常设裁决。条件:席位验收评论'
+            + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
+          date: '2026-09-10',
+          delta: 3,
+        },
+        {
+          // The TENTH increment, under the same STANDING exception — the same
           // words again, for the same reason: a record that quotes no ruling is
           // RED and each record stands alone. The +3 is accounted for line by
           // line beside this entry's ceiling above, and the exception's own

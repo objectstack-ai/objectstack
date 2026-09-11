@@ -175,6 +175,28 @@ describe('sys_http_delivery — the dispatcher claim path is a classified global
 
         await controlUnscopedUpdateMany(SYS_HTTP_DELIVERY);
     });
+
+    it("reap() recovers a crashed node's claims in every organization, without a finding", async () => {
+        const stale = Date.now() - 10 * 60_000;
+        await seedHttpRow('h_a', 'org_a', { status: 'in_flight', claimed_by: 'dead_node', claimed_at: stale });
+        await seedHttpRow('h_b', 'org_b', { status: 'in_flight', claimed_by: 'dead_node', claimed_at: stale });
+
+        // [#17623] The dispatcher's once-per-tick reap, on its own — the same
+        // predicate write `claim()` opens with, classified by the same warrant.
+        const outbox = new SqlHttpOutbox(engine as any, { partitionCount: 1 });
+        await outbox.reap({ claimTtlMs: 60_000 });
+
+        expect(auditedUpdateMany(SYS_HTTP_DELIVERY)).toBe(false);
+        // Both organizations' abandoned rows are back in the queue with the claim
+        // cleared — a per-organization reap would have stranded one.
+        const rows = (await engine.find(SYS_HTTP_DELIVERY, { where: {} })) as any[];
+        expect(rows.map((r) => `${r.id}:${r.organization_id}:${r.status}:${r.claimed_by ?? '-'}`).sort()).toEqual([
+            'h_a:org_a:pending:-',
+            'h_b:org_b:pending:-',
+        ]);
+
+        await controlUnscopedUpdateMany(SYS_HTTP_DELIVERY);
+    });
 });
 
 // ───────────────────────────────────────────────────────────────────────────
