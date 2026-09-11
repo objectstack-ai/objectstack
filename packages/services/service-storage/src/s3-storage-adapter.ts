@@ -31,6 +31,19 @@ import { contentDispositionValue } from './content-disposition.js';
 const S3_LIST_MAX_KEYS = 1000;
 
 /**
+ * The delimiter a {@link S3StorageAdapterOptions.keyPrefix} is normalised to end
+ * with, and the reason the normalisation is not cosmetic.
+ *
+ * S3 `Prefix` is a RAW STRING match, not a path match. A prefix of `env_1`
+ * therefore matches `env_10/report.pdf` as readily as `env_1/report.pdf`, so a
+ * host that wrote its environment ids without a delimiter would have one
+ * environment's `list()` enumerate another's objects — the very cross-tenant
+ * read this option exists to make structurally impossible. Every prefix ends in
+ * this character, so no prefix can be a prefix of another.
+ */
+const KEY_PREFIX_DELIMITER = '/';
+
+/**
  * Configuration for the S3 storage adapter.
  */
 export interface S3StorageAdapterOptions {
@@ -38,6 +51,36 @@ export interface S3StorageAdapterOptions {
   bucket: string;
   /** AWS region (e.g. 'us-east-1') */
   region: string;
+  /**
+   * Key namespace this adapter is confined to, or `null` for the bucket root.
+   *
+   * **Required, and deliberately not optional.** A shared bucket with no second
+   * boundary means the only thing keeping one tenant out of another's objects
+   * is that every metadata check upstream was written correctly; one missed
+   * check is then a cross-tenant read that the object store itself cannot
+   * refuse, because what it sees is a well-formed key. An OPTIONAL prefix
+   * reproduces that gap the first time a host forgets to set it, silently — so
+   * the choice is made at the call site or the code does not compile.
+   *
+   * The prefix is applied at EVERY door: prepended on write, read, delete,
+   * head, presign and multipart; prepended into `list()`'s `Prefix`; stripped
+   * off every key and cursor `list()` hands back. Callers therefore only ever
+   * see, and only ever supply, unprefixed keys — there is no door through which
+   * a caller can reach an unprefixed one. Keys are CONCATENATED, never path-
+   * joined, so a caller key of `../elsewhere` stays a literal key inside the
+   * prefix rather than escaping it.
+   *
+   * Normalised on construction: a missing trailing `/` is appended (see
+   * {@link KEY_PREFIX_DELIMITER} — this is load-bearing, not tidiness).
+   * Refused on construction: an empty or whitespace-only string, a leading `/`,
+   * and any `..` segment. Empty is refused rather than treated as "no prefix"
+   * because that is what an unset environment variable looks like, and the one
+   * thing this option may never do is fall back to unprefixed quietly.
+   *
+   * `null` is the written, greppable way to say "this deployment has one
+   * tenant and wants bucket-root keys".
+   */
+  keyPrefix: string | null;
   /** Optional endpoint URL for S3-compatible services (MinIO, R2, etc.) */
   endpoint?: string;
   /** AWS access key ID (falls back to env/SDK chain) */
@@ -48,6 +91,30 @@ export interface S3StorageAdapterOptions {
   forcePathStyle?: boolean;
   /** Optional MetricsRegistry for instrumentation. Defaults to NoopMetricsRegistry. */
   metrics?: MetricsRegistry;
+}
+
+/**
+ * Validate and normalise a {@link S3StorageAdapterOptions.keyPrefix}.
+ *
+ * Refusals are loud and thrown from the constructor: a misconfigured prefix must
+ * stop the deployment, never degrade to bucket-root writes that look healthy.
+ */
+export function normalizeStorageKeyPrefix(keyPrefix: string | null): string {
+  if (keyPrefix === null) return '';
+  if (typeof keyPrefix !== 'string' || keyPrefix.trim() === '') {
+    throw new Error(
+      'S3StorageAdapter: keyPrefix must be a non-empty string or null. An empty prefix is what an '
+      + 'unset environment variable looks like, so it is refused rather than silently writing to the '
+      + 'bucket root; pass null to ask for bucket-root keys deliberately.',
+    );
+  }
+  if (keyPrefix.startsWith('/')) {
+    throw new Error(`S3StorageAdapter: keyPrefix must not start with "/" (keyPrefix="${keyPrefix}")`);
+  }
+  if (keyPrefix.split(KEY_PREFIX_DELIMITER).includes('..')) {
+    throw new Error(`S3StorageAdapter: keyPrefix must not contain a ".." segment (keyPrefix="${keyPrefix}")`);
+  }
+  return keyPrefix.endsWith(KEY_PREFIX_DELIMITER) ? keyPrefix : keyPrefix + KEY_PREFIX_DELIMITER;
 }
 
 /**
@@ -62,8 +129,9 @@ export interface S3StorageAdapterOptions {
  * const storage = new S3StorageAdapter({
  *   bucket: 'my-bucket',
  *   region: 'us-east-1',
+ *   keyPrefix: 'env_7',   // or `null` for bucket-root keys
  * });
- * await storage.upload('path/to/file.txt', buffer);
+ * await storage.upload('path/to/file.txt', buffer);   // writes env_7/path/to/file.txt
  * ```
  */
 export class S3StorageAdapter implements IStorageService {
@@ -72,6 +140,12 @@ export class S3StorageAdapter implements IStorageService {
   private readonly endpoint?: string;
   private readonly forcePathStyle: boolean;
   private readonly metrics: MetricsRegistry;
+  /**
+   * The normalised key prefix — `''` for bucket-root, otherwise a string ending
+   * in `/`. Private and `readonly`: nothing outside this class can read it,
+   * change it, or route around it.
+   */
+  private readonly keyPrefix: string;
   private clientPromise: Promise<any> | null = null;
 
   constructor(private readonly options: S3StorageAdapterOptions) {
@@ -80,6 +154,38 @@ export class S3StorageAdapter implements IStorageService {
     this.endpoint = options.endpoint;
     this.forcePathStyle = options.forcePathStyle ?? false;
     this.metrics = options.metrics ?? new NoopMetricsRegistry();
+    this.keyPrefix = normalizeStorageKeyPrefix(options.keyPrefix);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Key namespacing — the ONE place the caller's key and the bucket's key are
+  // converted into one another.
+  //
+  // Every S3 command below reads `this.storageKey(key)` and never `key`, and
+  // every key handed back to a caller goes through `this.callerKey(...)`. Two
+  // one-line functions rather than an inline concatenation per door so that
+  // "did this door apply the prefix?" is answerable by reading the call, and so
+  // a door added later that forgets is a visible omission rather than a subtle
+  // one.
+  // ---------------------------------------------------------------------------
+
+  /** Caller key -> bucket key. */
+  private storageKey(key: string): string {
+    return this.keyPrefix + key;
+  }
+
+  /**
+   * Bucket key -> caller key.
+   *
+   * A key the bucket answers that does NOT carry the prefix cannot be mapped
+   * into the caller's namespace at all, and returning it raw is precisely the
+   * cross-namespace leak the prefix exists to prevent — so it is dropped rather
+   * than guessed at. In practice `ListObjectsV2` cannot produce one (it was
+   * asked for this prefix), which is what makes dropping safe.
+   */
+  private callerKey(bucketKey: string): string | undefined {
+    if (!bucketKey.startsWith(this.keyPrefix)) return undefined;
+    return bucketKey.slice(this.keyPrefix.length);
   }
 
   /**
@@ -166,7 +272,7 @@ export class S3StorageAdapter implements IStorageService {
       const body = data instanceof Buffer ? data : await streamToBuffer(data);
       const cmd = new s3.PutObjectCommand({
         Bucket: this.bucket,
-        Key: key,
+        Key: this.storageKey(key),
         Body: body,
         ContentType: options?.contentType,
         Metadata: options?.metadata,
@@ -180,7 +286,7 @@ export class S3StorageAdapter implements IStorageService {
     return this.track('get', async () => {
       const client = await this.getClient();
       const s3 = await this.s3Mod();
-      const cmd = new s3.GetObjectCommand({ Bucket: this.bucket, Key: key });
+      const cmd = new s3.GetObjectCommand({ Bucket: this.bucket, Key: this.storageKey(key) });
       const res = await client.send(cmd);
       return streamToBuffer(res.Body);
     });
@@ -190,7 +296,7 @@ export class S3StorageAdapter implements IStorageService {
     return this.track('delete', async () => {
       const client = await this.getClient();
       const s3 = await this.s3Mod();
-      const cmd = new s3.DeleteObjectCommand({ Bucket: this.bucket, Key: key });
+      const cmd = new s3.DeleteObjectCommand({ Bucket: this.bucket, Key: this.storageKey(key) });
       await client.send(cmd);
     });
   }
@@ -200,7 +306,7 @@ export class S3StorageAdapter implements IStorageService {
       const client = await this.getClient();
       const s3 = await this.s3Mod();
       try {
-        const cmd = new s3.HeadObjectCommand({ Bucket: this.bucket, Key: key });
+        const cmd = new s3.HeadObjectCommand({ Bucket: this.bucket, Key: this.storageKey(key) });
         await client.send(cmd);
         return true;
       } catch (err: any) {
@@ -214,7 +320,7 @@ export class S3StorageAdapter implements IStorageService {
     return this.track('head', async () => {
       const client = await this.getClient();
       const s3 = await this.s3Mod();
-      const cmd = new s3.HeadObjectCommand({ Bucket: this.bucket, Key: key });
+      const cmd = new s3.HeadObjectCommand({ Bucket: this.bucket, Key: this.storageKey(key) });
       const res = await client.send(cmd);
       return {
         key,
@@ -261,7 +367,15 @@ export class S3StorageAdapter implements IStorageService {
     // Refusals come from the contract's shared helpers, outside `track()`: a
     // refused call never reached S3, so it is not a failed storage operation.
     const limit = resolveStorageListLimit(options?.limit);
-    const startAfter = options?.cursor === undefined ? undefined : decodeStorageListCursor(options.cursor);
+    // The cursor is a CALLER key, so it is re-prefixed on the way in exactly as
+    // it was stripped on the way out. Doing it here rather than inside the loop
+    // keeps the caller-facing cursor byte-identical to the local adapter's, so a
+    // `SwappableStorageService` swap mid-sweep still resumes (the property
+    // `storage-adapter-list.conformance.test.ts` compares key-for-key).
+    const startAfter =
+      options?.cursor === undefined
+        ? undefined
+        : this.storageKey(decodeStorageListCursor(options.cursor));
 
     return this.track('list', async () => {
       const client = await this.getClient();
@@ -280,7 +394,10 @@ export class S3StorageAdapter implements IStorageService {
         const res = await client.send(
           new s3.ListObjectsV2Command({
             Bucket: this.bucket,
-            Prefix: prefix,
+            // The caller's prefix is itself namespaced: `list('')` enumerates
+            // THIS adapter's namespace and nothing else, and there is no value
+            // of `prefix` that reaches outside it.
+            Prefix: this.storageKey(prefix),
             MaxKeys: Math.min(limit - items.length, S3_LIST_MAX_KEYS),
             // `StartAfter` is honoured only on the first request of a run; S3
             // ignores it once `ContinuationToken` is present, which is correct
@@ -294,8 +411,22 @@ export class S3StorageAdapter implements IStorageService {
         );
 
         for (const object of res.Contents ?? []) {
-          const key: string | undefined = object?.Key;
-          if (!key) continue;
+          const bucketKey: string | undefined = object?.Key;
+          if (!bucketKey) continue;
+          // Stripped here, once, before anything else looks at it: from this
+          // line on the loop deals only in caller keys, so neither the emitted
+          // `key` nor the cursor derived from `lastKeySeen` can carry the
+          // prefix out.
+          const key = this.callerKey(bucketKey);
+          if (key === undefined) continue;
+          // The namespace's OWN directory marker (`<keyPrefix>` exactly) strips
+          // to the empty key. It is not a file, and it must not become
+          // `lastKeySeen` either: `decodeStorageListCursor` refuses an empty
+          // token, so emitting a cursor for it would hand the caller a
+          // continuation this contract then rejects. Skipping it costs nothing
+          // — the intra-call loop only stops on `items.length >= limit` (some
+          // real key was seen) or on a non-truncated response (no cursor owed).
+          if (key === '') continue;
           lastKeySeen = key;
           // A zero-byte key ending in `/` is a console-created directory
           // marker, not a file. The local backend cannot represent one at all,
@@ -341,7 +472,7 @@ export class S3StorageAdapter implements IStorageService {
     const { getSignedUrl } = await this.presignerMod();
     const cmd = new s3.PutObjectCommand({
       Bucket: this.bucket,
-      Key: key,
+      Key: this.storageKey(key),
       ContentType: options?.contentType,
       Metadata: options?.metadata,
       ACL: options?.acl === 'public-read' ? 'public-read' : undefined,
@@ -367,7 +498,7 @@ export class S3StorageAdapter implements IStorageService {
     // carries the real filename + type instead of the object key + octet-stream.
     const cmd = new s3.GetObjectCommand({
       Bucket: this.bucket,
-      Key: key,
+      Key: this.storageKey(key),
       ...(options?.contentType ? { ResponseContentType: options.contentType } : {}),
       ...(options?.filename
         ? { ResponseContentDisposition: contentDispositionValue(options.filename, options.disposition ?? 'inline') }
@@ -386,7 +517,7 @@ export class S3StorageAdapter implements IStorageService {
     const s3 = await this.s3Mod();
     const cmd = new s3.CreateMultipartUploadCommand({
       Bucket: this.bucket,
-      Key: key,
+      Key: this.storageKey(key),
       ContentType: options?.contentType,
       Metadata: options?.metadata,
     });
@@ -410,7 +541,7 @@ export class S3StorageAdapter implements IStorageService {
     }
     const cmd = new s3.UploadPartCommand({
       Bucket: this.bucket,
-      Key: key,
+      Key: this.storageKey(key),
       UploadId: uploadId,
       PartNumber: partNumber,
       Body: data,
@@ -431,7 +562,7 @@ export class S3StorageAdapter implements IStorageService {
     }
     const cmd = new s3.CompleteMultipartUploadCommand({
       Bucket: this.bucket,
-      Key: key,
+      Key: this.storageKey(key),
       UploadId: uploadId,
       MultipartUpload: {
         Parts: parts.map(p => ({ PartNumber: p.partNumber, ETag: p.eTag })),
@@ -449,7 +580,7 @@ export class S3StorageAdapter implements IStorageService {
     if (!key) return;
     const cmd = new s3.AbortMultipartUploadCommand({
       Bucket: this.bucket,
-      Key: key,
+      Key: this.storageKey(key),
       UploadId: uploadId,
     });
     await client.send(cmd);
