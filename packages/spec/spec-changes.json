@@ -274,7 +274,7 @@
       },
       {
         "surface": "translation.validationMessages",
-        "to": "translation key 'validationMessages' removed (#4667 — no resolver read it, so a translated rule message was stored and never shown; #3778's migration table had been steering retired `errors:` authors into it). Author the message on the rule itself (`object.validations[].message`)",
+        "to": "translation key 'validationMessages' removed (#4667 — no resolver read it, so a translated rule message was stored and never shown; #3778's migration table had been steering retired `errors:` authors into it). Author the message on the rule itself (`object.validations[].message`), and translate it under the object-scoped group `objects.<object_name>._validations.<rule_name>.message`, which the write path resolves (17.3.0, #14381)",
         "conversionId": "translation-validation-messages-removed",
         "toMajor": 17
       },
@@ -1423,7 +1423,7 @@
         },
         {
           "surface": "translation.validationMessages",
-          "to": "translation key 'validationMessages' removed (#4667 — no resolver read it, so a translated rule message was stored and never shown; #3778's migration table had been steering retired `errors:` authors into it). Author the message on the rule itself (`object.validations[].message`)",
+          "to": "translation key 'validationMessages' removed (#4667 — no resolver read it, so a translated rule message was stored and never shown; #3778's migration table had been steering retired `errors:` authors into it). Author the message on the rule itself (`object.validations[].message`), and translate it under the object-scoped group `objects.<object_name>._validations.<rule_name>.message`, which the write path resolves (17.3.0, #14381)",
           "conversionId": "translation-validation-messages-removed",
           "toMajor": 17
         },
