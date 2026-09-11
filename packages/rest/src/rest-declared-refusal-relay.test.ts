@@ -52,6 +52,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server';
@@ -137,10 +138,25 @@ async function postDataset(thrown: unknown) {
 
 // ── arm 2: the /references door, reached through handleRouteError ────────────
 
-/** The narrowest engine the /references reads bottom out on: no rows anywhere. */
+/**
+ * The narrowest engine the /references reads bottom out on: no rows anywhere.
+ *
+ * ⛔ READ-ONLY on purpose — no `delete`, `update` or `insert` member exists,
+ * because nothing this file drives writes, so it adds no write double for
+ * `check:engine-double-contract` to police. Its `findOne` IS pinned: a fake
+ * looser than `ObjectQL.findOne` is how a dead REST route once shipped with
+ * its suite green, so this one answers "no rows" to the same dispatch
+ * predicate the real engine enforces.
+ */
 function emptyEngine(): any {
     return {
-        find: async () => [], findOne: async () => undefined, count: async () => 0, aggregate: async () => [],
+        find: async () => [],
+        async findOne(table: string, opts: { where: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(table, opts);
+            return null;
+        },
+        count: async () => 0,
+        aggregate: async () => [],
         registry: {
             listItems: () => [], getItem: () => undefined, getObject: () => undefined,
             getPackage: () => undefined, getArtifactItem: () => undefined, isPackageDisabled: () => false,

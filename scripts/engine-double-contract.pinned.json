@@ -3267,6 +3267,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/rest/src/rest-declared-refusal-relay.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/rest/src/rest-server-meta-cached-etag-door-scope.test.ts",
       "verb": "findOne",
       "pinned": 1
