@@ -1168,8 +1168,21 @@ export class TursoDriver extends SqlDriver {
    * [#6402] `options` is a {@link DriverOptions} for the same reason, closed as
    * one sweep across every override in this file rather than one method at a
    * time — see the block comment above `find()`.
+   *
+   * [#17277] The return is the contract's own
+   * `Promise<Record<string, unknown>[]>`, and this override needs it declared
+   * HERE: an override re-declares the door in this package's own `.d.ts`, so
+   * the `@objectstack/driver-sql` narrowing does not reach a consumer holding a
+   * `TursoDriver` — the same shape #15280 had to fix separately for `update()`.
+   * Both branches already answer it: the remote branch is
+   * `RemoteTransport.aggregate`, declared `Promise<Record<string, unknown>[]>`,
+   * and the local branch is `SqlDriver.aggregate`, narrowed alongside.
    */
-  override async aggregate(object: string, query: DriverQuery, options?: DriverOptions): Promise<any> {
+  override async aggregate(
+    object: string,
+    query: DriverQuery,
+    options?: DriverOptions,
+  ): Promise<Record<string, unknown>[]> {
     if (this.isRemote) return this.remoteTransport!.aggregate(object, this.toRemoteQuery(object, query));
     return super.aggregate(object, query, options);
   }

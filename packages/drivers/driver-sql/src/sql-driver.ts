@@ -8811,11 +8811,24 @@ export class SqlDriver implements IDataDriver {
    *
    * `any` here was not "the object name goes unchecked", it was every check off
    * on the members this body READS: `where`'s filter dialect, `groupBy`'s node
-   * union, `aggregations`' node shape. #5181 narrowed the six methods
-   * `IDataDriver` declares and #6075 followed through on five drivers;
-   * `aggregate` is not on that contract, so neither reached it.
+   * union, `aggregations`' node shape. #5181 narrowed the six methods it swept
+   * and #6075 followed through on five drivers; this door was reached by
+   * neither.
+   *
+   * [#17277] The sentence that used to close the paragraph above —
+   * "`aggregate` is not on that contract" — was FALSE, and it is the whole
+   * reason #15267's census walked past this door: that census asked "is it on
+   * the contract?" and answered from THIS COMMENT rather than from the
+   * contract. `IDataDriver` declares
+   * `aggregate?(object, query, options?): Promise<Record<string, unknown>[]>`,
+   * beside the calling convention that dispatches on
+   * `typeof driver.aggregate === 'function'`. The `?` governs whether the
+   * member EXISTS, not what it returns once it does, so the declared return is
+   * a published promise here exactly as on a required door. The annotation
+   * below is the contract's own, pinned at the type level in
+   * `sql-driver-doors-declared-types.test.ts`.
    */
-  async aggregate(object: string, query: DriverQuery, options?: DriverOptions): Promise<any> {
+  async aggregate(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
     const builder = this.getBuilder(object, options);
     this.applyTenantScope(builder, object, options);
 
