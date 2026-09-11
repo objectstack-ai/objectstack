@@ -2915,17 +2915,73 @@ export class ObjectStackClient {
     },
 
     /**
-     * Cascade-delete an environment: cleans up credential/member/package_installation
-     * rows, releases the physical database via the provisioning adapter, and
-     * removes the `sys_environment` row. Default environments require `force: true`.
+     * Delete an environment — `DELETE /api/v1/cloud/environments/:id` — in the
+     * hosted control plane's TWO steps (cloud ADR-0014): no live environment is
+     * ever one call from irreversible destruction.
+     *
+     * 1. **Archive.** A live environment (active, provisioning, suspended, …) is
+     *    archived, whatever the flags. Its row and data are retained and it stays
+     *    recoverable until the retention window (`retentionDays`) ends, when the
+     *    control plane reclaims it. An archived environment deleted again without
+     *    `purge` stays archived and gets the same answer. The answer is
+     *    `deleted: false, archived: true`.
+     * 2. **Purge.** `purge: true` on an environment that is ALREADY archived tears
+     *    it down now, irreversibly — dependent rows, the physical database,
+     *    domains and attachments. The answer is `deleted: true, purged: true`.
+     *    `purge` on a live environment is deferred, never honoured: that call
+     *    archives it and answers `purgeDeferred: true`; delete again with `purge`
+     *    to tear it down.
+     *
+     * A `failed` environment (provisioning never completed) is torn down in ONE
+     * call, with or without `purge`.
+     *
+     * `force` and `purge` are independent confirmations; neither implies the
+     * other. `force: true` confirms the organization's PRODUCTION environment
+     * (for a legacy row with no `environment_type`, its default environment). It
+     * is required on every delete of one — the archiving call and the purging
+     * call — and it is never a purge: tearing down a production environment is
+     * `{ force: true }`, then `{ force: true, purge: true }`.
+     *
+     * Refusals reject instead of resolving (read `err.httpStatus` / `err.code`):
+     * `409` for a production environment without `force` and for a system
+     * environment, `404` for an id the caller cannot see, `403` for an
+     * organization member who is neither an owner/admin nor the environment's
+     * creator.
+     *
+     * The resolved value is one of the route's two 200 answers, discriminated by
+     * `deleted`; each member declares exactly the keys that answer carries.
      */
-    delete: async (id: string, opts?: { force?: boolean }) => {
-      const qs = opts?.force ? '?force=1' : '';
+    delete: async (id: string, opts?: { force?: boolean; purge?: boolean }) => {
+      const params = new URLSearchParams();
+      if (opts?.force) params.set('force', '1');
+      if (opts?.purge) params.set('purge', '1');
+      const qs = params.toString();
       const res = await this.fetch(
-        `${this.baseUrl}/api/v1/cloud/environments/${encodeURIComponent(id)}${qs}`,
+        `${this.baseUrl}/api/v1/cloud/environments/${encodeURIComponent(id)}${qs ? `?${qs}` : ''}`,
         { method: 'DELETE' },
       );
-      return this.unwrapResponse<{ deleted: boolean; environmentId: string; warnings: string[] }>(res);
+      return this.unwrapResponse<
+        | {
+            environmentId: string;
+            deleted: false;
+            archived: true;
+            /** `true` when `purge` was asked of a LIVE environment: it was archived instead — delete again with `purge`. */
+            purgeDeferred: boolean;
+            /** Days the archived environment is retained before the control plane reclaims it. */
+            retentionDays: number;
+            /** Always empty on an archive. */
+            warnings: string[];
+            /** The control plane's account of what happened and what to do next. */
+            message: string;
+          }
+        | {
+            environmentId: string;
+            deleted: true;
+            purged: true;
+            /** Best-effort cleanup steps that failed after the teardown itself succeeded. */
+            warnings: string[];
+          }
+      >(res);
     },
 
     /**
@@ -3577,8 +3633,11 @@ export class ObjectStackClient {
      * NOT the bare id string the vendor's OpenAPI stub declares.
      *
      * better-auth removes the organization row, all members, and all
-     * pending invitations. Project teardown (per-project DBs, etc.) is
-     * handled server-side by hooks attached to the organization plugin.
+     * pending invitations. It deletes NO environment and releases no
+     * environment database — no organization-plugin hook tears environments
+     * down. On the hosted control plane, delete each of the organization's
+     * environments first with {@link ObjectStackClient.environments}`.delete`
+     * (archive, then `purge`), then delete the organization.
      */
     delete: async (organizationId: string): Promise<OrganizationWire> => {
       const route = this.getRoute('auth');
