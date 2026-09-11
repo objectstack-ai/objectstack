@@ -1,5 +1,5 @@
 ---
-'@objectstack/core': patch
+'@objectstack/core': minor
 '@objectstack/driver-memory': patch
 ---
 
@@ -25,6 +25,19 @@ and `['2026-01-01', '2026-01-31', '2026-02-01']` each emitted a pipeline
 byte-identical to one with **no `dateRange` at all** — every row selected, the
 "plot all of history" failure #3650 was filed about — and `[null, null]`
 compared instants against the string `'null'` and selected none.
+
+**Levels.** `@objectstack/core` is `minor`: it gains a new exported symbol on
+its index (`ANALYTICS_DATE_RANGE_NOT_A_WINDOW`), and a purely additive widening
+of a published package's public surface takes at least `minor` whatever the
+commit type says. `@objectstack/driver-memory` is `patch`: its public surface is
+byte-unchanged — no new export, no new accepted key or value. Its behaviour does
+change, from selecting every row to refusing with `400
+ANALYTICS_DATE_RANGE_UNRECOGNIZED`, and that is a `patch` because the old
+behaviour was a defect and never a contract: the spec's own refusal wording
+already said an explicit window is the two-element array, and the #16322
+migration table already told authors to write a single day as two bounds. A
+release that stops answering a shape the contract never admitted is a fix, not a
+feature — and the shapes it now refuses had no correct answer to lose.
 
 **If you wrote a one-element array**, write both bounds: `['2026-01-01']`
 becomes `['2026-01-01', '2026-01-01']`, which selects exactly that day on every
