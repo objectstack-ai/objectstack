@@ -152,33 +152,34 @@ fields: {
 
 ## Multi-tenancy
 
-For SaaS, set `tenancy` on the object schema for row-level tenant isolation
-(the tenant field is injected on write and enforced on read). The block is
-**strict** — exactly two keys:
+Organization count is a **deployment posture** fact, never object metadata.
+`single` (default) = one logical tenant: the bootstrapped Default Organization
+only, a second refused (`403`); sub-units are business units. Tenants as
+`sys_organization` rows need a walled posture (`group`/`isolated`; open core,
+ADR-0132) — ⛔ never `single` + your own RLS. See ADR-0093, ADR-0105 §"Today's
+two postures", https://objectstack.ai/docs/deployment/tenancy-modes.
+
+Within a posture, `tenancy` on the object is the row-level knob (stamped on
+write, enforced on read); **strict**, two keys:
 
 ```typescript
 tenancy: {
-  enabled: true,   // enable row-level tenant isolation
-  // tenantField — NO default; omit it and the driver uses `organization_id`
+  enabled: true,
+  // tenantField: no default — omit it ⇒ `organization_id`
 }
 ```
 
-- **Database-per-tenant isolation is not object metadata** — it is an
-  environment/deployment choice (each environment carries its own database URL).
-
 ## Platform-global / admin-only objects (visibility posture)
 
-Some system/config objects are **env-global** (not partitioned per org) and
-should be visible to a **platform admin env-wide** but hidden from members —
-e.g. identity tables a plugin writes via its own adapter (`sys_sso_provider`,
-OAuth clients). These hit a non-obvious interaction:
+Some system objects are **env-global** — **platform admin** sees all, members
+none — e.g. identity tables a plugin writes via its own adapter
+(`sys_sso_provider`, OAuth clients):
 
-- Reads of a tenant object pass the **Layer 0 tenant wall** (ADR-0095 D1): an
-  `organization_id == <the caller's organization>` filter AND-composed ahead of
-  every business RLS policy. Any row whose `organization_id` is **null or
-  absent** (common for adapter-written rows that never get the tenant stamp) is
-  **denied** — the list renders empty. Single-tenant deployments never hit this;
-  the wall is inert there.
+- Reads of a tenant object pass the **Layer 0 tenant wall** (ADR-0095 D1):
+  `organization_id == <caller's organization>`, AND-composed ahead of all
+  business RLS. A row with **null or absent** `organization_id`
+  (adapter-written rows often lack it) is **denied** — the list renders empty.
+  Under `single` the wall is inert.
 - The `viewAllRecords` superuser bit is **posture-gated and wall-blind**: it
   short-circuits **business RLS only**, and only on objects whose posture allows
   it (`access.default: 'private'`, `tenancy: { enabled: false }`, or a
