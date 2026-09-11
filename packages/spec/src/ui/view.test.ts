@@ -4147,7 +4147,7 @@ describe("ListViewSchema — calendar in `appearance.allowedVisualizations` requ
 // ============================================================================
 
 describe("ListViewSchema — the `type: 'calendar'` axis is NOT gated by the #13817 check (#16577)", () => {
-  describe.each(viewDoorsCarryingPageMountCheck)('%s', (_label, parse) => {
+  describe.each(viewDoorsCarryingObjectLevelChecks)('%s', (_label, parse) => {
     it("ACCEPTS `type: 'calendar'` with no `calendar:` block — the axis #13817 does not gate", () => {
       const r = parse({ type: 'calendar', columns: ['name'] });
       expect(r.success, r.success === false ? JSON.stringify((r as unknown as { error: z.ZodError }).error.issues) : '').toBe(true);
