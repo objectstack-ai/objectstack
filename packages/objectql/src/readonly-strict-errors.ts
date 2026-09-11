@@ -21,7 +21,10 @@ import type { DroppedFieldsEvent } from '@objectstack/spec/data';
  * INSERT the runtime-owned ones and, since the 2026-09-03 ruling (#14147)
  * superseded the create-side exemption #3413 had granted, static `readonly`
  * too — judged over `staticReadonlyInsertSubject`, which leaves a
- * `sys_`-prefixed or `managedBy` object to its own guards (#15719), while
+ * `sys_`-prefixed object, and one in a PLATFORM-INTERNAL `managedBy` bucket, to
+ * its own guards (#15719 narrowed that from "`managedBy` set to anything": a
+ * user-writable bucket's static `readonly` columns are stripped on create
+ * exactly as they already were on update), while
  * `readonlyWhen` still locks nothing on a create (a conditional lock needs a
  * prior record). One error names everything wrong with the payload instead of
  * forcing a round-trip per field. `drops` keeps the per-reason breakdown (the

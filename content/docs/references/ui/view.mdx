@@ -639,7 +639,7 @@ Record grouping configuration — SERVER-SIDE: the set of groups and every numbe
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **field** | `string` | ✅ | Field name to group by — one `groupBy` column of the group header query; the header row carries its raw stored value (null for the empty group) |
+| **field** | `string` | ✅ | Field name to group by — one `groupBy` column of the group header query; the header row carries its raw stored value (null for the empty group). NO leading or trailing whitespace: the name is compiled into the aggregate query verbatim, so a padded spelling buckets every row into one empty group instead of grouping them. |
 | **order** | `Enum<'asc' \| 'desc'>` | optional (default: `"asc"`) | Group sort order — applied by the consumer over the header rows (the aggregate query carries no orderBy) |
 | **collapsed** | `boolean` | optional (default: `false`) | Collapse groups by default (presentation only) |
 
@@ -652,7 +652,7 @@ Record grouping configuration — SERVER-SIDE: the set of groups and every numbe
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **field** | `string` | ✅ | Field name to group by — one `groupBy` column of the group header query; the header row carries its raw stored value (null for the empty group) |
+| **field** | `string` | ✅ | Field name to group by — one `groupBy` column of the group header query; the header row carries its raw stored value (null for the empty group). NO leading or trailing whitespace: the name is compiled into the aggregate query verbatim, so a padded spelling buckets every row into one empty group instead of grouping them. |
 | **order** | `Enum<'asc' \| 'desc'>` | optional (default: `"asc"`) | Group sort order — applied by the consumer over the header rows (the aggregate query carries no orderBy) |
 | **collapsed** | `boolean` | optional (default: `false`) | Collapse groups by default (presentation only) |
 
@@ -785,7 +785,7 @@ Map view configuration
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | optional | Internal view name (lowercase snake_case) |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
-| **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
+| **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree' \| 'page'>` | optional (default: `"grid"`) |  |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns |
 | **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
@@ -806,7 +806,7 @@ Map view configuration
 | **chart** | `{ chartType?: Enum<'bar' \| 'line' \| 'pie' \| 'area' \| 'scatter'>; dataset: string; dimensions?: string[]; values: string[] }` | optional | List chart view configuration |
 | **map** | `{ latitudeField?: string; longitudeField?: string; locationField?: string; titleField?: string; … }` | optional | Map configuration — applies when the view renders as a map layout |
 | **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer }` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
-| **pageName** | `never` | optional | [REMOVED] `view.pageName` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the page a `type: 'page'` view was to mount, and that mount was never built: no renderer read the key, so the named page was never reached and the view drew an empty grid. Delete the key; to put a published page in front of users, give the app a navigation item — `{ type: 'page', pageName: '<page_name>' }` under the app's `navigation` — which is a different key on a different surface and is the page mount that has always rendered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
+| **pageName** | `string` | optional | Published page this view mounts — required when `type: 'page'`, and refused on every other view type. Rendering is delegated to the existing page renderer; the page keeps its own `assignedProfiles` audience. |
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
 | **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
@@ -1191,7 +1191,7 @@ Tab configuration for multi-tab view interface
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | optional | Internal view name (lowercase snake_case) |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
-| **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
+| **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree' \| 'page'>` | optional (default: `"grid"`) |  |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns |
 | **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
@@ -1211,7 +1211,7 @@ Tab configuration for multi-tab view interface
 | **chart** | `{ chartType?: Enum<'bar' \| 'line' \| 'pie' \| 'area' \| 'scatter'>; dataset: string; dimensions?: string[]; values: string[] }` | optional | List chart view configuration |
 | **map** | `{ latitudeField?: string; longitudeField?: string; locationField?: string; titleField?: string; … }` | optional | Map configuration — applies when the view renders as a map layout |
 | **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer }` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
-| **pageName** | `never` | optional | [REMOVED] `view.pageName` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the page a `type: 'page'` view was to mount, and that mount was never built: no renderer read the key, so the named page was never reached and the view drew an empty grid. Delete the key; to put a published page in front of users, give the app a navigation item — `{ type: 'page', pageName: '<page_name>' }` under the app's `navigation` — which is a different key on a different surface and is the page mount that has always rendered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
+| **pageName** | `string` | optional | Published page this view mounts — required when `type: 'page'`, and refused on every other view type. Rendering is delegated to the existing page renderer; the page keeps its own `assignedProfiles` audience. |
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
 | **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
@@ -1768,9 +1768,9 @@ Tab configuration for multi-tab view interface
 | **name** | `string` | optional | Item name — supplied by the metadata door; for an object-scoped container it is the object name. |
 | **label** | `string \| Record<string, string>` | optional | Human-readable label shown in metadata lists. |
 | **object** | `string` | optional | Object this container binds to — how a stack-level `views: [...]` entry says which object its views belong to; read by `getViewsByObject()` / `GET /meta/view?object=`. |
-| **list** | `{ name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| … +3 more; … }` | optional |  |
+| **list** | `{ name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| …>; data?: object \| … +3 more; … }` | optional |  |
 | **form** | `{ type?: Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>; layout?: Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>; columns?: integer; title?: string; … }` | optional |  |
-| **listViews** | `Record<string, { name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| … +3 more; … }>` | optional | Additional named list views (views mode — dropdown userFilters allowed, no tabs; ADR-0047) |
+| **listViews** | `Record<string, { name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| …>; data?: object \| … +3 more; … }>` | optional | Additional named list views (views mode — dropdown userFilters allowed, no tabs; ADR-0047) |
 | **formViews** | `Record<string, { type?: Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>; layout?: Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>; columns?: integer; title?: string; … }>` | optional | Additional named form views |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this view. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
@@ -1787,7 +1787,7 @@ Tab configuration for multi-tab view interface
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | optional | Internal view name (lowercase snake_case) |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
-| **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
+| **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| …>` | optional (default: `"grid"`) |  |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns |
 | **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
@@ -1807,7 +1807,7 @@ Tab configuration for multi-tab view interface
 | **chart** | `{ chartType?: Enum<'bar' \| 'line' \| 'pie' \| 'area' \| 'scatter'>; dataset: string; dimensions?: string[]; values: string[] }` | optional | List chart view configuration |
 | **map** | `{ latitudeField?: string; longitudeField?: string; locationField?: string; titleField?: string; … }` | optional | Map configuration — applies when the view renders as a map layout |
 | **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer }` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
-| **pageName** | `never` | optional | [REMOVED] `view.pageName` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the page a `type: 'page'` view was to mount, and that mount was never built: no renderer read the key, so the named page was never reached and the view drew an empty grid. Delete the key; to put a published page in front of users, give the app a navigation item — `{ type: 'page', pageName: '<page_name>' }` under the app's `navigation` — which is a different key on a different surface and is the page mount that has always rendered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
+| **pageName** | `string` | optional | Published page this view mounts — required when `type: 'page'`, and refused on every other view type. Rendering is delegated to the existing page renderer; the page keeps its own `assignedProfiles` audience. |
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
 | **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
@@ -1872,7 +1872,7 @@ Tab configuration for multi-tab view interface
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | optional | Internal view name (lowercase snake_case) |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
-| **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
+| **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| …>` | optional (default: `"grid"`) |  |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns |
 | **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
@@ -1892,7 +1892,7 @@ Tab configuration for multi-tab view interface
 | **chart** | `{ chartType?: Enum<'bar' \| 'line' \| 'pie' \| 'area' \| 'scatter'>; dataset: string; dimensions?: string[]; values: string[] }` | optional | List chart view configuration |
 | **map** | `{ latitudeField?: string; longitudeField?: string; locationField?: string; titleField?: string; … }` | optional | Map configuration — applies when the view renders as a map layout |
 | **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer }` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
-| **pageName** | `never` | optional | [REMOVED] `view.pageName` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the page a `type: 'page'` view was to mount, and that mount was never built: no renderer read the key, so the named page was never reached and the view drew an empty grid. Delete the key; to put a published page in front of users, give the app a navigation item — `{ type: 'page', pageName: '<page_name>' }` under the app's `navigation` — which is a different key on a different surface and is the page mount that has always rendered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
+| **pageName** | `string` | optional | Published page this view mounts — required when `type: 'page'`, and refused on every other view type. Rendering is delegated to the existing page renderer; the page keeps its own `assignedProfiles` audience. |
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
 | **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
@@ -2088,7 +2088,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **viewKind** | `'list'` | ✅ |  |
-| **config** | `{ name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| … +3 more; … }` | ✅ | List-family view configuration. |
+| **config** | `{ name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| …>; data?: object \| … +3 more; … }` | ✅ | List-family view configuration. |
 | **name** | `string` | ✅ | Globally-unique view id, `<object>.<viewKey>`. |
 | **object** | `string` | ✅ | Bound object name — the foreign key used to aggregate views. |
 | **label** | `string \| Record<string, string>` | optional | Display label (supports i18n). |
@@ -2112,7 +2112,7 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | optional | Internal view name (lowercase snake_case) |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
-| **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
+| **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| …>` | optional (default: `"grid"`) |  |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns |
 | **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
@@ -2133,7 +2133,7 @@ This schema accepts one of the following structures:
 | **chart** | `{ chartType?: Enum<'bar' \| 'line' \| 'pie' \| 'area' \| 'scatter'>; dataset: string; dimensions?: string[]; values: string[] }` | optional | List chart view configuration |
 | **map** | `{ latitudeField?: string; longitudeField?: string; locationField?: string; titleField?: string; … }` | optional | Map configuration — applies when the view renders as a map layout |
 | **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer }` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
-| **pageName** | `never` | optional | [REMOVED] `view.pageName` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the page a `type: 'page'` view was to mount, and that mount was never built: no renderer read the key, so the named page was never reached and the view drew an empty grid. Delete the key; to put a published page in front of users, give the app a navigation item — `{ type: 'page', pageName: '<page_name>' }` under the app's `navigation` — which is a different key on a different surface and is the page mount that has always rendered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
+| **pageName** | `string` | optional | Published page this view mounts — required when `type: 'page'`, and refused on every other view type. Rendering is delegated to the existing page renderer; the page keeps its own `assignedProfiles` audience. |
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
 | **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
@@ -2261,7 +2261,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **viewKind** | `'list'` | ✅ |  |
-| **config** | `{ name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| … +3 more; … }` | ✅ | List-family view configuration. |
+| **config** | `{ name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| …>; data?: object \| … +3 more; … }` | ✅ | List-family view configuration. |
 | **name** | `string` | ✅ | Globally-unique view id, `<object>.<viewKey>`. |
 | **object** | `string` | ✅ | Bound object name — the foreign key used to aggregate views. |
 | **label** | `string \| Record<string, string>` | optional | Display label (supports i18n). |
@@ -2288,7 +2288,7 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | optional | Internal view name (lowercase snake_case) |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
-| **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
+| **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| …>` | optional (default: `"grid"`) |  |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns |
 | **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
@@ -2309,7 +2309,7 @@ This schema accepts one of the following structures:
 | **chart** | `{ chartType?: Enum<'bar' \| 'line' \| 'pie' \| 'area' \| 'scatter'>; dataset: string; dimensions?: string[]; values: string[] }` | optional | List chart view configuration |
 | **map** | `{ latitudeField?: string; longitudeField?: string; locationField?: string; titleField?: string; … }` | optional | Map configuration — applies when the view renders as a map layout |
 | **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer }` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
-| **pageName** | `never` | optional | [REMOVED] `view.pageName` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the page a `type: 'page'` view was to mount, and that mount was never built: no renderer read the key, so the named page was never reached and the view drew an empty grid. Delete the key; to put a published page in front of users, give the app a navigation item — `{ type: 'page', pageName: '<page_name>' }` under the app's `navigation` — which is a different key on a different surface and is the page mount that has always rendered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
+| **pageName** | `string` | optional | Published page this view mounts — required when `type: 'page'`, and refused on every other view type. Rendering is delegated to the existing page renderer; the page keeps its own `assignedProfiles` audience. |
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
 | **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |

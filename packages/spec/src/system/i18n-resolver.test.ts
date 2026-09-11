@@ -3472,6 +3472,207 @@ describe('translateFlow (#11287)', () => {
   });
 });
 
+describe('translateFlow — screens inside ADR-0031 regions (#11745)', () => {
+  // The fourth pass in this repo written against a flat `flow.nodes` walk
+  // (#4347 `applyConversionsToFlow`, #4380 the flow lint rules, #5383
+  // `flow-inert-node-condition` were the first three). `FlowNode.config`
+  // carries regions — `loop.config.body`, `parallel.config.branches[].nodes`,
+  // `try_catch.config.try`/`.catch` — each a full `nodes` array that nests
+  // arbitrarily. A `type: 'screen'` node inside one is a real screen: the
+  // executor pauses on it and the client receives its `ScreenSpec.nodeId`, so
+  // `flows.<name>.screens.<node_id>` is authored for it and parses (the bundle
+  // schema is keyed by node id and knows nothing about depth). The flat walk
+  // accepted those keys and silently never applied them.
+  const bundle: FlowTestBundle = {
+    'zh-CN': {
+      flows: {
+        nested_regions: {
+          label: '嵌套区域',
+          screens: {
+            top_screen: { title: '顶层', fields: { f_top: { label: '顶层字段' } } },
+            loop_screen: { title: '循环内', fields: { f_loop: { label: '循环字段', placeholder: '请输入' } } },
+            branch_screen: { title: '分支内' },
+            try_screen: { title: 'try 内' },
+            catch_screen: { title: 'catch 内' },
+            deep_screen: { title: '深层' },
+          },
+        },
+      },
+    },
+  };
+
+  /**
+   * One flow carrying a screen in EVERY region slot the table declares, plus
+   * one two-levels-deep (a screen inside a loop inside a try's `try` region)
+   * and two negative controls the bundle deliberately omits — a non-screen
+   * node inside a region, and a nested screen with no bundle entry.
+   */
+  const regionFlow = (): any => ({
+    name: 'nested_regions',
+    label: 'Nested Regions',
+    type: 'screen',
+    nodes: [
+      {
+        id: 'top_screen',
+        type: 'screen',
+        label: 'Top',
+        config: { title: 'Top', fields: [{ name: 'f_top', label: 'Top Field' }] },
+      },
+      {
+        id: 'the_loop',
+        type: 'loop',
+        label: 'Loop',
+        config: {
+          collection: '{items}',
+          body: {
+            nodes: [
+              {
+                id: 'loop_screen',
+                type: 'screen',
+                label: 'In Loop',
+                config: { title: 'In Loop', fields: [{ name: 'f_loop', label: 'Loop Field' }] },
+              },
+              { id: 'loop_script', type: 'script', label: 'Loop Script' },
+              {
+                id: 'untranslated_screen',
+                type: 'screen',
+                label: 'Untranslated',
+                config: { title: 'Untranslated' },
+              },
+            ],
+            edges: [],
+          },
+        },
+      },
+      {
+        id: 'the_parallel',
+        type: 'parallel',
+        label: 'Parallel',
+        config: {
+          branches: [
+            { nodes: [{ id: 'branch_script', type: 'script', label: 'Branch Script' }], edges: [] },
+            {
+              nodes: [
+                { id: 'branch_screen', type: 'screen', label: 'In Branch', config: { title: 'In Branch' } },
+              ],
+              edges: [],
+            },
+          ],
+        },
+      },
+      {
+        id: 'the_try',
+        type: 'try_catch',
+        label: 'Try',
+        config: {
+          try: {
+            nodes: [
+              { id: 'try_screen', type: 'screen', label: 'In Try', config: { title: 'In Try' } },
+              {
+                id: 'inner_loop',
+                type: 'loop',
+                label: 'Inner Loop',
+                config: {
+                  collection: '{rows}',
+                  body: {
+                    nodes: [
+                      { id: 'deep_screen', type: 'screen', label: 'Deep', config: { title: 'Deep' } },
+                    ],
+                    edges: [],
+                  },
+                },
+              },
+            ],
+            edges: [],
+          },
+          catch: {
+            nodes: [{ id: 'catch_screen', type: 'screen', label: 'In Catch', config: { title: 'In Catch' } }],
+            edges: [],
+          },
+        },
+      },
+    ],
+    edges: [],
+  });
+
+  // Explicit paths rather than a recursive finder: the assertion then names
+  // the SLOT it is about, so a failure says which region stopped being walked.
+  const loopScreen = (d: any) => d.nodes[1].config.body.nodes[0];
+  const branchScreen = (d: any) => d.nodes[2].config.branches[1].nodes[0];
+  const tryScreen = (d: any) => d.nodes[3].config.try.nodes[0];
+  const deepScreen = (d: any) => d.nodes[3].config.try.nodes[1].config.body.nodes[0];
+  const catchScreen = (d: any) => d.nodes[3].config.catch.nodes[0];
+
+  it('overlays a screen in EVERY region slot — loop.body, parallel.branches[], try_catch.try and .catch', () => {
+    const out: any = translateFlow(regionFlow(), bundle, { locale: 'zh-CN' });
+    expect(loopScreen(out).config.title).toBe('循环内');
+    expect(branchScreen(out).config.title).toBe('分支内');
+    expect(tryScreen(out).config.title).toBe('try 内');
+    expect(catchScreen(out).config.title).toBe('catch 内');
+  });
+
+  it('reaches ARBITRARY depth — a screen inside a loop inside a try_catch', () => {
+    const out: any = translateFlow(regionFlow(), bundle, { locale: 'zh-CN' });
+    expect(deepScreen(out).config.title).toBe('深层');
+  });
+
+  it('overlays per-FIELD copy on a nested screen, not just its title', () => {
+    const out: any = translateFlow(regionFlow(), bundle, { locale: 'zh-CN' });
+    const field = loopScreen(out).config.fields.find((f: any) => f.name === 'f_loop');
+    expect(field.label).toBe('循环字段');
+    expect(field.placeholder).toBe('请输入');
+  });
+
+  it('still overlays the FLAT top-level screen — the reach grew, it did not move', () => {
+    const out: any = translateFlow(regionFlow(), bundle, { locale: 'zh-CN' });
+    expect(out.label).toBe('嵌套区域');
+    expect(out.nodes[0].config.title).toBe('顶层');
+    expect(out.nodes[0].config.fields[0].label).toBe('顶层字段');
+  });
+
+  it('preserves REFERENCE IDENTITY for everything that resolved nothing', () => {
+    // Load-bearing: `nodesChanged` is read by identity, so a node copied
+    // without cause turns every untouched document into a changed one.
+    const doc = regionFlow();
+    const out: any = translateFlow(doc, bundle, { locale: 'zh-CN' });
+
+    // A non-screen node inside a region, and a nested screen the bundle omits.
+    expect(loopScreen(out) === loopScreen(doc)).toBe(false);          // this one DID resolve
+    expect(out.nodes[1].config.body.nodes[1]).toBe(doc.nodes[1].config.body.nodes[1]);
+    expect(out.nodes[1].config.body.nodes[2]).toBe(doc.nodes[1].config.body.nodes[2]);
+
+    // A whole branch under which nothing resolved keeps its own reference,
+    // including its `nodes` array.
+    expect(out.nodes[2].config.branches[0]).toBe(doc.nodes[2].config.branches[0]);
+    expect(out.nodes[2].config.branches[0].nodes).toBe(doc.nodes[2].config.branches[0].nodes);
+
+    // The input document is never mutated.
+    expect(doc.nodes[1].config.body.nodes[0].config.title).toBe('In Loop');
+  });
+
+  it('returns the SAME flow reference when nothing resolved, regions included', () => {
+    // The negative control for the identity discipline one level up: a flow
+    // the bundle does not carry must come back untouched by reference, or
+    // `nodesChanged` starts reporting untouched documents as changed.
+    const doc = { ...regionFlow(), name: 'no_such_flow' };
+    expect(translateFlow(doc, bundle, { locale: 'zh-CN' })).toBe(doc);
+  });
+
+  it('leaves a region-shaped value that is not a region alone (`config` is an open record)', () => {
+    // `body` is also an ordinary key elsewhere — an `http` node's request
+    // payload. The descent checks the SHAPE (`{ nodes: [...] }`), never the
+    // key name alone, so a `loop` whose `body` is a string is passed through.
+    const doc: any = {
+      name: 'nested_regions',
+      label: 'Nested Regions',
+      nodes: [{ id: 'the_loop', type: 'loop', label: 'Loop', config: { collection: '{i}', body: 'not a region' } }],
+    };
+    const out: any = translateFlow(doc, bundle, { locale: 'zh-CN' });
+    expect(out.nodes[0]).toBe(doc.nodes[0]);
+    expect(out.label).toBe('嵌套区域');
+  });
+});
+
 describe('resolveFlowScreenTitle (#11287)', () => {
   const bundle: FlowTestBundle = {
     'zh-CN': {

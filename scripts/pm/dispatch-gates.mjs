@@ -96,12 +96,13 @@
  * `runReconciliation` carries all three measurements and what defeats each.
  *
  * The capture idiom is the load-bearing half, and it is one line: RECORD THE
- * COMMAND THIS TOOL PRINTED, as it runs, byte for byte.
+ * COMMAND THIS TOOL PRINTED, as it runs, byte for byte — and record WHAT IT
+ * ANSWERED beside it.
  *
  *     node scripts/pm/dispatch-gates.mjs --commands > gates.list
  *     while IFS= read -r cmd; do
- *       eval "$cmd" > "logs/$n" 2>&1
- *       printf '%s\n' "$cmd" >> ran.list      # what RAN — pass or fail
+ *       eval "$cmd" > "logs/$n" 2>&1; status=$?          # BEFORE any pipe
+ *       printf '%s :: exit %d\n' "$cmd" "$status" >> ran.list
  *     done < gates.list
  *     node scripts/pm/dispatch-gates.mjs --ran ran.list      # exit 1 if any family is unrun
  *
@@ -110,6 +111,17 @@
  * be lenient about. ⛔ Do not build the record from log FILE NAMES: that is the
  * step that needs a slug, and the slug is where the first hand-built
  * reconciliation went wrong.
+ *
+ * ⭐ The `:: exit <code>` half is OPTIONAL and it is the difference between a
+ * measurement and a claim. A bare line says only "I ran it", and a gate that
+ * refused with `PREREQUISITE NOT MET` is indistinguishable there from one that
+ * passed — so the NOT-MEASURED count over bare lines is whatever the runner
+ * remembered to declare, which is a claim. Measured across four consecutive
+ * deliveries (#17204): the tool printed `0 NOT-MEASURED` on every one of them
+ * while 2, 2, 1 and 2 gates respectively had exited 3, the truth carried only
+ * by each runner's prose beside the tool's own line. With the code recorded the
+ * class is DERIVED here and cannot be forgotten; without it, every count this
+ * mode prints says `CLAIMED` in the same stroke.
  *
  * ## This tool answers about the tree it RUNS IN, and says so on every run
  *
@@ -428,6 +440,11 @@ import {
   isExtractConfigPath,
   isMetadataFormModulePath,
 } from '../i18n-bundle-surface.mjs';
+// The number a refusing gate exits with, READ from the one module that declares
+// it rather than spelled again here. `--ran` classifies a recorded exit code by
+// this constant, so a repo that ever renumbered the class would move this tool
+// with it instead of leaving a stale 3 behind in a second copy (#17204).
+import { EXIT_PREREQUISITE_NOT_MET } from '../import-prerequisite.mjs';
 import { blank, maskComments, scanSource } from '../js-comment-mask.mjs';
 import { invokedAs, isEntrypoint } from '../invoked-as.mjs';
 
@@ -4155,18 +4172,21 @@ const BARE_ENTRY_POINT_NAME = 'selfTest';
  *
  * ## The census, re-derived on this tree
  *
- * 209 code-position matches over the tracked JS/TS corpus. 187 are the bare
- * `selfTest`; the remaining 22 carry compound names over 21 distinct spellings,
- * and they are the rows below. Fifteen are genuine self-test batteries — the
- * anchor firing on them is the anchor working. SEVEN are production code:
+ * 252 code-position matches over the tracked JS/TS corpus. 223 are the bare
+ * `selfTest`; the remaining 29 carry compound names over 26 distinct spellings,
+ * and they are the rows below. Nineteen are genuine self-test batteries — the
+ * anchor firing on them is the anchor working. TEN are production code:
  *
- *   scripts/check-self-test-wired.mjs            carriesSelfTest
+ *   scripts/check-self-test-wired.mjs             carriesSelfTest
  *   scripts/check-self-test-workflow-commands.mjs runSelfTest
- *   scripts/check-step-collectors.mjs            selfTestTargets
- *   scripts/check-step-collectors.mjs            selfTestDiscoveries
- *   scripts/measure-self-test-floor.mjs          selfTestDefs
- *   scripts/pm/dispatch-gates.mjs                selfTestOnlyCallables
- *   scripts/pm/dispatch-gates.mjs                maskSelfTests
+ *   scripts/check-step-collectors.mjs             selfTestTargets
+ *   scripts/check-step-collectors.mjs             selfTestDiscoveries
+ *   scripts/measure-durability-swallow-family.mjs selfTestMode
+ *   scripts/measure-self-test-floor.mjs           selfTestDefs
+ *   scripts/pm/dispatch-gates.mjs                 selfTestOnlyCallables
+ *   scripts/pm/dispatch-gates.mjs                 maskSelfTests
+ *   scripts/pm/dispatch-gates.mjs                 selfTestCaseLines
+ *   scripts/pm/dispatch-gates.mjs                 selfTestOnlyInvocation
  *
  * Every one of them is a gate that REASONS ABOUT self-tests, which is why they
  * cluster: a tool that finds, spawns, counts or masks other scripts' self-tests
@@ -4175,16 +4195,17 @@ const BARE_ENTRY_POINT_NAME = 'selfTest';
  *
  * ## What it costs today: nothing, MEASURED, and that is the whole point
  *
- * Neutralising each of the seven one at a time and re-extracting moves no hint
- * in any of the four files. The claim is therefore live rather than recalled —
+ * Neutralising each of the ten one at a time and re-extracting moves no hint
+ * in any of the six files. The claim is therefore live rather than recalled —
  * and it is exactly the kind of claim that stops being true without anything
  * going red, which is what the pin in this module's self-test exists to catch.
  *
- * The same measurement over the fifteen genuine rows is NOT zero, and that
- * asymmetry is what makes the classification load-bearing rather than
- * decorative: `fixtureSelfTest` drops `packages/spec/spec-changes.json` and
- * `prePushIsArmedSelfTest` drops `.githooks/pre-push`, both fixture paths in
- * `scripts/check-regen-pending.mjs`, both correctly refused. So "no
+ * The same measurement, redone over the table's current nineteen genuine rows,
+ * is still NOT zero, and that asymmetry is what makes the classification
+ * load-bearing rather than decorative: `fixtureSelfTest` drops
+ * `packages/spec/spec-changes.json` and `prePushIsArmedSelfTest` drops
+ * `.githooks/pre-push`, both fixture paths in `scripts/check-regen-pending.mjs`,
+ * both correctly refused. So "no
  * compound-name match may contribute a hint" is FALSE as a blanket invariant;
  * the invariant holds only over the accidental half, and only a classification
  * can name that half.
@@ -4202,14 +4223,14 @@ const BARE_ENTRY_POINT_NAME = 'selfTest';
  *     that excludes the accidental one also unmasks a real self-test battery and
  *     readmits its fixture paths as hints — the fabricated-lead family this
  *     whole masker exists to refuse, traded for a silence that costs nothing.
- *   - **Special-casing this module's own path fixes two rows of seven.** The
- *     other five live in three other files, so the objection that a rename
+ *   - **Special-casing this module's own path fixes four rows of ten.** The
+ *     other six live in five other files, so the objection that a rename
  *     "fixes one instance and leaves the class" applies to it too, one file
  *     wider — and it would make the tool's self-scan differ from every other
  *     scan, which is a hazard of its own.
  *
- * ⇒ What ships is neither. The anchor keeps firing on all 22, the mask keeps
- * blanking all 22, and the cost of the seven accidental ones is MEASURED on
+ * ⇒ What ships is neither. The anchor keeps firing on all 29, the mask keeps
+ * blanking all 29, and the cost of the ten accidental ones is MEASURED on
  * every run instead of asserted in prose. Silence was the defect; the remedy is
  * noise on the day it starts costing something.
  *
@@ -4222,6 +4243,13 @@ const BARE_ENTRY_POINT_NAME = 'selfTest';
  * measures, and keeps measuring, that masking it costs no hint. ⛔ Do not
  * "repair" a red by renaming the function to dodge the anchor: the row is the
  * record, and the next accidental name is the one nobody will notice.
+ *
+ * The TOTAL / GENUINE / ACCIDENTAL counts stated above are pinned the same
+ * way (#15310): `--self-test` computes them fresh from this table and checks
+ * the docblock's own prose against that computation, never against a second
+ * hand-typed constant. Prose that drifts from the table reds there, instead
+ * of drifting further unnoticed the way it had — twice — by the time #15310
+ * measured it.
  */
 const COMPOUND_ANCHOR_LEDGER = [
   ['packages/lint/scripts/check-doc-formula-expressions.mjs', 'specSelfTest', false],
@@ -10458,10 +10486,12 @@ export function residueLines(
 
 /**
  * The single source of truth for the model tier the PM lane's governance
- * reads — clause ②'s CONTRACT-REVIEW tier: the tier a card that changes
- * contract accept/reject behaviour or widens the public surface must be
- * dispatched at, and the tier the `needs:contract-review` re-review sub-round
- * must itself be running at (its opening self-check reads this). Declared HERE
+ * reads — clause ②'s CONTRACT-REVIEW tier: the tier the clause-② REVIEW runs
+ * at, both halves of it — the spec seat's review of a card that changes
+ * contract accept/reject behaviour or widens the public surface, and the
+ * `needs:contract-review` re-review sub-round (its opening self-check reads
+ * this). The BUILD of such a card is at the default judgment tier, so this
+ * constant is a review tier and never a dispatch mandate. Declared HERE
  * and only here, as a constant, so a model upgrade is a one-line change in one
  * file — the clause-① mandate rows below read it, the self-test compares
  * against it, and the PM skill's prose names it, so the model id is spelled as
@@ -10589,7 +10619,11 @@ export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
  * (1023 of that is the suspect glob's contract surface). The `skills/**`
  * entry (2026-09-10) adds one hint and the 47 tracked files under `skills/`
  * (`git ls-files skills` on ebf9a489), one of which — the published PM
- * skill — the table already covered.
+ * skill — the table already covered. That skill was deleted on 2026-09-10
+ * (maintainer, verbatim: 「发布版 skills/objectstack-pm-dispatch 删」) and its
+ * own entry left with it — a dead glob is refused by the self-test — so the
+ * catalog is covered by `skills/**` alone and a catalog file hits exactly ONE
+ * entry; the frame-copy half of clause ① now names the internal copy only.
  *
  * They stay inert against a gate that RESOLVES to this file, because no check
  * family does — `check:pm-dispatch-gates` resolves to `check-dispatch-gates.mjs`
@@ -10628,11 +10662,6 @@ export const MANDATORY_TIER_GLOBS = [
     glob: '.claude/agents/os-dev.md',
     tier: CONTRACT_REVIEW_TIER,
     why: 'clause ① (2026-08-20 narrowing): the dev-agent definition is protocol semantics — every dispatched dev runs under it, and receives the decision frame the PM pastes into its prompt at dispatch time rather than carrying a copy of its own',
-  },
-  {
-    glob: 'skills/objectstack-pm-dispatch/SKILL.md',
-    tier: CONTRACT_REVIEW_TIER,
-    why: 'clause ① (2026-08-20 narrowing): the published PM skill carries one enforced copy of the decision frame (check:skill-frame-sync COPIES) and ships verbatim to third-party projects',
   },
   {
     glob: 'skills/**',
@@ -11684,6 +11713,43 @@ export const RUN_RECORD_UNMEASURED_MARKER = 'NOT-MEASURED';
 export const RUN_RECORD_REASON_SEPARATOR = ' :: ';
 
 /**
+ * The word that opens the OPTIONAL annotation a ran line may carry after the
+ * separator: `<command> :: exit <code>`.
+ *
+ * ## Why this is additive, and what "additive" had to mean here (#17204)
+ *
+ * The record format is a contract other seats write BY HAND — nothing in this
+ * repo writes a ran-file — so a change that invalidated existing records would
+ * not be a fix. Measured before it was written, and the three properties are
+ * the whole argument for this spelling:
+ *
+ *   • A record line that reconciles TODAY cannot be re-read tomorrow. This
+ *     annotation is recognised only as the TAIL of a line, after ` :: `, and no
+ *     command this tool derives contains that separator — so the only lines
+ *     whose reading changes are lines that already matched nothing.
+ *   • A record WITHOUT the annotation classifies byte-identically to before:
+ *     every bare line is a ran claim, exactly as it was.
+ *   • A record WITH it, handed to a tool that predates it, fails LOUD rather
+ *     than green — the whole line misses the derivation and the family reports
+ *     UNRUN, exit 1. The one direction a format change must never take is a
+ *     silent pass, and this one cannot take it.
+ *
+ * ## Why the tail and not a `NOT-MEASURED`-style prefix
+ *
+ * The prefix marker is a CLASS the runner declares; this is a DATUM their shell
+ * captured (`status=$?`). Keeping it at the tail keeps the capture idiom a
+ * one-line `printf` over `"$cmd"` — the command still leads the line, byte for
+ * byte, which is the property every comparison in this file rests on.
+ *
+ * The payload is matched exactly: `exit ` followed by digits, nothing else. A
+ * lenient reader (`EXIT 3`, `exit=3`, `3`) would be a second dialect of a field
+ * whose entire purpose is to be unambiguous, so a tail that opens with the
+ * separator and is not this shape is reported as MALFORMED and the line keeps
+ * its old reading — the direction that costs a rerun, never a false green.
+ */
+export const RUN_RECORD_EXIT_PREFIX = 'exit ';
+
+/**
  * A run record, parsed. One entry per line that claims something.
  *
  * ## The format is the tool's, and it is the exact strings `--commands` emits
@@ -11742,7 +11808,7 @@ export function parseRunRecord(text) {
       const rest = raw.slice(RUN_RECORD_UNMEASURED_MARKER.length + 1);
       const at = rest.indexOf(RUN_RECORD_REASON_SEPARATOR);
       if (at < 0) {
-        entries.push({ command: rest, claim: 'not-measured', reason: null, line, raw, malformed: `no '${RUN_RECORD_REASON_SEPARATOR.trim()}' and no reason after it` });
+        entries.push({ command: rest, claim: 'not-measured', reason: null, exitCode: null, line, raw, malformed: `no '${RUN_RECORD_REASON_SEPARATOR.trim()}' and no reason after it`, malformedKind: 'claim' });
         continue;
       }
       const reason = rest.slice(at + RUN_RECORD_REASON_SEPARATOR.length).trim();
@@ -11750,15 +11816,85 @@ export function parseRunRecord(text) {
         command: rest.slice(0, at),
         claim: 'not-measured',
         reason: reason || null,
+        exitCode: null,
         line,
         raw,
         malformed: reason ? null : 'an empty reason',
+        malformedKind: reason ? null : 'claim',
       });
       continue;
     }
-    entries.push({ command: raw, claim: 'ran', reason: null, line, raw, malformed: null });
+    const { command, exitCode, malformed } = ranLineExitAnnotation(raw);
+    entries.push({ command, claim: 'ran', reason: null, exitCode, line, raw, malformed, malformedKind: malformed ? 'exit' : null });
   }
   return entries;
+}
+
+/**
+ * A ran line split into its command and the exit code it recorded, if any.
+ *
+ * The separator is found from the RIGHT: the annotation is a tail, so a command
+ * that somehow contained the separator keeps all of itself and only the last
+ * segment is read as a candidate annotation. A tail that is not the exact
+ * `exit <digits>` shape leaves the command as the WHOLE line — its reading
+ * before this field existed — and reports itself, so a runner who spelled it
+ * `EXIT 3` learns that from the run instead of from a family silently landing
+ * outside the derivation.
+ */
+function ranLineExitAnnotation(raw) {
+  const at = raw.lastIndexOf(RUN_RECORD_REASON_SEPARATOR);
+  if (at < 0) return { command: raw, exitCode: null, malformed: null };
+  const tail = raw.slice(at + RUN_RECORD_REASON_SEPARATOR.length);
+  const digits = tail.startsWith(RUN_RECORD_EXIT_PREFIX) ? tail.slice(RUN_RECORD_EXIT_PREFIX.length) : null;
+  if (digits === null || !/^\d{1,3}$/.test(digits)) {
+    return {
+      command: raw,
+      exitCode: null,
+      malformed: `a '${RUN_RECORD_REASON_SEPARATOR.trim()}' tail that is not an exit code ('${tail}')`,
+    };
+  }
+  return { command: raw.slice(0, at), exitCode: Number(digits), malformed: null };
+}
+
+/**
+ * What a record's NOT-MEASURED count RESTS on — the one question the headline
+ * used to answer by not asking it (#17204).
+ *
+ * ## The two channels, and why they are counted apart
+ *
+ * A family this record accounts for arrives through one of three doors, and
+ * only the first is a measurement the runner could not have forgotten to make:
+ *
+ *   CODED   the line carries `:: exit <code>`. The CLASS is derived here, from
+ *           a datum their shell captured. ⛔ This tool still did not run the
+ *           gate — it read a number — but the number is not a judgement, and
+ *           `exit 3` cannot be left undeclared by a runner in a hurry.
+ *   SILENT  a bare line: "I ran it". A gate that refused with its own unmet
+ *           prerequisite is INDISTINGUISHABLE here from one that passed, so
+ *           every NOT-MEASURED count over silent families is a floor at best
+ *           and, when every family is silent, a claim outright.
+ *   CLAIMED the `NOT-MEASURED … :: <reason>` line. Declared, reasoned, and
+ *           still the runner's own classification — which is why it keeps its
+ *           own block, its own count, and the word CLAIMED in both sentences.
+ *
+ * ## Why the class is `silent`-driven and not `claimed`-driven
+ *
+ * A hidden refusal can only live in a SILENT family: a claimed one is already
+ * counted, and a coded one is classified by its code. So the kind below turns
+ * on `silent` alone, and the floor it reports is a floor over exactly those
+ * families — not over the record's line count, which is a different number and
+ * would make the sentence unfalsifiable.
+ */
+export function runRecordEvidence({ coded = 0, silent = 0, notMeasured = [] } = {}) {
+  const derivedFromExit = notMeasured.filter((entry) => entry.source === 'exit-code').length;
+  const claimed = notMeasured.length - derivedFromExit;
+  const accounted = coded + silent + claimed;
+  let kind;
+  if (accounted === 0) kind = 'none';
+  else if (coded === 0) kind = 'claimed';
+  else if (silent === 0) kind = 'derived';
+  else kind = 'floor';
+  return { coded, silent, claimed, derivedFromExit, accounted, kind };
 }
 
 /**
@@ -11852,14 +11988,30 @@ export function runReconciliation({
 } = {}) {
   const derivedSet = new Set(derived);
   const ranClaims = new Set();
+  const recordedExits = new Map();
+  const exitContradictions = [];
   const unmeasuredClaims = new Map();
   const malformed = [];
   for (const entry of record) {
     if (entry.claim === 'ran') {
+      if (entry.malformed) malformed.push({ line: entry.line, raw: entry.raw, why: entry.malformed, kind: entry.malformedKind ?? 'exit' });
       ranClaims.add(entry.command);
+      if (typeof entry.exitCode === 'number') {
+        const held = recordedExits.get(entry.command);
+        if (!held) {
+          recordedExits.set(entry.command, { code: entry.exitCode, line: entry.line });
+        } else if (held.code !== entry.exitCode) {
+          exitContradictions.push({ command: entry.command, held: held.code, also: entry.exitCode, line: entry.line });
+          // Resolved the way the ran/claim contradiction beside it is: the
+          // reading that costs a rerun, never the one that costs a false green.
+          // Two lines disagreeing about one family is a record defect either
+          // way, and it is REPORTED — the resolution is not a repair.
+          if (entry.exitCode === EXIT_PREREQUISITE_NOT_MET) recordedExits.set(entry.command, { code: entry.exitCode, line: entry.line });
+        }
+      }
       continue;
     }
-    if (entry.malformed) malformed.push({ line: entry.line, raw: entry.raw, why: entry.malformed });
+    if (entry.malformed) malformed.push({ line: entry.line, raw: entry.raw, why: entry.malformed, kind: entry.malformedKind ?? 'claim' });
     if (!unmeasuredClaims.has(entry.command)) unmeasuredClaims.set(entry.command, entry);
   }
   // A command claimed BOTH ways is read as run — running it is the stronger
@@ -11869,14 +12021,43 @@ export function runReconciliation({
   const ran = [];
   const unrun = [];
   const notMeasured = [];
+  // The two halves of the evidence question, counted over the families this
+  // record ACCOUNTS FOR rather than over its lines: `coded` is what the runner
+  // measured and wrote down, `silent` is what their line merely asserts. A
+  // hidden refusal can only live in `silent`, which is why that number and not
+  // the line count is what the rendering quotes (#17204).
+  let coded = 0;
+  let silent = 0;
   for (const command of [...derivedSet].sort()) {
     if (ranClaims.has(command)) {
+      const recorded = recordedExits.get(command);
+      if (!recorded) {
+        silent += 1;
+        ran.push(command);
+        continue;
+      }
+      coded += 1;
+      // ⭐ The card's whole subject: the class is DERIVED from the recorded
+      // code, so a runner cannot fail to declare it. This is not the tool
+      // measuring the gate — it did not run it — it is the tool reading a
+      // datum the runner captured, which is a strictly different thing from
+      // the runner's own classification of it.
+      if (recorded.code === EXIT_PREREQUISITE_NOT_MET) {
+        notMeasured.push({
+          command,
+          reason: `recorded ${RUN_RECORD_EXIT_PREFIX}${recorded.code} on line ${recorded.line} — PREREQUISITE NOT MET`,
+          line: recorded.line,
+          source: 'exit-code',
+          exitCode: recorded.code,
+        });
+        continue;
+      }
       ran.push(command);
       continue;
     }
     const claim = unmeasuredClaims.get(command);
     if (claim && claim.reason) {
-      notMeasured.push({ command, reason: claim.reason, line: claim.line });
+      notMeasured.push({ command, reason: claim.reason, line: claim.line, source: 'claim', exitCode: null });
       continue;
     }
     unrun.push({
@@ -11934,6 +12115,12 @@ export function runReconciliation({
     nearMiss,
     malformed,
     conflicts,
+    exitContradictions,
+    // ⭐ Computed ONCE, here, and read by both sentences that quote it. The
+    // count line and the verdict line used to be free to say different things
+    // about the same number because each wrote its own words; the class below
+    // is the single expression both of them render (#17204).
+    evidence: runRecordEvidence({ coded, silent, notMeasured }),
     recordEntries: record.length,
     ok: unrun.length === 0,
   };
@@ -11982,15 +12169,26 @@ export function runReconciliationLines(recon, outside = {}) {
     `  The ${recon.derivedTotal} is THIS tree's derivation, recomputed in this process from the same expression --commands prints —` +
       ' never read back from your record. A family you never wrote down is still counted, which is what an arithmetic over your own list cannot do.',
   );
+  lines.push(...runRecordEvidenceLines(recon.evidence ?? runRecordEvidence({})));
   if (recon.unrun.length > 0) {
     lines.push(`  ⛔ UNRUN (${recon.unrun.length}) — derived for these paths, and the record does not account for them:`);
     for (const { command, why } of recon.unrun) lines.push(`    - ${command}   [${why}]`);
   }
-  if (recon.notMeasured.length > 0) {
+  const derivedNotMeasured = recon.notMeasured.filter((entry) => entry.source === 'exit-code');
+  const claimedNotMeasured = recon.notMeasured.filter((entry) => entry.source !== 'exit-code');
+  if (derivedNotMeasured.length > 0) {
     lines.push(
-      `  ${marker} (${recon.notMeasured.length}) — the RUNNER's claim, recorded with a reason. ⛔ This tool did not measure them and cannot verify the reason:`,
+      `  ${marker} · DERIVED (${derivedNotMeasured.length}) — your record carries ${RUN_RECORD_EXIT_PREFIX}${EXIT_PREREQUISITE_NOT_MET} for these,`
+        + ` the number a gate refusing its own prerequisite exits with. ⛔ This tool did not run them either — it classified the code YOU recorded,`
+        + ' which is the one channel here that cannot be left undeclared:',
     );
-    for (const { command, reason } of recon.notMeasured) lines.push(`    - ${command}   [${reason}]`);
+    for (const { command, reason } of derivedNotMeasured) lines.push(`    - ${command}   [${reason}]`);
+  }
+  if (claimedNotMeasured.length > 0) {
+    lines.push(
+      `  ${marker} · CLAIMED (${claimedNotMeasured.length}) — the RUNNER's claim, recorded with a reason. ⛔ This tool did not measure them and cannot verify the reason:`,
+    );
+    for (const { command, reason } of claimedNotMeasured) lines.push(`    - ${command}   [${reason}]`);
     lines.push(
       `    ⚠️ ${marker} is for a gate that REFUSES with its own stated prerequisite. A run the OS killed is not that —` +
         ' a cap kill (exit 143) leaves no verdict and the family is simply unrun. The two are easy to conflate under time pressure, and one of them was.',
@@ -12027,11 +12225,28 @@ export function runReconciliationLines(recon, outside = {}) {
         ' Record the command as --commands emits it, byte for byte. ⛔ A matcher that resolved this difference is how a reconciliation reported 0 over a set the raw comparison scored 36.',
     );
   }
-  for (const { line, raw, why } of recon.malformed) {
-    lines.push(`  ⚠️ line ${line} claims ${marker} with ${why}: '${raw}'. Spelling: ${marker} <command>${RUN_RECORD_REASON_SEPARATOR}<reason>.`);
+  for (const { line, raw, why, kind } of recon.malformed) {
+    lines.push(
+      kind === 'exit'
+        ? `  ⚠️ line ${line} carries ${why}: '${raw}'. Read as a command in full, so it pairs with nothing.`
+          + ` Spelling: <command>${RUN_RECORD_REASON_SEPARATOR}${RUN_RECORD_EXIT_PREFIX}<code>.`
+        : `  ⚠️ line ${line} claims ${marker} with ${why}: '${raw}'. Spelling: ${marker} <command>${RUN_RECORD_REASON_SEPARATOR}<reason>.`,
+    );
+  }
+  for (const { command, held, also, line } of recon.exitContradictions ?? []) {
+    lines.push(
+      `  ⚠️ '${command}' is recorded with TWO different exit codes (${held}, then ${also} on line ${line}).`
+        + ` Read as ${held === EXIT_PREREQUISITE_NOT_MET || also === EXIT_PREREQUISITE_NOT_MET ? EXIT_PREREQUISITE_NOT_MET : held}`
+        + ' — the reading that costs a rerun rather than a false green; fix the record so it states one thing.',
+    );
   }
   for (const command of recon.conflicts) {
-    lines.push(`  ⚠️ '${command}' is recorded BOTH as run and as ${marker}. Read as run; fix the record so it states one thing.`);
+    const derivedHere = recon.notMeasured.some((entry) => entry.command === command && entry.source === 'exit-code');
+    lines.push(
+      derivedHere
+        ? `  ⚠️ '${command}' is recorded BOTH as run and as ${marker}. Read as ${marker}, derived from its recorded ${RUN_RECORD_EXIT_PREFIX}${EXIT_PREREQUISITE_NOT_MET}; fix the record so it states one thing.`
+        : `  ⚠️ '${command}' is recorded BOTH as run and as ${marker}. Read as run; fix the record so it states one thing.`,
+    );
   }
   // ⭐ The enumeration READ from the one place it exists, not a prose copy.
   // This sentence used to spell three of the five blocks a plain run prints,
@@ -12047,10 +12262,77 @@ export function runReconciliationLines(recon, outside = {}) {
   );
   lines.push(
     recon.ok
-      ? `✓ dispatch-gates --ran: ${recon.derivedTotal} derived famil(ies) accounted for — ${recon.ran.length} run, ${recon.notMeasured.length} ${marker}.`
+      ? `✓ dispatch-gates --ran: ${recon.derivedTotal} derived famil(ies) accounted for — ${recon.ran.length} run,`
+        + ` ${recon.notMeasured.length} ${marker}${notMeasuredEvidenceTerm(recon)}.`
       : `✗ dispatch-gates --ran: ${recon.unrun.length} of ${recon.derivedTotal} derived famil(ies) UNRUN.`,
   );
   return lines;
+}
+
+/**
+ * The evidence block, printed under the counts it qualifies.
+ *
+ * It is unconditional wherever there is anything to qualify, and that is the
+ * point: a note that appears only when something is wrong is a note a reader
+ * learns to skip, and the state this card was filed about — `0 NOT-MEASURED`
+ * over three gates that had exited 3 — looked exactly like nothing being wrong.
+ */
+function runRecordEvidenceLines(evidence) {
+  const marker = RUN_RECORD_UNMEASURED_MARKER;
+  const spelling = `<command>${RUN_RECORD_REASON_SEPARATOR}${RUN_RECORD_EXIT_PREFIX}<code>`;
+  const capture = `Record it as \`${spelling}\`, capturing $? BEFORE any pipe.`;
+  const { coded, silent, claimed, accounted, kind } = evidence;
+  if (kind === 'none') return [];
+  if (kind === 'derived') {
+    return [
+      `  EXIT CODES — all ${accounted} accounted famil(ies) carry one, so the ${marker} count above is DERIVED from them`
+        + `${claimed > 0 ? `, bar ${claimed} reasoned claim(s) counted beside them` : ''}. ⛔ This tool ran none of them; it read the codes you recorded.`,
+    ];
+  }
+  if (kind === 'claimed') {
+    return [
+      `  ⛔ EXIT CODES — 0 of the ${accounted} accounted famil(ies) carry one. A bare line says only "I ran it", and a gate that exited`
+        + ` ${EXIT_PREREQUISITE_NOT_MET} is indistinguishable here from one that exited 0 — so the ${marker} count above is the RUNNER'S CLAIM`
+        + `${claimed > 0
+          ? `: it is the ${claimed} they DECLARED, and a refusal they did not declare is invisible here.`
+          : `, and nothing in this record can raise it above the zero it declares.`}`
+        + ` ${capture}`,
+    ];
+  }
+  return [
+    `  ⚠️ EXIT CODES — ${coded} of the ${accounted} accounted famil(ies) carry one; ${silent} famil(ies) say only "I ran it".`
+      + ` The ${marker} count above is a FLOOR over those ${silent}, not a total. ${capture}`,
+  ];
+}
+
+/**
+ * The parenthetical the ✓ line carries after its NOT-MEASURED count — the
+ * sentence this card is about.
+ *
+ * ⭐ It is a FUNCTION of the same `evidence` the block above renders, so the two
+ * cannot drift; and it is never empty when there is evidence to state, because
+ * the defect was a zero that read as a measurement. The incentive it removes is
+ * the one the card names: a runner who records nothing used to get the cleanest
+ * line in the file, cleaner than one who annotated honestly and was rewarded
+ * with a non-zero count. After this, the annotated run is the clean one.
+ */
+function notMeasuredEvidenceTerm(recon) {
+  const evidence = recon.evidence ?? runRecordEvidence({});
+  const { coded, silent, claimed, derivedFromExit, accounted, kind } = evidence;
+  const code = EXIT_PREREQUISITE_NOT_MET;
+  if (kind === 'none') return '';
+  if (kind === 'derived') {
+    if (recon.notMeasured.length === 0) {
+      return ` (a DERIVED zero — all ${accounted} recorded an exit code and none of them is ${code})`;
+    }
+    return ` (${derivedFromExit} DERIVED from a recorded ${RUN_RECORD_EXIT_PREFIX}${code}${claimed > 0 ? `, ${claimed} claimed` : ''})`;
+  }
+  if (kind === 'claimed') {
+    return ` (⛔ CLAIMED — ${silent} of ${accounted} recorded no exit code, so this`
+      + ` ${recon.notMeasured.length === 0 ? 'zero' : 'count'} is what the runner declared, not what the record shows)`;
+  }
+  return ` (⛔ a FLOOR — ${derivedFromExit} derived from ${RUN_RECORD_EXIT_PREFIX}${code}${claimed > 0 ? `, ${claimed} claimed` : ''};`
+    + ` ${silent} of ${coded + silent + claimed} recorded no exit code)`;
 }
 
 /**
@@ -15237,6 +15519,86 @@ function selfTest() {
     const names = selfCensus.map((d) => d.name);
     t("this module's own masker is in the anchor's population", names.includes('maskSelfTests'));
     t('…and so is the reachability helper beside it', names.includes('selfTestOnlyCallables'));
+  }
+
+  // #15310 — the docblock above states this table's TOTAL / GENUINE /
+  // ACCIDENTAL composition in prose, and prose does not move when a row is
+  // added: three integers that agree with EACH OTHER while jointly
+  // disagreeing with the table is exactly the shape that let this drift twice
+  // without ever looking wrong. The declared numbers are read out of this
+  // module's own docblock text, never re-typed as a second constant here, and
+  // checked against a count taken fresh from COMPOUND_ANCHOR_LEDGER itself —
+  // so a row added without touching the docblock reds here, and an edit to
+  // any unrelated line changes neither side and stays green.
+  {
+    const ownSource = readFileSync(nodePath.join(ROOT, 'scripts/pm/dispatch-gates.mjs'), 'utf8');
+    const ledgerAt = ownSource.indexOf('const COMPOUND_ANCHOR_LEDGER = [');
+    const before = ledgerAt < 0 ? '' : ownSource.slice(0, ledgerAt);
+    const blockStart = before.lastIndexOf('/**');
+    const blockEnd = before.lastIndexOf('*/');
+    // Line-wrapped JSDoc prose carries a `\n * ` between words that happen to
+    // fall on a line break — flattened to single spaces so a future rewrap of
+    // this paragraph cannot itself make a true reading look false.
+    const prose =
+      blockStart < 0 || blockEnd < 0
+        ? ''
+        : ownSource
+            .slice(blockStart, blockEnd)
+            .replace(/\n[ \t]*\*[ \t]?/g, ' ')
+            .replace(/[ \t]+/g, ' ');
+
+    const total = COMPOUND_ANCHOR_LEDGER.length;
+    const genuine = COMPOUND_ANCHOR_LEDGER.filter(([, , accidental]) => !accidental).length;
+    const accidental = COMPOUND_ANCHOR_LEDGER.length - genuine;
+    const distinctSpellings = new Set(COMPOUND_ANCHOR_LEDGER.map(([, name]) => name)).size;
+
+    // Only as wide as the words this docblock actually spells; extending it is
+    // a deliberate edit, not silent tolerance for a new spelling.
+    const NUMBER_WORDS = {
+      zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9,
+      ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16,
+      seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20,
+    };
+    const asCount = (word) => (/^\d+$/.test(word) ? Number(word) : NUMBER_WORDS[String(word).toLowerCase()]);
+
+    const remaining = prose.match(/the remaining (\d+) carry compound names/);
+    const allFiring = prose.match(/keeps firing on all (\d+), the mask keeps blanking all (\d+)/);
+    const genuineLine = prose.match(/([A-Za-z]+) are genuine self-test batteries/);
+    const accidentalLine = prose.match(/([A-Za-z]+) are production code:/);
+    const spellingsLine = prose.match(/over (\d+) distinct spellings/);
+
+    t(
+      'the docblock\'s TOTAL row count — "the remaining N carry compound names" and both "all N" claims — ' +
+        `agrees with the table (table: ${total}; declared: ` +
+        `${remaining ? remaining[1] : '<not found>'}/${allFiring ? allFiring[1] : '<not found>'}/` +
+        `${allFiring ? allFiring[2] : '<not found>'})`,
+      remaining !== null
+        && allFiring !== null
+        && Number(remaining[1]) === total
+        && Number(allFiring[1]) === total
+        && Number(allFiring[2]) === total,
+    );
+    t(
+      "the docblock's GENUINE count (\"N are genuine self-test batteries\") agrees with the table " +
+        `(table: ${genuine}; declared: ${genuineLine ? genuineLine[1] : '<not found>'})`,
+      genuineLine !== null && asCount(genuineLine[1]) === genuine,
+    );
+    t(
+      "the docblock's ACCIDENTAL count (\"N are production code:\") agrees with the table " +
+        `(table: ${accidental}; declared: ${accidentalLine ? accidentalLine[1] : '<not found>'})`,
+      accidentalLine !== null && asCount(accidentalLine[1]) === accidental,
+    );
+    // Distinct NAMES, not rows: `runSelfTest` is a genuine entry point in one
+    // file and an accidental one in another, so it is one spelling occupying
+    // two rows — the same reason COMPOUND_ANCHOR_KEYS has to carry the file in
+    // its key. This is derivable from the table exactly like the three above,
+    // so it is pinned the same way rather than left as the one clause in this
+    // paragraph a future row could still drift without going red.
+    t(
+      "the docblock's distinct-spellings count (\"over N distinct spellings\") agrees with the table " +
+        `(table: ${distinctSpellings}; declared: ${spellingsLine ? spellingsLine[1] : '<not found>'})`,
+      spellingsLine !== null && Number(spellingsLine[1]) === distinctSpellings,
+    );
   }
 
   // A population DECLARED for this very scanner is referenced by no executing
@@ -19179,7 +19541,7 @@ function selfTest() {
     'and the tier-table file globs are not inheritable either',
     ownPopulation.length > 0
       && !ownPopulation.includes('.claude/agents/os-dev.md')
-      && !ownPopulation.includes('skills/objectstack-pm-dispatch/SKILL.md'),
+      && !ownPopulation.includes('skills/**'),
   );
   // Cost of the mechanism on this tree, pinned so it cannot grow unnoticed: the
   // marker is an opt-out, and an opt-out that spreads is how a real population
@@ -20999,7 +21361,6 @@ function selfTest() {
   const fableOf = (paths) => deriveTier(paths);
   t('the pm-dispatch SKILL.md MAIN file is fable-mandatory', fableOf(['.claude/skills/pm-dispatch/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
   t('the dev-agent definition is fable-mandatory', fableOf(['.claude/agents/os-dev.md']).tier === CONTRACT_REVIEW_TIER);
-  t('the published PM skill (one enforced frame copy) is fable-mandatory', fableOf(['skills/objectstack-pm-dispatch/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
   t('a pm-dispatch REFERENCES path carries NO path mandate — the 2026-08-20 narrowing, inverted from the pre-narrowing pin', fableOf(['.claude/skills/pm-dispatch/references/review-checklist.md']).mandatory === false);
   const mixed = fableOf(['packages/spec/src/data/filter.zod.ts', '.claude/agents/os-dev.md']);
   t('a MIXED surface is mandatory — one mandatory path decides, ordinary paths do not dilute it', mixed.mandatory && mixed.tier === CONTRACT_REVIEW_TIER);
@@ -21019,8 +21380,13 @@ function selfTest() {
   t('a published catalog SKILL.md is mandated, by the skills/** entry', catalogHit.tier === CONTRACT_REVIEW_TIER && catalogHit.hits.some((h) => h.glob === 'skills/**'));
   t('a second published catalog file is mandated the same way', fableOf(['skills/objectstack-ai/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
   t('a generated references file under a published skill is mandated too — the mandate is the ROOT, not the SKILL.md files', fableOf(['skills/objectstack-data/references/_index.md']).mandatory === true);
-  const pmCopyHit = fableOf(['skills/objectstack-pm-dispatch/SKILL.md']);
-  t('the published PM skill is covered by its own entry AND skills/**, at ONE tier — no ambiguity refusal', pmCopyHit.hits.length === 2 && pmCopyHit.tier === CONTRACT_REVIEW_TIER);
+  // The published PM skill's own entry left with the file (2026-09-10 ruling,
+  // 「发布版 skills/objectstack-pm-dispatch 删」): the "own entry AND skills/**"
+  // shape has no subject any more, and what is pinned instead is that a
+  // catalog file is covered by exactly ONE entry — the root — so no second
+  // per-file entry under `skills/` has quietly returned.
+  t('a catalog file is covered by exactly ONE entry — skills/** — now that the published PM skill and its own entry are gone', catalogHit.hits.length === 1 && catalogHit.hits[0].glob === 'skills/**');
+  t('no per-file entry for the deleted published PM skill survives it, and its old path carries the root mandate only', !MANDATORY_TIER_GLOBS.some((g) => g.glob.includes('objectstack-pm-dispatch')) && fableOf(['skills/objectstack-pm-dispatch/SKILL.md']).hits.every((h) => h.glob === 'skills/**'));
   t('skills/** does NOT reach the internal .claude/skills tree — a pm-dispatch references file still carries no mandate', fableOf(['.claude/skills/pm-dispatch/references/core-rules.md']).mandatory === false);
   t('the skills/** entry is declared with its one-line exit switched off, as data', MANDATORY_TIER_GLOBS.some((g) => g.glob === 'skills/**' && g.oneLineExit === false && g.tier === CONTRACT_REVIEW_TIER));
   t('every other mandatory entry keeps the one-line exit open (the flag is an opt-out, absent by default)', MANDATORY_TIER_GLOBS.filter((g) => g.glob !== 'skills/**').every((g) => g.oneLineExit === undefined) && catalogHit.hits.every((h) => h.glob !== 'skills/**' || h.oneLineExit === false));
@@ -23071,6 +23437,43 @@ function selfTest() {
       unreasoned.every((e) => e.malformed && e.reason === null) && unreasoned[0].command === 'pnpm check:a' && unreasoned[1].command === 'pnpm check:b',
     );
 
+    // ── The OPTIONAL exit-code annotation (#17204) ──────────────────────────
+    //
+    // ⭐ The compatibility property FIRST, because it is the condition the
+    // shape was chosen under: the record format is written BY HAND by other
+    // seats, so a field that re-read any line they have already written would
+    // not be a fix. Every case below is about a line NOT changing.
+    const preExisting = parseRunRecord(
+      ['pnpm check:a', '  pnpm check:b', `${marker} pnpm check:c${sep}refuses without a built dist`, '# note', ''].join('\n'),
+    );
+    t(
+      '⭐ a record written before this field existed parses byte-identically — same commands, same classes, no exit code',
+      preExisting.length === 3
+        && preExisting[0].command === 'pnpm check:a' && preExisting[0].claim === 'ran' && preExisting[0].exitCode === null
+        && preExisting[1].command === '  pnpm check:b' && preExisting[1].exitCode === null
+        && preExisting[2].claim === 'not-measured' && preExisting[2].command === 'pnpm check:c' && preExisting[2].reason === 'refuses without a built dist',
+    );
+    const coded = parseRunRecord(['pnpm check:a :: exit 0', 'pnpm check:b :: exit 3', 'node scripts/check-c.mjs --flag :: exit 143'].join('\n'));
+    t(
+      'a recorded exit code is split off the tail, leaving the command byte-exact on the left of it',
+      coded.map((e) => e.command).join('|') === 'pnpm check:a|pnpm check:b|node scripts/check-c.mjs --flag'
+        && coded.map((e) => e.exitCode).join('|') === '0|3|143',
+    );
+    t('and the line is still a ran claim — the annotation is a datum, not a class', coded.every((e) => e.claim === 'ran' && !e.malformed));
+    // ⛔ The lenient reader, refused. A second dialect of a field whose whole
+    // purpose is to be unambiguous is worse than no field.
+    for (const tail of ['EXIT 3', 'exit=3', 'exit 3 ', '3', 'exit three', 'exit 1234']) {
+      const bad = parseRunRecord(`pnpm check:a${sep}${tail}`)[0];
+      t(
+        `a '${tail}' tail is MALFORMED, and the line keeps its pre-field reading in full`,
+        bad.malformed !== null && bad.exitCode === null && bad.command === `pnpm check:a${sep}${tail}`,
+      );
+    }
+    t(
+      'the separator is found from the RIGHT, so only the tail is ever read as an annotation',
+      parseRunRecord(`pnpm check:a${sep}note${sep}exit 3`)[0].command === `pnpm check:a${sep}note`,
+    );
+
     // ── The classes ────────────────────────────────────────────────────────
     const derived = ['node scripts/check-b.mjs', 'pnpm check:a', 'pnpm check:c'];
     const full = runReconciliation({ derived, record: parseRunRecord(derived.join('\n')) });
@@ -23131,6 +23534,91 @@ function selfTest() {
     );
     t('and the run says why, naming the cap kill it would otherwise absorb', unexplained.unrun[0].why.includes('cap-killed'));
     t('the malformed line is reported against its line number too', unexplained.malformed.length === 1 && unexplained.malformed[0].line === 1);
+
+    // ── ⭐ DERIVED from the recorded code, not declared by the runner (#17204) ──
+    //
+    // ONE world, recorded three ways. The gate `pnpm check:c` refused with its
+    // own unmet prerequisite in every one of them; what differs is only what
+    // the runner wrote down. Measured across four consecutive deliveries, the
+    // first shape — the sloppy one — printed `0 NOT-MEASURED` while 2, 2, 1 and
+    // 2 gates had exited 3.
+    const world = ['pnpm check:a', 'pnpm check:b', 'pnpm check:c'];
+    const sloppyRecord = world.join('\n');
+    const codedRecord = ['pnpm check:a :: exit 0', 'pnpm check:b :: exit 1', 'pnpm check:c :: exit 3'].join('\n');
+    const claimedRecord = ['pnpm check:a', 'pnpm check:b', `${marker} pnpm check:c${sep}refuses on an unbuilt tree`].join('\n');
+    const sloppyRun = runReconciliation({ derived: world, record: parseRunRecord(sloppyRecord) });
+    const codedRun = runReconciliation({ derived: world, record: parseRunRecord(codedRecord) });
+    const claimedRun = runReconciliation({ derived: world, record: parseRunRecord(claimedRecord) });
+    t(
+      '⭐ POSITIVE: a run CONTAINING an exit-3 gate reports it, and the class came off the code rather than a declaration',
+      codedRun.notMeasured.length === 1 && codedRun.notMeasured[0].command === 'pnpm check:c' && codedRun.notMeasured[0].source === 'exit-code',
+    );
+    t(
+      'a RED gate is still RUN — this mode answers what you RAN, never whether it passed, and only the refusal class moves',
+      codedRun.ran.join('|') === 'pnpm check:a|pnpm check:b' && codedRun.ok,
+    );
+    // ⭐ THE NEGATIVE CONTROL, and it is half the card: a change that reported
+    // everything as NOT-MEASURED would look "more careful" and pass a
+    // positive-only acceptance while being exactly as useless as a zero.
+    const noRefusal = runReconciliation({
+      derived: world,
+      record: parseRunRecord(['pnpm check:a :: exit 0', 'pnpm check:b :: exit 1', 'pnpm check:c :: exit 0'].join('\n')),
+    });
+    t(
+      '⭐ NEGATIVE CONTROL: a run genuinely WITHOUT a refusal still reports ZERO, with every family run',
+      noRefusal.notMeasured.length === 0 && noRefusal.ran.length === 3 && noRefusal.evidence.kind === 'derived',
+    );
+    t(
+      'the sloppy record reports the same zero it always did — this field cannot invent a refusal out of a bare line',
+      sloppyRun.notMeasured.length === 0 && sloppyRun.ran.length === 3 && sloppyRun.ok,
+    );
+    t(
+      '...and the difference between those two zeroes is the EVIDENCE class, which is where it belongs',
+      sloppyRun.evidence.kind === 'claimed' && sloppyRun.evidence.silent === 3 && sloppyRun.evidence.coded === 0
+        && noRefusal.evidence.coded === 3 && noRefusal.evidence.silent === 0,
+    );
+    t(
+      'a hand-written claim stays CLAIMED and is counted apart from a derived one, in the same run',
+      claimedRun.notMeasured.length === 1 && claimedRun.notMeasured[0].source === 'claim'
+        && claimedRun.evidence.claimed === 1 && claimedRun.evidence.derivedFromExit === 0,
+    );
+    const floor = runReconciliation({
+      derived: world,
+      record: parseRunRecord(['pnpm check:a :: exit 3', 'pnpm check:b', 'pnpm check:c :: exit 0'].join('\n')),
+    });
+    t(
+      'a PARTLY annotated record is a floor, not a total, and the two halves are counted separately',
+      floor.evidence.kind === 'floor' && floor.evidence.coded === 2 && floor.evidence.silent === 1 && floor.notMeasured.length === 1,
+    );
+
+    // Two lines disagreeing about one family: reported, and resolved toward the
+    // rerun in BOTH orders — a first-wins rule would make the resolution depend
+    // on which line the runner happened to append first.
+    for (const [first, second] of [['exit 0', 'exit 3'], ['exit 3', 'exit 0']]) {
+      const twoCodes = runReconciliation({
+        derived: ['pnpm check:a'],
+        record: parseRunRecord([`pnpm check:a${sep}${first}`, `pnpm check:a${sep}${second}`].join('\n')),
+      });
+      t(
+        `a family recorded '${first}' then '${second}' reads as ${marker} and the contradiction is REPORTED, not resolved silently`,
+        twoCodes.notMeasured.length === 1 && twoCodes.notMeasured[0].source === 'exit-code' && twoCodes.exitContradictions.length === 1,
+      );
+    }
+    const bothChannels = runReconciliation({
+      derived: ['pnpm check:a'],
+      record: parseRunRecord([`pnpm check:a${sep}exit 3`, `${marker} pnpm check:a${sep}refuses without a built dist`].join('\n')),
+    });
+    t(
+      'a family recorded through BOTH channels reads as the derived class, and the contradiction is still reported',
+      bothChannels.notMeasured.length === 1 && bothChannels.notMeasured[0].source === 'exit-code' && bothChannels.conflicts.length === 1,
+    );
+    // The malformed tail is reported like the malformed claim beside it, and it
+    // costs the family: the line stays whole, so it pairs with nothing.
+    const badTail = runReconciliation({ derived: ['pnpm check:a'], record: parseRunRecord(`pnpm check:a${sep}EXIT 3`) });
+    t(
+      'a malformed exit tail leaves the family UNRUN and says so — the direction that costs a rerun, never a false green',
+      !badTail.ok && badTail.unrun.length === 1 && badTail.malformed.length === 1 && badTail.malformed[0].kind === 'exit',
+    );
 
     // ── What the TOOL classifies, so no prose has to ────────────────────────
     // ⭐ The value-bearing spelling is the LIVE one — `pr-automation.yml`
@@ -23210,9 +23698,85 @@ function selfTest() {
     t('it states where the denominator came from — the claim an arithmetic cannot make', redText.includes('recomputed in this process'));
     t('every unrun family is NAMED, never just counted', short.unrun.every(({ command }) => redText.includes(command)));
     t('the verdict is one line and it is the LAST one', redLines[redLines.length - 1].startsWith('✗ dispatch-gates --ran:'));
-    const greenText = runReconciliationLines(full).join('\n');
-    t('and the green verdict is the same line in the same place', greenText.trim().endsWith('3 derived famil(ies) accounted for — 3 run, 0 NOT-MEASURED.'));
+    const greenLines = runReconciliationLines(full);
+    const greenText = greenLines.join('\n');
+    t(
+      'and the green verdict is the same line in the same place, still naming the derived total and the two counts',
+      greenLines[greenLines.length - 1].startsWith('✓ dispatch-gates --ran: 3 derived famil(ies) accounted for — 3 run, 0 NOT-MEASURED'),
+    );
     t('the rendering discloses what this number does NOT cover', greenText.includes('always-runs tail'));
+
+    // ── ⭐ #17204: the zero says WHICH KIND OF ZERO IT IS ────────────────────
+    //
+    // `full`'s record is the idiom every seat writes today: the command, bare.
+    // Its zero is therefore the runner's silence, and the verdict line — the
+    // one a reviewer's eye lands on, beside a ✓ — has to say so in the same
+    // stroke. It printed `0 NOT-MEASURED.` full stop, on four consecutive
+    // deliveries where 2, 2, 1 and 2 gates had exited 3.
+    t(
+      '⭐ a zero over a record with no exit codes is marked CLAIMED on the verdict line itself',
+      greenLines[greenLines.length - 1].endsWith(
+        '0 NOT-MEASURED (⛔ CLAIMED — 3 of 3 recorded no exit code, so this zero is what the runner declared, not what the record shows).',
+      ),
+    );
+    t(
+      'and the block above it says the same thing where the counts are, naming the spelling that fixes it',
+      greenText.includes('⛔ EXIT CODES — 0 of the 3 accounted famil(ies) carry one')
+        && greenText.includes('`<command> :: exit <code>`'),
+    );
+
+    // ⭐⭐ THE INCENTIVE INVERSION, PINNED — the defect this card is really
+    // about. Three renderings of ONE world (`pnpm check:c` refused in all
+    // three), side by side, as a reviewer would read them:
+    //
+    //   sloppy   — no annotation at all           → today: the CLEANEST line
+    //   claimed  — annotated by hand, with reason → today: `1 NOT-MEASURED`
+    //   coded    — the exit codes recorded        → today: indistinguishable
+    //                                               from sloppy, since the
+    //                                               field did not exist
+    //
+    // ⛔ Rewarding the first with the tidiest output is what trained seats to
+    // stop annotating. The assertion is not that the words changed: it is that
+    // the sloppy rendering is no longer the clean one, and that the ONLY
+    // rendering with no warning on it is the one that recorded the evidence.
+    const verdictOf = (recon) => runReconciliationLines(recon).at(-1);
+    const sloppyVerdict = verdictOf(sloppyRun);
+    const codedVerdict = verdictOf(codedRun);
+    const claimedVerdict = verdictOf(claimedRun);
+    t(
+      '⭐ the SLOPPY run — the one that annotated nothing — no longer gets the clean line: its zero carries ⛔ CLAIMED',
+      sloppyVerdict.includes('0 NOT-MEASURED (⛔ CLAIMED') && sloppyVerdict.includes('3 of 3 recorded no exit code'),
+    );
+    t(
+      '⭐ the CODED run — the same world, evidence recorded — is the only one of the three with no ⛔ on its verdict',
+      !codedVerdict.includes('⛔') && codedVerdict.includes('1 NOT-MEASURED (1 DERIVED from a recorded exit 3)')
+        && sloppyVerdict.includes('⛔') && claimedVerdict.includes('⛔'),
+    );
+    t(
+      'and the hand-written claim still counts — it is marked CLAIMED, not erased, because the path an exit code cannot express survives',
+      claimedVerdict.includes('1 NOT-MEASURED (⛔ CLAIMED') && runReconciliationLines(claimedRun).join('\n').includes(`${marker} · CLAIMED (1)`),
+    );
+    t(
+      'the derived refusal gets its own block, naming the recorded code and the line it was read from',
+      runReconciliationLines(codedRun).join('\n').includes(`${marker} · DERIVED (1)`)
+        && runReconciliationLines(codedRun).join('\n').includes('recorded exit 3 on line 3 — PREREQUISITE NOT MET'),
+    );
+    // The NEGATIVE beside every positive, in the rendering too: an honest zero
+    // must still read as a zero, and it must read as a BETTER one.
+    const noRefusalVerdict = verdictOf(noRefusal);
+    t(
+      '⭐ NEGATIVE CONTROL, rendered: a run genuinely without a refusal still ends in a zero — and it is a DERIVED zero, with no ⛔',
+      noRefusalVerdict.endsWith('3 run, 0 NOT-MEASURED (a DERIVED zero — all 3 recorded an exit code and none of them is 3).')
+        && !noRefusalVerdict.includes('⛔'),
+    );
+    t(
+      'a partly annotated record calls its count a FLOOR on both lines, and names how many are silent',
+      verdictOf(floor).includes('⛔ a FLOOR') && runReconciliationLines(floor).join('\n').includes('⚠️ EXIT CODES — 2 of the 3 accounted famil(ies) carry one'),
+    );
+    t(
+      'the malformed exit tail is reported with the spelling that repairs it, and is never read as a claim',
+      runReconciliationLines(badTail).join('\n').includes(`Spelling: <command>${sep}exit <code>.`),
+    );
     t(
       `the ${marker} block warns about the cap kill the category absorbs`,
       runReconciliationLines(claimed).join('\n').includes('exit 143'),
@@ -23436,6 +24000,49 @@ function selfTest() {
       const redOut = red.stdout ?? '';
       t('⭐ dropping ONE line from that record exits 1 — a verdict a report cannot paraphrase', red.status === 1);
       t('and the run names exactly the family that was dropped', redOut.includes('UNRUN (1)') && redOut.includes(dropped));
+
+      // ── ⭐ #17204 END TO END: the exit code reaches the verdict ────────────
+      //
+      // Every unit case above stays green if the MODE never passes the parsed
+      // codes through — the same shape #15115 measured one bucket over, where
+      // a defaulted parameter kept a class's own tests green while the live run
+      // still got it wrong. Only a real run reads the wiring, and the record
+      // here is this tool's own `--commands` output with a code appended to
+      // each line, which is the capture idiom the header prescribes.
+      const codedPath = nodePath.join(ranTmp, 'ran-coded.list');
+      writeFileSync(codedPath, `${rows.map((cmd) => `${cmd} :: exit 0`).join('\n')}\n`);
+      const codedRun = runCli([RAN_FLAG, codedPath, ranCard]);
+      const codedOut = codedRun.stdout ?? '';
+      t(
+        '⭐ NEGATIVE CONTROL, end to end: a real record whose codes are all 0 still reconciles green with a ZERO',
+        codedRun.status === 0 && codedOut.includes(`${rows.length} run, 0 NOT-MEASURED`),
+      );
+      t(
+        'and the zero is marked DERIVED — the reward for recording the evidence is the clean line',
+        codedOut.includes(`(a DERIVED zero — all ${rows.length} recorded an exit code and none of them is 3)`),
+      );
+      const refusedPath = nodePath.join(ranTmp, 'ran-refused.list');
+      const refused = rows[0];
+      writeFileSync(
+        refusedPath,
+        `${rows.map((cmd) => `${cmd} :: exit ${cmd === refused ? 3 : 0}`).join('\n')}\n`,
+      );
+      const refusedRun = runCli([RAN_FLAG, refusedPath, ranCard]);
+      const refusedOut = refusedRun.stdout ?? '';
+      t(
+        '⭐ POSITIVE, end to end: one recorded exit 3 in a real run reaches the HEADLINE — ⛔ never a zero',
+        refusedRun.status === 0
+          && refusedOut.includes(`${rows.length - 1} run, 1 NOT-MEASURED (1 DERIVED from a recorded exit 3)`)
+          && !refusedOut.includes('0 NOT-MEASURED'),
+      );
+      t(
+        'and the refusing family is NAMED under its own block, with the line the code was read from',
+        refusedOut.includes(`${RUN_RECORD_UNMEASURED_MARKER} · DERIVED (1)`) && refusedOut.includes(refused),
+      );
+      t(
+        'the SAME real run recorded bare — today\'s idiom — reports a zero that says CLAIMED on the verdict line',
+        greenOut.includes(`0 NOT-MEASURED (⛔ CLAIMED — ${rows.length} of ${rows.length} recorded no exit code`),
+      );
 
       // The refusals, and the unreadable input. All three exit before the tree
       // walk, so they cost nothing to assert.
@@ -23869,8 +24476,9 @@ if (invokedDirectly) {
       } catch (err) {
         console.error(`dispatch-gates: could not read the run record '${argv.runRecord}' — ${err.message}`);
         console.error(
-          `  ${RAN_FLAG} takes a file of the commands you ran, one per line, exactly as --commands emits them.` +
-            ' Capture them as you run, never by slugging log file names back into family names.',
+          `  ${RAN_FLAG} takes a file of the commands you ran, one per line, exactly as --commands emits them` +
+            ` — optionally with what each ANSWERED: \`<command>${RUN_RECORD_REASON_SEPARATOR}${RUN_RECORD_EXIT_PREFIX}<code>\`, so a refusal is` +
+            ' derived rather than declared. Capture them as you run, never by slugging log file names back into family names.',
         );
         process.exit(2);
       }

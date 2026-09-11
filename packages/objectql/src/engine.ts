@@ -44,6 +44,7 @@ import { MAX_BULK_PER_ROW_HOOK_ROWS, resolveBulkPerRowHookBudget } from '@object
 import { ActionActivationProjection, type ActionActivationRow, type ActionActivationStore } from './action-activation.js';
 import { assertListComparandShapes, assertFilterIsMaterializable } from './filter-comparand-shape.js';
 import { assertTemporalComparandsInterpretable } from './temporal-comparand-door.js';
+import { assertTextOperatorTargetsAreStringCapable } from './text-operator-declared-type-door.js';
 // Seek pagination for the walks that must read EVERY row — the autonumber seed
 // scan is one (#6249). Shared with `summary-backfill` rather than re-rolled:
 // the cursor merge is the part that is easy to get subtly wrong.
@@ -214,6 +215,11 @@ import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, str
 // SAME value. Armed and sealed in `update()`; the module owns the argument for
 // why neither end may move.
 import { recordHookPayloadWrites } from './hook-write-provenance.js';
+// [#17219] The hide pass's other half: when a hook faults reaching THROUGH a
+// key that pass withheld, this names the key, says the platform withheld it,
+// and points at `ctx.previous` — the module owns the measurement and the
+// reason the explanation cannot be composed any further downstream.
+import { dispatchHooksExplainingWithheldReadonly } from './hook-withheld-readonly-fault.js';
 import {
   divergingHookPayloadKeys,
   MultiUpdateHookKeyDivergenceError,
@@ -773,10 +779,22 @@ function lowerWhereFilterArray<T extends object | undefined>(
     // run it against" — and because this seam is the one place EVERY
     // caller-supplied `where` passes through, whichever verb it arrived by.
     assertFilterIsMaterializable(object, operation, schema, where);
-    // [#8690] The TEMPORAL-comparand door, third on the same seam and third
-    // question about the same predicate: the shape gate asks "can this
-    // comparand run", the materializable gate asks "is there a column to run it
-    // against", and this asks "can that column's storage rule READ this value".
+    // [#15661] The DECLARED-TYPE door for the text operators, third on this
+    // seam and third question about the same predicate: the shape gate asks
+    // "can this comparand run", the materializable gate asks "is there a column
+    // to run it against", and this asks "can that column's declared type ever
+    // hold a string". It runs BEFORE the temporal gate below deliberately — a
+    // `$startsWith` over a `date` field is refused by that gate today, with the
+    // same `INVALID_FILTER` / 400 envelope but a message about the COMPARAND,
+    // which sends the author to fix a value that could never have made the
+    // filter runnable. Same wire envelope, the ruling's message.
+    assertTextOperatorTargetsAreStringCapable(object, operation, schema, where);
+    // [#8690] The TEMPORAL-comparand door, fourth on the same seam (#15661's
+    // declared-type door was inserted above it) and fourth question about the
+    // same predicate: the shape gate asks "can this comparand run", the
+    // materializable gate asks "is there a column to run it against", the
+    // declared-type gate asks "can that column ever hold a string", and this
+    // asks "can that column's storage rule READ this value".
     // It must run BEFORE `resolveWhereTokens` (which is downstream of every
     // caller of this function) because the refusal has to precede the driver —
     // hence the door steps around `{placeholder}` strings rather than judging
@@ -851,6 +869,11 @@ function lowerWhereFilterArray<T extends object | undefined>(
   // the array sugar (`[['is_open','=',true]]`) names fields too, and a gate on
   // one branch would answer one mistake two ways depending on the spelling.
   assertFilterIsMaterializable(object, operation, schema, condition);
+  // [#15661] Same door as the object branch, on the LOWERED condition — the
+  // array sugar (`[['amount','contains','5']]`) names non-text fields too, and
+  // a gate on one branch would answer one mistake two ways depending on the
+  // spelling.
+  assertTextOperatorTargetsAreStringCapable(object, operation, schema, condition);
   // [#8690] Same door as the object branch, on the LOWERED condition — the
   // array sugar (`[['at','>=','last_30_days']]`) names temporal fields too, and
   // a gate on one branch would answer one mistake two ways depending on the
@@ -10562,9 +10585,12 @@ export class ObjectQL implements IObjectQLEngine {
         // it did not widen WHAT exempts it.
         //
         // WHICH fields it may judge is {@link staticReadonlyInsertSubject}'s
-        // (runtime-owned types belong to the pass above, platform objects to
-        // their own 403 guards); `null` — no such field on this object — is
-        // the cheap exit every ordinary insert takes.
+        // (runtime-owned types belong to the pass above; the `sys_` namespace
+        // and the PLATFORM-INTERNAL `managedBy` buckets to their own 403
+        // guards — #15719 narrowed that second exclusion from "`managedBy` set
+        // to anything", so a user-writable bucket is judged here exactly as it
+        // is on update); `null` — no such field on this object — is the cheap
+        // exit every ordinary insert takes.
         const readonlySubject = staticReadonlyInsertSubject(schemaForValidation as any);
         if (readonlySubject) {
           const preserveAuditIgnored: string[] = [];
@@ -11369,12 +11395,96 @@ export class ObjectQL implements IObjectQLEngine {
        // Single-row by construction: `update()` takes one payload, so there is
        // no partial-row mode to carry the verdict into — unlike `insert()`, the
        // refusal is simply thrown. One element in, one verdict out.
+       //
+       // [#16344] Hoisted from its old site below the dispatch ladder: the
+       // declared-field door and the pre-hook read-only pass both need this
+       // schema, and ONE lookup answering both is one fact rather than two that
+       // can drift.
+       const updateSchema = this._registry.getObject(object);
        const undeclared = undeclaredWriteFieldErrors(
          object,
-         this._registry.getObject(object) as { fields?: unknown } | undefined,
+         updateSchema as { fields?: unknown } | undefined,
          [opCtx.data],
        )[0];
        if (undeclared) throw undeclared;
+
+       // ── [#16344] HIDE caller-forged read-only values from the hooks ──────
+       //
+       // The invariant, in the maintainer-confirmed ruling's words:「交给生命
+       // 周期钩子的记录,就是它打算持久化的那条记录。」A hook handed a value
+       // the engine has ALREADY decided will not be stored can derive a column
+       // that IS stored, and that derived write is the HOOK's own — so nothing
+       // downstream takes it back.
+       //
+       // Measured on this change's base, with a control, in
+       // `engine-readonly-hook-input.test.ts`: one
+       // `PATCH { actual_value: 380, target_value: 1, weight: 1 }` against a
+       // `readonly` `target_value` committed `target_value = 400` — the strip
+       // DID work — beside a hook-derived trace reading `目标 1`. A row whose
+       // own audit trail cites a value it does not contain, with no error, no
+       // warning and a 200. The strip was never the defect; its POSITION was.
+       //
+       // ⭐ HIDE, not strip, and that word is the whole design. The enforcement
+       // point stays exactly where #2948 / #5591 / #14088 put it — after the
+       // hooks, where it is the only pass that can tell a hook's stamp from a
+       // caller's forgery (`hookWrittenKeys`). Moving it here instead would
+       // delete every server-side stamp a `beforeUpdate` makes to a read-only
+       // column, which is #5591 reintroduced. So this pass takes the caller's
+       // values out of the HOOKS' view only, and the confluence below hands
+       // them straight back before anything engine-owned reads the payload.
+       //
+       // What that buys: the post-hook declared-field door,
+       // `normalizeMultiValueFields`, `validateRecord`, the `readonlyWhen`
+       // strip, the static strip and therefore `onFieldsDropped`, the WARN and
+       // `strictReadonlyWrites` all see the payload they see today, and say the
+       // identical thing about it. ⛔ Feeding those channels from HERE instead
+       // is the shape to avoid: it would report — and under strict REFUSE — a
+       // whole-record write-back whose read-only key a hook goes on to restamp
+       // (the #5591 idiom), turning a write that succeeds today into a 400.
+       //
+       // ⛔ A hook that legitimately needs the caller's submission reads
+       // `ctx.submitted` (bound below) — the ruling's second half, and the
+       // reason nothing degrades: plugin-auth's ADR-0092 identity write guard
+       // names the non-whitelisted keys from THERE, so its 403 still says which
+       // field it refused.
+       //
+       // Placed BEFORE the recording is armed: a pass running inside that
+       // window is an ENGINE write recorded as a HOOK write, which is the
+       // laundering the seal note below exists to make impossible.
+       //
+       // ⛔ `id` is excluded — ADDRESSING IS NOT PAYLOAD (#8093), and the
+       // non-scalar case has its own owner further down (#6435), which reads
+       // the key where it already looks. Excluded through `supplied`, the one
+       // input that decides eligibility, so this pass never forms a second
+       // opinion about what an address is.
+       //
+       // ⛔ `readonlyWhen` is NOT hidden and must not be: a conditional lock is
+       // judged against the prior record — per ROW on the predicate path, where
+       // one shared payload cannot carry a per-row verdict — and #9107
+       // deliberately leaves it hook-writable.
+       let readonlyHiddenFromHooks: Record<string, unknown> | undefined;
+       if (!opCtx.context?.isSystem) {
+         const preHookPayload = opCtx.data as Record<string, unknown> | null | undefined;
+         if (preHookPayload && typeof preHookPayload === 'object') {
+           const suppliedDataOnly: Record<string, unknown> = { ...suppliedValues };
+           delete suppliedDataOnly.id;
+           // No logger, deliberately: this pass is SILENT by construction. The
+           // strip below owns every word said about these keys.
+           const hidden = stripReadonlyFields(
+             updateSchema as any, preHookPayload, suppliedDataOnly, undefined,
+             { preserveAudit: opCtx.context?.preserveAudit === true },
+           ) as Record<string, unknown>;
+           if (hidden !== preHookPayload) {
+             readonlyHiddenFromHooks = {};
+             for (const k of Object.keys(preHookPayload)) {
+               if (!(k in hidden)) readonlyHiddenFromHooks[k] = preHookPayload[k];
+             }
+             // Kept in step with the hook payload, which the recording below
+             // arms over: the two must not name different objects.
+             opCtx.data = hidden as any;
+           }
+         }
+       }
 
        // ── [#14088] ARM the hook-write recording ────────────────────────────
        //
@@ -11416,6 +11526,25 @@ export class ObjectQL implements IObjectQLEngine {
           object,
           event: 'beforeUpdate',
           input: { id, data: hookWrites?.payload ?? opCtx.data, options: opCtx.options },
+          // [#16344] The caller's submission AS SENT — the other half of the
+          // ruling, and the channel that keeps a submission-reading guard whole
+          // now that `input.data` is the persist image. It is the #5591
+          // snapshot, which is already a COPY taken at engine entry before any
+          // middleware or hook stamp, so nothing a hook does can rewrite it and
+          // no hook write can leak back through it into the payload.
+          //
+          // Frozen at the boundary rather than trusted: `previous` is the only
+          // other read-only-by-contract member and it is a live driver row, so
+          // "diagnostics only" would otherwise be enforced by nothing. A hook
+          // that assigns here fails loudly in strict mode instead of silently
+          // editing a record of what the caller sent.
+          //
+          // Bound ONCE, on the batch context: `dispatchPerRowBeforeHooks`,
+          // `dispatchUnscopedMultiWriteHooks` and `buildPerRowAfterContexts`
+          // all build their contexts by spreading this one, so every dispatch
+          // of this write — both phases, every matched row — carries the same
+          // submission, which is what it is: one caller write, one submission.
+          submitted: Object.freeze({ ...suppliedValues }) as Record<string, unknown>,
           session: this.buildSession(opCtx.context),
           provenance: this.buildProvenance(opCtx.context),
           // [#13644] The declared referential-cleanup marker. Conditional
@@ -11497,7 +11626,6 @@ export class ObjectQL implements IObjectQLEngine {
            scope: {},
        };
 
-       const updateSchema = this._registry.getObject(object);
        // Pre-update snapshot. Exposed to hooks via `hookContext.previous` in
        // BOTH phases now (the HookContext contract documents `previous` for
        // update/delete) and reused for object-level validation rules and the
@@ -11599,7 +11727,13 @@ export class ObjectQL implements IObjectQLEngine {
            // permanently true here: it states the invariant, and the invariant
            // outlives this call site.
            if (priorRecord) hookContext.previous = coerceBooleanFields(updateSchema as any, priorRecord as any) as any;
-           await this.triggerHooks('beforeUpdate', hookContext);
+           // [#17219] All three `beforeUpdate` dispatch sites inside the hide
+           // window share one wrapper, so a hook that faults reaching THROUGH a
+           // key this pass withheld names that key instead of surfacing the
+           // platform's own contract enforcement as the author's crash. It
+           // rethrows the original error untouched on every other path.
+           await dispatchHooksExplainingWithheldReadonly(readonlyHiddenFromHooks, 'beforeUpdate',
+             () => this.triggerHooks('beforeUpdate', hookContext));
            // The retired lever, refused. Everything above — `previous`, and
            // below it the `readonlyWhen` strip and every validation rule — was
            // computed against the row the ladder chose.
@@ -11670,7 +11804,8 @@ export class ObjectQL implements IObjectQLEngine {
            // predicate is unscoped.
            const rawWhere = (hookContext.input.options as { where?: unknown } | undefined)?.where;
            if (rawWhere === undefined || rawWhere === null) {
-               await this.dispatchUnscopedMultiWriteHooks('beforeUpdate', object, hookContext);
+               await dispatchHooksExplainingWithheldReadonly(readonlyHiddenFromHooks, 'beforeUpdate',
+                 () => this.dispatchUnscopedMultiWriteHooks('beforeUpdate', object, hookContext));
            }
            const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
            readPriorRows = async () => {
@@ -11702,7 +11837,8 @@ export class ObjectQL implements IObjectQLEngine {
                // [D1] Zero matched rows is zero dispatches — a batch that
                // changed nothing is not a record change.
                if (perRowBeforeHooks && rows.length > 0) {
-                   await this.dispatchPerRowBeforeHooks(object, 'beforeUpdate', rows, hookContext);
+                   await dispatchHooksExplainingWithheldReadonly(readonlyHiddenFromHooks, 'beforeUpdate',
+                     () => this.dispatchPerRowBeforeHooks(object, 'beforeUpdate', rows, hookContext));
                }
            }
        }
@@ -11731,7 +11867,78 @@ export class ObjectQL implements IObjectQLEngine {
        // deliberately keeps the pre-#14088 over-strip instead.
        const sealedHookWrites = hookWrites?.seal(hookContext.input.data);
        if (sealedHookWrites) hookContext.input.data = sealedHookWrites.data as any;
-       const hookWrittenKeys = sealedHookWrites?.hookWrittenKeys;
+       let hookWrittenKeys = sealedHookWrites?.hookWrittenKeys;
+
+       // ── [#16344] HAND BACK what was hidden from the hooks ────────────────
+       //
+       // The other end of the pre-hook pass above, on the SAME confluence and
+       // for the same reason: this is the line at which the payload has stopped
+       // being the hooks' and has not yet been read by anything engine-owned.
+       // Restoring HERE rather than at each branch's strip is what keeps the
+       // change invisible below — one site covers both branches, so the two can
+       // never end up with different notions of what the hooks were shown.
+       //
+       // ⛔ Only keys the payload does not already hold. A hook that wrote one
+       // of these columns owns the value standing on it, and putting the
+       // caller's back over it is precisely the forgery the recording refuses.
+       //
+       // Placed AFTER the seal, deliberately: a hand-back inside the recording
+       // window would enter the record as a hook write, and the static strip
+       // below reads that record for provenance — so the caller's own forgery
+       // would be handed the one credential (`hookWrittenKeys`) that stops it
+       // being stripped. The exact laundering #14088 exists to prevent.
+       //
+       // ⛔ ...and SET-TO-UNDEFINED of a hidden key is a NO-OP, not a hook
+       // write. A hook that assigns a hidden key from the payload it was shown
+       // (`data.x = data.x`, the shape #14088's own pin names) reads
+       // `undefined` and RE-CREATES the key holding it. Left alone, three
+       // mechanisms agree the wrong way: the recorder's `set` trap counts it as
+       // a hook write, the hand-back below skips the key because `k in target`,
+       // and the strip keeps it on that record — so a driver is handed
+       // `{ x: undefined }`. On the memory driver that ERASES the stored
+       // read-only value; on a knex-backed one `formatInput` does not drop
+       // `undefined` and `builder.update(payload)` hands knex an undefined
+       // binding, a bare compile-time `Error` OUTSIDE the ADR-0112 envelope.
+       // Neither is "the record the engine intends to persist", which is the
+       // whole subject of this card.
+       //
+       // Undoing it here — delete the key, drop it from the record, let the
+       // ordinary hand-back put the caller's value back for the strip to judge
+       // — makes the write read EXACTLY as it would have with no hook at all:
+       // stripped, `onFieldsDropped` reporting it, the WARN said, and
+       // `strictReadonlyWrites` refusing. That identity IS the invariant this
+       // hide/hand-back pair exists to hold.
+       //
+       // ⛔ Dropping the key from `hookWrittenKeys` is NOT optional and is not
+       // tidiness: leaving it there while handing the caller's value back over
+       // it would credit the caller's forgery with hook provenance — the exact
+       // laundering the note above refuses, arrived at from the other side. The
+       // narrowing reaches only keys THIS pass hid, and only the one value no
+       // driver can store; a hook write of any real value is untouched, so the
+       // recorder's deliberate blindness to VALUE (#14088) is unchanged for
+       // every key a hook can actually see.
+       if (readonlyHiddenFromHooks) {
+         const restoreTargets = new Set<Record<string, unknown> | null | undefined>([
+           hookContext.input.data as Record<string, unknown> | null | undefined,
+           opCtx.data as Record<string, unknown> | null | undefined,
+         ]);
+         const undoneSelfAssigns = new Set<string>();
+         for (const target of restoreTargets) {
+           if (!target || typeof target !== 'object') continue;
+           for (const [k, v] of Object.entries(readonlyHiddenFromHooks)) {
+             if (k in target && target[k] === undefined) {
+               delete target[k];
+               undoneSelfAssigns.add(k);
+             }
+             if (!(k in target)) target[k] = v;
+           }
+         }
+         if (undoneSelfAssigns.size > 0 && hookWrittenKeys !== undefined) {
+           const narrowed = new Set(hookWrittenKeys);
+           for (const k of undoneSelfAssigns) narrowed.delete(k);
+           hookWrittenKeys = narrowed;
+         }
+       }
 
        // ── [#13657] The POST-hook half of the declared-field door ──────────
        //
@@ -14009,6 +14216,12 @@ export class ObjectQL implements IObjectQLEngine {
           if (aggFilter == null) continue;
           assertListComparandShapes(object, 'aggregate', aggFilter, `aggregations[${i}].filter`);
           assertFilterIsMaterializable(object, 'aggregate', this._registry.getObject(object), aggFilter);
+          // [#15661] …and the declared-type door for the text operators: a
+          // `$contains` over a numeric column in ONE aggregation's filter is
+          // the same silent zero at a second filter position, and a door that
+          // spoke on `where` alone would answer one mistake two ways within a
+          // single verb.
+          assertTextOperatorTargetsAreStringCapable(object, 'aggregate', this._registry.getObject(object), aggFilter);
       }
       const driver = this.getDriver(object);
       this.logger.debug(`Aggregate on ${object} using ${driver.name}`, query);

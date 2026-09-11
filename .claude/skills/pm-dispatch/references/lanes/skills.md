@@ -5,7 +5,7 @@
 ## 范围
 
 - 两个技能根:`.claude/skills/**`(含 pm-dispatch 本体)与 `skills/**`(发布目录,恒英文)。
-- `scripts/pm/**` PM 循环工具;指令架构文件:根 `AGENTS.md` 与根 `CLAUDE.md`。
+- PM 循环工具与指令架构文件的归属见 SKILL.md 域车道表 `domain:skills` 行,⛔ 不另抄。
 - 受管面的治理执行文件:`.github/CODEOWNERS` 治理路由半边。
 - 同含 SUBJECT 是受管面本身的门禁与审计脚本。
 - 全量判据在 SKILL.md 域车道表;受管面统一定义见 SKILL.md 〈复核〉,⛔ 不另抄。

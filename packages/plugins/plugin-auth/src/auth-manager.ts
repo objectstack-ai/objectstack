@@ -1129,6 +1129,41 @@ async function smsQuotaExceededApiError(message: string): Promise<Error> {
 
 export class AuthManager {
   private auth: Auth<any> | null = null;
+  /**
+   * [#17176] The build currently in flight, so `getOrCreateAuth()` is
+   * single-flight.
+   *
+   * `this.auth` alone cannot serialise the build: it is assigned only AFTER
+   * `createAuthInstance()` resolves, and that function awaits a dynamic
+   * `import('better-auth')`, `buildPluginList()`, `resolvePasswordHasher()`
+   * and finally better-auth's own `$context`. Every caller that arrives inside
+   * that window still reads `this.auth === null` and starts its own build, so
+   * N overlapping callers construct N better-auth instances — measured, three
+   * concurrent `getAuthInstance()` calls returned three distinct instances.
+   *
+   * The boot has such callers: `auth-plugin.ts` fires
+   * `registerOidcDiscoveryRoutes()` with `void` from its route-mounting
+   * `kernel:ready` hook (that hook returns while the call is still pending)
+   * and a later `kernel:ready` hook reads the instantiated social providers
+   * off the instance for the account-issuer backfill.
+   *
+   * Duplicate instances are not merely wasteful. Each one runs every
+   * better-auth plugin's `init`, and `@better-auth/oauth-provider` seeds the
+   * RFC 8707 `sys_oauth_resource` row from there. Its seed is already
+   * check-then-insert (`findOne` by `identifier`, then `create` only on a
+   * miss) with the UNIQUE refusal caught as its documented
+   * concurrent-process fallback — so on a warm database every instance finds
+   * the row and inserts nothing, but on a FRESH one all N miss together and
+   * all N insert, and the unique index refuses N - 1 of them. That refusal is
+   * the `Insert operation failed {object: sys_oauth_resource}` line on the
+   * first boot of a fresh project.
+   *
+   * ⛔ The cure is not a quieter log and not an upsert: it is not doing the
+   * work twice. Holding the in-flight promise makes the seed run once per
+   * process on every driver, because there is only ever one plugin `init` to
+   * run it.
+   */
+  private authBuild: Promise<Auth<any>> | null = null;
   private config: AuthManagerOptions;
   /**
    * [#3653] The auth secret, resolved ONCE per manager. `generateSecret()`'s
@@ -1229,13 +1264,36 @@ export class AuthManager {
   }
 
   /**
-   * Get or create the better-auth instance (lazy initialization)
+   * Get or create the better-auth instance (lazy, and single-flight).
+   *
+   * Concurrent callers share ONE build — see {@link AuthManager.authBuild} for
+   * why an `if (!this.auth)` guard cannot serialise an async initializer and
+   * what the duplicate builds cost at boot. A rejected build is not cached:
+   * the slot is cleared so the next caller retries, which is the pre-existing
+   * behaviour of the un-serialised form.
    */
   private async getOrCreateAuth(): Promise<Auth<any>> {
-    if (!this.auth) {
-      this.auth = await this.createAuthInstance();
-    }
-    return this.auth;
+    if (this.auth) return this.auth;
+    if (this.authBuild) return this.authBuild;
+    // `build` is only read from callbacks that run after this statement
+    // completes, so comparing against it inside them is safe. The comparison
+    // is what makes `applyConfigPatch()`'s invalidation stick: a build the
+    // patch disowned must not install itself over the new configuration.
+    const build: Promise<Auth<any>> = this.createAuthInstance().then(
+      (auth) => {
+        if (this.authBuild === build) {
+          this.auth = auth;
+          this.authBuild = null;
+        }
+        return auth;
+      },
+      (e) => {
+        if (this.authBuild === build) this.authBuild = null;
+        throw e;
+      },
+    );
+    this.authBuild = build;
+    return build;
   }
 
   /**
@@ -3908,7 +3966,11 @@ export class AuthManager {
    * a warning is emitted.
    */
   setRuntimeBaseUrl(url: string): void {
-    if (this.auth) {
+    // [#17176] A build already IN FLIGHT counts as created: it has read (or is
+    // about to read) the standing config, and it is now the one instance every
+    // later caller receives. Reporting only on `this.auth` would let this
+    // silently no-op instead of saying so.
+    if (this.auth || this.authBuild) {
       console.warn(
         '[AuthManager] setRuntimeBaseUrl() called after the auth instance was already created — ignoring. ' +
         'Ensure this method is called before the first request.',
@@ -3975,8 +4037,14 @@ export class AuthManager {
     }
 
     this.config = next;
-    if (this.auth && !patch.authInstance) {
+    // [#17176] An in-flight build is discarded alongside a materialised one:
+    // it was composed from the pre-patch config, so adopting it would serve
+    // the superseded configuration to every later caller. `getOrCreateAuth()`
+    // checks its own identity before installing, so the disowned build resolves
+    // to its callers and installs nothing.
+    if ((this.auth || this.authBuild) && !patch.authInstance) {
       this.auth = null;
+      this.authBuild = null;
     }
   }
 
@@ -3996,10 +4064,19 @@ export class AuthManager {
   /**
    * ADR-0093 D1 — the deployment's membership policy **as it stands right now**.
    *
-   * The ONE source both membership paths read (#5152):
+   * The ONE source EVERY membership-writing path reads (#5152):
    *   - sign-up: the reconciler composed into `user.create.after` (below);
    *   - backfill: `AuthPlugin`'s ADR-0093 D6 pass over pre-existing member-less
-   *     users, which used to read the plugin's CONSTRUCTOR options instead.
+   *     users, which used to read the plugin's CONSTRUCTOR options instead;
+   *   - `POST /admin/create-user`: the endpoint-side belt-and-suspenders bind
+   *     in `admin-user-endpoints.ts`, reached through
+   *     `AdminUserEndpointDeps.getMembershipPolicy`.
+   *
+   * That list was written as "both membership paths" while the admin endpoint
+   * handed the reconciler a literal `'auto'` — a third writer, outside the
+   * accounting, binding under `invite-only` where the other two correctly did
+   * not. Enumerate every writer here: a path that is not in this list is a
+   * path that can disagree with the deployment's policy.
    *
    * That split mattered because `this.config` is what {@link applyConfigPatch}
    * targets: once `auth.membership_policy` became a platform setting, the
@@ -6130,9 +6207,33 @@ export class AuthManager {
    * signature against our own JWKS, `iss` must be this deployment's issuer,
    * `aud` must be the MCP resource URL (tokens minted for other audiences —
    * userinfo, plain OIDC SSO — do NOT unlock MCP), `exp`/`nbf` enforced by
-   * jose. Client-credentials (M2M) tokens carry no `sub` and are rejected:
-   * the MCP surface is principal-bound by design; headless callers use API
-   * keys. Revocation note: JWT access tokens are not server-tracked, so
+   * jose.
+   *
+   * A `client_credentials` (M2M) token is REFUSED here — the MCP surface is
+   * principal-bound by design; headless callers use API keys. The
+   * discriminator is the `sub`/`client_id` PAIR, read as RFC 9068 defines it
+   * for a JWT access token: §2.2 makes `client_id` REQUIRED, and §2.2.3.1
+   * fixes what `sub` means beside it — the resource OWNER for a grant that
+   * had one, and "an identifier the authorization server uses to indicate the
+   * client application" for a grant that did not. So a token whose `sub`
+   * equals its own `client_id` (or its `azp` spelling) states, in the
+   * authorization server's own words, that NO human delegated it, and a token
+   * carrying neither client claim is refused as well: the check cannot run on
+   * it, and a check that cannot run must not silently pass (Route & surface
+   * ownership §3).
+   *
+   * ⛔ Not `sid`, and ⛔ not a `sys_user` lookup. `sid` does separate today's
+   * two token shapes, but it is an OIDC session-management convenience the
+   * installed provider ALREADY gates per-client on ID tokens
+   * (`enableEndSession || backchannelLogoutUri`) — a bump that gates it on
+   * access tokens too would 401 every human on this surface, which is the
+   * failure this method must not have. A `sys_user` read would make a
+   * deliberately LOCAL, I/O-free verifier depend on the data engine and turn
+   * a transient store error into a 401 for a legitimate human, and a row's
+   * existence is not humanity anyway (`isHumanUserRow` exists because
+   * `usr_system` is a row and not a person).
+   *
+   * Revocation note: JWT access tokens are not server-tracked, so
    * revocation takes effect at expiry (≤1h default); refresh tokens ARE
    * revocable immediately via `/oauth2/revoke`.
    *
@@ -6163,14 +6264,34 @@ export class AuthManager {
         audience: this.getMcpResourceUrl(),
       });
 
-      const userId = typeof payload.sub === 'string' && payload.sub ? payload.sub : undefined;
-      if (!userId) return null;
+      const subject = typeof payload.sub === 'string' && payload.sub ? payload.sub : undefined;
+      if (!subject) return null;
+
+      // The two spellings of "which client is presenting this", read
+      // independently rather than through a `??` chain: a token that carries
+      // both and disagrees with itself must be refused on EITHER match, and
+      // collapsing them first would let the losing spelling smuggle the
+      // client id past the comparison below.
+      const clientIdClaim =
+        typeof (payload as any).client_id === 'string' && (payload as any).client_id
+          ? ((payload as any).client_id as string)
+          : undefined;
+      const azp =
+        typeof (payload as any).azp === 'string' && (payload as any).azp
+          ? ((payload as any).azp as string)
+          : undefined;
+      // No client identity at all → the human/machine discriminator has no
+      // input. Fail closed rather than admit an unclassifiable token.
+      if (!clientIdClaim && !azp) return null;
+      // `sub` IS the client → RFC 9068 §2.2.3.1's "no resource owner was
+      // involved" shape, i.e. a client_credentials grant. No principal.
+      if (subject === clientIdClaim || subject === azp) return null;
+
       const scopes =
         typeof payload.scope === 'string'
           ? payload.scope.split(' ').filter(Boolean)
           : [];
-      const clientId = typeof (payload as any).azp === 'string' ? (payload as any).azp : undefined;
-      return { userId, scopes, ...(clientId ? { clientId } : {}) };
+      return { userId: subject, scopes, ...(azp ? { clientId: azp } : {}) };
     } catch {
       return null; // unknown/expired/wrong-audience/garbage → no principal
     }
@@ -6224,7 +6345,7 @@ export class AuthManager {
    * contraction over what #5233 shipped. The gate used to judge
    * `postureEnforcesWall(resolveTenancyPosture())`, the operator's request, which
    * came apart from `/auth/config` on exactly one deployment shape: ADR-0093 D5
-   * degradation (a wall was asked for, the enterprise `@objectstack/organizations`
+   * degradation (a wall was asked for, the `@objectstack/organizations`
    * runtime is absent, so nothing isolates anything). There the console hid the
    * "Create organization" action while the API happily minted organizations whose
    * boundary NO engine enforces — a declared-but-unenforced security property,

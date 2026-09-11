@@ -66,6 +66,28 @@
  * via `test/serve-capability-vocabulary.test.ts` and the shared const's via
  * doctor's leg (ii).
  *
+ * ── The 2026-09-08 reword, and why it was made HERE rather than absorbed ──
+ *
+ * These pins previously expected the word "enterprise" in two operator-facing
+ * sentences: the install remedy ("add … (the enterprise multi-org runtime)")
+ * and the `isolated` posture hint. ADR-0132 moved the multi-org runtime into
+ * open core — `packages/plugins/organizations` is Apache-2.0 and carries no
+ * licence check — so both sentences told an open-source operator that a remedy
+ * they can in fact follow required a subscription.
+ *
+ * ⛔ The pins were NOT relaxed or deleted to accommodate the reword: they still
+ * compare the whole rendered line, whitespace included, against text built from
+ * `Serve.ORGANIZATIONS_RUNTIME_PKG`, and the #12151 CONTROL block below still
+ * proves they can say no. Only the expected PROSE moved, in the same diff as
+ * the prose itself, which is the shape this file is for — a wording change that
+ * does not redden a pin here would mean the pin had stopped reading.
+ *
+ * ⚠️ ONE NAME, TWO PACKAGES (ADR-0132 D3) is why the new wording names no
+ * edition at all: a commercial deployment resolves the same package name to a
+ * private licence-gated subclass, so any adjective this message picks is wrong
+ * for one of the two installs reading it. The roster keeps the edition fact,
+ * and `doctor-organizations-message-spelling.test.ts` leg (ii) still pins it.
+ *
  * ⚠️ This paragraph used to say the literal HAD to stay in `serve.ts`, because
  * `serve-cluster-host-resolution.test.ts` resolved the organizations `import()`
  * through that static and needed the literal in that file or the load dropped
@@ -135,24 +157,53 @@ const DECLARED: HostDeclaration = {
 };
 const UNDECLARED: HostDeclaration = { packageName: PKG, hostRoot: '/srv/app', declared: false };
 
-const remedyDeclared = () => formatOrganizationsInstallRemedy('declared-unresolvable', DECLARED, '/srv/app');
-const remedyUndeclared = () => formatOrganizationsInstallRemedy('undeclared', UNDECLARED, '/srv/app');
-const remedyNoLoadableEntry = () =>
-  formatOrganizationsInstallRemedy('declared-no-loadable-entry', DECLARED, '/srv/app');
+const remedyDeclared = () => formatOrganizationsInstallRemedy('declared-unresolvable', DECLARED);
+const remedyUndeclared = () => formatOrganizationsInstallRemedy('undeclared', UNDECLARED);
+const remedyNoLoadableEntry = () => formatOrganizationsInstallRemedy('declared-no-loadable-entry', DECLARED);
 
 describe('serve — the multi-org runtime name an operator READS comes from the declaration (#12151)', () => {
-  it('site 1 — the "install is broken" remedy names it, with the spacing intact', () => {
-    // The `declared-unresolvable` branch: the app's package.json IS correct and
-    // the install is what broke (#4719). One of the two an operator ACTS on.
+  it('site 1 — the "the declaration is not the problem" remedy names it, with the spacing intact', () => {
+    // The `declared-unresolvable` branch: the app's package.json IS correct
+    // (#4719). One of the two an operator ACTS on.
     expect(lines(remedyDeclared())[0]).toBe(
       `      • this app DECLARES ${PKG} (dependencies: "^1.2.3") — the`,
     );
   });
 
+  it('site 1b — the `declared-unresolvable` remedy DEFERS too; it mints no install advice (#17046)', () => {
+    // ── The arm that used to fire, quoted so the flip is legible ──────────
+    //
+    //         Repair the INSTALL in /srv/app: run `pnpm install`, check that a
+    //         production prune did not drop it, and that its dist is actually built — or
+    //
+    // DRIVEN on both shapes this one kind covers, that text was wrong twice:
+    // for a genuinely broken install it repeats, word for word, the three
+    // remedies `unresolvableMessage` already prints in the `cause:` line four
+    // lines below; and for #15045's location sub-case — narrowed by #17046 but
+    // NOT removed, since pnpm's `file:` virtual-store copy and every git /
+    // tarball declaration still reach it — the same `cause:` says outright
+    // that re-running `pnpm install`, un-pruning and rebuilding change
+    // nothing. One screen contradicting itself, the #14270 class.
+    const rendered = plain(remedyDeclared());
+    expect(rendered).not.toContain('Repair the INSTALL');
+    expect(rendered).not.toContain('pnpm install');
+    expect(rendered).not.toContain('production prune');
+    expect(rendered).not.toContain('dist is actually built');
+    // ⛔ Nor may it drift into the OTHER arm's instruction.
+    expect(rendered).not.toContain("declare it in the app's package.json");
+    // What it says instead: the declaration is fine, and the cause below owns
+    // the remedy — the same DEFERRAL site 2b pins for the sibling kind.
+    expect(rendered).toContain('declaration is NOT the problem');
+    expect(rendered).toContain('the cause below names the');
+    expect(rendered).toContain('authority on');
+    // It still chains into the `Fix one of:` list the fatal assembles.
+    expect(rendered.endsWith(' — or\n')).toBe(true);
+  });
+
   it('site 2 — the "add it to THIS APP" remedy names it, with the spacing intact', () => {
     // The other instruction an operator acts on: the app never declared it.
     expect(lines(remedyUndeclared())[0]).toBe(
-      `      • add ${PKG} (the enterprise multi-org runtime) to THIS APP`,
+      `      • add ${PKG} (the multi-org runtime) to THIS APP`,
     );
   });
 
@@ -164,7 +215,7 @@ describe('serve — the multi-org runtime name an operator READS comes from the 
     // package's own `exports` names no runtime entry Node can load — and it
     // fell into the else leg, rendering the UNDECLARED remedy verbatim:
     //
-    //       • add @objectstack/organizations (the enterprise multi-org runtime) to THIS APP
+    //       • add @objectstack/organizations (the multi-org runtime) to THIS APP
     //         — declare it in the app's package.json and install; the CLI resolves it from the
     //
     // i.e. "declare it and install it" to an operator who has already done
@@ -264,7 +315,7 @@ describe('serve — the posture description an operator reads names the declarat
     expect(verdict.ok, 'the gate accepted a value that is not a posture').toBe(false);
     if (verdict.ok) return;
     expect(lines(verdict.fatal)).toContain(
-      `      • set OS_TENANCY_POSTURE=isolated — organization wall + the enterprise ${PKG} runtime `
+      `      • set OS_TENANCY_POSTURE=isolated — organization wall + the ${PKG} runtime `
       + "(the legacy spelling 'multi' is accepted and normalizes to this)",
     );
   });
@@ -301,9 +352,9 @@ describe('#12151 CONTROL — these pins can say no', () => {
     // The exact regression the card names: interpolating into a template is
     // where a stray space or a lost backtick hides. If this instrument could
     // not tell the two apart, every assertion above would be decorative.
-    const expected = `      • add ${PKG} (the enterprise multi-org runtime) to THIS APP`;
-    expect(`      • add ${PKG}(the enterprise multi-org runtime) to THIS APP`).not.toBe(expected);
-    expect(`      • add ${PKG}  (the enterprise multi-org runtime) to THIS APP`).not.toBe(expected);
+    const expected = `      • add ${PKG} (the multi-org runtime) to THIS APP`;
+    expect(`      • add ${PKG}(the multi-org runtime) to THIS APP`).not.toBe(expected);
+    expect(`      • add ${PKG}  (the multi-org runtime) to THIS APP`).not.toBe(expected);
     expect(lines(remedyUndeclared())[0]).toBe(expected);
   });
 

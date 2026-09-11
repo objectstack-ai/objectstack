@@ -247,9 +247,23 @@ describe('[#14328] the ARRAY-form divergence is PRESERVED, not unified away', ()
         // reports it verbatim and binds nothing).
         // Typed as the real `FlowTrigger`, NOT `… as never`: the cast erases the
         // contextual type for `start`, which leaves `binding` implicitly `any`
-        // (TS7006). This package has no `typecheck` script, so its `tsc --noEmit`
-        // runs only in the type-check DEBT lane — which compiles `src/**`, tests
-        // included, and is a shrink-only ratchet. Same shape as `engine.test.ts`.
+        // (TS7006) — and here that error is reported on arrival. This package's
+        // `tsconfig.json` carries NO test exclusion (its `include` is `["src"]`),
+        // so the `tsc --noEmit` its `typecheck` script runs already compiles this
+        // file, and #15048's `tsconfig.test.json` — NAMED by the same script via
+        // `check:test-typecheck --project` — compiles it too. There is no
+        // `test-typecheck-debt.json` beside that config, and the ABSENCE is the
+        // zero: any error in any file here is red immediately, with no entry to
+        // be added to. Same shape as `engine.test.ts`.
+        //
+        // ⚠️ This used to say the package "has no `typecheck` script, so its
+        // `tsc --noEmit` runs only in the type-check DEBT lane", a shrink-only
+        // ratchet. False on this tree in BOTH halves: the package declares
+        // `typecheck` (`tsc --noEmit && pnpm check:test-typecheck`) and holds no
+        // entry in `scripts/check-type-check-coverage.mjs`'s `DEBT`. The floor
+        // under this file is stricter than that sentence claimed, not laxer —
+        // and the reason above is a property of the two configs, which outlives
+        // any package's script list.
         const started: FlowTriggerBinding[] = [];
         const trigger: FlowTrigger = {
             type: 'record_change',

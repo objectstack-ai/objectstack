@@ -15,7 +15,7 @@
 // The judge here is the EFFECTIVE posture (the `tenancy` service), not the
 // requested one, and the degraded scenario below is why. What these decisions
 // actually turn on is "will the per-org replay run INSTEAD of me?" — and that
-// replay is enterprise `@objectstack/organizations` middleware. On a degraded
+// replay is `@objectstack/organizations` middleware. On a degraded
 // boot it does not exist, so keying on the REQUEST would defer to a replay that
 // can never happen and leave the stack with no seed data at all. That case is
 // pinned explicitly, because it is the one a requested-posture fix would get

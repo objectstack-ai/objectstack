@@ -2410,34 +2410,49 @@ export class ObjectStackClient {
     /**
      * Get a specific installed package by its ID (reverse domain identifier).
      *
-     * ⛔ [#11925 / #12034] STILL NOT bound, and the `{ package }` envelope is
-     * left exactly as it was. #12034 shipped its `install` / `enable` /
-     * `disable` neighbours (one producer each) and deliberately did NOT ship
-     * this one, because this route is a REAL fork with no single true type.
-     * Both bodies below were MEASURED by driving each registrar, not read off
-     * the source:
+     * [#12034] Bound to `InstalledPackage` — the BARE row, no envelope. This
+     * was the last of the four `packages.*` methods #11925 left unbound, and
+     * the reason it was unbindable is GONE.
      *
-     *     dispatcher  handlePackages('/<id>', 'GET')
-     *       -> { success: true, data: { id, manifest, enabled, status } }
-     *     rest        GET /api/v1/packages/:id
-     *       -> { success: true, data: { package: { …row, source } } }
+     * What blocked it was a REAL fork: two mounted surfaces answering
+     * different envelopes, dispatcher `success(pkg)` against REST
+     * `sendOk(res, { package: { …row, source } })`. #16628 removed the REST
+     * twin outright. `registerPackageRoutes` mounts ONE route now —
+     * `POST /packages/publish` — which is not a claim about registration
+     * order but about the single `routes` array it hands to
+     * `mountDirectRoutes`, the same array it reports back as the description
+     * of what it mounted (`packages/rest/src/package-routes.ts`). So
+     * `runtime`'s `/packages` domain is the one implementation left, and it
+     * answers the bare row:
      *
-     * `unwrapResponse` strips one envelope, so the post-unwrap value is the
-     * BARE row on the dispatcher and `{ package }` on REST. Binding either
-     * member here hardens a claim that is false on the other surface. Making
-     * it bindable means converging the two PRODUCERS — a wire-behaviour change
-     * to two mounted surfaces, above this card's authority, with a clause-②
-     * narrowing analysis of its own. The measured convergence cost is recorded
-     * on #12034 for that ruling.
+     *     GET /packages/:id
+     *       -> success(withWritableVerdict(qlService, toPackageResponse(pkg)))
      *
-     * Its SCOPED twin `ScopedEnvironmentClient.packages.get` IS bound, because
-     * only the REST registrar serves the scoped mount — one surface, one
-     * shape.
+     * That is the SAME projection its `list` neighbour maps over every row
+     * (`packages/runtime/src/domains/packages.ts` — one expression, two
+     * doors), and `list` is already declared `InstalledPackage[]` directly
+     * above. This binding therefore makes two doors of one domain agree
+     * rather than making a new claim about either. `packages/spec` has
+     * declared the same thing all along and was never the fork's casualty:
+     * `GetInstalledPackageResponseSchema` is `data: InstalledPackageSchema`,
+     * the bare row.
+     *
+     * `source` stays undeclared because there is no longer anything that
+     * emits it on this route; `writable` stays undeclared for the reason
+     * `list` leaves it undeclared.
+     *
+     * ⚠️ Clause-② narrowing. `{ package: any }` is what let
+     * `(await client.packages.get(id)).package` compile, and on the only
+     * surface that has served this route since #16628 it was `undefined` at
+     * runtime — the falsehood was invisible precisely because the member was
+     * `any`. Callers read the row itself. Pinned in
+     * `return-type-precision.test.ts`, which is the only place it CAN be
+     * pinned: a runtime test cannot observe a return-type narrowing at all.
      */
-    get: async (id: string) => {
+    get: async (id: string): Promise<InstalledPackage> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}`);
-        return this.unwrapResponse<{ package: any }>(res);
+        return this.unwrapResponse<InstalledPackage>(res);
     },
 
     /**
@@ -2739,9 +2754,9 @@ export class ObjectStackClient {
    * environment-scoped `packages` block nested inside it, keeps its erased
    * `any` DELIBERATELY (#12036).
    *
-   * `@objectstack/spec/cloud` does declare row contracts that look like the
-   * obvious binding — `Environment`, `EnvironmentCredential`,
-   * `EnvironmentPackageInstallation` — and they are camelCase
+   * Until #16325 `@objectstack/spec/cloud` declared row contracts that looked
+   * like the obvious binding — `Environment`, `EnvironmentCredential`,
+   * `EnvironmentPackageInstallation` — and they were camelCase
    * (`displayName`, `organizationId`, `isDefault`, `databaseUrl`; zero
    * snake_case keys across all three schemas). The `/api/v1/cloud/*` control
    * plane this namespace calls speaks **snake_case**: the in-repo CLI
@@ -2856,8 +2871,9 @@ export class ObjectStackClient {
       //   OPTIONAL (the producer's own "absence stays absence" contract), and
       //   all three are typed as the INLINE WIRE SHAPE.
       //
-      // ⛔ Inline, and NOT bound to `@objectstack/spec/cloud`'s
-      // `ProvisionEnvironmentResponseSchema`. That is the namespace docblock's
+      // ⛔ Inline, and NOT bound to `ProvisionEnvironmentResponseSchema`
+      // (declared by `@objectstack/spec/cloud` until #16325; the cloud repo's
+      // own declaration since). That is the namespace docblock's
       // #11925/#12036 constraint applied to the response side: those contracts
       // are camelCase row types for a control plane that speaks snake_case on
       // `/api/v1/cloud/*`, so binding them would typecheck and be false. The
@@ -7548,25 +7564,47 @@ export class ScopedEnvironmentClient {
       return this.parent._unwrap<{ packages: InstalledPackage[]; total: number }>(res);
     },
     /**
-     * [#11925] The asymmetry #8140 recorded, now closed. Its neighbour `list`
-     * above carried BOTH a return annotation and a type argument, so #8140
-     * bound it; this method carried neither and was left erased — same object
-     * literal, same route family, opposite treatment purely because one lacked
-     * the annotation.
+     * [#11925 bound it · #12034 corrected the shape] The BARE row, no
+     * envelope — the same type its global twin `client.packages.get` now
+     * carries, and for the same reason.
      *
-     * The scoped mount is unambiguous, which is what makes it bindable while
-     * the GLOBAL `client.packages.get` is not: `registerPackageRoutes` is
-     * mounted at both `{base}/packages` and
-     * `{base}/environments/:environmentId/packages`, and only the REST
-     * registrar serves the scoped path — so the `{ package }` envelope
-     * declared here is the one that route actually sends. The handler also
-     * spreads a `source: 'database' | 'registry'` discriminator onto the row,
-     * left undeclared for the same reason `list` leaves it undeclared.
+     * ⚠️ The rationale this binding shipped with was FALSIFIED, and it is
+     * worth stating what it claimed because the claim is what made the
+     * `{ package }` envelope look safe: *"only the REST registrar serves the
+     * scoped path — so the `{ package }` envelope declared here is the one
+     * that route actually sends."* #16628 deleted the registrar's
+     * `GET /packages/:id`. `registerPackageRoutes` is still mounted on BOTH
+     * `{base}/packages` and `{base}/environments/:environmentId/packages`
+     * (`direct-mount-composition.ts` iterates that list of bases), so the
+     * mount the sentence named is still there — it just mounts one route now,
+     * `POST /packages/publish`, and no read. ⇒ Between #16628 and this
+     * change the declaration here described a body NO surface emitted
+     * anywhere, which is strictly worse than the erasure #11925 removed.
+     *
+     * What serves this path is the dispatcher, reached through the
+     * `@objectstack/hono` catch-all the scoped hosts mount: `dispatch()`
+     * strips the `/environments/:environmentId` prefix — that catch-all is
+     * the ONLY entry that hands `dispatch()` a still-scoped path
+     * (`packages/runtime/src/http-dispatcher.ts` says so at the stripping
+     * site) — and the `/packages` domain answers
+     * `success(withWritableVerdict(qlService, toPackageResponse(pkg)))`. That
+     * is the identical projection its `list` neighbour above maps over, which
+     * is why `list` already declares `InstalledPackage[]` and needed no
+     * correction here.
+     *
+     * ⚠️ Clause-② narrowing, and the sharper of the two: this member was
+     * `InstalledPackage`, not `any`, so `(await scoped.packages.get(id))
+     * .package` compiled with a REAL type behind it and was `undefined` at
+     * runtime.
+     *
+     * `version` is unchanged and deliberately not touched by this card — it
+     * is a request-side question, and it is a live one: see the acceptance
+     * notes on #12034.
      */
-    get: async (id: string, version?: string): Promise<{ package: InstalledPackage }> => {
+    get: async (id: string, version?: string): Promise<InstalledPackage> => {
       const qs = version ? `?version=${encodeURIComponent(version)}` : '';
       const res = await this.parent._fetch(this.url(`/packages/${encodeURIComponent(id)}${qs}`));
-      return this.parent._unwrap<{ package: InstalledPackage }>(res);
+      return this.parent._unwrap<InstalledPackage>(res);
     },
   };
 

@@ -205,9 +205,18 @@
  * never reported (ADR-0072 D1: one dead finding and authors stop trusting the
  * linter): an object this stack does not define, an object that declares no
  * readable field map (ADR-0015 `external`, datasource-introspected schemas),
- * and a registry-injected system column. A fourth skip is this surface's own:
- * a list view whose `data.provider` is not `object` binds to no object graph
- * at all, so none of its field names is resolvable here.
+ * and a hop THROUGH a registry-injected system column. A fourth skip is this
+ * surface's own: a list view whose `data.provider` is not `object` binds to no
+ * object graph at all, so none of its field names is resolvable here.
+ *
+ * [#16340] An injected column at the HEAD of a dotted filter key is not a skip
+ * and never was — it resolves. What used to be missing was its TYPE, so
+ * `classifyDottedFilterHead` read an unreadable head and this rule stayed
+ * silent on `created_at.x` while `assertFilterIsMaterializable` refused it at
+ * the door with the registry's own field map in hand. The graph now carries
+ * the registry's definition for each injected column, so the two answer alike.
+ * `id` remains unreadable — the DRIVER provisions the primary key and no
+ * definition table describes it — and the door serves it, so this rule does too.
  */
 
 import { classifyDottedFilterHead } from '@objectstack/spec/data';

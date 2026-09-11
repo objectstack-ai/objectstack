@@ -416,6 +416,10 @@ export default class Compile extends Command {
         normalized: authoringRuleUnionStack(normalized as Record<string, unknown>),
         parsed: authoringRuleUnionStack(result.data as Record<string, unknown>),
         sduiManifest: resolveSduiManifest(),
+        // [#16546] Ref strings, not hook indices — survive the union fold and
+        // the per-package re-slice below unchanged (see `LoweringResult.
+        // loweredHookRefs`'s header for why an index would not).
+        loweredHookRefs: lowering.loweredHookRefs,
       });
       const { errors: ruleErrors, advisories } = splitBySeverity(findings);
       ruleAdvisories = advisories;
@@ -489,6 +493,7 @@ export default class Compile extends Command {
             normalized: asStack,
             parsed: asStack,
             sduiManifest: resolveSduiManifest(),
+            loweredHookRefs: lowering.loweredHookRefs,
           }).filter((f) => !alreadyReported.has(findingKey(f)));
           for (const f of pkgFindings) alreadyReported.add(findingKey(f));
           const split = splitBySeverity(pkgFindings);

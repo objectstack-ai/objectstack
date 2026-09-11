@@ -5403,6 +5403,23 @@ const step18: MigrationStep = {
     'tombstones registered in RETIRED_KEYS_BY_MAJOR[18] with one D3 semantic entry and no D2 ' +
     'conversion (a manager config is no stack collection member); the rename is folded into ' +
     'the removal, so `cache.ttl` now prescribes deletion rather than a hop to a retired key. ' +
+    'It also retires the seven cron-typed positions nothing evaluated (#16320, the #15954 ' +
+    'ruling — option A per family, ADR-0049): the two export-schedule crons, ' +
+    '`ScheduleState.cronExpression`, `DataSyncConfig.schedule`, `CacheWarmup.schedule` and ' +
+    'the two disaster-recovery crons were parsed into the cron envelope and read by nothing ' +
+    '(the D7 ledger row `cron-declared-unwired`). All seven are DELETED OUTRIGHT — no ' +
+    'retiredKey tombstone, no RETIRED_KEYS_BY_MAJOR[18] entry, no D2 conversion and no D3 ' +
+    'semantic entry — so this step replays nothing for them and `migrate meta` lists no ' +
+    'edit: the keys simply stop existing. That the chain is silent does NOT make the ' +
+    'deletion silent to an author: the PARSE strips (no schema here is `.strict()`), but ' +
+    'above it `lintUnknownAuthoringKeys` (#3786) names the dropped key for the one ' +
+    'position a stack manifest reaches — `os validate` and `os build` both print ' +
+    '`connectors.<name>.syncConfig.schedule: \'schedule\' is not a declared connector ' +
+    'key, so its value is dropped at load.`, and `os validate --strict` EXITS 1 on that ' +
+    'warning. The other six positions are unreachable from a manifest, so for those the ' +
+    'parse-level strip is the whole of it. That is the maintainer ruling of 2026-09-10 ' +
+    'on the retirement PR, taken over the seat recommendation to keep the connector D2, on ' +
+    'the reading that customers do not upgrade major by major in order. ' +
     'It also retires the `type: \'page\'` LIST-VIEW mount and its `pageName` binding (#17063, ' +
     'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-09 「撤」). The member was added so a ' +
     'view could render nothing of its own and delegate to an already-published page, but only ' +
@@ -6336,6 +6353,56 @@ const step18: MigrationStep = {
         + 'code that this entry is the only notice of.',
     },
     {
+      id: 'cloud-subpath-retired',
+      surface:
+        '`@objectstack/spec/cloud` — the whole published subpath (`packages/spec/src/cloud/`, '
+        + '11 modules, 94 JSON-Schema defs): the cloud control plane\'s own contracts '
+        + '(`environment.zod`, `environment-package.zod`, `tenant.zod`, `developer-portal.zod`, '
+        + '`marketplace-admin.zod`, `app-store.zod` — 62 defs) and the package & marketplace '
+        + 'format (`package.zod`, `package-version.zod`, `marketplace.zod`, `package-l10n`, '
+        + '`template-manifest.zod` — 30 defs)',
+      replacement:
+        'Two answers, by owner. (1) The package & marketplace FORMAT moved unchanged to '
+        + '`@objectstack/spec/marketplace` (`packages/spec/src/marketplace/`): rewrite the import '
+        + 'path — `import { PackageSchema } from \'@objectstack/spec/cloud\'` becomes '
+        + '`from \'@objectstack/spec/marketplace\'` — and nothing else; every def, key and JSON '
+        + 'Schema is byte-identical under its new `$id` category (`RENAMED_DEFS`, 32 entries). '
+        + '`EnvironmentType(Schema)` — the 7-member taxonomy the discovery fold table is total '
+        + 'over — is re-declared in `@objectstack/spec/api` (`api/discovery.zod.ts`); the '
+        + 'environment-artifact envelope was only ever a re-export and is imported from '
+        + '`@objectstack/spec/system`. (2) The cloud control plane\'s contracts have NO '
+        + 'open-source replacement: `environment.zod` and `tenant.zod` are re-declared in the '
+        + 'cloud repo beside their producer (objectstack-ai/cloud#2037), and `developer-portal.zod`, '
+        + '`marketplace-admin.zod`, `app-store.zod`, `environment-package.zod` are deleted outright — '
+        + 'zero consumers in any repo (maintainer ruling on #16526, option A). Recoverable from git '
+        + 'history at `d5d8d50db` if a declaration is ever wanted again; that is a new card in the '
+        + 'cloud repo, not a re-import.',
+      reason:
+        'Maintainer direction (2026-09-06, verbatim, untranslated): 「我一直觉得 cloud 的协议应该放在云端，'
+        + '没必要开源」; ruled option B "cut by owner" on #16325 (director batch #62, 2026-09-07, 「同意」). '
+        + 'The control-plane schemas\' producer and every consumer live in the closed cloud repo — the '
+        + 'open-source tree read exactly one type from them (`EnvironmentType`, for the discovery fold '
+        + 'table). Leaving them published made the obvious-looking binding of `client.environments.*` '
+        + 'to a camelCase `Environment` row compile and read `undefined` at runtime against a '
+        + 'snake_case wire (#11925 / #12036); with the declarations gone the mis-binding is '
+        + 'structurally impossible rather than warned about in a docblock. No alias and no '
+        + 'deprecation window, per the standing 2026-08-27 ruling 「项目在创业阶段，用户也很少，短期不考虑渐进。」. '
+        + 'Not losslessly convertible: an import path is TypeScript source, not a metadata document '
+        + '`objectstack migrate meta` can rewrite.',
+      acceptanceCriteria:
+        'No code imports anything from `@objectstack/spec/cloud` — the specifier is not an `exports` '
+        + 'key and every such import fails to resolve (TS2307) after upgrade. Package-format consumers '
+        + 'resolve the same symbols from `@objectstack/spec/marketplace` (pinned by resolved symbol '
+        + 'identity in `kernel/package-dependency-dual-source.test.ts` and '
+        + '`system/environment-artifact.test.ts`). `api/discovery-environment-subset.pin.test.ts` '
+        + 'still proves DiscoveryEnvironment ⊂ EnvironmentType against the re-declared enum. No '
+        + 'metadata document needs editing: the 509 `cloud/*` authorable-surface baseline keys are '
+        + 'discharged by the deletion gate\'s own proofs — 30 defs carried by declared rename, 62 by '
+        + 'whole-def retirement (`RETIRED_DEFS_BY_MAJOR[18]`) — not by a tombstone an author could hit. '
+        + '⚠️ Runtime behaviour is deliberately UNCHANGED: `os package publish`, the marketplace routes '
+        + 'and the metadata plugin\'s artifact ingest parse byte-identically before and after.',
+    },
+    {
       id: 'cluster-driver-dangling-values-removed',
       surface: 'kernel.cluster.driver (ClusterDriverSchema, kernel/cluster.zod.ts) '
         + '- the `postgres` and `nats` enum values',
@@ -6432,6 +6499,62 @@ const step18: MigrationStep = {
         + 'deadline is still refused. Two neighbours on this same shape deliberately do NOT move, '
         + 'and a sweep that renamed either has over-applied the rule: batchSize is a COUNT of '
         + 'documents, not a duration, and consistency / projection / hint are not numbers at all.',
+    },
+    {
+      id: 'dataset-measure-aggregate-field-type-refused',
+      surface: 'dataset measure `aggregate` × `field` pairs (`DatasetMeasureSchema`, the rows '
+        + 'inside `Dataset.measures[]`) over a TEMPORAL field — `date`, `datetime`, `time` — '
+        + 'whose aggregate that declared `FieldType` cannot carry: `avg` and `sum` over any of '
+        + 'the three. ⛔ The compile leg is scoped to that class and to nothing else: the '
+        + 'table\'s string rows are under #16785 (ruled C — the table itself is to be amended '
+        + 'to accept `min` / `max` over them) and its `sum` × `percent` row is not executed '
+        + 'here either, so no non-temporal pair changes behaviour',
+      replacement: 'an aggregate the field\'s type accepts, per '
+        + '`AGGREGATE_FIELD_TYPE_COMPATIBILITY` (`@objectstack/spec/data`, #16353): '
+        + '`min` / `max` for a temporal field — both return a real instant of the field\'s own '
+        + 'type — or `count` / `count_distinct`, which read no arithmetic off the value. '
+        + 'A DURATION is not recoverable from an aggregate over instants: store it as a '
+        + 'number (a computed "days open" field) and aggregate that. A `derived` measure whose `of` '
+        + 'names a refused measure is fixed by fixing that measure, not the `derived` one',
+      reason:
+        '#16737 / #16099. Nothing between the author and the driver correlated a measure\'s '
+        + 'aggregate with its field type, so `avg` over a `Field.datetime` compiled to '
+        + '`AVG(col)` and reached the backend — where the ANSWER was decided by the dialect '
+        + 'rather than by the data. Measured on both halves: SQLite coerces the column\'s '
+        + 'canonical UTC text to a number by reading its leading digits, so '
+        + '`avg(submitted_at)` over 2026-05 and 2025-01 returns `2025.5` — the average YEAR, '
+        + 'no error, no log; PostgreSQL 16 answers `function avg(timestamp with time zone) '
+        + 'does not exist` (SQLSTATE 42883). ⚠️ The two halves are not evidenced alike: the '
+        + 'SQLite half is PINNED by a live `sql.js` suite in '
+        + '`__tests__/aggregate-datetime-measure-refusal.test.ts`, while the Postgres half was '
+        + 'MEASURED IN-SESSION on PostgreSQL 16.13 and is not pinned by any test — the live PG '
+        + 'conformance job carries no cell for it. Nothing depends on it: the refusal is '
+        + 'decided from declared metadata before a driver is reached. ⭐ The silent half is '
+        + 'the dangerous one, and it is the DEV default: '
+        + '`derived: { op: \'difference\', of: [avg_a, avg_b] }` over two '
+        + 'such averages rendered `-0.85` on a tile labelled "average cycle time delta" — '
+        + 'indistinguishable from a correct answer, which is the shape Prime Directive #12 '
+        + 'exists to remove. Which pairs are accepted is therefore a contract, declared once '
+        + 'in `@objectstack/spec` under the director ruling of decision batch #59 '
+        + '(2026-09-06, "both legs, table in spec") and executed by the consumer legs; the '
+        + 'compile-time leg (`dataset-compiler`, `service-analytics`) refuses the pair with '
+        + '`DATASET_INVALID` / 400 before any query is built, using the declared type the '
+        + 'host already supplies through `AnalyticsServiceConfig.sourceFieldMeta`. '
+        + '⚠️ A `date` / `datetime` used as a DIMENSION — grouping, bucketing, date-range '
+        + 'filtering — is untouched: this is about aggregation only.',
+      acceptanceCriteria:
+        'Every dataset measure over a `date` / `datetime` / `time` field pairs that field with '
+        + 'an `aggregate` the temporal class accepts — `min`, `max`, `count`, `count_distinct` '
+        + '— and none pairs it with `avg` or `sum`. ⛔ The criterion reaches no further: a '
+        + 'measure over a field of any OTHER class is not judged by this leg at all, so a '
+        + 'string, boolean, percent or numeric pair is neither refused nor certified here. '
+        + 'Accepted pairs compile and execute byte-identically to before '
+        + '(`avg` over `number` / `currency`, `min` / `max` over `datetime`, `count` over '
+        + 'anything); a refused pair answers `400 DATASET_INVALID` naming the measure, the '
+        + 'field, its declared type and the accepted set, with no SQL emitted. The refusal '
+        + 'stands down rather than guessing wherever the type cannot be resolved: no '
+        + '`sourceFieldMeta` wired, an unknown field, or a `relationship.field` path whose '
+        + 'column lives on a joined object.',
     },
     {
       id: 'datasource-config-mongo-options-credential-refused',
@@ -7575,6 +7698,133 @@ const step18: MigrationStep = {
         + 'assuming the old result set was correct.',
     },
     {
+      id: 'filter-text-operator-declared-type-refused',
+      surface: 'a STORED filter body the engine executes, where a text operator names a '
+        + 'field whose declared type can never store a string. Measured carriers: '
+        + '`sys_saved_report.query_json.filter` (executed verbatim as `engine.find(object, '
+        + '{ where: q.filter })`, and reached again by every `sys_report_schedule` row '
+        + 'through its `report_id`), `FieldSchema.summaryOperations[].filter` (ANDed with '
+        + 'the parent-FK match and handed to `engine.aggregate`), `ListView.filter` and tab '
+        + 'filters (`ViewFilterRuleSchema`, whose `contains` / `not_contains` / `icontains` '
+        + '/ `starts_with` / `ends_with` spellings lower to the same operators through '
+        + '`AST_OPERATOR_MAP`), and the `FilterConditionSchema` carriers on dashboards '
+        + '(widget `filter`, `GlobalFilter`), datasets and reports (`runtimeFilter`), plus '
+        + '`FieldSchema.relatedListFilter`. NOT this surface: an RLS / sharing / tenant '
+        + 'predicate, which the platform composes onto the AST AFTER this door and which '
+        + 'the door therefore never judges.',
+      replacement: 'compare the field with an operator its declared type can answer — `$eq` '
+        + '/ `$ne` / `$in`, or a range (`$gte` / `$lt`) for a temporal or numeric field — or '
+        + 'aim the text operator at a text-valued field instead. A dotted path into a '
+        + 'structured-JSON field (`address.city`) stays legal and is deliberately unjudged. '
+        + 'NO rewrite is mechanical: the author\'s intent is not recoverable from the stored '
+        + 'condition — `{ amount: { $contains: \'5\' } }` may have meant `$eq: 5`, a range, '
+        + 'or a filter on a different column altogether — so the loader must not choose one.',
+      reason:
+        'objectstack#15661, ruled 2026-09-05 (decision batch #43, option C-deny), landed at '
+        + 'the engine seam as objectstack#15773. A text operator (`$contains` / '
+        + '`$notContains` / `$startsWith` / `$endsWith` / `$icontains` / `$like` / `$ilike`) '
+        + 'over a field whose DECLARED type can never store a string — `NUMERIC_VALUE_TYPES` '
+        + '∪ `BOOLEAN_VALUE_TYPES` ∪ `CALENDAR_DATE_TYPES` ∪ `INSTANT_TYPES` ∪ '
+        + '`CLOCK_TIME_TYPES` ∪ `STRUCTURED_JSON_TYPES` — is refused at the engine\'s '
+        + 'field-aware door with `INVALID_FILTER` 400 instead of reaching a driver. It is a '
+        + 'RUNTIME narrowing over an AUTHORED surface, which is why it is registered here '
+        + 'rather than disposed of as needing no prescription: NO schema changed, so a '
+        + 'stored filter carrying the refused shape still parses and still loads — '
+        + '`FilterConditionSchema` constrains no field type, and `ViewFilterRuleSchema` '
+        + 'takes `field: z.string()` with `contains` in its operator enum — and the first '
+        + 'sign of it is a 400 on the read that executes it. Before the door those reads '
+        + 'answered `[]` (or every row for `$notContains`, or a SQLite coercion accident) '
+        + 'with no diagnostic, which is the silent cell the ruling closed. `objectstack '
+        + 'migrate meta` cannot repair the stored bodies for the reason `replacement` '
+        + 'records, so this is a structured TODO rather than a graduated conversion.',
+      acceptanceCriteria:
+        'Every stored filter body listed under `surface` executes without an '
+        + '`INVALID_FILTER` 400 naming a declared type: run each saved report, list view, '
+        + 'dashboard widget, dataset and roll-up once after the upgrade and read the '
+        + 'refusals — each message names the filter key, the field\'s declared type and the '
+        + 'operator, which is the whole repair list. A filter re-authored onto a typed '
+        + 'operator returns the rows its author meant; one left as written keeps answering '
+        + '400, and NOTHING silently rewrites it. Filters over text-valued fields — '
+        + 'including `select` / `radio` codes, `multiselect` / `checkboxes` / `tags`, lookup '
+        + 'and `user` ids, `autonumber` and the file classes — are unaffected and must keep '
+        + 'answering exactly as before; that is the control which proves a repair pass did '
+        + 'not over-reach. A DIRECT driver call bypasses this door entirely and keeps '
+        + 'answering the `FILTER_TEXT_CASES` stored-value row (objectstack#14079), so a '
+        + 'driver-level test is not evidence about this migration in either direction.',
+    },
+    // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+    // span already, and a nested backtick would close it.
+    {
+      id: 'flow-edge-condition-evaluated-slot-source-required',
+      surface:
+        'a flow edge predicate — edges[].condition on FlowEdgeSchema, the branch predicate '
+        + 'AutomationEngine.evaluateCondition runs at every traversal — authored either as an '
+        + 'expression envelope carrying only ast ({ dialect: \'cel\', ast: … } with no source), or '
+        + 'with a source that is blank after trimming, through the envelope key ({ dialect: \'cel\', '
+        + 'source: \'   \' }) or the bare-string shorthand for it (condition: \'   \'). Reachable '
+        + 'wherever a flow is authored or stored: defineStack({ flows }) sources, an exported stack '
+        + 'passed to objectstack validate, a POST /flows body, and a flow row already sitting in '
+        + 'sys_metadata',
+      replacement:
+        'a non-blank `source` — `{ dialect: \'cel\', source: \'record.amount > 10\' }`, or the bare '
+        + 'string `\'record.amount > 10\'` — if the edge was meant to branch; or REMOVE the '
+        + '`condition` key entirely if it was meant to be unconditional. ⚠️ Those two are not '
+        + 'interchangeable, and the choice is the judgment this entry delegates: a refused condition '
+        + 'evaluated to a silent `false`, so the edge NEVER fired, while an absent `condition` is an '
+        + 'unconditional edge that ALWAYS fires. Deleting the key to clear the refusal inverts the '
+        + 'edge rather than preserving it. An `ast` BESIDE a string `source` is untouched and stays '
+        + 'admitted everywhere',
+      reason:
+        'Card #15807 (the #15430 / #15662 lineage): `FlowEdgeSchema.condition` now composes '
+        + '`EvaluatedExpressionInputSchema` instead of `ExpressionInputSchema`, so an evaluated slot '
+        + 'is held to what the engine can actually run. The engine reads `source` alone '
+        + '(`cel-engine.ts` `evaluate`: "AST-only evaluation not yet supported; persist `source`"), '
+        + 'so both refused spellings landed in its empty-source arm and answered a SILENT `false` on '
+        + 'every release that carried them — they parsed, registered, passed `objectstack validate`, '
+        + 'and then produced a branch that quietly never fired (measured on #15430, comment '
+        + '5550509137). The refusal is one rule with one sentence, '
+        + '`EVALUATED_EXPRESSION_SOURCE_REQUIRED`. '
+        + '⚠️ No D2 conversion is possible, and this is exactly why the change needs a D3 entry '
+        + 'rather than none. An `ast`-only envelope carries no `source` to derive one from — '
+        + 'lowering an AST to surface syntax is the compiler direction the platform does not run — '
+        + 'and dropping a blank `condition` would flip the edge from never-fires to ALWAYS-fires, '
+        + 'which is the platform guessing which of two different flows the author meant. '
+        + '⚠️ And the consequence for a flow ALREADY STORED is wider than the edge, which is the '
+        + 'part no author-time prescription reaches. `applyConversionsToStoredItem` is deliberately '
+        + 'not applied to `flow` (`spec/src/conversions/stored.ts`, and the same skip in '
+        + '`metadata/src/loaders/database-loader.ts` `rowToData`) because flow-node conversions need '
+        + 'the automation engine\'s live executor registry; flows canonicalize at `registerFlow` '
+        + 'instead, which parses through `canonicalizeStoredFlow` → `FlowSchema.parse`. Each of the '
+        + 'three boot paths in `service-automation/src/plugin.ts` wraps that call in try/catch, logs '
+        + 'one `warn` naming the flow, and CONTINUES — so a stored `sys_metadata` flow with such an '
+        + 'edge is no longer registered at all: its trigger is never armed and the WHOLE flow stops '
+        + 'running, not just the branch, announced only by that warn line. A repo-wide census at '
+        + '`ae19f5edb` (examples/, packages/, content/, skills/) found zero edge conditions of either '
+        + 'spelling against a lit control, so there is nothing in THIS repository to rewrite — a '
+        + 'repo reading, which is why the notification is registered here rather than skipped. '
+        + 'ADR-0087, ADR-0032.',
+      acceptanceCriteria:
+        'Grep every authored `edges[].condition` — `defineStack({ flows })` sources, exported stacks, '
+        + '`POST /flows` bodies — and every flow row in `sys_metadata`, for an envelope with no '
+        + '`source` key and for a `source` (or bare string) that is empty after trimming. For each '
+        + 'hit decide, per the `replacement` note, whether the edge was meant to branch (author the '
+        + '`source`) or to be unconditional (remove the key) — do not default to removal. Two proofs, '
+        + 'and the second is the one that matters for stored rows. (1) For a stack authored in config '
+        + 'files, `objectstack validate` is clean: it locates each offender at '
+        + '`flows.N.edges.N.condition` with the `EVALUATED_EXPRESSION_SOURCE_REQUIRED` sentence, and '
+        + 'an `ast`-only envelope is also reported by the lint path as '
+        + '`STRUCTURAL_CONDITION_SHAPE_REFUSAL`. There is no CLI verb that lowers a stored row back '
+        + 'into a config file, so this proof does not reach a flow that exists only in '
+        + '`sys_metadata`. (2) Boot the stack and '
+        + 'confirm each flow REGISTERS: no `failed to register flow` warn for it (the three boot '
+        + 'paths spell it `[Automation] failed to register flow`, `[Automation] flow re-sync: failed '
+        + 'to register flow` and `[Automation] cold-boot flow bind: failed to register flow`), and '
+        + 'its trigger is armed. That warn line IS the locator for a stored row: its `issues[].path` '
+        + 'names the offending edge as `edges[N].condition`. A flow that boots without that warn is '
+        + 'unaffected; every edge '
+        + 'condition carrying a non-blank `source` parses byte-identically to before.',
+    },
+    {
       id: 'hot-reload-inert-state-strategies-retired',
       surface:
         "`HotReloadConfig.stateStrategy` values 'disk' and 'distributed', plus the "
@@ -8484,6 +8734,76 @@ const step18: MigrationStep = {
         + 'before and after.',
     },
     {
+      id: 'object-block-sort-item-array',
+      surface:
+        'The `sort` prop of `object-grid` and `object-calendar` in `ComponentPropsMap` '
+        + '(the FORM: the accept-anything `z.unknown()` at both block doors, vs the '
+        + '`SortItem` array `[{ field, order }, ...]`)',
+      replacement:
+        '`z.array(SortItemSchema)` at both doors — the array `ElementDataSourceSchema.sort`, '
+        + '`ListPageSchema.sort` and `element:record_picker`\'s flat `sort` shorthand already '
+        + 'carry. The legacy OData-ish clause `sort: \'created_at desc\'` becomes '
+        + '`sort: [{ field: \'created_at\', order: \'desc\' }]`; a bare field name '
+        + '`sort: \'created_at\'` meant ascending and becomes '
+        + '`sort: [{ field: \'created_at\', order: \'asc\' }]` — `order` is required in '
+        + '`SortItemSchema`, so it is written out rather than omitted. A comma-separated '
+        + 'clause becomes one array entry per key, in the same order. `record:related_list` '
+        + 'is NOT moved by this entry: its string is the `\'field\'` / `\'-field\'` dialect '
+        + 'read by `RelatedList.normalizeSortSpec`, which never reaches '
+        + '`convertSortToQueryParams`, and retiring it was not ruled. '
+        + '`object-grid.defaultSort` is a different key, retired separately by the '
+        + '`ui__ObjectGridProps__defaultSort` entry.',
+      reason:
+        'One `sort` spelling platform-wide, the array (objectui#8221, decision batch #77, '
+        + '2026-09-07, maintainer verbatim 「其他同意」, option B; the consumer half is '
+        + 'objectui PR #8758, which drops the string arm from `convertSortToQueryParams`). '
+        + 'Item 4 of that ruling is this entry\'s subject: 「`ComponentPropsMap` for '
+        + '`object-calendar` and `object-grid` constrains the `sort` value to the array shape '
+        + '(today it accepts anything), so the spec, the registrations and the helper agree; '
+        + 'that is a pull-back to the declared contract, ordinary tier」. The `z.unknown()` at '
+        + 'both doors was a read-point record (#7751), the same vintage as the `filter` doors '
+        + 'the `element-data-source-and-object-block-filter-rule-array` entry moved, and not an '
+        + 'exception to the ruling: measured on `@objectstack/spec` 17.2.0 an array, a string '
+        + 'and a bare NUMBER all returned `success: true` while `bogusProp` was refused by name '
+        + 'on the same call, so key checking was live and only the VALUE was unheld. Meanwhile '
+        + 'objectui\'s own html tier has published `type: \'array\'` for the grid all along '
+        + '(`plugin-grid/src/index.tsx:222`) and answered `type-mismatch` on the string — a '
+        + 'spelling `@object-ui/core` implemented, the docs taught and the validator refused, '
+        + 'which is what made this a ruling rather than a mechanical widening. '
+        + 'Sequenced measurement-first: at the objectui pin this repo builds against '
+        + '(`53ded82b`) the string is still lowered — `ObjectGrid.tsx:1844-1851` carries an '
+        + 'explicit `typeof === \'string\'` arm onto `$orderby`, and `ObjectCalendar.tsx:431` '
+        + 'hands `schema.sort` to `convertSortToQueryParams`, whose string arm is still present '
+        + 'at `sort-query.ts:66-70`. So this declaration lands AHEAD of the pinned consumer, '
+        + 'which the ruling permits explicitly (either order; the registrations already declare '
+        + 'the array). The in-repo sweep found ZERO authored `sort` on either block — the two '
+        + 'showcase pages that author `object-grid` (`command-center.page.ts`, '
+        + '`my-work.page.ts`) declare none — with the same grep shape finding 40+ string `sort` '
+        + 'values at OTHER doors (view definitions, ObjectQL `query.sort`) as the control that '
+        + 'the sweep fires; so this entry carries the prescription for authors outside the repo. '
+        + '⚠️ Metadata AT REST is deliberately NOT rewritten and this disposition adds no D2 '
+        + 'conversion: `os migrate meta --stored` replays D2 conversions only, and the read path '
+        + 'does not re-validate stored rows (`applyConversionsToStoredItem` replays the chain '
+        + 'without validating, by its own contract), so a stored page carrying a string `sort` '
+        + 'keeps loading and is still rendered by objectui at the pinned `.objectui-sha`. What '
+        + 'changes is that RE-SAVING it is refused at the `sort` door, on its next save and not '
+        + 'before. ADR-0049, ADR-0087.',
+      acceptanceCriteria:
+        '`ComponentPropsMap[\'object-grid\' | \'object-calendar\'].safeParse({ objectName, '
+        + 'sort: [{ field: \'created_at\', order: \'desc\' }] })` succeeds and the parsed `sort` '
+        + 'is that same array, equal value-for-value to '
+        + '`ElementDataSourceSchema.parse({ object, sort: <that array> }).sort`. The legacy '
+        + 'string clause is refused at the `sort` path on both doors (`invalid_type`, expected '
+        + 'array), and so is a bare number; a misspelled or ABSENT direction is refused at '
+        + '`sort.0.order` (`invalid_value` — `order` is a required enum, so both take one '
+        + 'verdict) and a missing field at `sort.0.field` (`invalid_type`). An undeclared key '
+        + 'is still refused BY NAME on the same call (`unrecognized_keys` naming it), the '
+        + 'control that makes those refusals verdicts rather than a schema reporting nothing. '
+        + 'No `sort` door in `ComponentPropsMap` accepts a string except `record:related_list`, '
+        + 'which is the one deliberate exception. At runtime each block orders exactly as the '
+        + 'array orders — the same `$orderby` the string lowered to.',
+    },
+    {
       id: 'object-grid-data-view-data-converged',
       surface:
         "`object-grid` component props — `data` (the KIND: bare array `z.array(z.unknown())` "
@@ -9152,6 +9472,68 @@ const step18: MigrationStep = {
         + 'their defaults and their mounts. The mounted REST surface is byte-identical before and after — none '
         + 'of the ten keys ever reached it. No code imports `CrudEndpointPattern(Schema)` from '
         + '`@objectstack/spec/api` (TS2305 after upgrade).',
+    },
+    {
+      id: 'schedule-flow-acting-organization-required',
+      surface:
+        'The START NODE `config.organization` key of every time-triggered flow — a `type: '
+        + "'schedule'` flow carrying a `config.schedule` cadence, and the `timeRelative` sweep "
+        + 'that carries its cadence in the same slot (`FlowTriggerKind` `schedule` / '
+        + '`time_relative`). Nothing is renamed, retired or re-typed: the start node\'s `config` '
+        + 'is an OPEN record (ADR-0018), so the key is an ADDITION to a slot that already '
+        + 'accepted it, and every flow that parses today parses byte-identically after the '
+        + 'change. What narrows is the BIND-time accept set and the RUN-time data plane.',
+      replacement:
+        'Declare the organization the flow runs as, on the start node beside the cadence: '
+        + "`config: { schedule: { … }, organization: '<sys_organization.id>' }`. There is "
+        + 'deliberately NO fan-out — a sweep wanted in N organizations is N flows, one per '
+        + 'organization — and deliberately no fallback: nothing on this path ever chooses an '
+        + 'organization, because a wrong `organization_id` is silently authoritative to every '
+        + 'report, export and cleanup that filters by organization, while a refusal is visible '
+        + 'at boot and names its flow. ⚠️ Three consequences of the split that the declaration '
+        + 'itself does not carry, and each is deployment work: (1) rows whose tenant column is '
+        + 'NULL stay visible to a scoped read (`org = :tenant OR org IS NULL`), so after the '
+        + 'split each such row is matched ONCE PER FLOW — N runs and N notifications for one '
+        + 'row, each acting as a different organization; (2) the dispatch-claim key embeds the '
+        + 'flow name (`schedule:<flowName>:<window>`, '
+        + '`time-relative:<flowName>:<scope>:<recordId>`), so renaming one flow into N abandons '
+        + "the current window's claims and a window already delivered under the old name can "
+        + 'deliver once more under the new ones; (3) a run SUSPENDED before the upgrade '
+        + 'rehydrates its context from `context_json`, which carries no `tenantId`, so it '
+        + 'resumes org-less — drain or accept in-flight suspended runs rather than assuming the '
+        + 'upgrade confines them retroactively.',
+      reason:
+        'Maintainer ruling, 2026-09-08, verbatim, untranslated: '
+        + '「多组织定时任务本来只能在组织内运行，应该带组织ID，不允许跨组织的定时任务。」 A time-triggered '
+        + 'run is launched from a job tick and a job tick carries no identity, so the run reached '
+        + 'the tenancy guard with nothing to offer it: the notification wrote '
+        + '`organization_id = NULL`, every tenant-scoped row beneath it was refused, and the tick '
+        + 'still summarised itself as healthy. ⛔ NOT losslessly convertible, and the reason is '
+        + 'that the remedy is a value only the deployment holds: an organization id is minted per '
+        + 'install at runtime, so there is no authored artifact and no stored representation a '
+        + 'transform could rewrite — `objectstack migrate meta` cannot know which organization a '
+        + 'given sweep belongs to, and inventing one is precisely what the ruling forbids. '
+        + 'Registered under ADR-0087 D3 rather than left silent because the change DOES carry a '
+        + 'prescription — "declare one flow per organization, no fan-out" is deployment work a '
+        + 'human must do, which is what D3 says a structured TODO is for. The direct precedent is '
+        + '`rest-requireauth-default-flip` (protocol 12): behaviour-only, no shape moved, a '
+        + 'deployment judgement no transform can make, registered anyway.',
+      acceptanceCriteria:
+        'Every `schedule` / `time_relative` flow in the stack declares a non-empty '
+        + '`config.organization` on its start node. `os lint` reports '
+        + '`flow-schedule-organization-missing` for none of them (severity `warning`, so it does '
+        + 'NOT gate a build — an unfixed flow is silently unarmed, which is why the lint run is '
+        + 'part of the criteria rather than the build), and boot logs no '
+        + '`[schedule] NOT BOUND` / `[time-relative] NOT BOUND` line: '
+        + '`getFlowRuntimeStates()` reports `bound: true` and `getTriggerBindingAudit()` lists '
+        + 'no time-triggered flow. A deployment that ran ONE flow across all organizations has '
+        + 'split it into one flow per organization and has re-checked the three consequences '
+        + 'above — NULL-tenant rows, abandoned dispatch claims, suspended runs. ⚠️ '
+        + '`@objectstack/driver-memory` has NO legal configuration for a time-triggered flow '
+        + 'that touches per-organization data: it refuses any call handed a tenant scope '
+        + '(`MEMORY_MULTI_TENANT_UNSUPPORTED`), so a declared flow is refused per call while an '
+        + 'undeclared one is not armed at all. Multi-organization deployments use '
+        + '`@objectstack/driver-sql`.',
     },
     {
       id: 'scim-provider-object-retired',
@@ -9983,6 +10365,55 @@ const step18: MigrationStep = {
         + '(`record.features.x`). Stored form views are unaffected until their next '
         + 'authoring-path save (zero such documents were measured to exist); on refusal the '
         + 'author re-gates by record state or moves the gate to an app surface.',
+    },
+    {
+      id: 'ui-list-view-grouping-field-padded-refused',
+      surface: 'list-view grouping level names — `grouping.fields[].field` '
+        + '(`GroupingFieldSchema`, the rows inside `ListView.grouping.fields[]`) — '
+        + 'values carrying leading or trailing whitespace',
+      replacement: 'the field name written with no leading and no trailing whitespace — the '
+        + 'same spelling the object declares and the server answers under. A padded value is '
+        + 'RE-AUTHORED, never trimmed on the author\'s behalf: `\'  business_unit  \'` becomes '
+        + '`\'business_unit\'`. The refusal names the offending spelling verbatim, so the '
+        + 'whitespace an author cannot see in an editor is visible in the message.',
+      reason:
+        '#17360, ruling C on objectui#7347 (maintainer 「其他同意」, decision batch #110 item 5): '
+        + 'refuse at the producer. `field` was a bare `z.string()`, so a padded grouping level '
+        + 'was valid authored metadata all the way to the renderers. Measured on objectui '
+        + '(M1-M11 with live controls): the projection harvester `collectGroupingFieldRefs` '
+        + 'TRIMS the name when it builds `$select`, while THREE renderers bucket rows by the '
+        + 'RAW name — plugin-grid `usableGroupingFields`, plugin-list '
+        + '`ObjectGallery.groupedItems`, plugin-kanban `effectiveSwimlaneField`. The server '
+        + 'therefore answers under `business_unit` while every per-row lookup asks for '
+        + '`\'  business_unit  \'`, reads `undefined`, and the view collapses into ONE `(empty)` '
+        + 'group (grid, gallery) or ONE `Uncategorized` lane (kanban) holding every record — a '
+        + 'silent wrong answer that reads as a true statement about the data, which is why '
+        + 'nothing weaker than a parse refusal is honest here. ⛔ NOT a `.trim()`: a trimming '
+        + 'schema makes `\'  a  \'` and `\'a\'` silently equivalent, the consumer-tolerance '
+        + 'direction AGENTS.md #0.1 refuses. objectui\'s harvester trim stays as '
+        + 'defence-in-depth; nothing is removed there. The narrowing is non-padded ONLY and '
+        + 'deliberately not the snake_case machine-name grammar `/^[a-z_][a-z0-9_]*$/` this '
+        + 'package spells inline for object/field/tool NAMES: a grouping level is authored as '
+        + 'a field REFERENCE and a dotted relationship path (`owner.name`) is an in-tree '
+        + 'spelling of one. The blank name is unchanged here — it is already refused loudly '
+        + 'one layer down by `compileListViewGroupQuery`\'s `grouping_field_blank`, and this '
+        + 'narrowing exists for the SILENT case. Ships at once, no deprecation window '
+        + '(2026-08-27 maintainer ruling 「短期不考虑渐进」).',
+      acceptanceCriteria:
+        'Every stored list view whose `grouping.fields[].field` carries leading or trailing '
+        + 'whitespace is refused on its next authoring-path save, with a per-element issue at '
+        + '`grouping.fields[N].field` naming the offending spelling and the trimmed name to '
+        + 'write instead. Names with no padding parse byte-identically to before — nothing is '
+        + 'normalised on the way through, and a dotted relationship path stays valid. Views '
+        + 'with no `grouping` block are untouched. Every `grouping.fields[].field` spelling '
+        + 'in this repo at the time of the change parses unchanged: 50 literal occurrences '
+        + 'under a `grouping:` key across 19 files, harvested with the TypeScript parser and '
+        + 'cross-checked against 906 shape-exact `{ field, order?, collapsed? }` literals in '
+        + '`packages/**`. The single harvested spelling this refuses — `\' \'` at '
+        + '`view-grouping-query.test.ts` — is a NEGATIVE fixture handed straight to '
+        + '`compileListViewGroupQuery` with no parse on its path, pinning that same '
+        + '`grouping_field_blank` refusal; the producer now refuses it one layer earlier for '
+        + 'the same reason.',
     },
     {
       id: 'ui-mcp-connect-agent-unknown-keys-refused',
@@ -13315,6 +13746,316 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // (`packages/runtime/src/route-ledger.ts`). See
     // `18.api__RestApiEndpoint__handlerStatus.ts` for the retirement record.
     'api/RouteCoverageReport',
+    // #16325 — `cloud/developer-portal.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/AnalyticsTimeRange',
+    // #16325 — `cloud/app-store.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/AppDiscoveryRequest',
+    // #16325 — `cloud/app-store.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/AppDiscoveryResponse',
+    // #16325 — `cloud/app-store.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/AppSubscription',
+    // #16325 — `cloud/developer-portal.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/CreateListingRequest',
+    // #16325 — `cloud/marketplace-admin.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/CuratedCollection',
+    // #16325 — `cloud/environment.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/Environment',
+    // #16325 — `cloud/environment.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/EnvironmentCredential',
+    // #16325 — `cloud/environment.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/EnvironmentCredentialStatus',
+    // #16325 — `cloud/environment.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/EnvironmentDriver',
+    // #16325 — `cloud/environment.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/EnvironmentMember',
+    // #16325 — `cloud/environment-package.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/EnvironmentPackageInstallation',
+    // #16325 — `cloud/environment-package.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/EnvironmentPackageStatus',
+    // #16325 — `cloud/environment.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/EnvironmentRole',
+    // #16325 — `cloud/environment.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/EnvironmentStatus',
+    // #16325 — `cloud/environment.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/EnvironmentVisibility',
+    // #16325 — `cloud/marketplace-admin.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/FeaturedListing',
+    // #16325 — `cloud/environment-package.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/InstallPackageToEnvironmentRequest',
+    // #16325 — `cloud/app-store.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/InstalledAppSummary',
+    // #16325 — `cloud/environment-package.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/ListEnvironmentPackagesResponse',
+    // #16325 — `cloud/app-store.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/ListInstalledAppsRequest',
+    // #16325 — `cloud/app-store.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/ListInstalledAppsResponse',
+    // #16325 — `cloud/app-store.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/ListReviewsRequest',
+    // #16325 — `cloud/app-store.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/ListReviewsResponse',
+    // #16325 — `cloud/developer-portal.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/ListingActionRequest',
+    // #16325 — `cloud/marketplace-admin.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/MarketplaceHealthMetrics',
+    // #16325 — `cloud/tenant.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/PackageInstallation',
+    // #16325 — `cloud/tenant.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/PackageInstallationStatus',
+    // #16325 — `cloud/marketplace-admin.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/PolicyAction',
+    // #16325 — `cloud/marketplace-admin.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/PolicyViolationType',
+    // #16325 — `cloud/environment.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/ProvisionEnvironmentRequest',
+    // #16325 — `cloud/environment.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/ProvisionEnvironmentResponse',
+    // #16325 — `cloud/environment.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/ProvisionOrganizationRequest',
+    // #16325 — `cloud/environment.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/ProvisionOrganizationResponse',
+    // #16325 — `cloud/tenant.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/ProvisionTenantRequest',
+    // #16325 — `cloud/tenant.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/ProvisionTenantResponse',
+    // #16325 — `cloud/developer-portal.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/PublisherProfile',
+    // #16325 — `cloud/developer-portal.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/PublishingAnalyticsRequest',
+    // #16325 — `cloud/developer-portal.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/PublishingAnalyticsResponse',
+    // #16325 — `cloud/app-store.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/RecommendationReason',
+    // #16325 — `cloud/app-store.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/RecommendedApp',
+    // #16325 — `cloud/marketplace-admin.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/RejectionReason',
+    // #16325 — `cloud/developer-portal.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/ReleaseChannel',
+    // #16325 — `cloud/marketplace-admin.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/ReviewCriterion',
+    // #16325 — `cloud/marketplace-admin.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/ReviewDecision',
+    // #16325 — `cloud/app-store.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/ReviewModerationStatus',
+    // #16325 — `cloud/environment-package.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/RollbackEnvironmentPackageRequest',
+    // #16325 — `cloud/marketplace-admin.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/SubmissionReview',
+    // #16325 — `cloud/app-store.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/SubmitReviewRequest',
+    // #16325 — `cloud/app-store.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/SubscriptionStatus',
+    // #16325 — `cloud/tenant.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/TenantContext',
+    // #16325 — `cloud/tenant.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/TenantDatabase',
+    // #16325 — `cloud/tenant.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/TenantDatabaseStatus',
+    // #16325 — `cloud/tenant.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/TenantIdentificationSource',
+    // #16325 — `cloud/tenant.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/TenantPlan',
+    // #16325 — `cloud/tenant.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/TenantRoutingConfig',
+    // #16325 — `cloud/developer-portal.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/TimeSeriesPoint',
+    // #16325 — `cloud/marketplace-admin.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/TrendingListing',
+    // #16325 — `cloud/developer-portal.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/UpdateListingRequest',
+    // #16325 — `cloud/environment-package.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/UpgradeEnvironmentPackageRequest',
+    // #16325 — `cloud/app-store.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/UserReview',
+    // #16325 — `cloud/developer-portal.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
+    // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
+    // the cloud repo's own declarations, not an open-source protocol). Prescription: the
+    // `cloud-subpath-retired` semantic entry of this major.
+    'cloud/VersionRelease',
     // #8715 — identity/identity.zod.ts `ApiKeySchema`, retired whole (ADR-0049
     // enforce-or-remove; maintainer ruling 2026-08-15, disposition B: delete).
     // The schema documented better-auth's `apiKey` PLUGIN shape — a plugin this

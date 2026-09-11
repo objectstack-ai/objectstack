@@ -31,6 +31,7 @@ import {
   NO_DEFAULT,
   authorableDefaultsShardTexts,
   authoriseDefaultChanges,
+  carryDefaultsThroughRenames,
   collectAuthorableDefaults,
   defaultFingerprintOf,
   diffAuthorableDefaults,
@@ -210,6 +211,61 @@ describe('diffAuthorableDefaults — the discrimination the gate rests on', () =
         currentKeys: new Map([['system/Job:tombstoned', true]]),
       }),
     ).toEqual([]);
+  });
+});
+
+describe('carryDefaultsThroughRenames — a declared def rename moves no default (#16325)', () => {
+  // The exact shape measured on the cloud → marketplace category move: the
+  // OLD def's default under the OLD key at the baseline, the SAME value under
+  // the NEW key in this build, and a key-set the gate already carries.
+  const RENAMES = { 'cloud/Package': 'marketplace/Package' } as const;
+  const OLD = 'cloud/Package:visibility';
+  const NEW = 'marketplace/Package:visibility';
+
+  it('carries the baseline default onto the renamed def, so the diff reports nothing', () => {
+    const baseline = carryDefaultsThroughRenames(new Map([[OLD, '"private"']]), RENAMES);
+    expect([...baseline]).toEqual([[NEW, '"private"']]);
+    expect(
+      diffAuthorableDefaults({
+        baseline,
+        current: new Map([[NEW, '"private"']]),
+        baselineKeys: live(NEW), // the key-set half is carried by the gate already
+        currentKeys: live(NEW),
+      }),
+    ).toEqual([]);
+  });
+
+  it('is the discriminating half: WITHOUT the carry the same rename reads as an `added` flip', () => {
+    // Negative control — what the gate reported before this helper existed
+    // (22 such findings on #16325): a key the carried key-set says already
+    // existed, with no baseline default under its new name.
+    expect(
+      diffAuthorableDefaults({
+        baseline: new Map([[OLD, '"private"']]),
+        current: new Map([[NEW, '"private"']]),
+        baselineKeys: live(NEW),
+        currentKeys: live(NEW),
+      }),
+    ).toEqual([{ key: NEW, kind: 'added', from: NO_DEFAULT, to: '"private"' }]);
+  });
+
+  it('still catches a default that REALLY moved across the rename', () => {
+    const baseline = carryDefaultsThroughRenames(new Map([[OLD, '"private"']]), RENAMES);
+    expect(
+      diffAuthorableDefaults({
+        baseline,
+        current: new Map([[NEW, '"org"']]),
+        baselineKeys: live(NEW),
+        currentKeys: live(NEW),
+      }),
+    ).toEqual([{ key: NEW, kind: 'changed', from: '"private"', to: '"org"' }]);
+  });
+
+  it('leaves a key whose def is not declared renamed untouched, fingerprint included', () => {
+    const carried = carryDefaultsThroughRenames(new Map([[RETRY, '3'], [OLD, '"private"']]), RENAMES);
+    expect(carried.get(RETRY)).toBe('3');
+    expect(carried.has(OLD)).toBe(false);
+    expect(carried.get(NEW)).toBe('"private"');
   });
 });
 

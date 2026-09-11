@@ -12,9 +12,9 @@
  *     cloud ADR-0081 D1 closes.
  *
  * This helper HOME is plugin-auth (the open member-management basics). The
- * enterprise organizations package reuses it for the multi-org bootstrap and
- * injects its seed-ownership step via `claimSeedOwnership` (that machinery is
- * part of the per-org seed pipeline, not of the basics).
+ * `@objectstack/organizations` package reuses it for the multi-org bootstrap
+ * and injects its seed-ownership step via `claimSeedOwnership` (that machinery
+ * is part of the per-org seed pipeline, not of the basics).
  *
  * ## Who "the platform admin" is (#11973 / #11663 L3, design §2 step 5)
  *
@@ -126,8 +126,8 @@ export interface EnsureDefaultOrganizationOptions {
   logger?: BootstrapLogger;
   /**
    * Optional seed-ownership handoff, run after the owner bind (best-effort).
-   * The enterprise organizations package injects `claimOrgSeedOwnership`
-   * here; the open single-org path has no per-org seed pipeline and omits it.
+   * The `@objectstack/organizations` package injects `claimOrgSeedOwnership`
+   * here; the single-org path has no per-org seed pipeline and omits it.
    */
   claimSeedOwnership?: (
     ql: any,
@@ -172,7 +172,7 @@ function oldestFirst(a: any, b: any): number {
  * [#11973 / #11663 L3, design H4] Which writes can change this helper's
  * answer — the trigger predicate for the default-org bootstrap re-run
  * middleware. Exported so every wiring (plugin-auth's single-posture
- * middleware, and the enterprise organizations package's walled bootstrap
+ * middleware, and the organizations package's walled bootstrap
  * wiring) consumes the SAME predicate instead of re-deriving it — the
  * `shouldReplayBootstrapFor` pattern next door in `plugin-security`.
  *

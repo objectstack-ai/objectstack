@@ -435,8 +435,9 @@ describe('ScheduledExportSchema', () => {
       format: 'csv',
       fields: ['name', 'email', 'status'],
       filter: { status: 'active' },
+      // `schedule.cronExpression` was deleted outright (#16320) — the strip is
+      // pinned in `cron-typed-positions-retirement.test.ts`.
       schedule: {
-        cronExpression: '0 6 * * MON',
         timezone: 'America/New_York',
       },
       delivery: {
@@ -445,7 +446,7 @@ describe('ScheduledExportSchema', () => {
       },
     });
     expect(sched.name).toBe('weekly_account_export');
-    expect(sched.schedule.cronExpression).toEqual({ dialect: 'cron', source: '0 6 * * MON' });
+    expect(sched.schedule.timezone).toBe('America/New_York');
     expect(sched.delivery.method).toBe('email');
     expect(sched.enabled).toBe(true);
   });
@@ -454,7 +455,7 @@ describe('ScheduledExportSchema', () => {
     const sched = ScheduledExportSchema.parse({
       name: 'daily_export',
       object: 'order',
-      schedule: { cronExpression: '0 0 * * *' },
+      schedule: {},
       delivery: { method: 'storage', storagePath: '/exports/daily/' },
     });
     expect(sched.format).toBe('csv');
@@ -466,7 +467,7 @@ describe('ScheduledExportSchema', () => {
     expect(() => ScheduledExportSchema.parse({
       name: 'WeeklyExport',
       object: 'account',
-      schedule: { cronExpression: '0 6 * * MON' },
+      schedule: {},
       delivery: { method: 'email' },
     })).toThrow();
   });
@@ -477,7 +478,7 @@ describe('ScheduledExportSchema', () => {
       expect(() => ScheduledExportSchema.parse({
         name: 'test_export',
         object: 'account',
-        schedule: { cronExpression: '0 0 * * *' },
+        schedule: {},
         delivery: { method: m },
       })).not.toThrow();
     });
@@ -631,8 +632,9 @@ describe('ScheduleExportRequestSchema', () => {
       object: 'account',
       format: 'csv',
       fields: ['name', 'email'],
+      // `schedule.cronExpression` was deleted outright (#16320) — the strip is
+      // pinned in `cron-typed-positions-retirement.test.ts`.
       schedule: {
-        cronExpression: '0 6 * * MON',
         timezone: 'America/New_York',
       },
       delivery: {
@@ -641,7 +643,7 @@ describe('ScheduleExportRequestSchema', () => {
       },
     });
     expect(req.name).toBe('weekly_account_export');
-    expect(req.schedule.cronExpression).toEqual({ dialect: 'cron', source: '0 6 * * MON' });
+    expect(req.schedule.timezone).toBe('America/New_York');
     expect(req.delivery.method).toBe('email');
   });
 
@@ -649,7 +651,7 @@ describe('ScheduleExportRequestSchema', () => {
     const req = ScheduleExportRequestSchema.parse({
       name: 'daily_export',
       object: 'order',
-      schedule: { cronExpression: '0 0 * * *' },
+      schedule: {},
       delivery: { method: 'storage', storagePath: '/exports/daily/' },
     });
     expect(req.format).toBe('csv');
@@ -660,7 +662,7 @@ describe('ScheduleExportRequestSchema', () => {
     expect(() => ScheduleExportRequestSchema.parse({
       name: 'WeeklyExport',
       object: 'account',
-      schedule: { cronExpression: '0 6 * * MON' },
+      schedule: {},
       delivery: { method: 'email' },
     })).toThrow();
   });

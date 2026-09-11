@@ -343,13 +343,15 @@ describe('validateReadonlyHookWrites - GREEN: what a create is NOT judged on', (
   // be false in exactly the way the sudo() hint used to be (#14010). Since
   // #16249 the shape does not arrive at all: the ledger no longer advertises it
   // and the build refuses `.create(` at lowering.
-  // The engine's create-side strip does not judge a PLATFORM object at all
-  // (`staticReadonlyInsertSubject`: `managedBy` set, or a `sys_` name — its
-  // own 403 write guard governs it); the UPDATE path applies no such
-  // exclusion. Pinned in both directions per object shape.
+  // The engine's create-side strip does not judge a PLATFORM-INTERNAL object at
+  // all (`staticReadonlyInsertSubject`: a `sys_` name, or one of the three
+  // `managedBy` buckets whose own 403 write guard governs it); the UPDATE path
+  // applies no such exclusion. Pinned in both directions per object shape.
   it.each([
     ['a sys_ object', { name: 'sys_activity', fields: { verdict: { type: 'text', readonly: true } } }],
-    ['a managedBy object', { name: 'activity', managedBy: 'append-only', fields: { verdict: { type: 'text', readonly: true } } }],
+    ['an append-only object', { name: 'activity', managedBy: 'append-only', fields: { verdict: { type: 'text', readonly: true } } }],
+    ['an engine-owned object', { name: 'run_row', managedBy: 'engine-owned', fields: { verdict: { type: 'text', readonly: true } } }],
+    ['a better-auth object', { name: 'identity_row', managedBy: 'better-auth', fields: { verdict: { type: 'text', readonly: true } } }],
   ])('never flags insert() into %s — outside the create-side strip; the same update() is still flagged', (_label, platformObject) => {
     const hook = (source: string) => ({
       objects: [platformObject],
@@ -360,6 +362,24 @@ describe('validateReadonlyHookWrites - GREEN: what a create is NOT judged on', (
     expect(control).toHaveLength(1);
     expect(control[0].rule).toBe(HOOK_API_UPDATE_READONLY_FIELD);
   });
+
+  // [#15719] The other half: a USER-WRITABLE bucket on an app-authored name is
+  // judged on create now, so the insert() write is a real finding.
+  it.each([['platform'], ['config'], ['system-data']])(
+    'DOES flag insert() into a `managedBy: %s` object — the strip reaches it',
+    (bucket) => {
+      const userWritable = { name: 'deal_row', managedBy: bucket, fields: { verdict: { type: 'text', readonly: true } } };
+      const findings = validateReadonlyHookWrites({
+        objects: [userWritable],
+        hooks: [{
+          name: 'log', object: 'crm_case', events: ['afterInsert'],
+          body: { language: 'js', source: "await ctx.api.object('deal_row').insert({ verdict: 'ok' });" },
+        }],
+      });
+      expect(findings).toHaveLength(1);
+      expect(findings[0].rule).toBe(HOOK_API_UPDATE_READONLY_FIELD);
+    },
+  );
 
   it('never flags create() — the shape cannot reach this rule at all since #16249', () => {
     expect(
@@ -674,5 +694,50 @@ describe('READONLY_HOOK_WRITE_PATTERN_IDS - ledger partition', () => {
       });
       expect(findings, `excluded pattern '${pattern.id}' produced a finding`).toEqual([]);
     }
+  });
+});
+
+// [#16546] `hooks[i].body.source` names a key the author never wrote when the
+// body was minted by `lowerCallables` from an inline `handler` function — this
+// rule redirects `path` (plus a message suffix) to `hooks[i].handler`, the key
+// that replaced it, when `ctx.loweredHookRefs` names this hook's ref.
+describe('validateReadonlyHookWrites - #16546: path redirect for a lowered hook', () => {
+  const loweredStack = () =>
+    crmStack("await ctx.api.object('crm_account').update({ id: accountId, last_activity_date: now });");
+
+  it('reports `hooks[i].handler` plus the suffix when this hook’s ref is in ctx.loweredHookRefs', () => {
+    const stack = loweredStack();
+    // The lowered shape: `handler` is the ref string `lowerCallables` minted,
+    // beside the `body` it extracted from the function it replaced.
+    (stack.hooks[0] as Record<string, unknown>).handler = 'touch_account';
+    const findings = validateReadonlyHookWrites(stack, { loweredHookRefs: new Set(['touch_account']) });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('hooks[0].handler');
+    expect(findings[0].message).toContain('(judged on the metadata body lowered from the inline handler)');
+    // [3] Only the location and the wording move — the verdict does not.
+    expect(findings[0].rule).toBe(HOOK_API_UPDATE_READONLY_FIELD);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].where).toBe('hook "touch_account" > body');
+  });
+
+  it('CONTROL — the identical hook keeps `hooks[i].body.source` when ctx is absent (author-written body)', () => {
+    // [4] Non-regression control: same stack, no `ctx` at all — the standing
+    // shape every OTHER test in this file exercises. Path must not move.
+    const findings = validateReadonlyHookWrites(loweredStack());
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('hooks[0].body.source');
+    expect(findings[0].message).not.toContain('lowered from the inline handler');
+  });
+
+  it('CONTROL — a `handler` ref NOT named in ctx.loweredHookRefs keeps `hooks[i].body.source`', () => {
+    // A hook can carry a string `handler` (a bundle reference, #16095) without
+    // its `body` having been minted from a function THIS run lowered — e.g. a
+    // second `runAuthoringRules` call over an already-lowered stack. Only
+    // membership in the set redirects the path, never `handler`'s mere presence.
+    const stack = loweredStack();
+    (stack.hooks[0] as Record<string, unknown>).handler = 'touch_account';
+    const findings = validateReadonlyHookWrites(stack, { loweredHookRefs: new Set(['some_other_hook']) });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('hooks[0].body.source');
   });
 });

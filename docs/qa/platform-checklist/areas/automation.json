@@ -76,7 +76,7 @@
       "title": "Flow Runs render loop/region iterations as a nested execution tree",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -86,7 +86,7 @@
         "app": "showcase",
         "requires": [
           "showcase_batch_reminders (examples/app-showcase/src/automation/flows/index.ts BatchRemindersFlow) — an autolaunched loop flow with a `tasks` list input, runnable on demand via the trigger route",
-          "a `loop` whose body holds a two-branch `parallel` — the only shape that exercises both index keys on one step, needed by the loop { parallel } clause. ⚠️ NOT PRESENT in examples/app-showcase: it carries `loop` (showcase_batch_reminders) and `parallel` (showcase_fan_out_notify) as SEPARATE flows and nests neither, so that clause scores blocked(fixture) until such a flow lands (filed as #16356). The clause is written now because what it pins is settled — maintainer ruling 2026-09-03 — and a clause missing from this item is exactly what let the `iteration` overload sit unmeasured"
+          "showcase_nested_fan_out_reminders (examples/app-showcase/src/automation/flows/index.ts NestedFanOutRemindersFlow) — an autolaunched flow whose `loop` body holds a two-branch `parallel`, the only shape that exercises both index keys on one step; landed by #16356, which is why the loop { parallel } clause below no longer scores blocked(fixture). Rows are task-shaped `{id, title, owner, watcher}`: `owner` and `watcher` are the two branches' recipients and `notify` refuses an empty resolved recipient set, so a row missing either ends the sweep. Drive it over at least TWO rows — one row cannot distinguish an (iteration, branch) pair from a branch index alone"
         ]
       },
       "steps": [
@@ -96,7 +96,7 @@
         "record every step's nodeId, nodeType, status, parentNodeId, iteration, regionKind (ExecutionStepLogSchema #1505 region tags)",
         "open the flow in the Studio flow-designer (metadata-admin) and its Runs panel (FlowRunsPanel) — NOT the developer Flow Runs page — and expand the newest run",
         "screenshot the expanded step tree showing the per-iteration children under the loop node",
-        "nesting run (needs the loop { parallel } fixture above): trigger that flow over at least two rows, GET its newest run detail, and record every branch step's parentNodeId, iteration, branch and regionKind — both index keys are read off the SAME step, which is the whole point of the clause",
+        "nesting run: POST /api/v1/automation/showcase_nested_fan_out_reminders/trigger with body {\"params\": {\"tasks\": [r1, r2]}} — at least TWO task-shaped rows each carrying id/title/owner/watcher — then GET /api/v1/automation/showcase_nested_fan_out_reminders/runs/:runId and record every branch step's parentNodeId, iteration, branch and regionKind; both index keys are read off the SAME step, which is the whole point of the clause",
         "contrast run: trigger again with {\"params\": {\"tasks\": []}} and capture the loop step of that run"
       ],
       "acceptance": [
@@ -148,7 +148,8 @@
         "#3358 §2 — 'the developer Flow Runs page renders steps flat; looking there alone reads as a miss'",
         "packages/spec/src/automation/execution.zod.ts#ExecutionStepLogSchema (ExecutionStepLogSchema parentNodeId/iteration/regionKind)",
         "objectui packages/app-shell/src/views/metadata-admin/previews/FlowRunsPanel.tsx (#1505 buildStepTree)",
-        "examples/app-showcase/src/automation/flows/index.ts#BatchRemindersFlow (BatchRemindersFlow)"
+        "examples/app-showcase/src/automation/flows/index.ts#BatchRemindersFlow (BatchRemindersFlow)",
+        "examples/app-showcase/src/automation/flows/index.ts#NestedFanOutRemindersFlow (NestedFanOutRemindersFlow — the loop { parallel } fixture, #16356)"
       ],
       "history": [
         {
@@ -168,6 +169,12 @@
           "date": "2026-09-06",
           "change": "added the loop { parallel } clause. The item pinned parentNodeId/iteration/regionKind on a plain loop body and said nothing about the nested case — the one shape where two enclosing regions each have an index of their own. It was unwritable while `iteration` was overloaded, because there was no correct reading to assert: the branch index displaced the row. The maintainer ruling of 2026-09-03 made `iteration` single-valued and gave the branch index its own `branch` key, and the engine's runRegion tagger now carries an outer region's index through nesting instead of discarding it for a step an inner region already tagged. Also records, rather than hides, the fixture gap the clause exposes: showcase nests neither construct in the other",
           "ref": "#15230"
+        },
+        {
+          "revision": 4,
+          "date": "2026-09-10",
+          "change": "the loop { parallel } fixture landed: examples/app-showcase gains showcase_nested_fan_out_reminders, a loop whose body holds a two-branch parallel. Revision 3 wrote the clause with no flow to trigger and recorded the gap in fixtures.requires; this revision replaces that record with the flow that closes it and spells the nesting run's trigger call and row shape, so the clause is driven rather than scored blocked(fixture)",
+          "ref": "#16356"
         }
       ]
     },
@@ -426,7 +433,7 @@
         {
           "clause": "suspending types (screen, wait, approval, approval_revise — and subflow/map when the child pauses) park the run status=paused and resume to completed",
           "oracle": "api",
-          "verify": "run detail shows status paused while parked and completed after the screen resume / timer elapse / approval decision / resubmit (ExecutionStatus vocabulary: pending|running|paused|completed|failed|cancelled|timed_out|retrying)",
+          "verify": "run detail shows status paused while parked and completed after the screen resume / timer elapse / approval decision / resubmit (see the ExecutionStatus vocabulary declared in packages/spec/src/automation/execution.zod.ts)",
           "evidence": "before/after run-detail reads per suspending type"
         },
         {

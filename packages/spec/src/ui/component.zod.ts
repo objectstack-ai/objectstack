@@ -719,10 +719,10 @@ export const PageTabsProps = strictObject({
      *     binds it to the data-source ADAPTER. Same key, two meanings.
      *   * **The row's bare fields are spread flat**, so `status` resolves as
      *     well as `record.status`. The ambient scope is spread AFTER the row,
-     *     so an ambient root (`app`, `features`, `user`, …) wins over a record
+     *     so an ambient root (`features`, `user`, …) wins over a record
      *     field of the same name.
      *
-     * Like the component-node surface it also mounts the ambient `app` /
+     * Like the component-node surface it also mounts the ambient
      * `features` / `os.user` roots, which no ADR rules for a UI predicate
      * (ADR-0068's Non-goals: "only the user object is in scope here").
      *
@@ -2485,7 +2485,45 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
     .describe('Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. THE key, singular — not the plural misspelling. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array`'),
   defaultFilters: z.unknown().optional()
     .describe('Legacy base-filter fallback, read only when `filter` is absent. Prefer `filter`'),
-  sort: z.unknown().optional().describe('Initial sort (array of { field, order })'),
+  /**
+   * Initial row order — the `SortItem` ARRAY form, `[{ field, order }, ...]`,
+   * the one sort orthography every DECLARED `sort` door on this platform
+   * carries: `ElementDataSourceSchema.sort` and `ListPageSchema.sort`
+   * (page.zod.ts) and `element:record_picker`'s flat shorthand above. One
+   * shared schema rather than a third copy — all of them are
+   * `SortItemSchema`, already imported at the top of this file for the picker.
+   *
+   * objectui#8221, decision batch #77, 2026-09-07, maintainer verbatim
+   * 「其他同意」, option B: one `sort` spelling, the array; the legacy string
+   * clause is retired from `@object-ui/core`. Item 4 of that ruling is this
+   * declaration and `object-calendar`'s below — 「`ComponentPropsMap` for
+   * `object-calendar` and `object-grid` constrains the `sort` value to the
+   * array shape (today it accepts anything), so the spec, the registrations
+   * and the helper agree; that is a pull-back to the declared contract,
+   * ordinary tier」.
+   *
+   * The `z.unknown()` this door carried was a read-point record (#7751), the
+   * same vintage as its `filter` neighbour above and not an exception to the
+   * ruling: it receipted an array, a string and a bare NUMBER alike with
+   * `success: true`, while `plugin-grid/src/index.tsx:222` has published
+   * `type: 'array'` all along — so the html tier answered `type-mismatch` on a
+   * value this schema had just accepted.
+   *
+   * Sequenced measurement-first, as this family has to be. Measured at the
+   * objectui pin `53ded82b`: `ObjectGrid.tsx:1457` reads `schema.sort` and the
+   * fetch path at `:1844-1851` carries an explicit `typeof === 'string'` arm
+   * putting the clause on `$orderby` verbatim, beside the array arm that folds
+   * `[{ field, order }]` onto the same parameter. ⚠️ At THIS pin the string is
+   * therefore still lowered, and this door refuses a spelling the pinned
+   * renderer honours — the ruled sequence, not an oversight: objectui#8221's
+   * PR #8758 (merged 2026-09-09, after this pin) drops the string arm from
+   * `convertSortToQueryParams`, and the next pin bump carries it in. The array
+   * is the spelling both ends already agree on today; the header-arrow read at
+   * `:3998` hands `schemaSort` to `parseSchemaSort` as `TableSortItem[]`, the
+   * array shape and not the string.
+   */
+  sort: z.array(SortItemSchema).optional()
+    .describe('Initial row order — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array`'),
   /**
    * REMOVED (#11805, maintainer ruling 2026-08-25, decision-inbox batch 4:
    * 「#11805 退役 defaultSort,不需要major」 — the ADR-0049 enforce-or-remove
@@ -2542,7 +2580,8 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   reorderableColumns: z.boolean().optional().describe('Allow column drag-reorder'),
   frozenColumns: z.number().optional().describe('How many leading columns stay frozen (default 1)'),
   showColumnTypeIcons: z.boolean().optional().describe('Show field-type icons in column headers'),
-  exportOptions: z.unknown().optional().describe('Export config ({ formats, streaming })'),
+  exportOptions: z.unknown().optional()
+    .describe('Export config ({ formats, maxRecords, includeHeaders, fileNamePrefix, streaming }). Unvalidated here (`z.unknown()`), so this list is the whole account of the shape; `ListViewSchema.exportOptions` declares the same five members with their per-member contract'),
   operations: z.unknown().optional().describe('Operation toggles ({ export: false, … })'),
   /**
    * Data source binding — `ViewDataSchema`, the #5090-pinned authority the
@@ -2836,7 +2875,25 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
    */
   filter: z.array(ViewFilterRuleSchema).optional()
     .describe('Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array`'),
-  sort: z.unknown().optional().describe('Sort for the fetched events'),
+  /**
+   * Row order for the fetched events — the same `SortItem` ARRAY form
+   * `object-grid` declares above, and for the same ruling (objectui#8221,
+   * decision batch #77, option B; the `object-grid` entry carries the verbatim
+   * text). One sort orthography, one shared `SortItemSchema`.
+   *
+   * Measured at the objectui pin `53ded82b`: `ObjectCalendar.tsx:431` hands
+   * `schema.sort` to the shared sink `convertSortToQueryParams`
+   * (`core/src/utils/sort-query.ts`) as the fetch's `$orderby`. ⚠️ That sink
+   * still honours the legacy string clause at this pin — `sort-query.ts:66-70`
+   * — so, exactly as on `object-grid`, this declaration lands ahead of the
+   * consumer-side retirement (objectui#8221's PR #8758, merged 2026-09-09) and
+   * refuses a spelling the pinned helper still lowers. The array arm is
+   * unaffected: the sink folds `[{ field, order }]` into the field-direction
+   * map either way. Unlike the grid, `plugin-calendar/src/index.tsx` declares
+   * no `sort` input at all, so nothing on the registry side moves.
+   */
+  sort: z.array(SortItemSchema).optional()
+    .describe('Row order for the fetched events — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array`'),
   data: z.array(z.unknown()).optional().describe('Pre-fetched records — skips the internal fetch'),
   staticData: z.array(z.unknown()).optional().describe('Static inline records'),
   locale: z.string().optional().describe('Locale override for the calendar chrome'),

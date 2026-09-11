@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { coerceRow, type RefResolver, type RefMatch } from './import-coerce.js';
 import type { ExportFieldMeta } from './export-format.js';
 import type { ValidationMessageTranslator } from '@objectstack/spec/system';
-import type { ValidateDataIssue, ValidateDataRequest, ValidateDataResponse } from '@objectstack/spec/api';
+import type { CreateDataRequest, FindDataRequest, UpdateDataRequest, ValidateDataIssue, ValidateDataRequest, ValidateDataResponse } from '@objectstack/spec/api';
 import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult } from '@objectstack/core';
 import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
 import { isEngineDuplicateRecordEnvelope } from './error-response.js';
@@ -91,18 +91,56 @@ export interface ImportRunSummary extends ImportProgress {
   undoLog?: ImportUndoLog;
 }
 
-/** Minimal protocol surface the runner needs (find / create / update). */
+/**
+ * The envelope `runImport` wraps every declared request in before dispatch: the
+ * spec request type itself, plus the two server-side members the runner threads
+ * onto it. Exported so an implementor can NAME what it receives.
+ *
+ * ⚠️ `rest-server.ts` declares a structurally identical local alias for the
+ * door's own dispatch sites (`ServerScopedDataRequest`). The two are not
+ * converged here because that file is held by a sibling change; the difference
+ * is the `context` slot, which stays `any` on this side because that is what
+ * this file's own members already spelled.
+ */
+export type ImportProtocolRequest<R> = R & { context?: any; environmentId?: string };
+
+/**
+ * Minimal protocol surface the runner needs (find / create / update).
+ *
+ * ⭐ [#16952] Every member states the request it is handed, and this
+ * declaration is the ONLY place the dialect is stated. It used to be
+ * `args: any` on all three required members, which is why the dialect ended up
+ * written down in three places that no compiler reads — a prose comment and a
+ * runtime read in `plugin-auth`'s hand-written implementor, and a local
+ * parameter annotation in a test double. An implementor had nothing to compile
+ * against and could only freeze on the spelling it happened to observe; when
+ * #16638 moved the runner's literals to the canonical QueryAST, the frozen read
+ * went `undefined` and its `?? {}` default degraded a duplicate probe into
+ * match-everything, so an admin user import updated the WRONG user. Nothing
+ * caught it, because the parameter was `any`.
+ *
+ * ⇒ Compiled against `FindDataRequest` / `CreateDataRequest` /
+ * `UpdateDataRequest`, a wire alias (`$filter`, `$top`, …) is a compile error
+ * in the IMPLEMENTOR rather than a payload no schema has seen. `QuerySchema`
+ * declares `where` / `limit` / `offset` / `fields` / `orderBy` / `expand`; it
+ * declares neither `$filter` nor `$top`, and declaring those at the HTTP door
+ * is #16066's spec half, not this interface's business.
+ *
+ * ⛔ An implementor that annotates its own parameter `any` opts back out of all
+ * of this — the annotation wins over the contextual type. Leave the parameter
+ * unannotated and let this declaration type it.
+ */
 export interface ImportProtocolLike {
-  findData(args: any): Promise<any>;
-  createData(args: any): Promise<any>;
-  updateData(args: any): Promise<any>;
+  findData(args: ImportProtocolRequest<FindDataRequest>): Promise<any>;
+  createData(args: ImportProtocolRequest<CreateDataRequest>): Promise<any>;
+  updateData(args: ImportProtocolRequest<UpdateDataRequest>): Promise<any>;
   /**
    * Optional bulk-create primitive. When present, `runImport` batches
    * CREATE-resolved rows through it instead of one `createData` call per
    * row — see framework#2678. Must resolve to `{ records: any[] }` with one
    * record per input row, in the same order.
    */
-  createManyData?(args: { object: string; records: any[]; context?: any; environmentId?: string }): Promise<{ records: any[] }>;
+  createManyData?(args: ImportProtocolRequest<{ object: string; records: any[] }>): Promise<{ records: any[] }>;
   /**
    * Optional partial-success bulk create (framework#3172). When present it is
    * preferred over `createManyData`: one outcome per input row, in order — a
@@ -110,7 +148,7 @@ export interface ImportProtocolLike {
    * the whole-batch degradation that re-runs beforeInsert hooks on the good
    * rows.
    */
-  insertManyData?(args: { object: string; records: any[]; context?: any; environmentId?: string }): Promise<{ outcomes: Array<{ ok: boolean; record?: any; error?: unknown }> }>;
+  insertManyData?(args: ImportProtocolRequest<{ object: string; records: any[] }>): Promise<{ outcomes: Array<{ ok: boolean; record?: any; error?: unknown }> }>;
   /**
    * Validate-only (#6037 — #4633 ruling D). The write path's verdict on a
    * candidate row, with nothing persisted. The dry run routes through THIS
@@ -126,7 +164,7 @@ export interface ImportProtocolLike {
    * findings ITS write never produces — a false alarm dressed as coverage.
    * Such a dry run reports coercion + create/update/skip resolution only.
    */
-  validateData?(args: ValidateDataRequest & { context?: any; environmentId?: string }): Promise<ValidateDataResponse>;
+  validateData?(args: ImportProtocolRequest<ValidateDataRequest>): Promise<ValidateDataResponse>;
 }
 
 export interface RunImportOptions {
@@ -357,9 +395,29 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
       : Array.isArray(r?.data) ? r.data
         : Array.isArray(r?.rows) ? r.rows
           : Array.isArray(r) ? r : [];
-  const findArgsBase = (query: any) => ({
-    object: '',
-    query,
+  // [#16638] The server-scoped envelope for this file's `findData` calls, and
+  // the reason its parameter is TYPED. It used to be `query: any`, so the three
+  // call sites below were type-checked by nothing at all and their undeclared
+  // `$filter` / `$top` wire spellings cost no diagnostic — the same erasure
+  // #16337 found on `loadImportJob`'s `p: any` handle in `rest-server.ts`,
+  // whose signpost prescribes exactly this rewrite. Compiled against
+  // `FindDataRequest` every member is now held to the contract
+  // `FindDataRequestSchema` declares (`QuerySchema`: `where` / `limit` /
+  // `offset` / `fields` / `orderBy` / `expand`), so a wire alias is a compile
+  // error at the call site instead of a payload no schema has seen. It also
+  // retires the `object: ''` placeholder every caller had to override.
+  //
+  // ⚠️ The rewrite is a SPELLING change only: `@objectstack/metadata-protocol`
+  // folds `$filter`→`where` and `$top`→`limit` by the spec's own
+  // `RPC_QUERY_ALIAS_SLOTS` with the value moved verbatim, so all three calls
+  // reach `engine.find` with the same option bag as before —
+  // `rest-server-canonical-query-ast.test.ts` §3 measures that pair by pair.
+  //
+  // ⛔ Server-built means server-built: the wire aliases stay accepted at the
+  // HTTP door for CALLERS. Declaring them there is #16066's spec half and is
+  // not this file's business.
+  const findArgsBase = (request: FindDataRequest) => ({
+    ...request,
     ...(environmentId ? { environmentId } : {}),
     ...(context ? { context } : {}),
   });
@@ -385,10 +443,10 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
       let match: RefMatch = {};
       for (const f of candidates) {
         try {
-          const r = await p.findData({
-            ...findArgsBase({ $filter: { [f]: display }, $top: 2 }),
+          const r = await p.findData(findArgsBase({
             object: referenceObject,
-          });
+            query: { object: referenceObject, where: { [f]: display }, limit: 2 },
+          }));
           const recs = findRows(r);
           if (recs.length === 0) continue;
           if (recs.length > 1) { match = { ambiguous: true, matchedField: f }; break; }
@@ -428,7 +486,10 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
       if (v === undefined || v === null || v === '') return 'blank';
       filter[f] = v;
     }
-    const r = await p.findData({ ...findArgsBase({ $filter: filter, $top: 2 }), object: objectName });
+    const r = await p.findData(findArgsBase({
+      object: objectName,
+      query: { object: objectName, where: filter, limit: 2 },
+    }));
     const recs = findRows(r);
     if (recs.length === 0) return 'none';
     if (recs.length > 1) return 'ambiguous';
@@ -548,10 +609,10 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
   const recheckByIds = async (chunk: Array<Record<string, any>>): Promise<Map<string, any>> => {
     const ids = chunk.map((r) => r.id).filter((v) => v != null && v !== '');
     if (ids.length === 0) return new Map();
-    const r = await p.findData({
-      ...findArgsBase({ $filter: { id: { $in: ids } }, $top: ids.length }),
+    const r = await p.findData(findArgsBase({
       object: objectName,
-    });
+      query: { object: objectName, where: { id: { $in: ids } }, limit: ids.length },
+    }));
     return new Map(findRows(r).map((rec: any) => [String(rec.id), rec]));
   };
   const flushPendingCreates = async (): Promise<void> => {

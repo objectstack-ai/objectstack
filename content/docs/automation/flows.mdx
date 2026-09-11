@@ -965,10 +965,21 @@ the chain resolves from either end:
   parked on an `approval`, resuming the parent is refused too.
 
 A child that fails terminally after the pause fails every waiting ancestor, so
-no run is stranded as resumable-forever. See the worked example pair in the
-showcase app: `showcase_project_closure` invokes the reusable
-`showcase_closure_signoff` approval subflow and notifies the owner with the
-bubbled decision.
+no run is stranded as resumable-forever. **When the child's failure is a
+strand** — its resume consumed the pause and a downstream node threw — each
+ancestor's consumed pause is recorded too, and the repair verb puts the whole
+chain back in one call: `POST …/runs/{runId}/restore-suspension` on **any**
+member re-arms every member, deepest first, so the continuation re-issued on
+the run you named flows back up through the ancestors instead of completing a
+leaf into a parent that never continues. Re-arming an ancestor is all the verb
+does — an ancestor is never *stranded*, because resuming it is not what moves
+it. A cascade from a child that is **not** repairable records no ancestor
+snapshot, deliberately, so the verb never promises a chain repair it could not
+finish.
+
+See the worked example pair in the showcase app:
+`showcase_project_closure` invokes the reusable `showcase_closure_signoff`
+approval subflow and notifies the owner with the bubbled decision.
 
 ### Observing runs
 
@@ -1060,6 +1071,7 @@ instead:
 | `connector_action` | `unmeasured` |
 | `script`, function declared pure (the default) | nothing — a registered function is **contractually pure**: data I/O stays on the flow graph, so every write it causes is a downstream node that counts itself |
 | `script`, function declared `effect: 'writes'` | `unmeasured` — the function said it writes where the platform cannot see, so the run says the count is incomplete |
+| `notify` | `selected`: the recipient entries the node addressed, always. Then `acted: <delivered>` when the messaging stack delivered inline and knows the outcome, or `unmeasured` when it handed the deliveries to the outbox and the dispatcher decides later. A notify that reached **nobody** — an audience that resolved to no recipient, a preference filter that suppressed every pair, a dedup hit, no messaging service installed — reports `selected: N, acted: 0` and no `unmeasured`, which is what puts it inside the broken-sweep filter instead of leaving it silent |
 
 The `script` row is a contract, not a measurement: nothing stops a registered
 function from writing, so an **undeclared** writer still makes its run report
@@ -1070,6 +1082,17 @@ every flow that calls any function, to cover the few that break the rule.
 
 `unmeasured` propagates through `subflow` and `map` roll-ups, so a parent whose
 child dispatched an uncountable effect knows its own `acted` is incomplete.
+
+<Callout type="warn">
+A `notify` node reports `selected` for the recipients it addressed **whether or
+not any of them were reached**, and that is deliberate: it is the only thing
+that separates a run which notified nobody from a run that had nobody to
+notify. Both used to fold to `selected: 0, acted: 0, unmeasured: 0` — the same
+triple a run with no `notify` node at all reports — so a flow that quietly
+stopped delivering read exactly like a healthy quiet day, and the broken-sweep
+filter could not match it because its first clause is `selected > 0`. The zero
+is reported as a **measured** zero, never as `unmeasured`: the count is known.
+</Callout>
 
 The same counts land on `sys_automation_run` as **queryable columns**
 (`selected_count`, `acted_count`, `skipped_count`, `unmeasured_count`, plus a
@@ -1735,7 +1758,7 @@ curl -b cookies.txt -X POST \
 | `POST /api/v1/automation/:name/runs/:runId/resume` | Resume a paused run — body `{ inputs, output, branchLabel }` |
 | `GET /api/v1/automation/:name/runs/:runId/screen` | The pending screen of a screen-flow run |
 | `POST /api/v1/automation/:name/runs/:runId/cancel` | Cancel a suspended run (ADR-0044) — `PLATFORM_ADMIN` posture only (`isSystem` bypass); body `{ reason? }`. `501 NOT_IMPLEMENTED` when the service does not declare the verb |
-| `POST /api/v1/automation/:name/runs/:runId/restore-suspension` | Re-arm a run stranded by a failed resume — same gate as `cancel`; body `{ reason? }`. `501 NOT_IMPLEMENTED` when the service does not declare the verb |
+| `POST /api/v1/automation/:name/runs/:runId/restore-suspension` | Re-arm a run stranded by a failed resume — and, for a nested run, every ancestor whose pause that strand's cascade consumed, deepest first, from whichever member you name. Same gate as `cancel`; body `{ reason? }`. `501 NOT_IMPLEMENTED` when the service does not declare the verb |
 
 **Failures answer real HTTP status codes.** A flow that does not run is not a
 `200`. The route classifies five outcomes, and it reads the engine's own verdict
@@ -1922,6 +1945,9 @@ export const contractExpirationCheck: Flow = {
       config: {
         triggerType: 'schedule',
         schedule: { type: 'cron', expression: '0 0 * * *', timezone: 'UTC' },
+        // REQUIRED on every time-triggered flow — see "The acting
+        // organization" below. A flow that omits it is refused at bind.
+        organization: '<sys_organization.id>',
       },
     },
     { id: 'find_expiring', type: 'get_record', label: 'Find Expiring Contracts' },
@@ -1963,6 +1989,9 @@ export const renewalReminder: Flow = {
           offsetDays: [60, 30, 7], // — or — withinDays: 30 (negative = overdue lookback)
           filter: { status: 'active' }, // optional, ANDed with the date window
         },
+        // REQUIRED, and for a stronger reason than a plain schedule flow —
+        // see "The acting organization" below.
+        organization: '<sys_organization.id>',
         // schedule: { type: 'cron', expression: '0 8 * * *' } // optional; defaults to daily 08:00 UTC
       },
     },
@@ -1980,6 +2009,80 @@ Exactly one of `offsetDays` (discrete T-minus days) or `withinDays` (a range) is
 required. Requires the `triggers` **and** `job` capabilities. The record is on
 the flow context (`record.*`), so the start `condition` and `{record.*}`
 interpolation work as in a record-change flow.
+
+### The acting organization
+
+A `record_change` or `api` flow inherits its organization from whoever triggered
+it: the caller's session rides into the run and every tenant-scoped write below
+resolves the same organization a normal write would. A **time-triggered** flow
+has no such caller — a job tick carries no identity at all.
+
+So a `schedule` or `timeRelative` flow **declares the organization it runs as**,
+on the start node's `config`, beside the cadence it scopes:
+
+```typescript
+config: {
+  schedule: { type: 'cron', expression: '0 8 * * *' },
+  organization: 'org_msokm9oaz0cal87q', // a sys_organization.id
+}
+```
+
+The run then executes as that organization: `tenantId` carries it, the
+notifications a `notify` node emits land in that organization's inboxes, the
+`sys_automation_run` history row is stamped with it, and every record the run
+reads, updates or deletes is confined to it.
+
+**For a `timeRelative` sweep the declaration also bounds the QUERY.** A sweep
+runs elevated on purpose — a background sweep must see every row rather than the
+RLS-scoped subset an absent user would see — so nothing else keeps its selection
+inside one organization. The declared id rides the sweep's own query, and the
+driver scopes the read: a sweep declared for one organization matches that
+organization's rows and launches a run per match. Elevation and tenancy are
+independent axes, and a sweep carrying only the first is a cross-organization
+scheduled task however its runs are stamped.
+
+<Callout type="warn">
+Two cases where a declaration cannot deliver containment, and both say so rather
+than going quiet. A store with no row-level tenant isolation
+(`@objectstack/driver-memory`) **refuses** a scoped sweep instead of answering it
+unscoped, and the failure is logged at `error` naming the flow — multi-organization
+deployments use `@objectstack/driver-sql`. And on a platform-global object
+(`tenancy: { enabled: false }`) or a federated one, the engine applies no tenant
+scope at all, so the sweep still selects across every organization while its runs
+act as the declared one; the trigger warns at bind, naming the object.
+</Callout>
+
+`os lint`, `os validate` and `objectstack build` report a missing declaration as
+a warning (`flow-schedule-organization-missing`) so it is visible at authoring
+time rather than only in a server log at boot.
+
+**A time-triggered flow that declares none is a declaration error**, refused at
+bind:
+
+- the trigger logs the reason at `error`, naming the flow;
+- the flow is recorded as **not bound** — it is listed by
+  `getTriggerBindingAudit()`, warned at `kernel:bootstrapped`, printed in the
+  `os dev` / `os start` startup summary, and `getFlowRuntimeStates()` reports
+  `bound: false`;
+- nothing fires it.
+
+There is deliberately **no fallback** — not the platform organization, not "the
+install's only one". Without the declaration the run would reach every
+tenant-scoped write with nothing to offer, and on an install holding more than
+one `sys_organization` each of those writes is refused one layer below anything
+that summarises the run: the tick reports itself healthy and delivers nothing.
+A wrong `organization_id` is worse still, because it is silently authoritative
+to every report, export and cleanup script that filters by organization.
+
+**No fan-out.** A single flow belongs to one organization. A sweep wanted in
+several organizations is declared once per organization.
+
+<Callout type="warn">
+The start node's `config` is an open record, so a near-miss spelling —
+`organizationId`, `organization_id`, `orgId`, `org_id`, `tenantId` — parses
+happily and is then ignored. The bind-time refusal names the spelling you
+actually wrote.
+</Callout>
 
 ### Update-triggered flow
 

@@ -1668,11 +1668,20 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * epoch-ms window would have to be declared, not here). An author who wants an
    * instant window writes it as one; a declared `string` binds as a string. No
    * STORAGE coercion happens here either, deliberately: `NativeSQLStrategy` needs
-   * `coerceTemporal` because it binds into raw SQL and had to learn that a
-   * SQLite `Field.datetime` is an INTEGER epoch (#2034); this path goes through
+   * `coerceTemporal` because it binds into raw SQL and so has to canonicalise
+   * the comparand itself (#2034, then #3912); this path goes through
    * `engine.aggregate()`, where the driver's own CRUD filter coercion applies —
    * the very coercion that already makes a `where` bound on that same column
    * work today.
+   *
+   * ⛔ This sentence used to end "…had to learn that a SQLite `Field.datetime`
+   * IS an INTEGER epoch (#2034)". That flat claim has been wrong since #3912
+   * gave the column one canonical UTC-text storage form; the epoch survives only
+   * in a database not yet backfilled. The reason `NativeSQLStrategy` needs the
+   * coercion is unchanged — it binds outside the driver's builder — and the
+   * storage fact itself is stated in ONE place, on
+   * `AnalyticsServiceConfig.coerceTemporalFilterValue` in `analytics-service.ts`
+   * (#16737).
    *
    * [#16322] A bare string is a member of the CLOSED date-range preset
    * vocabulary (#16041) and is lowered to a real window by

@@ -99,10 +99,14 @@ async function makeRealProtocol() {
   const impl = new ObjectStackProtocolImplementation(engine as any);
   // `runImport` needs find/create only for an insert-mode run; delegate both to
   // the real implementation so the ingress is genuinely on the path.
+  // [#16952] The bridge is annotated FROM the exported declaration, so the
+  // request this test hands the REAL implementation is the one the contract
+  // declares — `args: any` here would have made the bridge itself another
+  // place the dialect was only observed.
   const p: ImportProtocolLike = {
-    findData: (args: any) => impl.findData(args as any) as any,
-    createData: (args: any) => impl.createData(args as any) as any,
-    updateData: (args: any) => impl.updateData(args as any) as any,
+    findData: (args) => impl.findData(args) as any,
+    createData: (args) => impl.createData(args) as any,
+    updateData: (args) => impl.updateData(args) as any,
   };
   return { p, inserted, logger };
 }

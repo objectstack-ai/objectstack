@@ -84,7 +84,7 @@
 // every entry: labels fell back to raw ids, and cross-object rebucketing filed
 // every row under `'(restricted)'` while the grand total still reconciled.
 
-import { calendarPartsInTzOrUtc } from '@objectstack/core';
+import { bucketDateKey } from '@objectstack/core';
 import type { QueryAST, GroupByNode, AggregationNode, DateGranularityValue } from '@objectstack/spec/data';
 import { matchesAggregationFilter } from './having-filter.js';
 
@@ -273,12 +273,20 @@ function toNumber(v: any): number {
  * Bucket a date-like value into an ISO-formatted period label. Weeks start
  * Monday and use ISO week numbering.
  *
- * ⚠️ **This is one of two implementations of the same contract.** A driver that
- * advertises `supports.queryDateGranularity[g]` buckets that granularity in SQL
- * instead, and `engine.aggregate` picks between them per query — so a label
- * produced here must equal the label that driver's SQL produces for the same
- * instant, or a drill-down breaks when it crosses the seam. Editing the labels
- * below means editing every driver's bucket expression too.
+ * ⚠️ **The label rule itself no longer lives here.** It is
+ * `@objectstack/core`'s `bucketDateKey`, and this function is a thin delegate
+ * with its export name and signature unchanged — the hoist ruled on #16178, so
+ * that `driver-memory`'s analytics face can bucket with the SAME labeller
+ * without a driver taking a dependency on objectql and without a third hand
+ * copy of the rule. Read `bucketDateKey`'s header for the output-contract
+ * vocabulary, the timezone semantics, the epoch-millis branch (#3773) and the
+ * null/unparseable bucket (#3839).
+ *
+ * ⚠️ **This is still one of two implementations of the same contract.** A driver
+ * that advertises `supports.queryDateGranularity[g]` buckets that granularity in
+ * SQL instead, and `engine.aggregate` picks between them per query — so the
+ * label produced through here must equal the label that driver's SQL produces
+ * for the same instant, or a drill-down breaks when it crosses the seam.
  *
  * The seam is enforced by `checkDateBucketParity` (@objectstack/verify), run
  * against the real drivers in
@@ -286,62 +294,11 @@ function toNumber(v: any): number {
  * driver test files also hand-copy this function for self-containment; those
  * copies cannot detect their own drift, which is why the executable check
  * exists.
- *
- * `timezone` (ADR-0053 Phase 2) resolves the calendar day in a reference zone
- * so an instant near a tz day-boundary buckets where a user in that zone would
- * expect. An unset / `'UTC'` / invalid zone keeps the historical UTC bucketing.
- * The y/m/d are taken in the reference zone and the ISO-week math then runs on
- * a UTC date built from those parts — the parts already carry the zone shift,
- * so the week boundary lands correctly without re-applying any offset.
- *
- * A finite NUMBER is read as epoch milliseconds — the form SQLite stores a
- * `Field.datetime` in, and what any driver that hands back raw storage values
- * yields. `new Date(String(1767225600000))` is an Invalid Date, so without this
- * branch such a row landed in the empty bucket while the pushed-down SQL
- * bucketed it correctly (#3773) — the two paths must label the same instant
- * identically or a drill-down built on one breaks against the other.
- *
- * Returns `null` for a null/absent or unparseable instant — the same key the
- * pushed-down SQL yields, where the bucket expression propagates NULL (#3839).
- * Null and unparseable deliberately share one bucket: SQL cannot tell them
- * apart either (`strftime('%Y-%m', 'not-a-date')` is NULL), and splitting them
- * here would re-open the seam this function exists to close.
  */
 export function bucketDateValue(
   value: unknown,
   granularity: DateGranularityValue,
   timezone?: string,
 ): string | null {
-  if (value == null) return null;
-  const d =
-    value instanceof Date
-      ? value
-      : typeof value === 'number'
-        ? new Date(value)
-        : new Date(String(value));
-  if (Number.isNaN(d.getTime())) return null;
-  const { year: y, month: m, day } = calendarPartsInTzOrUtc(d, timezone);
-  switch (granularity) {
-    case 'year':
-      return String(y);
-    case 'quarter':
-      return `${y}-Q${Math.floor((m - 1) / 3) + 1}`;
-    case 'month':
-      return `${y}-${String(m).padStart(2, '0')}`;
-    case 'day':
-      return `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    case 'week': {
-      // ISO-8601 week date: week 1 contains the first Thursday of the year.
-      const target = new Date(Date.UTC(y, m - 1, day));
-      const dayNum = (target.getUTCDay() + 6) % 7; // Mon=0..Sun=6
-      target.setUTCDate(target.getUTCDate() - dayNum + 3);
-      const firstThursday = new Date(Date.UTC(target.getUTCFullYear(), 0, 4));
-      const weekNo = 1 + Math.round(
-        ((target.getTime() - firstThursday.getTime()) / 86400000 - 3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7,
-      );
-      return `${target.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
-    }
-    default:
-      return String(value);
-  }
+  return bucketDateKey(value, granularity, timezone);
 }

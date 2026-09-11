@@ -1460,7 +1460,7 @@ function validateNamespacePrefix(config: ObjectStackDefinition): string[] {
 }
 
 /**
- * Validate the "at most one App per package" rule — ADR-0019 (D1/D3).
+ * Validate the "at most one App per package" rule — ADR-0019 (app-as-consumer-unit) D1/D3.
  *
  * A consumer package (`manifest.type === 'app'`) must not define **more than
  * one** app — that is the banned "suite contains apps" shape. Fold the apps
@@ -1479,7 +1479,7 @@ function validateSingleApp(config: ObjectStackDefinition): string[] {
   const names = apps.map((a) => a.name).join(', ');
   return [
     `An 'app' package must define at most one app, but found ${apps.length} (${names}). ` +
-      `Fold them into one app with multiple tabs, or split into separate packages (ADR-0019 D3).`,
+      `Fold them into one app with multiple tabs, or split into separate packages — ADR-0019 (app-as-consumer-unit) D3.`,
   ];
 }
 
@@ -1943,7 +1943,8 @@ class StackNamespacePrefixInvalidError extends StackRefusalError {
 
 /**
  * [ADR-0112 · #15963] An `app` package declares more than one app — the banned
- * "suite contains apps" shape, ADR-0019 D3 — {@link validateSingleApp}.
+ * "suite contains apps" shape, ADR-0019 (app-as-consumer-unit) D3 —
+ * {@link validateSingleApp}.
  * Spelled `_VIOLATION` like the ledger's other rule-violation refusals
  * (`UNIQUE_VIOLATION`, `EXTERNAL_SCHEMA_MODE_VIOLATION`).
  */

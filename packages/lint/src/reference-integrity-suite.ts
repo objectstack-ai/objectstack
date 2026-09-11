@@ -178,7 +178,12 @@ export interface ReferenceIntegrityRule {
    * {@link validateReferenceIntegrity}).
    */
   runtimeTypes?: readonly string[];
-  run: (stack: Record<string, unknown>) => ReferenceIntegrityFinding[];
+  /**
+   * `ctx` is the same {@link ReferenceIntegrityRunOptions} `validateReferenceIntegrity`
+   * received — optional because most members read only `stack`; the two hook
+   * write-set members (#16546) read `ctx.loweredHookRefs`.
+   */
+  run: (stack: Record<string, unknown>, ctx?: ReferenceIntegrityRunOptions) => ReferenceIntegrityFinding[];
 }
 
 /** The runtime snapshot types a member judges when it declares none. */
@@ -394,7 +399,7 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // declared fields — the write-side counterpart of validateFlowTemplatePaths'
   // read-side membership (#4271). Lazy: only a hook that actually carries a
   // `language:'js'` body loads the TypeScript parser.
-  { name: 'validateHookBodyWrites', run: validateHookBodyWrites },
+  { name: 'validateHookBodyWrites', run: (stack, ctx) => validateHookBodyWrites(stack, ctx) },
   // The same check on the other surface that carries a `HookBodySchema` body:
   // action bodies, run by the same sandbox. Only the `ctx.api` write family
   // carries over — an action's `ctx.input` is its params bag, not a record
@@ -444,7 +449,7 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // `readonly` field is CORRECT and widely used, because the strip drops only
   // caller-supplied values (#5591) — so the rule keys on the write CHANNEL,
   // and both directions are pinned in its tests.
-  { name: 'validateReadonlyHookWrites', run: validateReadonlyHookWrites },
+  { name: 'validateReadonlyHookWrites', run: (stack, ctx) => validateReadonlyHookWrites(stack, ctx) },
   // [#13770] The THIRD write surface, and the one place the family's answer
   // differs. An action body's `ctx.api` is `createContext({ ...ec, isSystem:
   // true })` — elevated by design (#3914) — so the engine's STATIC readonly
@@ -514,6 +519,15 @@ export interface ReferenceIntegrityRunOptions {
    * caller, which run all members unconditionally.
    */
   runtimeWriteType?: string;
+  /**
+   * [#16546] `hooks[*].handler` ref strings whose metadata `body` was minted
+   * by `lowerCallables` from the author's inline `handler` function — spells
+   * the same key as `AuthoringRuleContext.loweredHookRefs` (see this
+   * interface's own header on why the two types stay separate). Read by
+   * `validateReadonlyHookWrites` / `validateHookBodyWrites` to redirect their
+   * `path` at the key the author actually wrote.
+   */
+  loweredHookRefs?: ReadonlySet<string>;
 }
 
 /**
@@ -535,7 +549,7 @@ export function validateReferenceIntegrity(
   for (const rule of REFERENCE_INTEGRITY_RULES) {
     if (writeType !== undefined
       && !(rule.runtimeTypes ?? DEFAULT_MEMBER_RUNTIME_TYPES).includes(writeType)) continue;
-    findings.push(...rule.run(stack));
+    findings.push(...rule.run(stack, options));
   }
   return findings;
 }

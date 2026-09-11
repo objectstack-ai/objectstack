@@ -1,6 +1,6 @@
 ---
 title: Protocol Reference
-description: Every schema published by @objectstack/spec — 1582 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1523 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -20,20 +20,20 @@ counts are sums of the rows they head. Regenerate with
 | Module | Pages | Schemas | Description |
 | :--- | ---: | ---: | :--- |
 | [AI Protocol](/docs/references/ai) | 11 | 66 | Agents, tools, skills, RAG and knowledge sources, model registry, conversations. |
-| [API Protocol](/docs/references/api) | 31 | 437 | REST contracts, endpoints, routing, realtime, batch, discovery. |
-| [Automation Protocol](/docs/references/automation) | 13 | 73 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
-| [Cloud Protocol](/docs/references/cloud) | 11 | 94 | Environments, packages and versions, marketplace, developer portal, tenancy. |
+| [API Protocol](/docs/references/api) | 31 | 440 | REST contracts, endpoints, routing, realtime, batch, discovery. |
+| [Automation Protocol](/docs/references/automation) | 14 | 74 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
 | [Data Protocol](/docs/references/data) | 29 | 173 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
 | [Identity Protocol](/docs/references/identity) | 5 | 27 | Users and accounts, organizations, positions, SCIM provisioning. |
 | [Integration Protocol](/docs/references/integration) | 1 | 24 | The single connector protocol (ADR-0097) — catalog descriptors and provider-bound instances. |
 | [Kernel Protocol](/docs/references/kernel) | 30 | 162 | Plugin lifecycle and manifests, capabilities and security, metadata loading, service registry. |
+| [Marketplace Protocol](/docs/references/marketplace) | 4 | 30 | The package & marketplace format — package identity and versions, listing, publish, review, search, install, template manifests. |
 | [QA Protocol](/docs/references/qa) | 1 | 8 | Declarative test suites — scenarios, steps, actions and assertions. |
 | [Security Protocol](/docs/references/security) | 5 | 30 | Permission sets, row-level security, sharing rules, tenancy posture. |
-| [Shared Protocol](/docs/references/shared) | 9 | 28 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
+| [Shared Protocol](/docs/references/shared) | 9 | 29 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
 | [System Protocol](/docs/references/system) | 33 | 272 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
 | [UI Protocol](/docs/references/ui) | 16 | 153 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **198** | **1582** | 14 protocol modules |
+| **Total** | **192** | **1523** | 14 protocol modules |
 
 ---
 
@@ -61,7 +61,7 @@ Agents, tools, skills, RAG and knowledge sources, model registry, conversations.
 
 ## API Protocol
 
-**Source:** `packages/spec/src/api/` · **Import:** `@objectstack/spec/api` · **31 pages, 437 schemas**
+**Source:** `packages/spec/src/api/` · **Import:** `@objectstack/spec/api` · **31 pages, 440 schemas**
 
 REST contracts, endpoints, routing, realtime, batch, discovery.
 
@@ -73,7 +73,7 @@ REST contracts, endpoints, routing, realtime, batch, discovery.
 | [`automation-api.zod.ts`](/docs/references/api/automation-api) | `AutomationApiErrorCode`, `AutomationFlowPathParams`, `AutomationRunPathParams`, `CreateFlowRequest`, `CreateFlowResponse`, `DeleteFlowRequest`, `DeleteFlowResponse`, `FlowSummary`, `GetFlowRequest`, `GetFlowResponse`, `GetRunRequest`, `GetRunResponse`, `ListFlowsRequest`, `ListFlowsResponse`, `ListRunsRequest`, `ListRunsResponse`, `ResumeFailureDetails`, `ToggleFlowRequest`, `ToggleFlowResponse`, `TriggerFlowRequest`, `TriggerFlowResponse`, `UpdateFlowRequest`, `UpdateFlowResponse` |
 | [`batch.zod.ts`](/docs/references/api/batch) | `BatchConfig`, `BatchOperationResult`, `BatchOperationType`, `BatchOptions`, `BatchRecord`, `BatchUpdateRequest`, `BatchUpdateResponse`, `CrossObjectBatchDroppedFields`, `CrossObjectBatchOperation`, `CrossObjectBatchRequest`, `CrossObjectBatchResponse`, `DeleteManyRequest`, `UpdateManyRecord`, `UpdateManyRequest` |
 | [`contract.zod.ts`](/docs/references/api/contract) | `ApiError`, `BaseResponse`, `BatchLoadingStrategy`, `BulkRequest`, `BulkResponse`, `CreateRequest`, `DataLoaderConfig`, `DeleteResponse`, `ExportRequest`, `IdRequest`, `ListRecordResponse`, `ModificationResult`, `QueryOptimizationConfig`, `RecordData`, `SingleRecordResponse`, `UpdateRequest` |
-| [`discovery.zod.ts`](/docs/references/api/discovery) | `ApiRoutes`, `CapabilityDescriptor`, `Discovery`, `DiscoveryEnvironment`, `RouteHealthEntry`, `RouteHealthReport`, `ServiceInfo`, `ServiceSelfInfo`, `ServiceStatus`, `WellKnownCapabilities` |
+| [`discovery.zod.ts`](/docs/references/api/discovery) | `ApiRoutes`, `CapabilityDescriptor`, `Discovery`, `DiscoveryEnvironment`, `EnvironmentType`, `RouteHealthEntry`, `RouteHealthReport`, `ServiceInfo`, `ServiceSelfInfo`, `ServiceStatus`, `WellKnownCapabilities` |
 | [`dispatcher.zod.ts`](/docs/references/api/dispatcher) | `DispatcherConfig`, `DispatcherErrorCode`, `DispatcherErrorResponse`, `DispatcherRoute` |
 | [`documentation.zod.ts`](/docs/references/api/documentation) | `ApiChangelogEntry`, `ApiDocumentationConfig`, `ApiTestCollection`, `ApiTestRequest`, `ApiTestingUiConfig`, `ApiTestingUiType`, `CodeGenerationTemplate`, `GeneratedApiDocumentation`, `OpenApiSecurityScheme`, `OpenApiServer`, `OpenApiSpec` |
 | [`endpoint.zod.ts`](/docs/references/api/endpoint) | `ApiEndpoint`, `ApiMapping` |
@@ -85,7 +85,7 @@ REST contracts, endpoints, routing, realtime, batch, discovery.
 | [`metadata.zod.ts`](/docs/references/api/metadata) | `AppDefinitionResponse`, `ConceptListResponse`, `MetadataBulkRegisterRequest`, `MetadataBulkResponse`, `MetadataBulkUnregisterRequest`, `MetadataDeleteResponse`, `MetadataDependenciesResponse`, `MetadataDependentsResponse`, `MetadataExistsResponse`, `MetadataExportRequest`, `MetadataExportResponse`, `MetadataImportRequest`, `MetadataImportResponse`, `MetadataItemResponse`, `MetadataListResponse`, `MetadataNamesResponse`, `MetadataQueryRequest`, `MetadataQueryResponse`, `MetadataRegisterRequest`, `MetadataTypeInfoResponse`, `MetadataTypesResponse`, `MetadataValidateRequest`, `MetadataValidateResponse`, `ObjectDefinitionResponse` |
 | [`misc`](/docs/references/api/misc) *(no single source file)* | `ResolvedBook`, `ResolvedEntry`, `ResolvedGroup` |
 | [`odata.zod.ts`](/docs/references/api/odata) | `ODataConfig`, `ODataError`, `ODataFilterFunction`, `ODataMetadata`, `ODataQuery`, `ODataResponse` |
-| [`package-api.zod.ts`](/docs/references/api/package-api) | `GetInstalledPackageRequest`, `GetInstalledPackageResponse`, `ListInstalledPackagesRequest`, `ListInstalledPackagesResponse`, `PackageApiErrorCode`, `PackageInstallRequest`, `PackageInstallResponse`, `PackagePathParams`, `PackageRollbackRequest`, `PackageUpgradeRequest`, `PackageUpgradeResponse`, `ResolveDependenciesRequest`, `ResolveDependenciesResponse`, `UninstallPackageApiRequest`, `UninstallPackageApiResponse`, `UploadArtifactRequest`, `UploadArtifactResponse` |
+| [`package-api.zod.ts`](/docs/references/api/package-api) | `AssembledInstalledPackage`, `GetInstalledPackageRequest`, `GetInstalledPackageResponse`, `InstalledPackageAtEitherStage`, `ListInstalledPackagesRequest`, `ListInstalledPackagesResponse`, `PackageApiErrorCode`, `PackageInstallRequest`, `PackageInstallResponse`, `PackagePathParams`, `PackageRollbackRequest`, `PackageUpgradeRequest`, `PackageUpgradeResponse`, `ResolveDependenciesRequest`, `ResolveDependenciesResponse`, `UninstallPackageApiRequest`, `UninstallPackageApiResponse`, `UploadArtifactRequest`, `UploadArtifactResponse` |
 | [`package-lifecycle.zod.ts`](/docs/references/api/package-lifecycle) | `DiscardPackageDraftsResponse`, `DuplicatePackageResponse`, `ListPackageCommitsResponse`, `PackageExportManifest`, `PackagePublishResult`, `ReassignOrphanedMetadataResponse`, `RevertPackageCommitResponse`, `RollbackToPackageCommitResponse` |
 | [`plugin-rest-api.zod.ts`](/docs/references/api/plugin-rest-api) | `ErrorHandlingConfig`, `OpenApiGenerationConfig`, `RequestValidationConfig`, `ResponseEnvelopeConfig`, `RestApiEndpoint`, `RestApiPluginConfig`, `RestApiRouteCategory`, `RestApiRouteRegistration`, `ValidationMode` |
 | [`protocol.zod.ts`](/docs/references/api/protocol) | `AiAgentCapabilities`, `AiAgentChatRequest`, `AiAgentSummary`, `AiAgentsResponse`, `AiChatRequest`, `AiChatResponse`, `AiCompleteRequest`, `AiConversation`, `AiMessage`, `AiModelsResponse`, `AiPendingAction`, `AiPendingActionStatus`, `AiStreamChunk`, `ApproveAiPendingActionResponse`, `AuditMetaItemRequest`, `AuditMetaItemResponse`, `AutomationActionsResponse`, `AutomationTriggerRequest`, `AutomationTriggerResponse`, `BatchDataRequest`, `BatchDataResponse`, `CheckPermissionRequest`, `CheckPermissionResponse`, `CloneDataResponse`, `CreateAiConversationRequest`, `CreateDataRequest`, `CreateDataResponse`, `CreateManyDataRequest`, `CreateManyDataResponse`, `DeleteDataRequest`, `DeleteDataResponse`, `DeleteManyDataRequest`, `DeleteManyDataResponse`, `DeleteMetaItemRequest`, `DeleteMetaItemResponse`, `DiffMetaItemResponse`, `DisablePackageRequest`, `DisablePackageResponse`, `EnablePackageRequest`, `EnablePackageResponse`, `FindDataRequest`, `FindDataResponse`, `FindReferencesToMetaResponse`, `GetDataRequest`, `GetDataResponse`, `GetDiscoveryRequest`, `GetDiscoveryResponse`, `GetEffectivePermissionsRequest`, `GetEffectivePermissionsResponse`, `GetFieldLabelsRequest`, `GetFieldLabelsResponse`, `GetLocalesRequest`, `GetLocalesResponse`, `GetMetaDiagnosticsResponse`, `GetMetaItemCachedRequest`, `GetMetaItemCachedResponse`, `GetMetaItemLayeredRequest`, `GetMetaItemLayeredResponse`, `GetMetaItemRequest`, `GetMetaItemResponse`, `GetMetaItemsRequest`, `GetMetaItemsResponse`, `GetMetaTypesRequest`, `GetMetaTypesResponse`, `GetNotificationPreferencesRequest`, `GetNotificationPreferencesResponse`, `GetObjectPermissionsRequest`, `GetObjectPermissionsResponse`, `GetPackageRequest`, `GetPackageResponse`, `GetPresenceRequest`, `GetPresenceResponse`, `GetPublishedMetaItemResponse`, `GetTranslationsRequest`, `GetTranslationsResponse`, `GetUiViewRequest`, `GetUiViewResponse`, `HistoryMetaItemRequest`, `HistoryMetaItemResponse`, `HttpFindQueryParams`, `InstallPackageRequest`, `InstallPackageResponse`, `ListAiConversationsRequest`, `ListAiConversationsResponse`, `ListAiPendingActionsRequest`, `ListAiPendingActionsResponse`, `ListDraftsResponse`, `ListNotificationsRequest`, `ListNotificationsResponse`, `ListPackagesRequest`, `ListPackagesResponse`, `MarkAllNotificationsReadRequest`, `MarkAllNotificationsReadResponse`, `MarkNotificationsReadRequest`, `MarkNotificationsReadResponse`, `Notification`, `NotificationPreferences`, `PublishMetaItemRequest`, `PublishMetaItemResponse`, `PublishPackageDraftsResponse`, `RealtimeConnectRequest`, `RealtimeConnectResponse`, `RealtimeDisconnectRequest`, `RealtimeDisconnectResponse`, `RealtimeSubscribeRequest`, `RealtimeSubscribeResponse`, `RealtimeUnsubscribeRequest`, `RealtimeUnsubscribeResponse`, `RegisterDeviceRequest`, `RegisterDeviceResponse`, `RejectAiPendingActionResponse`, `RollbackMetaItemResponse`, `RuntimeAuthoringIssue`, `SaveMetaItemRequest`, `SaveMetaItemResponse`, `SearchAllHit`, `SearchAllPageHit`, `SearchAllResponse`, `SetPresenceRequest`, `SetPresenceResponse`, `UninstallPackageRequest`, `UninstallPackageResponse`, `UnregisterDeviceRequest`, `UnregisterDeviceResponse`, `UpdateAiConversationRequest`, `UpdateDataRequest`, `UpdateDataResponse`, `UpdateManyDataRequest`, `UpdateManyDataResponse`, `UpdateNotificationPreferencesRequest`, `UpdateNotificationPreferencesResponse`, `ValidateDataIssue`, `ValidateDataRequest`, `ValidateDataResponse` |
@@ -103,7 +103,7 @@ REST contracts, endpoints, routing, realtime, batch, discovery.
 
 ## Automation Protocol
 
-**Source:** `packages/spec/src/automation/` · **Import:** `@objectstack/spec/automation` · **13 pages, 73 schemas**
+**Source:** `packages/spec/src/automation/` · **Import:** `@objectstack/spec/automation` · **14 pages, 74 schemas**
 
 Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records.
 
@@ -118,32 +118,11 @@ Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execu
 | [`flow-function.zod.ts`](/docs/references/automation/flow-function) | `FlowFunctionEffect` |
 | [`io-node-config.zod.ts`](/docs/references/automation/io-node-config) | `HttpConfig`, `NotifyConfig` |
 | [`node-executor.zod.ts`](/docs/references/automation/node-executor) | `ActionCategory`, `ActionDescriptor`, `ActionParadigm`, `NodeExecutorDescriptor`, `WaitEventType`, `WaitExecutorConfig`, `WaitResumePayload`, `WaitTimeoutBehavior` |
+| [`schedule-organization.zod.ts`](/docs/references/automation/schedule-organization) | `ScheduleOrganization` |
 | [`schemaless-node-config.zod.ts`](/docs/references/automation/schemaless-node-config) | `DecisionCondition`, `DecisionConfig`, `ScriptConfig`, `SubflowConfig` |
 | [`state-machine.zod.ts`](/docs/references/automation/state-machine) | `ActionRef`, `GuardRef`, `StateMachine`, `StateNode`, `Transition` |
 | [`time-relative-trigger.zod.ts`](/docs/references/automation/time-relative-trigger) | `TimeRelativeTrigger` |
 | [`webhook.zod.ts`](/docs/references/automation/webhook) | `Webhook`, `WebhookTriggerType` |
-
----
-
-## Cloud Protocol
-
-**Source:** `packages/spec/src/cloud/` · **Import:** `@objectstack/spec/cloud` · **11 pages, 94 schemas**
-
-Environments, packages and versions, marketplace, developer portal, tenancy.
-
-| File | Schemas |
-| :--- | :--- |
-| [`app-store.zod.ts`](/docs/references/cloud/app-store) | `AppDiscoveryRequest`, `AppDiscoveryResponse`, `AppSubscription`, `InstalledAppSummary`, `ListInstalledAppsRequest`, `ListInstalledAppsResponse`, `ListReviewsRequest`, `ListReviewsResponse`, `RecommendationReason`, `RecommendedApp`, `ReviewModerationStatus`, `SubmitReviewRequest`, `SubscriptionStatus`, `UserReview` |
-| [`developer-portal.zod.ts`](/docs/references/cloud/developer-portal) | `AnalyticsTimeRange`, `CreateListingRequest`, `ListingActionRequest`, `PublisherProfile`, `PublishingAnalyticsRequest`, `PublishingAnalyticsResponse`, `ReleaseChannel`, `TimeSeriesPoint`, `UpdateListingRequest`, `VersionRelease` |
-| [`environment.zod.ts`](/docs/references/cloud/environment) | `Environment`, `EnvironmentCredential`, `EnvironmentCredentialStatus`, `EnvironmentDriver`, `EnvironmentMember`, `EnvironmentRole`, `EnvironmentStatus`, `EnvironmentType`, `EnvironmentVisibility`, `ProvisionEnvironmentRequest`, `ProvisionEnvironmentResponse`, `ProvisionOrganizationRequest`, `ProvisionOrganizationResponse` |
-| [`environment-artifact.zod.ts`](/docs/references/cloud/environment-artifact) | `Sha256Digest` |
-| [`environment-package.zod.ts`](/docs/references/cloud/environment-package) | `EnvironmentPackageInstallation`, `EnvironmentPackageStatus`, `InstallPackageToEnvironmentRequest`, `ListEnvironmentPackagesResponse`, `RollbackEnvironmentPackageRequest`, `UpgradeEnvironmentPackageRequest` |
-| [`marketplace.zod.ts`](/docs/references/cloud/marketplace) | `ArtifactDownloadResponse`, `ArtifactReference`, `ListingStatus`, `MarketplaceCategory`, `MarketplaceInstallRequest`, `MarketplaceInstallResponse`, `MarketplaceListing`, `MarketplaceSearchRequest`, `MarketplaceSearchResponse`, `PackageSubmission`, `PricingModel`, `Publisher`, `PublisherVerification` |
-| [`marketplace-admin.zod.ts`](/docs/references/cloud/marketplace-admin) | `CuratedCollection`, `FeaturedListing`, `MarketplaceHealthMetrics`, `PolicyAction`, `PolicyViolationType`, `RejectionReason`, `ReviewCriterion`, `ReviewDecision`, `SubmissionReview`, `TrendingListing` |
-| [`package.zod.ts`](/docs/references/cloud/package) | `CreatePackageRequest`, `Package`, `PackageCategory`, `PackageLocale`, `PackagePublisher`, `PackageTranslation`, `PackageTranslations`, `PackageVisibility`, `UpdatePackageRequest` |
-| [`package-version.zod.ts`](/docs/references/cloud/package-version) | `CreatePackageVersionRequest`, `PackageDependency`, `PackageManifest`, `PackageVersion`, `PackageVersionStatus`, `PublishPackageVersionRequest`, `UpdatePackageVersionRequest` |
-| [`template-manifest.zod.ts`](/docs/references/cloud/template-manifest) | `TemplateManifest` |
-| [`tenant.zod.ts`](/docs/references/cloud/tenant) | `PackageInstallation`, `PackageInstallationStatus`, `ProvisionTenantRequest`, `ProvisionTenantResponse`, `TenantContext`, `TenantDatabase`, `TenantDatabaseStatus`, `TenantIdentificationSource`, `TenantPlan`, `TenantRoutingConfig` |
 
 ---
 
@@ -256,6 +235,21 @@ Plugin lifecycle and manifests, capabilities and security, metadata loading, ser
 
 ---
 
+## Marketplace Protocol
+
+**Source:** `packages/spec/src/marketplace/` · **Import:** `@objectstack/spec/marketplace` · **4 pages, 30 schemas**
+
+The package & marketplace format — package identity and versions, listing, publish, review, search, install, template manifests.
+
+| File | Schemas |
+| :--- | :--- |
+| [`marketplace.zod.ts`](/docs/references/marketplace/marketplace) | `ArtifactDownloadResponse`, `ArtifactReference`, `ListingStatus`, `MarketplaceCategory`, `MarketplaceInstallRequest`, `MarketplaceInstallResponse`, `MarketplaceListing`, `MarketplaceSearchRequest`, `MarketplaceSearchResponse`, `PackageSubmission`, `PricingModel`, `Publisher`, `PublisherVerification` |
+| [`package.zod.ts`](/docs/references/marketplace/package) | `CreatePackageRequest`, `Package`, `PackageCategory`, `PackageLocale`, `PackagePublisher`, `PackageTranslation`, `PackageTranslations`, `PackageVisibility`, `UpdatePackageRequest` |
+| [`package-version.zod.ts`](/docs/references/marketplace/package-version) | `CreatePackageVersionRequest`, `PackageDependency`, `PackageManifest`, `PackageVersion`, `PackageVersionStatus`, `PublishPackageVersionRequest`, `UpdatePackageVersionRequest` |
+| [`template-manifest.zod.ts`](/docs/references/marketplace/template-manifest) | `TemplateManifest` |
+
+---
+
 ## QA Protocol
 
 **Source:** `packages/spec/src/qa/` · **Import:** `@objectstack/spec/qa` · **1 page, 8 schemas**
@@ -286,7 +280,7 @@ Permission sets, row-level security, sharing rules, tenancy posture.
 
 ## Shared Protocol
 
-**Source:** `packages/spec/src/shared/` · **Import:** `@objectstack/spec/shared` · **9 pages, 28 schemas**
+**Source:** `packages/spec/src/shared/` · **Import:** `@objectstack/spec/shared` · **9 pages, 29 schemas**
 
 Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums.
 
@@ -294,7 +288,7 @@ Primitives used across every protocol — identifiers, HTTP, expressions, error 
 | :--- | :--- |
 | [`enums.zod.ts`](/docs/references/shared/enums) | `IsolationLevelEnum`, `MutationEventEnum`, `SortDirectionEnum`, `SortItem` |
 | [`epoch.zod.ts`](/docs/references/shared/epoch) | `EpochMs` |
-| [`expression.zod.ts`](/docs/references/shared/expression) | `CronExpressionInput`, `EvaluatedExpression`, `Expression`, `ExpressionDialect`, `ExpressionInput`, `ExpressionMeta`, `Predicate`, `PredicateInput`, `TemplateExpressionInput` |
+| [`expression.zod.ts`](/docs/references/shared/expression) | `CronExpressionInput`, `EvaluatedExpression`, `EvaluatedExpressionInput`, `Expression`, `ExpressionDialect`, `ExpressionInput`, `ExpressionMeta`, `Predicate`, `PredicateInput`, `TemplateExpressionInput` |
 | [`http.zod.ts`](/docs/references/shared/http) | `CorsConfig`, `HttpMethod`, `HttpMethodSubset`, `HttpRequest`, `RateLimitConfig`, `StaticMount` |
 | [`identifiers.zod.ts`](/docs/references/shared/identifiers) | `MetadataItemName`, `SnakeCaseIdentifier`, `SystemIdentifier` |
 | [`mapping.zod.ts`](/docs/references/shared/mapping) | `FieldMapping` |

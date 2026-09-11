@@ -119,7 +119,7 @@
 - 二、派发词必带自驱条款:云会话回合一结束即停摆等 poke。
 - ⛔ 不为提问或中期汇报结束回合;开放选择按裁决与评估轴自裁,记入终报 `open_questions`。
 - 合法回合终点只有两个:推送完成加终报,或硬阻塞详报。
-- 三、交付通道:dev 自开 draft PR(`Fixes #<n>`,正文含验证记录)。
+- 三、交付通道:dev 自开 draft PR(`Fixes #<n>` 只写正文,`partof-closing-keyword` RULE 2,含验证记录)。
 - 终报以 issue 评论交付,带 `os-dev-report` 标记。
 - 未 attach 的姊妹仓够不着,跨仓跟进卡由 PM 代立。
 - trigger 定时会话维持降级通道:推送 outcome branch,终报走最后一条会话消息,PM 代开 draft PR。

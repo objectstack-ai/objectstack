@@ -41,10 +41,10 @@
 // The last two are the ones that matter most: they are what stop this gate from
 // decaying into a no-op the day someone reflows the wording.
 //
-// EXEMPTIONS ARE NAMED, JUSTIFIED, AND SELF-INVALIDATING. Two SKILL.md files
-// deliberately pin no major, for two different and legitimate reasons, and both are
-// written down in EXEMPT below with a `rationale` regex that must still match the
-// live text. If the justification is edited away, the exemption dies with it and
+// EXEMPTIONS ARE NAMED, JUSTIFIED, AND SELF-INVALIDATING. One SKILL.md file
+// deliberately pins no major, for a legitimate reason, and it is written down in
+// EXEMPT below with a `rationale` regex that must still match the live text (a
+// second, the published PM skill, was deleted with its file on 2026-09-10). If the justification is edited away, the exemption dies with it and
 // the file falls back to the normal rule. An exemption never covers a pinned claim:
 // exempt files' pins, if they ever grow any, are reconciled like everyone else's.
 // This is the difference between "we thought about this file" and a silent hole.
@@ -144,14 +144,6 @@ const MENTION_RE = /@objectstack\/([a-z0-9][a-z0-9-]*)/g;
  * applying, so this list cannot quietly outlive the thing it describes.
  */
 const EXEMPT = [
-  {
-    file: 'skills/objectstack-pm-dispatch/SKILL.md',
-    // A process skill: it drives a GitHub backlog and imports nothing from the
-    // workspace, so there is no major to be compatible WITH. Its compatibility text
-    // says so in as many words, and that self-declaration is the exemption's warrant.
-    why: 'process skill with no @objectstack/spec dependency — it declares so explicitly',
-    rationale: /No\s+@objectstack\/spec\s+dependency/i,
-  },
   {
     file: 'skills/objectstack-upgrade/SKILL.md',
     // The cross-major upgrade skill. Pinning it to the current major would be
@@ -548,10 +540,6 @@ function selfTest() {
   const ok = (n = 'skills/objectstack-ai/SKILL.md') => ({
     file: n, text: fm('compatibility: Requires @objectstack/spec 17.x (Zod v4 schemas)'),
   });
-  const exemptDispatch = {
-    file: 'skills/objectstack-pm-dispatch/SKILL.md',
-    text: fm('compatibility: >\n  No @objectstack/spec dependency — process skill. Needs a GitHub repository\n  with issues enabled.'),
-  };
   const exemptUpgrade = {
     file: 'skills/objectstack-upgrade/SKILL.md',
     text: fm('compatibility: >\n  Needs `@objectstack/spec` and `@objectstack/cli` at the TARGET major\n  (protocol 10 at the time of writing).'),
@@ -560,12 +548,12 @@ function selfTest() {
   const cases = [
     {
       label: 'the landed wording (exact 17.x pin) → GREEN',
-      files: [ok(), exemptDispatch, exemptUpgrade],
+      files: [ok(), exemptUpgrade],
       expect: 'green',
     },
     {
       label: 'R1 — a stale major (17.x → 16.x, the #5245 drift) → RED naming file/declared/actual/fix',
-      files: [{ file: 'skills/objectstack-ai/SKILL.md', text: fm('compatibility: Requires @objectstack/spec 16.x (Zod v4 schemas)') }, exemptDispatch, exemptUpgrade],
+      files: [{ file: 'skills/objectstack-ai/SKILL.md', text: fm('compatibility: Requires @objectstack/spec 16.x (Zod v4 schemas)') }, exemptUpgrade],
       expect: 'red',
       wants: [
         /skills\/objectstack-ai\/SKILL\.md/,
@@ -576,19 +564,19 @@ function selfTest() {
     },
     {
       label: 'R3 — no `compatibility:` key at all → RED (absence is never a skip, #4690)',
-      files: [{ file: 'skills/objectstack-ai/SKILL.md', text: '---\nname: x\n---\n\n# body\n' }, exemptDispatch, exemptUpgrade],
+      files: [{ file: 'skills/objectstack-ai/SKILL.md', text: '---\nname: x\n---\n\n# body\n' }, exemptUpgrade],
       expect: 'red',
       wants: [/no `compatibility:` key/],
     },
     {
       label: 'an empty `compatibility:` value → RED',
-      files: [{ file: 'skills/objectstack-ai/SKILL.md', text: fm('compatibility:') }, exemptDispatch, exemptUpgrade],
+      files: [{ file: 'skills/objectstack-ai/SKILL.md', text: fm('compatibility:') }, exemptUpgrade],
       expect: 'red',
       wants: [/present but empty/],
     },
     {
       label: 'no frontmatter at all → RED',
-      files: [{ file: 'skills/objectstack-ai/SKILL.md', text: '# just a heading\n' }, exemptDispatch, exemptUpgrade],
+      files: [{ file: 'skills/objectstack-ai/SKILL.md', text: '# just a heading\n' }, exemptUpgrade],
       expect: 'red',
       wants: [/no YAML frontmatter/],
     },
@@ -596,7 +584,7 @@ function selfTest() {
       label: 'R4 — wording switched to an unpinned range (#5245 option ②) → RED, not a silent no-op',
       files: [
         { file: 'skills/objectstack-ai/SKILL.md', text: fm('compatibility: Requires @objectstack/spec >= 17') },
-        exemptDispatch, exemptUpgrade,
+        exemptUpgrade,
       ],
       expect: 'red',
       // The per-file "no pinned major" fires first; both are the same refusal to
@@ -605,13 +593,13 @@ function selfTest() {
     },
     {
       label: 'R4b — zero pins repo-wide with every file exempt → RED via the anti-no-op assertion',
-      files: [exemptDispatch, exemptUpgrade],
+      files: [exemptUpgrade],
       expect: 'red',
       wants: [/not one "@objectstack\/<pkg> <major>\.x" pin was found/],
     },
     {
       label: 'R5 — an exemption naming a file that is not scanned → RED (anti-dormancy)',
-      files: [ok(), exemptDispatch],
+      files: [ok()],
       expect: 'red',
       wants: [/stale exemption: skills\/objectstack-upgrade\/SKILL\.md/],
     },
@@ -619,8 +607,7 @@ function selfTest() {
       label: 'R7 — an exempt file whose written justification is gone → RED (exemption self-invalidates)',
       files: [
         ok(),
-        { file: 'skills/objectstack-pm-dispatch/SKILL.md', text: fm('compatibility: >\n  Needs a GitHub repository with issues enabled.') },
-        exemptUpgrade,
+        { file: 'skills/objectstack-upgrade/SKILL.md', text: fm('compatibility: >\n  Cross-major upgrade skill — correct at whatever major the project moves to.') },
       ],
       expect: 'red',
       wants: [/no longer matches that justification/],
@@ -629,8 +616,7 @@ function selfTest() {
       label: 'an exempt file that grows a pin → RED (the exemption is now dead config)',
       files: [
         ok(),
-        { file: 'skills/objectstack-pm-dispatch/SKILL.md', text: fm('compatibility: >\n  No @objectstack/spec dependency — process skill, but @objectstack/core 17.x.') },
-        exemptUpgrade,
+        { file: 'skills/objectstack-upgrade/SKILL.md', text: fm('compatibility: >\n  Correct at the TARGET major, but @objectstack/core 17.x.') },
       ],
       expect: 'red',
       wants: [/is on the EXEMPT list \(no-pin allowed\) yet now declares a pinned major/],
@@ -639,8 +625,7 @@ function selfTest() {
       label: 'an exempt file whose pin is ALSO wrong → RED on the pin (exemptions never cover a claim)',
       files: [
         ok(),
-        { file: 'skills/objectstack-pm-dispatch/SKILL.md', text: fm('compatibility: >\n  No @objectstack/spec dependency — process skill, but @objectstack/core 16.x.') },
-        exemptUpgrade,
+        { file: 'skills/objectstack-upgrade/SKILL.md', text: fm('compatibility: >\n  Correct at the TARGET major, but @objectstack/core 16.x.') },
       ],
       expect: 'red',
       wants: [/declared: @objectstack\/core 16\.x/],
@@ -649,7 +634,7 @@ function selfTest() {
       label: 'R8 — a half-pinned line (one pinned, one bare mention) → RED on the bare one',
       files: [
         { file: 'skills/objectstack-ai/SKILL.md', text: fm('compatibility: Requires @objectstack/spec 17.x and @objectstack/core') },
-        exemptDispatch, exemptUpgrade,
+        exemptUpgrade,
       ],
       expect: 'red',
       wants: [/mentions @objectstack\/core without a "<major>\.x" pin/],
@@ -658,7 +643,7 @@ function selfTest() {
       label: 'a pin naming a package the workspace does not have → RED',
       files: [
         { file: 'skills/objectstack-ai/SKILL.md', text: fm('compatibility: Requires @objectstack/nonesuch 17.x') },
-        exemptDispatch, exemptUpgrade,
+        exemptUpgrade,
       ],
       expect: 'red',
       wants: [/no workspace package is named @objectstack\/nonesuch/],
@@ -671,7 +656,7 @@ function selfTest() {
     },
     {
       label: 'no workspace packages discovered → RED',
-      files: [ok(), exemptDispatch, exemptUpgrade],
+      files: [ok(), exemptUpgrade],
       pkgs: new Map(),
       expect: 'red',
       wants: [/no workspace package\.json files found/],
@@ -680,7 +665,7 @@ function selfTest() {
       label: 'multi-package line, both pinned correctly → GREEN',
       files: [
         { file: 'skills/objectstack-ai/SKILL.md', text: fm('compatibility: Requires @objectstack/spec 17.x and @objectstack/core 17.x (Zod v4 schemas), Node 22+') },
-        exemptDispatch, exemptUpgrade,
+        exemptUpgrade,
       ],
       expect: 'green',
     },
@@ -689,13 +674,13 @@ function selfTest() {
       label: 'wording reflowed around a correct pin → stays GREEN',
       files: [
         { file: 'skills/objectstack-ai/SKILL.md', text: fm('compatibility: Works with @objectstack/spec 17.x — Zod v4 schemas throughout') },
-        exemptDispatch, exemptUpgrade,
+        exemptUpgrade,
       ],
       expect: 'green',
     },
     {
       label: 'a prerelease major still reconciles by major (17.0.0-rc.5 ↔ 17.x) → GREEN',
-      files: [ok(), exemptDispatch, exemptUpgrade],
+      files: [ok(), exemptUpgrade],
       expect: 'green',
     },
   ];
@@ -792,7 +777,8 @@ function selfTest() {
   // state what it reads. If that refusal ever changes, this line moves with it.
   const unseeable = (r) => !r.includes('/') && !r.startsWith('.');
   const declFailures = [];
-  const decl = (label, ok) => { if (!ok) declFailures.push(label); };
+  let declCases = 0;
+  const decl = (label, ok) => { declCases += 1; if (!ok) declFailures.push(label); };
   decl('SKILLS_DIR is invisible to the derivation, which is why it needs a declaration at all',
     unseeable(SKILLS_DIR));
   decl('and it declares exactly that root, in the subtree spelling',
@@ -879,7 +865,7 @@ function selfTest() {
     console.error(`\n✗ check-skill-compatibility-version self-test: ${failed} failure(s) (cases and floor).`);
     process.exit(1);
   }
-  console.log(`\n✓ check-skill-compatibility-version self-test: ${cases.length} cases pass, plus 7 dispatch-gates declaration cases.`);
+  console.log(`\n✓ check-skill-compatibility-version self-test: ${cases.length} cases pass, plus ${declCases} dispatch-gates declaration cases.`);
   selfTestReachedVerdict = true;
 }
 

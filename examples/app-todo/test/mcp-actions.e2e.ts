@@ -180,6 +180,71 @@ function mcpRequest(body: unknown): Request {
   check(unexposedRun.result?.isError === true, 'run_action refuses the unexposed action (fail-closed)');
   check(/not exposed to AI/i.test(unexposedRun.result?.content?.[0]?.text ?? ''), 'refusal names the AI-exposure gate');
 
+  // ── Step 7 — the confirmation gate (#15942), BOTH directions ───────
+  //
+  // The one drive that spans the whole path. A unit test on either side is
+  // blind to the other: `invokeBusinessAction` called directly never sees the
+  // MCP door strip the member (the SDK's shape wrap drops unknown keys, and
+  // the handler forwards a rebuilt object), and a door test with a stubbed
+  // bridge never sees the runtime gate. Here the member travels from a real
+  // JSON-RPC `tools/call`, through both of those layers, into the real gate —
+  // and the record afterwards says whether anything ran.
+  console.log('\n🔒 Step 7 — ai.requiresConfirmation is ENFORCED, and satisfiable');
+  // Same app, but complete_task now declares the author's gate.
+  const gatedConfirmObjects = mergedObjects.map((o) =>
+    o.name !== 'todo_task'
+      ? o
+      : {
+          ...o,
+          actions: o.actions.map((a: any) =>
+            a.name === 'complete_task' ? { ...a, ai: { ...(a.ai ?? {}), requiresConfirmation: true } } : a,
+          ),
+        },
+  );
+  const confirmBridge = bridgeFor(user, gatedConfirmObjects);
+
+  // The listing tells a client the gate is there (unchanged behaviour).
+  const gatedList = JSON.parse((await callMcp(confirmBridge, toolsCall(11, 'list_actions', {}))).result.content[0].text).actions as any[];
+  check(
+    gatedList.find((a) => a.name === 'complete_task')?.requiresConfirmation === true,
+    'list_actions still reports requiresConfirmation:true (unchanged)',
+  );
+
+  const gatedTask: any = await engine.insert('todo_task', { subject: 'Needs a human', status: 'not_started', priority: 'high' });
+  const gatedId = gatedTask?.id ?? gatedTask?.record?.id;
+
+  // 7a — WITHOUT the member: refused, with the declared code, and NOTHING ran.
+  const refused = await callMcp(confirmBridge, toolsCall(12, 'run_action', { actionName: 'complete_task', recordId: gatedId }));
+  check(refused.result?.isError === true, 'run_action WITHOUT confirm is refused');
+  let refusedEnvelope: any = {};
+  try {
+    refusedEnvelope = JSON.parse(refused.result?.content?.[0]?.text ?? '{}');
+  } catch {
+    refusedEnvelope = {};
+  }
+  check(refusedEnvelope?.error?.code === 'ACTION_CONFIRMATION_REQUIRED', `refusal carries code ACTION_CONFIRMATION_REQUIRED (got ${refusedEnvelope?.error?.code})`);
+  check(refusedEnvelope?.error?.status === 428, `refusal carries status 428 (got ${refusedEnvelope?.error?.status})`);
+  check(refusedEnvelope?.error?.details?.actionName === 'complete_task', 'refusal names the action');
+  check(refusedEnvelope?.error?.details?.confirmationMember === 'confirm', 'refusal names the member to set');
+  const afterRefusal: any[] = await engine.find('todo_task', { where: { id: gatedId } });
+  check(afterRefusal?.[0]?.status === 'not_started', `nothing ran — status is still '${afterRefusal?.[0]?.status}'`);
+
+  // 7b — WITH the member: the identical call succeeds and the handler runs.
+  // This is the leg that proves the member is not stripped: before the door
+  // grew it, this call was refused exactly like 7a and the action was
+  // permanently un-invokable.
+  const confirmed = await callMcp(confirmBridge, toolsCall(13, 'run_action', { actionName: 'complete_task', recordId: gatedId, confirm: true }));
+  check(confirmed.result?.isError !== true, 'run_action WITH confirm:true succeeds');
+  const afterConfirm: any[] = await engine.find('todo_task', { where: { id: gatedId } });
+  check(afterConfirm?.[0]?.status === 'completed', `the handler ran — status is now '${afterConfirm?.[0]?.status}'`);
+
+  // 7c — the heuristic must NOT gate: delete_completed is `variant:'danger'`
+  // and the listing calls it requiresConfirmation, but its author declared
+  // nothing, so it stays invokable with no member (this change narrows a
+  // published accept set; refusing here would be the regression).
+  const undeclared = await callMcp(confirmBridge, toolsCall(14, 'run_action', { actionName: 'delete_completed' }));
+  check(undeclared.result?.isError !== true, 'a destructive-LOOKING action with no declared flag is NOT gated');
+
   console.log('\n────────────────────────────────────────────────────────────────────────────────');
   if (failures > 0) {
     console.error(`❌ MCP action E2E FAILED — ${failures} check(s) failed`);

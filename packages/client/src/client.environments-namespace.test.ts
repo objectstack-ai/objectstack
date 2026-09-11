@@ -127,9 +127,10 @@ export function createDeclaresNoDatabaseBlock(): void {
  * ⚖️ Maintainer ruling, 2026-08-29, verbatim: 「同意」 — option 甲. `warnings`
  * and `durationMs` are declared PRESENT, `hostnameAssignment` OPTIONAL (the
  * producer's own "absence stays absence" contract), all three typed as the
- * INLINE WIRE SHAPE and ⛔ NOT bound to `@objectstack/spec/cloud`'s
- * `ProvisionEnvironmentResponseSchema` — those are camelCase row contracts for
- * a control plane that speaks snake_case on `/api/v1/cloud/*` (#11925/#12036).
+ * INLINE WIRE SHAPE and ⛔ NOT bound to `ProvisionEnvironmentResponseSchema`
+ * (declared by `@objectstack/spec/cloud` until #16325, by the cloud repo since)
+ * — those are camelCase row contracts for a control plane that speaks
+ * snake_case on `/api/v1/cloud/*` (#11925/#12036).
  *
  * Each read below is a separate assertion on purpose: a key that regresses on
  * its own is named by the failure instead of hidden behind a sibling's.

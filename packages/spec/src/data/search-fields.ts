@@ -6,7 +6,10 @@
  * ONE resolution shared by the two layers that must agree on it:
  *
  * - the ENGINE (`@objectstack/objectql` `expandSearchToFilter`), which expands
- *   a `$search` term into a `$or` of `$contains` clauses over exactly this set;
+ *   a `$search` term into a `$or` of `$icontains` clauses over exactly this set
+ *   — `$icontains` since #7641, NOT `$contains`, which is contractually
+ *   case-SENSITIVE (#4706 Q2 = A): a gate, test or driver written to the old
+ *   sentence is STRICTER than the platform — a false refusal, not a leak;
  * - the INGRESS gate (`@objectstack/metadata-protocol` `findData`), which
  *   refuses a `$searchFields` override naming a field this set does not admit
  *   (#4254), instead of letting the engine drop it silently.

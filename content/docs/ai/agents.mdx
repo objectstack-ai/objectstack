@@ -83,19 +83,26 @@ Per client:
 | Client | How to connect |
 |---|---|
 | **Claude Code** | `claude mcp add --transport http objectstack https://<your-deployment>/api/v1/mcp` — a browser login opens on first use. Headless alternative: add `--header "x-api-key: osk_..."`. |
-| **Claude Desktop** | Settings → Connectors → *Add custom connector* → paste the MCP URL → sign in when prompted. |
-| **claude.ai (web)** | Settings → Connectors → *Add custom connector* → paste the MCP URL. |
+| **Claude Desktop** | Settings → Connectors → *Add custom connector* → paste the MCP URL → sign in when prompted. Connects from Anthropic's servers — needs public HTTPS (see below). |
+| **claude.ai (web)** | Settings → Connectors → *Add custom connector* → paste the MCP URL. Connects from Anthropic's servers — needs public HTTPS (see below). |
 | **Other MCP clients** | Any client implementing MCP authorization discovers the flow automatically; header-based clients can send the API key instead. |
 
 <Callout type="info">
 **Private / intranet deployments.** OAuth requires HTTPS (localhost is
-exempt, per OAuth 2.1). **Local** clients — Claude Code and Claude Desktop —
-run on your machine, so they can reach an intranet-only deployment (an
-internal CA works). **claude.ai web connectors** connect from Anthropic's
-servers, so they additionally need the MCP endpoint reachable from the public
-internet — a network decision, not a platform switch. On a plain-HTTP
-non-localhost deployment the OAuth track stays dark and the endpoint is
-API-key-only, fail-closed.
+exempt, per OAuth 2.1). What decides reach is **where the connection is made
+from**, not whether the client application runs on your machine. **Claude
+Code** (`claude mcp add`, or the plugin) dials the endpoint from your own
+machine, so it reaches an intranet-only deployment (an internal CA works).
+**claude.ai and Claude Desktop** both go through the same claude.ai
+custom-connector system, which connects **from Anthropic's servers**:
+Anthropic's custom-connector documentation requires the MCP server to be
+reachable over the public internet from Anthropic's IP ranges, and states that
+a server on a private corporate network, behind a VPN, or blocked by a firewall
+will not connect — a locally trusted certificate does not change that. So an
+intranet deployment is connected through the **Claude Code** track; *Add custom
+connector* is not a second door to it — a network fact, not a platform switch.
+On a plain-HTTP non-localhost deployment the OAuth track stays dark and the
+endpoint is API-key-only, fail-closed.
 </Callout>
 
 ## You extend the platform with **skills**, not agents

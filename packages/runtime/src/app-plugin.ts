@@ -1613,8 +1613,8 @@ export class AppPlugin implements Plugin {
      * the analogous moment, and `claim-seed-ownership.ts` names the missing
      * tenancy half in its own header ("the ownership twin of org-scoping's
      * `claimOrphanOrgRows`, which back-fills `organization_id`") — that back-fill
-     * ships in the enterprise organizations runtime, which a single-tenant install
-     * does not have. This is the open-core half of the same handoff.
+     * ships in the organizations runtime, which a single-tenant install
+     * does not have. This is the always-present half of the same handoff.
      *
      * Cheap by construction: the backfill's first act is one indexed probe of
      * `_objectstack_sequences`, and on any install with no untenanted counter it

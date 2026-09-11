@@ -60,7 +60,8 @@
       "@objectstack/organizations": ["../../plugins/organizations/src/index.ts"],
       "@objectstack/formula": ["../../formula/src/index.ts"],
       "@objectstack/plugin-approvals": ["../../plugins/plugin-approvals/src/index.ts"],
-      "@objectstack/trigger-record-change": ["../../triggers/trigger-record-change/src/index.ts"]
+      "@objectstack/trigger-record-change": ["../../triggers/trigger-record-change/src/index.ts"],
+      "@objectstack/trigger-schedule": ["../../triggers/trigger-schedule/src/index.ts"]
     }
   },
   "include": ["test/**/*"],

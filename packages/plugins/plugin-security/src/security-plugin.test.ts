@@ -625,7 +625,7 @@ describe('SecurityPlugin', () => {
       };
       await harness.run(opCtx); // must not throw — no cross-tenant check on an absent value
       // [ADR-0105 D5/D12] SecurityPlugin never stamps organization_id. That stays
-      // with the enterprise organizations runtime, which is also what activates a
+      // with the organizations runtime, which is also what activates a
       // walled posture — so a forged `org-scoping` registration yields NULL-org
       // rows the wall hides (a broken deployment), not a working unlicensed one.
       expect(opCtx.data.organization_id).toBeUndefined();
@@ -3848,9 +3848,16 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
       objectql: ql,
       metadata: { get: async () => baseSchema, list: async () => opts.sets },
     };
+    // The registered `security` service is captured, not discarded: the
+    // ADR-0090 D10 diagnostic (`describeDelegationNarrowing`) is published ON
+    // that service, and asserting it through the same boot the enforcement
+    // tests use is what keeps the two from drifting.
+    let registeredSecurity: any = null;
     const ctx: any = {
       logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-      registerService: vi.fn(),
+      registerService: vi.fn((name: string, impl: any) => {
+        if (name === 'security') registeredSecurity = impl;
+      }),
       getService: (name: string) => {
         if (!(name in services)) throw new Error(`service not registered: ${name}`);
         return services[name];
@@ -3858,6 +3865,7 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
     };
     return {
       ctx, taskFindOne,
+      security: () => registeredSecurity,
       run: async (opCtx: any) => { await middleware(opCtx, () => runEngineWriteBody(opCtx)); return opCtx; },
     };
   };
@@ -3982,6 +3990,193 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
     // so plugin-sharing can re-run the owner-match under the DELEGATOR identity.
     expect(ctx.__readScope).toBe('org');
     expect(ctx.__delegatorReadScope).toBe('own');
+  });
+
+  // ── [#16549 / maintainer ruling 2026-09-08] "a ceiling that says nothing
+  //    subtracts nothing" — the OAuth-agent parity half of the ruling ─────────
+  //
+  // The shipped MCP ceilings (`mcp_agent_data_read` / `_write`) are pure
+  // CAPABILITY sets: a `'*'` grant with no `readScope` and no `viewAllRecords`.
+  // `getEffectiveScope`'s owner-only default turned that silence into `'own'`,
+  // so the agent leg imposed an owner-match nobody declared and every
+  // `viewAllRecords` manager collapsed to `own + shares` the moment an OAuth
+  // MCP client asked on her behalf: measured 9/23/45 through an API key,
+  // 5/0/0 over OAuth, same account, same questions, same server.
+  //
+  // `silentCeiling` is that exact shape. The pins below fix BOTH directions —
+  // what the ruling widened, and every subtraction it did not.
+  const silentCeiling = (name: string, extra?: Record<string, unknown>): PermissionSet => ({
+    name, label: name, objects: { task: { allowRead: true, ...(extra ?? {}) } },
+  } as any);
+  const viewAllDelegator = (name: string): PermissionSet => ({
+    name, label: name, objects: { task: { allowRead: true, viewAllRecords: true } },
+  } as any);
+
+  it('[#16549] a ceiling silent about depth contributes NO owner narrowing — the delegator\'s viewAllRecords stands', async () => {
+    const { h } = await boot({
+      sets: [silentCeiling('agent_set'), viewAllDelegator('del_set')],
+      agentPositions: ['agent_set'], delegatorPositions: ['del_set'],
+      schemaExtra: { sharingModel: 'private' },
+    });
+    const ctx: any = agentCtx();
+    await h.run({ object: 'task', operation: 'find', ast: { where: undefined }, context: ctx });
+    // Was 'own' before the ruling — the manufactured opinion that produced
+    // `crm_opportunity: 0`. Both legs now say 'org', so plugin-sharing's
+    // `buildReadFilter` returns null on each and the agent reads exactly the
+    // rows the human reads. THIS is pin 1: equal, not merely closer.
+    expect(ctx.__readScope).toBe('org');
+    expect(ctx.__delegatorReadScope).toBe('org');
+  });
+
+  it('[#16549] NEGATIVE CONTROL: a delegator WITHOUT viewAllRecords is unchanged — the delegator leg still bounds the read', async () => {
+    const delOwn: PermissionSet = { name: 'del_set', label: 'd', objects: { task: { allowRead: true, readScope: 'own' } } } as any;
+    const { h } = await boot({
+      sets: [silentCeiling('agent_set'), delOwn],
+      agentPositions: ['agent_set'], delegatorPositions: ['del_set'],
+      schemaExtra: { sharingModel: 'private' },
+    });
+    const ctx: any = agentCtx();
+    await h.run({ object: 'task', operation: 'find', ast: { where: undefined }, context: ctx });
+    // The widening is on the CEILING's leg only. The delegator's own 'own'
+    // depth is untouched and still AND-s in, so a user with no viewAllRecords
+    // sees exactly what she saw before: own + shares. ⛔ The fix widens the
+    // manager's view, not everyone's.
+    expect(ctx.__readScope).toBe('org');
+    expect(ctx.__delegatorReadScope).toBe('own');
+  });
+
+  it('[#16549] NEGATIVE CONTROL: a ceiling that DOES declare a depth keeps its full subtractive force', async () => {
+    const declaringCeiling: PermissionSet = { name: 'agent_set', label: 'a', objects: { task: { allowRead: true, readScope: 'own' } } } as any;
+    const { h } = await boot({
+      sets: [declaringCeiling, viewAllDelegator('del_set')],
+      agentPositions: ['agent_set'], delegatorPositions: ['del_set'],
+      schemaExtra: { sharingModel: 'private' },
+    });
+    const ctx: any = agentCtx();
+    await h.run({ object: 'task', operation: 'find', ast: { where: undefined }, context: ctx });
+    // Silence is "no opinion"; a DECLARATION is an opinion and still narrows.
+    expect(ctx.__readScope).toBe('own');
+    expect(ctx.__delegatorReadScope).toBe('org');
+  });
+
+  it('[#16549] the write leg follows the same rule — a silent write ceiling takes the delegator\'s modifyAllRecords depth', async () => {
+    const silentWriteCeiling: PermissionSet = {
+      name: 'agent_set', label: 'a',
+      objects: { task: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+    } as any;
+    const modifyAllDelegator: PermissionSet = {
+      name: 'del_set', label: 'd',
+      objects: { task: { allowRead: true, allowEdit: true, allowDelete: true, modifyAllRecords: true } },
+    } as any;
+    const { h } = await boot({
+      sets: [silentWriteCeiling, modifyAllDelegator],
+      agentPositions: ['agent_set'], delegatorPositions: ['del_set'],
+      schemaExtra: { sharingModel: 'private' },
+    });
+    const ctx: any = agentCtx();
+    await h.run({ object: 'task', operation: 'update', data: { id: 'r1', name: 'x' }, options: { where: { id: 'r1' } }, context: ctx });
+    expect(ctx.__writeScope).toBe('org');
+    expect(ctx.__delegatorWriteScope).toBe('org');
+  });
+
+  it('[#16549] NEGATIVE CONTROL: the read-only ceiling still cannot WRITE, whatever the delegator holds', async () => {
+    // The shipped `mcp_agent_data_read` shape against a delegator who CAN edit
+    // and holds modifyAllRecords. Depth is now 'org' on the agent leg — and the
+    // CRUD gate refuses anyway, because depth and capability are different axes
+    // and the ruling moved only the first.
+    const modifyAllDelegator: PermissionSet = {
+      name: 'del_set', label: 'd',
+      objects: { task: { allowRead: true, allowEdit: true, modifyAllRecords: true } },
+    } as any;
+    const { h } = await boot({
+      sets: [silentCeiling('agent_set'), modifyAllDelegator],
+      agentPositions: ['agent_set'], delegatorPositions: ['del_set'],
+    });
+    await expect(h.run({
+      object: 'task', operation: 'update', data: { id: 'r1', name: 'x' },
+      options: { where: { id: 'r1' } }, context: agentCtx(),
+    })).rejects.toMatchObject({ name: 'PermissionDeniedError' });
+  });
+
+  it('[#16549] NEGATIVE CONTROL: allowTransfer is still refused — a write ceiling without it cannot move owner_id', async () => {
+    const silentWriteCeiling: PermissionSet = {
+      name: 'agent_set', label: 'a',
+      objects: { task: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+    } as any;
+    const transferringDelegator: PermissionSet = {
+      name: 'del_set', label: 'd',
+      objects: { task: { allowRead: true, allowEdit: true, modifyAllRecords: true } },
+    } as any;
+    const { h } = await boot({
+      sets: [silentWriteCeiling, transferringDelegator],
+      agentPositions: ['agent_set'], delegatorPositions: ['del_set'],
+    });
+    // The delegator holds transfer via modifyAllRecords; the ceiling does not
+    // declare `allowTransfer` and D10 requires BOTH. ⛔ The ruling explicitly
+    // fenced this off — and it is the reason the fix lands on the intersection
+    // rather than putting `modifyAllRecords` on the ceiling, which would have
+    // granted transfer (MODIFY_ALL_WRITE_KEYS covers it) and reached `private`
+    // objects through the superuser wildcard.
+    await expect(h.run({
+      object: 'task', operation: 'update', data: { id: 'r1', owner_id: 'someone_else' },
+      options: { where: { id: 'r1' } }, context: agentCtx(),
+    })).rejects.toMatchObject({ name: 'PermissionDeniedError' });
+  });
+
+  // ── [#16549 consequence 2] the diagnostic, INDEPENDENT of the parity half ──
+  describe('describeDelegationNarrowing — a narrowed delegated read says so', () => {
+    it('reports the narrowing when the ceiling declares a depth below the delegator\'s', async () => {
+      const declaringCeiling: PermissionSet = { name: 'agent_set', label: 'a', objects: { task: { allowRead: true, readScope: 'own' } } } as any;
+      const { h } = await boot({
+        sets: [declaringCeiling, viewAllDelegator('del_set')],
+        agentPositions: ['agent_set'], delegatorPositions: ['del_set'],
+      });
+      const verdict = await h.security().describeDelegationNarrowing('task', agentCtx());
+      expect(verdict.narrowed).toBe(true);
+      expect(verdict.effectiveScope).toBe('own');
+      expect(verdict.delegatorScope).toBe('org');
+      // The sentence is for an AI consumer: it must say the rows are ABSENT
+      // from the result rather than from the object, or the agent reports
+      // `total: 0` as an answer — the whole cost of this card.
+      expect(verdict.statement).toMatch(/D10 intersection/);
+      expect(verdict.statement).toMatch(/NOT absent from the object/);
+      expect(verdict.statement).toContain(DELEGATOR);
+      expect(verdict.statement).toContain('task');
+    });
+
+    it('reports NO narrowing for a silent ceiling — an un-narrowed delegated read carries no statement', async () => {
+      const { h } = await boot({
+        sets: [silentCeiling('agent_set'), viewAllDelegator('del_set')],
+        agentPositions: ['agent_set'], delegatorPositions: ['del_set'],
+      });
+      const verdict = await h.security().describeDelegationNarrowing('task', agentCtx());
+      expect(verdict).toEqual({ narrowed: false });
+    });
+
+    it('reports NO narrowing for a NON-delegated principal', async () => {
+      const { h } = await boot({
+        sets: [silentCeiling('agent_set'), viewAllDelegator('del_set')],
+        agentPositions: ['agent_set'], delegatorPositions: ['del_set'],
+      });
+      const humanCtx = { userId: DELEGATOR, tenantId: 'org-1', positions: ['del_set'], permissions: [] };
+      expect(await h.security().describeDelegationNarrowing('task', humanCtx)).toEqual({ narrowed: false });
+    });
+
+    it('reports NO narrowing for a system context — a diagnostic never speaks for the engine\'s own writer', async () => {
+      const { h } = await boot({
+        sets: [silentCeiling('agent_set'), viewAllDelegator('del_set')],
+        agentPositions: ['agent_set'], delegatorPositions: ['del_set'],
+      });
+      expect(await h.security().describeDelegationNarrowing('task', { isSystem: true })).toEqual({ narrowed: false });
+    });
+
+    it('a DANGLING delegator is a denial upstream, not a narrowing — the probe stays silent', async () => {
+      const { h } = await boot({
+        sets: [silentCeiling('agent_set')],
+        agentPositions: ['agent_set'], delegatorPositions: null,
+      });
+      expect(await h.security().describeDelegationNarrowing('task', agentCtx())).toEqual({ narrowed: false });
+    });
   });
 
   // ── fail-closed on a dangling delegation link ───────────────────────────

@@ -29,7 +29,7 @@
 import { readFile } from 'node:fs/promises';
 import { resolve as resolvePath, basename, dirname, isAbsolute } from 'node:path';
 import { Args, Command, Flags } from '@oclif/core';
-import { PackageSchema } from '@objectstack/spec/cloud';
+import { PackageSchema } from '@objectstack/spec/marketplace';
 import { printHeader, printKV, printSuccess, printError, printStep } from '../../utils/format.js';
 import { DEFAULT_CLOUD_URL, tryReadCloudConfig } from '../../utils/cloud-config.js';
 import { readErrorMessage } from '../../utils/response-envelope.js';
@@ -106,33 +106,51 @@ export interface DerivedManifestId {
 }
 
 /**
- * Derive a reverse-domain manifest_id when the user hasn't passed --manifest-id.
+ * Decide the manifest_id when the user hasn't passed --manifest-id.
  * Order of precedence:
- *   1. artifact.manifest.id (only when it is a manifest id the control plane accepts)
+ *   1. artifact.manifest.id — whenever the artifact DECLARES one
  *   2. local.<artifact.manifest.name slug>
  *   3. local.<artifact filename without extension>
  *
- * Step 1 is gated by the schema, not by a local look-alike test: `manifest.id`
- * is a bare `z.string()` in `ManifestSchema`, so an artifact may carry any
- * shape at all, and the previous test forwarded `com.acme.repair_desk` and
- * friends unchanged. The old extra `explicit.includes('.')` condition is gone
- * because the schema subsumes it — its pattern requires at least two segments,
- * so a dotless id can never parse. That is why a bare `crm` was already blocked
- * here while the explicit `--manifest-id` path let it through: two paths, two
- * strictnesses, neither of them the declared one.
+ * ## Step 1 is a declaration, not a candidate
  *
- * Steps 2 and 3 are the CLI's own invention and are **not** guaranteed valid:
- * `slugify` has no letter-first rule, so a manifest named `2024 App` derives
- * `local.2024-app`, which the schema rejects. That is refused at the single
- * gate in `run()` with the source named, rather than normalised: `manifestId`
- * is immutable once published ("renaming a package requires creating a new
- * package"), so silently minting a different permanent global identifier than
- * the one the inputs imply is worse than saying what is wrong.
+ * A declared `manifest.id` is either used or refused. It is never *skipped* in
+ * favour of a derived id, and that is the whole point of this branch's shape:
+ * `manifestId` is immutable once published ("renaming a package requires
+ * creating a new package"), so the id chosen here is a permanent, globally
+ * unique identifier. Falling through on a declared-but-unusable value published
+ * an id the author never wrote and cannot rename afterwards, and said nothing —
+ * the substituted id appeared in the ordinary progress line, indistinguishable
+ * from the case where the artifact declared no id at all.
+ *
+ * So an unusable declared value reaches the single gate in `run()` and is
+ * refused there, quoting the schema and naming where the id came from.
+ *
+ * ⛔ Honouring such a value instead is not available, and not because anything
+ * downstream depends on the derivation — `deriveManifestId` has exactly one
+ * non-test caller. It is unavailable because the values that used to fall
+ * through here are, by construction, exactly the ones
+ * `PackageSchema.shape.manifestId` rejects — and
+ * `CreatePackageRequestSchema.manifestId` IS that same schema node, not a copy
+ * of it, so it is the declared shape of the `manifest_id` this command POSTs.
+ * Forwarding one would only move the same refusal to the server, later and with
+ * a worse message.
+ *
+ * An absent, non-string or blank `manifest.id` is not a declaration, and those
+ * fall through to step 2 exactly as before.
+ *
+ * ## Steps 2 and 3 are the CLI's own invention
+ *
+ * They are **not** guaranteed valid: `slugify` has no letter-first rule, so a
+ * manifest named `2024 App` derives `local.2024-app`, which the schema rejects.
+ * That is refused at the same gate with the source named, rather than
+ * normalised — minting a different permanent identifier than the inputs imply
+ * is worse than saying what is wrong.
  */
 export function deriveManifestId(artifact: any, artifactPath: string): DerivedManifestId {
   const explicit = artifact?.manifest?.id;
-  if (typeof explicit === 'string' && isManifestId(explicit)) {
-    return { id: explicit, source: 'artifact-manifest-id' };
+  if (typeof explicit === 'string' && explicit.trim()) {
+    return { id: explicit.trim(), source: 'artifact-manifest-id' };
   }
   const name = artifact?.manifest?.name;
   if (typeof name === 'string' && name.trim()) {
@@ -148,9 +166,18 @@ export function deriveManifestId(artifact: any, artifactPath: string): DerivedMa
 function manifestIdRemedy(source: ManifestIdSource | 'explicit'): string {
   switch (source) {
     case 'artifact-manifest-id':
+      // Names the conflict: the value is the author's own declaration, and the
+      // command is telling them it will not quietly publish under a different
+      // one. Removing the key is listed because it is the only way back to the
+      // derived id — which used to happen silently.
+      return 'It is the `manifest.id` declared by the compiled artifact, and `os package publish` '
+        + 'publishes under the id you declared or refuses — it does not substitute a derived one, '
+        + 'because manifest_id is immutable once published. Fix `manifest.id` in objectstack.config.ts '
+        + 'and rebuild, remove it to derive an id from `manifest.name`, or pass --manifest-id.';
     case 'artifact-manifest-name':
-      return 'It was derived from the compiled artifact. Pass --manifest-id, set `manifestId` in '
-        + 'objectstack.manifest.json, or fix `manifest.id` in objectstack.config.ts and rebuild.';
+      return 'It was derived from the compiled artifact, from `manifest.name`. Pass --manifest-id, set '
+        + '`manifestId` in objectstack.manifest.json, or declare `manifest.id` in objectstack.config.ts '
+        + 'and rebuild.';
     case 'artifact-filename':
       return 'It was derived from the artifact filename. Pass --manifest-id, set `manifestId` in '
         + 'objectstack.manifest.json, or give the app a `manifest.name` and rebuild.';
@@ -543,7 +570,7 @@ export default class PackagePublish extends Command {
       }
 
       // Marketplace per-locale translations. Schema is
-      // `PackageTranslationsSchema` from @objectstack/spec/cloud. Per-entry
+      // `PackageTranslationsSchema` from @objectstack/spec/marketplace. Per-entry
       // `readme` may be inlined markdown OR a path (e.g. `README.zh-CN.md`)
       // — we resolve paths against the manifest directory.
       if (m.translations && typeof m.translations === 'object') {

@@ -176,22 +176,22 @@ export const ActionParamSchema = lazySchema(() => strictObject(
   },
   {
   /** Request-body key. Defaults to `field` when `field` is set. */
-  name: z.string().optional(),
+  name: z.string().optional().meta({ title: 'Name' }),
   /** Reference an existing object field for label/type/validation/options. */
-  field: SnakeCaseIdentifierSchema.optional(),
+  field: SnakeCaseIdentifierSchema.optional().meta({ title: 'Field' }),
   /** Object that owns the referenced field (defaults to the action's parent object). */
-  objectOverride: SnakeCaseIdentifierSchema.optional(),
+  objectOverride: SnakeCaseIdentifierSchema.optional().meta({ title: 'Object Override' }),
   /** Overrides the resolved field label (or sets it for inline params). */
-  label: I18nLabelSchema.optional(),
+  label: I18nLabelSchema.optional().meta({ title: 'Label' }),
   /** Overrides the resolved field type (or sets it for inline params). */
-  type: FieldType.optional(),
+  type: FieldType.optional().meta({ title: 'Type' }),
   /**
    * Required override; when omitted defaults to `false`. Consumers that wish
    * to inherit the underlying field's `required` flag should leave this
    * undefined in the source schema and resolve at runtime (the dialog
    * renderers check truthiness, so `false === undefined` for UI purposes).
    */
-  required: z.boolean().optional().default(false),
+  required: z.boolean().optional().default(false).meta({ title: 'Required' }),
   /**
    * Select/picklist options override.
    *
@@ -327,11 +327,11 @@ export const ActionParamSchema = lazySchema(() => strictObject(
      * bypassable.
      */
     visibleWhen: ExpressionInputSchema.optional().describe("Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Same env as the field-level per-option visibleWhen (record + current_user). e.g. P`record.tier == 'gold'`"),
-  })).optional(),
+  })).optional().meta({ title: 'Options' }),
   /** Placeholder override. */
-  placeholder: z.string().optional(),
+  placeholder: z.string().optional().meta({ title: 'Placeholder' }),
   /** Help/description override. */
-  helpText: z.string().optional(),
+  helpText: z.string().optional().meta({ title: 'Help Text' }),
   /**
    * Default value for the dialog input — prefilled into the control when the
    * dialog opens, and SUBMITTED VERBATIM if the user does not touch the field
@@ -345,7 +345,7 @@ export const ActionParamSchema = lazySchema(() => strictObject(
    * runtime tokens (`current_user`, CEL `today()`; ROADMAP §M9.9b), nothing on
    * the action-param path interprets this value.
    */
-  defaultValue: z.unknown().optional(),
+  defaultValue: z.unknown().optional().meta({ title: 'Default Value' }),
   /**
    * Widget config for inline params (field-backed params inherit these from
    * the referenced field at runtime; inline values override). The param
@@ -354,11 +354,11 @@ export const ActionParamSchema = lazySchema(() => strictObject(
    * `FieldSchema` knobs.
    */
   /** Allow multiple values (file/image/lookup/user params → array value). */
-  multiple: z.boolean().optional().describe('Allow multiple values (array value shape); mirrors FieldSchema.multiple.'),
+  multiple: z.boolean().optional().describe('Allow multiple values (array value shape); mirrors FieldSchema.multiple.').meta({ title: 'Multiple' }),
   /** Accepted upload types (MIME types / extensions) for `file`/`image` params. */
-  accept: z.array(z.string()).optional().describe('Accepted upload types (MIME types / extensions) for file/image params.'),
+  accept: z.array(z.string()).optional().describe('Accepted upload types (MIME types / extensions) for file/image params.').meta({ title: 'Accepted Types' }),
   /** Max upload size in bytes for `file`/`image` params. */
-  maxSize: z.number().int().positive().optional().describe('Max upload size in bytes for file/image params.'),
+  maxSize: z.number().int().positive().optional().describe('Max upload size in bytes for file/image params.').meta({ title: 'Max Size (bytes)' }),
   /**
    * Reference target for an inline `lookup` / `master_detail` param — the
    * object whose records the picker searches. Field-backed params inherit it
@@ -371,13 +371,13 @@ export const ActionParamSchema = lazySchema(() => strictObject(
    * Key name deliberately mirrors `FieldSchema.reference` so the same spelling
    * works in both places.
    */
-  reference: SnakeCaseIdentifierSchema.optional().describe('Reference target object for inline lookup/master_detail params; mirrors FieldSchema.reference.'),
+  reference: SnakeCaseIdentifierSchema.optional().describe('Reference target object for inline lookup/master_detail params; mirrors FieldSchema.reference.').meta({ title: 'Reference Object' }),
   /**
    * When true, the param's default value is pulled from the current row record
    * (key = the resolved field name) when the action runs from a list_item
    * context. Useful for edit dialogs that pre-fill from the selected row.
    */
-  defaultFromRow: z.boolean().optional(),
+  defaultFromRow: z.boolean().optional().meta({ title: 'Default From Row' }),
   /**
    * Carry-over declaration (#11753 ruling, 2026-08-25): the param's value is
    * carried through the dialog rather than collected from the user — seeded
@@ -411,16 +411,16 @@ export const ActionParamSchema = lazySchema(() => strictObject(
     + 'render it as a non-editable summary in the dialog, and submit it verbatim in the request '
     + 'body. Unlike `visible: false` (which omits the param from the submission entirely), a '
     + 'carry-over param is always sent.',
-  ),
+  ).meta({ title: 'Carry Over' }),
   /**
    * Visibility predicate (CEL) — same scope as the action-level `visible`
-   * (`current_user` / `app` / `data` / `features`). When it evaluates false the
+   * (`current_user` / `data` / `features`). When it evaluates false the
    * dialog omits this param entirely. Use it to hide a param that the backend
    * only accepts under an opt-in capability, e.g. the create-user `phoneNumber`
    * param gated on `features.phoneNumber` so the form never offers a field the
    * default backend rejects. Absent = always visible.
    */
-  visible: ExpressionInputSchema.optional().describe('Param visibility predicate (CEL); omits the param when false.'),
+  visible: ExpressionInputSchema.optional().describe('Param visibility predicate (CEL); omits the param when false.').meta({ title: 'Visible When' }),
   /**
    * Declarative capability gate (#2874): name a public auth feature flag
    * (see `PUBLIC_AUTH_FEATURES` in `@objectstack/spec/kernel`) and the schema
@@ -431,7 +431,7 @@ export const ActionParamSchema = lazySchema(() => strictObject(
    * over a hand-written `features.*` predicate: the flag name is
    * enum-checked and the gate/registry stay in lockstep.
    */
-  requiresFeature: z.enum(PUBLIC_AUTH_FEATURE_NAMES).optional().describe('Public auth feature flag gating this param; lowered into `visible` at parse time.'),
+  requiresFeature: z.enum(PUBLIC_AUTH_FEATURE_NAMES).optional().describe('Public auth feature flag gating this param; lowered into `visible` at parse time.').meta({ title: 'Requires Feature' }),
 }).refine(
   (p) => Boolean(p.name) || Boolean(p.field),
   { message: 'ActionParam requires either "name" or "field"' },
@@ -1297,7 +1297,7 @@ const actionObject = () => strictObject({
   /**
    * Whether the action is offered at all. Three arms, one meaning — see
    * {@link ActionConditionInputSchema}: `false` parks the action, `true` is the
-   * explicit default, and a predicate gates it per record/user/app/features.
+   * explicit default, and a predicate gates it per record/user/features.
    *
    * ⚠️ Client-side hiding is UX, not authorization — the button is gone, the
    * route is not. An action gated for access-control reasons must also be

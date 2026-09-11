@@ -955,19 +955,19 @@ export const NavigationAreaSchema = lazySchema(() => strictObject(
   },
   {
   /** Unique area identifier */
-  id: SnakeCaseIdentifierSchema.describe('Unique area identifier (lowercase snake_case)'),
+  id: SnakeCaseIdentifierSchema.describe('Unique area identifier (lowercase snake_case)').meta({ title: 'ID' }),
 
   /** Display label */
-  label: I18nLabelSchema.describe('Area display label'),
+  label: I18nLabelSchema.describe('Area display label').meta({ title: 'Label' }),
 
   /** Icon name (Lucide) */
-  icon: z.string().optional().describe('Area icon name'),
+  icon: z.string().optional().describe('Area icon name').meta({ title: 'Icon' }),
 
   // `order` removed in 17.0.0 (#4667) — see AREA_ORDER_RETIRED. Reorder the
   // `areas` array instead; declaration order is display order.
 
   /** Area description */
-  description: I18nLabelSchema.optional().describe('Area description'),
+  description: I18nLabelSchema.optional().describe('Area description').meta({ title: 'Description' }),
 
   // `visible` and `requiredPermissions` removed in 17.0.0 (#4651) — see
   // AREA_VISIBLE_RETIRED / AREA_REQUIRED_PERMISSIONS_RETIRED. Both were
@@ -976,7 +976,7 @@ export const NavigationAreaSchema = lazySchema(() => strictObject(
   // (or the app) instead.
 
   /** Navigation items within this area */
-  navigation: z.array(NavigationItemSchema).describe('Navigation items within this area'),
+  navigation: z.array(NavigationItemSchema).describe('Navigation items within this area').meta({ title: 'Navigation' }),
 }));
 
 /**

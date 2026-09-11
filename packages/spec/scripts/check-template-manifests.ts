@@ -41,7 +41,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { TemplateManifestSchema } from '../src/cloud/template-manifest.zod';
+import { TemplateManifestSchema } from '../src/marketplace/template-manifest.zod';
 
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = join(pkgRoot, '..', '..');
@@ -285,7 +285,7 @@ function main(): void {
       `      value. Fix the manifest.\n` +
       `    • the SCHEMA is wrong — it demands something no template can supply, the way\n` +
       `      it required a publish-time \`manifestId\` from a source tree (#7319). Fix\n` +
-      `      packages/spec/src/cloud/template-manifest.zod.ts, and keep the relaxation\n` +
+      `      packages/spec/src/marketplace/template-manifest.zod.ts, and keep the relaxation\n` +
       `      LOCAL: CreatePackageRequestSchema is the publish request and must stay strict.\n`,
   );
   process.exit(1);

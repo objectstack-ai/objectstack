@@ -158,12 +158,16 @@ create/update payload.
   the app author exposed to AI and you are permitted to run), with each
   action's declared parameters, whether it operates on a record, and whether
   it is flagged destructive.
-- **run_action({ actionName, objectName?, recordId?, params? })** — invoke a
-  business action by name. Invocation is permission-gated, but the action body
-  executes the app's registered logic as trusted code (it can mutate data or
-  trigger flows with the app's own authority). Pass \`recordId\` for
-  record-scoped actions and \`params\` for declared inputs; \`objectName\` only
-  disambiguates a name shared by multiple objects.
+- **run_action({ actionName, objectName?, recordId?, params?, confirm? })** —
+  invoke a business action by name. Invocation is permission-gated, but the
+  action body executes the app's registered logic as trusted code (it can
+  mutate data or trigger flows with the app's own authority). Pass
+  \`recordId\` for record-scoped actions and \`params\` for declared inputs;
+  \`objectName\` only disambiguates a name shared by multiple objects. Pass
+  \`confirm: true\` on an action \`list_actions\` reports as
+  \`requiresConfirmation\` — the server REFUSES such a call without it
+  (\`ACTION_CONFIRMATION_REQUIRED\`) and nothing runs. Ask your human first;
+  the flag asserts an approval, it does not obtain one.
 
 ## Conventions & gotchas
 

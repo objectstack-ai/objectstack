@@ -2,7 +2,7 @@
 
 /**
  * #4818 — `os serve` must tell an operator WHICH of two different things went
- * wrong with the enterprise multi-org runtime, over the REAL CLI process.
+ * wrong with the multi-org runtime, over the REAL CLI process.
  *
  * The defect: `importFromHost('@objectstack/organizations')` and
  * `kernel.use(new mod.OrganizationsPlugin())` shared a single `try`, so an
@@ -27,10 +27,13 @@
  * `serve-organizations-host-resolution.e2e.test.ts`): every other test of the
  * walled postures hands the plugin in as `extraPlugins` or mocks the module,
  * which bypasses the CLI's own load/mount sequence — the only thing under test
- * here. The fixtures stand in for the closed-source enterprise package: one app
- * simply does not ship it, another ships a version whose plugin throws on
- * construction (the shape cloud#1020 gave its license gate). What is asserted
- * is the CLI's CLASSIFICATION and its message, not any enterprise semantics.
+ * here. The fixtures stand in for a mounted multi-org runtime: one app simply
+ * does not ship it, another ships a version whose plugin throws on construction
+ * — which is specifically the COMMERCIAL package's shape, since ADR-0132 D2
+ * leaves construction-time licence refusal to the private subclass and the open
+ * `packages/plugins/organizations` carries no licence check of any kind (the
+ * shape cloud#1020 gave its license gate). What is asserted is the CLI's
+ * CLASSIFICATION and its message, not any runtime's semantics.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';

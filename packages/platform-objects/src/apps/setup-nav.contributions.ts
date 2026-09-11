@@ -81,7 +81,7 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       // plugin-auth's single-org default-org bootstrap guarantees an org to
       // invite into — these are the OPEN member-management basics. Only the
       // org LIST below keeps the gate: browsing organizations is meaningful
-      // only when more than one can exist (enterprise multi-org).
+      // only when more than one can exist (a walled multi-org posture).
       { id: 'nav_teams', type: 'object', label: 'Teams', objectName: 'sys_team', icon: 'users-round' },
       { id: 'nav_organizations', type: 'object', label: 'Organizations', objectName: 'sys_organization', icon: 'building-2', requiresService: 'org-scoping' },
       { id: 'nav_invitations', type: 'object', label: 'Invitations', objectName: 'sys_invitation', icon: 'mail' },

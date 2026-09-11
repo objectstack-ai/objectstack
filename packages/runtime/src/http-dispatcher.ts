@@ -1183,7 +1183,19 @@ export class HttpDispatcher {
 
     /** Thin delegate — body extracted to `./action-execution.ts` (D11③ PR-8). */
 
-    /** True when an action is destructive by author signal/heuristic (HITL hint). */
+    /**
+     * True when an action is destructive by author signal/heuristic — the
+     * LISTING predicate, which advises a client to ask its human.
+     *
+     * [#15942] No longer a bare "HITL hint": the platform now ENFORCES the
+     * declared flag. An action whose author set `ai.requiresConfirmation: true`
+     * is REFUSED at the AI-facing door (`ACTION_CONFIRMATION_REQUIRED`, 428)
+     * unless the request carries the confirmation member — see
+     * `actionConfirmationRefusal` in `./action-execution.ts`. This predicate is
+     * the WIDER of the two and is not the one that refuses: it also answers
+     * `true` on the `mode:'delete'` / `variant:'danger'` heuristic, where the
+     * author declared nothing and so asked for no gate.
+     */
     /** Thin delegate — body extracted to `./action-execution.ts` (D11③ PR-8). */
 
     /** Project an action's declarative metadata into a lean MCP summary. */

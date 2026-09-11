@@ -1,0 +1,13 @@
+---
+"@objectstack/rest": minor
+---
+
+`import-runner.ts` builds its three server-side `findData` requests in the CANONICAL QueryAST, and the helper that carried them is typed against the declared contract instead of `any`.
+
+`FindDataRequestSchema` declares `query: QuerySchema.optional()`, and `QuerySchema` declares `where` / `limit` / `offset` / `fields` / `orderBy` / `expand` — it declares neither `$filter` nor `$top`. The normalizer's own table calls those two "the wire-only spellings no schema declares". The reference resolver, the duplicate probe and the id recheck each built a literal in that undeclared dialect, and nothing reddened because the helper they went through took `query: any`: the literals were type-checked by nothing at all, so the undeclared keys cost no diagnostic. Reverting one of them to `$filter` now costs `TS2353 … '$filter' does not exist in type 'QueryInput'`; on the pre-change file the identical revert cost zero errors.
+
+- **The three literals.** `$filter` → `where`, `$top` → `limit`, plus the `object` the declared query requires. No behaviour change on the two `rest-server.ts` call paths (`POST /data/:object/import` and the async import-job worker), which hand `runImport` the real `ObjectStackProtocolImplementation`: that normalizer folds `$filter` onto `where` and `$top` onto `limit` by the spec's own `RPC_QUERY_ALIAS_SLOTS`, moving the value verbatim, so both dialects reach `engine.find` as the same option bag.
+- **The erasure vehicle.** `findArgsBase` now takes a `FindDataRequest` rather than a bare `any` query, so the request-level `object` is compiled too and the `object: ''` placeholder every caller had to override is gone. This is the durable half: rewriting the literals while leaving the parameter `any` would leave the next author in this file with no diagnostic at all.
+- **The pin.** `rest-server-canonical-query-ast.test.ts` censuses the PACKAGE rather than one file. `import-runner.ts` has no HTTP door — every query in it is server-built — so its census rejects a wire spelling anywhere in the file, not only inside a `query:` slot. That whole-file rule is the one that finds this class: these three literals were arguments to a helper and were never in a `query:` slot to begin with.
+
+⚠️ Implementor-visible: `ImportProtocolLike` is exported, its `findData(args: any)` never declared which dialect the runner sends, and the runner now sends the canonical one. An implementation that reads `args.query.$filter` / `args.query.$top` directly — rather than through the protocol normalizer — receives `undefined` and must be updated to read `where` / `limit`.

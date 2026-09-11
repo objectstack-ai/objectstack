@@ -1046,8 +1046,9 @@ export type FilterColumnSqlResolver = (
 ) => string;
 
 /**
- * [#14079] Is this column's STORED value never text — a declared numeric or
- * boolean scalar? The declared-type half of the text-operator contract,
+ * [#14079/#15683] Is this a column a text operator must not be aimed at — one
+ * DECLARED numeric, boolean or (since #15683's ruling) temporal? The
+ * declared-type half of the text-operator contract,
  * injected by TursoDriver exactly the way {@link FilterColumnSqlResolver} is:
  * this transport keeps no schema (`syncSchema` reads one and retains nothing),
  * while the driver classifies every field at remote schema-sync time
@@ -1056,6 +1057,10 @@ export type FilterColumnSqlResolver = (
  * (`SqlDriver.isNonTextColumn`). Absent (the default), every column reads as
  * text and the text arms compile exactly as they did — a transport nobody
  * handed the rule to cannot guess it from a value it will only see at run time.
+ * The name is kept for the injection point rather than renamed to follow the
+ * ruling: what it answers is "the DECLARATION forbids a text operator here",
+ * which is what the resolver was always asked, and a rename would churn a
+ * published type for prose.
  */
 export type NonTextColumnResolver = (object: string, field: string) => boolean;
 

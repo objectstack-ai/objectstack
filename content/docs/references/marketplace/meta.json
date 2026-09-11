@@ -1,0 +1,11 @@
+{
+  "title": "Marketplace Protocol",
+  "pages": [
+    "---Packages & Versions---",
+    "package",
+    "package-version",
+    "template-manifest",
+    "---Marketplace---",
+    "marketplace"
+  ]
+}

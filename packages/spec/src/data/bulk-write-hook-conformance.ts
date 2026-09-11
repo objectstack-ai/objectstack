@@ -66,13 +66,26 @@
  *    single-row writes. One `updateMany`, one affected count (#4639), one
  *    aggregate `data.records.updated` — the write's own contract is untouched,
  *    exactly as #5038 left it;
- *  - a rewrite CONDITIONED on the row (`ctx.previous`, `ctx.input.id`) is
- *    therefore **outside this contract**: it does not scope itself to the row
- *    it was decided on, it widens to every matched row. Per-row `previous` is
- *    supplied so a guard can REFUSE the write, not so a rewrite can be aimed
- *    at one row. The three supported routes for row-specific work are: throw
- *    (which is what the guard case wants), write through `ctx.api` per row, or
- *    have the CALLER paginate the batch into by-id updates.
+ *  - a rewrite CONDITIONED on the row (`ctx.previous`, `ctx.input.id`)
+ *    therefore cannot scope itself to the row it was decided on: it widens to
+ *    every matched row. Per-row `previous` is supplied so a guard can REFUSE
+ *    the write, and — ruled on #16074 — so a hook can make a
+ *    ROW-INVARIANT-IN-EFFECT rewrite: one whose written KEY SET is the same on
+ *    every matched row AND is assigned IN PLACE. The engine's
+ *    `MULTI_UPDATE_HOOK_KEY_DIVERGENCE` refusal (#14099; `400`, naming the
+ *    diverging `keys` and the matched `rows`) is what makes that shape safe —
+ *    when two rows' hook chains assign different key sets in place the WHOLE
+ *    batch is refused before any write. In-place is the condition the refusal
+ *    rests on, not a detail of spelling: a hook that REPLACES `ctx.input.data`
+ *    rather than assigning into it leaves the dispatch unable to attribute
+ *    keys, so the recording yields nothing and the batch is NOT JUDGED at all.
+ *    A rewrite aimed at ONE row — a per-row key set; the same key with a
+ *    per-row value, which the key-set test cannot see; or a row-conditioned
+ *    REPLACEMENT of the payload, which the recording cannot see — is still
+ *    **outside this contract**; `hook.zod.ts` carries the operator-facing
+ *    shape of the refusal. The three supported routes for row-specific work
+ *    are: throw (which is what the guard case wants), write through `ctx.api`
+ *    per row, or have the CALLER paginate the batch into by-id updates.
  *
  * On a predicate DELETE this clause is vacuous — a delete context carries an
  * id and no payload — which is why `payloadScope` is `'none'` there.
@@ -150,12 +163,17 @@
  *
  * The residual hazard is named rather than hidden: D3 hands authors per-row
  * `previous` and a batch-scoped payload, so a row-conditional rewrite is
- * *expressible* and wrong. That is a contract statement, not an enforcement —
- * no static rule can decide whether a rewrite is row-invariant — so it belongs
- * in the authoring docs and, if it ever earns one, an advisory lint over hook
- * bodies (`packages/lint`'s `validate-hook-body-writes` is the existing seam).
- * Naming an unenforceable clause is the honest half of ADR-0049, not a breach
- * of it: the alternative was to leave the same hazard undocumented.
+ * *expressible*. No static rule can decide whether a rewrite is row-invariant,
+ * but since #14099 the dispatch MEASURES the half that matters — the key set
+ * each row's chain writes — and refuses divergence, which is what lets #16074
+ * admit the row-invariant-in-effect shape above. That measurement has two
+ * blind spots, and both stay unenforced: the same key with per-row VALUES, and
+ * a payload REPLACED wholesale rather than assigned into, whose keys the
+ * dispatch cannot attribute at all. Both belong in the authoring docs and, if
+ * they ever earn one, an advisory lint over hook bodies (`packages/lint`'s
+ * `validate-hook-body-writes` is the existing seam). Naming an unenforceable
+ * clause is the honest half of ADR-0049, not a breach of it: the alternative
+ * was to leave the same hazard undocumented.
  *
  * @see docs/adr/0058-expression-and-predicate-surface.md — Addendum II
  * @see HookContextSchema in `data/hook.zod.ts` — the per-event shape the engine

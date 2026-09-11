@@ -312,7 +312,7 @@ Sort field and direction pair
 | **calendar** | `any` | optional | Calendar field config: `{ startDateField, endDateField?, titleField?, colorField?, allDayField? }` |
 | **defaultView** | `Enum<'month' \| 'week' \| 'day'>` | optional | Initial view mode |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
-| **sort** | `any` | optional | Sort for the fetched events |
+| **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Row order for the fetched events — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array` |
 | **data** | `any[]` | optional | Pre-fetched records — skips the internal fetch |
 | **staticData** | `any[]` | optional | Static inline records |
 | **locale** | `string` | optional | Locale override for the calendar chrome |
@@ -327,6 +327,15 @@ View filter rule
 | **field** | `string` | ✅ | Field name to filter on |
 | **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
 | **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. |
+
+### Nested Shape: `ObjectCalendarProps.sort[number]`
+
+Sort field and direction pair
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to sort by |
+| **order** | `Enum<'asc' \| 'desc'>` | ✅ | Sort direction |
 
 
 ---
@@ -393,7 +402,7 @@ View filter rule
 | **fields** | `any[]` | optional | Field list fallback used when `columns` is absent |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. THE key, singular — not the plural misspelling. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **defaultFilters** | `any` | optional | Legacy base-filter fallback, read only when `filter` is absent. Prefer `filter` |
-| **sort** | `any` | optional | Initial sort (array of `{ field, order }`) |
+| **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Initial row order — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array` |
 | **defaultSort** | `never` | optional | [REMOVED] `object-grid` property `defaultSort` was removed in @objectstack/spec 17 (ADR-0049) — it was the legacy second spelling of `sort`: a single `{ field, order }` pair read only when `sort` was absent, so one intent had two spellings and a grid authoring both silently ignored this one. Rename the key to `sort` and wrap the value in an array (`defaultSort: { field, order }` becomes `sort: [{ field, order }]`); the pair itself is unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **pagination** | `any` | optional | Pagination config (`{ pageSize, pageSizeOptions, … }`); its presence enables paging |
 | **pageSize** | `number` | optional | Flat page-size shorthand; `pagination.pageSize` wins when both are set |
@@ -419,7 +428,7 @@ View filter rule
 | **reorderableColumns** | `boolean` | optional | Allow column drag-reorder |
 | **frozenColumns** | `number` | optional | How many leading columns stay frozen (default 1) |
 | **showColumnTypeIcons** | `boolean` | optional | Show field-type icons in column headers |
-| **exportOptions** | `any` | optional | Export config (`{ formats, streaming }`) |
+| **exportOptions** | `any` | optional | Export config (`{ formats, maxRecords, includeHeaders, fileNamePrefix, streaming }`). Unvalidated here (`z.unknown()`), so this list is the whole account of the shape; `ListViewSchema.exportOptions` declares the same five members with their per-member contract |
 | **operations** | `any` | optional | Operation toggles (`{ export: false, … }`) |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source binding (ViewDataSchema — discriminated on `provider`: object \| api \| value \| schema). Static inline rows live at `{ provider: 'value', items: [...] }`; the bare-array shortcut is refused — see migration `object-grid-data-view-data-converged` |
 | **staticData** | `any[]` | optional | Deprecated bare-array static-rows shortcut the renderer still reads. Prefer `data: { provider: 'value', items: [...] }` |
@@ -433,6 +442,15 @@ View filter rule
 | **field** | `string` | ✅ | Field name to filter on |
 | **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
 | **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. |
+
+### Nested Shape: `ObjectGridProps.sort[number]`
+
+Sort field and direction pair
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to sort by |
+| **order** | `Enum<'asc' \| 'desc'>` | ✅ | Sort direction |
 
 ### Nested Shape: `ObjectGridProps.data[provider='object']`
 

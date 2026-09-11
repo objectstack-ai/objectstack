@@ -115,9 +115,10 @@ export const RENAMED_DEFS: Readonly<Record<string, string>> = {
   // (`packageId` / `versionRange` / `optional`), `kernel` is the RESOLVER form
   // the dependency graph walks (`name` / `versionConstraint` / `type` /
   // `resolvedVersion`). Two concepts, not two spellings. The resolver side
-  // takes the descriptive name; `cloud/PackageDependency` keeps the bare one
-  // and is deliberately absent from this table — it is neither source nor
-  // target, and it is emitted byte-for-byte unchanged by this build.
+  // takes the descriptive name; `cloud/PackageDependency` kept the bare one
+  // and was deliberately absent from this table — neither source nor target,
+  // emitted byte-for-byte unchanged by that build. (It is a SOURCE below since
+  // #16325, for the category move to `marketplace/` — a different change.)
   'kernel/PackageDependency': 'kernel/ResolvedPackageDependency', // 4 keys carried
 
   // #5832 / ADR-0112 D9 — `shared/http.zod.ts` declared TWO different enums
@@ -162,6 +163,61 @@ export const RENAMED_DEFS: Readonly<Record<string, string>> = {
   // to prevent. The rename removes the collision at its source, so the baseline
   // stays empty rather than gaining its first exception.
   'system/ServiceStatus': 'system/KernelServiceStatus', // 6 keys carried
+
+  // #16325 — the `./cloud` subpath left `@objectstack/spec` (maintainer ruling,
+  // option B "cut by owner": the cloud control plane's own contracts are the
+  // cloud repo's, not an open-source protocol). The package & marketplace
+  // FORMAT half — `package.zod`, `package-version.zod`, `marketplace.zod`,
+  // `package-l10n`, `template-manifest.zod` — stays and moves to
+  // `src/marketplace/`, so every def it emits changes CATEGORY and nothing
+  // else: the same Zod, the same keys, the same JSON Schema bytes under a new
+  // `$id`. That is exactly the shape this table exists for — a rename that
+  // must carry every key — and NOT the retirement kit, which is reserved below
+  // for the six control-plane files whose defs really did leave
+  // (`RETIRED_DEFS_BY_MAJOR[18]`, one `entries/retired-defs/18.cloud__*.ts`
+  // each).
+  //
+  // Two 0-key defs move category the same way rather than retiring:
+  //   - `cloud/EnvironmentType` — the 7-member environment taxonomy the
+  //     discovery fold table is total over; re-declared in
+  //     `api/discovery.zod.ts`, its only open-source reader.
+  //   - `cloud/Sha256Digest` — was emitted twice, once per entry that exported
+  //     the `system/environment-artifact.zod.ts` declaration (`./cloud`
+  //     re-exported it, #4740 route A′). With `./cloud` gone it is emitted
+  //     once, under `system/` — a rename onto a def that already existed,
+  //     which the manifest rewrite handles by dropping the stale key.
+  'cloud/ArtifactDownloadResponse': 'marketplace/ArtifactDownloadResponse',
+  'cloud/ArtifactReference': 'marketplace/ArtifactReference',
+  'cloud/CreatePackageRequest': 'marketplace/CreatePackageRequest',
+  'cloud/CreatePackageVersionRequest': 'marketplace/CreatePackageVersionRequest',
+  'cloud/ListingStatus': 'marketplace/ListingStatus',
+  'cloud/MarketplaceCategory': 'marketplace/MarketplaceCategory',
+  'cloud/MarketplaceInstallRequest': 'marketplace/MarketplaceInstallRequest',
+  'cloud/MarketplaceInstallResponse': 'marketplace/MarketplaceInstallResponse',
+  'cloud/MarketplaceListing': 'marketplace/MarketplaceListing',
+  'cloud/MarketplaceSearchRequest': 'marketplace/MarketplaceSearchRequest',
+  'cloud/MarketplaceSearchResponse': 'marketplace/MarketplaceSearchResponse',
+  'cloud/Package': 'marketplace/Package',
+  'cloud/PackageCategory': 'marketplace/PackageCategory',
+  'cloud/PackageDependency': 'marketplace/PackageDependency',
+  'cloud/PackageLocale': 'marketplace/PackageLocale',
+  'cloud/PackageManifest': 'marketplace/PackageManifest',
+  'cloud/PackagePublisher': 'marketplace/PackagePublisher',
+  'cloud/PackageSubmission': 'marketplace/PackageSubmission',
+  'cloud/PackageTranslation': 'marketplace/PackageTranslation',
+  'cloud/PackageTranslations': 'marketplace/PackageTranslations',
+  'cloud/PackageVersion': 'marketplace/PackageVersion',
+  'cloud/PackageVersionStatus': 'marketplace/PackageVersionStatus',
+  'cloud/PackageVisibility': 'marketplace/PackageVisibility',
+  'cloud/PricingModel': 'marketplace/PricingModel',
+  'cloud/PublishPackageVersionRequest': 'marketplace/PublishPackageVersionRequest',
+  'cloud/Publisher': 'marketplace/Publisher',
+  'cloud/PublisherVerification': 'marketplace/PublisherVerification',
+  'cloud/TemplateManifest': 'marketplace/TemplateManifest',
+  'cloud/UpdatePackageRequest': 'marketplace/UpdatePackageRequest',
+  'cloud/UpdatePackageVersionRequest': 'marketplace/UpdatePackageVersionRequest',
+  'cloud/EnvironmentType': 'api/EnvironmentType', // 0-key carry: enum def
+  'cloud/Sha256Digest': 'system/Sha256Digest', // 0-key carry: string def, onto its surviving twin
 };
 
 /**

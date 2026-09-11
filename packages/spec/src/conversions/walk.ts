@@ -115,6 +115,53 @@ function mapNodeTree(
 }
 
 /**
+ * Immutably map ONE flow's `nodes[]` — **including the nodes nested inside
+ * ADR-0031 structured regions** (`loop.config.body`,
+ * `parallel.config.branches[]`, `try_catch.config.try`/`.catch`), to any depth.
+ *
+ * Returns the **same array reference** when nothing under it changed, so a
+ * caller can tell "rewritten" from "untouched" by identity — the copy-on-write
+ * contract this module states for the stack, one level in.
+ *
+ * `mapper` receives each node dict and its path (`${basePath}[i]`, or
+ * `${basePath}[i].config.body.nodes[j]` for a nested one) and returns either the
+ * same reference (no change) or a new dict. Non-dict elements pass through
+ * untouched.
+ *
+ * **Exported because the flow-node unit has more than one consumer, and every
+ * consumer that hand-rolled it walked `nodes` FLAT.** {@link mapFlowNodes} is
+ * the stack-shaped consumer (the ADR-0087 conversions); `translateFlow`
+ * (`system/i18n-resolver.ts`) is the document-shaped one — it is handed a
+ * single flow, never a stack, so it could not reach `mapFlowNodes` at all and
+ * walked `flow.nodes` flat instead, leaving a `type: 'screen'` node inside any
+ * region unoverlaid. Both now descend through this one function, so the region
+ * table has one reader per unit rather than one per call site: the "why does
+ * the flat walk keep being reachable" question is answered by there being a
+ * region-aware helper at the shape a document-level caller actually holds.
+ *
+ * ⚠️ Deliberately NOT re-exported from `conversions/index.js`: this is
+ * cross-module reuse inside `packages/spec`, not a published entry-point
+ * export. `walk.ts` reaches no `exports` subpath of the package
+ * (`packages/spec/api-surface/*.json` lists none of its symbols), and that is
+ * the boundary that keeps this a repair rather than a widening of the
+ * package's public surface.
+ */
+export function mapFlowNodeList(
+  nodes: readonly unknown[],
+  basePath: string,
+  mapper: (node: Dict, path: string) => Dict,
+): readonly unknown[] {
+  let changed = false;
+  const next = nodes.map((node, ni) => {
+    if (!isDict(node)) return node;
+    const mapped = mapNodeTree(node, `${basePath}[${ni}]`, mapper, 0);
+    if (mapped !== node) changed = true;
+    return mapped;
+  });
+  return changed ? next : nodes;
+}
+
+/**
  * Immutably map every flow node in `stack.flows[].nodes[]` — **including the
  * nodes nested inside ADR-0031 structured regions** (`loop.config.body`,
  * `parallel.config.branches[]`, `try_catch.config.try`/`.catch`), to any depth.
@@ -124,6 +171,9 @@ function mapNodeTree(
  * the same reference (no change) or a new dict. The stack, the `flows` array, an
  * individual flow, its `nodes` array, and every container `config` on the way
  * down are each copied only when a descendant actually changed.
+ *
+ * The per-flow descent is {@link mapFlowNodeList}'s — one implementation, so
+ * this walker and the document-overlay one cannot drift about which nodes exist.
  */
 export function mapFlowNodes(
   stack: Dict,
@@ -135,14 +185,8 @@ export function mapFlowNodes(
   let flowsChanged = false;
   const nextFlows = flows.map((flow, fi) => {
     if (!isDict(flow) || !Array.isArray(flow.nodes)) return flow;
-    let nodesChanged = false;
-    const nextNodes = flow.nodes.map((node, ni) => {
-      if (!isDict(node)) return node;
-      const mapped = mapNodeTree(node, `flows[${fi}].nodes[${ni}]`, mapper, 0);
-      if (mapped !== node) nodesChanged = true;
-      return mapped;
-    });
-    if (!nodesChanged) return flow;
+    const nextNodes = mapFlowNodeList(flow.nodes, `flows[${fi}].nodes`, mapper);
+    if (nextNodes === flow.nodes) return flow;
     flowsChanged = true;
     return { ...flow, nodes: nextNodes };
   });

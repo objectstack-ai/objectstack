@@ -71,12 +71,15 @@
  * `FILTER_TEXT_CASES`' stored-value row (a stored value that is not a string
  * never satisfies a positive text operator and always satisfies
  * `$notContains`). The SQL faces' compile-time type-gate set,
- * `NON_TEXT_STORED_VALUE_TYPES` (numeric + boolean), is NARROWER than this
- * door's set on purpose: temporal and structured-JSON columns are refused
- * here, by declaration, but beneath the door they answer by their stored
- * representation, which is a dialect question (ADR-0053) the contract does
- * not decide. Neither `filter-text-conformance.ts` nor `field-value.zod.ts`
- * changes for this door.
+ * `NON_TEXT_STORED_VALUE_TYPES`, is NARROWER than this door's set — today by
+ * exactly `STRUCTURED_JSON_TYPES`. ⚠️ It was narrower by the temporal classes
+ * too when this module landed; #15683's ruling (2026-09-05, one stroke after
+ * this one) put `date` / `datetime` / `time` INTO that set, so beneath the
+ * door a temporal column now answers the same declared no-match the door
+ * refuses above it, on every SQL face. A structured-JSON column is still the
+ * one class where the two sets disagree: refused here by declaration, answered
+ * by its stored representation beneath. Neither `filter-text-conformance.ts`
+ * nor this door changed for #15683 — only the set it points at.
  *
  * ## Where the door lives, and what this module is
  *

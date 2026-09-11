@@ -24,12 +24,19 @@ For the **data path** behind this contract — Repository → Change Log → Cac
 per-shape methods like `createObject` / `getField`; you register and read the whole
 definition for a type.
 
+The excerpt below groups the interface's members by concern; it is **not** the full
+declaration and is not held equal to it by any check. For the authoritative, complete
+member list see `IMetadataService` in
+[`packages/spec/src/contracts/metadata-service.ts`](https://github.com/objectstack-ai/objectstack/blob/main/packages/spec/src/contracts/metadata-service.ts).
+
 ```typescript
+// Excerpt — grouped by concern, not exhaustive. See packages/spec/src/contracts/metadata-service.ts for the full declaration.
 export interface IMetadataService {
   // Core CRUD (by type + name)
   register(type: string, name: string, data: unknown): Promise<void>;
   registerInMemory?(type: string, name: string, data: unknown): void;
   get(type: string, name: string): Promise<unknown | undefined>;
+  getDiagnosed?(type: string, name: string): Promise<{ data: unknown | undefined; degraded: boolean; errors: string[] }>;
   list(type: string): Promise<unknown[]>;
   listDiagnosed?(type: string): Promise<{ items: unknown[]; degraded: boolean; errors: string[] }>;
   unregister(type: string, name: string): Promise<void>;
@@ -64,6 +71,7 @@ export interface IMetadataService {
 
   // Watch / subscribe (optional)
   watch?(type: string, callback: MetadataWatchCallback): MetadataWatchHandle;
+  subscribe?(type: string, callback: (event: MetadataWatchEvent) => void | Promise<void>): () => void;
 
   // Import / export (optional)
   exportMetadata?(options?: MetadataExportOptions): Promise<unknown>;
@@ -320,6 +328,7 @@ console.log(result.failed);    // failed
 | `MetadataBulkResult` | Result of `bulkRegister` / `bulkUnregister` |
 | `MetadataWatchCallback` | `(event: { type, metadataType, name, data? }) => void` |
 | `MetadataWatchHandle` | `{ unsubscribe(): void }` |
+| `MetadataWatchEvent` | `subscribe`'s callback argument: `{ type: 'added' \| 'changed' \| 'deleted', path, name?, stats?, metadataType?, data?, timestamp? }` |
 | `PackagePublishResult` | `{ success, packageId, version, publishedAt, itemsPublished, validationErrors? }` |
 
 ---

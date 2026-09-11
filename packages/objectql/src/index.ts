@@ -84,6 +84,7 @@ export {
   OBJECT_OWNERSHIP_CONFLICT_CODE,
 } from './registry.js';
 
+
 // [#14553] The navigation-contribution group diagnostic (ADR-0029 D7,
 // ADR-0112 D6c). Exported because `os build` is the SECOND door that has to
 // answer "does this group id resolve?" — over a composed artifact, at compile

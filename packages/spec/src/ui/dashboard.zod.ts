@@ -255,15 +255,32 @@ export const DashboardWidgetOptionsSchema = lazySchema(() => z.object({
   limit: z.number().int().positive().optional().describe('Max rows (applied after ordering)'),
 
   /**
-   * Explicit category order for ordered-sequence charts — `funnel` / `pyramid`
-   * stages above all. Values are the dimension's STORED values (e.g.
-   * `['qualification', 'needs_analysis', 'proposal', 'negotiation']`), not
-   * display labels. Omit to let the renderer fall back to the dimension
-   * field's own picklist option order, which is the pipeline order an author
-   * already declared on the object.
+   * Explicit stage order for a `funnel` widget. Values are the dimension's
+   * STORED values (e.g. `['qualification', 'needs_analysis', 'proposal',
+   * 'negotiation']`), not display labels. Omit to let the renderer fall back
+   * to the dimension field's own picklist option order, which is the pipeline
+   * order an author already declared on the object.
+   *
+   * `funnel` is the ONLY widget `type` that reads this key. On every other
+   * type — `bar` / `horizontal-bar` / `column`, `line`, `area`, `pie`,
+   * `donut`, `treemap`, `sankey`, `radar`, `scatter`, `combo`, the tabular and
+   * single-value families — the key parses, is forwarded to the renderer, and
+   * no branch consults it: the rendered order stays whatever the analytics
+   * query returned. Order those with `sortBy` / `sortOrder`, which lower into
+   * the dataset query itself.
+   *
+   * There is no `pyramid` widget type. It was removed from `ChartTypeSchema`
+   * as a variant that only ever rendered as `funnel` (see the taxonomy NOTE at
+   * the foot of `chart.zod.ts`; `chart.test.ts` pins the refusal alongside its
+   * fallback-only siblings). Write `type: 'funnel'`.
    */
   stageOrder: z.array(z.union([z.string(), z.number(), z.boolean()])).optional()
-    .describe('Explicit category order for funnel/pyramid stages (stored values)'),
+    .describe(
+      'Explicit stage order for a funnel widget, as the dimension\'s stored values. '
+      + '`funnel` is the only widget type that reads it: on any other type the key '
+      + 'parses and is never consulted, so order those with sortBy/sortOrder instead. '
+      + 'There is no `pyramid` widget type — write `funnel`.',
+    ),
 }).passthrough().describe('Widget configuration — declared query keys + open renderer extras'));
 
 // ── `compareTo` convergence prescriptions (#5011) ────────────────────────────

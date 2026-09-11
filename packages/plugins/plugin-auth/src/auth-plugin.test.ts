@@ -1371,7 +1371,7 @@ describe('AuthPlugin', () => {
       expect(ql.tables.sys_member).toHaveLength(memberCount);
     });
 
-    it('multi-org: bootstrap is NOT wired (enterprise organizations package owns it)', async () => {
+    it('multi-org: bootstrap is NOT wired (the organizations package owns it)', async () => {
       process.env.OS_MULTI_ORG_ENABLED = 'true';
       // [#11184] A walled posture now declares its platform owner or refuses
       // to boot; this fixture's subject is the default-org wiring, so declare

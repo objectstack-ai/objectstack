@@ -188,7 +188,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - objectui 构建产物经 `pnpm objectui:refresh` 回流。
 - 多车道仓 `objectstack`、`objectui`:中央分诊是 `domain:*`/type/定级的唯一生产者。
 - 单车道仓 `cloud`、`objectos`、`hotcrm`、`www.objectos.ai`;未来新仓默认此类。
-- 单车道仓 `repo:*` 席自理机械三务,⛔ 不产 `domain:*`;决策卡默认入 objectstack 收件箱。
+- 单车道仓 `repo:*` 席自理机械三务,⛔ 不产 `domain:*`;决策卡入本仓收件箱,不落 objectstack。
 - 机械三务 = 自扫 sweep、自打 `type`、自做 `finding` 首触定级。
 - 跨仓查重/shadow 检查恒归中央,全仓视图 ⛔ 不下放。
 - 新仓登记是一张清单:座位贴、标签、类别归属、门禁盘点。
@@ -207,7 +207,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 判据:正文抽掉 objectstack 还成立 ⇒ 当场转仓(console/UI 缺陷即转 objectui);不成立才是缝卡。
 - transfer 不可用时重建:出处头 + 裸 `#N` 改全名 + 关源单为 moved。
 - 缝卡收窄为真协调卡:留 objectstack 带 `repo:*`,正文点名读者(哪个座位、哪一步)。
-- 维护者收件箱恒为 objectstack;在飞卡 ⛔ 不中途转仓。
+- 决策收件箱按仓:平台在 objectstack / objectui,元数据项目在本仓;在飞卡 ⛔ 不中途转仓。
 - 规则 2:跨仓 feature 永不是一次派发:父单 + 每仓一 sub-issue,spec/后端先行。
 - 下游带 `Blocked-by: <owner/repo>#<n>`;`Blocked-by` 未关闭/未合并的不派发,对 GitHub 现验。
 - 被链接或同父的两单永不同批。
@@ -232,7 +232,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 任何跨座位请求都是工作(要读数、要开卡、要授权):一律立卡进目标车道队列。
 - ⛔ 座位贴敲门或裁决评论永不作跨座位请求的唯一载体;评论是加速器不是记录。
 - 等待方同一笔把自卡翻 `pm:blocked` + `Blocked-by:` 指向请求卡;⛔ 不设新标签新 sweep。
-- 目标仓不可达时按缝卡规则落 objectstack 带 `repo:*` + 具名读者。
+- 目标仓不可达是读数缺口,不是落点:由可达席在目标仓立卡,此前请求记座位贴或协调卡。
 
 ## 域车道
 
@@ -244,8 +244,8 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 |:--|:--|
 | `domain:engine` | `packages/objectql`、`packages/core`、`packages/formula`(CEL / `matches-filter` / RLS 谓词求值)、`plugin-pinyin-search`;`packages/metadata*`、`packages/platform-objects`;`packages/drivers/driver-*`;退役标签 `domain:engine-core` / `domain:metadata` / `domain:drivers` 只退出流通,GitHub 标签对象保留 |
 | `domain:services` | `packages/services/*`、`packages/connectors/*`、`packages/triggers/*`、`plugin-approvals`、`plugin-webhooks`、`plugin-email`、`plugin-reports`、`embedder-openai`、`knowledge-*`;`plugin-auth`、`plugin-security`、`plugin-sharing`、`plugin-audit`;退役标签 `domain:identity` 同上只退流通 |
-| `domain:devx` | `packages/sdui-parser`、`content/docs/**`、`apps/docs`;`packages/lint`、`scripts/`(门禁类)、`.github/workflows/`(门禁接线);三者与 spec 相交的面按锚定规则的例外归 `domain:spec`,门禁再按 SUBJECT:治理 agent 指令面/governed 面的归 skills,治理代码/文档质量的归本域 |
-| `domain:skills` | governed 面全量(含本文件;统一定义见「governed 面统一定义」行);governed 面的治理执行文件:`.github/CODEOWNERS` + SUBJECT 是 governed 面本身的门禁/审计(现为 `scripts/pm/check-governed-merges.mjs`) |
+| `domain:devx` | `sdui-parser`、`content/docs/**`、`apps/docs`、`.githooks/`、`docker/README.md`、`examples/**` 仅测试基建面;`packages/lint`、`scripts/`(门禁类)、`.github/workflows/`(接线)三者与 spec 相交面按锚定规则例外归 `domain:spec`,门禁按 SUBJECT:governed 面归 skills,代码/文档质量归本域 |
+| `domain:skills` | governed 面全量(含本文件;统一定义见「governed 面统一定义」行);非门禁的 `scripts/pm/**`(PM 循环工具);governed 面的治理执行文件:`.github/CODEOWNERS` + SUBJECT 是 governed 面本身的门禁/审计(现为 `scripts/pm/check-governed-merges.mjs`) |
 | `domain:spec` | `packages/spec` 整包:schema 形状、`contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误 guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及按锚定规则的例外归本域的工具链(域边界枚举与席内分派见 `references/lanes/spec.md`) |
 | `domain:cli` | `packages/cli`、`runtime`、`verify`、`packages/qa`、`types`、`packages/rest`、`packages/mcp`、`packages/observability`、`packages/client*`、`cloud-connection`、`create-objectstack`、`packages/adapters/*`、`plugin-hono-server`、`plugin-dev` |
 | (无固定归属,按落点分诊) | `packages/apps/*`、`packages/console`(dist 由脚本生成 ⛔ 不手改;UI 缺陷走 `repo:objectui`)、`examples/*`(归它演练的子系统)、`docs/audits/**` |
@@ -266,7 +266,8 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 贴 = 座位(标签 `pm:seat`),正文固定四段现值:当前 PM / 继承台账 / 热文件串行队 / 说明。
 - 正文只由在任座位 PM 编辑且为权威;标题与 assignee 是派生视图,三者同笔更新。
 - 标题只放慢状态,快状态留在说明段。
-- 接管/移交 = 改正文 + 审计评论(评论只作审计不承载状态),接管压缩是标准步骤。
+- 维护者强制接管令取席位、队列、未起工卡与待落地 PR;⛔ 不取在飞卡,由原认领者跟完。
+- 子代理 dev 的返回消息、探活与续派只在派发会话;落地或 `Release:` 后归新席位。
 - 范围与常设承诺是岗位说明不是状态,版本化在 `references/lanes/<lane>.md`。
 - 贴内只放指向车道文件的指针,升级走技能 PR,⛔ 不手抄接力。
 - 写侧刷新点 = 轮次边界;中途状态由卡上 claim/ACCEPT 评论承载。
@@ -282,8 +283,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 原则错/缺 → skills 席专题;可机械化项 → 门禁/脚本卡,⛔ 不是散文。
 - 平台事实变化 → references 事实表改一行。
 - 三类以 `finding` 入 skills 车道由该席分诊;三类之外默认关 not planned。
-- 经验教训散文不再入技能文本;交接按收尾清单逐步走完,并 `list_triggers` 清点自设定时器。
-- 四段模板、状态词表、接管/退场收尾清单细则见 `references/seat-post-protocol.md`。
+- 接管/移交 = 改正文 + 审计评论(只作审计);收尾清单等细则见 `references/seat-post-protocol.md`。
 - epic 委托不入座位贴体系;`packages/spec` 恒归 spec 座位。
 
 ## Epic 子树车道
@@ -638,8 +638,8 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - `--tier` 嫌疑行是提示非裁定;双肢命中任一 ⇒ 无席内条款②复核 PASS 在案 ⛔ 禁止入队。
 - 路径肢 = diff 触及契约面 `packages/spec/src/**`,含 error-code-ledger 与 `*.zod.ts` 契约 schema。
 - 声明肢 = 认领评论声明 `Clause-②: yes`,与路径无关;错误的 `no` 是可审计的假申报。
-- 交付后复核由派发席席内完成:spec 席达档自审或派该档子任务,余席默认档自审加门禁。
-- PASS ⇒ 同席剥标、ready、auto-merge;FAIL ⇒ 补丁轮;⛔ 免复核不放行。
+- 交付后复核由派发席席内完成:spec 席达档,余席默认档加门禁;记录 = 同形评论落 PR 或卡。
+- PASS ⇒ 同席剥标并引记录、ready、auto-merge;FAIL ⇒ 补丁轮;⛔ 免复核不放行。
 - 真正设计分叉照旧进决策箱,席内复核 ⛔ 不替代维护者裁定。
 - 外部评审链降为可选事后审计,非放行前提。
 - `needs:contract-review`(恒英文)由 PR 创建者随可复审契约增量同笔挂:draft PR,或先到的报告。

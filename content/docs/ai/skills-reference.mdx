@@ -37,7 +37,7 @@ Skills are versioned as **one bundle**. You do not track or update each skill in
 
 {/* BEGIN GENERATED: skills (packages/spec/scripts/build-skill-docs.ts) — DO NOT EDIT */}
 
-ObjectStack ships **11 skills** — one per authoring domain, plus process skills for how a project is delivered. Each is self-contained: an AI assistant loads only the ones a task needs.
+ObjectStack ships **10 skills** — one per authoring domain, plus process skills for how a project is delivered. Each is self-contained: an AI assistant loads only the ones a task needs.
 
 ## Quick Reference
 
@@ -52,8 +52,7 @@ ObjectStack ships **11 skills** — one per authoring domain, plus process skill
 | 7 | [API](#api) | `api` | `skills/objectstack-api/` | Design the server-side API surface that an ObjectStack runtime exposes — REST endpoints, auth providers, realtime channels, error envelopes, batch contracts. |
 | 8 | [i18n](#i18n) | `i18n` | `skills/objectstack-i18n/` | Author ObjectStack translation bundles — object/field labels, view text, app navigation strings, automation messages — and configure locale fallback, coverage reporting, and the source layout. |
 | 9 | [Formula](#formula) | `expression` | `skills/objectstack-formula/` | Author CEL expressions used across ObjectStack — formula fields, field conditional rules (`visibleWhen`, `readonlyWhen`, `requiredWhen`), validation / sharing / visibility predicates, flow conditions, and dynamic seed values. This is the companion skill that objectstack-data, -ui, -api and -automation each tell you to load alongside them. |
-| 10 | [PM Dispatch](#pm-dispatch) | `process` | `skills/objectstack-pm-dispatch/` | Run a project-manager dispatch loop over a GitHub backlog: triage and queue ready issues, claim each one, dispatch it to a parallel developer agent that returns a structured JSON report, review the results against GitHub, and drive accepted pull requests to landing — escalating to the maintainer only what genuinely needs a human decision. Ships the developer-agent operating template the loop injects into every dispatch (no custom agent types required). |
-| 11 | [Upgrade](#upgrade) | `process` | `skills/objectstack-upgrade/` | Upgrade an ObjectStack metadata project across a protocol major — run the deterministic conversion chain, then work the semantic residue the chain cannot express (intent choices, custom code on retired APIs, stale prose) to a decision with the project's owner, and finish with a green `validate` plus a human-readable upgrade report. |
+| 10 | [Upgrade](#upgrade) | `process` | `skills/objectstack-upgrade/` | Upgrade an ObjectStack metadata project across a protocol major — run the deterministic conversion chain, then work the semantic residue the chain cannot express (intent choices, custom code on retired APIs, stale prose) to a decision with the project's owner, and finish with a green `validate` plus a human-readable upgrade report. |
 
 ---
 
@@ -180,20 +179,6 @@ Use when the user is writing an `F`, `P`, or `cel` tagged-template literal, or a
 Do not use for SQL fragments (driver-native) or L2 hook bodies (those belong in objectstack-data).
 
 **Tags:** `cel`, `formula`, `predicate`, `condition`, `validation`, `visibility`, `seed-dynamic`
-
----
-
-### PM Dispatch
-
-**Domain** `process` · **Path** `skills/objectstack-pm-dispatch/`
-
-Run a project-manager dispatch loop over a GitHub backlog: triage and queue ready issues, claim each one, dispatch it to a parallel developer agent that returns a structured JSON report, review the results against GitHub, and drive accepted pull requests to landing — escalating to the maintainer only what genuinely needs a human decision. Ships the developer-agent operating template the loop injects into every dispatch (no custom agent types required).
-
-Use when asked to "work through the backlog", "batch-dispatch issues", "派发 issue 给开发 agent", or to stand up a multi-agent delivery loop in an ObjectStack app project.
-
-Do not use for authoring ObjectStack metadata (the domain skills cover that), for a single already-scoped change you can just make, or as a replacement for the project's own conventions file — that file always wins.
-
-**Tags:** `pm`, `dispatch`, `backlog`, `triage`, `multi-agent`, `delivery`, `github`, `escalation`, `upstream`
 
 ---
 

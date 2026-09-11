@@ -43,11 +43,15 @@ parsed-but-never-enforced spec clusters are removed rather than maintained.
 > 17.2.0](/docs/releases/v17/17-2#breaking-changes--migration-in-1720)** and **[Breaking changes &
 > migration in 17.3.0](/docs/releases/v17/17-3#breaking-changes--migration-in-1730)** before upgrading.
 >
-> ⛔ **17.4.0's notes are a machine draft, not curated.** 396 changesets across 61
-> packages landed in it, 35 of them carrying a breaking marker, and no editorial
-> pass has been made — see **[17.4.0](/docs/releases/v17/17-4)**, which says so at
-> the top and lists what it does and does not cover. Its upgrade checklist is
-> **not written**: nobody has walked 17.3.0 → 17.4.0.
+> 17.4.0 stays in that register. It renames every duration-shaped key onto a
+> unit-bearing name with no aliases, strips a static `readonly` field from a
+> non-system INSERT exactly as it already did on update, corrects `positions[]`
+> on the session payload from a comma-split identity scalar to the security
+> axis, and closes the analytics date-range vocabulary. Read **[Breaking changes
+> & migration in
+> 17.4.0](/docs/releases/v17/17-4#breaking-changes--migration-in-1740)** and its
+> **[upgrade checklist](/docs/releases/v17/17-4#upgrade-checklist)** before
+> upgrading.
 
 ## Per-release notes
 
@@ -75,11 +79,12 @@ marked breaking — which is exactly why a checklist is not a restatement of
 [Breaking changes & migration in 17.3.0](/docs/releases/v17/17-3#breaking-changes--migration-in-1730).
 
 ⛔ **That run covered one hop, 17.2.0 → 17.3.0. Nobody has walked 17.1.0 →
-17.2.0.** Every line in the 17.2.0 list is derived from a change's own
-**Migration** note and is marked **not exercised**: accurate about what changed,
-unproven about what it costs to cross. The two are kept apart on purpose — a step
-nobody has run, presented beside steps that were, is how a reader finishes a
-checklist and believes they are done.
+17.2.0, and nobody has walked 17.3.0 → 17.4.0.** Every line in the 17.2.0 and
+17.4.0 lists is derived from a change's own **Migration** note and is marked
+**not exercised**: accurate about what changed, unproven about what it costs to
+cross. The two kinds are kept apart on purpose — a step nobody has run,
+presented beside steps that were, is how a reader finishes a checklist and
+believes they are done.
 </Callout>
 
 Per-release checklists: [17.4.0](/docs/releases/v17/17-4#upgrade-checklist) · [17.3.0](/docs/releases/v17/17-3#upgrade-checklist) · [17.2.0](/docs/releases/v17/17-2#upgrade-checklist) · [17.1.0](/docs/releases/v17/17-1#upgrade-checklist) · [17.0.0](/docs/releases/v17/17-0#upgrade-checklist)

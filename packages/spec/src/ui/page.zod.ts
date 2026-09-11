@@ -43,9 +43,9 @@ export const PageRegionSchema = lazySchema(() => strictObject({
   history: PAGE_HISTORY,
   aliases: { id: 'name', region: 'name', children: 'components', items: 'components', content: 'components', size: 'width', span: 'width' },
 }, {
-  name: z.string().describe('Region name (e.g. "sidebar", "main", "header")'),
-  width: z.enum(['small', 'medium', 'large', 'full']).optional(),
-  components: z.array(z.lazy(() => PageComponentSchema)).describe('Components in this region')
+  name: z.string().describe('Region name (e.g. "sidebar", "main", "header")').meta({ title: 'Region' }),
+  width: z.enum(['small', 'medium', 'large', 'full']).optional().meta({ title: 'Width' }),
+  components: z.array(z.lazy(() => PageComponentSchema)).describe('Components in this region').meta({ title: 'Components' })
 }));
 
 // Page-component TYPES retired by name → the prescription an author who still
@@ -319,7 +319,7 @@ export const PageComponentSchema = lazySchema(() => strictObject({
    *
    * ## Ambient roots — renderer behaviour, NOT contract-guaranteed
    *
-   * The shipping renderer additionally mounts `app`, `features` and `os.user`
+   * The shipping renderer additionally mounts `features` and `os.user`
    * from app-shell's `ExpressionProvider`, and binds `data`. **No ADR rules
    * those on this surface**: ADR-0068's Non-goals fence its ruling to the user
    * object ("only the user object is in scope here"), and ADR-0058 governs
@@ -342,7 +342,7 @@ export const PageComponentSchema = lazySchema(() => strictObject({
    * the record **ROW** instead. Same key name, two bindings; see that key's own
    * describe in `component.zod.ts` rather than assuming this one carries over.
    */
-  visibleWhen: ExpressionInputSchema.optional().describe("Visibility predicate (CEL) — component rendered only when TRUE. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user` — one object, three spellings), and page state as `page.<var>`. The shipping renderer additionally mounts `app`, `features`, `os.user` and binds `data` to the data-source ADAPTER here — renderer behaviour, NOT contract-guaranteed (ADR-0068 rules the user object only). ⚠️ `data` is surface-dependent: on a `page:tabs` item `visibleWhen` it is the record ROW instead. e.g. \"page.selectedProjectId != ''\""),
+  visibleWhen: ExpressionInputSchema.optional().describe("Visibility predicate (CEL) — component rendered only when TRUE. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user` — one object, three spellings), and page state as `page.<var>`. The shipping renderer additionally mounts `features`, `os.user` and binds `data` to the data-source ADAPTER here — renderer behaviour, NOT contract-guaranteed (ADR-0068 rules the user object only). ⚠️ `data` is surface-dependent: on a `page:tabs` item `visibleWhen` it is the record ROW instead. e.g. \"page.selectedProjectId != ''\""),
   /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
   visibility: ExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse.'),
 
@@ -405,13 +405,15 @@ export const PageVariableSchema = lazySchema(() => strictObject({
     bindTo: 'the binding names the WRITER, not a target — `source` is the id of the component that writes this variable; readers reference it as `page.<name>`',
   },
 }, {
-  name: z.string().describe('Variable name. Exposed to expressions as `page.<name>`.'),
-  type: z.enum(['string', 'number', 'boolean', 'object', 'array', 'record_id']).default('string'),
+  name: z.string().describe('Variable name. Exposed to expressions as `page.<name>`.').meta({ title: 'Name' }),
+  type: z.enum(['string', 'number', 'boolean', 'object', 'array', 'record_id']).default('string').meta({ title: 'Type' }),
   defaultValue: z.unknown().optional()
-    .describe('Initial value. Defaults to a type-appropriate empty value when omitted.'),
+    .describe('Initial value. Defaults to a type-appropriate empty value when omitted.')
+    .meta({ title: 'Default Value' }),
   /** Source element binding — the component id that writes this variable. */
   source: z.string().optional()
-    .describe('Component id that writes this variable (e.g. an element:record_picker whose `id` matches).'),
+    .describe('Component id that writes this variable (e.g. an element:record_picker whose `id` matches).')
+    .meta({ title: 'Written By' }),
 }));
 
 // BlankPageLayoutItemSchema / BlankPageLayoutSchema removed — the `blank` page
@@ -655,8 +657,25 @@ export const PageSchema = lazySchema(() => strictObject({
     route: '`route` is not a page key — a page is routed by its `name` (lowercase snake_case). Rename the page rather than declaring a path.',
     path: '`path` is not a page key — a page is routed by its `name` (lowercase snake_case).',
     url: '`url` is not a page key — a page is routed by its `name`. To link OUT to an address, use a navigation node on the app.',
-    visibleWhen: 'page-level conditional rendering does not exist — put `visibleWhen` on the COMPONENT inside a region, or gate the page with `assignedProfiles`',
-    permissions: 'a page is not permission-gated by a field — reach it through `assignedProfiles`, and gate the DATA it shows with the object\'s permission sets (which is what actually protects the records)',
+    // ⛔ Neither prescription below may name `assignedProfiles` as the way to gate
+    // a page. The key is still authorable on this schema — nothing here changes what
+    // the schema accepts — but it gates NOTHING, so prescribing it handed the author
+    // a capability the runtime does not deliver, at parse time, which is Prime
+    // Directive #10's exact prohibition. Measured 2026-09-10: zero readers in this
+    // repo (every hit is a declaration, a generated artifact, prose, or this
+    // schema's own round-trip test) and zero readers in objectui at `3fbdd4a2d`
+    // (three hits — a docs table row, `packages/types/src/layout.ts` and
+    // `packages/types/src/zod/layout.zod.ts` — every one a declaration; lit controls
+    // `visibleWhen` 308 files and `PageSchema` 94 files prove the instrument fired).
+    // `liveness/page.json` still grades it `live` on the strength of an objectui
+    // bridge at `react/src/spec-bridge/bridges/page.ts` — a path that does not exist
+    // in that repo, while two sibling citations in the same ledger file resolve.
+    // It is also named for the concept ADR-0090 D2 removed, which
+    // `security/permission.zod.ts` states to authors three times over.
+    // ⛔ The key's own disposition (keep / rename / remove) needs a ruling and is
+    // tracked in #16929; this correction deliberately does not pre-empt it.
+    visibleWhen: 'page-level conditional rendering does not exist — put `visibleWhen` on the COMPONENT inside a region',
+    permissions: 'a page is not permission-gated by a field — gate the DATA it shows with the object\'s permission sets (which is what actually protects the records)',
   },
 }, {
   name: SnakeCaseIdentifierSchema.describe('Page unique name (lowercase snake_case)'),
