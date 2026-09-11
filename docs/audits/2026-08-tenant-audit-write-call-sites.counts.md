@@ -29,19 +29,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 222 |
+| Write call sites | 223 |
 | Object name statically decidable | 149 |
-| Object name chosen at run time | 73 |
+| Object name chosen at run time | 74 |
 | Against a tenancy-enabled object | 149 |
 | Against an object declaring tenancy off | 0 |
 | Threading a tenant context | 139 |
 | Provably carrying none | 17 |
 | …and decidably tenancy-enabled | 9 |
-| Options argument unreadable | 66 |
+| Options argument unreadable | 67 |
 | …and decidably tenancy-enabled | 32 |
 | Threading a decidably elevated context | 105 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 100 |
+| Threading a context of undecidable elevation | 101 |
 
 ## Corpus scale — present and dated, ⛔ NOT enforced
 
@@ -52,11 +52,11 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-09-11 at `f368fd0aa`.
+Measured on 2026-09-11 at `06215b074`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 563 |
+| tracked non-test sources scanned | 564 |
 | engine-shaped types recognised | 59 |
 | declared objects in the registry | 300 |
 | same-named calls subtracted as non-engine | 137 |
@@ -179,7 +179,7 @@ Measured on 2026-09-11 at `f368fd0aa`.
 | `packages/services/service-messaging/src/messaging-service.ts` | `update` | `RECEIPT_OBJECT` | undecidable | options unreadable | 1 |
 | `packages/services/service-messaging/src/messaging-service.ts` | `insert` | `sys_notification` | enabled | options unreadable | 1 |
 | `packages/services/service-messaging/src/sql-http-outbox.ts` | `insert` | `this.objectName` | undecidable | options unreadable | 1 |
-| `packages/services/service-messaging/src/sql-http-outbox.ts` | `update` | `this.objectName` | undecidable | options unreadable | 4 |
+| `packages/services/service-messaging/src/sql-http-outbox.ts` | `update` | `this.objectName` | undecidable | options unreadable | 5 |
 | `packages/services/service-messaging/src/sql-outbox.ts` | `insert` | `this.objectName` | undecidable | options unreadable | 1 |
 | `packages/services/service-messaging/src/sql-outbox.ts` | `update` | `this.objectName` | undecidable | options unreadable | 4 |
 | `packages/services/service-queue/src/db-queue-adapter.ts` | `delete` | `sys_job_queue` | enabled | context, elevation undecidable | 2 |
