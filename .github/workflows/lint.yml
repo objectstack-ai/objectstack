@@ -4523,6 +4523,13 @@ jobs:
         if: failure()
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          # ⚠️ Must equal this step's own `name:` above. The reporter subtracts
+          # it so that it does not list ITSELF among the steps that never ran —
+          # measured in run 34584689309, where it did exactly that, because the
+          # jobs API had not yet marked it `in_progress`. Drift between the two
+          # lines costs one extra, visibly silly line in the report; it cannot
+          # go wrong quietly.
+          OS_TAIL_REPORT_STEP: Report how many gates never ran
         run: node scripts/report-unmeasured-gate-tail.mjs
 
   # Lane 1 of 4 behind the required `TypeScript Type Check` context. The
