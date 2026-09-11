@@ -400,7 +400,7 @@ try { d = JSON.parse(fs.readFileSync(process.env.OS_GUARD_FILE, "utf8")); }
 catch { process.exit(1); }
 const mode = process.env.OS_GUARD_MODE;
 if (mode === "head-sha") { const s = d && d.head && d.head.sha; if (!s) process.exit(1); console.log(s); }
-else if (mode === "filenames") { if (!Array.isArray(d)) process.exit(1); for (const f of d) if (f && f.filename) console.log(f.filename); }
+else if (mode === "filenames") { if (!Array.isArray(d)) process.exit(1); for (const f of d) { if (f && f.filename) console.log(f.filename); if (f && f.previous_filename && f.previous_filename !== f.filename) console.log(f.previous_filename); } }
 else if (mode === "count") { if (!Array.isArray(d)) process.exit(1); console.log(d.length); }
 else if (mode === "exceptions") console.log(((d || {}).exceptions || []).length);
 else if (mode === "hits") console.log((((d || {}).hitPaths) || []).join(", "));

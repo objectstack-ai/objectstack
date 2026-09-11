@@ -48,7 +48,7 @@
  * the five the spec DECLARES:
  *
  *   dateGranularity, sortBy, sortOrder, limit   (query-affecting, framework#3588)
- *   stageOrder                                  (funnel/pyramid stage order)
+ *   stageOrder                                  (funnel stage order — the only type that reads it)
  *
  * plus ONE undeclared key with a real read site:
  *

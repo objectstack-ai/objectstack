@@ -51,14 +51,14 @@
 红窗守候规则住 `platform-readings.md` 配额段。
 
 1. draft 转 ready 翻转:GraphQL-only mutation;出口代理只放钉住的 PR-review GraphQL 集。
-   判据 = REST update-a-pull-request 只收 `title`/`body`/`state`/`base`/`maintainer_can_modify`,无 `draft`
-   (与第 5 条同批核对官方文档,未逐个实调)。断粮出路:等 MCP 恢复,或人工点一下。
+   判据 = 2026-09-11 实调:REST `PATCH /pulls/{n}` 带 `{"draft": false}` 回 200 且什么都没改,读回仍 draft
+   ⇒ 状态码不作数,读回才作数。通道 = MCP `update_pull_request`;断粮:等它恢复或人工点一下。
 2. auto-merge 与入队挂载:GraphQL mutation,即 MCP `enable_pr_auto_merge`。
    走合并队列的仓落地必经它 ⇒ 配额红窗无退路;直合仓有退路 `PUT .../pulls/{n}/merge`。
 3. 语义搜索:`/search/*` 被出口代理按设计拒绝。退路 = REST 列表端点加本地 grep。
    REST 也被会话门关掉的席位 = 一次定向 MCP `search_issues`,⛔ 不宽表扫。
 4. Projects field_values:GraphQL-only —— 舰队并不需要它;MCP 服务器端无条件抓它才是漏点。
-5. `issue transfer`:issues 端点表无 transfer 路由 ⇒ 同为 GraphQL-only。
+5. `issue transfer`:issues 端点表无 transfer 路由(核对文档,未实调)⇒ 同为 GraphQL-only。
    拿不到时当轮改走在目的仓重建配方,配方住 `platform-readings.md`。
 
 ## 第三桶 —— git 零配额等价物
