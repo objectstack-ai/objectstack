@@ -7,8 +7,9 @@
  *
  * ## The defect, and where it is minted
  *
- * Not here: it comes out of the pinned vendor. Measured against the installed
- * better-auth `1.7.2`, `dist/plugins/organization/routes/crud-invites.mjs`:
+ * Not here: it comes out of the pinned vendor. Re-measured 2026-09-11 against
+ * the installed better-auth `1.7.3` (unchanged from the `1.7.2` reading this
+ * replaces), `dist/plugins/organization/routes/crud-invites.mjs`:
  * the three id-addressed routes ask
  * `shouldRequireVerifiedEmailForInvitationIdAction({ organizationOptions, … })`,
  * whose first line is

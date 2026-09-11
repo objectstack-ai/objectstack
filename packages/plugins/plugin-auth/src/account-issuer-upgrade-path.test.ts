@@ -24,7 +24,9 @@
  *   • engine A registers a `sys_account` that still DECLARES `issuer` — the
  *     pre-upgrade shape. A real `AuthManager` signs a user up through the real
  *     HTTP route, so the password hash is better-auth's own, and the row is then
- *     stamped with the issuer a 1.7.2 runtime would have written.
+ *     stamped with the issuer a 1.7.2 runtime wrote — read off the derivation
+ *     this branch retires, 2026-09-10, and ⛔ NOT re-measured: 1.7.2 is a
+ *     version this tree no longer installs, which is the whole premise here.
  *   • engine B, on the SAME file, registers the objects as they ship TODAY. It
  *     is the upgraded deployment: new code, old table.
  *

@@ -175,9 +175,9 @@ export const SCAFFOLD_BUILT_DEPENDENCIES = ['better-sqlite3', 'esbuild'];
  *    finding.
  *
  *    ⚠️ These four do NOT retire with the SCIM rc pin, even though one of them
- *    names scim. Stable `@better-auth/scim@1.7.2` still peers
- *    `@better-auth/utils@0.4.2` EXACTLY — re-read off the installed package
- *    manifest on 2026-08-31 for #13940, unchanged from 1.7.1 — so this skew
+ *    names scim. Stable `@better-auth/scim@1.7.3` still peers
+ *    `@better-auth/utils@0.4.2` EXACTLY — re-read (2026-09-11) off the
+ *    installed package manifest, unchanged from 1.7.1 and 1.7.2 — so this skew
  *    outlives that pin. They retire
  *    when the four packages accept 0.5.0 upstream, or when
  *    `SCAFFOLD_PNPM_RANGE` reaches `>=10.31` — pnpm 10.31 changed peer
@@ -506,10 +506,11 @@ export function renderPnpmWorkspaceYaml(
       '#   (the copy @objectstack/cli declares for its own sqlite tooling). That',
       '#   peer is optional and covers handing better-auth a raw better-sqlite3',
       '#   `Database`; ObjectStack hands it an ObjectQL adapter instead, so',
-      '#   nothing here goes down that path. Re-measured on better-auth 1.7.2:',
-      '#   no file in the published package references better-sqlite3 at all —',
-      '#   it only accepts a Database you construct — so there is no call site',
-      '#   that could depend on what changed between 12 and 13. The upstream',
+      '#   nothing here goes down that path. Re-measured 2026-09-11 on',
+      '#   better-auth 1.7.3: nothing in the published package references',
+      '#   better-sqlite3 except that peer declaration itself — it only accepts',
+      '#   a Database you construct — so there is no call site that could',
+      '#   depend on what changed between 12 and 13. The upstream',
       '#   range is stale; pinning back to 12 would just install a second,',
       '#   unused native copy.',
       '#',

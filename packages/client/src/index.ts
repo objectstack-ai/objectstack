@@ -3653,7 +3653,10 @@ export class ObjectStackClient {
      * wrong-but-plausible answer, silently. `list-members` reads
      * `ctx.query.organizationId` and its rows carry the identical shape
      * ({@link OrganizationMemberWithUserWire}), so only the addressing moved.
-     * Measured against better-auth 1.7.2 over a real `AuthManager` + `SqlDriver`.
+     * Measured 2026-09-09 (#16761) against the then-installed better-auth
+     * 1.7.2, over a real `AuthManager` + `SqlDriver`. The drive is what made
+     * this reading, so it is anchored rather than restamped: the family has
+     * since lifted to 1.7.3 and this drive has not been re-run against it.
      *
      * What an existing caller sees change, all of it measured on the same drive:
      *
