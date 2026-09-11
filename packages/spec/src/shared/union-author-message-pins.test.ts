@@ -33,11 +33,10 @@
  * call in `packages/spec/src` was parsed with the TypeScript compiler API and
  * its arms classified, resolving named arms through the tree's own declarations
  * and through `lazySchema()` / `strictObject()`; a site qualifies when one arm
- * resolves to `z.string()` and another to an object schema. On `origin/main`
- * `ad715aca57` (this branch's point of departure): 166 `z.union([...])` sites,
- * of which **31 are string-or-object** (plus 7 in test fixtures, excluded) —
- * re-derived byte-for-byte unchanged on each of the two later merges of `main`,
- * so the reading is not an artifact of one snapshot.
+ * resolves to `z.string()` and another to an object schema. Anchored to
+ * `origin/main` `ad715aca57` (this branch's point of departure) and re-derived
+ * unchanged on each later merge of `main`: **166** `z.union([...])` sites, of
+ * which **32 are string-or-object** (plus 7 in test fixtures, excluded).
  *
  * The scan's own control — sites with any arm it could not resolve, each of
  * which could hide a match — went **46 → 0** as the resolver learned
@@ -45,30 +44,79 @@
  * the final zero a measured absence rather than a scan that saw nothing: the
  * control was demonstrably lit before it was cleared.
  *
- * Those 31 split into three classes by what their OBJECT arm does with an
- * undeclared key, which is what decides whether there is an author-visible
- * message to pin at all:
+ * ⚠️ **A cleared control is not a complete scan, and this file learned that the
+ * hard way.** The first pass of this scan read 31, not 32. It resolved
+ * `lazySchema(() => …)` only when the arrow body was an EXPRESSION, so
+ * `FormFieldBaseSchema` — whose `lazySchema` arrow has a BLOCK body — fell out
+ * as unclassifiable rather than as an object, and `ui/view.zod.ts:2895` never
+ * reached the population at all. Its unresolved-arm control was zero throughout,
+ * because the arm resolved to *something*; it was just the wrong something. A
+ * second, independent re-derivation by a different method (a brace-matching
+ * scanner) found the site, and it was settled by BEHAVIOUR rather than by either
+ * scanner's syntax: the door is refused and the refusal renders curated prose.
+ * ⇒ Two lessons encoded here: the class of a site is decided by what it RENDERS,
+ * and one scanner agreeing with itself across three merge bases is not
+ * independent evidence.
  *
- * - **A — curated `strictObject()` arm (13 sites).** The refusal names the key,
- *   the surface and, where the site declares an alias or edit distance reaches,
- *   the rename. This is the shape PR #14975 pinned, and all 13 are covered:
- *   11 by the table below, `devPlugins` by #14975's own file
+ * Those 32 split into three classes by what their OBJECT arm does with an
+ * undeclared key, which is what decides whether there is curated prose to pin:
+ *
+ * - **A — closed AND curated arm (14 sites).** The refusal names the key, the
+ *   surface and, where the site declares an alias or edit distance reaches, the
+ *   rename. This is the shape PR #14975 pinned. All 14 are covered: 12 by the
+ *   table below, `devPlugins` by #14975's own file
  *   (`kernel/manifest-unknown-keys.test.ts`), `ActionRef` by the CONTROL case
  *   in `automation/state-machine.test.ts`.
- * - **B — bare `.strict()` arm (1 site).** `lifecycleOnlyWhenSchema`
- *   (`data/object.zod.ts`) closes its two object arms with plain zod
- *   `.strict()`, so the refusal names the key and the path but carries no
- *   surface and no rename — there is no curated prose to assert. It is pinned
- *   below anyway, on the half it does have, because it rides the same descent.
+ *
+ *   ⚠️ Curation and closure are INDEPENDENT, which is the trap. Thirteen of the
+ *   14 spell both at once with `strictObject()`. `ui/view.zod.ts:2895` splits
+ *   them: `FormFieldBaseSchema` takes a `strictObjectError({ surface: 'this
+ *   form field', … })` map WITHOUT closing the shape (#6619), and
+ *   `FormFieldSchema` closes it one level up with a plain `.strict()`. A
+ *   classifier that reads `strictObject()` calls alone therefore files it as
+ *   class B and under-states its message. `strictObjectError(` has exactly ONE
+ *   call site in the tree, so this pair has exactly one member today.
+ * - **B — closed but UNCURATED arm (1 site).** `lifecycleOnlyWhenSchema`
+ *   (`data/object.zod.ts:855`) closes its two object arms with plain zod
+ *   `.strict()` and carries no error map, so the refusal names the key and the
+ *   path but no surface and no rename. It is pinned below on the half it has,
+ *   because it rides the same descent.
  * - **C — open object arm (17 sites).** The arm is a non-strict `z.object` or
- *   an explicit `z.looseObject`, so an undeclared key is *stripped* and no
- *   refusal is raised at all. Measured, not assumed: `GroupByNodeSchema` and
- *   `BookNodeSchema` both ACCEPT a bogus key and parse it away, against a lit
- *   control (`ChartGroupBySchema`, class A, same probe) that names the key and
- *   the surface. ⛔ These are deliberately NOT pinned: there is no
- *   author-visible message at them to regress, so a pin would assert the
- *   absence of prose rather than its content, and would go green forever. If a
- *   class-C arm is ever closed, it becomes class A and belongs in the table.
+ *   an explicit `z.looseObject`, so an **undeclared key is stripped** and no
+ *   unknown-key refusal is raised. Measured, not assumed: `GroupByNodeSchema`
+ *   and `BookNodeSchema` both ACCEPT a bogus key and parse it away, against a
+ *   lit control (`ChartGroupBySchema`, class A, same probe) that names the key
+ *   and the surface.
+ *
+ *   ⛔ **What is NOT true of them — the narrower claim is the correct one.**
+ *   A class-C site is not silent in general: a wrong-typed or bad-enum
+ *   **declared** key IS refused there and IS rendered through this very
+ *   descent. Measured — `GroupByNodeSchema.safeParse({ field: 123 })` renders
+ *   `✗ (root): Invalid input` then `✗ field: Invalid input: expected string,
+ *   received number`, with the string arm dropped; `{ dateGranularity:
+ *   'fortnight' }` and `ExpressionInputSchema` `{ dialect: 'cel', source: 5 }`
+ *   behave the same way. So what these 17 lack is **curated unknown-key prose
+ *   to pin**, not an author-visible message. They are excluded on that narrower
+ *   ground: there is no surface phrase and no rename at them, so the pin shape
+ *   this file applies has nothing to assert. Their rendered half is covered
+ *   GENERICALLY rather than per site, by `shared/error-map.test.ts` (`:226`
+ *   nests a union inside a union with open `z.object` arms; `:307-329` walks
+ *   four open-armed levels), which pins the same descent on the same arm shape.
+ *   Whether that generic coverage is enough, or whether these want per-site
+ *   pins, is a scope question this file does not settle.
+ *
+ *   The 17, so the exclusion set is auditable here without re-deriving it:
+ *   `api/protocol.zod.ts:2853` · `data/data-engine.zod.ts:140` ·
+ *   `data/field-value.zod.ts:459` · `data/field-value.zod.ts:555` ·
+ *   `data/filter.zod.ts:405` · `data/query.zod.ts:200` · `data/query.zod.ts:537` ·
+ *   `shared/expression.zod.ts:178` · `shared/expression.zod.ts:242` ·
+ *   `shared/expression.zod.ts:349` · `shared/expression.zod.ts:384` ·
+ *   `system/book.zod.ts:31` · `system/book.zod.ts:48` ·
+ *   `system/metrics.zod.ts:430` · `system/tracing.zod.ts:347` ·
+ *   `ui/action.zod.ts:825` · `ui/component.zod.ts:1593`.
+ *
+ *   If a class-C arm is ever closed AND curated, it becomes class A and belongs
+ *   in the table.
  *
  * ⭐ **Every message asserted below was MEASURED before it was written**, and
  * every one of them was already correct. This file changes no behaviour: the
@@ -98,7 +146,7 @@ import { ObjectSchema } from '../data/object.zod';
 import { GroupByNodeSchema } from '../data/query.zod';
 import { ChartGroupBySchema } from '../ui/chart.zod';
 import { RecordHighlightsProps } from '../ui/component.zod';
-import { GanttConfigSchema, GanttQuickFilterSchema } from '../ui/view.zod';
+import { FormSectionSchema, GanttConfigSchema, GanttQuickFilterSchema } from '../ui/view.zod';
 import { formatZodError } from './error-map.zod';
 
 /** A door that renders through `formatZodError` — every schema below is one. */
@@ -129,8 +177,21 @@ interface UnionMessageSite {
   readonly keyInMessage: string;
   /** The curated surface phrase, or `null` for the one class-B site. */
   readonly surface: string | null;
-  /** The `Did you mean` target, or `null` where the site declares no rename. */
-  readonly rename: string | null;
+  /**
+   * The rename prescription exactly as the message renders it, or `null` where
+   * the site declares none.
+   *
+   * ⚠️ Spelled out per row rather than built from a `` `key` → `target` ``
+   * template on purpose. The template was the first version, and it silently
+   * assumed one rendering: `strictObject()`'s alias/edit-distance line really
+   * does render that arrow, but `ui/view.zod.ts:2895` prescribes its rename as
+   * an ADR-0089 **bullet** (`• If this is the conditional-visibility
+   * predicate, the canonical key is ...`) and carries no arrow at all. A
+   * template would have forced that row to declare `rename: null` and drop a
+   * real prescription out of the pin — the assertion would still be green and
+   * would be measuring less than it claims.
+   */
+  readonly renameInMessage: string | null;
   /** The same slot, written with the STRING arm — must still parse. */
   readonly acceptString: unknown;
   /** The same slot, written with a legal OBJECT arm — must still parse. */
@@ -141,9 +202,14 @@ interface UnionMessageSite {
  * The class-A and class-B population minus the two sites already covered
  * (`devPlugins` by #14975, `ActionRef` by `state-machine.test.ts`).
  *
- * ⛔ Rows are not invented: each `site` is a coordinate the scan produced, and
- * adding a string-or-object union with a closed object arm anywhere in
- * `packages/spec/src` adds a row here.
+ * ⛔ Rows are not invented: each `site` is a coordinate the scan produced.
+ *
+ * ⚠️ Nothing MECHANICALLY holds this table equal to the tree — `toHaveLength`
+ * below pins the snapshot, not the derivation, so a string-or-object union
+ * added with a closed object arm tomorrow makes no test red. Re-deriving is a
+ * manual step, and the header says how. A standing guard that re-scans and
+ * fails on an unpinned new site is the real fix and is deliberately left to its
+ * own card, not asserted here as though it existed.
  */
 const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
   ['GuardRef — the object arm of a guard reference', {
@@ -153,7 +219,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     key: 'parms',
     keyInMessage: '`parms`',
     surface: 'this guard reference',
-    rename: 'params',
+    renameInMessage: '`parms` → `params`',
     acceptString: 'isManager',
     acceptObject: { type: 'log', params: { a: 1 } },
   }],
@@ -164,7 +230,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     key: 'guard',
     keyInMessage: '`guard`',
     surface: 'this state transition',
-    rename: 'cond',
+    renameInMessage: '`guard` → `cond`',
     acceptString: { on: { GO: 'next' } },
     acceptObject: { on: { GO: { target: 'next' } } },
   }],
@@ -176,7 +242,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     key: 'guard',
     keyInMessage: '`guard`',
     surface: 'this state transition',
-    rename: 'cond',
+    renameInMessage: '`guard` → `cond`',
     acceptString: { id: 'machine', initial: 'idle', states: { idle: { initial: 'a', states: {} } },
       on: { GO: 'idle' } },
     acceptObject: { id: 'machine', initial: 'idle', states: { idle: { initial: 'a', states: {} } },
@@ -189,7 +255,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     key: 'widget',
     keyInMessage: '`widget`',
     surface: 'this decision-output declaration',
-    rename: 'type',
+    renameInMessage: '`widget` → `type`',
     acceptString: { approvers: [{ type: 'user', value: 'u1' }], decisionOutputs: ['comment'] },
     acceptObject: { approvers: [{ type: 'user', value: 'u1' }],
       decisionOutputs: [{ key: 'comment', type: 'text' }] },
@@ -201,7 +267,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     key: 'efect',
     keyInMessage: '`efect`',
     surface: 'this `functions` entry',
-    rename: 'effect',
+    renameInMessage: '`efect` → `effect`',
     acceptString: 'scoreLead',
     acceptObject: { handler: () => undefined },
   }],
@@ -212,7 +278,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     key: 'name',
     keyInMessage: '`name`',
     surface: 'this lookup column',
-    rename: 'field',
+    renameInMessage: '`name` → `field`',
     acceptString: { name: 'owner', type: 'lookup', reference: 'account', lookupColumns: ['amount'] },
     acceptObject: { name: 'owner', type: 'lookup', reference: 'account', lookupColumns: [{ field: 'amount' }] },
   }],
@@ -223,7 +289,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     key: 'local',
     keyInMessage: '`local`',
     surface: 'this dependsOn entry',
-    rename: 'field',
+    renameInMessage: '`local` → `field`',
     acceptString: { name: 'owner', type: 'lookup', reference: 'account', dependsOn: ['account'] },
     acceptObject: { name: 'owner', type: 'lookup', reference: 'account', dependsOn: [{ field: 'account' }] },
   }],
@@ -234,7 +300,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     key: 'granularity',
     keyInMessage: '`granularity`',
     surface: 'this chart groupBy',
-    rename: 'dateGranularity',
+    renameInMessage: '`granularity` → `dateGranularity`',
     acceptString: 'created_at',
     acceptObject: { field: 'created_at', dateGranularity: 'day' },
   }],
@@ -245,7 +311,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     key: 'field',
     keyInMessage: '`field`',
     surface: 'this `record:highlights` field',
-    rename: 'name',
+    renameInMessage: '`field` → `name`',
     acceptString: { fields: ['status'] },
     acceptObject: { fields: [{ name: 'status' }] },
   }],
@@ -256,7 +322,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     key: 'title',
     keyInMessage: '`title`',
     surface: 'this gantt quick-filter option',
-    rename: 'label',
+    renameInMessage: '`title` → `label`',
     acceptString: { field: 'stage', options: ['won'] },
     acceptObject: { field: 'stage', options: [{ value: 'won', label: 'Won' }] },
   }],
@@ -268,14 +334,32 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     key: 'name',
     keyInMessage: '`name`',
     surface: 'this gantt tooltip field',
-    rename: 'field',
+    renameInMessage: '`name` → `field`',
     acceptString: { startDateField: 's', endDateField: 'e', titleField: 't',
       tooltipFields: ['amount'] },
     acceptObject: { startDateField: 's', endDateField: 'e', titleField: 't',
       tooltipFields: [{ field: 'amount' }] },
   }],
-  // ── class B: the one bare-`.strict()` site. No surface, no rename — see the
-  //    header. It is here because the KEY half rides the same union descent.
+  // ── class A, the site a `strictObject()`-shaped classifier files as class B.
+  //    `FormFieldBaseSchema` carries the curated map (`strictObjectError`,
+  //    #6619) and `FormFieldSchema` closes the shape one level up with a plain
+  //    `.strict()`, so the message is fully curated — surface AND rename —
+  //    while the syntax looks bare. ⚠️ Its rename is an ADR-0089 guidance
+  //    BULLET, not the `key → target` arrow every other row renders; that is
+  //    why `renameInMessage` is a literal per row rather than a template.
+  ['FormSection.fields — a form field entry (curated map + separate `.strict()`)', {
+    site: 'ui/view.zod.ts:2895',
+    door: FormSectionSchema,
+    reject: { label: 'S', fields: [{ field: 'x', visibleWhenn: 'a', bogus: 1 }] },
+    key: 'visibleWhenn',
+    keyInMessage: '`visibleWhenn`, `bogus`',
+    surface: 'this form field',
+    renameInMessage: 'the canonical key is `visibleWhen`',
+    acceptString: { label: 'S', fields: ['x'] },
+    acceptObject: { label: 'S', fields: [{ field: 'x' }] },
+  }],
+  // ── class B: the one closed-but-uncurated site. No surface, no rename — see
+  //    the header. It is here because the KEY half rides the same union descent.
   ['lifecycle onlyWhen — a row-filter comparand (class B: bare `.strict()`)', {
     site: 'data/object.zod.ts:855',
     door: ObjectSchema,
@@ -285,7 +369,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     key: 'bogusKey',
     keyInMessage: 'Unrecognized key: "bogusKey"',
     surface: null,
-    rename: null,
+    renameInMessage: null,
     acceptString: { name: 'lead', label: 'Lead', fields: { a: { type: 'text', label: 'A' } },
       lifecycle: { class: 'audit', retention: { maxAge: '30d', onlyWhen: { status: 'closed' } } } },
     acceptObject: { name: 'lead', label: 'Lead', fields: { a: { type: 'text', label: 'A' } },
@@ -319,11 +403,13 @@ describe('[#15423] the AUTHOR-VISIBLE message at a string-or-object union site',
           .toContain(site.surface);
       }
 
-      // The rename, where the site declares an alias or edit distance reaches
-      // it. This is the half a bare `unrecognized_keys` code cannot carry.
-      if (site.rename !== null) {
+      // The rename, where the site declares an alias, edit distance reaches it,
+      // or a guidance bullet prescribes it. This is the half a bare
+      // `unrecognized_keys` code cannot carry, and the row supplies the exact
+      // rendered text — ⛔ never a template, see `renameInMessage`.
+      if (site.renameInMessage !== null) {
         expect(rendered, `${site.site}: the rename prescription must survive the union descent`)
-          .toContain(`\`${site.key}\` → \`${site.rename}\``);
+          .toContain(site.renameInMessage);
       }
 
       // ⛔ And it is genuinely the union door, not a non-union bypass: zod folds
@@ -385,10 +471,13 @@ describe('[#15423] the AUTHOR-VISIBLE message at a string-or-object union site',
   // all. These two guard the table itself rather than any one site.
   describe('the table is not vacuous', () => {
     it('covers every site the scan found outside the two already pinned elsewhere', () => {
-      // 13 class-A sites + 1 class-B = 14 with an unknown-key refusal to lose;
-      // `devPlugins` (#14975) and `ActionRef` (`state-machine.test.ts`) are
-      // pinned in their own files, so 12 belong here.
-      expect(SITES).toHaveLength(12);
+      // 14 class-A sites + 1 class-B = 15 with a curated-or-bare unknown-key
+      // refusal to lose; `devPlugins` (#14975) and `ActionRef`
+      // (`state-machine.test.ts`) are pinned in their own files, so 13 belong
+      // here. ⚠️ This number certifies the population COMPLETE, which is why
+      // the first pass getting it wrong mattered: at 12 it asserted, forever
+      // and greenly, that `ui/view.zod.ts:2895` was not a member.
+      expect(SITES).toHaveLength(13);
       // Each row names a distinct `z.union` coordinate.
       expect(new Set(SITES.map(([, s]) => s.site)).size).toBe(SITES.length);
     });
