@@ -1040,7 +1040,8 @@ registry? Add it to `OPEN_CAPABILITY_REGISTRIES` in the same PR that fixes it.
 3. **Add a changeset for anything that publishes.** Feature, functional improvement or fix — run `pnpm changeset`
    (or add a `.changeset/*.md` entry) describing it before committing. A bug fix in a released package takes a
    **`patch`** changeset — never none, and ⛔ never `skip-changeset`: that label is for a diff that publishes
-   nothing from any released package.
+   nothing from any released package. A PR that declares `Clause-②: yes` takes at least **`minor`** instead —
+   the widening it declares is what makes it more than a patch, whatever else the diff fixes.
    **Breaking changesets must carry their migration.** If the change removes or renames anything an author can write (a
    spec key, an export, a config field), the changeset body must state the FROM → TO mapping and the one-line fix —
    this text ships to consumers as `CHANGELOG.md` inside the npm package and is what an upgrading agent greps after the

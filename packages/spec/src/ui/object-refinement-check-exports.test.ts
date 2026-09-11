@@ -53,11 +53,15 @@ import { fileURLToPath } from 'node:url';
 import {
   ListViewSchema,
   ObjectListViewSchema,
-  checkListViewPageMount,
   checkListViewCalendarVisualization,
 } from './view.zod';
 import { PageSchema, checkPageSourceCompleteness } from './page.zod';
-import { GlobalFilterSchema, checkGlobalFilterDateDefaultValue } from './dashboard.zod';
+import {
+  GlobalFilterSchema,
+  checkGlobalFilterDateDefaultValue,
+  DashboardWidgetSchema,
+  checkDashboardWidgetStageOrder,
+} from './dashboard.zod';
 import * as ui from './index';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -172,26 +176,12 @@ const vectorOf = (run: (value: unknown) => IssueSig[], values: unknown[]): strin
 // Fixture matrices — one entry per distinct failure path, plus accepting paths
 // ---------------------------------------------------------------------------
 
-const pageMountFixtures: Fixture[] = [
-  { label: '`type: page` with no `pageName`', value: { type: 'page', columns: [] }, refusesAt: ['pageName'] },
-  {
-    label: '`pageName` on a view that is not `type: page`',
-    value: { type: 'grid', pageName: 'sales_dashboard', columns: ['name'] },
-    refusesAt: ['pageName'],
-  },
-  {
-    label: 'a page mount declaring `columns`',
-    value: { type: 'page', pageName: 'sales_dashboard', columns: ['name'] },
-    refusesAt: ['columns'],
-  },
-  {
-    label: 'both failures at once — no `pageName` AND `columns`',
-    value: { type: 'page', columns: ['name'] },
-    refusesAt: ['pageName', 'columns'],
-  },
-  { label: 'a complete page mount', value: { type: 'page', pageName: 'sales_dashboard', columns: [] }, refusesAt: [] },
-  { label: 'an ordinary grid', value: { type: 'grid', columns: ['name'] }, refusesAt: [] },
-];
+// [#17063] `pageMountFixtures` / `checkListViewPageMount` stood here. The check
+// existed only to police the `type: 'page'` mount, and the mount was retired
+// under ADR-0049 enforce-or-remove (maintainer ruling 2026-09-09 「撤」) — so the
+// export, its three refusal messages and this population went with it. Nothing
+// weaker replaced them: the enum refuses the value by name and `pageName` is a
+// `retiredKey()` tombstone, both pinned in `view.test.ts`.
 
 const calendarFixtures: Fixture[] = [
   {
@@ -244,19 +234,56 @@ const dateDefaultFixtures: Fixture[] = [
   { label: 'a non-date filter with the bad spelling', value: { field: 'period', type: 'select', defaultValue: 'last_7_dayz' }, refusesAt: [] },
 ];
 
+/**
+ * The widget base every stage-order fixture builds on — shape-valid on purpose
+ * (`id` two characters or more, a `dataset`, at least one `values` member), for
+ * the reason the file header gives: zod 4 skips object-level checks when the
+ * shape itself failed, so a shape-invalid fixture would make "refused" true for
+ * the wrong reason.
+ */
+const WIDGET = { id: 'stage_widget', dataset: 'contracts', dimensions: ['status'], values: ['count'] } as const;
+
+const stageOrderFixtures: Fixture[] = [
+  {
+    label: '`stageOrder` on a widget type that does not read it',
+    value: { ...WIDGET, type: 'horizontal-bar', options: { stageOrder: ['draft', 'approved'] } },
+    refusesAt: ['options.stageOrder'],
+  },
+  {
+    label: '`stageOrder` on a second non-funnel type — the message interpolates, the check does not',
+    value: { ...WIDGET, type: 'pie', options: { stageOrder: ['draft'] } },
+    refusesAt: ['options.stageOrder'],
+  },
+  {
+    label: '`stageOrder` on a widget that declares NO type (the `metric` default)',
+    value: { ...WIDGET, options: { stageOrder: ['draft'] } },
+    refusesAt: ['options.stageOrder'],
+  },
+  {
+    label: '`stageOrder` on the one type that reads it',
+    value: { ...WIDGET, type: 'funnel', options: { stageOrder: ['draft', 'approved'] } },
+    refusesAt: [],
+  },
+  {
+    label: 'a non-funnel carrying the SIBLING options, which every type reads',
+    value: { ...WIDGET, type: 'horizontal-bar', options: { sortBy: 'count', sortOrder: 'desc', limit: 10 } },
+    refusesAt: [],
+  },
+  { label: 'a non-funnel with no `options` at all', value: { ...WIDGET, type: 'horizontal-bar' }, refusesAt: [] },
+];
+
 // ---------------------------------------------------------------------------
 // The population — every mirrored spec object that carries an object-level check
 // ---------------------------------------------------------------------------
 
 const listViewExports: ExportUnderTest[] = [
-  { name: 'checkListViewPageMount', check: checkListViewPageMount, fixtures: pageMountFixtures },
   { name: 'checkListViewCalendarVisualization', check: checkListViewCalendarVisualization, fixtures: calendarFixtures },
 ];
 
 const MIRRORED: MirroredSchema[] = [
   { name: 'ListViewSchema', schema: ListViewSchema, exports: listViewExports, cleanFixtures: [{ type: 'grid', columns: ['name'] }] },
-  // `objects[].listViews.*` re-attaches the same two checks (zod 4 refuses
-  // `.omit()` on a refined object, so the door cannot inherit them). Pinned
+  // `objects[].listViews.*` re-attaches the same check (zod 4 refuses
+  // `.omit()` on a refined object, so the door cannot inherit it). Pinned
   // here too so a second copy cannot appear at the ADR-0047 authoring door.
   { name: 'ObjectListViewSchema', schema: ObjectListViewSchema, exports: listViewExports, cleanFixtures: [{ type: 'grid', columns: ['name'] }] },
   {
@@ -270,6 +297,23 @@ const MIRRORED: MirroredSchema[] = [
     schema: GlobalFilterSchema,
     exports: [{ name: 'checkGlobalFilterDateDefaultValue', check: checkGlobalFilterDateDefaultValue, fixtures: dateDefaultFixtures }],
     cleanFixtures: [{ field: 'created_at', type: 'date' }],
+  },
+  // `dashboard.widgets[]` is mirrored the same way and for the same reason, so
+  // the ADR-0049 `stageOrder` type gate belongs in this catalogue: measured at
+  // the `.objectui-sha` pin `53ded82bf7a494f54e344e19099dbf00854b8694`,
+  // objectui's `packages/types/src/zod/complex.zod.ts` builds its own
+  // `DashboardWidgetSchema` from
+  // `specFieldsExcept(SpecDashboardWidgetSchema.shape, …)` — a `.shape` spread,
+  // which carries the FIELDS and drops every object-level check. That mirror
+  // re-attaches none of these exports today, which is a live gap recorded on
+  // the check's own docblock rather than a reason to leave the export
+  // uncatalogued: an export nothing pins here can drift away from the rule the
+  // door runs, and then a mirror that DOES re-attach it re-attaches the drift.
+  {
+    name: 'DashboardWidgetSchema',
+    schema: DashboardWidgetSchema,
+    exports: [{ name: 'checkDashboardWidgetStageOrder', check: checkDashboardWidgetStageOrder, fixtures: stageOrderFixtures }],
+    cleanFixtures: [{ ...WIDGET, type: 'horizontal-bar' }],
   },
 ];
 
@@ -357,23 +401,27 @@ describe('each schema attaches its export BY IDENTIFIER — no inline copy', () 
   const declarations = (src: string, name: string): number =>
     src.match(new RegExp(`^\\s*(export )?function ${name}\\b`, 'gm'))?.length ?? 0;
 
-  it('view.zod.ts declares both exports and chains them onto ListViewShapeSchema for ListViewSchema', () => {
+  it('view.zod.ts declares the export and chains it onto ListViewShapeSchema for ListViewSchema', () => {
     const src = read('view.zod.ts');
-    expect(src).toContain('export function checkListViewPageMount(');
     expect(src).toContain('export function checkListViewCalendarVisualization(');
-    // Exactly one declaration each — the counts below key on these names.
-    expect(declarations(src, 'checkListViewPageMount')).toBe(1);
+    // Exactly one declaration — the count below keys on this name.
     expect(declarations(src, 'checkListViewCalendarVisualization')).toBe(1);
-    // The mirrored door, exactly: shape → page-mount check → calendar check.
+    // The mirrored door, exactly: shape → calendar check.
     expect(src).toMatch(
-      /ListViewShapeSchema\s*\.superRefine\(checkListViewPageMount\)\s*\.superRefine\(checkListViewCalendarVisualization\)/,
+      /ListViewShapeSchema\s*\.superRefine\(checkListViewCalendarVisualization\)/,
     );
     // Three doors (authoring terminal, `objects[].listViews.*`, the flattened
-    // overlay) attach each check — `viewDoorsCarryingPageMountCheck` in
+    // overlay) attach the check — `viewDoorsCarryingObjectLevelChecks` in
     // view.test.ts pins the behaviour; this pins that every attachment is the
     // export, by name, and none is an inline copy.
-    expect(attachments(src, 'checkListViewPageMount')).toBe(3);
     expect(attachments(src, 'checkListViewCalendarVisualization')).toBe(3);
+    // [#17063] `checkListViewPageMount` was retired with the `type: 'page'`
+    // mount it policed, so neither a declaration nor an attachment of it may
+    // return: a re-attachment would be a check with no rule left to enforce.
+    // Counted, not `toContain`-ed — the file's own tombstone docblock names the
+    // retired check in prose on purpose, and a mention is not a relapse.
+    expect(declarations(src, 'checkListViewPageMount')).toBe(0);
+    expect(attachments(src, 'checkListViewPageMount')).toBe(0);
   });
 
   it('page.zod.ts declares the export and attaches it to PageSchema', () => {
@@ -396,8 +444,12 @@ describe('each schema attaches its export BY IDENTIFIER — no inline copy', () 
 // ---------------------------------------------------------------------------
 
 describe('`./index` (the `@objectstack/spec/ui` surface) exports the same function objects', () => {
+  // NOT the full export list: `checkDashboardWidgetStageOrder` is catalogued in
+  // `MIRRORED` above (legs 1-2) and carries its own legs 3-4 — barrel identity
+  // and attached-by-identifier — beside the schema it guards, in
+  // `dashboard.test.ts`. Read this `it.each` as the rows that live here, not as
+  // an enumeration of every exported refinement.
   it.each([
-    ['checkListViewPageMount', checkListViewPageMount],
     ['checkListViewCalendarVisualization', checkListViewCalendarVisualization],
     ['checkPageSourceCompleteness', checkPageSourceCompleteness],
     ['checkGlobalFilterDateDefaultValue', checkGlobalFilterDateDefaultValue],
@@ -405,5 +457,14 @@ describe('`./index` (the `@objectstack/spec/ui` surface) exports the same functi
     expect((ui as Record<string, unknown>)[name]).toBe(fn);
     expect(typeof fn).toBe('function');
     expect(fn.length).toBe(2);
+  });
+
+  // [#17063] The retired member, from the same surface, in the same leg. A
+  // downstream mirror re-attaching a check it imports from here is the whole
+  // point of this file, so the barrel is where a relapse would first become
+  // reachable — the runtime namespace answers it, with the three survivors
+  // above as the lit control that the namespace is really populated.
+  it('no longer exports `checkListViewPageMount` — retired with the mount it policed', () => {
+    expect('checkListViewPageMount' in (ui as Record<string, unknown>)).toBe(false);
   });
 });

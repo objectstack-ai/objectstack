@@ -2230,51 +2230,14 @@ function validateCrossReferences(config: ObjectStackDefinition): string[] {
     }
   }
 
-  // Validate `type: 'page'` list view → page references (#13216).
-  //
-  // The THIRD surface in this function that names a page — after an app nav
-  // item's `pageName` and a modal action's `target` — and it is checked the
-  // same way for the same reasons, deliberately rather than incidentally: one
-  // reference kind should not answer to three different build-time policies.
-  // So it carries the identical `pageNames.size > 0` gate, whose meaning is
-  // stated once at the modal-action block above ("when no pages are defined the
-  // target may be provided by a plugin"), and `@objectstack/lint`'s
-  // `validateViewPageRefs` is what speaks when that gate has switched the check
-  // off — exactly the division `validate-nav-target-refs` already documents for
-  // the nav twin.
-  //
-  // A `page`-typed view whose `pageName` resolves to nothing is a view that
-  // appears in the object's view switcher and renders nothing when opened:
-  // unlike every other view type it has no rows to fall back to, so there is no
-  // degraded-but-visible state to notice it by. `ListViewSchema`'s own
-  // refinement has already guaranteed the key is present and well-formed by the
-  // time this runs; existence is the one question left, and only a whole-stack
-  // walk can ask it.
-  const checkViewPageRef = (listView: unknown, where: string): void => {
-    if (!listView || typeof listView !== 'object') return;
-    const lv = listView as { type?: unknown; pageName?: unknown };
-    if (lv.type !== 'page' || typeof lv.pageName !== 'string') return;
-    if (pageNames.size === 0 || pageNames.has(lv.pageName)) return;
-    errors.push(
-      `${where} mounts page '${lv.pageName}' which is not defined in pages.`,
-    );
-  };
-  if (config.views) {
-    for (const [i, view] of config.views.entries()) {
-      const viewLabel = view.name ? `View '${view.name}'` : `View[${i}]`;
-      checkViewPageRef(view.list, `${viewLabel} list`);
-      for (const [key, lv] of Object.entries(view.listViews ?? {})) {
-        checkViewPageRef(lv, `${viewLabel} listViews.${key}`);
-      }
-    }
-  }
-  if (config.objects) {
-    for (const obj of config.objects) {
-      for (const [key, lv] of Object.entries(obj.listViews ?? {})) {
-        checkViewPageRef(lv, `Object '${obj.name}' listViews.${key}`);
-      }
-    }
-  }
+  // [#17063] The `type: 'page'` list-view → page existence branch was REMOVED
+  // here with the mount itself (ADR-0049 enforce-or-remove, maintainer ruling
+  // 2026-09-09 「撤」). It was the THIRD surface in this function that named a
+  // page; the surviving two — an app nav item's `pageName` and a modal action's
+  // `target`, both below — are untouched, as is `pageNames` itself, which they
+  // share. A list view can no longer carry `pageName` at all (the key is a
+  // `retiredKey()` tombstone on `ListViewSchema`), so there is no reference
+  // left to resolve rather than a resolution left unchecked.
 
   if (config.actions) {
     for (const action of config.actions) {

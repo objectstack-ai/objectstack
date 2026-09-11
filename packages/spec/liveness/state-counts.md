@@ -39,7 +39,7 @@ for both corollaries.
 | `skill` | 16 | 0 | 0 | 1 | 0 | 17 |
 | `dataset` | 27 | 0 | 0 | 0 | 0 | 27 |
 | `page` | 23 | 0 | 0 | 0 | 1 | 24 |
-| `view` | 78 | 0 | 0 | 10 | 0 | 88 |
+| `view` | 77 | 0 | 0 | 11 | 0 | 88 |
 | `report` | 21 | 0 | 0 | 0 | 0 | 21 |
 | `dashboard` | 34 | 0 | 0 | 8 | 0 | 42 |
 | `webhook` | 19 | 0 | 0 | 0 | 0 | 19 |
@@ -63,4 +63,4 @@ for both corollaries.
 | `batch_endpoints` | 5 | 0 | 0 | 2 | 0 | 7 |
 | `route_generation` | 0 | 0 | 0 | 4 | 0 | 4 |
 | `realtime_subscription` | 0 | 0 | 0 | 6 | 0 | 6 |
-| **total** | **851** | **5** | **1** | **92** | **10** | **959** |
+| **total** | **850** | **5** | **1** | **93** | **10** | **959** |
