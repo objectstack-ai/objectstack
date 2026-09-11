@@ -4509,14 +4509,26 @@ jobs:
       # is added here is a machine-readable COUNT, on all three surfaces.
 
       # Offline, no token, no network: drives the reporter's judge() over
-      # recorded jobs-API shapes. Wired as a step because an unrun self-test is
-      # a phantom check. Sub-second.
+      # recorded jobs-API shapes, and checks that the step below still hands
+      # itself its own name. Wired as a step because an unrun self-test is a
+      # phantom check. Sub-second.
+      #
+      # ⭐ `if: failure()` for the same reason the step below carries it, and it
+      # is the whole negative control: a green run of this job must be BYTE
+      # IDENTICAL to what it was before any of this existed. A self-test that
+      # ran unconditionally would print one line on every green run — one line
+      # is still new noise, and this change is not allowed to cost any. It is
+      # exercised on exactly the runs its subject is used on, which in this repo
+      # is not a rare event. ⛔ Do not "fix" this by dropping the condition.
+      # It fails LOUDLY: it is a separate step, so a broken reporter shows up as
+      # its own red step rather than as a missing paragraph.
       - name: Unmeasured-gate-tail reporter self-test
+        if: failure()
         run: node scripts/report-unmeasured-gate-tail.mjs --self-test
 
-      # The only step in this job that runs BECAUSE something failed. On a green
-      # head `failure()` is false, so it is skipped and contributes zero bytes to
-      # the log, the summary and the annotations. It always exits 0: the job is
+      # Runs BECAUSE something failed. On a green head `failure()` is false, so
+      # it is skipped and contributes zero bytes to the log, the summary and the
+      # annotations — measured, not assumed. It always exits 0: the job is
       # already failed when it runs, and a non-zero exit here would only add a
       # second annotation pointing at the reporter instead of at the gate.
       - name: Report how many gates never ran
