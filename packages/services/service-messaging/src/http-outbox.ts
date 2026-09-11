@@ -313,6 +313,27 @@ export interface HttpClaimOptions {
     claimTtlMs: number;
     /** "Now" reference, ms since epoch. Defaults to Date.now(). */
     now?: number;
+    /**
+     * [#17623] Skip the visibility-timeout reap this call otherwise runs before
+     * claiming. Default `false`: a direct `claim()` stays self-contained — the
+     * call that wants stale `in_flight` rows back is the one that recovers them.
+     *
+     * A caller that already ran {@link IHttpOutbox.reap} for this pass passes
+     * `true`. `HttpDispatcher` reaps once per tick and then claims every
+     * partition; the reap is environment-wide — its predicate names no
+     * partition — so repeating it per claim recovers nothing the first run did
+     * not, and on an idle outbox with the default 8 partitions it was 8 of a
+     * tick's 16 statements.
+     */
+    skipReap?: boolean;
+}
+
+/** [#17623] Options for {@link IHttpOutbox.reap}. */
+export interface HttpReapOptions {
+    /** Visibility timeout — `in_flight` rows claimed longer ago than this revert to `pending`. */
+    claimTtlMs: number;
+    /** "Now" reference, ms since epoch. Defaults to Date.now(). */
+    now?: number;
 }
 
 export interface HttpAckSuccess {
@@ -491,6 +512,23 @@ export interface IHttpOutbox {
      * dangerous outcome unreachable by omission rather than merely discouraged.
      */
     recordUndeliverable(input: UndeliverableHttpInput): Promise<string>;
+
+    /**
+     * [#17623] The visibility-timeout recovery on its own: every `in_flight` row
+     * whose claim is older than `claimTtlMs` reverts to `pending` with its claim
+     * cleared — across the WHOLE store, every partition and every organization.
+     * It is the step {@link claim} runs first unless told `skipReap`, exposed so
+     * a dispatcher can run it once per pass instead of once per partition.
+     *
+     * Safe to run at any moment and from any number of nodes, with exactly the
+     * claim-TTL semantics {@link claim} already has: it moves only rows already
+     * past their timeout, and {@link claim} takes only `pending` rows.
+     *
+     * Optional, so an outbox written before it keeps working unchanged: the
+     * dispatcher probes for it and, when it is absent, lets every claim reap as
+     * before — correct, at the per-claim cost. Both built-in stores implement it.
+     */
+    reap?(opts: HttpReapOptions): Promise<void>;
 
     /**
      * Atomically claim up to `limit` rows whose `nextRetryAt <= now` (or null)

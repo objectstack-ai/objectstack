@@ -134,6 +134,8 @@ export type {
     HttpDeliveryStatus,
     EnqueueHttpInput,
     HttpClaimOptions,
+    // [#17623] The dispatcher's once-per-tick visibility-timeout recovery.
+    HttpReapOptions,
     HttpAckResult,
     HttpAckSuccess,
     HttpAckFailure,
