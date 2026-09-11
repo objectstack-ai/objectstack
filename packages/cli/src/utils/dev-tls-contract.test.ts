@@ -206,7 +206,7 @@ describe('formatIncompleteDevTlsPairNotice — both halves, and the way out', ()
   it('carries no raw control bytes — colouring happens at the call site', () => {
     for (const given of [DEV_TLS_CERT_FLAG, DEV_TLS_KEY_FLAG] as const) {
       // eslint-disable-next-line no-control-regex
-      expect(formatIncompleteDevTlsPairNotice(given)).not.toMatch(/\[/);
+      expect(formatIncompleteDevTlsPairNotice(given)).not.toMatch(/\u001b\[/);
     }
   });
 });
