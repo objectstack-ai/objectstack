@@ -292,3 +292,51 @@ describe('`./index` (the `@objectstack/spec/ui` surface) exports the same functi
     expect(objectNavTargetExclusivity.length).toBe(2);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Leg 5 — the `recordId` docblock agrees with the accept set it describes
+// ---------------------------------------------------------------------------
+
+/**
+ * The tolerated pair is the one an author learns about from PROSE, not from a
+ * refusal: nothing goes red when the docblock drifts away from it. The
+ * `recordId` docblock did drift — it declared the pair "mutually exclusive"
+ * while leg 1 pins it as accepted — so the prose gets a pin of its own beside
+ * the measurement it has to match.
+ *
+ * The extraction throws when its anchor moves, so this can never pass
+ * vacuously on a docblock it failed to find. The docblock is normalised the
+ * way a JSDoc block has to be before it can be searched: strip the leading
+ * `*` of each line first, THEN flatten whitespace — a claim wraps lines, and
+ * a raw search reads a confident 0 on text that is plainly there.
+ */
+describe('`recordId` docblock parity with the accept set (#16875)', () => {
+  const src = fs.readFileSync(path.join(HERE, 'app.zod.ts'), 'utf8');
+
+  const recordIdDocblock = ((): string => {
+    const m = src.match(/\/\*\*([\s\S]*?)\*\/\s*\n\s*recordId: z\.string\(\)\.optional\(\)/);
+    if (!m) throw new Error('recordId docblock not found in app.zod.ts — the anchor moved, re-locate it BY TEXT');
+    return m[1].replace(/^[ \t]*\*[ \t]?/gm, '').replace(/\s+/g, ' ').trim();
+  })();
+
+  it('the extraction is lit — it found a non-empty docblock that names `viewName`', () => {
+    expect(recordIdDocblock.length).toBeGreaterThan(80);
+    expect(recordIdDocblock).toContain('viewName');
+  });
+
+  it('claims no exclusivity the guard does not enforce', () => {
+    expect(recordIdDocblock).not.toMatch(/mutually exclusive/i);
+    expect(recordIdDocblock).not.toMatch(/not combinable/i);
+    expect(recordIdDocblock).not.toMatch(/cannot be combined/i);
+  });
+
+  it('says the pair is tolerated — and the schema still accepts it', () => {
+    expect(recordIdDocblock).toMatch(/tolerated/i);
+    const r = NavigationItemSchema.safeParse({
+      ...NAV,
+      recordId: '{current_user_id}',
+      viewName: 'all',
+    });
+    expect(r.success).toBe(true);
+  });
+});
