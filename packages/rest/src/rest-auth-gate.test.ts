@@ -63,12 +63,17 @@ describe('RestServer.enforceAuth — ADR-0069 auth-policy gate', () => {
 
 // #7432 — a request carrying NO path must not be exempt from the gate.
 //
-// `isAuthGateAllowlisted(undefined)` returns `true` (it treats "no path" as
-// allow-listed), so passing `req.path` through raw made a pathless request read
-// as allow-listed on every route and the gate silently did not fire. These pin
-// the CONSEQUENCE — blocked / not blocked — rather than the guard expression, so
-// they stay meaningful if the guard is rewritten. Removing the guard turns the
-// first two red; they are the reverse-verification target.
+// `isAuthGateAllowlisted(undefined)` used to return `true` (it treated "no path"
+// as allow-listed), so passing `req.path` through raw made a pathless request
+// read as allow-listed on every route and the gate silently did not fire. These
+// pin the CONSEQUENCE — blocked / not blocked — rather than the guard
+// expression, so they stay meaningful if the guard is rewritten.
+//
+// [#7898] That default is gone: the predicate is fail-closed at the source now,
+// so this seam's guard and the predicate agree and A1's behaviour is unmoved —
+// which is exactly what these keep measuring. ⛔ The guard is NOT redundant: it
+// is what makes A1 independent of the predicate's treatment of a falsy argument,
+// and removing it still turns the first two red.
 describe('#7432 — enforceAuth exempts only a REAL path from the ADR-0069 gate', () => {
   const gate = (req: any, context: any) => {
     const { res, state } = makeRes();

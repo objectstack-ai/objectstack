@@ -511,7 +511,14 @@ describe('[#13214] §5 `isAuthGateAllowlisted` does not name a `/ui` path', () =
         // ⛔ Without this, a predicate that returned `false` for everything
         // (a rename, a broken import) would read exactly like the finding.
         expect(isAuthGateAllowlisted('/api/v1/auth/sign-in')).toBe(true);
-        expect(isAuthGateAllowlisted(undefined)).toBe(true);
+        expect(isAuthGateAllowlisted('/api/v1/health')).toBe(true);
+        // [#7898] `isAuthGateAllowlisted(undefined)` stood here as a second
+        // positive control and answered `true`. That was the fail-OPEN default,
+        // and it is now `false` — a falsy path is not exempt. Dropped rather
+        // than inverted: a refusal cannot serve as a positive control, and the
+        // control this test needs is fully carried by the two real paths above.
+        // The falsy-path decision itself is pinned where it belongs, in
+        // `packages/core/src/security/auth-gate.test.ts`.
     });
 });
 

@@ -151,6 +151,148 @@ describe('auth-gate (ADR-0069 session gate)', () => {
     });
   });
 
+  // ── [#7898] FAIL-CLOSED — an absent or empty path is NOT exempt ──────────
+  //
+  // Maintainer ruling, director seat batch #114 item 2, verbatim 「其他同意」:
+  // Option A, fail-close at the source. The predicate used to answer `true`
+  // for a falsy path, so any caller reaching the ADR-0069 gate without a
+  // populated `path` was exempt on EVERY route — a transport author who simply
+  // forgot to set `path` disabled the gate with no diagnostic at all.
+  //
+  // ⛔ These pin the DECISION (exempt / not exempt, blocked / not blocked),
+  // never the spelling of the predicate, so they survive a rewrite of it.
+  describe('[#7898] a falsy path is not exempt (fail-closed)', () => {
+    it('refuses to exempt an absent, null or empty path', () => {
+      for (const p of [undefined, null, ''] as const) {
+        expect(isAuthGateAllowlisted(p), JSON.stringify(p)).toBe(false);
+      }
+    });
+
+    it('⭐ POSITIVE CONTROL — the predicate still EXEMPTS a real control-plane path', () => {
+      // ⛔ Without this, a predicate that answered `false` for everything (a
+      // broken import, an over-eager guard, a rename) reads exactly like the
+      // refusal above — the failure this card must not ship is "a request that
+      // used to work now 403s", not "the refusal did not fire".
+      expect(isAuthGateAllowlisted('/api/v1/auth/sign-in')).toBe(true);
+      expect(isAuthGateAllowlisted('/api/v1/health')).toBe(true);
+      expect(isAuthGateAllowlisted('/api/v1/discovery')).toBe(true);
+    });
+
+    it('carries the flip through A3 `evaluateAuthGate`, and tightens only the EXEMPTION', () => {
+      const gated = { id: 'u1', authGate: { code: 'PASSWORD_EXPIRED', message: 'change it' } };
+      // A3 is the seam the dispatcher hands `cleanPath` to.
+      expect(evaluateAuthGate(gated, '')).toEqual({ code: 'PASSWORD_EXPIRED', message: 'change it' });
+      // ⭐ The other direction, and the one that matters more: the flip narrows
+      // what is EXEMPT, never what is GATED. A session with no `authGate` has
+      // nothing to enforce and is still not blocked on the same empty path,
+      // and a gated session still reaches every remediation route.
+      expect(evaluateAuthGate({ id: 'u1' }, '')).toBeNull();
+      expect(evaluateAuthGate(gated, '/api/v1/auth/change-password')).toBeNull();
+      expect(evaluateAuthGate(gated, '/api/v1/me/apps')).toBeNull();
+    });
+
+    // ⭐ THE FENCE — the ruling's own control, verbatim:
+    // 「控制:现有四处生产调用点行为逐字节不变,普查 5257880748 重跑」
+    //
+    // The census re-run on d46deba195 finds the SAME four production call
+    // sites it found on #7432, and no fifth:
+    //
+    //   A1 `RestServer.enforceAuth`        rest-server.ts      — guards non-empty
+    //   A2 `HttpDispatcher.enforceAuthGate` http-dispatcher.ts — passes `cleanPath`
+    //   A3 `evaluateAuthGate`              this file           — `path: string`
+    //   B1 `shouldDenyAnonymous`           anonymous-deny.ts   — guards non-empty
+    //
+    // A1 and B1 reach this predicate ONLY with a non-empty string, so "their
+    // behaviour did not move" is exactly "no non-empty path changed answer" —
+    // which is what this measures, over the whole corpus rather than a handful
+    // of examples.
+    //
+    // `preFlipAllowlisted` is the predicate this card replaced, transcribed
+    // verbatim from origin/main d46deba195. A legitimate future change to the
+    // allow-list updates BOTH sides: this is a ratchet on the FLIP, not on the
+    // route rules (those are #16839's, pinned above and untouched here).
+    it('changes the answer for the falsy path ONLY — every real caller input is unmoved', () => {
+      const OLD_MOUNT_BASES: readonly (readonly string[])[] = [['api', 'v1'], ['api'], []];
+      const OLD_SCOPE_SEGMENTS: readonly string[] = ['environments', 'projects'];
+      const OLD_ALLOW_ROUTES: readonly (readonly string[])[] = [
+        ['health'], ['ready'], ['discovery'], ['me', 'apps'], ['me', 'localization'],
+      ];
+      const startsWith = (segments: readonly string[], prefix: readonly string[]): boolean => {
+        if (segments.length < prefix.length) return false;
+        for (let k = 0; k < prefix.length; k++) if (segments[k] !== prefix[k]) return false;
+        return true;
+      };
+      const preFlipAllowlisted = (rawPath: string | undefined | null): boolean => {
+        if (!rawPath) return true;             // ⬅ the fail-open default this card removes
+        let path = rawPath.split('?')[0] || '/';
+        let end = path.length;
+        while (end > 1 && path.charCodeAt(end - 1) === 47) end--;
+        path = path.slice(0, end) || '/';
+        const segments = path.split('/').filter((s) => s !== '');
+        for (const base of OLD_MOUNT_BASES) {
+          if (!startsWith(segments, base)) continue;
+          let i = base.length;
+          let scoped = false;
+          if (i + 1 < segments.length && OLD_SCOPE_SEGMENTS.includes(segments[i] as string)) {
+            i += 2;
+            scoped = true;
+          }
+          if (segments[i] === 'auth') {
+            if (i + 1 < segments.length) return true;
+            if (!scoped) return true;
+          }
+          for (const route of OLD_ALLOW_ROUTES) {
+            if (segments.length - i === route.length && startsWith(segments.slice(i), route)) return true;
+          }
+        }
+        return false;
+      };
+
+      const SEG = ['api', 'v1', 'auth', 'health', 'ready', 'discovery', 'me', 'apps',
+        'localization', 'data', 'meta', 'ui', 'environments', 'projects', 'env1', 'x'];
+      const corpus: string[] = ['', '/'];
+      for (const a of SEG) {
+        corpus.push(`/${a}`);
+        for (const b of SEG) {
+          corpus.push(`/${a}/${b}`);
+          for (const c of SEG) {
+            corpus.push(`/${a}/${b}/${c}`);
+            for (const d of SEG) corpus.push(`/${a}/${b}/${c}/${d}`);
+          }
+        }
+      }
+
+      const moved = corpus.filter((p) => isAuthGateAllowlisted(p) !== preFlipAllowlisted(p));
+      expect(moved).toEqual(['']);
+
+      // Anti-vacuity: the corpus really exercises BOTH answers on BOTH
+      // predicates — an all-`false` predicate would satisfy the line above for
+      // every non-empty path without measuring anything.
+      expect(corpus.length).toBeGreaterThan(10_000);
+      expect(corpus.filter((p) => isAuthGateAllowlisted(p)).length).toBeGreaterThan(0);
+      expect(corpus.filter((p) => !isAuthGateAllowlisted(p)).length).toBeGreaterThan(0);
+      expect(corpus.filter((p) => preFlipAllowlisted(p)).length).toBeGreaterThan(0);
+    });
+
+    // ⚠️ The one shipped input whose answer DOES move, recorded rather than
+    // left to be discovered. `http-dispatcher.ts` computes
+    // `cleanPath = path.replace(/\/$/, '')`, so the bare-root `${prefix}/`
+    // arrives as `''` — exempt via the fail-open default before this card, not
+    // exempt after it. Normalising `'' → '/'` at the dispatcher is the ruling's
+    // step 2 (#17625, `domain:cli`, `Blocked-by: #7898`); it is deliberately
+    // NOT a tolerance re-added here.
+    it('does not exempt the dispatcher bare-root `cleanPath` — step 2 is #17625', () => {
+      expect(isAuthGateAllowlisted('')).toBe(false);
+      // ⛔ And `'/'`, the value step 2 normalises to, is not exempt either —
+      // so #17625 keeping bare-root discovery reachable for a GATED session is
+      // its own question, not something this flip already answered.
+      expect(isAuthGateAllowlisted('/')).toBe(false);
+      // The named discovery route is unaffected in both spellings.
+      expect(isAuthGateAllowlisted('/discovery')).toBe(true);
+      expect(isAuthGateAllowlisted('/api/v1/discovery')).toBe(true);
+    });
+  });
+
   describe('evaluateAuthGate', () => {
     it('returns null when the user carries no authGate', () => {
       expect(evaluateAuthGate({ id: 'u1' }, '/api/v1/data/x')).toBeNull();
