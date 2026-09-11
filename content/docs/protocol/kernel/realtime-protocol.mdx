@@ -162,6 +162,30 @@ names none, which is why every host the open framework ships answers `false`.
   A WebSocket upgrade endpoint is part of the planned transport (`IRealtimeService.handleUpgrade()`) and is not yet served — realtime stays out of the open framework (maintainer ruling, 2026-09-04). If a host ever mounts one, its realtime service names the mounted path via `getChannelRoute()` and discovery advertises `routes.realtime`, `handlerReady: true` and `capabilities.websockets` in the same step (see #2462, #14646).
 </Callout>
 
+### Declared message vocabulary
+
+**`WebSocketMessageType` (`packages/spec/src/api/websocket.zod.ts`) is a closed enum, and it is the
+only declaration this protocol has.** It names exactly ten message types:
+
+`subscribe` · `unsubscribe` · `event` · `ping` · `pong` · `ack` · `error` · `presence` · `cursor` · `edit`
+
+`BaseWebSocketMessage` types every message's `type` field as that enum, and each message schema pins
+`type` to one of those literals, so a message whose `type` is outside the enum parses against **no**
+schema in the file: `WebSocketMessageSchema` is a discriminated union over exactly those ten, and an
+unknown discriminant matches no branch at all.
+
+Every message also carries the three `BaseWebSocketMessage` fields — `messageId` (UUID), `type`, and
+`timestamp` (ISO 8601).
+
+<Callout type="warn">
+  ⛔ **Five message types this page used to teach are not in that enum:** an in-band handshake
+  (`auth`, `auth_success`, `auth_error`) and two acknowledgements (`subscribed`, `unsubscribed`).
+  Nothing in the runtime produces or consumes any of the five, and a client built on them sends and
+  waits for messages the declared contract cannot carry. They were documentation, not protocol. The
+  sections below describe what the enum does carry: see **Authentication** for where a credential
+  goes instead, and `ack` for the acknowledgement the protocol actually declares.
+</Callout>
+
 ### Establishing Connection
 
 **Client-side (JavaScript):**
@@ -170,12 +194,8 @@ const ws = new WebSocket('wss://api.acme.com/ws');
 
 ws.onopen = () => {
   console.log('Connected to ObjectStack');
-  
-  // Authenticate
-  ws.send(JSON.stringify({
-    type: 'auth',
-    token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
-  }));
+  // No in-band auth message: the credential travels on the upgrade request
+  // (see Authentication). A socket that reaches `onopen` was already admitted.
 };
 
 ws.onmessage = (event) => {
@@ -194,38 +214,37 @@ ws.onclose = (event) => {
 
 ### Authentication
 
-Send authentication message immediately after connection:
+**The declared protocol has no authentication message.** A credential travels on the HTTP upgrade
+request, before the socket exists — `WebSocketConfig.headers` ("Custom headers for WebSocket
+handshake") is the declared seam for it, and `IRealtimeService.handleUpgrade(request)` receives that
+`Request` with the headers attached. So there is nothing to send once the socket is open, and no
+success or failure message to wait for: an upgrade that is refused never becomes a WebSocket, and the
+client sees the HTTP rejection or an immediate close rather than a message.
 
-**Request:**
 ```json
 {
-  "type": "auth",
-  "token": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-}
-```
-
-**Success Response:**
-```json
-{
-  "type": "auth_success",
-  "user_id": "user_123",
-  "session_id": "session_abc",
-  "expires_at": "2024-01-16T22:30:00Z"
-}
-```
-
-**Failure Response:**
-```json
-{
-  "type": "auth_error",
-  "error": {
-    "code": "INVALID_TOKEN",
-    "message": "JWT token expired"
+  "url": "wss://api.acme.com/ws",
+  "headers": {
+    "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
   }
 }
 ```
 
-**Connection closes on auth failure:** Server closes WebSocket if authentication fails within 10 seconds.
+Browsers cannot set headers on `new WebSocket(...)`, so a browser client carries the credential the
+way the host's upgrade route accepts it — a cookie already scoped to the origin, or a short-lived
+ticket in the URL. Which of those a host accepts is that host's decision; `handleUpgrade` receives
+the whole `Request` either way.
+
+Failures that arise **after** admission are ordinary `type: "error"` messages (`ErrorMessageSchema`,
+flat `code` / `message` / `details`) — see **Token Expiration** for the one that matters most here.
+
+<Callout type="warn">
+  ⛔ **Nothing serves any of this yet.** `handleUpgrade` is optional and unimplemented throughout the
+  open framework (#2462, #3197), and per `IRealtimeService` the delivery path carries **no
+  per-recipient authorization** at all — subscriptions carry no principal. Admission on the upgrade
+  request is where the declared shapes put a credential; it is not a claim that a served endpoint
+  checks one today.
+</Callout>
 
 ## Subscriptions
 
@@ -253,12 +272,18 @@ Subscribe to changes on a specific object:
 - `filter`: Optional filter (same syntax as HTTP API filters)
 
 **Success Response:**
+
+The declared acknowledgement is an `ack` message (`AckMessageSchema`); there is no `subscribed` type.
+`ackMessageId` echoes the `messageId` of the message being acknowledged, `success` says whether it was
+accepted, and the optional `error` string carries the reason when it was not.
+
 ```json
 {
-  "type": "subscribed",
-  "subscription_id": "sub_1",
-  "object": "task",
-  "events": ["created", "updated", "deleted"]
+  "messageId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  "type": "ack",
+  "timestamp": "2024-01-16T14:30:00Z",
+  "ackMessageId": "550e8400-e29b-41d4-a716-446655440000",
+  "success": true
 }
 ```
 
@@ -358,11 +383,16 @@ Stop receiving events for a subscription:
 }
 ```
 
-**Response:**
+**Response:** the same `ack` envelope as a subscribe acknowledgement — there is no `unsubscribed`
+type either.
+
 ```json
 {
-  "type": "unsubscribed",
-  "subscription_id": "sub_1"
+  "messageId": "1f2b7d64-9a01-4c8e-9f3a-2b5c8d417e60",
+  "type": "ack",
+  "timestamp": "2024-01-16T14:35:00Z",
+  "ackMessageId": "c0ffee00-1111-4222-8333-444455556666",
+  "success": true
 }
 ```
 
@@ -565,9 +595,11 @@ Handle disconnections gracefully:
 
 ```javascript
 class ObjectStackClient {
-  constructor(url, token) {
+  // The credential is not held here: it travels on the upgrade request (see
+  // Authentication), so reconnecting re-presents it the same way the first
+  // connection did.
+  constructor(url) {
     this.url = url;
-    this.token = token;
     this.subscriptions = new Map();
     this.reconnectDelay = 1000;  // Start with 1 second
     this.maxReconnectDelay = 30000;  // Max 30 seconds
@@ -579,7 +611,6 @@ class ObjectStackClient {
     this.ws.onopen = () => {
       console.log('Connected');
       this.reconnectDelay = 1000;  // Reset backoff
-      this.authenticate();
       this.resubscribe();
     };
     
@@ -591,10 +622,6 @@ class ObjectStackClient {
         this.maxReconnectDelay
       );
     };
-  }
-  
-  authenticate() {
-    this.send({ type: 'auth', token: this.token });
   }
   
   resubscribe() {
@@ -616,7 +643,7 @@ class ObjectStackClient {
 }
 
 // Usage
-const client = new ObjectStackClient('wss://api.acme.com/ws', token);
+const client = new ObjectStackClient('wss://api.acme.com/ws');
 client.connect();
 ```
 
@@ -1010,18 +1037,12 @@ ws.on('task.updated', (task) => {
 ## Security Considerations
 
 ### Authentication Required
-All WebSocket connections must authenticate within 10 seconds:
 
-```javascript
-ws.onopen = () => {
-  ws.send(JSON.stringify({ 
-    type: 'auth', 
-    token: getToken() 
-  }));
-};
-
-// Server closes connection if no auth within 10 seconds
-```
+Every WebSocket connection is admitted on the **upgrade request**, before the socket exists — there
+is no authentication message to send afterwards, because `WebSocketMessageType` declares none. A
+connection that reaches `onopen` was already admitted; one that was refused never opened, and the
+client sees the HTTP rejection or an immediate close. See **Authentication** for the declared seam
+(`WebSocketConfig.headers` into `IRealtimeService.handleUpgrade`).
 
 ### Token Expiration
 Handle JWT expiration gracefully:
