@@ -35,14 +35,13 @@ import {
   resolveLocalizationContext,
   assembleExecutionContextOrGuest,
   type EntryLocalization,
-  effectiveTenancyPosture,
-  // [#13906 decision 1 A] The loud answer for an authorization input that
-  // exists and could not be read, and the REGISTRY's own "never registered"
-  // brand that lets the tenancy seam absorb the supported no-tenancy
-  // composition while every other rejection stays loud. Never message text
-  // (#13905).
-  AuthzStoreUnavailableError,
-  isServiceNotRegisteredError,
+  // [#13906 decision 1 A / #16013] The ONE classification this door applies to
+  // the `tenancy` service's rejection: the REGISTRY's own "never registered"
+  // brand absorbs the supported no-tenancy composition (quiet `undefined`)
+  // while every other rejection becomes the loud `AuthzStoreUnavailableError`
+  // for an authorization input that exists and could not be read. Never
+  // message text (#13905). ⛔ The RESOLUTION stays here — see the call site.
+  classifyAdmissionTenancyPosture,
 } from '@objectstack/core';
 
 /**
@@ -203,15 +202,17 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
   // capability PROBE, `resolveService`) still reads as absent — which is why
   // `HttpDispatcher.resolveRequestScope` hands THIS read the classified
   // rejection rather than the probe's collapsed answer.
-  let tenancyPosture;
-  try {
-    tenancyPosture = effectiveTenancyPosture(await opts.getService('tenancy'));
-  } catch (err) {
-    if (!isServiceNotRegisteredError(err)) {
-      throw new AuthzStoreUnavailableError('tenancy', err);
-    }
-    tenancyPosture = undefined;
-  }
+  //
+  // [#17114] The CLASSIFICATION above is `classifyAdmissionTenancyPosture`'s,
+  // not a hand-written copy of it: this seam was one of the two that #16013
+  // left behind, and a copy of this decision is by construction the stale one.
+  // ⛔ The RESOLUTION is still this door's own and must stay so — `opts.getService`
+  // is this facade's lookup (the dispatcher hands it the registry's own async
+  // accessor; other callers hand it a probe), so it is handed in as the thunk
+  // and the helper never learns how this seam reaches the service.
+  const tenancyPosture = await classifyAdmissionTenancyPosture(
+    () => opts.getService('tenancy'),
+  );
 
   const authz = await resolveAuthzContext({
     ql,

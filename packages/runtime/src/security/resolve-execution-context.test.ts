@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { ObjectKernel, isAuthzStoreUnavailableError } from '@objectstack/core';
+import { ObjectKernel, isAuthzStoreUnavailableError, isServiceNotRegisteredError } from '@objectstack/core';
 
 import { resolveExecutionContext } from './resolve-execution-context.js';
 import { hashApiKey } from './api-key.js';
@@ -738,5 +738,62 @@ describe('[#13906 decision 1 A, runtime door] the tenancy posture seam tells "ne
       request: { headers: { 'x-api-key': RAW_EXMEMBER } },
     });
     expect(ctx.userId).toBe('u_exmember');
+  });
+
+  // -------------------------------------------------------------------------
+  // [#17114] The classification above is now `classifyAdmissionTenancyPosture`
+  // (`@objectstack/core`) rather than a hand-written copy of it — one of the
+  // two seams #16013 left behind. The RESOLUTION stayed here: this facade's
+  // `opts.getService` is handed in as the thunk.
+  //
+  // These two arms are the pins the WRONG fold fails. A fold that awaited the
+  // service OUTSIDE the shared classification — resolving first and handing it
+  // an already-settled value — would need a `catch` of its own to get there,
+  // which is the per-seam copy this card deletes. The observable difference is
+  // a lookup that throws SYNCHRONOUSLY: `KernelServiceLookup` declares
+  // `Promise<any> | any`, so a facade that throws rather than rejecting is
+  // within its contract, and both rejection classes must classify exactly as
+  // their asynchronous twins above do.
+  //
+  // Both errors are the REGISTRY's own — read out of a real kernel and then
+  // re-raised synchronously — so neither arm is the fixture asserting itself.
+  // -------------------------------------------------------------------------
+
+  /** The registry's own branded "never registered" rejection, as a value. */
+  const brandedNotRegistered = async (): Promise<unknown> =>
+    kernelWith('unregistered').getServiceAsync('tenancy').then(() => undefined, (e) => e);
+
+  /** The registry's own UNBRANDED rejection for a factory that threw. */
+  const unbrandedBuildFailure = async (): Promise<unknown> =>
+    kernelWith('factory-throws').getServiceAsync('tenancy').then(() => undefined, (e) => e);
+
+  const throwingSync = (err: unknown, headers: Record<string, string>) => ({
+    getService: (name: string) => {
+      if (name === 'tenancy') throw err;
+      return undefined;
+    },
+    getQl: async () => qlWith(),
+    request: { headers },
+  });
+
+  it('[#17114] a SYNCHRONOUSLY thrown branded "never registered" is absorbed exactly like the rejected one — quiet, admitted', async () => {
+    const branded = await brandedNotRegistered();
+    expect(isServiceNotRegisteredError(branded), 'fixture: the kernel did not brand its miss').toBe(true);
+    const ctx = await resolveExecutionContext(throwingSync(branded, { 'x-api-key': RAW_EXMEMBER }) as any);
+    expect(ctx.userId).toBe('u_exmember');
+    expect(ctx.tenantId).toBe('org_A');
+  });
+
+  it('[#17114] and a SYNCHRONOUSLY thrown UNBRANDED failure is the 503 outage — the two still answer differently', async () => {
+    const unbranded = await unbrandedBuildFailure();
+    expect(isServiceNotRegisteredError(unbranded), 'fixture: the failed build was branded').toBe(false);
+    const err: any = await rejectionOf(
+      resolveExecutionContext(throwingSync(unbranded, { 'x-api-key': RAW_EXMEMBER }) as any),
+    );
+    expect(err, 'the resolver RESOLVED — a synchronous outage escaped the classification').toBeDefined();
+    expect(isAuthzStoreUnavailableError(err)).toBe(true);
+    expect(err.code).toBe('SERVICE_UNAVAILABLE');
+    expect(err.status).toBe(503);
+    expect(err.object).toBe('tenancy');
   });
 });
