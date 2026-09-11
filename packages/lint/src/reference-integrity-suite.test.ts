@@ -45,10 +45,10 @@ describe('reference-integrity suite — membership', () => {
       'validateDatasetReferences',
       'validateNavAccess',
       'validateNavTargetRefs',
-      // [#13216] The conscious edit this written-out list exists to force: the
-      // page reference on a `type: 'page'` list view, placed beside the nav
-      // twin that asks the identical question one surface over.
-      'validateViewPageRefs',
+      // [#17063] `validateViewPageRefs` sat HERE, beside the nav twin that asks
+      // the identical question one surface over. It left with the `type: 'page'`
+      // list-view mount it resolved — this written-out list is exactly where a
+      // removal has to be argued, the same way an addition is.
       'validateNavObjectServability',
       'validateTranslationReferences',
       'validateTranslatableSections',

@@ -1693,93 +1693,57 @@ const exportOptionsPdfUnionError = (issue: { input?: unknown }): string | undefi
 };
 
 /**
- * [#13216] The `type: 'page'` mount refusals, in BOTH directions.
+ * [#17063] The retired `type: 'page'` list-view mount — prescriptions only.
  *
- * `page` is the one member of the view `type` enum that renders nothing of its
- * own: every other member describes how to draw the object's ROWS, and degrades
- * to a wrong-but-visible list when its config block is missing (which is why
- * `checkViewCompleteness`'s `VIEW_BINDING_BLOCKS` treats those as WARNINGs — the
- * renderer falls back to literal default field names). A `page` view has no
- * rows to fall back to: without `pageName` there is no page to hand the page
- * renderer, so the view is not "degraded", it is empty. Nothing weaker than a
- * parse refusal is honest about that, and the refusal is why `page` is
- * deliberately absent from `VIEW_BINDING_BLOCKS` — see the note there.
+ * `page` was one member of the list-view `type` enum and `pageName` was its
+ * binding: the view was to render nothing of its own and delegate to the
+ * already-published page named by `pageName` (#13216, maintainer ruling
+ * 2026-08-29, direction 1). Only the spec half was ever built. No renderer
+ * routed the member — objectui's `ListView` switch shares its `default:` arm
+ * with `case 'grid'`, and `isListViewVisualization('page')` is false — so a
+ * page view drew an empty grid where the page was supposed to be, and the
+ * three parse refusals that used to police the binding
+ * (`checkListViewPageMount`) policed a mount that never mounted anything.
  *
- * The reverse direction matters just as much and is the cheaper mistake to
- * make: `pageName` on a `grid` (or any non-`page`) view is accepted-and-ignored,
- * the failure mode this file's `VIEW_HISTORY` exists to record and the one that
- * reads as working to whoever authored it — human or model.
+ * Retired under ADR-0049 enforce-or-remove (maintainer ruling 2026-09-09,
+ * decision batch #107 item 1, verbatim 「撤」), on the governing principle
+ * 「已发布零消费的能力不因沉没成本获得豁免」. What replaces it: publish the page
+ * and reach it from an app NAVIGATION item (`{ type: 'page', pageName }` on
+ * `PageNavItemSchema`) — a different key on a different surface, and the page
+ * mount that has always rendered.
  *
- * ## Why `columns` is checked here and the other inert keys are not
+ * Two prescriptions, because this retirement removes two different KINDS of
+ * authorable thing and they travel on different channels:
  *
- * `columns` is the ONLY required key on {@link ListViewSchema}, so a `page` view
- * cannot be authored without writing one, and the only truthful value is `[]`.
- * Leaving that unchecked would mean the platform forces an author to write a
- * value and then ignores what they wrote. The optional type-specific blocks
- * (`kanban` on a grid view, `chart` on a tree view, …) are NOT checked, here or
- * anywhere: tolerating a stale optional block is this schema's standing
- * disposition, and narrowing it is a separate decision about every view type,
- * not a rider on this one.
- *
- * ⛔ `columns` is NOT made optional to spare the author the `[]`. The list and
- * form overlay arms of {@link ViewMetadataSchema} are told apart by exactly two
- * properties — "no required `columns`, disjoint `type` enum" — and the list arm
- * is tried FIRST, so an optional `columns` would let a flattened FORM overlay
- * that carries no explicit `type` match the LIST arm, default to `'grid'`, and
- * have its `sections` silently stripped by that arm's `.strip()`.
+ *   - {@link LIST_VIEW_PAGE_NAME_RETIRED} — `pageName` is a KEY, so it keeps a
+ *     `retiredKey()` tombstone in the shape: `tsc` types it `never` and the
+ *     parse raises the prescription instead of a bare unrecognized-key report.
+ *   - {@link LIST_VIEW_TYPE_PAGE_RETIRED} — `'page'` was an enum VALUE, and an
+ *     enum-value narrowing has no tombstone to hang a prescription on (the def
+ *     survives, one value lighter). The enum's own `error` map carries it,
+ *     keyed on `issue.input` so only the value that used to be legal gets the
+ *     "was removed" message — the {@link LIST_VIEW_EXPORT_PDF_RETIRED}
+ *     precedent in this same file, and `HookBodyCapability` /
+ *     `object.managedBy: 'system'` before it.
  */
-const VIEW_PAGE_MOUNT_NEEDS_PAGE_NAME =
-  "A `type: 'page'` view mounts a published page and has no rows of its own, so it needs to say "
-  + 'WHICH page: declare `pageName`. Unlike every other view type there is no fallback rendering — '
-  + "without it the view is blank. Shape: `{ type: 'page', pageName: '<page_name>', columns: [] }`.";
+const LIST_VIEW_TYPE_PAGE_RETIRED =
+  "'page' was removed from the list-view `type` enum in @objectstack/spec 17.5.0 "
+  + '(ADR-0049 enforce-or-remove) — the delegating mount was declared on the spec side and never '
+  + 'built, so no renderer ever routed the member: a page view fell through to the grid branch and '
+  + 'drew an empty table where the page was supposed to be. Delete the member and pick a view type '
+  + 'that draws rows (`grid` and its siblings); to put a published page in front of users, give the '
+  + "app a navigation item instead — `{ type: 'page', pageName: '<page_name>' }` under the app's "
+  + '`navigation`, which is the page mount that has always rendered. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
 
-const VIEW_PAGE_NAME_NEEDS_PAGE_TYPE =
-  "`pageName` is only read by a `type: 'page'` view (it names the published page that view mounts). "
-  + 'On any other view type it is accepted and never applied — the view renders as its own type and '
-  + "the page is never reached. Set `type: 'page'` to mount the page, or remove `pageName`.";
-
-const VIEW_PAGE_MOUNT_HAS_COLUMNS =
-  "A `type: 'page'` view renders the page named by `pageName`, not a column list — the declared "
-  + 'columns are never read. `columns` is required on every list view, so write the empty list: '
-  + '`columns: []`. (To show records in columns, use a row-rendering view type — `grid` and its '
-  + 'siblings — or let the page itself declare the list it wants.)';
-
-/**
- * The `type` ⇄ `pageName` binding check attached to {@link ListViewSchema}.
- *
- * Attached with `.superRefine` rather than being folded into the shape because
- * it is a relation BETWEEN two keys. Zod 4 attaches refinements to the schema
- * itself, so `.extend()` and `.omit()` carry it — which is what puts this check
- * on the flattened runtime overlay arm ({@link ViewMetadataSchema} member 3,
- * the door a Studio tenant or an MCP/AI author writes through) and on
- * {@link ObjectListViewSchema} (`objects[].listViews.*`) without a second copy.
- *
- * Exported (#16489, the spec half of objectui#7715) so a downstream mirror
- * that derives its schema from `ListViewSchema.shape` — which carries the
- * FIELDS by reference and drops every object-level check — can re-attach
- * exactly this rule with `.superRefine(checkListViewPageMount)` instead of
- * re-implementing it. One function per refinement, no bundle: a mirror attaches
- * the checks whose fields it carries. Every spec door attaches this same
- * binding, so the export IS the check the schema runs — pinned in
- * `object-refinement-check-exports.test.ts`.
- */
-export function checkListViewPageMount(
-  view: { type?: string; pageName?: string; columns?: unknown },
-  ctx: z.RefinementCtx,
-): void {
-  const isPageMount = view.type === 'page';
-  const hasPageName = typeof view.pageName === 'string' && view.pageName.length > 0;
-
-  if (isPageMount && !hasPageName) {
-    ctx.addIssue({ code: 'custom', path: ['pageName'], message: VIEW_PAGE_MOUNT_NEEDS_PAGE_NAME });
-  }
-  if (!isPageMount && hasPageName) {
-    ctx.addIssue({ code: 'custom', path: ['pageName'], message: VIEW_PAGE_NAME_NEEDS_PAGE_TYPE });
-  }
-  if (isPageMount && Array.isArray(view.columns) && view.columns.length > 0) {
-    ctx.addIssue({ code: 'custom', path: ['columns'], message: VIEW_PAGE_MOUNT_HAS_COLUMNS });
-  }
-}
+const LIST_VIEW_PAGE_NAME_RETIRED =
+  '`view.pageName` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named '
+  + "the page a `type: 'page'` view was to mount, and that mount was never built: no renderer read "
+  + 'the key, so the named page was never reached and the view drew an empty grid. Delete the key; '
+  + "to put a published page in front of users, give the app a navigation item — `{ type: 'page', "
+  + "pageName: '<page_name>' }` under the app's `navigation` — which is a different key on a "
+  + 'different surface and is the page mount that has always rendered. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
 
 const VIEW_CALENDAR_ALLOWED_NEEDS_START_DATE =
   "`appearance.allowedVisualizations` includes 'calendar', so end users can switch this view to a "
@@ -1813,15 +1777,15 @@ const VIEW_CALENDAR_ALLOWED_NEEDS_START_DATE =
  * ⚠️ [#16577] Scope, the OTHER axis: this check reads
  * `appearance.allowedVisualizations` and NOT `type`. A view that asks for a
  * calendar by BEING one — `type: 'calendar'` with no `calendar:` block —
- * parses CLEAN at all three doors, measured. That is not an unwatched shape:
- * it is the axis `checkViewCompleteness`'s `VIEW_BINDING_BLOCKS`
- * (`../kernel/functional-completeness.ts`) carries, at WARNING, under the same
- * ADR-0078 §1 rubric the `page` note above cites — refuse what renders
- * NOTHING, warn what degrades. The two axes are covered by two doors with
- * complementary coverage: the completeness check reads `type` only and is
- * blind to `allowedVisualizations`, this check reads `allowedVisualizations`
- * only and is blind to `type`. ⛔ Escalating the `type` axis to a refusal is
- * NOT ruled: it would refuse a shape 17.3.0 accepts, so it is a
+ * parses CLEAN at all three doors, measured. That is not an unwatched
+ * shape: it is the axis `checkViewCompleteness`'s `VIEW_BINDING_BLOCKS`
+ * (`../kernel/functional-completeness.ts`) carries, at WARNING, under the
+ * same ADR-0078 §1 rubric — refuse what renders NOTHING, warn what
+ * degrades. The two axes are covered by two doors with complementary
+ * coverage: the completeness check reads `type` only and is blind to
+ * `allowedVisualizations`, this check reads `allowedVisualizations` only
+ * and is blind to `type`. ⛔ Escalating the `type` axis to a refusal is NOT
+ * ruled: it would refuse a shape 17.3.0 accepts, so it is a
  * published-surface narrowing and a separate finding — the same disposition
  * the `timeline` sentence above states. Both halves are pinned in
  * `view.test.ts`, so a change to either is a deliberate edit.
@@ -1831,15 +1795,16 @@ const VIEW_CALENDAR_ALLOWED_NEEDS_START_DATE =
  * `.strip()`ed overlay door DROPS it, so the view parses as the defaulted
  * `type: 'grid'` — an author who spells it reaches a grid, never a calendar.
  *
- * Attached with `.superRefine` at the same three doors as
- * {@link checkListViewPageMount}, for the same zod-4 reason (refinements block
- * `.omit()`/key-overwriting `.extend()`, so derived shapes re-attach): the
- * authoring terminal, `objects[].listViews.*`, and the flattened runtime
- * overlay arm — the door a Studio tenant or an MCP/AI author writes through.
+ * Attached with `.superRefine` at all three list-view doors, for the zod-4
+ * reason that refinements block `.omit()`/key-overwriting `.extend()` so
+ * derived shapes re-attach: the authoring terminal, `objects[].listViews.*`,
+ * and the flattened runtime overlay arm — the door a Studio tenant or an
+ * MCP/AI author writes through. (#17063 retired the page-mount check that used
+ * to ride the same three attachment points; this one is now the only
+ * object-level binding check the list-view doors carry.)
  *
- * Exported (#16489, the spec half of objectui#7715) for the same reason as
- * {@link checkListViewPageMount}: a mirror built from `ListViewSchema.shape`
- * drops this check and re-attaches it with
+ * Exported (#16489, the spec half of objectui#7715): a mirror built from
+ * `ListViewSchema.shape` drops this check and re-attaches it with
  * `.superRefine(checkListViewCalendarVisualization)` — the measured 17.3.0
  * gap was exactly this rule, accepted by objectui's authoring door and refused
  * by the spec's publish door. Every spec door attaches this same binding, so
@@ -1896,8 +1861,8 @@ export function checkListViewCalendarVisualization(
  * containing refinements"`, thrown at construction), and
  * {@link ObjectListViewSchema} is built by omitting `userFilters` from this
  * shape. So the shape stays refinement-free and BOTH terminals attach
- * {@link checkListViewPageMount} themselves — one check function, two
- * attachment points, no second copy of the rule.
+ * {@link checkListViewCalendarVisualization} themselves — one check function,
+ * two attachment points, no second copy of the rule.
  *
  * ⛔ Not exported, deliberately: a top-level EXPORTED schema binding mints a
  * new protocol def in `json-schema.manifest/` and a full set of ratcheted
@@ -1920,6 +1885,12 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
 }, {
   name: SnakeCaseIdentifierSchema.optional().describe('Internal view name (lowercase snake_case)'),
   label: I18nLabelSchema.optional(), // Display label override (supports i18n)
+  // [#17063] `'page'` was REMOVED here (ADR-0049 enforce-or-remove). This is an
+  // enum-VALUE narrowing, so there is no `retiredKey()` tombstone to hang the
+  // prescription on — the enum's own error map carries it
+  // ({@link LIST_VIEW_TYPE_PAGE_RETIRED}), keyed on `issue.input` so only the
+  // value which used to be legal gets the "was removed" message. Every other
+  // invalid value keeps zod's default message.
   type: z.enum([
     'grid',       // Standard Data Table
     'kanban',     // Board / Columns
@@ -1929,9 +1900,10 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
     'gantt',      // Project Timeline
     'map',        // Geospatial
     'chart',      // Aggregate visualisation
-    'tree',       // Self-referencing hierarchy (tree-grid)
-    'page'        // Mount an already-published `page` — see `pageName` below
-  ]).default('grid'),
+    'tree'        // Self-referencing hierarchy (tree-grid)
+  ], {
+    error: (issue) => (issue.input === 'page' ? LIST_VIEW_TYPE_PAGE_RETIRED : undefined),
+  }).default('grid'),
   
   /** Data Source Configuration */
   data: ViewDataSchema.optional().describe('Data source configuration (defaults to "object" provider)'),
@@ -2028,31 +2000,20 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
   tree: TreeConfigSchema.optional().describe('Tree/hierarchy configuration — applies when the view renders as a tree layout'),
 
   /**
-   * The published `page` a `type: 'page'` view mounts.
+   * [#17063] REMOVED — the `type: 'page'` mount this key named was never
+   * built. Tombstoned rather than deleted so the removal is audible in both
+   * channels an upgrading author hits: `tsc` (the input type is `never`) and
+   * the parse ({@link LIST_VIEW_PAGE_NAME_RETIRED} instead of a bare
+   * unrecognized-key report). The reference itself is not gone from the
+   * platform — `PageNavItemSchema.pageName` is the surviving spelling, on the
+   * app navigation item, and it is the page mount that has always rendered.
    *
-   * Named `pageName` because that is what a page reference is already called on
-   * every other surface that carries one — `PageNavItemSchema.pageName` in
-   * `app.zod.ts`, the collection it resolves against (`stack.pages`), and the
-   * lint rule that resolves it (`nav-target-unresolved`). A second spelling for
-   * the same reference would split the one thing an author has to learn.
-   *
-   * Grammar is {@link SnakeCaseIdentifierSchema} — the SAME schema
-   * `PageSchema.name` is declared with — rather than the bare `z.string()`
-   * the nav item uses, so the set of values this key accepts is exactly the set
-   * of strings that could name a page. A `pageName` outside that grammar names
-   * nothing that can exist, and saying so at parse is cheaper than resolving it
-   * against a collection. (The nav item stays a bare string: its targets may be
-   * `${…}`-interpolated at render time, which a view mount has no path to.)
-   *
-   * Existence of the target is a separate question with its own answers, on the
-   * doors that can see the collection: `defineStack`'s `validateCrossReferences`
-   * (build-time, throws) and `validateViewPageRefs` in `@objectstack/lint`
-   * (the CLI commands and the runtime publish gate).
+   * The two existence checks this key used to feed went with it: the
+   * `validateCrossReferences` branch in `stack.zod.ts` and `validateViewPageRefs`
+   * in `@objectstack/lint`. The nav item's own resolution
+   * (`validate-nav-target-refs`) is untouched.
    */
-  pageName: SnakeCaseIdentifierSchema.optional().describe(
-    "Published page this view mounts — required when `type: 'page'`, and refused on every other view type. "
-    + 'Rendering is delegated to the existing page renderer; the page keeps its own `assignedProfiles` audience.',
-  ),
+  pageName: retiredKey(LIST_VIEW_PAGE_NAME_RETIRED),
 
   /** View Metadata (Airtable-style view management) */
   description: I18nLabelSchema.optional().describe('View description for documentation/tooltips'),
@@ -2213,14 +2174,14 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
 
 /**
  * List View Schema (Expanded) — {@link ListViewShapeSchema} plus the
- * `type: 'page'` ⇄ `pageName` binding check and the
  * `allowedVisualizations` ⇄ `calendar` binding check. See that shape for why
- * shape and checks are separate bindings, and {@link checkListViewPageMount} /
- * {@link checkListViewCalendarVisualization} for what each check refuses.
+ * shape and checks are separate bindings, and
+ * {@link checkListViewCalendarVisualization} for what the check refuses.
+ * (#17063 removed the `type: 'page'` ⇄ `pageName` binding check with the mount
+ * it policed.)
  */
 export const ListViewSchema = lazySchema(() =>
   ListViewShapeSchema
-    .superRefine(checkListViewPageMount)
     .superRefine(checkListViewCalendarVisualization));
 
 /**
@@ -3797,12 +3758,10 @@ export const ObjectListViewSchema = lazySchema(() =>
   ListViewShapeSchema.omit({ userFilters: true })
     .extend({ userFilters: ObjectUserFiltersSchema.optional() })
     // Derived from the UNREFINED shape (zod 4 refuses `.omit()` on a refined
-    // object), so the binding checks are re-attached here rather than
-    // inherited. Dropping these lines would leave `objects[].listViews.*` —
-    // the ADR-0047 authoring surface — as the one door where a `page` view
-    // with no `pageName`, or a calendar-enabled view with no `calendar:`
-    // block, parses clean.
-    .superRefine(checkListViewPageMount)
+    // object), so the binding check is re-attached here rather than inherited.
+    // Dropping this line would leave `objects[].listViews.*` — the ADR-0047
+    // authoring surface — as the one door where a calendar-enabled view with
+    // no `calendar:` block parses clean.
     .superRefine(checkListViewCalendarVisualization));
 
 /**
@@ -4709,13 +4668,12 @@ const ListViewOverlayWireSchema = lazySchema(() =>
   // [#13216] Built from {@link ListViewShapeSchema}, not {@link ListViewSchema}:
   // `flattenedViewOverlayFields()` re-declares `name` and `label`, and zod 4
   // refuses to overwrite a key on an object that carries refinements. So the
-  // binding checks are re-attached AFTER `.strip()` instead of inherited — this
+  // binding check is re-attached AFTER `.strip()` instead of inherited — this
   // is the runtime write door (`PUT /api/v1/meta/view`), the one an MCP/AI
   // author reaches, so it is the last place the refusals may go missing.
-  // `viewDoorsCarryingPageMountCheck` in `view.test.ts` fails if any of the
+  // `viewDoorsCarryingObjectLevelChecks` in `view.test.ts` fails if any of the
   // three attachment points is dropped.
   ListViewShapeSchema.extend(flattenedViewOverlayFields()).strip()
-    .superRefine(checkListViewPageMount)
     .superRefine(checkListViewCalendarVisualization),
 );
 

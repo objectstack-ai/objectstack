@@ -422,7 +422,6 @@
     "chartAggregateValueKey": "src/ui/chart-aggregate.ts#chartAggregateValueKey (function)",
     "checkGlobalFilterDateDefaultValue": "src/ui/dashboard.zod.ts#checkGlobalFilterDateDefaultValue (function)",
     "checkListViewCalendarVisualization": "src/ui/view.zod.ts#checkListViewCalendarVisualization (function)",
-    "checkListViewPageMount": "src/ui/view.zod.ts#checkListViewPageMount (function)",
     "checkPageSourceCompleteness": "src/ui/page.zod.ts#checkPageSourceCompleteness (function)",
     "columnSummaryAlias": "src/ui/view-grouping-query.ts#columnSummaryAlias (function)",
     "compileListViewGroupQuery": "src/ui/view-grouping-query.ts#compileListViewGroupQuery (function)",
