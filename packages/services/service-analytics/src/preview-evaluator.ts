@@ -23,6 +23,7 @@ import {
   resolveAnalyticsDateRangeString,
   utcInstantMs,
 } from '@objectstack/core';
+import { explicitDateRangeWindow } from './date-range-array-arm.js';
 import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contracts';
 import { emptyGroupValueFor, type Cube } from '@objectstack/spec/data';
 
@@ -404,12 +405,14 @@ export function lowerPreviewDateRange(
     const window = resolveAnalyticsDateRangeString(dateRange as string, { timezone });
     return { start: window.start, end: window.end, endExclusive: window.endExclusive };
   }
-  // ⛔ An oddly-sized array keeps the reading this face has always published
-  // (a one-entry array leaves the upper bound unwritten); the sibling faces
-  // degenerate it to a point instead, and reconciling the two is a divergence
-  // of its own, not this card's.
-  const [start, end] = dateRange as readonly string[];
-  return { start: String(start), end: String(end), endExclusive: false };
+  // [#17124] An oddly-sized array is REFUSED, by the one
+  // `explicitDateRangeWindow` every face in this package calls. ⛔ What this
+  // replaced left the upper bound UNWRITTEN — `String(undefined)` is
+  // `"undefined"`, and every ISO date sorts below it, so a one-entry array
+  // admitted every row from `start` onward while the sibling faces read the
+  // same document as one day and as all of history.
+  const [start, end] = explicitDateRangeWindow(dateRange as readonly unknown[]);
+  return { start, end, endExclusive: false };
 }
 
 /**

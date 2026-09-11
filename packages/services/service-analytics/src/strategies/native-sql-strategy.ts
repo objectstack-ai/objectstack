@@ -18,6 +18,7 @@ import { datasetInvalidError, invalidMemberError } from '../dataset-refusal.js';
 import { type LikeShape } from '../like-pattern.js';
 import { textMatchPredicateSql, sqlDialectFor } from '../text-match-sql.js';
 import { nextUtcCalendarDay, resolveAnalyticsDateRangeString } from '@objectstack/core';
+import { explicitDateRangeWindow } from '../date-range-array-arm.js';
 
 /**
  * The SQL wrapper for each aggregate a measure's `type` can name.
@@ -509,39 +510,45 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
           const resolved = Array.isArray(td.dateRange)
             ? null
             : resolveAnalyticsDateRangeString(td.dateRange, { timezone: query.timezone });
-          const range = resolved ? [resolved.start, resolved.end] : (td.dateRange as string[]);
-          if (range.length === 2) {
-            // Same epoch-vs-text root cause as buildFilterClause: a dateRange on a
-            // SQLite `Field.datetime` column compares ISO TEXT against an INTEGER
-            // epoch and matches nothing. Coerce both bounds to the storage form —
-            // and normalise the column to that form too, because the column holds
-            // BOTH forms at once and coercing only the bounds still empties the
-            // half the writer stored the other way (#3912).
-            const td2 = this.resolveStorageTarget(cube, td.dimension, tableName);
-            const column = this.temporalColumn(ctx, td2, colExpr);
-            // A bare-day window end means "through that whole day" (#3777). A
-            // BETWEEN's inclusive upper bound anchors a bare `YYYY-MM-DD` to
-            // midnight on a datetime column, dropping the final day's rows, so
-            // the window compiles half-open — `>= start AND < end+1day` — the
-            // same `[gte, lt)` the drill ranges emit. Equivalent to the old
-            // BETWEEN for a `date` column (plain `YYYY-MM-DD` ordering), which
-            // is what lets this path stay column-type-blind.
-            //
-            // [#16322] A RESOLVED window already states its own upper reading
-            // and is never a bare day, so it never takes the widening branch:
-            // the ten calendar presets stop BEFORE their end instant (`<`), the
-            // three rolling ones end at NOW and reach it (`<=`). ⛔ An explicit
-            // `[a, b]` a CALLER wrote keeps the inclusive reading it has always
-            // had — the #16179 separation, on this side too.
-            const nextDay = resolved ? null : nextUtcCalendarDay(range[1]);
-            const upperExclusive = resolved ? resolved.endExclusive : nextDay != null;
-            params.push(this.coerceTemporal(ctx, td2, range[0]));
-            const lower = `${column} >= $${params.length}`;
-            params.push(this.coerceTemporal(ctx, td2, nextDay ?? range[1]));
-            whereClauses.push(
-              `(${lower} AND ${column} ${upperExclusive ? '<' : '<='} $${params.length})`,
-            );
-          }
+          const range = resolved
+            ? ([resolved.start, resolved.end] as [string, string])
+            // [#17124] An oddly-sized array is REFUSED, by the one
+            // `explicitDateRangeWindow` every face in this package calls. ⛔ What
+            // this replaced was a silent `if (range.length === 2)` DROP: a
+            // one-element array emitted no time clause at all, so the query read
+            // ALL of history — "plot all of history" is the very failure #16322
+            // repaired for the string arm, and it was still live on this arm.
+            : explicitDateRangeWindow(td.dateRange as readonly unknown[]);
+          // Same epoch-vs-text root cause as buildFilterClause: a dateRange on a
+          // SQLite `Field.datetime` column compares ISO TEXT against an INTEGER
+          // epoch and matches nothing. Coerce both bounds to the storage form —
+          // and normalise the column to that form too, because the column holds
+          // BOTH forms at once and coercing only the bounds still empties the
+          // half the writer stored the other way (#3912).
+          const td2 = this.resolveStorageTarget(cube, td.dimension, tableName);
+          const column = this.temporalColumn(ctx, td2, colExpr);
+          // A bare-day window end means "through that whole day" (#3777). A
+          // BETWEEN's inclusive upper bound anchors a bare `YYYY-MM-DD` to
+          // midnight on a datetime column, dropping the final day's rows, so
+          // the window compiles half-open — `>= start AND < end+1day` — the
+          // same `[gte, lt)` the drill ranges emit. Equivalent to the old
+          // BETWEEN for a `date` column (plain `YYYY-MM-DD` ordering), which
+          // is what lets this path stay column-type-blind.
+          //
+          // [#16322] A RESOLVED window already states its own upper reading
+          // and is never a bare day, so it never takes the widening branch:
+          // the ten calendar presets stop BEFORE their end instant (`<`), the
+          // three rolling ones end at NOW and reach it (`<=`). ⛔ An explicit
+          // `[a, b]` a CALLER wrote keeps the inclusive reading it has always
+          // had — the #16179 separation, on this side too.
+          const nextDay = resolved ? null : nextUtcCalendarDay(range[1]);
+          const upperExclusive = resolved ? resolved.endExclusive : nextDay != null;
+          params.push(this.coerceTemporal(ctx, td2, range[0]));
+          const lower = `${column} >= $${params.length}`;
+          params.push(this.coerceTemporal(ctx, td2, nextDay ?? range[1]));
+          whereClauses.push(
+            `(${lower} AND ${column} ${upperExclusive ? '<' : '<='} $${params.length})`,
+          );
         }
       }
     }
