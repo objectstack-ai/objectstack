@@ -60,6 +60,14 @@ files_of() { # files_of path... -> the /pulls/{n}/files body shape
   printf '%s' "$out"
 }
 
+# A RENAME is the one entry shape `files_of` cannot build: every other status
+# carries `filename` alone, a renamed one ALSO carries `previous_filename`.
+# Measured on PR #17372 (`GET /pulls/17372/files`): `filename` is the NEW path,
+# `previous_filename` the OLD one. `files_of` keeps its shape; this is the twin.
+renamed_of() { # renamed_of <old path> <new path> -> the /files body for one RENAME
+  jq -nc --arg o "$1" --arg n "$2" '[{filename:$n,previous_filename:$o,status:"renamed"}]'
+}
+
 approved_at() { # approved_at <login> <sha>
   jq -nc --arg l "$1" --arg c "$2" '[{state:"APPROVED",user:{login:$l},commit_id:$c}]'
 }
@@ -86,6 +94,8 @@ F_DISMISSED="$(fixture governed-dismissed "$GOVERNED_FILES" \
 F_CLEAR="$(fixture not-governed "$CLEAR_FILES" "$NO_REVIEWS")"
 F_REGEN="$(fixture pure-regeneration "$REGEN_FILES" "$NO_REVIEWS")"
 F_EMPTY="$(fixture empty-diff '[]' "$NO_REVIEWS")"
+F_RENAMED_OFF="$(fixture governed-renamed-off-the-surface "$(renamed_of AGENTS.md docs/AGENTS.md)" "$NO_REVIEWS")"
+F_RENAMED_CLEAR="$(fixture rename-within-an-ordinary-prefix "$(renamed_of packages/spec/src/a.ts packages/spec/src/b.ts)" "$NO_REVIEWS")"
 
 mcp() { # mcp <tool> <pull> [owner] [repo]
   jq -nc --arg t "$1" --argjson n "$2" --arg o "${3:-objectstack-ai}" --arg r "${4:-objectstack}" \
@@ -200,6 +210,20 @@ expect_says 'outside the authorized set' 'an unauthorized approval is reported a
 echo "== nothing governed in the diff: allowed, and no review is ever consulted =="
 expect allow 'an ordinary diff enqueues freely' \
   "$(mcp $AUTO 14070)" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_CLEAR"
+
+echo "== a RENAME is a change to BOTH paths, so the OLD one is read too =="
+# Read `filename` alone and the old path is simply absent from the list handed to
+# the register — and a dropped path can only REMOVE governance, never add it, so
+# a diff that moves AGENTS.md to docs/AGENTS.md would read here as an ordinary
+# one. The other two readers of the same diff already see both paths (the queue
+# guard decomposes per commit with `--no-renames`, and `--pr` derives the list
+# three-dot), so this is the hook catching up to them, not a new predicate.
+expect block 'a governed file renamed OFF the governed surface is still governed' \
+  "$(mcp $AUTO 13794)" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_RENAMED_OFF"
+expect_says 'AGENTS.md' 'the OLD path is the governed hit the refusal names' \
+  "$(mcp $AUTO 13794)" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_RENAMED_OFF"
+expect allow 'a rename inside a non-governed prefix changes no verdict' \
+  "$(mcp $AUTO 14070)" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_RENAMED_CLEAR"
 
 echo "== PURE REGENERATION: the hook must AGREE with the register, never re-decide =="
 # The requirement (maintainer 2026-09-01: 纯生成的指针行 … 不需要我审核吧) is that
