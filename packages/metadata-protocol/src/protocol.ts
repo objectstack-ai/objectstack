@@ -3274,7 +3274,7 @@ function unusableFilterError(param: string, detail: string): Error {
  * | type | column | sortable |
  * |---|---|---|
  * | `formula` | none — `SqlDriver.createColumn` returns early; `driver-turso`'s transport skips it with the same `Virtual — no column` note | **no** |
- * | `summary` | `table.float`, maintained by the engine | yes (measured #6924: `orderBy <summary> desc` -> E D C B A over 5 4 3 2 1) |
+ * | `summary` | an engine-maintained numeric column — `table.decimal` on tables created since #16318, `table.float` on earlier ones | yes (measured #6924: `orderBy <summary> desc` -> E D C B A over 5 4 3 2 1) |
  * | `autonumber` | `table.string`, engine-assigned | yes |
  *
  * So the spec's own `COMPUTED_VALUE_TYPES` (`formula`/`summary`/`autonumber`)
@@ -9637,7 +9637,8 @@ export class ObjectStackProtocolImplementation implements
      * the defect they had just been refused for.
      *
      * `rollup`/`summary` was the other half of that wording and is NOT broken
-     * the same way — it does get a real, maintained column (`table.float`;
+     * the same way — it does get a real, maintained column (`table.decimal`
+     * on tables created since #16318, `table.float` on earlier ones;
      * measured: `orderBy <summary> desc` -> E D C B A over values 5 4 3 2 1).
      * It is dropped from the hint because it cannot do THIS job: a rollup
      * aggregates CHILD records (count/sum/min/max/avg), so it cannot carry a
