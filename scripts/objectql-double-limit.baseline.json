@@ -528,9 +528,6 @@
     "packages/plugins/plugin-auth/src/accept-invitation-adopt-membership.test.ts": {
       "wrong": 1
     },
-    "packages/plugins/plugin-auth/src/account-issuer-parity.test.ts": {
-      "blind": 1
-    },
     "packages/plugins/plugin-auth/src/admin-revoke-user-session-match-guard.test.ts": {
       "wrong": 1
     },
