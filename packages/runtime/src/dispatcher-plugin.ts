@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Plugin, PluginContext, IHttpServer, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS } from '@objectstack/core';
-import { looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, serverFaultProvenance, demotedDeclaredCode, logServerFault, describeFaultRequest } from '@objectstack/types';
+import { looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, serverFaultProvenance, declaredRefusalMessage, demotedDeclaredCode, logServerFault, describeFaultRequest } from '@objectstack/types';
 import { DispatcherErrorCode } from '@objectstack/spec/api';
 import type { IAuthService, IMetadataService, Logger } from '@objectstack/spec/contracts';
 import type { CounterStore } from '@objectstack/plugin-auth/rate-limit-storage';
@@ -715,10 +715,36 @@ function errorResponseBase(
     // The author-facing text channel is `userMessage` (#9934), never the raw
     // message — a producer whose 5xx prose is addressed to a human declares it
     // there and it survives the withhold on its own channel.
+    //
+    // [#16146 / #17153] A sixth, and the ONE exception to the declaration limb
+    // above. `serverFaultProvenance` answers WHO named this 5xx; it cannot
+    // answer WHAT KIND it is, so this exit withheld a deliberate REFUSAL —
+    // prose the producer authored for its caller — exactly as it withholds a
+    // driver fault. The director seat ruled the distinction a producer-side
+    // DECLARATION on the published ADR-0112 envelope (decision batch #58,
+    // 2026-09-06, option C): `ApiErrorSchema.refusal`, which this exit's own
+    // `ErrorResponseSchema` nests. `declaredRefusalMessage` is that read,
+    // ⛔ not a second copy — this exit is the THIRD arm of three that withhold
+    // on a declaration, and the other two (`declaredServerFaultAnswer` and
+    // `resolveErrorResponse`'s 5xx passthrough, `@objectstack/rest`) call the
+    // same function, which is what keeps "one rule, every door inherits"
+    // (#12509) a construction rather than three suites agreeing about a field
+    // name.
+    //
+    // ⛔ Still NOT a widening of the `'declared'` limb. Absent the flag this
+    // expression is byte-identical, so #12281's structural withhold is intact
+    // for every producer that declares a FAULT — which is the default, and the
+    // only thing a rewrap can carry. The shared read is fail-closed on its own
+    // account too: it requires a declared in-band 5xx, a non-empty string
+    // `code`, prose, and prose that does not trip `looksLikeInternalErrorLeak`
+    // — so a refusal cannot buy its way past the driver/SQL filter this exit
+    // has applied since #3867, and the heuristic limb below stays unconditional.
+    const refusalMessage = declaredRefusalMessage(err);
     const message =
-        serverFaultProvenance(thrown) === 'declared' || (httpStatus >= 500 && looksLikeInternalErrorLeak(raw))
+        refusalMessage
+        ?? (serverFaultProvenance(thrown) === 'declared' || (httpStatus >= 500 && looksLikeInternalErrorLeak(raw))
             ? INTERNAL_ERROR_MESSAGE
-            : raw || 'Internal Server Error';
+            : raw || 'Internal Server Error');
     // [#3842] A thrown error's own `.code` finally has somewhere to go — the
     // declared field, so the same SDK method reports the same code whichever
     // exit answered. [#9106] WHICH spelling goes there is the shared resolver's
