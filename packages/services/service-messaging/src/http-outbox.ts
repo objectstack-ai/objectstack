@@ -433,7 +433,7 @@ export function httpAckNotClaimedMessage(id: string, status: HttpDeliveryStatus 
         `Delivery row '${id}' is '${status}', not 'in_flight': ack() was handed a claim credential and `
         + 'this row is not claimed, so NOTHING was written. Expected when a slow send outruns `claimTtlMs` '
         + 'and the visibility-timeout reap returns the row to the queue: whoever claims it next sends it '
-        + 'again (#17634).'
+        + 'again.'
     );
 }
 
@@ -448,7 +448,7 @@ export function httpAckLostClaimMessage(id: string, status: HttpDeliveryStatus |
         `Delivery row '${id}' is no longer held by the claim this ack completes (it now reads `
         + `'${status}'), so the ownership-checked conditional update matched no row and NOTHING was `
         + 'written — this attempt was not recorded and the row belongs to whoever holds it now. '
-        + 'Expected when a slow send outruns `claimTtlMs` and the row is reaped and re-claimed (#17634).'
+        + 'Expected when a slow send outruns `claimTtlMs` and the row is reaped and re-claimed.'
     );
 }
 
