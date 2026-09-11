@@ -177,6 +177,13 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # ⭐ Read-only, and it buys exactly one thing: the LAST step of this job
+      # asks the jobs API how many of the steps below it never ran, because the
+      # size of that tail is the one fact no step can work out locally (the
+      # runner alone knows which step index it stopped at). See
+      # `scripts/report-unmeasured-gate-tail.mjs`. Nothing else in this job
+      # reads it, and no step writes anything anywhere.
+      actions: read
 
     steps:
       - name: Checkout repository
@@ -4468,13 +4475,55 @@ jobs:
       # author copying the outer number into the inner block got a 3.6-second
       # cache and no error anywhere. No baseline, by ruling: the gate is green
       # only at zero offenders, and a red is a rename under an ADR-0087
-      # conversion (or a describe to fix), never a ledger row. Placed LAST in
-      # this job on purpose: it is a new tree-wide ratchet, and the job aborts
-      # at the first non-zero exit — nothing behind it would be masked by its
-      # red. Reads src/ through tsx (no build); self-tests first, wired into
+      # conversion (or a describe to fix), never a ledger row. Placed LAST
+      # AMONG THE GATES on purpose: it is a new tree-wide ratchet, and the job
+      # aborts at the first non-zero exit — nothing behind it would be masked
+      # by its red. (The two steps after it are not gates and cannot be masked:
+      # one is an offline self-test, the other runs only ON failure and exits 0.
+      # The qualifier is this PR's, forced by appending them; the ruling it
+      # describes is untouched, and no gate's relative order moved.) Reads src/ through tsx (no build); self-tests first, wired into
       # the package script as `check:self-test-wired` requires.
       - name: Duration-shaped spec keys carry their unit in the key name
         run: pnpm --filter @objectstack/spec check:duration-unit-keys
+
+      # ── NOT GATES. The two steps below judge nothing about the tree. ──────
+      #
+      # ⭐ One red in this job is a LOWER BOUND on the number of problems in the
+      # tree, not a count — every gate behind the failing one never executed,
+      # and a gate that never executed produced no output, which is the same
+      # shape a passing gate has. The GATE ORDER note above `jobs:` already
+      # names this quantity ("the unmeasured tail") and is tuned to shrink it;
+      # until now nothing printed it. These steps print it.
+      #
+      # ⛔ The fix is NOT to make the skipped gates run: that would undo the
+      # adjudicated fail-fast order. ⛔ Nor is it `continue-on-error`, which
+      # trades a red for silence. The job's conclusion is untouched.
+      #
+      # Measured before this was written, on run 34468505490 of this very
+      # workflow (job 102842713265, failed at step #55): the jobs API and the web
+      # UI DO mark the un-run steps `skipped` — 112 of them there — but they
+      # never count them, and they use that same word for a step its own `if:`
+      # turned off, so the one surface that says it cannot tell the two apart.
+      # The check-run `output` was null on title, summary and text alike, and the
+      # job log — what an API or agent reader gets — said nothing at all. So what
+      # is added here is a machine-readable COUNT, on all three surfaces.
+
+      # Offline, no token, no network: drives the reporter's judge() over
+      # recorded jobs-API shapes. Wired as a step because an unrun self-test is
+      # a phantom check. Sub-second.
+      - name: Unmeasured-gate-tail reporter self-test
+        run: node scripts/report-unmeasured-gate-tail.mjs --self-test
+
+      # The only step in this job that runs BECAUSE something failed. On a green
+      # head `failure()` is false, so it is skipped and contributes zero bytes to
+      # the log, the summary and the annotations. It always exits 0: the job is
+      # already failed when it runs, and a non-zero exit here would only add a
+      # second annotation pointing at the reporter instead of at the gate.
+      - name: Report how many gates never ran
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/report-unmeasured-gate-tail.mjs
 
   # Lane 1 of 4 behind the required `TypeScript Type Check` context. The
   # aggregator job at the bottom of this file explains the split, holds the
