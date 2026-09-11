@@ -29,10 +29,30 @@
  * `aliases` and `guidance` stay hand-written, because they are the part that
  * carries judgement rather than transcription:
  *
- * - `aliases` — semantic near-misses edit distance cannot reach. The one that
- *   proves the category is `visibleWhen → visible`: ADR-0089 made `visibleWhen`
- *   the correct spelling on view/page, so an author borrowing it on a different
- *   surface is not making a typo, and only a human-written entry can catch it.
+ * - `aliases` — the curated answer for a semantic near-miss, a different *word*
+ *   for the same intent. It is consulted BEFORE the distance fallback and wins
+ *   outright (`aliases[aliasProbe(key)] ?? findClosestMatches(…)` in
+ *   `suggestions.zod.ts`), which is what gives it **two** jobs, not one:
+ *   - **filling a gap** — the near-miss distance cannot reach. The proving case
+ *     is `visibleWhen → visible`: ADR-0089 made `visibleWhen` the correct
+ *     spelling on view/page, so an author borrowing it on a different surface
+ *     is not making a typo, and only a human-written entry can catch it.
+ *   - **overruling a wrong hit** — the near-miss distance CAN reach, and
+ *     answers with the wrong key. The proving case is `hosts → network` on the
+ *     plugin `permissions` block (#16859): the budget is `max(2, len/3)` = 2
+ *     for a five-character key and `hosts` is exactly 2 from the declared
+ *     `hooks`, so without the entry the author is sent to lifecycle hooks on
+ *     the one block that also grants network access.
+ *
+ *   ⚠️ Neither job is the rare one, and this bullet claimed only the first
+ *   until #17361 measured it. Over every registered surface on 2026-09-11:
+ *   1910 alias entries, 1658 of them unreachable by distance and **252
+ *   reachable** — 211 where the fallback would have answered identically, and
+ *   **41 where it answers a different key** the entry overrules. ⛔ So do not
+ *   read this option as *only* for what distance cannot reach: that reading
+ *   tells an adopter holding a confident wrong suggestion — the case the
+ *   option is most needed for — that `aliases` is not their tool, which is
+ *   this campaign's own finding-7 shape (see {@link acceptsNothing}).
  * - `guidance` — tombstones for retired keys (the rejection must carry the
  *   upgrade) and wrong-layer pointers.
  *
@@ -114,8 +134,18 @@ export interface StrictObjectOptions {
   /** One sentence: what silently happened before this shape was closed. */
   history: string;
   /**
-   * Semantic near-misses edit distance cannot reach — a different *word* for
-   * the same intent, usually correct on a neighbouring surface.
+   * Curated answers for semantic near-misses — a different *word* for the same
+   * intent, usually correct on a neighbouring surface.
+   *
+   * Looked up BEFORE the edit-distance fallback and preferred over it, so an
+   * entry is the right tool in **both** directions: the word distance cannot
+   * reach (`visibleWhen → visible`), and the word distance *does* reach and
+   * gets WRONG (`hosts → network`, where `hosts` is 2 edits from the declared
+   * `hooks` against a budget of 2 — #16859). ⛔ Not "only for what distance
+   * cannot reach": that was this line until #17361, and it sends an author
+   * holding a confidently wrong suggestion away from the option that fixes it.
+   * Plain case / underscore slips still need no entry — the fallback folds
+   * those already, and a second spelling of a covered probe is a dead row.
    */
   aliases?: Readonly<Record<string, string>>;
   /**
