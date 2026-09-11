@@ -2091,7 +2091,7 @@ export class RemoteTransport {
    * identifier — `object`, `field` and the `groupBy` `outKey` in
    * {@link RemoteTransport.aggregate}, the table and column names in
    * `syncSchema` / `syncSchemasBatch` / `buildCreateTableSQL`, and the index
-   * name and columns in `buildDeclaredIndexDDL` — so the envelope is decided once
+   * key columns in `buildDeclaredIndexDDL` — so the envelope is decided once
    * for all of them. See {@link unsafeIdentifierError} for which envelope and
    * why. The predicate and the message are unchanged.
    */
@@ -2142,6 +2142,9 @@ export class RemoteTransport {
    * `alias` is escaped rather than concatenated.
    *
    * ⛔ NOT for column references — those keep {@link assertSafeIdentifier}.
+   *
+   * [#17609] It also spells a declared index NAME in
+   * {@link buildDeclaredIndexDDL}: one name, never a reference.
    */
   private aliasIdentifierSql(alias: string): string {
     return `"${String(alias).replace(/"/g, '""')}"`;
@@ -2248,8 +2251,14 @@ export class RemoteTransport {
         continue;
       }
       if (emitted.has(index.name)) continue;
-      this.assertSafeIdentifier(index.name);
+      // The KEY columns are references and stay gated. The index NAME is not a
+      // reference but one name by definition — the class #14113 escapes for an
+      // alias rather than refuses. It is the one position here an author types
+      // freely (`IndexSchema.name` is any string, and the local face quotes
+      // whatever it is given), so refusing it would fail this face's WHOLE
+      // schema sync over a declaration the other face accepts.
       for (const column of index.columns) this.assertSafeIdentifier(column);
+      const nameSql = this.aliasIdentifierSql(index.name);
 
       const nullSafe = new Set(index.nullSafeColumns ?? []);
       const parts = index.columns.map((c) =>
@@ -2266,7 +2275,7 @@ export class RemoteTransport {
         table: tableName,
         unique: index.unique,
         sql:
-          `CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX IF NOT EXISTS "${index.name}" ` +
+          `CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX IF NOT EXISTS ${nameSql} ` +
           `ON "${tableName}" (${parts.join(', ')})`,
       });
       emitted.add(index.name);

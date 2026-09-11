@@ -40,8 +40,10 @@
  * on `service-messaging` or `platform-objects`. `os17609_scoped` covers what
  * those two do not: a tenant column, a field-level `unique` scoped by it, a
  * declared `unique: 'organization'` (NULL-safe key part), an explicit
- * `unique: 'global'`, an author-named index, and an index over a virtual
- * `formula` field that neither face may materialize.
+ * `unique: 'global'`, two author-named indexes — one of them no SQL
+ * identifier at all (a space and a double quote), which both faces must
+ * accept — and an index over a virtual `formula` field that neither face may
+ * materialize.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -143,6 +145,7 @@ const SCOPED: ObjectDef = {
     { fields: ['external_id'], unique: 'global' },
     { fields: ['region', 'slug'] },
     { name: 'os17609_scoped_by_region', fields: ['region'] },
+    { name: 'os17609 scoped-by "slug"', fields: ['slug'] },
     { fields: ['total'] },
   ],
 };
@@ -176,6 +179,7 @@ const EXPECTED_NAMES: Record<string, string[]> = {
     buildIndexName(SCOPED.name, ['external_id'], true),
     buildIndexName(SCOPED.name, ['region', 'slug'], false),
     'os17609_scoped_by_region',
+    'os17609 scoped-by "slug"',
     `sqlite_autoindex_${SCOPED.name}_1`,
   ].sort(),
 };
@@ -197,6 +201,9 @@ const withoutDeclaredIndexes = (o: ObjectDef): ObjectDef => {
 };
 
 type Row = Record<string, unknown>;
+
+/** A SQL identifier, quoted — the fixture carries an index name that is not a bare identifier. */
+const quoteIdent = (id: string) => `"${id.replace(/"/g, '""')}"`;
 type Query = (sql: string, args?: unknown[]) => Promise<Row[]>;
 
 interface IndexShape {
@@ -222,7 +229,7 @@ async function indexShapes(query: Query, table: string): Promise<IndexShape[]> {
     const expressions = [
       ...String(master?.sql ?? '').matchAll(/COALESCE\(\s*[`"]?(\w+)[`"]?\s*,\s*'([^']*)'\s*\)/gi),
     ].map((m) => `COALESCE(${m[1]}, '${m[2]}')`);
-    const keys = (await query(`PRAGMA index_xinfo("${name}")`))
+    const keys = (await query(`PRAGMA index_xinfo(${quoteIdent(name)})`))
       .filter((k) => Number(k.key) === 1)
       .sort((a, b) => Number(a.seqno) - Number(b.seqno))
       .map((k) => (Number(k.cid) === -2 ? (expressions.shift() ?? '<expression>') : String(k.name)));
@@ -234,7 +241,8 @@ async function indexShapes(query: Query, table: string): Promise<IndexShape[]> {
       keys,
     });
   }
-  return out.sort((a, b) => a.name.localeCompare(b.name));
+  // Code-unit order, the same order `EXPECTED_NAMES`' `.sort()` uses.
+  return out.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
 const indexNames = async (query: Query, table: string) => (await indexShapes(query, table)).map((i) => i.name);
