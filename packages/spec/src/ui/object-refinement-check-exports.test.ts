@@ -316,7 +316,7 @@ const MIRRORED: MirroredSchema[] = [
   },
   // `dashboard.widgets[]` is mirrored the same way and for the same reason, so
   // the ADR-0049 `stageOrder` type gate belongs in this catalogue: measured at
-  // the pinned `.objectui-sha` `53ded82bf7a494f54e344e19099dbf00854b8694`,
+  // the `.objectui-sha` pin `53ded82bf7a494f54e344e19099dbf00854b8694`,
   // objectui's `packages/types/src/zod/complex.zod.ts` builds its own
   // `DashboardWidgetSchema` from
   // `specFieldsExcept(SpecDashboardWidgetSchema.shape, …)` — a `.shape` spread,

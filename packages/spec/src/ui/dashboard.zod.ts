@@ -440,7 +440,7 @@ const WIDGET_TYPE_DEFAULT = 'metric';
  *     schema.
  *  4. **objectui's CLIENT-SIDE authoring door, which is a `.shape` mirror and
  *     therefore runs no object-level check of this schema's at all.** At the
- *     pinned `.objectui-sha` `53ded82bf7a494f54e344e19099dbf00854b8694`,
+ *     `.objectui-sha` pin `53ded82bf7a494f54e344e19099dbf00854b8694`,
  *     `packages/types/src/zod/complex.zod.ts:627` builds its own
  *     `DashboardWidgetSchema` from
  *     `specFieldsExcept(SpecDashboardWidgetSchema.shape, …).extend({…}).strict()`,
