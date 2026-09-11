@@ -11,6 +11,7 @@ import { emptyGroupValueFor, type FilterCondition } from '@objectstack/spec/data
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { bucketKeyToCalendarRange, filterTokenContextFrom, resolveFilterTokens } from '@objectstack/core';
 import type { CompiledDataset, DerivedMeasureSpec } from './dataset-compiler.js';
+import { explicitDateRangeWindow } from './date-range-array-arm.js';
 import { datasetInvalidError } from './dataset-refusal.js';
 import type { OrderLabelResolver } from './dimension-labels.js';
 
@@ -1307,8 +1308,13 @@ export class DatasetExecutor {
     // questions are answered in one place — see `resolveCompareDimension`.
     const dimension = resolveCompareDimension(selection);
     const td = (selection.timeDimensions ?? []).find((t) => t.dimension === dimension)!;
+    // [#17124] The ARRAY arm goes through the one `explicitDateRangeWindow` every
+    // face in this package calls. ⛔ What this replaced filled a missing upper
+    // bound in from the lower one, so a one-element array silently became a
+    // point window HERE while the primary pass it is compared against may have
+    // read the same document as all of history.
     const range: [string, string] = Array.isArray(td.dateRange)
-      ? [td.dateRange[0], td.dateRange[1] ?? td.dateRange[0]]
+      ? explicitDateRangeWindow(td.dateRange as readonly unknown[])
       : [td.dateRange as string, td.dateRange as string];
     const shifted = shiftRange(range, cmp.kind);
     const shiftedTd = (selection.timeDimensions ?? []).map((t) =>
