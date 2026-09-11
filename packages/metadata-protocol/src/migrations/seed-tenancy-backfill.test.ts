@@ -50,6 +50,7 @@ import {
   ORGANIZATION_TABLE,
 } from './seed-tenancy-backfill.js';
 import type { SeedTenancyBackfillResult } from './seed-tenancy-backfill.js';
+import { TABLE_IS_PRESENT_ROWS, isTablePresenceCatalogSql } from './read-probe.testkit.js';
 
 describe('#8686 normalizeRows — one reader for three dialect shapes', () => {
   const rows = [{ object: 'crm_case', field: 'case_number' }];
@@ -405,7 +406,12 @@ describe('#12394 the counter handoff writes the row the driver will read', () =>
     const rows = new Map<string, Record<string, unknown>>();
     for (const row of seed) rows.set(String(row.key_hash), { ...row });
     const exec = async (sql: string, params: unknown[] = []): Promise<unknown> => {
-      if (sql.includes('WHERE 1 = 0')) return []; // presence + key-shape probes
+      // [#17175] The presence question is asked of the catalog now, and a
+      // catalog answering zero rows means ABSENT — so "the counter table is
+      // there" has to be said with a ROW. The `WHERE 1 = 0` line below is still
+      // live: it is the key-SHAPE probe, which still asks by being refused.
+      if (isTablePresenceCatalogSql(sql, SEQUENCES_TABLE)) return TABLE_IS_PRESENT_ROWS;
+      if (sql.includes('WHERE 1 = 0')) return []; // key-shape probe
       if (sql.includes('LEFT JOIN')) {
         return [
           { object: OBJECT, field: FIELD, global_last_value: 38, organization_last_value: 1 },
@@ -537,7 +543,8 @@ describe('#9451 the seed-tenancy repair leaves a durable receipt', () => {
       // Dispatched on the statements the module actually compiles, so a builder
       // that changed shape breaks this fixture rather than silently turning it
       // into a healthy install.
-      if (sql.includes('WHERE 1 = 0')) return []; // presence + key-shape probes
+      if (isTablePresenceCatalogSql(sql, SEQUENCES_TABLE)) return TABLE_IS_PRESENT_ROWS;
+      if (sql.includes('WHERE 1 = 0')) return []; // key-shape probe
       if (sql.includes('LEFT JOIN')) {
         return [
           {
@@ -680,7 +687,8 @@ describe('#9451 the seed-tenancy repair leaves a durable receipt', () => {
     const log = createLogger();
     const result = await backfillSeedTenancy(
       {
-        exec: async (sql: string) => (sql.includes('SELECT 1') ? [] : []),
+        exec: async (sql: string) =>
+          isTablePresenceCatalogSql(sql, SEQUENCES_TABLE) ? TABLE_IS_PRESENT_ROWS : [],
         client: 'better-sqlite3',
         ledger: store.ledger,
       },
@@ -769,6 +777,7 @@ describe('#9451 the seed-tenancy repair leaves a durable receipt', () => {
     const result = await backfillSeedTenancy(
       {
         exec: async (sql: string) => {
+          if (isTablePresenceCatalogSql(sql, SEQUENCES_TABLE)) return TABLE_IS_PRESENT_ROWS;
           if (sql.includes('LEFT JOIN')) {
             return [
               { object: 'sys_migration', field: 'seq', global_last_value: 7, organization_last_value: 2 },
@@ -842,6 +851,7 @@ describe('#12395 zero organizations is a third state, not the ambiguous one', ()
     const sql: string[] = [];
     const exec = async (statement: string) => {
       sql.push(statement);
+      if (isTablePresenceCatalogSql(statement, SEQUENCES_TABLE)) return TABLE_IS_PRESENT_ROWS;
       if (statement.includes('WHERE 1 = 0')) return [];
       if (statement.includes('LEFT JOIN')) {
         return [
