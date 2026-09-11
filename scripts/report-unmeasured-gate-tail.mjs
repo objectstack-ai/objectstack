@@ -95,7 +95,9 @@
  */
 
 import process from 'node:process';
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
 
@@ -165,13 +167,20 @@ export function declaredRegion(steps) {
  * has not reached yet is not evidence of anything, and is not read as one.
  *
  * @param {Array<Record<string, unknown>>} steps a job's `steps[]` from the API
+ * @param {string} [selfStepName] the name of the step running THIS script, so
+ *   that it never reports itself as a gate that never ran. Supplied by the
+ *   workflow through `OS_TAIL_REPORT_STEP` rather than written here: the literal
+ *   then lives beside the step it names, and if the two ever drift the step
+ *   reappears in the tail as a visible off-by-one rather than going wrong
+ *   quietly. Measured first, in run 34584689309: without it the report ended
+ *   `- Report how many gates never ran`, while that step was the one printing.
  * @returns {{
  *   measured: boolean, reason?: string, total: number, failedNumber: number|null,
  *   failedName: string|null, ran: number, skippedByCondition: string[],
  *   neverRan: string[], alsoFailed: string[], inFlight: string[],
  * }}
  */
-export function judge(steps) {
+export function judge(steps, selfStepName = '') {
   const empty = {
     measured: false,
     total: 0,
@@ -210,7 +219,9 @@ export function judge(steps) {
   const EXECUTED = new Set(['success', 'failure']);
 
   const before = declared.slice(0, failedIdx);
-  const after = declared.slice(failedIdx + 1);
+  const after = declared
+    .slice(failedIdx + 1)
+    .filter((s) => selfStepName === '' || nameOf(s) !== selfStepName);
 
   // The only step that can be `in_progress` behind the failure is this reporter,
   // because it is the one running right now. Held apart so it is never counted
@@ -420,7 +431,7 @@ async function main() {
           `none of the ${jobs.length} job(s) in run ${runId} could be identified as this one ` +
           `(runner ${runnerName || 'unnamed'})`;
       } else {
-        verdict = judge(own.steps);
+        verdict = judge(own.steps, env.OS_TAIL_REPORT_STEP ?? '');
       }
     } catch (err) {
       verdict = judge([]);
@@ -452,6 +463,52 @@ async function main() {
 }
 
 // -- self-test --------------------------------------------------------------
+
+/**
+ * `OS_TAIL_REPORT_STEP` must be the literal `name:` of the step that sets it.
+ *
+ * Read as plain text on purpose: the assertion is about two LINES of the
+ * workflow agreeing, it needs no schema, and a text read works before
+ * `pnpm install` has put a YAML parser on disk -- which matters, because the
+ * step this file backs is the one that reports on a job that may have died at
+ * the install step.
+ *
+ * @param {string} source the text of `.github/workflows/lint.yml`
+ * @returns {{ ok: boolean, note: string }}
+ */
+export function wiringVerdict(source) {
+  const lines = String(source).split('\n');
+  const found = [];
+  for (let i = 0; i < lines.length; i++) {
+    const env = /^\s*OS_TAIL_REPORT_STEP:\s*(.+?)\s*$/.exec(lines[i]);
+    if (env === null) continue;
+    let declared = null;
+    for (let j = i - 1; j >= 0 && j > i - 40; j--) {
+      const name = /^\s*- name:\s*(.+?)\s*$/.exec(lines[j]);
+      if (name !== null) {
+        declared = name[1].replace(/^['"]|['"]$/g, '');
+        break;
+      }
+    }
+    found.push({ env: env[1].replace(/^['"]|['"]$/g, ''), declared });
+  }
+  if (found.length === 0) {
+    return { ok: false, note: 'no step sets OS_TAIL_REPORT_STEP, so this reporter would list itself' };
+  }
+  const wrong = found.filter((f) => f.declared !== f.env);
+  if (wrong.length > 0) {
+    return {
+      ok: false,
+      note: `OS_TAIL_REPORT_STEP does not match its own step name: ${JSON.stringify(wrong)}`,
+    };
+  }
+  return { ok: true, note: `${found.length} step(s) set OS_TAIL_REPORT_STEP to their own name` };
+}
+
+/** This repo's root, resolved from this file rather than from the cwd. */
+function repoRoot() {
+  return resolve(dirname(fileURLToPath(import.meta.url)), '..');
+}
 
 /**
  * Recorded `steps[]` shapes, abbreviated from real jobs of this repo.
@@ -566,6 +623,22 @@ function selfTest() {
     [mid.inFlight, mid.neverRan.includes('Report how many gates never ran')],
     [['Report how many gates never ran'], false]);
 
+  // The reporter is not always stamped `in_progress` by the time it reads the
+  // API -- measured in run 34584689309, where it listed ITSELF in its own tail.
+  // The `in_progress` rule alone does not catch that; the name does.
+  const selfNotYetMarked = midRun.map((x) =>
+    x.name === 'Report how many gates never ran' ? { ...x, status: 'queued' } : x);
+  t('an unmarked reporter WOULD list itself, which is why the workflow passes a name',
+    judge(selfNotYetMarked).neverRan.includes('Report how many gates never ran'), true);
+  t('...and naming it removes exactly that one entry, nothing else',
+    [judge(selfNotYetMarked, 'Report how many gates never ran').neverRan.includes('Report how many gates never ran'),
+      judge(selfNotYetMarked).neverRan.length
+        - judge(selfNotYetMarked, 'Report how many gates never ran').neverRan.length],
+    [false, 1]);
+  t('a name that matches nothing changes no count',
+    judge(selfNotYetMarked, 'Report how many gates NEVER ran').neverRan.length,
+    judge(selfNotYetMarked).neverRan.length);
+
   // -- an empty tail is a real, different answer ------------------------------
   const last = judge(lintFailedLast);
   t('a failure in the last gate reports an EMPTY tail rather than staying silent',
@@ -611,6 +684,18 @@ function selfTest() {
     renderedLines.some((l) => l.includes(legacyToken)), false);
   t('no rendered line starts with the modern command token, which parses at line start',
     renderedLines.some((l) => l.startsWith(modernToken)), false);
+
+  // -- the workflow wiring, read from the real file ---------------------------
+  const workflow = readFileSync(join(repoRoot(), '.github/workflows/lint.yml'), 'utf8');
+  const wiring = wiringVerdict(workflow);
+  t(`lint.yml wires OS_TAIL_REPORT_STEP to its own step name (${wiring.note})`, wiring.ok, true);
+  t('a renamed step with a stale env value is caught',
+    wiringVerdict('      - name: Renamed\n        env:\n          OS_TAIL_REPORT_STEP: Old name\n').ok,
+    false);
+  t('a missing wiring is caught too, not read as clean',
+    wiringVerdict('      - name: Report how many gates never ran\n        run: node x.mjs\n').ok, false);
+  t('a quoted step name matches its unquoted env value',
+    wiringVerdict("      - name: 'A name'\n        env:\n          OS_TAIL_REPORT_STEP: A name\n").ok, true);
 
   // -- picking this job out of the run ---------------------------------------
   const jobs = [
