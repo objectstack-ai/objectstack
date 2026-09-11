@@ -200,6 +200,42 @@ function aggregateToMetricType(m: DatasetMeasure): Metric['type'] {
 }
 
 /**
+ * The aggregates that DERIVE a new number from the aggregated values, as
+ * opposed to SELECTING one of them. `sum` and `avg` always answer a number
+ * whatever the column holds, so a non-numeric storage form is read as
+ * arithmetic by whichever dialect is underneath — the divergence
+ * {@link assertAggregateFieldTypeCompatible} refuses. `min` / `max` answer a
+ * value of the field's own type and are the other half of the same split
+ * `measureResultType` makes; they are not judged here (see that function's
+ * scope note). `count` / `count_distinct` read no value at all.
+ *
+ * ⛔ This is a SCOPE, never a verdict: which pairs are accepted is read off
+ * `AGGREGATE_FIELD_TYPE_COMPATIBILITY` in `@objectstack/spec` and is not
+ * restated anywhere in this package.
+ */
+const DERIVING_AGGREGATES: ReadonlySet<string> = new Set(['sum', 'avg']);
+
+/**
+ * The one sentence of PRESCRIPTION a refusal adds after naming the accepted
+ * set — chosen by the source field's class, because the author's way forward
+ * is not the same one for every refused pair. ⛔ It prescribes; it never
+ * re-states which pairs are accepted (that is the table's line above it).
+ *
+ * The temporal sentence is the one #16737 measured and shipped, kept verbatim
+ * for the class it was written about. The string/other sentence is the
+ * generalisation this card adds: counting is the aggregate that reads no
+ * arithmetic off a value, so it is what an author who wanted "how much text is
+ * there" actually wants.
+ */
+const REMEDY_BY_SOURCE_CLASS = (fieldType: string): string =>
+  TEMPORAL_SOURCE_FIELD_TYPES.has(fieldType)
+    ? 'For a temporal field, `min`/`max` return a real instant; a DURATION has to be '
+      + 'stored as a number (a computed "days open" field) and aggregated as one.'
+    : 'For a non-numeric field, `count`/`count_distinct` accept every type because they '
+      + 'read no arithmetic off the value; a quantity that should be added up has to be '
+      + 'stored as a numeric field and aggregated as one.';
+
+/**
  * [#16737 / #16099] Refuse a measure whose AGGREGATE cannot meaningfully consume
  * its field's declared TYPE — the compile leg of the director ruling (decision
  * batch #59, 2026-09-06: "both legs, table in spec"; the table is
@@ -241,48 +277,61 @@ function aggregateToMetricType(m: DatasetMeasure): Metric['type'] {
  * is the whole of `derived` coverage — there is no second gate to keep in step,
  * which is why the refusal is placed on the measure and not on the consumer.
  *
- * ## ⚠️ Scope: TEMPORAL source fields only, and why the rest of the table waits
+ * ## ⚠️ Scope: the DERIVING aggregates, and why `min` / `max` still wait
  *
- * The verdict is the spec predicate's — ⛔ no row is restated here, and
- * `min`/`max` over a temporal field stay ACCEPTED because the table accepts
- * them. What is scoped is which FIELDS this gate judges at all: the temporal
- * class (`TEMPORAL_SOURCE_FIELD_TYPES` — this package's own shipped statement
- * of it, the set `measureResultType` already reads), and no other.
+ * The verdict is the spec predicate's — ⛔ no row is restated here. What is
+ * scoped is which PAIRS this gate judges at all: those whose aggregate DERIVES
+ * a new number from the values (`sum` / `avg`, {@link DERIVING_AGGREGATES}),
+ * and no other. `min` / `max` SELECT one of the stored values and are not
+ * judged here at all.
  *
- * ⛔ That is a deliberate stop, not an oversight, and it is not a rule invented
- * ahead of the table. Executing every row of the table today REFUSES pairs this
- * platform currently answers, on purpose, with tests:
+ * ⛔ That is a deliberate stop, not an oversight, and the line is the one this
+ * package already draws: `measureResultType` branches on exactly this pair of
+ * aggregates, because `min` / `max` return a value of the source field's OWN
+ * type while `sum` / `avg` always return a number (#15768). The defect this
+ * gate exists for is a DERIVED number whose value is decided by the dialect
+ * rather than by the data, so the deriving aggregates are precisely its
+ * population.
+ *
+ * ⛔ Executing the table's `min` / `max` rows from here today would break uses
+ * this platform answers on purpose, measured rather than assumed — #16099
+ * drove it before this scope was written:
  *
  * - `min` / `max` over the STRING classes (`text`, `select`, `lookup`,
- *   `autonumber`, …) — refused by the table, and ⛔ NOT enforced here.
- *   `measureResultType` (#15768) types exactly those results as `'string'`, and
- *   `__tests__/measure-result-type.test.ts` pins them end to end through
- *   `queryDataset` — 15 cases that would go red the moment those rows were
- *   enforced. #16785 has since **ruled C** on exactly this: the TABLE is to be
- *   amended to accept `min` / `max` over the string classes. Enforcing them
- *   from here would pre-empt a ruling that goes the other way.
- * - `boolean` / `toggle` are no longer a collision at all, and this note no
- *   longer refers one to the maintainer. #16685 was ruled A and #16750 added
- *   both members to the `sum` / `avg` / `min` / `max` rows, on the authority of
- *   maintainer ruling #11152 (booleans aggregate as NUMBERS on every backend,
- *   pinned by `AGGREGATION_CASES`). The table ACCEPTS them — so there is
- *   nothing here to refuse, and this gate never judged them either way: they
- *   are outside the temporal class.
+ *   `autonumber`, …) are refused by the table and are the subject of a ruling
+ *   going the OTHER way: the table is to be AMENDED to accept them
+ *   (**#17513**). `measureResultType` (#15768) types exactly those results as
+ *   `'string'`, and `__tests__/measure-result-type.test.ts` pins them end to
+ *   end through `queryDataset`. Enforcing them here would pre-empt that
+ *   amendment.
+ * - `min` over `json` and over `formula` are refused by the table, are in NO
+ *   ruling's scope, and are nonetheless driven end to end by the same shared
+ *   fixture as the rows above (`min_payload`, `min_margin`). Because that
+ *   fixture compiles every measure in ONE dataset, a single refused pair reds
+ *   the whole section: subtracting only the string classes and enforcing the
+ *   rest was measured on this card and still failed **15** cases, all of them
+ *   on `min` × `json`. So the `min` / `max` population is ONE question, and it
+ *   is #17513's rather than a set this gate can partly execute.
  *
- * Enforcing the string rows would break uses that work today, and #16785 ruled
- * that they be AMENDED rather than executed. The temporal rows carry no such
- * counter-evidence, and were measured on both dialects before this gate was
- * written: SQLite answers a silent average YEAR, Postgres refuses at 42883, no
- * shipped dataset in this repo pairs them, and there is no reading on which the
- * mean of a set of instants is a duration. So the temporal rows are executed
- * here and the full-table leg stays with #16099 — now waiting on #16785's
- * amendment landing, not on two unruled collisions.
+ * The deriving rows carry no such counter-evidence. Their temporal members were
+ * measured on both dialects under #16737 (above); for the rest, no shipped
+ * dataset in this repository pairs `sum` or `avg` with a non-numeric field —
+ * every one of the eleven shipped dataset measures resolves to `number`,
+ * `currency`, `summary` or `progress` — and `sum` × `percent`, which
+ * `analytics-service.ts` has called "incoherent" in a comment since before this
+ * table existed, is refused here on the table's authority at last.
+ *
+ * `boolean` / `toggle` are not a collision in either population: #16750 added
+ * both members to the `sum` / `avg` / `min` / `max` rows on the authority of
+ * maintainer ruling #11152 (booleans aggregate as NUMBERS on every backend,
+ * pinned by `AGGREGATION_CASES`), so the table ACCEPTS them and there is
+ * nothing here to refuse.
  *
  * ## Tiering — "cannot answer, do not block", the same as every sibling probe
  *
  * - No `declaredFieldType` hook (no data engine wired) → not judged.
  * - A field the hook cannot resolve → not judged.
- * - A field outside the temporal class → not judged HERE (see the scope note).
+ * - A `min` / `max` measure → not judged HERE (see the scope note).
  * - A RELATIONSHIP-PATH field (`account.closed_at`) → not judged. The hook
  *   resolves a column on the BASE object, so it would answer about a different
  *   column of the same name, or about nothing; the spec module says exactly
@@ -309,9 +358,9 @@ function assertAggregateFieldTypeCompatible(
   if (field.includes('.')) return;
   const fieldType = declaredFieldType(objectName, field);
   if (!fieldType) return;
-  // Scoped to the temporal class — see the scope note above. The VERDICT still
-  // comes from the spec table, never from this condition.
-  if (!TEMPORAL_SOURCE_FIELD_TYPES.has(fieldType)) return;
+  // Scoped to the DERIVING aggregates — see the scope note above. The VERDICT
+  // still comes from the spec table, never from this condition.
+  if (!DERIVING_AGGREGATES.has(aggregate)) return;
   if (isAggregateCompatibleWithFieldType(aggregate, fieldType)) return;
 
   const accepted = AGGREGATE_FIELD_TYPE_COMPATIBILITY[aggregate];
@@ -321,13 +370,13 @@ function assertAggregateFieldTypeCompatible(
   throw datasetInvalidError(
     `[dataset-compiler] dataset "${datasetName}" measure "${measure.name}" applies aggregate ` +
     `"${aggregate}" to field "${field}", which object "${objectName}" declares as ` +
-    `\`${fieldType}\`. That pair is not accepted: the answer would be decided by the SQL ` +
-    `dialect rather than by the data (SQLite coerces the stored text to a number — an ` +
-    `AVG over a datetime returns the average YEAR — while Postgres has no such function ` +
-    `and fails at query time), so one dataset would mean two things on two deployments. ` +
+    `\`${fieldType}\`. That pair is not accepted: "${aggregate}" derives a NUMBER from the ` +
+    `stored values, so over a \`${fieldType}\` column the answer is decided by the SQL ` +
+    `dialect rather than by the data — one coerces the stored form to a number and returns ` +
+    `something plausible, another has no such function and fails at query time — and one ` +
+    `dataset would mean two things on two deployments. ` +
     `"${aggregate}" accepts: ${accepted.join(', ')}. ` +
-    `For a temporal field, \`min\`/\`max\` return a real instant; a DURATION has to be ` +
-    `stored as a number (a computed "days open" field) and aggregated as one.`,
+    `${REMEDY_BY_SOURCE_CLASS(fieldType)}`,
   );
 }
 

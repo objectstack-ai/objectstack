@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { coerceRow, type RefResolver, type RefMatch } from './import-coerce.js';
 import type { ExportFieldMeta } from './export-format.js';
 import type { ValidationMessageTranslator } from '@objectstack/spec/system';
-import type { FindDataRequest, ValidateDataIssue, ValidateDataRequest, ValidateDataResponse } from '@objectstack/spec/api';
+import type { CreateDataRequest, FindDataRequest, UpdateDataRequest, ValidateDataIssue, ValidateDataRequest, ValidateDataResponse } from '@objectstack/spec/api';
 import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult } from '@objectstack/core';
 import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
 import { isEngineDuplicateRecordEnvelope } from './error-response.js';
@@ -91,18 +91,56 @@ export interface ImportRunSummary extends ImportProgress {
   undoLog?: ImportUndoLog;
 }
 
-/** Minimal protocol surface the runner needs (find / create / update). */
+/**
+ * The envelope `runImport` wraps every declared request in before dispatch: the
+ * spec request type itself, plus the two server-side members the runner threads
+ * onto it. Exported so an implementor can NAME what it receives.
+ *
+ * ⚠️ `rest-server.ts` declares a structurally identical local alias for the
+ * door's own dispatch sites (`ServerScopedDataRequest`). The two are not
+ * converged here because that file is held by a sibling change; the difference
+ * is the `context` slot, which stays `any` on this side because that is what
+ * this file's own members already spelled.
+ */
+export type ImportProtocolRequest<R> = R & { context?: any; environmentId?: string };
+
+/**
+ * Minimal protocol surface the runner needs (find / create / update).
+ *
+ * ⭐ [#16952] Every member states the request it is handed, and this
+ * declaration is the ONLY place the dialect is stated. It used to be
+ * `args: any` on all three required members, which is why the dialect ended up
+ * written down in three places that no compiler reads — a prose comment and a
+ * runtime read in `plugin-auth`'s hand-written implementor, and a local
+ * parameter annotation in a test double. An implementor had nothing to compile
+ * against and could only freeze on the spelling it happened to observe; when
+ * #16638 moved the runner's literals to the canonical QueryAST, the frozen read
+ * went `undefined` and its `?? {}` default degraded a duplicate probe into
+ * match-everything, so an admin user import updated the WRONG user. Nothing
+ * caught it, because the parameter was `any`.
+ *
+ * ⇒ Compiled against `FindDataRequest` / `CreateDataRequest` /
+ * `UpdateDataRequest`, a wire alias (`$filter`, `$top`, …) is a compile error
+ * in the IMPLEMENTOR rather than a payload no schema has seen. `QuerySchema`
+ * declares `where` / `limit` / `offset` / `fields` / `orderBy` / `expand`; it
+ * declares neither `$filter` nor `$top`, and declaring those at the HTTP door
+ * is #16066's spec half, not this interface's business.
+ *
+ * ⛔ An implementor that annotates its own parameter `any` opts back out of all
+ * of this — the annotation wins over the contextual type. Leave the parameter
+ * unannotated and let this declaration type it.
+ */
 export interface ImportProtocolLike {
-  findData(args: any): Promise<any>;
-  createData(args: any): Promise<any>;
-  updateData(args: any): Promise<any>;
+  findData(args: ImportProtocolRequest<FindDataRequest>): Promise<any>;
+  createData(args: ImportProtocolRequest<CreateDataRequest>): Promise<any>;
+  updateData(args: ImportProtocolRequest<UpdateDataRequest>): Promise<any>;
   /**
    * Optional bulk-create primitive. When present, `runImport` batches
    * CREATE-resolved rows through it instead of one `createData` call per
    * row — see framework#2678. Must resolve to `{ records: any[] }` with one
    * record per input row, in the same order.
    */
-  createManyData?(args: { object: string; records: any[]; context?: any; environmentId?: string }): Promise<{ records: any[] }>;
+  createManyData?(args: ImportProtocolRequest<{ object: string; records: any[] }>): Promise<{ records: any[] }>;
   /**
    * Optional partial-success bulk create (framework#3172). When present it is
    * preferred over `createManyData`: one outcome per input row, in order — a
@@ -110,7 +148,7 @@ export interface ImportProtocolLike {
    * the whole-batch degradation that re-runs beforeInsert hooks on the good
    * rows.
    */
-  insertManyData?(args: { object: string; records: any[]; context?: any; environmentId?: string }): Promise<{ outcomes: Array<{ ok: boolean; record?: any; error?: unknown }> }>;
+  insertManyData?(args: ImportProtocolRequest<{ object: string; records: any[] }>): Promise<{ outcomes: Array<{ ok: boolean; record?: any; error?: unknown }> }>;
   /**
    * Validate-only (#6037 — #4633 ruling D). The write path's verdict on a
    * candidate row, with nothing persisted. The dry run routes through THIS
@@ -126,7 +164,7 @@ export interface ImportProtocolLike {
    * findings ITS write never produces — a false alarm dressed as coverage.
    * Such a dry run reports coercion + create/update/skip resolution only.
    */
-  validateData?(args: ValidateDataRequest & { context?: any; environmentId?: string }): Promise<ValidateDataResponse>;
+  validateData?(args: ImportProtocolRequest<ValidateDataRequest>): Promise<ValidateDataResponse>;
 }
 
 export interface RunImportOptions {

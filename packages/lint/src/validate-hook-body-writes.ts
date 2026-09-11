@@ -414,6 +414,40 @@ type AnyRec = Record<string, unknown>;
 const isRec = (v: unknown): v is AnyRec => !!v && typeof v === 'object' && !Array.isArray(v);
 
 /**
+ * [#16546] `path` + message suffix for a hook write-set finding — the
+ * location half shared by BOTH hook write-set rules
+ * (`validateHookBodyWrites` here and `validateReadonlyHookWrites`), so `os
+ * build` and `os lint` — which feed this registry the same
+ * `ctx.loweredHookRefs` for the same hook (`AuthoringRuleContext`,
+ * `@objectstack/lint`) — cannot report it two ways. That parity is #16095's
+ * own rule restated one layer down: one implementation, not two call sites
+ * that happen to agree today.
+ *
+ * `hooks[i].body.source` is a key this stack's `body` did not come from the
+ * author for whenever `lowerCallables` minted it from an inline `handler`
+ * function (`hook.handler` is then the ref string it registered that
+ * function under, named in `ctx.loweredHookRefs`) — an author grepping their
+ * source for `body.source` finds nothing. `hooks[i].handler` is: on a
+ * lowered hook it is the STRING that replaced the function the author wrote,
+ * literally the key `handler:` under which they wrote it. On a hook whose
+ * `body` the author wrote directly (`ctx` absent, or the ref unmarked),
+ * `hooks[i].body.source` remains the correct answer and is unchanged.
+ */
+export function hookBodyFindingLocation(
+  hook: AnyRec,
+  hookIndex: number,
+  ctx: { loweredHookRefs?: ReadonlySet<string> } | undefined,
+): { path: string; messageSuffix: string } {
+  const loweredFromHandler = typeof hook.handler === 'string' && !!ctx?.loweredHookRefs?.has(hook.handler);
+  return loweredFromHandler
+    ? {
+        path: `hooks[${hookIndex}].handler`,
+        messageSuffix: ' (judged on the metadata body lowered from the inline handler)',
+      }
+    : { path: `hooks[${hookIndex}].body.source`, messageSuffix: '' };
+}
+
+/**
  * object name → its declared field names (both `fields` authoring shapes).
  *
  * Exported for `validate-action-body-writes.ts` only (see
@@ -779,7 +813,10 @@ export function extractHookBodyWriteSet(source: string): ExtractedHookBodyWriteS
  * on it; the refusal itself is reported by `os lint`'s `hook-body/*` rules and
  * by `os build`'s warn-and-bundle line, never guessed at here.
  */
-export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
+export function validateHookBodyWrites(
+  stack: AnyRec,
+  ctx?: { loweredHookRefs?: ReadonlySet<string> },
+): HookBodyWriteFinding[] {
   const findings: HookBodyWriteFinding[] = [];
   const hooks = recordsOf(stack.hooks);
   if (hooks.length === 0) return findings;
@@ -803,15 +840,17 @@ export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
     // read" rather than "nothing written".
     const extracted = extractHookBodyWriteSet(source);
     const hookName = typeof hook.name === 'string' && hook.name ? hook.name : `#${hookIndex}`;
+    const loc = hookBodyFindingLocation(hook, hookIndex, ctx);
     if (extracted.parseFailure) {
       findings.push({
         severity: 'warning',
         rule: HOOK_BODY_SOURCE_UNPARSEABLE,
         where: `hook "${hookName}" › body`,
-        path: `hooks[${hookIndex}].body.source`,
+        path: loc.path,
         message:
           `L2 body did not parse (${describeParseFailure(extracted.parseFailure)}), so its write set was ` +
-          `read from a partially recovered tree — an undeclared field write in the unread part is not reported.`,
+          `read from a partially recovered tree — an undeclared field write in the unread part is not ` +
+          `reported.${loc.messageSuffix}`,
         hint: PARSE_FAILURE_HINT,
       });
     }
@@ -839,7 +878,7 @@ export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
       targets.length > 0 && !targets.includes('*') && targetSets.every((s) => s !== undefined);
 
     const where = `hook "${hookName}" › body`;
-    const path = `hooks[${hookIndex}].body.source`;
+    const path = loc.path;
     const reported = new Set<string>();
 
     for (const w of writes) {
@@ -870,7 +909,8 @@ export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
             path,
             message:
               `body writes '${w.field}' to its input, and ${unprovisionedAnchorCause(anchorObj, w.field)} — ` +
-              unprovisionedAnchorWriteConsequence(),
+              unprovisionedAnchorWriteConsequence() +
+              loc.messageSuffix,
             hint: unprovisionedAnchorHint(anchorObj, w.field),
           });
           continue;
@@ -895,7 +935,8 @@ export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
             // authors and operators who cannot resolve a tracker number.
             `clean and the value is copied back onto the record payload unfiltered, so the write is then ` +
             `REFUSED at run time — INVALID_FIELD / 400, identically on every driver (#4271). The ` +
-            `record is never written, and the refusal names the field far from the body that wrote it.`,
+            `record is never written, and the refusal names the field far from the body that wrote it.` +
+            loc.messageSuffix,
           hint: fixHint(w.field, unionCandidates(targetSets)),
         });
       } else {
@@ -916,7 +957,8 @@ export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
             path,
             message:
               `body calls ctx.api.object('${w.object}').${w.method ?? 'update'}(…) writing '${w.field}', and ` +
-              `${unprovisionedAnchorCause(w.object, w.field)} — ${unprovisionedAnchorWriteConsequence()}`,
+              `${unprovisionedAnchorCause(w.object, w.field)} — ${unprovisionedAnchorWriteConsequence()}` +
+              loc.messageSuffix,
             hint: unprovisionedAnchorHint(w.object, w.field),
           });
           continue;
@@ -940,7 +982,8 @@ export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
             `engine, so the payload arrives as an ordinary CALLER write and the declared-field door ` +
             `REFUSES it at run time — INVALID_FIELD / 400, identically on every driver (#4271), before ` +
             `any statement is built. The nested write lands nothing, and the refusal escapes the body ` +
-            `and fails the operation that triggered the hook.`,
+            `and fails the operation that triggered the hook.` +
+            loc.messageSuffix,
           hint: fixHint(w.field, [...known]),
         });
       }

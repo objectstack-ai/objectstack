@@ -60,6 +60,22 @@ every project.
 (`https://your-deployment.example.com/api/v1/mcp`). The first use walks through
 the same browser login.
 
+<Callout type="warn">
+**This track needs a publicly reachable HTTPS endpoint — it cannot reach
+`localhost` or an intranet address.** *Add custom connector* is the same
+claude.ai connector system in both surfaces, and it connects to your deployment
+**from Anthropic's servers**, not from the machine the client is running on.
+Anthropic's custom-connector documentation requires the MCP server to be
+reachable over the public internet from Anthropic's IP ranges, and states that
+a server on a private corporate network, behind a VPN, or blocked by a firewall
+will not connect. A locally trusted TLS certificate does not make a private
+address reachable, and an `http://` URL is refused before any of that.
+
+For a **local or intranet** deployment, connect through
+[Claude Code](#claude-code-one-command) instead — `claude mcp add` runs on your
+own machine, so `localhost` and intranet addresses work there.
+</Callout>
+
 ## Any MCP client (`.mcp.json`)
 
 Clients that read an `mcpServers` map connect the same way. With an API key:

@@ -17,6 +17,9 @@ import {
   RELATIONSHIP_FIELD_TYPES,
 } from './object-graph.js';
 import { walkFilterFieldKeys, type FilterFieldKey } from './filter-walk.js';
+// [#16340] Read back the registry's OWN definition table to assert the graph
+// derives its injected types rather than carrying a second copy of them.
+import { injectedSystemColumnDefs } from '@objectstack/spec/data';
 
 const stack = {
   objects: [
@@ -94,10 +97,64 @@ describe('object-graph — resolveFieldPath verdicts', () => {
     expect(isUnjudgeable(verdict)).toBe(true);
   });
 
-  it('marks an injected leaf so a caller cannot mistake it for a typed field', () => {
-    const verdict = resolveFieldPath(graph, 'crm_opportunity', 'created_at');
-    expect(verdict).toMatchObject({ kind: 'ok', injected: true });
-    expect((verdict as { meta?: unknown }).meta).toBeUndefined();
+  // [#16340] An injected leaf resolves WITH the registry's own definition. The
+  // marker still says the object does not author the column — that is the #8116
+  // provenance question — but `meta` answers the second question a caller asks
+  // ("is it temporal?") exactly as it does on an authored field. Before this,
+  // the leaf carried no `meta` at all and every such caller had to stay silent;
+  // `filter-preset-comparand` did, on the two most-filtered columns in the
+  // platform.
+  it("resolves an injected leaf with the registry's own type, and marks it injected", () => {
+    expect(resolveFieldPath(graph, 'crm_opportunity', 'created_at')).toMatchObject({
+      kind: 'ok', object: 'crm_opportunity', field: 'created_at', injected: true,
+      meta: { type: 'datetime' },
+    });
+    expect(resolveFieldPath(graph, 'crm_opportunity', 'updated_at')).toMatchObject({
+      kind: 'ok', injected: true, meta: { type: 'datetime' },
+    });
+    // An injected LOOKUP anchor carries its target too — read from the same
+    // table, never re-declared here.
+    expect(resolveFieldPath(graph, 'crm_opportunity', 'owner_id')).toMatchObject({
+      kind: 'ok', injected: true, meta: { type: 'lookup', reference: 'sys_user' },
+    });
+  });
+
+  // The type is DERIVED, never transcribed: it must equal the definition the
+  // registry spreads at registration, byte for byte. Reading the spec table
+  // here is the assertion — a hand-copied 'datetime' in this package would pass
+  // a literal pin and drift the day the registry re-types the column.
+  it('reports the type the registry injects, not a copy of it', () => {
+    const defs = injectedSystemColumnDefs(stack.objects[0]);
+    for (const [name, def] of Object.entries(defs)) {
+      const verdict = resolveFieldPath(graph, 'crm_opportunity', name);
+      expect(verdict).toMatchObject({ kind: 'ok', injected: true });
+      expect((verdict as { meta?: { type?: string } }).meta?.type).toBe(def.type);
+    }
+    expect(Object.keys(defs).length).toBeGreaterThan(0); // lit control
+  });
+
+  // `id` is the one addressable column with NO definition behind it — the
+  // DRIVER provisions the primary key. An empty slice is the truthful answer,
+  // and it must stay distinguishable from "this column does not exist".
+  it('resolves the primary key with an empty slice rather than a guessed type', () => {
+    const verdict = resolveFieldPath(graph, 'crm_opportunity', 'id');
+    expect(verdict).toMatchObject({ kind: 'ok', field: 'id', injected: true });
+    expect((verdict as { meta?: { type?: string } }).meta?.type).toBeUndefined();
+    expect(injectedSystemColumnDefs(stack.objects[0]).id).toBeUndefined(); // why
+  });
+
+  // The opt-out rows are the registry's, not this module's: an object that
+  // opts out has no injected column to resolve, so the reference is a real
+  // miss and must still be reported.
+  it('reports an injected name on an object the registry opts out of', () => {
+    const optedOut = indexObjectGraph({
+      objects: [{ name: 'seed_rows', systemFields: false, fields: { note: { type: 'text' } } }],
+    });
+    expect(resolveFieldPath(optedOut, 'seed_rows', 'created_at')).toMatchObject({
+      kind: 'field-unknown', object: 'seed_rows', field: 'created_at',
+    });
+    // …and the driver's primary key survives even that row.
+    expect(resolveFieldPath(optedOut, 'seed_rows', 'id')).toMatchObject({ kind: 'ok', injected: true });
   });
 
   it('skips an object not in the stack, and one with no field map', () => {

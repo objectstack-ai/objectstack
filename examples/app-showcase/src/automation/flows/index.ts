@@ -352,12 +352,34 @@ export const TaskCompletedSlackFlow = defineFlow({
  * A `type: 'schedule'` flow whose start node carries an interval descriptor.
  * The automation engine parses that into a schedule binding; the schedule
  * trigger plugin (`@objectstack/trigger-schedule`, paired with the job
- * service) registers a job that fires this flow every interval. Each tick runs
- * the `notify` node, dropping a fresh `sys_inbox_message` row — so the
- * scheduled fire is observable end-to-end with no manual `engine.execute()`.
+ * service) registers a job that fires this flow every interval, and each tick
+ * runs the `notify` node.
  *
- * Install `requires: ['automation', 'triggers', 'job', 'messaging']` and this
- * flow auto-launches on the interval.
+ * ⛔ AS SHIPPED, THIS FLOW DOES NOT FIRE. Since #16659 a time-triggered flow
+ * must declare the organization it runs as (`config.organization`, a
+ * `sys_organization.id`), and a flow that declares none is REFUSED at bind:
+ * the trigger logs the reason at `error` and throws, the engine records the
+ * flow as not bound, and it is listed in the startup summary's
+ * trigger-binding audit. A package-shipped flow has no legal value to write
+ * there — organization ids are minted at runtime, per install — so this
+ * example cannot declare one and ⛔ a placeholder id must NOT be invented: a
+ * value matching no row is silently authoritative, which is strictly worse
+ * than the refusal.
+ *
+ * ⇒ What a package-shipped time-triggered flow should do INSTEAD is an open
+ * maintainer decision. Its tracking card was destroyed along with a suspended
+ * account and is being re-filed; until that card carries a number, this
+ * paragraph is the record. Until it is settled this flow is a worked example of
+ * the SHAPE, and running it end-to-end means registering it at runtime with an
+ * `organization` your install actually holds.
+ *
+ * `os lint` / `os validate` / `objectstack build` say so too, as a `warning`
+ * (`flow-schedule-organization-missing`) — deliberately not an `error`, because
+ * an `error` would refuse this package's own build for a defect it has no
+ * authorable way to repair.
+ *
+ * Install `requires: ['automation', 'triggers', 'job', 'messaging']` for the
+ * binding machinery this example demonstrates.
  */
 export const ScheduledDigestFlow = defineFlow({
   name: 'showcase_scheduled_digest',
@@ -1020,6 +1042,120 @@ export const FanOutNotifyFlow = defineFlow({
 });
 
 /**
+ * Nested Fan-out Reminders — demonstrates the ADR-0031 **parallel block nested
+ * inside a loop body**, the one composition the flows above do not show:
+ * `BatchRemindersFlow` loops, `FanOutNotifyFlow` fans out, and neither sits
+ * inside the other.
+ *
+ * Why the nesting earns its own flow rather than a comment: it is the only
+ * shape in which a single execution step carries BOTH region indices. The
+ * maintainer ruling of 2026-09-03 made `ExecutionStepLog.iteration`
+ * single-valued — always the enclosing loop's row, carried through any nesting
+ * — and gave the parallel branch position its own `branch` key. A step inside
+ * a parallel branch that is itself inside a loop body therefore records
+ * `iteration` (which row) and `branch` (which audience) at once, so a per-row
+ * failure inside one branch stays attributable to the row. In every other
+ * composition one of the two keys is absent by construction.
+ *
+ * Shape: the `loop` body holds exactly one node — the `parallel` — so each row
+ * fans out to both audiences concurrently and the block joins before the next
+ * row starts. ⛔ Deliberately NO `try_catch` between the two: a containment
+ * region would retag the leaf steps `try` / `catch`, and the branch position
+ * would no longer be readable off them. Per-iteration containment is
+ * demonstrated by `BatchRemindersFlow` instead.
+ *
+ * Input rows are task-shaped — `{ id, title, owner, watcher }`. `owner` and
+ * `watcher` are the two recipients and `notify` refuses an empty resolved
+ * recipient set, so a row missing either ends the sweep; drive it with at least
+ * two rows so the `(iteration, branch)` pairs have something to distinguish.
+ *
+ * Fixture for `docs/qa/platform-checklist/areas/automation.json`
+ * → `automation.flow-run-step-nesting`, the `loop { parallel }` clause.
+ */
+export const NestedFanOutRemindersFlow = defineFlow({
+  name: 'showcase_nested_fan_out_reminders',
+  label: 'Nested Fan-out Reminders (Loop of Parallel)',
+  description: 'Iterates a collection of tasks and notifies each task\'s owner and watcher concurrently — a parallel block nested in a loop body, the only shape that carries both region indices on one step (ADR-0031).',
+  type: 'autolaunched',
+  status: 'active',
+  variables: [
+    { name: 'tasks', type: 'list', isInput: true, isOutput: false },
+  ],
+  nodes: [
+    { id: 'start', type: 'start', label: 'Start' },
+    {
+      id: 'each_task',
+      type: 'loop',
+      label: 'For each task',
+      config: {
+        collection: '{tasks}',
+        iteratorVariable: 'task',
+        indexVariable: 'taskIndex',
+        maxIterations: 500,
+        body: {
+          nodes: [
+            {
+              // The whole body is this one `parallel` node. Its branch steps are
+              // the records the `loop { parallel }` clause reads: each carries
+              // `regionKind: 'parallel-branch'`, its own `branch` (0 or 1) and
+              // the enclosing loop's `iteration`. The container step itself is a
+              // loop-body step — the row on `iteration`, no `branch` of its own.
+              id: 'fan_out_audiences',
+              type: 'parallel',
+              label: 'Notify both audiences',
+              config: {
+                branches: [
+                  {
+                    name: 'Notify the owner',
+                    nodes: [
+                      {
+                        id: 'notify_owner',
+                        type: 'notify',
+                        label: 'Notify Owner',
+                        config: {
+                          recipients: '{task.owner}',
+                          title: 'Overdue ({taskIndex}): {task.title}',
+                          sourceObject: 'showcase_task',
+                          sourceId: '{task.id}',
+                        },
+                      },
+                    ],
+                    edges: [],
+                  },
+                  {
+                    name: 'Notify the watcher',
+                    nodes: [
+                      {
+                        id: 'notify_watcher',
+                        type: 'notify',
+                        label: 'Notify Watcher',
+                        config: {
+                          recipients: '{task.watcher}',
+                          title: 'Watching ({taskIndex}): {task.title}',
+                          sourceObject: 'showcase_task',
+                          sourceId: '{task.id}',
+                        },
+                      },
+                    ],
+                    edges: [],
+                  },
+                ],
+              },
+            },
+          ],
+          edges: [],
+        },
+      },
+    },
+    { id: 'end', type: 'end', label: 'End' },
+  ],
+  edges: [
+    { id: 'e1', source: 'start', target: 'each_task' },
+    { id: 'e2', source: 'each_task', target: 'end' },
+  ],
+});
+
+/**
  * Resilient Sync — demonstrates the ADR-0031 **try/catch/retry** construct.
  *
  * The `try_catch` node runs a protected `try` region (an outbound HTTP push);
@@ -1656,6 +1792,21 @@ export const CommitteeQuorumFlow = defineFlow({
  * 3 and 1 days before its `due_date`, with the task on the flow context. Swap
  * `offsetDays` for `withinDays: 7` to nudge everything due within a week
  * (negative = overdue lookback).
+ *
+ * ⛔ AS SHIPPED, THIS SWEEP DOES NOT FIRE — same reason as
+ * {@link ScheduledDigestFlow}, and it is worth stating separately because a
+ * sweep is the case where the consequence is largest. Since #16659 a
+ * `time_relative` flow must declare `config.organization`, and a flow that
+ * declares none is REFUSED at bind. The declaration is not only the run's
+ * identity: it is the SWEEP QUERY's scope, so a sweep without one would select
+ * rows across every organization on the install. That is why there is no
+ * "fall back to something" path for it to take instead, and why a placeholder
+ * id ⛔ must not be invented here — a value matching no row is silently
+ * authoritative.
+ *
+ * ⇒ Package-shipped time-triggered flows are the open decision described on
+ * {@link ScheduledDigestFlow}. Register this sweep at runtime with an
+ * `organization` your install holds to see it work.
  */
 export const TaskDueReminderFlow = defineFlow({
   name: 'showcase_task_due_reminder',
@@ -1788,6 +1939,7 @@ export const allFlows = [
   ProjectClosureFlow,
   BatchRemindersFlow,
   FanOutNotifyFlow,
+  NestedFanOutRemindersFlow,
   ResilientSyncFlow,
   ProjectEscalationFlow,
   InboundTaskWebhookFlow,

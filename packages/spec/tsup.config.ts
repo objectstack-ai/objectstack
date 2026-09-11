@@ -117,6 +117,12 @@ const browserConditionedEntries = [
   'src/data/index.ts',
   'src/system/index.ts',
   'src/kernel/index.ts',
+  // `./api` joined the poisoned set when the package read API began declaring
+  // the assembled manifest stage: its record body reaches the datasource
+  // declaration, and with it the driver-config validators. Same seam, same
+  // swap, same degradation the 2026-08-22 ruling accepted — not a second
+  // mechanism.
+  'src/api/index.ts',
 ];
 
 /**

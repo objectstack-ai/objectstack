@@ -199,6 +199,7 @@ import type * as M177 from './data/date-macros.zod.js';
 import type * as M178 from './data/field-value.zod.js';
 import type * as M179 from './data/mapping.zod.js';
 import type * as M180 from './security/sharing.zod.js';
+import type * as M186 from './automation/schedule-organization.zod.js';
 import type * as M114 from './shared/metadata-types.zod.js';
 import type * as M115 from './shared/protection.zod.js';
 import type * as M116 from './stack.zod.js';
@@ -269,7 +270,7 @@ import type * as M184 from './shared/value-domain.zod.js';
 import type * as M185 from './shared/epoch.zod.js';
 
 // ---------------------------------------------------------------------------
-// 782 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 783 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -627,6 +628,13 @@ export type Iso246 = Assert<Eq< z.input< typeof M42.StateMachineSchema >, z.infe
 
 // automation/time-relative-trigger.zod.ts
 export type Iso247 = Assert<Eq< z.input< typeof M43.TimeRelativeTriggerSchema >, z.infer< typeof M43.TimeRelativeTriggerSchema > >>;
+
+// automation/schedule-organization.zod.ts
+// [#16659] A bare non-empty string: no transform, no default, no coercion — an
+// organization id is written exactly as it is stored. So input === infer, and an
+// `XParsed` here would be a permanent synonym. The day this schema learns to
+// normalize an id, this line goes red and the ADR's remedy applies.
+export type Iso872 = Assert<Eq< z.input< typeof M186.ScheduleOrganizationSchema >, z.infer< typeof M186.ScheduleOrganizationSchema > >>;
 
 // automation/webhook.zod.ts
 export type Iso248 = Assert<Eq< z.input< typeof M44.WebhookTriggerType >, z.infer< typeof M44.WebhookTriggerType > >>;
@@ -1646,7 +1654,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 782 isomorphic pins', () => {
+  it('still declares all 783 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2152,7 +2160,31 @@ describe('ADR-0122 type-alias convention', () => {
     // reader to `api/discovery.zod.ts` (M17), where it is pinned again as
     // `Iso871`. The four package-format modules (M50–M53) moved to
     // `marketplace/` and kept their pins. -30 + 1.
-    expect(pins).toHaveLength(782);
+    //
+    // 782 -> 783 is #16659's `ScheduleOrganizationSchema`
+    // (automation/schedule-organization.zod.ts, new module slot M186): the
+    // acting organization a time-triggered flow declares, a bare
+    // `z.string().min(1)` — no coercion, no default, no transform, because an
+    // organization id is written exactly as it is stored. The (RISE) case, one
+    // new pin. +1 added.
+    //
+    // ⚠️ Worth one line on how it ARRIVED, because the module is not new — only
+    // its NAME is. It shipped in the same card as `schedule-organization.ts`,
+    // and every gate in this family reads `*.zod.ts` only, so neither this pin
+    // file nor `check:spec-parsed-alias` could see it. Renaming the file to
+    // `.zod.ts` is what asked the question, and the answer was a real ADR-0122
+    // violation (`z.infer` on the bare alias) sitting green behind an extension.
+    //
+    // ⚠️ Its id took a SECOND number on the merge, and that is the interesting
+    // half: this branch authored the pin as `Iso871` while #16325 landed its
+    // own `Iso871` (`EnvironmentTypeSchema`) on `main`. The two additions are
+    // disjoint pins, so the text merge took BOTH lines with no conflict marker
+    // and left two declarations sharing one id — a duplicate-identifier error
+    // tsc catches, but only after a merge that read clean. Renumbered here to
+    // `Iso872`, the next free id after the merged file's maximum; ids are
+    // claims about pins, not positions, so the collision costs nothing but a
+    // number. The merged count is 811 - 30 + 1 + 1.
+    expect(pins).toHaveLength(783);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

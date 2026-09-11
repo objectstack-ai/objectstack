@@ -8720,6 +8720,76 @@ const step18: MigrationStep = {
         + 'before and after.',
     },
     {
+      id: 'object-block-sort-item-array',
+      surface:
+        'The `sort` prop of `object-grid` and `object-calendar` in `ComponentPropsMap` '
+        + '(the FORM: the accept-anything `z.unknown()` at both block doors, vs the '
+        + '`SortItem` array `[{ field, order }, ...]`)',
+      replacement:
+        '`z.array(SortItemSchema)` at both doors — the array `ElementDataSourceSchema.sort`, '
+        + '`ListPageSchema.sort` and `element:record_picker`\'s flat `sort` shorthand already '
+        + 'carry. The legacy OData-ish clause `sort: \'created_at desc\'` becomes '
+        + '`sort: [{ field: \'created_at\', order: \'desc\' }]`; a bare field name '
+        + '`sort: \'created_at\'` meant ascending and becomes '
+        + '`sort: [{ field: \'created_at\', order: \'asc\' }]` — `order` is required in '
+        + '`SortItemSchema`, so it is written out rather than omitted. A comma-separated '
+        + 'clause becomes one array entry per key, in the same order. `record:related_list` '
+        + 'is NOT moved by this entry: its string is the `\'field\'` / `\'-field\'` dialect '
+        + 'read by `RelatedList.normalizeSortSpec`, which never reaches '
+        + '`convertSortToQueryParams`, and retiring it was not ruled. '
+        + '`object-grid.defaultSort` is a different key, retired separately by the '
+        + '`ui__ObjectGridProps__defaultSort` entry.',
+      reason:
+        'One `sort` spelling platform-wide, the array (objectui#8221, decision batch #77, '
+        + '2026-09-07, maintainer verbatim 「其他同意」, option B; the consumer half is '
+        + 'objectui PR #8758, which drops the string arm from `convertSortToQueryParams`). '
+        + 'Item 4 of that ruling is this entry\'s subject: 「`ComponentPropsMap` for '
+        + '`object-calendar` and `object-grid` constrains the `sort` value to the array shape '
+        + '(today it accepts anything), so the spec, the registrations and the helper agree; '
+        + 'that is a pull-back to the declared contract, ordinary tier」. The `z.unknown()` at '
+        + 'both doors was a read-point record (#7751), the same vintage as the `filter` doors '
+        + 'the `element-data-source-and-object-block-filter-rule-array` entry moved, and not an '
+        + 'exception to the ruling: measured on `@objectstack/spec` 17.2.0 an array, a string '
+        + 'and a bare NUMBER all returned `success: true` while `bogusProp` was refused by name '
+        + 'on the same call, so key checking was live and only the VALUE was unheld. Meanwhile '
+        + 'objectui\'s own html tier has published `type: \'array\'` for the grid all along '
+        + '(`plugin-grid/src/index.tsx:222`) and answered `type-mismatch` on the string — a '
+        + 'spelling `@object-ui/core` implemented, the docs taught and the validator refused, '
+        + 'which is what made this a ruling rather than a mechanical widening. '
+        + 'Sequenced measurement-first: at the objectui pin this repo builds against '
+        + '(`53ded82b`) the string is still lowered — `ObjectGrid.tsx:1844-1851` carries an '
+        + 'explicit `typeof === \'string\'` arm onto `$orderby`, and `ObjectCalendar.tsx:431` '
+        + 'hands `schema.sort` to `convertSortToQueryParams`, whose string arm is still present '
+        + 'at `sort-query.ts:66-70`. So this declaration lands AHEAD of the pinned consumer, '
+        + 'which the ruling permits explicitly (either order; the registrations already declare '
+        + 'the array). The in-repo sweep found ZERO authored `sort` on either block — the two '
+        + 'showcase pages that author `object-grid` (`command-center.page.ts`, '
+        + '`my-work.page.ts`) declare none — with the same grep shape finding 40+ string `sort` '
+        + 'values at OTHER doors (view definitions, ObjectQL `query.sort`) as the control that '
+        + 'the sweep fires; so this entry carries the prescription for authors outside the repo. '
+        + '⚠️ Metadata AT REST is deliberately NOT rewritten and this disposition adds no D2 '
+        + 'conversion: `os migrate meta --stored` replays D2 conversions only, and the read path '
+        + 'does not re-validate stored rows (`applyConversionsToStoredItem` replays the chain '
+        + 'without validating, by its own contract), so a stored page carrying a string `sort` '
+        + 'keeps loading and is still rendered by objectui at the pinned `.objectui-sha`. What '
+        + 'changes is that RE-SAVING it is refused at the `sort` door, on its next save and not '
+        + 'before. ADR-0049, ADR-0087.',
+      acceptanceCriteria:
+        '`ComponentPropsMap[\'object-grid\' | \'object-calendar\'].safeParse({ objectName, '
+        + 'sort: [{ field: \'created_at\', order: \'desc\' }] })` succeeds and the parsed `sort` '
+        + 'is that same array, equal value-for-value to '
+        + '`ElementDataSourceSchema.parse({ object, sort: <that array> }).sort`. The legacy '
+        + 'string clause is refused at the `sort` path on both doors (`invalid_type`, expected '
+        + 'array), and so is a bare number; a misspelled or ABSENT direction is refused at '
+        + '`sort.0.order` (`invalid_value` — `order` is a required enum, so both take one '
+        + 'verdict) and a missing field at `sort.0.field` (`invalid_type`). An undeclared key '
+        + 'is still refused BY NAME on the same call (`unrecognized_keys` naming it), the '
+        + 'control that makes those refusals verdicts rather than a schema reporting nothing. '
+        + 'No `sort` door in `ComponentPropsMap` accepts a string except `record:related_list`, '
+        + 'which is the one deliberate exception. At runtime each block orders exactly as the '
+        + 'array orders — the same `$orderby` the string lowered to.',
+    },
+    {
       id: 'object-grid-data-view-data-converged',
       surface:
         "`object-grid` component props — `data` (the KIND: bare array `z.array(z.unknown())` "
@@ -9388,6 +9458,68 @@ const step18: MigrationStep = {
         + 'their defaults and their mounts. The mounted REST surface is byte-identical before and after — none '
         + 'of the ten keys ever reached it. No code imports `CrudEndpointPattern(Schema)` from '
         + '`@objectstack/spec/api` (TS2305 after upgrade).',
+    },
+    {
+      id: 'schedule-flow-acting-organization-required',
+      surface:
+        'The START NODE `config.organization` key of every time-triggered flow — a `type: '
+        + "'schedule'` flow carrying a `config.schedule` cadence, and the `timeRelative` sweep "
+        + 'that carries its cadence in the same slot (`FlowTriggerKind` `schedule` / '
+        + '`time_relative`). Nothing is renamed, retired or re-typed: the start node\'s `config` '
+        + 'is an OPEN record (ADR-0018), so the key is an ADDITION to a slot that already '
+        + 'accepted it, and every flow that parses today parses byte-identically after the '
+        + 'change. What narrows is the BIND-time accept set and the RUN-time data plane.',
+      replacement:
+        'Declare the organization the flow runs as, on the start node beside the cadence: '
+        + "`config: { schedule: { … }, organization: '<sys_organization.id>' }`. There is "
+        + 'deliberately NO fan-out — a sweep wanted in N organizations is N flows, one per '
+        + 'organization — and deliberately no fallback: nothing on this path ever chooses an '
+        + 'organization, because a wrong `organization_id` is silently authoritative to every '
+        + 'report, export and cleanup that filters by organization, while a refusal is visible '
+        + 'at boot and names its flow. ⚠️ Three consequences of the split that the declaration '
+        + 'itself does not carry, and each is deployment work: (1) rows whose tenant column is '
+        + 'NULL stay visible to a scoped read (`org = :tenant OR org IS NULL`), so after the '
+        + 'split each such row is matched ONCE PER FLOW — N runs and N notifications for one '
+        + 'row, each acting as a different organization; (2) the dispatch-claim key embeds the '
+        + 'flow name (`schedule:<flowName>:<window>`, '
+        + '`time-relative:<flowName>:<scope>:<recordId>`), so renaming one flow into N abandons '
+        + "the current window's claims and a window already delivered under the old name can "
+        + 'deliver once more under the new ones; (3) a run SUSPENDED before the upgrade '
+        + 'rehydrates its context from `context_json`, which carries no `tenantId`, so it '
+        + 'resumes org-less — drain or accept in-flight suspended runs rather than assuming the '
+        + 'upgrade confines them retroactively.',
+      reason:
+        'Maintainer ruling, 2026-09-08, verbatim, untranslated: '
+        + '「多组织定时任务本来只能在组织内运行，应该带组织ID，不允许跨组织的定时任务。」 A time-triggered '
+        + 'run is launched from a job tick and a job tick carries no identity, so the run reached '
+        + 'the tenancy guard with nothing to offer it: the notification wrote '
+        + '`organization_id = NULL`, every tenant-scoped row beneath it was refused, and the tick '
+        + 'still summarised itself as healthy. ⛔ NOT losslessly convertible, and the reason is '
+        + 'that the remedy is a value only the deployment holds: an organization id is minted per '
+        + 'install at runtime, so there is no authored artifact and no stored representation a '
+        + 'transform could rewrite — `objectstack migrate meta` cannot know which organization a '
+        + 'given sweep belongs to, and inventing one is precisely what the ruling forbids. '
+        + 'Registered under ADR-0087 D3 rather than left silent because the change DOES carry a '
+        + 'prescription — "declare one flow per organization, no fan-out" is deployment work a '
+        + 'human must do, which is what D3 says a structured TODO is for. The direct precedent is '
+        + '`rest-requireauth-default-flip` (protocol 12): behaviour-only, no shape moved, a '
+        + 'deployment judgement no transform can make, registered anyway.',
+      acceptanceCriteria:
+        'Every `schedule` / `time_relative` flow in the stack declares a non-empty '
+        + '`config.organization` on its start node. `os lint` reports '
+        + '`flow-schedule-organization-missing` for none of them (severity `warning`, so it does '
+        + 'NOT gate a build — an unfixed flow is silently unarmed, which is why the lint run is '
+        + 'part of the criteria rather than the build), and boot logs no '
+        + '`[schedule] NOT BOUND` / `[time-relative] NOT BOUND` line: '
+        + '`getFlowRuntimeStates()` reports `bound: true` and `getTriggerBindingAudit()` lists '
+        + 'no time-triggered flow. A deployment that ran ONE flow across all organizations has '
+        + 'split it into one flow per organization and has re-checked the three consequences '
+        + 'above — NULL-tenant rows, abandoned dispatch claims, suspended runs. ⚠️ '
+        + '`@objectstack/driver-memory` has NO legal configuration for a time-triggered flow '
+        + 'that touches per-organization data: it refuses any call handed a tenant scope '
+        + '(`MEMORY_MULTI_TENANT_UNSUPPORTED`), so a declared flow is refused per call while an '
+        + 'undeclared one is not armed at all. Multi-organization deployments use '
+        + '`@objectstack/driver-sql`.',
     },
     {
       id: 'scim-provider-object-retired',
@@ -10266,6 +10398,55 @@ const step18: MigrationStep = {
         + '(`record.features.x`). Stored form views are unaffected until their next '
         + 'authoring-path save (zero such documents were measured to exist); on refusal the '
         + 'author re-gates by record state or moves the gate to an app surface.',
+    },
+    {
+      id: 'ui-list-view-grouping-field-padded-refused',
+      surface: 'list-view grouping level names — `grouping.fields[].field` '
+        + '(`GroupingFieldSchema`, the rows inside `ListView.grouping.fields[]`) — '
+        + 'values carrying leading or trailing whitespace',
+      replacement: 'the field name written with no leading and no trailing whitespace — the '
+        + 'same spelling the object declares and the server answers under. A padded value is '
+        + 'RE-AUTHORED, never trimmed on the author\'s behalf: `\'  business_unit  \'` becomes '
+        + '`\'business_unit\'`. The refusal names the offending spelling verbatim, so the '
+        + 'whitespace an author cannot see in an editor is visible in the message.',
+      reason:
+        '#17360, ruling C on objectui#7347 (maintainer 「其他同意」, decision batch #110 item 5): '
+        + 'refuse at the producer. `field` was a bare `z.string()`, so a padded grouping level '
+        + 'was valid authored metadata all the way to the renderers. Measured on objectui '
+        + '(M1-M11 with live controls): the projection harvester `collectGroupingFieldRefs` '
+        + 'TRIMS the name when it builds `$select`, while THREE renderers bucket rows by the '
+        + 'RAW name — plugin-grid `usableGroupingFields`, plugin-list '
+        + '`ObjectGallery.groupedItems`, plugin-kanban `effectiveSwimlaneField`. The server '
+        + 'therefore answers under `business_unit` while every per-row lookup asks for '
+        + '`\'  business_unit  \'`, reads `undefined`, and the view collapses into ONE `(empty)` '
+        + 'group (grid, gallery) or ONE `Uncategorized` lane (kanban) holding every record — a '
+        + 'silent wrong answer that reads as a true statement about the data, which is why '
+        + 'nothing weaker than a parse refusal is honest here. ⛔ NOT a `.trim()`: a trimming '
+        + 'schema makes `\'  a  \'` and `\'a\'` silently equivalent, the consumer-tolerance '
+        + 'direction AGENTS.md #0.1 refuses. objectui\'s harvester trim stays as '
+        + 'defence-in-depth; nothing is removed there. The narrowing is non-padded ONLY and '
+        + 'deliberately not the snake_case machine-name grammar `/^[a-z_][a-z0-9_]*$/` this '
+        + 'package spells inline for object/field/tool NAMES: a grouping level is authored as '
+        + 'a field REFERENCE and a dotted relationship path (`owner.name`) is an in-tree '
+        + 'spelling of one. The blank name is unchanged here — it is already refused loudly '
+        + 'one layer down by `compileListViewGroupQuery`\'s `grouping_field_blank`, and this '
+        + 'narrowing exists for the SILENT case. Ships at once, no deprecation window '
+        + '(2026-08-27 maintainer ruling 「短期不考虑渐进」).',
+      acceptanceCriteria:
+        'Every stored list view whose `grouping.fields[].field` carries leading or trailing '
+        + 'whitespace is refused on its next authoring-path save, with a per-element issue at '
+        + '`grouping.fields[N].field` naming the offending spelling and the trimmed name to '
+        + 'write instead. Names with no padding parse byte-identically to before — nothing is '
+        + 'normalised on the way through, and a dotted relationship path stays valid. Views '
+        + 'with no `grouping` block are untouched. Every `grouping.fields[].field` spelling '
+        + 'in this repo at the time of the change parses unchanged: 50 literal occurrences '
+        + 'under a `grouping:` key across 19 files, harvested with the TypeScript parser and '
+        + 'cross-checked against 906 shape-exact `{ field, order?, collapsed? }` literals in '
+        + '`packages/**`. The single harvested spelling this refuses — `\' \'` at '
+        + '`view-grouping-query.test.ts` — is a NEGATIVE fixture handed straight to '
+        + '`compileListViewGroupQuery` with no parse on its path, pinning that same '
+        + '`grouping_field_blank` refusal; the producer now refuses it one layer earlier for '
+        + 'the same reason.',
     },
     {
       id: 'ui-mcp-connect-agent-unknown-keys-refused',

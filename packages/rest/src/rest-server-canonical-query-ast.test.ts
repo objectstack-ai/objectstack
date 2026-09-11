@@ -76,6 +76,7 @@ import { dirname, resolve } from 'node:path';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import type { FindDataRequest } from '@objectstack/spec/api';
 import { RestServer } from './rest-server.js';
+import type { ImportProtocolLike } from './import-runner.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const sourceOf = (file: string) => readFileSync(resolve(HERE, file), 'utf8');
@@ -303,8 +304,54 @@ describe('[#16638] §1 the three sites import-runner.ts names are canonical, and
         // changes no spelling — but naming it here says which line is load
         // bearing, and the second assertion closes the vector class-wide.
         expect(IMPORT_RUNNER).toMatch(/const findArgsBase = \(request: FindDataRequest\) => \(\{/);
-        const erased = withoutCommentLines(IMPORT_RUNNER).match(/\(\s*(?:query|request)\s*:\s*any\b/g) ?? [];
+        const erased = withoutCommentLines(IMPORT_RUNNER).match(ERASED_PARAM) ?? [];
         expect(erased, 'a query-carrying parameter typed as any puts every literal handed to it back outside the compiler').toEqual([]);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// §1b [#16952] The EXPORTED extension point — the erasure the detector missed
+// ---------------------------------------------------------------------------
+
+/**
+ * ⭐ [#16952] `args` joined `query` / `request` here because the erasure that
+ * survived #16638 was spelled with it: `ImportProtocolLike`'s three required
+ * members were `findData(args: any)` / `createData(args: any)` /
+ * `updateData(args: any)`, so the detector above swept the whole file and
+ * reported nothing while the EXPORTED extension point declared no dialect at
+ * all. A detector that enumerates parameter names it has already seen closes
+ * yesterday's instance; the name an implementor actually writes is `args`.
+ */
+const ERASED_PARAM = /\(\s*(?:args|query|request)\s*:\s*any\b/g;
+
+describe('[#16952] §1b the exported `ImportProtocolLike` declares what it is handed', () => {
+    it('no required member takes `any` — the three that did are named', () => {
+        // Source-read rather than type-read on purpose: §2 below cannot tell a
+        // reverted signature from a declared one that happens to admit
+        // everything, and `any` admits everything.
+        expect(IMPORT_RUNNER).toContain('findData(args: ImportProtocolRequest<FindDataRequest>): Promise<any>;');
+        expect(IMPORT_RUNNER).toContain('createData(args: ImportProtocolRequest<CreateDataRequest>): Promise<any>;');
+        expect(IMPORT_RUNNER).toContain('updateData(args: ImportProtocolRequest<UpdateDataRequest>): Promise<any>;');
+    });
+
+    it('the envelope is declared ONCE and every member of the interface uses it', () => {
+        // The interface used to spell `{ context?: any; environmentId?: string }`
+        // inline on each of its already-typed members. One declaration is the
+        // point of this card; three copies of it would be the same defect a
+        // level down.
+        expect(IMPORT_RUNNER).toMatch(/export type ImportProtocolRequest<R> = R & \{ context\?: any; environmentId\?: string \};/);
+        const inlineEnvelopes = IMPORT_RUNNER.match(/context\?: any; environmentId\?: string/g) ?? [];
+        expect(inlineEnvelopes, 'the envelope is declared once, not re-spelled per member').toHaveLength(1);
+    });
+
+    it('CONTROL: the erasure detector fires on the exact spelling this card removed', () => {
+        // Without this the empty result above is equally consistent with a
+        // detector that never matches `args` at all — which is precisely how
+        // the erasure survived the previous card.
+        expect('  findData(args: any): Promise<any>;'.match(ERASED_PARAM)).toHaveLength(1);
+        expect('const findArgsBase = (request: any) => ({'.match(ERASED_PARAM)).toHaveLength(1);
+        // …and does NOT fire on the declared form, so a green is a green.
+        expect('  findData(args: ImportProtocolRequest<FindDataRequest>): Promise<any>;'.match(ERASED_PARAM)).toBeNull();
     });
 });
 
@@ -348,6 +395,68 @@ describe('[#16337] §2 the declared `FindDataRequest[\'query\']` contract', () =
         // @ts-expect-error `object` is REQUIRED on the declared query
         const noObject: Query = { limit: 1 };
         expect([dollarTop, dollarFilter, wireFilters, wireSelect, wireSort, recordSort, commaExpand, noObject]).toHaveLength(8);
+    });
+});
+
+/**
+ * ⭐ [#16952] The type-level half of the extension point itself. Every alias
+ * below is derived from the EXPORTED declaration with `Parameters<…>`, so it
+ * cannot drift into a fourth restatement of the dialect: revert
+ * `ImportProtocolLike.findData` to `any` and these become `any` too, every
+ * `@ts-expect-error` in the block goes unused, and `tsconfig.test.json` reds
+ * the whole file with TS2578. That is the ablation this section is written to
+ * lose.
+ */
+type FindArgs = Parameters<ImportProtocolLike['findData']>[0];
+type CreateArgs = Parameters<ImportProtocolLike['createData']>[0];
+type UpdateArgs = Parameters<ImportProtocolLike['updateData']>[0];
+
+describe('[#16952] §2 the declared `ImportProtocolLike` parameter contract', () => {
+    it('admits what the runner sends, and refuses the wire dialect (compile-time)', () => {
+        // Exactly the three literals `import-runner.ts` builds, envelope included.
+        const find: FindArgs = {
+            object: 'sys_user',
+            query: { object: 'sys_user', where: { email: 'a@b.c' }, limit: 2 },
+            context: { isSystem: true },
+            environmentId: 'env_1',
+        };
+        const create: CreateArgs = { object: 'task', data: { name: 'r0' }, context: {}, environmentId: 'env_1' };
+        const update: UpdateArgs = { object: 'task', id: 'id_1', data: { name: 'r0' }, context: {} };
+        expect([find.object, create.object, update.id]).toEqual(['sys_user', 'task', 'id_1']);
+
+        // ⭐ The dialect an implementor used to freeze on, now refused at the
+        // extension point rather than observed from it. Each directive is LIVE
+        // — an unused `@ts-expect-error` is TS2578 under `tsconfig.test.json`.
+        // @ts-expect-error `$filter` is the wire spelling; the declared key is `where`
+        const wireFilter: FindArgs = { object: 'sys_user', query: { object: 'sys_user', $filter: { email: 'a@b.c' } } };
+        // @ts-expect-error `$top` is the wire spelling; the declared key is `limit`
+        const wireTop: FindArgs = { object: 'sys_user', query: { object: 'sys_user', $top: 2 } };
+        // @ts-expect-error `object` is REQUIRED on every declared request
+        const noObject: FindArgs = { query: { object: 'sys_user', where: {} } };
+        // @ts-expect-error `data` is REQUIRED on a create
+        const noData: CreateArgs = { object: 'task' };
+        // @ts-expect-error `id` is REQUIRED on an update
+        const noId: UpdateArgs = { object: 'task', data: { name: 'r0' } };
+        expect([wireFilter, wireTop, noObject, noData, noId]).toHaveLength(5);
+    });
+
+    it('an implementor written against the declaration needs no annotation of its own', () => {
+        // ⭐ The whole point: leave the parameter unannotated and the contract
+        // types it. This is the shape `plugin-auth`'s hand-written implementor
+        // could not have while the declaration said `any`.
+        const probes: Array<Record<string, unknown> | undefined> = [];
+        const p: ImportProtocolLike = {
+            findData: async (args) => { probes.push(args.query?.where); return { records: [] }; },
+            createData: async (args) => ({ id: String(args.data.name) }),
+            updateData: async (args) => ({ id: args.id }),
+        };
+        return Promise.all([
+            p.findData({ object: 'sys_user', query: { object: 'sys_user', where: { email: 'a@b.c' } } }),
+            p.createData({ object: 'task', data: { name: 'r0' } }),
+            p.updateData({ object: 'task', id: 'id_1', data: { name: 'r1' } }),
+        ]).then(() => {
+            expect(probes).toEqual([{ email: 'a@b.c' }]);
+        });
     });
 });
 

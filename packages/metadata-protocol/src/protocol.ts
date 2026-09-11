@@ -56,6 +56,13 @@ import {
     // (#9454's read-side rule). One predicate on both doors means the swept
     // page set and the served page set cannot drift.
     organizationIdForMetaRead,
+    // [#16319] The field-`type` admission vocabulary. `loadMetaFromDb` asks the
+    // registration door's OWN question — never a second opinion about which
+    // declarations the registry will take, which is the defect class the
+    // 2026-09-10 ruling closes — to choose the sentence it prints and the level
+    // it prints it at.
+    findUndeclarableFieldType,
+    isObjectFieldTypeRefused,
 } from '@objectstack/metadata-core';
 // [#5532] One vocabulary of "which driver read errors are benign", shared with
 // `sys-metadata-repository.ts` in this package and with `DatabaseLoader` in
@@ -369,21 +376,136 @@ function stripServedSystemColumns<T>(type: string, item: T): T {
 let warnedNoRegistryForDataGate = false;
 
 /**
- * Convert a Zod schema to a JSON Schema, returning `undefined` if conversion
- * fails (e.g. unsupported constructs). Cached per schema reference.
+ * [#17501] Does a converted JSON Schema carry any authorable surface at all?
+ *
+ * `z.toJSONSchema()` answers a `ZodPipe` in its default `'output'` mode with a
+ * document that is syntactically a JSON Schema and semantically nothing:
+ * `{"$schema": "..."}` and not one property. It is truthy, so a `?? fallback`
+ * downstream never fires, and the endpoint serves a document that reads as
+ * "this type declares no constraints" when the truth is "this derivation could
+ * not see the type at all".
+ *
+ * A derivation is DEGENERATE when it names no property, offers no union arm,
+ * points at no `$ref` and opens no `additionalProperties` object — i.e. there
+ * is nothing an author or a form renderer could address. Every one of those
+ * four is a real authorable surface, so any one of them present means the
+ * derivation worked.
+ */
+function isDegenerateDerivation(json: Record<string, unknown> | undefined): boolean {
+    if (!json || typeof json !== 'object') return true;
+    const properties = json.properties;
+    if (properties && typeof properties === 'object' && Object.keys(properties).length > 0) return false;
+    for (const arm of ['anyOf', 'oneOf', 'allOf'] as const) {
+        const value = json[arm];
+        if (Array.isArray(value) && value.length > 0) return false;
+    }
+    if (typeof json.$ref === 'string') return false;
+    const additional = json.additionalProperties;
+    if (additional && typeof additional === 'object') return false;
+    return true;
+}
+
+/**
+ * [#17501] One-shot per type: both derivations of this type's schema came back
+ * empty. Keyed by type name, not by schema reference, because the message names
+ * the type and repeating it per request is noise.
+ */
+const _warnedDegenerateDerivation = new Set<string>();
+
+/**
+ * Convert a Zod schema to a JSON Schema, returning `undefined` if no usable
+ * derivation exists — which is what lets the caller's `?? HAND_CRAFTED_SCHEMAS`
+ * arm fire. Cached per schema reference.
+ *
+ * ## [#17501] Why this tries TWICE, and why only sometimes
+ *
+ * `/meta/types` served `action` as `{"$schema": "..."}` — an empty schema for a
+ * type that accepts 47 keys — because `ActionSchema` is
+ * `lazySchema(() => actionObject().refine(...))`, a `ZodPipe`, and the OUTPUT
+ * derivation of a pipe carries no properties. The hand-crafted fallback
+ * declared for exactly this case never fired: conversion did not throw, it
+ * SUCCEEDED and returned a truthy husk.
+ *
+ * The obvious repair — derive everything with `io: 'input'`, the authoring
+ * shape a property panel actually wants, which `reference-sites.ts` already
+ * passes — was measured across the whole served surface and REFUSED. It is not
+ * a repair with a blast radius of one: 24 of the 26 types that carry a Zod
+ * schema answer differently under `input`, and the direction is a WEAKENING of
+ * a published contract — `required` entries 1132 to 867, `additionalProperties:
+ * false` 663 to 637. Serving the authoring shape for every type is a defensible
+ * contract change, but it is a `packages/spec` question with its own review,
+ * not a rider on this bug fix. (The card's own reading that thirteen types
+ * "answer identically" is a TOP-LEVEL PROPERTY COUNT, which cannot see either
+ * keyword; the counts reproduce exactly and the inference from them does not.)
+ *
+ * So the output derivation stays the served default and the authoring
+ * derivation is a RETRY, reached only when the default degenerates. Measured on
+ * the full registry: exactly one type — `action` — takes the retry arm, and the
+ * other 25 stay byte-for-byte identical. `protocol.meta-types-degenerate-derivation.test.ts`
+ * pins that count, which is the assertion that fails if someone later widens
+ * this to every type.
+ *
+ * ## Absence is deliberately NOT degeneracy
+ *
+ * A type with no Zod schema at all (`external_catalog`) never reaches here —
+ * the caller's `zodSchema ? ... : undefined` guard sees to that — and it is a
+ * different, honest shape: nothing is advertised, so nothing lies. This
+ * function judges only a derivation that RAN and came back empty. Widening it
+ * to cover missing schemas would change what absence means at the endpoint and
+ * is out of scope.
+ *
+ * ## A throwing conversion keeps its old path exactly
+ *
+ * If the output derivation THROWS, that is the case `HAND_CRAFTED_SCHEMAS` was
+ * documented for and it returns `undefined` as it always did — no retry. Not
+ * one type's conversion throws today, so retrying there would move no payload
+ * while widening the change past the ruling.
  */
 const _jsonSchemaCache = new WeakMap<z.ZodTypeAny, Record<string, unknown> | null>();
-function toJsonSchemaSafe(schema: z.ZodTypeAny): Record<string, unknown> | undefined {
+function toJsonSchemaSafe(schema: z.ZodTypeAny, typeLabel?: string): Record<string, unknown> | undefined {
     const cached = _jsonSchemaCache.get(schema);
     if (cached !== undefined) return cached ?? undefined;
+
+    let output: Record<string, unknown>;
     try {
-        const result = z.toJSONSchema(schema, { unrepresentable: 'any' }) as Record<string, unknown>;
-        _jsonSchemaCache.set(schema, result);
-        return result;
+        output = z.toJSONSchema(schema, { unrepresentable: 'any' }) as Record<string, unknown>;
     } catch {
+        // Conversion failed outright — the original hand-crafted-fallback case.
         _jsonSchemaCache.set(schema, null);
         return undefined;
     }
+
+    if (!isDegenerateDerivation(output)) {
+        _jsonSchemaCache.set(schema, output);
+        return output;
+    }
+
+    // The default derivation produced a husk. Retry in the authoring shape
+    // before giving up — for a `ZodPipe` this is the derivation that can see
+    // the object at all.
+    try {
+        const authoring = z.toJSONSchema(schema, { unrepresentable: 'any', io: 'input' }) as Record<string, unknown>;
+        if (!isDegenerateDerivation(authoring)) {
+            _jsonSchemaCache.set(schema, authoring);
+            return authoring;
+        }
+    } catch {
+        // Fall through to the loud arm below.
+    }
+
+    // Both derivations are unusable. Say so once, then hand the caller
+    // `undefined` so its `?? HAND_CRAFTED_SCHEMAS` arm decides.
+    if (typeLabel && !_warnedDegenerateDerivation.has(typeLabel)) {
+        _warnedDegenerateDerivation.add(typeLabel);
+        console.warn(
+            `[Protocol] /meta/types: both the output and the authoring derivations of the `
+            + `"${typeLabel}" schema came back empty, so no schema is derived from it — a property `
+            + `panel built for this type will show no fields. Fix the schema so it derives, or `
+            + `declare a HAND_CRAFTED_SCHEMAS entry for "${typeLabel}".`,
+        );
+    }
+    _jsonSchemaCache.set(schema, null);
+    return undefined;
 }
 
 /**
@@ -6381,7 +6503,10 @@ export class ObjectStackProtocolImplementation implements
             // Studio's editor and the runtime overlay validator stay in
             // lock-step (one source of truth).
             const zodSchema = getMetadataTypeSchema(singular);
-            const schema = (zodSchema ? toJsonSchemaSafe(zodSchema) : undefined)
+            // [#17501] `singular` is passed so the degenerate-derivation warning
+            // can name the type it could not derive. A type with NO zod schema
+            // never reaches the converter at all — absence is not degeneracy.
+            const schema = (zodSchema ? toJsonSchemaSafe(zodSchema, singular) : undefined)
                 ?? HAND_CRAFTED_SCHEMAS[singular];
             const form = TYPE_TO_FORM[singular];
             // Phase 2: the authoritative minimal create seed (single source of
@@ -21411,14 +21536,36 @@ export class ObjectStackProtocolImplementation implements
                     const verdict = computeMetadataDiagnostics(normalizedType, data);
                     if (verdict && !verdict.valid) {
                         invalid++;
-                        const first = verdict.errors?.[0];
-                        console.warn(
-                            `[Protocol] [metadata_spec_invalid] stored ${normalizedType}/${record.name} fails the ` +
-                            `current spec schema even after conversion` +
-                            (first ? ` (${first.path || '<root>'}: ${first.message})` : '') +
-                            `. Registered anyway so it stays serveable and fixable — correct it in Studio ` +
-                            `(the read carries the full _diagnostics), or delete the sys_metadata row.`,
-                        );
+                        // [#16319] ⭐ THE ONE CLASS THIS POLICY NO LONGER COVERS.
+                        //
+                        // MAINTAINER RULING 2026-09-10 (director seat batch #111
+                        // item 2): a field whose `type` is absent or is not a
+                        // `FieldType` member 「应该禁止加载」, so the row does NOT
+                        // register and 「Registered anyway so it stays serveable and
+                        // fixable」 would be a false receipt for it. `registerObject`
+                        // below throws for exactly this class and the per-record
+                        // catch prints the `error`-level line naming the object, the
+                        // field, the reason and the remedy — one loud statement, not
+                        // this reassuring one followed by a contradiction.
+                        //
+                        // ⛔ The question is asked through the DOOR's own predicate,
+                        // never re-derived here: a boot log with its own opinion
+                        // about what the registry admits is the same two-answers
+                        // defect one layer up. And ⛔ the row is not skipped here
+                        // either — the refusal stays the registry's single act, so
+                        // ablating the door's check makes this row register again.
+                        const willRefuseFieldType =
+                            normalizedType === 'object' && findUndeclarableFieldType(data) !== null;
+                        if (!willRefuseFieldType) {
+                            const first = verdict.errors?.[0];
+                            console.warn(
+                                `[Protocol] [metadata_spec_invalid] stored ${normalizedType}/${record.name} fails the ` +
+                                `current spec schema even after conversion` +
+                                (first ? ` (${first.path || '<root>'}: ${first.message})` : '') +
+                                `. Registered anyway so it stays serveable and fixable — correct it in Studio ` +
+                                `(the read carries the full _diagnostics), or delete the sys_metadata row.`,
+                            );
+                        }
                     }
                     if (normalizedType === 'object') {
                         // Every row here came from `sys_metadata` — a TENANT-authored
@@ -21503,7 +21650,35 @@ export class ObjectStackProtocolImplementation implements
                     loaded++;
                 } catch (e) {
                     errors++;
-                    console.warn(`[Protocol] Failed to hydrate ${record.type}/${record.name}: ${e instanceof Error ? e.message : String(e)}`);
+                    if (isObjectFieldTypeRefused(e)) {
+                        // [#16319] `error`, not `warn` — the AGENTS.md
+                        // "Degradation log levels" question answers YES here:
+                        // after this line the system looks entirely normal
+                        // (boot completes, every other object is served) while a
+                        // row the operator can see in `sys_metadata` is simply
+                        // not part of the runtime. It owes the two things an
+                        // `error` owes, in this first line: the CONSEQUENCE —
+                        // the object is absent, so its table is never created or
+                        // updated and every API for it answers as unknown — and
+                        // the FIX, which is the ruling's own precondition that
+                        // the row stay reachable: it is still readable, still
+                        // writable and still deletable through the metadata
+                        // API's raw-row path (`GET`/`PUT`/`DELETE
+                        // /api/v1/metadata/object/<name>`), because that path
+                        // reads `sys_metadata` directly and never asks the
+                        // registry whether the row registered.
+                        console.error(
+                            `[Protocol] [metadata_field_type_refused] stored ${record.type}/${record.name} is NOT ` +
+                            `registered. ${e.message} Until the row is corrected this object is absent from the ` +
+                            `runtime — its table is never created or updated, and every API for it answers as ` +
+                            `unknown — while the boot completes and everything else looks healthy. The row itself ` +
+                            `is untouched and still reachable: correct it in Studio or with ` +
+                            `PUT /api/v1/metadata/object/${record.name}, or remove it with ` +
+                            `DELETE /api/v1/metadata/object/${record.name}.`,
+                        );
+                    } else {
+                        console.warn(`[Protocol] Failed to hydrate ${record.type}/${record.name}: ${e instanceof Error ? e.message : String(e)}`);
+                    }
                 }
             }
             // #6190 — say out loud which org-scoped rows this filter just

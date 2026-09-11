@@ -2348,6 +2348,12 @@ export class AuthPlugin implements Plugin {
         // target org (never grab the bootstrap default org in a multi-tenant
         // deployment); single-org resolves the default org.
         getTenancy: () => this.tenancy ?? undefined,
+        // ADR-0093 D1 — the LIVE membership policy, read through the accessor
+        // per call (the deps factory itself runs per request). A captured
+        // value would keep the endpoint auto-binding after an admin switched
+        // the deployment to `invite-only`, which is the exact defect the
+        // accessor exists to prevent.
+        getMembershipPolicy: () => this.authManager!.getMembershipPolicy(),
         logger: ctx.logger,
       });
       // Gate: the shared `gateAdmin` hoisted above the SSO mounts (#9653).

@@ -153,7 +153,7 @@ describe('#14092 — `operation: \'update\'` + `patch` is accepted (the bulk def
 
   it('positive control — the api and script forms are untouched by the new refinements', () => {
     expect(ActionSchema.safeParse({
-      name: 'revoke', label: 'Revoke', type: 'api', target: '/api/v1/sys_api_key/{id}',
+      name: 'revoke', label: 'Revoke', type: 'api', target: '/api/v1/data/sys_api_key/${ctx.recordId}',
       method: 'PATCH', bodyExtra: { revoked: true }, recordIdParam: 'id',
     }).success).toBe(true);
     expect(ActionSchema.safeParse({ name: 'run', label: 'Run', target: 'runThing' }).success).toBe(true);

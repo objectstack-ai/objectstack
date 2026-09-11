@@ -26,6 +26,25 @@
  * same schema, and the dot condition is gone because the schema subsumes it
  * (its pattern needs at least two segments).
  *
+ * ## The derive path carries a DECLARATION, not a candidate (#16891)
+ *
+ * Asking the same schema on both paths closed the "admitted here, refused by
+ * the server" hole; it did not close the derive path's *silent* one. A declared
+ * `manifest.id` that failed that parse used to fall through to
+ * `local.<manifest.name slug>` and publish under it without a word, and
+ * `manifest_id` is immutable once published — so the author acquired a
+ * permanent, globally unique identifier they never wrote and cannot rename.
+ * The output made it invisible: `Registering package 'local.acme-crm'...` was
+ * byte-identical to the run where the artifact declared no id at all.
+ *
+ * A declared id is now used or refused, never skipped, and the last describe
+ * block below pins the two runs apart — the property the defect violated.
+ * Honouring an unusable declared value is not on the table: the values that
+ * reached the fall-through are, by construction, exactly the ones
+ * `PackageSchema.manifestId` rejects, and `CreatePackageRequestSchema.manifestId`
+ * IS that schema node, so forwarding one only relocates the same refusal to the
+ * server.
+ *
  * ## What separates a fix from a re-transcription
  *
  * Re-typing the schema's regex into this file would turn every refusal
@@ -199,24 +218,33 @@ describe('os package publish — the manifest-id rule is the spec manifest-id ru
 
   describe('derive path', () => {
     for (const { id, why, admittedOnDerivePathBefore } of RELAXATIONS) {
-      it(`refuses to adopt '${id}' (${why}${admittedOnDerivePathBefore ? '' : ' — already blocked before the fix'})`, async () => {
-        // Unit half: the deriver does not forward the illegal shape…
+      it(`refuses a declared '${id}' (${why}${admittedOnDerivePathBefore ? ' — reached the server before #16889' : ''})`, async () => {
+        // Unit half: a DECLARED id is carried to the gate, never swapped for a
+        // derived one. `deriveManifestId` documents its result as "NOT
+        // guaranteed valid" precisely so this branch can hand an unusable
+        // declaration onwards to be refused by name.
         const derived = deriveManifestId(
           { manifest: { id, name: 'Acme CRM' } },
           '/nowhere/objectstack.json',
         );
-        expect(derived.id).not.toBe(id);
-        expect(derived).toEqual({ id: 'local.acme-crm', source: 'artifact-manifest-name' });
-        expect(isManifestId(derived.id)).toBe(true);
+        expect(derived).toEqual({ id, source: 'artifact-manifest-id' });
+        expect(isManifestId(derived.id)).toBe(false);
 
-        // …and end to end, nothing resembling it reaches the wire.
+        // …and end to end the publish refuses before any network call, rather
+        // than proceeding under `local.acme-crm`.
         const path = await artifactAt({ id, name: 'Acme CRM', version: '1.2.0' });
         const calls = stubCloud();
-        await PackagePublish.run([path]);
+        const { exitCode, output } = await runPublish([path]);
 
-        expect(calls).toHaveLength(2);
-        expect(calls[0].body.manifest_id).not.toBe(id);
-        expect(MANIFEST_ID.safeParse(calls[0].body.manifest_id).success).toBe(true);
+        expect(exitCode).toBe(1);
+        expect(calls).toEqual([]);
+        // The refusal names the author's own value…
+        expect(output).toContain(`Invalid manifest-id '${id}'`);
+        // …and never the id that used to be substituted for it. This is the
+        // assertion the defect could not satisfy: `manifestId` is immutable
+        // once published, so a permanent identifier the author did not write
+        // must not be minted, and must not be reported as if it were theirs.
+        expect(output).not.toContain('local.acme-crm');
       });
     }
 
@@ -233,9 +261,60 @@ describe('os package publish — the manifest-id rule is the spec manifest-id ru
       expect(calls[0].body.manifest_id).toBe(LEGAL_ID);
     });
 
-    it('falls back to the artifact filename when the artifact names nothing usable', () => {
-      expect(deriveManifestId({ manifest: { id: 'com..acme' } }, '/tmp/build/objectstack.json'))
+    it('falls back to the artifact filename when the artifact names nothing at all', () => {
+      expect(deriveManifestId({ manifest: {} }, '/tmp/build/objectstack.json'))
         .toEqual({ id: 'local.objectstack', source: 'artifact-filename' });
+    });
+
+    // An absent key is not a declaration. Neither is a blank one, nor a
+    // non-string: `ManifestSchema.id` is `z.string()`, so those shapes are
+    // off-spec input rather than an id the author chose, and they keep
+    // deriving exactly as they did before.
+    it.each([
+      ['absent', undefined],
+      ['empty string', ''],
+      ['whitespace', '   '],
+      ['non-string', 42],
+    ])('does not treat a %s `manifest.id` as a declaration', (_label, value) => {
+      expect(deriveManifestId({ manifest: { id: value, name: 'Acme CRM' } }, '/nowhere/objectstack.json'))
+        .toEqual({ id: 'local.acme-crm', source: 'artifact-manifest-name' });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // The card's own reproduction: the two cases must be TELLABLE APART.
+  //
+  // Before this fix both printed `Registering package 'local.acme-crm'...` and
+  // both POSTed `manifest_id: local.acme-crm` — byte-identical output for
+  // "the author declared an id we discarded" and "the author declared no id".
+  // That indistinguishability IS the defect, so it is pinned as one assertion
+  // over both runs rather than as two separate expectations.
+  // -------------------------------------------------------------------------
+
+  describe('a discarded declaration is distinguishable from no declaration', () => {
+    async function publishWith(manifest: Record<string, unknown>) {
+      const path = await artifactAt(manifest);
+      const calls = stubCloud();
+      const { exitCode, output } = await runPublish([path]);
+      return { exitCode: exitCode ?? 0, wire: calls[0]?.body?.manifest_id, output };
+    }
+
+    it("declaring manifest.id = 'crm' no longer looks like declaring nothing", async () => {
+      const declared = await publishWith({ id: 'crm', name: 'Acme CRM', version: '1.2.0' });
+      // Fresh artifact dir for the control run.
+      await rm(dir, { recursive: true, force: true });
+      dir = '';
+      const silent = await publishWith({ name: 'Acme CRM', version: '1.2.0' });
+
+      // The control run is unchanged by this card — an artifact that declares
+      // no id still publishes under the derived one.
+      expect(silent).toMatchObject({ exitCode: 0, wire: 'local.acme-crm' });
+
+      // The declaring run is refused, and every observable differs.
+      expect(declared.exitCode).toBe(1);
+      expect(declared.wire).toBeUndefined();
+      expect(declared.output).not.toBe(silent.output);
+      expect(declared.output).toContain("'crm'");
     });
   });
 

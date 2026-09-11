@@ -304,6 +304,10 @@ import { runImport } from './import-runner.js';
 // [#16581] The public picker's authoring-dialect → parser-grammar lowering.
 import { lowerViewFilterRules } from './view-filter-rule-lowering.js';
 import { prepareImportRequest } from './import-prepare.js';
+// [#17058] The `POST …/analytics/dataset/query` door parse — the half of the
+// analytics family this route never had. See the module header for the
+// measurement that decides its shape.
+import { datasetSelectionRefusal } from './analytics-selection-door.js';
 import { loadExcelJs, type Worksheet } from './xlsx-module.js';
 import { enrichOpenApiWithEndpoints } from './openapi-endpoints.js';
 import { buildBuiltinPaths } from './openapi-builtin-paths.js';
@@ -10658,8 +10662,8 @@ export class RestServer {
                     // `publicPicker.object` override, fall back to the
                     // field def on the parent object.
                     const p = await this.resolveProtocol(environmentId, req);
-                    let referenceTo: string | undefined = picker.object;
-                    if (!referenceTo && typeof (p as any).getMetaItems === 'function') {
+                    let referenceObject: string | undefined = picker.object;
+                    if (!referenceObject && typeof (p as any).getMetaItems === 'function') {
                         try {
                             const objectsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
                                 type: 'object',
@@ -10669,58 +10673,45 @@ export class RestServer {
                             const items: any[] = Array.isArray(r?.items) ? r.items : Array.isArray(r) ? r : [];
                             const obj = items.find((o: any) => o?.name === match.object);
                             const def = obj?.fields?.[fieldName];
-                            // [#7486] `reference` FIRST — it is the canonical
-                            // key on `FieldSchema`, and the ONLY spelling that
-                            // schema accepts. Reading only the legacy spellings
-                            // meant a well-formed object schema carried NONE of
-                            // them, the chain resolved `undefined`, and the
-                            // route answered 500 — making `publicPicker.object`
-                            // de-facto required while the schema and docs
-                            // present it as an optional override.
+                            // [#7486] Resolve the target from the canonical key — and, since
+                            // [#12920], from it ALONE. `reference` is the spelling `FieldSchema`
+                            // accepts, so it is the only spelling a field def can legitimately
+                            // carry.
                             //
-                            // ⛔ [#13137] `data/field.zod.ts` does NOT fold the
-                            // legacy spellings onto `reference`. An earlier
-                            // version of this comment said it did, and that
-                            // sentence is precisely what invited consumers to
-                            // be lenient. Its `aliases` table is a RENAME HINT
-                            // ON A REJECTED KEY, not a normaliser:
-                            // `strictObject` consults `aliases` only from the
-                            // `unrecognized_keys` path (the semantics are
-                            // stated in `spec/src/shared/strict-object.ts`), so
-                            // `relatedTo` / `referenceTo` / `target` /
-                            // `targetObject` / `lookupObject` are REFUSED by
-                            // `FieldSchema` — answered with *"Did you mean
-                            // `referenceTo` → `reference`?"* and never
-                            // rewritten. Pinned three ways (accept /
-                            // alias-refusal-with-hint / unknown-key-refusal
-                            // -without-hint) in
-                            // `public-form-lookup-picker.test.ts`.
-                            // ⇒ ⛔ this chain is NOT licence to be lenient
-                            // anywhere else: nothing upstream folds for you,
-                            // and a producer emitting a legacy spelling emits a
-                            // document the spec refuses by name.
+                            // ⛔ [#12920] This read used to be a four-spelling tolerant chain
+                            // (`reference ?? referenceTo ?? target ?? options.objectName`). It was
+                            // RETIRED by ruling — director seat summon #20, decision batch #107
+                            // item 5, 2026-09-09, maintainer verbatim 「其他同意」 = option A —
+                            // executing the stance recorded 2026-08-30, verbatim 「折叠即契约」:
+                            // the spec spelling IS the contract, and a stored row spelling the
+                            // target the old way is a PRODUCER defect, not a shape this route
+                            // accommodates. The prerequisite that had held execution — whether any
+                            // live deployment holds alias-spelled rows — was answered by the
+                            // maintainer: none to preserve.
                             //
-                            // The tail below reads exactly three spellings —
-                            // `referenceTo`, `target`, `options.objectName` —
-                            // which is NOT the spec's five-entry hint list:
-                            // only the first two appear on it, and
-                            // `options.objectName` appears on no list at all.
-                            // They can reach here only on a STORED row that
-                            // never went through `FieldSchema`, which is
-                            // possible because the serving read path replays
-                            // ADR-0087 conversions
-                            // (`applyConversionsToStoredItem`) and performs no
-                            // schema validation. ⚠️ Whether such a row is still
-                            // reachable in production is #12920's OPEN census —
-                            // ⛔ do not widen this chain here, and do not narrow
-                            // it here either; #12920 decides its fate.
-                            referenceTo = def?.reference
-                                ?? def?.referenceTo
-                                ?? def?.target
-                                ?? def?.options?.objectName;
+                            // Wire-visible consequence, deliberate: a stored def spelling the
+                            // target `referenceTo` / `target` / `options.objectName` now resolves
+                            // NOTHING here, and the route answers `500 LOOKUP_TARGET_MISSING`
+                            // instead of searching the aliased object. Pinned, in both directions,
+                            // in `public-form-lookup-picker.test.ts`.
+                            //
+                            // ⛔ Do not re-widen this read, here or in any sibling consumer —
+                            // widening it back is how the platform came to answer the same
+                            // question differently per consumer. Nothing upstream folds for you:
+                            // [#13137] `data/field.zod.ts`'s `aliases` table is a RENAME HINT ON A
+                            // REJECTED KEY, not a normaliser (`strictObject` consults it solely
+                            // from the `unrecognized_keys` path — the semantics are stated in
+                            // `spec/src/shared/strict-object.ts`), so `relatedTo` / `referenceTo` /
+                            // `target` / `targetObject` / `lookupObject` are REFUSED by
+                            // `FieldSchema`, answered with *"Did you mean `referenceTo` →
+                            // `reference`?"*, and never rewritten. The one place an alias IS
+                            // tolerated is the ADR-0087 conversion layer (`fieldReferenceToAlias`),
+                            // replayed on stored-row rehydration — declared, tested and removable
+                            // on a schedule, which a `??` arm here never was.
+                            referenceObject = def?.reference;
                         } catch {/* ignore */}
                     }
-                    if (!referenceTo) {
+                    if (!referenceObject) {
                         res.status(500).json({
                             code: 'LOOKUP_TARGET_MISSING',
                             error: `Could not resolve referenced object for "${fieldName}"`,
@@ -10768,7 +10759,7 @@ export class RestServer {
                     };
 
                     const pickerRequest: ServerScopedDataRequest<FindDataRequest> = {
-                        object: referenceTo,
+                        object: referenceObject,
                         // [#16337] Canonical QueryAST: `filters` → `where`,
                         // `select` → `fields`, `sort` → `orderBy`. The normalizer
                         // folds each of those aliases onto exactly these keys and
@@ -10786,7 +10777,7 @@ export class RestServer {
                         // all; that the value is now a filter the ingress ACCEPTS
                         // is measured end-to-end, not asserted by the type.
                         query: {
-                            object: referenceTo,
+                            object: referenceObject,
                             limit: maxResults,
                             offset: 0,
                             where: filters,
@@ -10931,6 +10922,29 @@ export class RestServer {
                             code: 'VALIDATION_FAILED',
                             message: 'body.selection.measures must be a non-empty array of measure names.',
                         });
+                    }
+
+                    // [#17058] …and every OTHER member of `selection` had no
+                    // door at all, so a malformed one travelled into
+                    // `dataset-executor` and was answered by whatever the face
+                    // behind it happened to do with it — while the sibling
+                    // routes (`/analytics/query`, `/analytics/sql`) lift the
+                    // identical failure to a 400 at the entry. One family, two
+                    // postures, decided by which door the client knocked on.
+                    //
+                    // The parse is a PROJECTION, never the siblings' schema:
+                    // `selection` is a `DatasetSelection`, which is NOT the
+                    // `AnalyticsQuery` the siblings parse — it carries no
+                    // `cube` and has four members of its own, so the sibling
+                    // schema would 400 every real dashboard widget.
+                    // {@link datasetSelectionRefusal} carries that measurement
+                    // and the reason those four are deliberately left out.
+                    //
+                    // Validation-only: the caller's `selection` is what reaches
+                    // `queryDataset` below, never a parse output.
+                    const selectionRefusal = await datasetSelectionRefusal(selection);
+                    if (selectionRefusal) {
+                        return res.status(selectionRefusal.status).json(selectionRefusal.body);
                     }
 
                     // ADR-0037 P3 — draft data preview: the canvas / preview

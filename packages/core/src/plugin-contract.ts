@@ -123,7 +123,7 @@ import type { Plugin } from './types.js';
  * This function used to filter `version` issues out. It did so because the two
  * declarations disagreed: `PluginSchema.version` was `/^\d+\.\d+\.\d+$/` and
  * refused the prerelease and build-metadata forms SemVer 2.0.0 defines, while
- * `PluginLoader.isValidSemanticVersion` — the check the loader has always run —
+ * `PluginLoader.isSemverShapedVersion` — the check the loader has always run —
  * implemented the full grammar and accepted them. Enforcing the narrow spelling
  * would have RETIRED a pinned capability under a card that ruled on `type`, so
  * the disagreement was declared here rather than performed.

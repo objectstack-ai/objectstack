@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { retiredKey } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
+import type { KeySetGuidance } from '../shared/suggestions.zod';
 // Package-internal, like `strict-object` itself — the `shared/index.ts` barrel
 // deliberately does not re-export it, so nothing about the public API surface
 // moves. No cycle back into this file: that module's only runtime import is
@@ -846,6 +847,68 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
   requiredWhen: ExpressionInputSchema.optional().describe('Predicate (CEL) — the cell is required when TRUE. Same `record` + `parent` scope as `readonlyWhen`. PRESENTATION ONLY: this flags the cell inline-invalid in the grid; nothing on the write path reads it. The server-enforced contract is the child FIELD\'s own `requiredWhen` — a transition gate, see `Field.requiredWhen` — which hydration copies onto an identity-only column, so declaring the requirement here alone enforces nothing.'),
 }));
 
+/**
+ * The FLATTENED spellings of the column constraint — `notNull`, `not_null`,
+ * `storageNotNull` — answered with one prescription that names the real key.
+ *
+ * ## Why this is prose and not a rename
+ *
+ * ADR-0113 split one knob into two axes, and adjudicated the spelling of each:
+ * `required` is the write-time contract, and the physical constraint is
+ * `storage: { notNull: true }` (Q1, decided 2026-07-30). The target is
+ * therefore a NESTED key, and `aliases` renames onto a flat one — the same
+ * reason `currency` is answered in prose a few lines below.
+ *
+ * ## Why it may not rename onto `required` (#16867)
+ *
+ * It used to: `notNull: 'required'` sat in the alias table beside `isRequired`
+ * and `mandatory`, and because `aliases` is consulted only AFTER this channel
+ * declines, an author who wrote `notNull` was told to write the one key ADR-0113
+ * exists to say is not the column constraint. `required`'s own `.describe()`
+ * below states the opposite in the same file: *"NOT a column constraint — the
+ * physical NOT NULL is a separate explicit opt-in (`storage.notNull`)"*.
+ *
+ * The cost of that rename was not a wording nit. The refusal was loud and did
+ * its job; its REMEDY produced the wrong end state, and that end state was
+ * SILENT — the author complied, got `required: true`, and received a nullable
+ * column plus a write gate with nothing downstream to refuse it. The same
+ * conflation was withdrawn from the conversion registry on the same reading
+ * (`conversions/registry.ts`, maintainer ruling 2026-09-08): *"A conversion
+ * cannot be what decides a column constraint — that is the author's explicit
+ * act."*
+ *
+ * ## Why a SET and not three `guidance` rows
+ *
+ * `guidance` is matched case-sensitively on the exact authored spelling, while
+ * `aliases` is indexed by `aliasProbe` (case- and separator-folded). Moving
+ * `notNull` from one channel to the other therefore silently narrows what it
+ * covers: the single alias row answered `not_null` too, and a lone
+ * `guidance.notNull` row would not have. The pattern restores the fold, and
+ * fires once per message however many members were written.
+ *
+ * ## Both halves are named on purpose
+ *
+ * The prescription states what `required` is as well as what `storage.notNull`
+ * is, because the defect being repaired is precisely that the author cannot
+ * tell which of the two they are getting — answering only one half would leave
+ * the author who meant the write contract to guess in the other direction.
+ */
+const COLUMN_CONSTRAINT_FLAT_KEYS: KeySetGuidance = {
+  name: 'COLUMN_CONSTRAINT_FLAT_KEYS',
+  // Anchored, so it claims only the flattened column-constraint spellings and
+  // cannot reach a declared key: `required`, `requiredWhen` and `storage`
+  // itself are all outside it.
+  keys: /^(?:storage[_-]?)?not[_-]?null$/i,
+  examples: ['notNull', 'not_null', 'storageNotNull'],
+  prescription:
+    'physical column constraints live under `storage` — write `storage: { notNull: true }` '
+    + '(ADR-0113). There is no flat spelling of it: post-17 a column is NOT NULL because its '
+    + 'author wrote that nested key, and for no other reason. It is NOT `required`, which is '
+    + 'the WRITE contract (an insert must provide a value; an update may not null it out) and '
+    + 'deliberately does NOT imply the column constraint — `required: true` alone leaves the '
+    + 'column nullable. Write whichever of the two you meant, or both.',
+};
+
 export const FieldSchema = lazySchema(() => {
   const base = strictObject({
   surface: 'this field',
@@ -857,7 +920,10 @@ export const FieldSchema = lazySchema(() => {
     title: 'label', displayName: 'label',
     help: 'inlineHelpText', helpText: 'inlineHelpText', hint: 'inlineHelpText', tooltip: 'inlineHelpText',
     default: 'defaultValue', initialValue: 'defaultValue',
-    isRequired: 'required', mandatory: 'required', notNull: 'required',
+    // `notNull` is NOT here, deliberately — see COLUMN_CONSTRAINT_FLAT_KEYS
+    // below. `isRequired` / `mandatory` stay: both are genuine spellings of the
+    // WRITE contract, and ADR-0113 moved neither.
+    isRequired: 'required', mandatory: 'required',
     isUnique: 'unique',
     values: 'options', choices: 'options', picklist: 'options', selectOptions: 'options',
     relatedTo: 'reference', referenceTo: 'reference', target: 'reference', targetObject: 'reference', lookupObject: 'reference',
@@ -908,13 +974,12 @@ export const FieldSchema = lazySchema(() => {
     referenceFilters:
       '`referenceFilters` (string[]) was removed in the 16.x line — the lookup picker only '
       + 'ever read the structured form. Use `lookupFilters: [{ field, operator, value }]`.',
-    // `notNull` is aliased to `required` above for the common case, but ADR-0113
-    // makes the two deliberately distinct and the distinction IS the point, so
-    // the flattened spelling gets its own sentence rather than a rename.
-    storageNotNull:
-      'physical column constraints live under `storage` — write `storage: { notNull: true }` '
-      + '(ADR-0113). `required` is the WRITE contract and deliberately does not imply the column '
-      + 'constraint.',
+    // `notNull` / `not_null` / `storageNotNull` are answered by
+    // COLUMN_CONSTRAINT_FLAT_KEYS (a `guidanceSets` entry, declared above this
+    // schema) rather than by a row here: exact `guidance` is matched
+    // CASE-SENSITIVELY on the authored spelling, so a row per spelling is the
+    // only way this channel can cover a family, and `not_null` was the spelling
+    // it would have missed.
     tracked: '`tracked` is not a field key — per-field timeline tracking is `trackHistory: true` (ADR-0052 §5b).',
     // Prose rather than a rename, because this surface declares BOTH forms and
     // the two answers have opposite polarity: renaming onto `visibleWhen` sends
@@ -927,6 +992,7 @@ export const FieldSchema = lazySchema(() => {
       + 'per-record CEL predicate is `visibleWhen` (shown only when TRUE). Its siblings are '
       + '`readonlyWhen` and `requiredWhen`.',
   },
+  guidanceSets: [COLUMN_CONSTRAINT_FLAT_KEYS],
 }, {
   /** Identity */
   name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Machine name (snake_case)').optional(),

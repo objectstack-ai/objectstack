@@ -28,7 +28,7 @@ This is **not** a schedule-only concern, and for approvals it is the common case
 
 ### 3. The approval node
 
-The node declares **who approves** (a named user, a position, the submitter's manager, …) and what happens on approve / reject / escalate. The authoritative shape is [`ApprovalNodeConfig` / `ApproverType`](/docs/references/automation/approval); a flow strings the trigger, the approval node, and the post-decision branches together.
+The node declares **who approves** (a named user, a position, the submitter's manager, …) and what happens on approve / reject / escalate. Not every kind is configured the same way: the submitter's manager resolves from a column no product surface writes, so read the `manager` callout below before you reach for it. The authoritative shape is [`ApprovalNodeConfig` / `ApproverType`](/docs/references/automation/approval); a flow strings the trigger, the approval node, and the post-decision branches together.
 
 ```ts
 // Illustrative — see the Approval reference for the exact node schema.
@@ -61,6 +61,29 @@ different thing — the better-auth **org-membership tier**, whose only values a
 
 Authored `type: 'role'` on 15.x? That is the deprecated spelling of `org_membership_level`
 (ADR-0090 D3): it still resolves, warns at runtime, and is removed in the next major.
+</Callout>
+
+<Callout type="warn">
+**`manager` is a directory-sync dependency, not something you configure here.**
+`{ type: 'manager' }` resolves at runtime from `sys_user.manager_id` on the record's owner, and
+that column is not one an operator can fill in from inside the product.
+
+`sys_user.manager_id` has no product write surface — the data API's managed-update whitelist is
+`{name, image, locale}`, the auth admin endpoints do not accept the column and the Console
+renders no field for it, so it is never populated by editing the user in the Console. On this
+platform the column is written by a seed, or by any other system-context write, which bypasses
+the managed-update whitelist. SCIM provisioning and directory sync can populate it too, but only
+through a provisioning path your own deployment supplies: this platform declares the SCIM
+`manager` attribute without projecting it onto the column, and its admin bulk import does not
+write it either.
+
+So where `manager_id` is unset the slate resolves to nobody: the request opens with an empty
+`pending_approvers` and waits forever, and under the default `lockRecord: true` the record stays
+locked with no in-product recovery. Populate the column for everyone who submits this request,
+or add a fallback approver that cannot resolve empty — e.g.
+`{ type: 'org_membership_level', value: 'owner' }`. `os lint` reports this at authoring time
+(`approval-approvers-may-resolve-empty`, `info`) and carries the same remedy text, so the two
+cannot drift apart.
 </Callout>
 
 Approving is itself a gated action — model "may approve" as a capability (`approve_invoice`) the approver's permission set grants, and gate the approve action's `requiredPermissions` on it so the gate is enforced on **both** the UI and the server (ADR-0066 D4).
@@ -303,7 +326,9 @@ hierarchy. `queue` still parses so stored flows keep loading, but it is **not
 implemented** by the runtime and is no longer offered for authoring (#3508) —
 a queue entry resolves to nobody. Route to a `team`, `department`, or
 `position` instead. `field`, `manager`, and `expression` resolve against the record's
-**live** state at node entry (#3447). `position`, `department`,
+**live** state at node entry (#3447); `manager` additionally depends on
+`sys_user.manager_id`, which no product surface writes — see [the `manager`
+callout above](#3-the-approval-node). `position`, `department`,
 `org_membership_level` and `expression` may additionally name which
 organization's directory resolves them — see
 [Approving across organizations](#cross-org-approvers). An entry that resolves

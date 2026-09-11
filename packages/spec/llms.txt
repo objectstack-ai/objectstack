@@ -77,7 +77,7 @@ const query = {
 
 ---
 
-## 3. Schema Inventory by Domain (198 schemas)
+## 3. Schema Inventory by Domain (199 schemas)
 
 Counted as `*.zod.ts` modules under `packages/spec/src/<domain>/` — the sources
 that ship in this tarball (`files` includes `src/**/*.zod.ts`), so every number
@@ -90,7 +90,7 @@ here is verifiable from the installed package.
 | data | 30 | Object, Field, Query, Filter, Driver (SQL/NoSQL/Memory/Mongo/Postgres), Cube |
 | api | 30 | Endpoint, REST Server, Discovery, OData, Batch, WebSocket, Response Envelope, Package Lifecycle |
 | ui | 18 | View, App, Action, Dashboard, Page, Chart, Component, Animation |
-| automation | 13 | Flow, Approval, BPMN Interop, Control Flow, State Machine, Webhook |
+| automation | 14 | Flow, Approval, BPMN Interop, Control Flow, State Machine, Webhook, Schedule Organization |
 | shared | 14 | Enums, HTTP, Identifiers, Mapping, Metadata Types, Connector Auth, Retry Policy, Value Domain, Epoch Instant (EpochMs) |
 | ai | 11 | Agent, Conversation, Knowledge Source/Document, Model Registry, MCP, Skill, Tool |
 | identity | 5 | Identity, Organization, Position, SCIM, Eval User |

@@ -40,6 +40,7 @@ export type {
     ImportRunSummary,
     ImportUndoLog,
     ImportProtocolLike,
+    ImportProtocolRequest,
     RunImportOptions,
 } from './import-runner.js';
 export { coerceRow } from './import-coerce.js';

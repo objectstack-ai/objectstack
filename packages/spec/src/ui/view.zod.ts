@@ -839,6 +839,60 @@ export const RowHeightSchema = lazySchema(() => z.enum([
   'extra_tall',  // Maximum padding, rich content preview
 ]).describe('Row height / density setting for list view'));
 
+/*
+ * ---------------------------------------------------------------------------
+ * `grouping.fields[].field` — the non-padded name rule (#17360)
+ * ---------------------------------------------------------------------------
+ */
+
+// The ruling is objectui#7347 ruling C (decision batch #110 item 5) — internal
+// readers get the ids here; the author-facing sentence carries the date only,
+// which is what a refused author can act on.
+const GROUPING_FIELD_RULING = 'ruled 2026-09-10';
+
+/**
+ * A name with no leading and no trailing whitespace.
+ *
+ * Deliberately **not** the snake_case machine-name grammar
+ * (`/^[a-z_][a-z0-9_]*$/`) this package spells inline for object, field and
+ * tool NAMES: a grouping level is authored as a field REFERENCE, and a dotted
+ * relationship path (`owner.name`) is an in-tree spelling of one, so the
+ * machine-name grammar is the wrong vocabulary for this key. The ruling asks
+ * for a non-padded pattern, and that is exactly what this is — nothing wider,
+ * nothing narrower.
+ *
+ * The empty string still matches, on purpose: a blank grouping name is already
+ * refused LOUDLY one layer down (`compileListViewGroupQuery`'s
+ * `grouping_field_blank`), and this narrowing exists for the SILENT case only.
+ */
+const GROUPING_FIELD_NON_PADDED_PATTERN = /^(?:\S|\S[\s\S]*\S)?$/;
+
+/**
+ * Validate one `grouping.fields[].field` name against the ruling. Returns the
+ * author-facing refusal, or `undefined` when the value conforms.
+ *
+ * ⛔ Not a `.trim()`. A trimming schema would make `'  a  '` and `'a'` silently
+ * equivalent, which is the consumer-tolerance direction AGENTS.md #0.1 refuses:
+ * the padded spelling is a mistake the author should be told about, not a
+ * dialect the producer should quietly accept and normalise away.
+ */
+function checkGroupingFieldName(raw: string): string | undefined {
+  if (GROUPING_FIELD_NON_PADDED_PATTERN.test(raw)) return undefined;
+
+  const trimmed = raw.trim();
+  const remedy = trimmed === ''
+    ? 'Name the field to group by — this value is nothing but whitespace.'
+    : `Write ${JSON.stringify(trimmed)}.`;
+
+  return '`grouping.fields[].field` names the field exactly as it is stored, with no leading or '
+    + `trailing whitespace — received ${JSON.stringify(raw)}. The group header query is compiled `
+    + 'from this string verbatim (`compileListViewGroupQuery` sends it as a `groupBy` column) and '
+    + 'the server answers under the unpadded name, so a padded spelling makes every renderer\'s '
+    + 'per-row lookup miss: the grid and the gallery show a single `(empty)` group and the kanban '
+    + 'a single `Uncategorized` lane holding every record — a wrong answer that reads as a true '
+    + `statement about the data. ${remedy} (${GROUPING_FIELD_RULING}.)`;
+}
+
 /**
  * Grouping Field Configuration
  * Defines a single grouping level for record grouping.
@@ -854,7 +908,17 @@ export const GroupingFieldSchema = lazySchema(() => strictObject({
   surface: 'this grouping field',
   history: VIEW_HISTORY,
 }, {
-  field: z.string().describe('Field name to group by — one `groupBy` column of the group header query; the header row carries its raw stored value (null for the empty group)'),
+  field: z.string()
+    .superRefine((raw, ctx) => {
+      const refusal = checkGroupingFieldName(raw);
+      if (refusal) ctx.addIssue({ code: 'custom', message: refusal });
+    })
+    .describe(
+      'Field name to group by — one `groupBy` column of the group header query; the header row '
+      + 'carries its raw stored value (null for the empty group). NO leading or trailing '
+      + 'whitespace: the name is compiled into the aggregate query verbatim, so a padded spelling '
+      + 'buckets every row into one empty group instead of grouping them.',
+    ),
   order: z.enum(['asc', 'desc']).default('asc').describe('Group sort order — applied by the consumer over the header rows (the aggregate query carries no orderBy)'),
   collapsed: z.boolean().default(false).describe('Collapse groups by default (presentation only)'),
 }));
@@ -1745,6 +1809,27 @@ const VIEW_CALENDAR_ALLOWED_NEEDS_START_DATE =
  * ⚠️ Scope: `calendar` only — the measured defect. Whether `timeline` or
  * another visualization has the same shape is a separate finding to measure
  * first, not a rider here (the #13748 ruling says so in those words).
+ *
+ * ⚠️ [#16577] Scope, the OTHER axis: this check reads
+ * `appearance.allowedVisualizations` and NOT `type`. A view that asks for a
+ * calendar by BEING one — `type: 'calendar'` with no `calendar:` block —
+ * parses CLEAN at all three doors, measured. That is not an unwatched shape:
+ * it is the axis `checkViewCompleteness`'s `VIEW_BINDING_BLOCKS`
+ * (`../kernel/functional-completeness.ts`) carries, at WARNING, under the same
+ * ADR-0078 §1 rubric the `page` note above cites — refuse what renders
+ * NOTHING, warn what degrades. The two axes are covered by two doors with
+ * complementary coverage: the completeness check reads `type` only and is
+ * blind to `allowedVisualizations`, this check reads `allowedVisualizations`
+ * only and is blind to `type`. ⛔ Escalating the `type` axis to a refusal is
+ * NOT ruled: it would refuse a shape 17.3.0 accepts, so it is a
+ * published-surface narrowing and a separate finding — the same disposition
+ * the `timeline` sentence above states. Both halves are pinned in
+ * `view.test.ts`, so a change to either is a deliberate edit.
+ *
+ * ⚠️ [#16577] `viewType` is NOT a second spelling of `type` at any of these
+ * doors: the two authoring doors refuse it as an unknown key, and the
+ * `.strip()`ed overlay door DROPS it, so the view parses as the defaulted
+ * `type: 'grid'` — an author who spells it reaches a grid, never a calendar.
  *
  * Attached with `.superRefine` at the same three doors as
  * {@link checkListViewPageMount}, for the same zod-4 reason (refinements block

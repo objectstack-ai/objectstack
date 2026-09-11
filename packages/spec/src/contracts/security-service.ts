@@ -56,7 +56,7 @@
 import type { FilterCondition } from '../data/filter.zod.js';
 import type { ExecutionContext } from '../kernel/execution-context.zod.js';
 import type { ExplainDecision, ExplainOperation } from '../security/explain.zod.js';
-import type { PermissionSet } from '../security/permission.zod.js';
+import type { ObjectAccessScope, PermissionSet } from '../security/permission.zod.js';
 
 /**
  * The context shape these methods accept.
@@ -190,6 +190,48 @@ export type AuthoredRowWriteVerdict = 'admit' | 'abstain';
  * acquire a widening path here by being spelled into a wider union.
  */
 export type AuthoredRowWriteOperation = 'update' | 'delete';
+
+/**
+ * [ADR-0090 D10 — maintainer ruling 2026-09-08] What
+ * {@link ISecurityService.describeDelegationNarrowing} reports about a
+ * delegated read.
+ *
+ * `narrowed: false` is the ONLY shape a non-delegated, system, principal-less
+ * or unresolvable context produces, and it carries no `statement` — so a
+ * consumer renders a note if and only if there is a narrowing to describe. A
+ * transport must not manufacture a warning from the absence of an answer: not
+ * knowing and knowing there is nothing to say are the same *rendered* outcome
+ * here on purpose, because the alternative is warning-fatigue on every read.
+ *
+ * A DISCRIMINATED UNION, not one shape with three optional fields, and the
+ * reason is `statement` itself: it is the sentence an AI consumer RENDERS, so
+ * left optional a consumer that forgets the `narrowed` check renders
+ * `undefined` — the same silence-by-omission this method exists to remove. The
+ * union makes the compiler enforce the invariant the prose above only asserts.
+ * The two shapes are also not symmetric under permanence: shipping this one and
+ * later LOOSENING it (a third member, or an optional field on the `true` arm)
+ * is non-breaking, while shipping optional fields and later TIGHTENING them to
+ * required is breaking — so the loose shape buys nothing and forecloses the
+ * tightening.
+ */
+export type DelegationNarrowing =
+  | {
+      /** No narrowing to describe. Carries nothing: there is nothing to say. */
+      narrowed: false;
+    }
+  | {
+      /** The delegated principal's own ceiling narrowed the readable depth. */
+      narrowed: true;
+      /**
+       * The sentence to surface. Written for an AI consumer: it states that the
+       * result is a SUBSET and that the count is not a fact about the object.
+       */
+      statement: string;
+      /** The depth actually enforced for the delegated read. */
+      effectiveScope: ObjectAccessScope;
+      /** The depth the delegator reaches alone. */
+      delegatorScope: ObjectAccessScope;
+    };
 
 /**
  * Public contract for the `security` service.
@@ -465,7 +507,48 @@ export interface ISecurityService {
   resolveWriteScope(
     object: string,
     context?: SecurityContext,
-  ): Promise<'own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org'>;
+  ): Promise<ObjectAccessScope>;
+
+  /**
+   * [ADR-0090 D10 — maintainer ruling 2026-09-08] Did the D10 intersection
+   * NARROW what this delegated context can read on `object`, and if so, what
+   * should the caller be told?
+   *
+   * The diagnostic half of the delegated-read contract, and the reason it is a
+   * method rather than a caller-side derivation: the consumer being corrected
+   * is an **AI agent**. An MCP `query_records` answering `total: 0` with no note
+   * is read by the agent as a fact about the data, and it then tells a
+   * decision-maker "there are no opportunities this quarter" — the measured
+   * failure on issue #16549. A count served from a narrowed row set must
+   * therefore arrive WITH the narrowing stated, in the words the explain path
+   * already uses ("D10 intersection"), or the transport is lying by omission.
+   *
+   * `narrowed: true` iff the delegated principal's OWN sets declare a record
+   * DEPTH narrower than the delegator's for a read on `object` — the axis the
+   * ruling widened and the only axis this reports. It is resolved from the same
+   * evaluator calls the CRUD middleware stashes as `__readScope`, so it cannot
+   * claim a narrowing the query did not have, nor miss one it did.
+   *
+   * ⛔ What it deliberately does NOT report, because these are refusals rather
+   * than silent shrinkage and already surface as errors: an object the ceiling
+   * does not reach at all, a write refused on a read-only scope, a refused
+   * `allowTransfer`. And it reports nothing about narrowing that comes from the
+   * DELEGATOR's own grants — that is the user's own permissions working, which
+   * is exactly what the delegated path promises.
+   *
+   * **Non-delegated contexts answer `{ narrowed: false }`.** So does a system
+   * context, a principal-less one, and any internal failure: this is a
+   * diagnostic and must never fail, narrow, or block a read.
+   *
+   * **OPTIONAL.** A security service that predates it omits it and every
+   * consumer feature-detects (`typeof svc.describeDelegationNarrowing ===
+   * 'function'`); absence reads as "cannot say", which callers render as no
+   * statement — the behaviour they had before this method existed.
+   */
+  describeDelegationNarrowing?(
+    object: string,
+    context?: SecurityContext,
+  ): Promise<DelegationNarrowing>;
 
   /**
    * [#5493 / ADR-0105 D3] Does an **app-authored** row-level security policy

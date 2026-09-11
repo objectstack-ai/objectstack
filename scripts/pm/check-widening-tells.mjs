@@ -217,6 +217,67 @@
  * moves, `check:authorable-surface` on any authorable key, and the ADR-0087
  * registries — instruments a rename must move and a rewording cannot.
  *
+ * ## The fourth accidental variable #17300 removed — a ledger of REMOVALS
+ *
+ * T2 is "the accept set gains a VALUE", and the ADR-0087 retirement ledger
+ * (`packages/spec/src/migrations/registry.ts`) is a list of values written
+ * BECAUSE an accept set shrank: `RETIRED_KEYS_BY_MAJOR` and
+ * `RETIRED_DEFS_BY_MAJOR` are tombstones, and a step's `conversionIds` names the
+ * D2 conversions that STRIP the retired shape on load. Every retirement adds
+ * rows to them — that is the kit working as designed — so the mechanical
+ * clause-② axis read ADVERSE on the one change class whose direction is most
+ * unambiguously narrowing. Measured on PR #17298 (the maintainer's 「撤」
+ * retirement of the list-view `type: 'page'` mount): three T2 rows, exit 4,
+ * against a declaration that is correct.
+ *
+ * ⛔ The fix is NOT excluding the file, and ⛔ not excluding the generated
+ * regions either. Both are holes rather than repairs — anything a generator
+ * emits there would stop being judged — and neither could have worked anyway:
+ * of the three rows, ONE (`'view-page-mount-removed'`, the conversion id) sits
+ * in the HAND-MAINTAINED `conversionIds` array, outside every `<os-generated …>`
+ * marker. A predicate keyed on position covers two rows of three and leaves
+ * `--pair` at exit 4 on every retirement that registers a conversion, which a
+ * D2 retirement does by definition.
+ *
+ * ⛔ And it is not a lookup in the local tree. That reading was measured and it
+ * is not merely expensive, it is WRONG for the whole population: a retirement
+ * registers its conversion in the SAME PR, so `view-page-mount-removed` is
+ * absent from `src/conversions/registry.ts` in any checkout of `main` (measured
+ * on this tree: 0 occurrences, against a positive control
+ * `turso-config-timeout-to-timeout-ms` reading 1). A seat's worktree is not the
+ * diff's head, and resolving an id against it answers about the wrong commit —
+ * in the direction that keeps the false positive.
+ *
+ * What the DIFF carries instead is the generator's own INPUT. #7297 split those
+ * three tables into `src/migrations/entries/`, one file per entry, precisely so
+ * a retirement writes a FILE instead of appending to a shared tail line; the
+ * file's payload is `export const entry = '<the row>';`, the exact string the
+ * generated row carries. So a row DECLINES only when this same diff ADDS the
+ * declaration that mints it:
+ *
+ *   - `export const entry = 'ui/ListView:pageName';` under
+ *     `packages/spec/src/migrations/entries/**` licenses that one row, and
+ *   - `id: 'view-page-mount-removed',` added to
+ *     `packages/spec/src/conversions/registry.ts` licenses that one id.
+ *
+ * ⚠️ This is the first reading in this file whose evidence spans FILES rather
+ * than a hunk, and the departure is deliberate rather than overlooked: the
+ * generator's input and its output are two files BY CONSTRUCTION (#7297), so a
+ * hunk-local reader cannot see the input however carefully it is written. The
+ * evidence is still positive, still carried by the document being judged, and
+ * still absent by default — a licence is minted by an added line or not at all.
+ *
+ * The sensitivity guarantee is exact string identity, not a shape: an entry
+ * file for `'a/B:c'` buys nothing for `'a/B:d'`; a licence buys nothing for the
+ * same string added to any OTHER file; a row typed by hand between the markers
+ * with no entry file still fires, which is also what `check:migration-registry`
+ * reports; and a genuinely new member of a genuinely closed set in the ledger
+ * file still fires with its own file:line. ⚠️ The quiet direction, stated
+ * rather than left to be found: a regeneration that lands SEPARATELY from the
+ * entry file it emits — the entry added in one PR, `gen:migration-registry` run
+ * in the next — carries no licence in its own diff and still tells. That is the
+ * loud direction and it is the right one; the second PR re-declares or explains.
+ *
  * ## Where the surfaces come from — imported, never hand-copied
  *
  * The contract SOURCE surface is `SUSPECT_TIER_GLOBS`, imported from
@@ -428,6 +489,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'T2 — a new member of a closed set': 13,
   '#16822 — the two accidental variables, and the evidence each one needs': 15,
   '#16943 — the net member/key delta: a replaced line is not a net addition': 23,
+  '#17300 — the retirement ledger is a record of REMOVALS, not a set that gained a value': 27,
   'T3 — a new row in a published entry point': 8,
   'T4 — a new registration in a registry': 10,
   '#16448 acceptance: the four positive controls, each with its file:line': 8,
@@ -542,6 +604,43 @@ export const REGISTRATION_SURFACES = Object.freeze([
     imported: null,
   }),
 ]);
+
+/**
+ * The ADR-0087 retirement ledger, and the two surfaces that MINT a licence for
+ * one of its rows (#17300).
+ *
+ * ⛔ Not a surface any tell fires ON, and ⛔ not an exclusion: `table` is the
+ * one file whose bare-string rows a licence can clear, and the other two rows
+ * are where a licence has to come FROM. Declared here rather than inlined for
+ * the reason `REGISTRATION_SURFACES` is — a renamed path must red in
+ * `--self-test`, not go quiet — and every row is asserted to exist in this tree
+ * by the same battery.
+ */
+export const LEDGER_INPUT_SURFACES = Object.freeze([
+  Object.freeze({
+    glob: 'packages/spec/src/migrations/registry.ts',
+    role: 'table',
+    repo: THIS_REPO,
+    why: 'the ADR-0087 D3 chain: RETIRED_KEYS_BY_MAJOR / RETIRED_DEFS_BY_MAJOR and each step\'s conversionIds — rows written BECAUSE an accept set shrank',
+  }),
+  Object.freeze({
+    glob: 'packages/spec/src/migrations/entries/**',
+    role: 'entry',
+    repo: THIS_REPO,
+    why: "the generator's input (#7297), one file per entry — `export const entry = '<row>'` is the exact string gen:migration-registry emits into the table",
+  }),
+  Object.freeze({
+    glob: 'packages/spec/src/conversions/registry.ts',
+    role: 'conversion',
+    repo: THIS_REPO,
+    why: "the ADR-0087 D2 conversion table — `id: '<id>'` is the registration a step's hand-maintained conversionIds row REFERS to",
+  }),
+]);
+
+/** The one row of {@link LEDGER_INPUT_SURFACES} playing `role`, for a run's repo. */
+export function ledgerSurface(role, repo = THIS_REPO) {
+  return LEDGER_INPUT_SURFACES.find((s) => s.role === role && s.repo === repo) ?? null;
+}
 
 /** Every declared surface, in one list, so a caller can render the whole set. */
 export const ALL_SURFACES = Object.freeze([
@@ -929,6 +1028,66 @@ export function rewritesExistingOpener(text, removedTexts) {
   return removedTexts.some((r) => closedSetOpenerBinding(r) === binding);
 }
 
+/**
+ * The string a bare list element carries, or `null` if the line is not one.
+ *
+ * ⛔ The SAME `BARE_STRING_ELEMENT` shape T2 reads, so "the row that fired" and
+ * "the row a licence is checked against" can never be two different questions —
+ * the drift `memberTellKind` exists to prevent one reading over.
+ */
+export function bareElementValue(text) {
+  const s = String(text ?? '');
+  if (!BARE_STRING_ELEMENT.test(s)) return null;
+  const m = /^[ \t]*(?:'([^']*)'|"([^"]*)")/.exec(s);
+  return m ? (m[1] ?? m[2] ?? null) : null;
+}
+
+/** `export const entry = '<row>';` — the generator's input for ONE ledger row (#7297). */
+const LEDGER_ENTRY_DECLARATION = /^[ \t]*export[ \t]+const[ \t]+entry(?:[ \t]*:[^=]*)?[ \t]*=[ \t]*(?:'([^']+)'|"([^"]+)")[ \t]*;?[ \t]*$/;
+
+/** `id: '<id>',` — one row's registration in the ADR-0087 D2 conversion table. */
+const CONVERSION_ID_DECLARATION = /^[ \t]*id[ \t]*:[ \t]*(?:'([^']+)'|"([^"]+)")[ \t]*,?[ \t]*$/;
+
+/**
+ * The retirement-ledger rows THIS DIFF licenses (#17300).
+ *
+ * A licence is minted by an ADDED line on one of the two input surfaces and by
+ * nothing else: the generator's own per-entry input, or the D2 conversion
+ * registration a `conversionIds` row refers to. Absence of a licence is the
+ * default and leaves every tell firing, which is the loud direction this file
+ * takes everywhere.
+ *
+ * ⛔ Never a position, a region marker or a filename shape — the licence is the
+ * EXACT string the row carries, so an entry for one row buys nothing for its
+ * neighbour. See the header for why the evidence spans files here and why a
+ * lookup in the local tree answers about the wrong commit.
+ *
+ * @param {{ filename?: string, status?: string, patch?: string|null }[]} files
+ * @returns {Set<string>} every row string this diff mints a licence for
+ */
+export function ledgerRowLicences(files, { repo = THIS_REPO } = {}) {
+  const licensed = new Set();
+  const entrySurface = ledgerSurface('entry', repo);
+  const conversionSurface = ledgerSurface('conversion', repo);
+  if (entrySurface === null && conversionSurface === null) return licensed;
+  for (const file of files ?? []) {
+    const filename = String(file?.filename ?? '');
+    if (filename === '' || file?.status === 'removed') continue;
+    const isEntry = entrySurface !== null && hintCovers(entrySurface.glob, filename);
+    const isConversion = conversionSurface !== null && hintCovers(conversionSurface.glob, filename);
+    if (!isEntry && !isConversion) continue;
+    for (const row of patchLines(file?.patch)) {
+      if (row.kind !== 'added') continue;
+      const m = isEntry
+        ? LEDGER_ENTRY_DECLARATION.exec(row.text)
+        : CONVERSION_ID_DECLARATION.exec(row.text);
+      const value = m ? (m[1] ?? m[2]) : null;
+      if (typeof value === 'string' && value !== '') licensed.add(value);
+    }
+  }
+  return licensed;
+}
+
 /** T3 — a row of a published export listing: every entry is a JSON string. */
 const JSON_STRING_ROW = /^[ \t]*"/;
 
@@ -1016,10 +1175,12 @@ export function changeBlocks(lines) {
  * Every tell one file's added lines carry.
  *
  * @param {{ filename?: string, status?: string, patch?: string|null }} file
- * @param {{ repo?: string }} [opts]
+ * @param {{ repo?: string, licensed?: Set<string> }} [opts] — `licensed` is the
+ *   whole diff's {@link ledgerRowLicences}; omitted, NOTHING is licensed and
+ *   every row tells, because an unread licence is not a granted one.
  * @returns {{ tell: string, file: string, line: number, text: string, why: string }[]}
  */
-export function tellsInFile(file, { repo = THIS_REPO } = {}) {
+export function tellsInFile(file, { repo = THIS_REPO, licensed = null } = {}) {
   const filename = String(file?.filename ?? '');
   if (filename === '') return [];
   if (file?.status === 'removed') return []; // a deleted file adds nothing.
@@ -1062,6 +1223,11 @@ export function tellsInFile(file, { repo = THIS_REPO } = {}) {
     typeof idx === 'number' && isConcatenationFragment(neighbourOn(side, idx, -1), neighbourOn(side, idx, 1));
   const surfaces = surfaceFlags(filename, repo);
   const { onContractSource } = surfaces;
+  // #17300 — is THIS file the ADR-0087 ledger? A licence clears a row in the
+  // ledger table and nowhere else: the same string added to any other file on
+  // any other surface still tells, with its own file:line.
+  const ledgerTable = ledgerSurface('table', repo);
+  const onLedgerTable = ledgerTable !== null && hintCovers(ledgerTable.glob, filename);
   // #16943 — the REPLACEMENT budget, one per change block, per tell kind.
   //
   // Every removed line in the block that carried a member or a key of kind K
@@ -1109,6 +1275,20 @@ export function tellsInFile(file, { repo = THIS_REPO } = {}) {
         budget.set(kind, paid - 1);
         continue;
       }
+    }
+    // #17300 — a retirement-ledger row this DIFF mints the licence for is a
+    // record that an accept set SHRANK, not a value it gained.
+    //
+    // ⛔ Read AFTER the #16943 budget, deliberately, because the ordering
+    // decides a case: when a block removes a real member and adds BOTH a
+    // licensed tombstone and a genuine member, the tombstone spends the removal
+    // and the genuine member — which now has nothing left to pay with — fires
+    // with its own file:line. Checking the licence first would leave the budget
+    // for the genuine member to spend instead, and buy exactly the silence this
+    // file refuses. The licence is the LAST reading, never the first.
+    if (kind === 'T2' && onLedgerTable && licensed !== null) {
+      const value = bareElementValue(text);
+      if (value !== null && licensed.has(value)) continue;
     }
     // A DECLARED registry is read as a registry first. Its files also sit on
     // the contract source surface (two of the three live under
@@ -1184,10 +1364,18 @@ export function unreadFiles(files, { repo = THIS_REPO } = {}) {
   return gaps;
 }
 
-/** Every tell in a whole changed-file listing, in file order. */
+/**
+ * Every tell in a whole changed-file listing, in file order.
+ *
+ * The retirement-ledger licences (#17300) are read ONCE, from the whole
+ * listing, and threaded down: the generator's input and its output are two
+ * files by construction, so the reading that clears a tombstone row is the only
+ * one in this file whose evidence a single file cannot hold.
+ */
 export function wideningTells(files, { repo = THIS_REPO } = {}) {
   const rows = [];
-  for (const file of files ?? []) rows.push(...tellsInFile(file, { repo }));
+  const licensed = ledgerRowLicences(files, { repo });
+  for (const file of files ?? []) rows.push(...tellsInFile(file, { repo, licensed }));
   return rows;
 }
 
@@ -1790,6 +1978,70 @@ export function selfTest() {
   t('⛔ …and an OPENER as neither — an opener-only line declares no member', memberTellKind('export const X = z.union([', { onContractSource: true }) === null);
   t('⛔ …and nothing at all off every surface', memberTellKind('  extra: z.string(),', {}) === null);
 
+  // -- #17300: the retirement ledger ----------------------------------------
+  //
+  // The card's population is five PRs measured in one lane in one day, every
+  // firing a false positive. Four of them (#17342, #17439, #17463, #17473) are
+  // T1 and #16943's net delta already clears them; the three cases below pin
+  // that so it cannot silently regress. The fifth, PR #17298, is the one that
+  // still refused at exit 4 — three T2 rows on a retirement, two generated into
+  // `<os-generated retired-key:18>` and ONE hand-typed into `step18.conversionIds`
+  // — and every fixture here is taken from that diff rather than invented.
+  //
+  // ⭐ Read the FIRING half first. A reading that can only suppress is
+  // untestable in the direction that matters, so the decline is bracketed on
+  // every side: the same row with no licence, a licence for a neighbouring row,
+  // a licence spent on the wrong file, a genuine member added beside a licensed
+  // one, and the ordering against #16943's budget.
+  battery('#17300 — the retirement ledger is a record of REMOVALS, not a set that gained a value');
+  const LEDGER = 'packages/spec/src/migrations/registry.ts';
+  const LEDGER_KEY_ENTRY = 'packages/spec/src/migrations/entries/retired-keys/18.ui__ListView__pageName.ts';
+  const LEDGER_DEF_ENTRY = 'packages/spec/src/migrations/entries/retired-defs/18.api__HandlerStatus.ts';
+  const CONVERSION_TABLE = 'packages/spec/src/conversions/registry.ts';
+  // PR #17298's own rows, at their own lines on that head.
+  const RETIRED_KEY_ROW = { filename: LEDGER, status: 'modified', patch: patchOf(12837, "+    'ui/ListView:pageName',") };
+  const RETIRED_DEF_ROW = { filename: LEDGER, status: 'modified', patch: patchOf(13540, "+    'api/HandlerStatus',") };
+  const CONVERSION_ID_ROW = { filename: LEDGER, status: 'modified', patch: patchOf(5443, "+    'view-page-mount-removed',") };
+  const KEY_ENTRY_FILE = { filename: LEDGER_KEY_ENTRY, status: 'added', patch: patchOf(13, "+export const entry = 'ui/ListView:pageName';") };
+  const DEF_ENTRY_FILE = { filename: LEDGER_DEF_ENTRY, status: 'added', patch: patchOf(9, "+export const entry = 'api/HandlerStatus';") };
+  const CONVERSION_REGISTRATION = { filename: CONVERSION_TABLE, status: 'modified', patch: patchOf(4820, "+  id: 'view-page-mount-removed',") };
+  const rowsFor = (...files) => wideningTells(files);
+
+  // -- the firing half: what a licence must NOT buy --------------------------
+  t('⛔ a ledger row whose entry file is NOT in this diff still fires — a licence is minted or it is absent', rowsFor(RETIRED_KEY_ROW)[0]?.tell === 'T2');
+  t('…at its own file:line, so the seat is told which row it is', rowsFor(RETIRED_KEY_ROW)[0] && `${rowsFor(RETIRED_KEY_ROW)[0].file}:${rowsFor(RETIRED_KEY_ROW)[0].line}` === `${LEDGER}:12837`);
+  t('⛔ nor does an entry file for a NEIGHBOURING row license this one — the licence is exact string identity', rowsFor(RETIRED_KEY_ROW, { filename: 'packages/spec/src/migrations/entries/retired-keys/18.ui__ListView__virtualScroll.ts', status: 'added', patch: patchOf(13, "+export const entry = 'ui/ListView:virtualScroll';") }).length === 1);
+  t('⛔ nor a conversion registration for a DIFFERENT id', rowsFor(CONVERSION_ID_ROW, { filename: CONVERSION_TABLE, status: 'modified', patch: patchOf(4820, "+  id: 'some-other-conversion',") }).length === 1);
+  t('⛔ a licence clears a row in the LEDGER table and nowhere else — the same string on another contract file still fires', rowsFor({ filename: 'packages/spec/src/ui/view.zod.ts', status: 'modified', patch: patchOf(300, "+    'ui/ListView:pageName',") }, KEY_ENTRY_FILE).length === 1);
+  t('⛔ a genuinely new member added BESIDE a licensed row still fires, and it is the row reported', rowsFor({ filename: LEDGER, status: 'modified', patch: "@@ -12837,0 +12837,2 @@\n+    'ui/ListView:pageName',\n+    'workflow'," }, KEY_ENTRY_FILE).length === 1);
+  t('…named by its own line, never the licensed one', rowsFor({ filename: LEDGER, status: 'modified', patch: "@@ -12837,0 +12837,2 @@\n+    'ui/ListView:pageName',\n+    'workflow'," }, KEY_ENTRY_FILE)[0]?.line === 12838);
+  t('⭐ the licence is read AFTER #16943\'s budget: a removal pays for the tombstone, so the genuine member has nothing left to pay with', rowsFor({ filename: LEDGER, status: 'modified', patch: "@@ -12837,1 +12837,2 @@\n-    'legacy-thing',\n+    'ui/ListView:pageName',\n+    'workflow'," }, KEY_ENTRY_FILE).length === 1);
+  t('⛔ an `export const entry` OUTSIDE the entries directory mints nothing', rowsFor(RETIRED_KEY_ROW, { filename: 'packages/spec/src/ui/view.zod.ts', status: 'modified', patch: patchOf(13, "+export const entry = 'ui/ListView:pageName';") }).length === 1);
+  t('⛔ a REMOVED entry declaration mints nothing — only an added line is evidence', rowsFor(RETIRED_KEY_ROW, { filename: LEDGER_KEY_ENTRY, status: 'modified', patch: "@@ -13,1 +13,0 @@\n-export const entry = 'ui/ListView:pageName';" }).length === 1);
+  t('⛔ `tellsInFile` alone licenses nothing — an unread licence is never a granted one', tellsInFile(RETIRED_KEY_ROW).length === 1);
+  t('⛔ and a licence never reaches a T1 key: the same string as a schema property still tells', rowsFor({ filename: LEDGER, status: 'modified', patch: patchOf(400, '+  pageName: z.string(),') }, { filename: LEDGER_KEY_ENTRY, status: 'added', patch: patchOf(13, "+export const entry = 'pageName';") })[0]?.tell === 'T1');
+
+  // -- the declining half: PR #17298's three rows ----------------------------
+  t('⭐ a generated retired-KEY row whose entry file this diff adds is not a new member', rowsFor(RETIRED_KEY_ROW, KEY_ENTRY_FILE).length === 0);
+  t('⭐ …the retired-DEF table reads the same way, from the same declaration', rowsFor(RETIRED_DEF_ROW, DEF_ENTRY_FILE).length === 0);
+  t('⭐ …and the HAND-MAINTAINED `conversionIds` row, which no region marker could ever have covered', rowsFor(CONVERSION_ID_ROW, CONVERSION_REGISTRATION).length === 0);
+  t('⭐ PR #17298\'s three rows together read CLEAN — the exit code a correct `Clause-②: no` could not reach', wideningRefusal({ declaration: 'no', files: [RETIRED_KEY_ROW, CONVERSION_ID_ROW, KEY_ENTRY_FILE, CONVERSION_REGISTRATION] }).state === 'clean');
+  t('`ledgerRowLicences` reads BOTH input surfaces into one set', (() => { const s = ledgerRowLicences([KEY_ENTRY_FILE, CONVERSION_REGISTRATION]); return s.has('ui/ListView:pageName') && s.has('view-page-mount-removed') && s.size === 2; })());
+  t('…and mints nothing from a listing that carries neither', ledgerRowLicences([RETIRED_KEY_ROW]).size === 0);
+  t('`bareElementValue` reads the row T2 fired on, not a second spelling of it', bareElementValue("    'ui/ListView:pageName',") === 'ui/ListView:pageName' && bareElementValue('  pageName: z.string(),') === null);
+
+  // -- the four T1 instances #16943 already cleared, pinned so they stay clear
+  t('⭐ #17463 — a key whose regex is BYTE-IDENTICAL across the pair is not a new key', tells({ filename: 'packages/spec/src/kernel/plugin.zod.ts', status: 'modified', patch: "@@ -212,1 +212,1 @@\n-  version: z.string().regex(SEMVER).optional().describe('Semantic Version'),\n+  version: z.string().regex(SEMVER).optional().describe('Version: major.minor.patch, …')," }).length === 0);
+  t('⭐ #17473 — a `z.unknown()` whose `.describe()` merely wrapped onto its own line is not a new key', tells({ filename: 'packages/spec/src/ui/component.zod.ts', status: 'modified', patch: "@@ -2583,1 +2583,2 @@\n-  exportOptions: z.unknown().optional().describe('Export config ({ formats, streaming })'),\n+  exportOptions: z.unknown().optional()\n+    .describe('Export config ({ formats, streaming })')," }).length === 0);
+  t('⭐ #17439 — a re-declaration that NARROWS (`z.unknown()` → `z.array(…)`) is not a new key either', tells({ filename: 'packages/spec/src/ui/component.zod.ts', status: 'modified', patch: "@@ -2525,1 +2525,1 @@\n-  sort: z.unknown().optional().describe('Initial sort (array of { field, order })'),\n+  sort: z.array(SortItemSchema).optional()," }).length === 0);
+  t('⛔ …while the SAME key removed in one hunk and added in another still fires — no reading crosses that boundary', tells({ filename: 'packages/spec/src/ui/component.zod.ts', status: 'modified', patch: "@@ -2525,1 +2525,0 @@\n-  sort: z.unknown().optional(),\n@@ -2894,0 +2893,1 @@\n+  sort: z.array(SortItemSchema).optional()," }).length === 1);
+
+  // -- the declared rows still exist -----------------------------------------
+  t('every ledger-input row names a path in THIS tree — a renamed input must red here, not go quiet', LEDGER_INPUT_SURFACES.filter((s) => s.repo === THIS_REPO).every((s) => existsSync(new URL(s.glob.replace(/\/\*+$/, ''), `file://${ROOT}`))), LEDGER_INPUT_SURFACES.filter((s) => !existsSync(new URL(s.glob.replace(/\/\*+$/, ''), `file://${ROOT}`))).map((s) => s.glob).join(', '));
+  t('all three roles are declared, and each exactly once — a missing role would silently license nothing', ['table', 'entry', 'conversion'].every((r) => LEDGER_INPUT_SURFACES.filter((s) => s.role === r).length === 1));
+  t('every ledger-input row carries a `why` and the repo it applies to', LEDGER_INPUT_SURFACES.every((s) => typeof s.why === 'string' && s.why.length > 10 && typeof s.repo === 'string' && s.repo.includes('/')));
+  t('`ledgerSurface` answers for this repo and is inert for another board', ledgerSurface('table')?.glob === LEDGER && ledgerSurface('table', 'objectstack-ai/objectui') === null);
+
   // -- T3 --------------------------------------------------------------------
   battery('T3 — a new row in a published entry point');
   t('a new export row is a tell', tells(FILE_API_SURFACE)[0]?.tell === 'T3');
@@ -2056,6 +2308,7 @@ export function selfTest() {
       'line-number directions, the unified-diff splitter, the three imported/declared surfaces, the ' +
       'four tells, the two accidental variables #16822 removed and the evidence each declines on, '
       + 'the #16943 net member/key delta with its surplus rule and the quiet direction it buys, ' +
+      '#17300\'s retirement-ledger licence with the firing controls that bracket it on every side, ' +
       "#16448's four positive controls each with its file:line, its negative controls — " +
       'the same diffs with `yes`, and a removal-only diff with `no` — the local path composed end ' +
       'to end so a binary change to a tell surface cannot read as clean, #17112\'s split count with ' +

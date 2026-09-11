@@ -120,6 +120,17 @@
  *       as absent left #10063 permanently blocked in silence (#10102). H9's
  *       `Restart-when:` shares that anchor AND, since #10403, this two-channel
  *       read; the history of the closed asymmetry is stated at H9.
+ *       ⭐ Since #17365 the row also says what the missing line WOULD have
+ *       said: a card that states its block in PROSE («blocked on», «HELD by»,
+ *       «解锁条件») has its candidate upstreams read out of that prose and
+ *       their CURRENT STATE printed, so the row reads 「缺行,且上游已关」
+ *       instead of only 「缺行」. That upgrade is what the class costs — three
+ *       cards were measured stalled past a satisfied unlock, one `priority:p1`
+ *       + `security` for four days — and it is the ONLY reading that can reach
+ *       them, because H19 needs a `Blocked-by:` line to exist before it can
+ *       resolve anything. Still report-only, still a CANDIDATE and never a
+ *       verdict; the anchor list and the request bound are stated at
+ *       `PROSE_BLOCKER_ANCHORS`.
  *   H5  `pm:seat` sticker whose title/assignee pair is out of sync — the
  *       seat-sticker protocol makes 标题、assignee、正文 a same-write triple:
  *       a title claiming 🟢 <login> must have that login as assignee; a title
@@ -1386,6 +1397,255 @@ export function commentBlockedByTargets(commentBodies) {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// PROSE BLOCKER CANDIDATES — H4's second half: what the missing line WOULD
+// have said, and whether it has already come true.
+//
+// ## The leak
+//
+// The state model defines `pm:blocked` as a PAIR — the label plus the body
+// line `Blocked-by: #N` — and the unlock scan fires from that line and from
+// nothing else. A seat that states the block in PROSE has written something a
+// human reads perfectly and no machine reads at all, so when the upstream
+// closes there is nothing anywhere that returns the card.
+//
+// H4 already catches the missing line. What it could NOT say is the half that
+// costs: that the condition the prose states has ALREADY BEEN MET. Three cards
+// were measured in exactly that shape on 2026-09-10, each past a satisfied
+// unlock, one of them `priority:p1` + `security` and stalled four days after
+// its own ruling had landed:
+//
+//   #15942  "State: `needs-user-decision` -> `pm:blocked` (blocker: #16293)
+//            ... Unblocks to `pm:queue` when #16293 merges"     #16293 CLOSED
+//   #16674  "解锁条件:PR #16628 合并(或其分支释放)"                #16628 CLOSED
+//   #16545  "解除条件(唯一):PR #16380 合并或关闭"                  #16380 CLOSED
+//
+// ⛔ H19 cannot reach this class and never could: it resolves the target of a
+// `Blocked-by:` line, and the whole defect is that there IS no such line. So
+// the reading has to be bought on H4's side, where the population already is.
+// The lesson the filing card drew is why this is a row and not a discipline
+// note: one of the three specimens had a seat that learned the lesson
+// correctly, added the `pm:blocked` label for exactly the right reason — and
+// still wrote no `Blocked-by:` line. Prose is the natural way to say this;
+// the machine-readable line has to be deliberately remembered.
+//
+// ## The anchors are MEASURED, never imagined
+//
+// `PROSE_BLOCKER_ANCHORS` holds spellings seats actually wrote: the three
+// specimens above, plus every H4-firing card on the 2026-09-10 board (18 rows
+// — "blocked on #16335", "`pm:blocked` behind **#16049**", "HELD by open PR
+// #17438", "held by **eight** open PRs", "Unblock condition (the only one)",
+// "机械解除条件"). ⛔ Never extend this list from imagination: an anchor nobody
+// writes buys a false candidate AND a request, and the clause is worth reading
+// only while every candidate it names is worth reading. Extend it when a new
+// spelling is MEASURED, and record where it was measured.
+//
+// ## A candidate is not a verdict
+//
+// An anchored sentence naming `#N` is a CANDIDATE. The clause names candidates
+// and their state and stops: it never says the card is unblocked, it writes no
+// label, and the remedy stays the one H4 always had — write the line. Same
+// posture H14 holds for `pm:blocking` and H19 for a released block, and the
+// exit code is untouched: a completed sweep still exits 0 whether it found 0
+// or 40 half-states.
+//
+// ## The cost, bounded the way H19's is
+//
+// Only a card ALREADY FIRING H4 is scanned (18 of 496 listed cards at the
+// 2026-09-10 reading), at most `H4_PROSE_CANDIDATE_CAP` distinct candidates
+// per card are resolved, and the resolutions ride H19's own per-target cache —
+// so a candidate some other card already named is free, and an OPEN LOCAL
+// candidate is answered from the exhaustive open listing this sweep already
+// holds for no request at all. What is left to pay for is the population the
+// clause is ABOUT: closed upstreams and cross-repo refs.
+// ---------------------------------------------------------------------------
+
+/**
+ * The prose spellings that introduce a block — matched case-insensitively
+ * against a line whose markdown decoration has been removed, so 「`pm:blocked`
+ * on #15162」 and 「`pm:blocked` behind **#16049**」 read like the bare forms.
+ * That is the same judgement #10102 made for the directive itself: authors
+ * format these lines, and a decorated one means what the bare one means.
+ *
+ * Two shapes are deliberately ABSENT. `Blocked-by` is the DIRECTIVE, and H4
+ * fires only when it is missing from both channels, so it can never be a prose
+ * candidate. Bare `blocking` is the LABEL `pm:blocking` being discussed far
+ * more often than a block being stated — five such lines on #16184 alone at
+ * the measured reading — and admitting it would fill the clause with refs to
+ * cards nobody is waiting on.
+ */
+export const PROSE_BLOCKER_ANCHORS = Object.freeze([
+  'blocked on',
+  'blocked by',
+  'blocked behind',
+  'blocker',
+  'held by',
+  'unblock',
+  '解锁条件',
+  '解除条件',
+]);
+
+/**
+ * How many distinct prose candidates one card resolves.
+ *
+ * A per-card constant rather than a sweep budget, for `H19_TARGET_LIST_CAP`'s
+ * reason: every blocked card measured on this board states one or two
+ * upstreams, so five covers the real population while bounding the
+ * pathological case — a card that names eight held PRs in one sentence
+ * (#15927, measured) resolves five of them and the clause says how many it
+ * held back. It bounds REQUESTS, not just rendering: the resolution is what
+ * costs, so the cap is applied before the fetch, never after it.
+ */
+export const H4_PROSE_CANDIDATE_CAP = 5;
+
+/** Markdown decoration removed, so an anchor and a ref read as the author meant. */
+function undecorateProseLine(line) {
+  return String(line ?? '').replace(/[`*]/g, '');
+}
+
+/**
+ * A `#N`, `PR #N`, `repo#N` or `owner/repo#N` ref anywhere in an anchored line.
+ *
+ * Line-scoped rather than sentence-scoped, and deliberately: real lines carry
+ * their refs in a list after the anchor (「held by eight open PRs — #15889,
+ * #15888, …」), which any sentence splitter would cut in half. Line anchoring
+ * is also what every other directive reader in this file uses.
+ */
+const PROSE_REF_SCAN = /([A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)?)?#(\d+)/gu;
+
+/**
+ * Every blocker ref carried by an ANCHORED line of this text, in order.
+ *
+ * Exported for the self-test: the anchor set and the ref shapes are the whole
+ * design, and a spelling that silently stopped matching would cost the clause
+ * without costing a row.
+ *
+ * @param {string} text
+ * @returns {{ repo: string|null, number: number }[]}
+ */
+export function proseBlockerRefs(text) {
+  const out = [];
+  for (const raw of String(text ?? '').split(/\r?\n/)) {
+    const line = undecorateProseLine(raw);
+    const lower = line.toLowerCase();
+    if (!PROSE_BLOCKER_ANCHORS.some((anchor) => lower.includes(anchor))) continue;
+    for (const m of line.matchAll(PROSE_REF_SCAN)) {
+      const hashAt = m.index + (m[1] ? m[1].length : 0);
+      // An HTML numeric entity is not a card number. GitHub bodies carry them
+      // (a zero-width space is spelled ampersand-hash-8203), and reading the
+      // digits as a ref would buy a request against an unrelated card.
+      if (line[hashAt - 1] === '&') continue;
+      const word = m[1] ?? null;
+      // `PR#17438` names this repo's PR, not a repo called `PR`. The spaced
+      // form never reaches here — the group cannot span the space.
+      const repo = word && !/^pr$/iu.test(word) ? word : null;
+      out.push({ repo, number: Number(m[2]) });
+    }
+  }
+  return out;
+}
+
+/**
+ * Every DISTINCT prose blocker candidate one card names, both channels, in the
+ * order written — the input the sweep resolves. Uncapped and pure; the CAP is
+ * applied by the caller, which is where the request is spent.
+ *
+ * Channels are unioned exactly as `blockerTargetsFor` unions them, and
+ * self-references are dropped for the same reason: a card cannot be its own
+ * blocker, and resolving one always answers `open`.
+ *
+ * @param {object} issue
+ * @param {string[]|null|undefined} commentBodies
+ * @param {string} [ownerRepo]
+ * @returns {{ key: string, repo: string, number: number, local: boolean }[]}
+ */
+export function proseBlockerCandidatesFor(issue, commentBodies, ownerRepo = OWNER_REPO) {
+  const texts = [issue?.body ?? '', ...(Array.isArray(commentBodies) ? commentBodies : [])];
+  const out = [];
+  const seenKeys = new Set();
+  for (const text of texts) {
+    for (const ref of proseBlockerRefs(text)) {
+      const target = blockerTargetKey(ref, ownerRepo);
+      if (!Number.isFinite(target.number)) continue;
+      if (target.local && target.number === issue?.number) continue;
+      if (seenKeys.has(target.key)) continue;
+      seenKeys.add(target.key);
+      out.push(target);
+    }
+  }
+  return out;
+}
+
+/** `#N` (or `owner/repo#N`) and its state, one per resolved candidate. */
+function namedProseCandidates(rows) {
+  return rows
+    .map((r) => {
+      const ref = `\`${r.local ? `#${r.number}` : r.key}\``;
+      if (r.state === 'closed') return `${ref} CLOSED${r.closedAt ? ` (${r.closedAt})` : ''}`;
+      if (r.state === 'unresolved') return `${ref} UNRESOLVED${r.detail ? ` (${r.detail})` : ''}`;
+      return `${ref} open`;
+    })
+    .join(', ');
+}
+
+/**
+ * The sentence H4 appends when the card states its block in prose.
+ *
+ * `undefined` (the scan was not run — every caller that does not ask for it,
+ * including every pre-#17365 one) yields the empty string, so the row is
+ * byte-identical to what it always was. An empty array is a real reading:
+ * scanned, nothing anchored, and the row again says nothing about prose. Only
+ * a non-empty array produces a clause.
+ *
+ * @param {{ key: string, repo: string, number: number, local: boolean,
+ *   state: 'open'|'closed'|'unresolved', closedAt?: string|null,
+ *   detail?: string|null }[]|null|undefined} candidates — RESOLVED candidates.
+ * @param {number} [heldBack] — distinct candidates left unresolved by the cap.
+ */
+export function proseBlockerClause(candidates, heldBack = 0) {
+  const rows = Array.isArray(candidates) ? candidates : [];
+  if (rows.length === 0) return '';
+  const closed = rows.filter((r) => r.state === 'closed');
+  const unresolved = rows.filter((r) => r.state === 'unresolved');
+  const more =
+    heldBack > 0
+      ? ` (+${heldBack} more candidate(s) named but NOT resolved — the per-card cap is ` +
+        `${H4_PROSE_CANDIDATE_CAP}, so this list is a lower bound)`
+      : '';
+  const head =
+    ` This card DOES state its block — in PROSE, where no machine reads it. Candidate ` +
+    `upstream(s) read off its anchored prose: ${namedProseCandidates(rows)}${more}.`;
+  let verdict;
+  if (closed.length === rows.length) {
+    verdict =
+      ' Every one of them is ALREADY CLOSED — the condition this card states in words is ' +
+      'already satisfied, nothing is coming to release it, and the card is due back in ' +
+      '`pm:queue`.';
+  } else if (closed.length > 0) {
+    verdict =
+      ` ${closed.length} of ${rows.length} ${closed.length === 1 ? 'is' : 'are'} ALREADY ` +
+      'CLOSED — the block is at least partly expired, and nothing machine-readable is ' +
+      'tracking any of it.';
+  } else if (unresolved.length === rows.length) {
+    verdict =
+      ' None of them could be resolved from this install — a cross-repo target is unjudgeable ' +
+      'per install (each token reads its own repo), so this clause says NOTHING about whether ' +
+      'the block still stands, and ⛔ no re-run resolves them.';
+  } else {
+    verdict =
+      ' They all still read OPEN, so the block itself looks live — what is missing is only the ' +
+      'line that would let a machine see it when they close.';
+  }
+  return (
+    head +
+    verdict +
+    ' ⚠️ A prose sentence is NOT a directive: these are CANDIDATES read off anchored prose ' +
+    '(「blocked on」, 「HELD by」, 「blocker」, 「解锁条件」, 「解除条件」, 「unblock…」), never a ' +
+    'verdict, and ⛔ no label is written from here. Read the card before acting, and fix it by ' +
+    'writing the `Blocked-by: #N` line whatever the states above say.'
+  );
+}
+
 /**
  * H4 — null when clean, else the finding sentence.
  *
@@ -1422,21 +1682,22 @@ export function commentBlockedByTargets(commentBodies) {
  * end. An unreadable reading must surface on the cheap side and must never
  * drive the expensive one.
  */
-export function h4BlockedNoBlockedBy(issue, commentBodies) {
+export function h4BlockedNoBlockedBy(issue, commentBodies, proseCandidates, proseHeldBack = 0) {
   if (!labelNames(issue).includes('pm:blocked')) return null;
   if (hasBlockedByLine(issue.body)) return null;
+  const prose = proseBlockerClause(proseCandidates, proseHeldBack);
   const remedy =
     ' The unlock sweep greps this literal line, so without it in SOME channel nothing can ' +
     'ever return this card to the queue — the block outlives its blocker in silence.';
   if (commentBodies === undefined) {
-    return '`pm:blocked` without a `Blocked-by:` body line.' + remedy;
+    return '`pm:blocked` without a `Blocked-by:` body line.' + remedy + prose;
   }
   if (commentBodies === null) {
     return (
       '`pm:blocked` without a `Blocked-by:` body line, and this card\'s comment thread could ' +
       'NOT be read this sweep — so the second channel (a `Blocked-by:` line parked in a comment, ' +
       'which is how most blocked cards on this board state it) is unjudged, not empty. Read the ' +
-      'thread by hand before acting: an unreadable channel is not an absent one (#4690).' + remedy
+      'thread by hand before acting: an unreadable channel is not an absent one (#4690).' + remedy + prose
     );
   }
   if (commentBodies.some((body) => hasBlockedByLine(body))) return null;
@@ -1445,7 +1706,7 @@ export function h4BlockedNoBlockedBy(issue, commentBodies) {
     'comment on the thread (both were read). Either channel discharges the duty: seats park the ' +
     'line in a comment on purpose, because rewriting a body through the MCP escaping hazard ' +
     '(#8813) is the riskier write. So this is not a formatting nit — no machine reader anywhere ' +
-    'knows what this card is waiting for.' + remedy
+    'knows what this card is waiting for.' + remedy + prose
   );
 }
 
@@ -11085,6 +11346,921 @@ export function h56EstimatedStampRow(hit, comment, total = 1) {
 }
 
 // ---------------------------------------------------------------------------
+// H57 — a SCHEDULED, NON-BLOCKING workflow whose latest `event=schedule` run is
+// not green, read by something OTHER than itself (#17132).
+//
+// ## The ruling, and the two things it refuses
+//
+// Ruled on objectui#8402 (director seat, batch #88, maintainer authority): this
+// sweep gains one check — for each scheduled, non-blocking workflow, read the
+// LATEST run whose `event` is `schedule` and report it RED when its conclusion
+// is not `success` or its age exceeds the schedule period plus one day. Two
+// refusals travel with it and neither is re-opened here:
+//
+//   ⛔ NO SELF-REPORTING AUTOMATION. A workflow that dies at `Set up job` never
+//      reaches a step that could open an issue, so a workflow watching itself
+//      is silent at exactly the moment there is something to say. An external
+//      reader is not, which is why the check is a row in this file — and why
+//      this change adds no workflow, no step and no schedule anywhere.
+//   ⛔ NEVER A `status=success` COUNT. Measured on the originating card and
+//      re-measured for this row: objectui's `check-links.yml` answers
+//      `?status=success` with 218 runs, and its newest are from 2026-01-24..28
+//      on `push` / `pull_request` — triggers it no longer declares, under the
+//      scan scope it had before objectui#3449. They are a different job wearing
+//      this job's name. `?event=schedule` on the same workflow answers FIVE
+//      runs, all five `failure`, weekly since 2026-08-09. So the filter is a
+//      CORRECTNESS requirement rather than a preference, and it is enforced
+//      structurally: every runs read this row makes is built by
+//      `scheduledRunsPath`, which cannot be spelled without `event=schedule`.
+//
+// ## Why the absence of this row is silence rather than a red light
+//
+// The population is defined by NOT blocking anything: no PR turns red when one
+// of these dies, no card is opened, no label moves. objectui#8126 is the
+// measured shape — `stale.yml` there accumulated 234 scheduled runs and ZERO
+// successes from 2026-01-16, every one failing at `Set up job`, and nothing on
+// any board said so for eight months. A row that is the only reader of a
+// surface with no board presence at all is the row whose loss restores the
+// original silence exactly.
+//
+// ## Where the population comes from — three readings, each stated
+//
+//   ACTIVE — `GET /actions/workflows` (ONE request for the swept repo) gives
+//     `id`, `path`, `name` and `state`. Only `state === 'active'` is judged, per
+//     the card's own wording. A scheduled workflow in any other state is HELD
+//     OUT and NAMED in the summary clause rather than dropped: GitHub disables a
+//     scheduled workflow after 60 days of repository inactivity, and that
+//     disablement is itself a death this row must not swallow silently.
+//   SCHEDULED — read from the workflow FILE's own `on:` block, off the local
+//     checkout, because the checkout is the swept repo on the runner this patrol
+//     actually runs on (`GITHUB_REPOSITORY`) and reading it costs no request.
+//     ⛔ Not from the API: classifying by `GET /contents/.github/workflows/<f>`
+//     would cost one request per workflow — 36 on this repo — to answer a
+//     question the disk answers for free. When the local checkout is NOT the
+//     swept repo the whole row reports `unresolved` and reads NOTHING, because
+//     judging one repo's runs by another repo's workflow files is #11217's
+//     disease pointed the other way.
+//   NON-BLOCKING — the workflow declares none of `pull_request`,
+//     `pull_request_target` or `merge_group`. This is a STRUCTURAL reading of
+//     "not in the required set" and it is exact in the direction it is used: a
+//     required status check is matched by check-run NAME on a pull request or in
+//     the merge queue, so a workflow that runs on neither can produce no
+//     required context and can block nothing. ⇒ {required} ⊆ {declares a
+//     PR-gating trigger}, and its contrapositive is what this reading asserts.
+//     It is deliberately NARROWER than the ruleset's own answer: a workflow that
+//     declares `pull_request` and is NOT required is held out here. ⛔ The
+//     ruleset is not read instead, because mapping a required CONTEXT (a job's
+//     check-run name, `Test (shard 1/4)`) back to a workflow FILE requires
+//     guessing at job names a matrix computes at run time — a silent, confident
+//     mis-mapping, which is the one failure mode this file spends its length
+//     refusing. The held-out count rides the summary clause so the narrowing is
+//     a stated bound rather than a quiet one.
+//
+// Measured 2026-09-10 across the two installed repos: objectstack 36 workflow
+// files, 22 scheduled, 7 of them non-blocking; objectui 37 files, 9 scheduled,
+// 7 non-blocking — 14 rows' worth of population and 16 requests a sweep for the
+// pair, each install paying only its own 8.
+//
+// ## The period, and why it is the LONGEST gap rather than the shortest
+//
+// The verdict is "older than the schedule period plus one day", so the period
+// has to be the longest wait the schedule itself produces — otherwise a cron
+// firing Monday and Tuesday (shortest gap: one day) reports RED every Wednesday
+// for doing exactly what it declares. `cronPeriodHours` therefore enumerates the
+// UNION of the workflow's crons over a bounded horizon and returns the widest
+// gap between consecutive fires. Declaring a second, denser cron shortens that
+// answer, which is the "shortest interval among the crons" the card asks for,
+// arrived at structurally instead of by special case. A cron this file cannot
+// parse, or one too sparse to show two fires inside the horizon, returns `null`
+// — the staleness leg is then UNJUDGED and says so; ⛔ never a default period,
+// which would date every sweep to a schedule nobody read.
+// ---------------------------------------------------------------------------
+
+/** Triggers that can produce a required check-run, and therefore BLOCK a merge. */
+export const H57_PR_GATING_EVENTS = Object.freeze([
+  'pull_request',
+  'pull_request_target',
+  'merge_group',
+]);
+
+/**
+ * The grace the ruling grants on top of the period, verbatim: "its age exceeds
+ * the schedule period plus one day". GitHub's scheduled-workflow queue delays
+ * fires under load — sometimes by tens of minutes at the top of the hour — so a
+ * period-exact threshold would alarm on lateness rather than on death.
+ */
+export const H57_STALE_GRACE_HOURS = 24;
+
+/**
+ * How far `cronPeriodHours` looks for fires, and how many it collects. The
+ * horizon is two full years plus a margin, so a YEARLY cron shows two fires
+ * from any starting date and anything sparser reads UNJUDGED rather than
+ * guessed at; the fire cap bounds a dense one
+ * (`7,22,37,52 * * * *` would otherwise enumerate ~76,000 instants to answer a
+ * question its first hour settles).
+ */
+export const H57_CRON_HORIZON_DAYS = 800;
+export const H57_CRON_FIRE_CAP = 64;
+
+/**
+ * The workflows listing's page size and its quota backstop, in this file's
+ * standing "bounded window, stated boundary" shape. Neither install binds it
+ * today — objectstack lists 44 workflows and objectui 47 — so the ceiling can
+ * only ever bite on a repo that grew past 300, and the shortfall is PRINTED
+ * rather than absorbed: a workflow never listed is a workflow this row is
+ * silent about, which is the failure it exists to end.
+ */
+export const H57_WORKFLOW_PAGE_SIZE = 100;
+export const H57_WORKFLOW_PAGE_CEILING = 3;
+
+/**
+ * Which rows of the workflows listing name a workflow FILE this checkout can
+ * hold — an EXTENSION test, and ⛔ deliberately not a `.github/workflows/`
+ * prefix one.
+ *
+ * The two readings classify this fleet identically (GitHub spells a file-backed
+ * workflow's `path` as `.github/workflows/<name>.yml`, and the fileless rows it
+ * lists for Dependabot and the coding agents carry no extension at all), so the
+ * choice is decided by what each SAYS rather than by what it matches. A
+ * directory-shaped string literal in this file is read by
+ * `scripts/pm/dispatch-gates.mjs` as a WATCH SURFACE, which would place
+ * `check:pm-half-states` on every card touching `.github/workflows/**` — and CI
+ * runs this file only as `--self-test`, which reads no workflow file at all.
+ * That placement was removed once already (#15753, through the noise-floor
+ * constant) and `ROOT_WALK_RESIDUE_LEDGER`'s row for this family records why;
+ * re-introducing it says the opposite of what the gate's own invocation does.
+ * ⛔ So this stays a regex: it asserts the property that actually matters — the
+ * listing row names a YAML file — and claims no directory this gate never reads.
+ */
+export const WORKFLOW_FILE_PATH = /\.ya?ml$/i;
+
+/** How many held-out workflows the summary clause names before it counts. */
+export const H57_HELD_OUT_NAME_CAP = 4;
+
+/**
+ * The ONE spelling of this row's runs read. Every caller goes through it, so
+ * `event=schedule` is not something an author has to remember: a request that
+ * omits it cannot be built here at all, and the self-test drives a spy that
+ * throws on any runs path reaching the transport without the filter.
+ *
+ * `per_page=1` is the whole read — the ruling asks for the LATEST scheduled run
+ * and nothing else, so the bound is one request per workflow by construction
+ * rather than by discipline.
+ */
+export function scheduledRunsPath(ownerRepo, workflowId) {
+  return `/repos/${ownerRepo}/actions/workflows/${workflowId}/runs?event=schedule&per_page=1`;
+}
+
+/**
+ * Every Actions RUNS path this file can build, and which of them omit the
+ * `event=schedule` filter — read off this file's own source, the same detector
+ * shape `familyRegistryCoverage` uses and for the same reason.
+ *
+ * The injectable spy in the self-test proves THIS pass sends the filter. This
+ * proves no OTHER line in the file can send a runs read without it, which is
+ * the half a spy cannot cover: the next author reaching for a second runs read
+ * writes a path here, not a call into the pass. The refused shape is exactly the
+ * 217-run trap — a runs listing whose answer is drawn from triggers the workflow
+ * no longer declares.
+ *
+ * @param {string} [source] — defaults to this file; injectable for the self-test.
+ * @returns {{ paths: string[], unfiltered: string[] }}
+ */
+export function h57RunsPathAudit(source) {
+  const text =
+    typeof source === 'string' ? source : readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  const paths = [];
+  const re = /`\/repos\/[^`]*?\/actions\/workflows\/[^`]*?\/runs[^`]*`/g;
+  let m;
+  while ((m = re.exec(text))) paths.push(m[0]);
+  return { paths, unfiltered: paths.filter((p) => !p.includes('event=schedule')) };
+}
+
+/**
+ * A YAML line with its trailing comment removed — `#` only where it opens the
+ * line or follows whitespace, and only outside a quoted span, so
+ * `cron: '0 1 * * *' # daily` loses the note and `path: 'a#b'` does not lose the
+ * value.
+ */
+export function stripYamlComment(line) {
+  const text = String(line ?? '');
+  let quote = null;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quote) {
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      quote = c;
+      continue;
+    }
+    if (c === '#' && (i === 0 || /\s/.test(text[i - 1]))) return text.slice(0, i);
+  }
+  return text;
+}
+
+const yamlIndent = (line) => line.length - line.trimStart().length;
+const unquote = (value) => String(value ?? '').trim().replace(/^(['"])([\s\S]*)\1$/, '$2');
+
+/**
+ * The trigger names and cron expressions a workflow file DECLARES.
+ *
+ * A bounded line scanner rather than a YAML parse, and the reason is the
+ * adoption model: this file is copied VERBATIM into sibling repos (#11217) and
+ * imports node builtins only, so a dependency it cannot assume is present is a
+ * dependency it cannot have. The scanner is therefore written to REFUSE rather
+ * than to interpret — anything it cannot resolve returns `events: null` with a
+ * reason, which the row reports as UNJUDGED. ⛔ A shape it half-reads must never
+ * become a clean reading; that is #4690 with a `#` in front of it.
+ *
+ * Handles the four spellings this fleet uses today, all pinned in the
+ * self-test: a block map (`on:` then indented keys), a flow sequence
+ * (`on: [push, pull_request]`), a sequence block (`on:` then `- push` items),
+ * and a bare scalar (`on: push`). YAML 1.1 reads a bare `on` as a boolean, so
+ * `'on':` and `"on":` are accepted at the same position.
+ *
+ * @param {string} text — the workflow file's bytes.
+ * @returns {{ events: string[]|null, crons: string[], reason: string|null }}
+ */
+export function workflowTriggers(text) {
+  const lines = String(text ?? '')
+    .split(/\r?\n/)
+    .map(stripYamlComment);
+  let start = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (yamlIndent(lines[i]) !== 0) continue;
+    const m = /^(?:on|'on'|"on")\s*:(.*)$/.exec(lines[i]);
+    if (!m) continue;
+    const inline = m[1].trim();
+    if (inline) {
+      if (inline.startsWith('{')) {
+        return { events: null, crons: [], reason: 'a flow-mapping `on:` value' };
+      }
+      const flow = /^\[([\s\S]*)\]$/.exec(inline);
+      const names = (flow ? flow[1] : inline)
+        .split(',')
+        .map((s) => unquote(s))
+        .filter(Boolean);
+      if (names.length > 0 && names.every((n) => /^[a-z_]+$/.test(n))) {
+        return { events: [...new Set(names)].sort(), crons: [], reason: null };
+      }
+      return { events: null, crons: [], reason: 'an unreadable inline `on:` value' };
+    }
+    start = i;
+    break;
+  }
+  if (start < 0) return { events: null, crons: [], reason: 'no top-level `on:` key' };
+
+  const events = new Set();
+  const crons = [];
+  let base = null;
+  let inSchedule = false;
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.trim()) continue;
+    const indent = yamlIndent(line);
+    if (indent === 0) break;
+    if (base === null) base = indent;
+    if (indent < base) break;
+    if (indent === base) {
+      const key = /^\s*([A-Za-z_][A-Za-z0-9_-]*)\s*:/.exec(line);
+      if (key) {
+        events.add(key[1]);
+        inSchedule = key[1] === 'schedule';
+        continue;
+      }
+      const item = /^\s*-\s*(.+)$/.exec(line);
+      const name = item ? unquote(item[1]) : '';
+      if (name && /^[a-z_]+$/.test(name)) {
+        events.add(name);
+        inSchedule = false;
+        continue;
+      }
+      return { events: null, crons: [], reason: 'an unreadable key inside `on:`' };
+    }
+    if (!inSchedule) continue;
+    const cron = /^\s*-\s*cron\s*:\s*(.+)$/.exec(line);
+    if (cron) crons.push(unquote(cron[1]));
+  }
+  return { events: [...events].sort(), crons, reason: null };
+}
+
+/**
+ * One cron field expanded to the values it matches, or `null` when this file
+ * cannot read it. ⛔ Names (`MON`, `JAN`) are refused rather than guessed: they
+ * are a crontab extension, and a wrong expansion here would compute a period
+ * nobody declared.
+ */
+export function expandCronField(spec, min, max) {
+  const text = String(spec ?? '').trim();
+  if (!text) return null;
+  const out = new Set();
+  for (const part of text.split(',')) {
+    const m = /^(\*|\d+(?:-\d+)?)(?:\/(\d+))?$/.exec(part.trim());
+    if (!m) return null;
+    const step = m[2] === undefined ? 1 : Number(m[2]);
+    if (!Number.isInteger(step) || step < 1) return null;
+    let from;
+    let to;
+    if (m[1] === '*') {
+      from = min;
+      to = max;
+    } else {
+      const range = m[1].split('-').map(Number);
+      from = range[0];
+      to = range.length > 1 ? range[1] : range[0];
+      if (range.length === 1 && m[2] !== undefined) to = max;
+    }
+    if (![from, to].every((n) => Number.isInteger(n)) || from < min || to > max || from > to) {
+      return null;
+    }
+    for (let v = from; v <= to; v += step) out.add(v);
+  }
+  return out.size > 0 ? [...out].sort((a, b) => a - b) : null;
+}
+
+/**
+ * A cron expression as five expanded fields, or `null` when any field refuses.
+ * Day-of-week 7 is Sunday's second spelling and folds onto 0.
+ */
+export function parseCron(expression) {
+  const fields = String(expression ?? '').trim().split(/\s+/);
+  if (fields.length !== 5) return null;
+  const minute = expandCronField(fields[0], 0, 59);
+  const hour = expandCronField(fields[1], 0, 23);
+  const dom = expandCronField(fields[2], 1, 31);
+  const month = expandCronField(fields[3], 1, 12);
+  const dowRaw = expandCronField(fields[4], 0, 7);
+  if (!minute || !hour || !dom || !month || !dowRaw) return null;
+  const dow = [...new Set(dowRaw.map((d) => (d === 7 ? 0 : d)))].sort((a, b) => a - b);
+  return {
+    minute,
+    hour,
+    dom,
+    month,
+    dow,
+    domRestricted: fields[2].trim() !== '*',
+    dowRestricted: fields[4].trim() !== '*',
+  };
+}
+
+/**
+ * The widest gap, in hours, between consecutive fires of the UNION of these
+ * crons — this row's "schedule period". See the section header for why it is
+ * the widest gap and not the narrowest.
+ *
+ * `null` means UNJUDGED, and the two ways to get there are deliberately the
+ * same value: a cron this file refuses to parse, and a schedule too sparse to
+ * show two fires inside `H57_CRON_HORIZON_DAYS`. ⛔ Neither falls back to a
+ * default period — a period nobody declared would make every later staleness
+ * reading a fiction.
+ *
+ * @param {string[]} crons
+ * @param {number} [fromMs] — the instant the horizon starts at, UTC.
+ */
+export function cronPeriodHours(crons, fromMs = Date.now()) {
+  const list = Array.isArray(crons) ? crons : [];
+  if (list.length === 0) return null;
+  const parsed = list.map(parseCron);
+  if (parsed.some((p) => !p)) return null;
+  const day = new Date(fromMs);
+  day.setUTCHours(0, 0, 0, 0);
+  const fires = [];
+  for (let d = 0; d < H57_CRON_HORIZON_DAYS && fires.length < H57_CRON_FIRE_CAP; d++) {
+    const at = new Date(day.getTime() + d * 86_400_000);
+    const month = at.getUTCMonth() + 1;
+    const dom = at.getUTCDate();
+    const dow = at.getUTCDay();
+    for (const cron of parsed) {
+      if (!cron.month.includes(month)) continue;
+      // POSIX cron: with BOTH day fields restricted the day matches when EITHER
+      // does; with one restricted, that one decides.
+      const domHit = cron.dom.includes(dom);
+      const dowHit = cron.dow.includes(dow);
+      const dayHit =
+        cron.domRestricted && cron.dowRestricted ? domHit || dowHit : domHit && dowHit;
+      if (!dayHit) continue;
+      for (const h of cron.hour) {
+        for (const m of cron.minute) {
+          fires.push(at.getTime() + h * 3_600_000 + m * 60_000);
+        }
+      }
+    }
+  }
+  const sorted = [...new Set(fires)].sort((a, b) => a - b);
+  if (sorted.length < 2) return null;
+  let widest = 0;
+  for (let i = 1; i < sorted.length; i++) widest = Math.max(widest, sorted[i] - sorted[i - 1]);
+  return widest / 3_600_000;
+}
+
+/**
+ * Is this workflow in H57's population at all, and if not, why not — one
+ * three-valued answer so the sweep never has to re-derive the reason for the
+ * clause that reports it.
+ *
+ * @param {{ state?: string, path?: string }} workflow — a `GET /actions/workflows` row.
+ * @param {{ events: string[]|null, crons: string[], reason: string|null }} triggers
+ * @returns {{ inPopulation: boolean, kind: string, crons: string[], detail: string|null }}
+ */
+export function h57Population(workflow, triggers) {
+  const path = String(workflow?.path ?? '');
+  if (!WORKFLOW_FILE_PATH.test(path)) {
+    return { inPopulation: false, kind: 'not-a-file', crons: [], detail: null };
+  }
+  if (!triggers || triggers.events === null) {
+    return {
+      inPopulation: false,
+      kind: 'unreadable',
+      crons: [],
+      detail: triggers?.reason ?? 'the file could not be read',
+    };
+  }
+  if (!triggers.events.includes('schedule')) {
+    return { inPopulation: false, kind: 'not-scheduled', crons: [], detail: null };
+  }
+  const gating = H57_PR_GATING_EVENTS.filter((e) => triggers.events.includes(e));
+  if (gating.length > 0) {
+    return { inPopulation: false, kind: 'pr-gating', crons: triggers.crons, detail: gating.join(', ') };
+  }
+  if (String(workflow?.state ?? '') !== 'active') {
+    return {
+      inPopulation: false,
+      kind: 'not-active',
+      crons: triggers.crons,
+      detail: String(workflow?.state ?? 'an unread state'),
+    };
+  }
+  return { inPopulation: true, kind: 'judged', crons: triggers.crons, detail: null };
+}
+
+/**
+ * H57 — `null` when the workflow's latest scheduled run is green and fresh,
+ * else the finding sentence.
+ *
+ * Three RED reasons, and they compose: a run can be both non-success and stale,
+ * and the row then says both rather than picking one.
+ *
+ *   never ran     `total_count` is 0 — the schedule is declared and has never
+ *                 produced a run. Its own RED, stated as such, because "no run
+ *                 to judge" is not a clean reading of a declared schedule.
+ *   non-success   the latest scheduled run CONCLUDED, and not as `success`.
+ *                 ⚠️ A run that has not concluded (`status !== 'completed'`)
+ *                 carries `conclusion: null`, and reading that as non-success
+ *                 would report RED on every sweep that lands inside a run's own
+ *                 window. It is held out of this leg and kept in the staleness
+ *                 one, so a run wedged in `queued` still ages into a finding.
+ *   stale         the run started longer ago than the period plus the grace.
+ *                 UNJUDGED, never assumed fresh, when the period is `null`.
+ *
+ * @param {object} entry — `{ repo, path, crons, periodHours, runsRead, run }`. `runsRead` is
+ *   the guard that keeps a FAILED runs read from reading as "never ran on schedule": the two
+ *   arrive at this predicate as the same absent `run`, and only one of them is a finding.
+ * @param {number} [nowMs]
+ */
+export function h57ScheduledWorkflowRed(entry, nowMs = Date.now()) {
+  if (!entry || entry.runsRead !== true) return null;
+  const repo = String(entry.repo ?? 'an unread repo');
+  const path = String(entry.path ?? 'an unread workflow');
+  const crons = Array.isArray(entry.crons) ? entry.crons : [];
+  const cronText = crons.length > 0 ? crons.map((c) => `\`${c}\``).join(' + ') : 'an unread cron';
+  const period = typeof entry.periodHours === 'number' ? entry.periodHours : null;
+  const periodText =
+    period === null
+      ? 'a period this sweep could not derive from that cron, so the staleness leg is UNJUDGED'
+      : `a fire at least every ${Math.round(period)}h, plus the ruled ${H57_STALE_GRACE_HOURS}h grace`;
+  const remedy =
+    ' An EXTERNAL reader found this, because a workflow that dies at `Set up job` cannot report its' +
+    " own death: the owning lane's seat opens the run above and fixes the workflow, or retires it." +
+    ' ⛔ This row never reads a `status=success` count — that count answers about every trigger the' +
+    ' workflow ever had, including ones it no longer declares. Report-only patrol INPUT, not a gate' +
+    ' verdict: nothing is blocked by this row.';
+
+  const run = entry.run ?? null;
+  if (!run) {
+    return (
+      `\`${repo}\` · \`${path}\` declares a schedule (${cronText}) and has NEVER produced a run whose ` +
+      '`event` is `schedule` — the declaration is the only evidence it exists. ⇒ RED for never having ' +
+      'run on schedule, which is a reading of the schedule rather than the absence of one.' +
+      remedy
+    );
+  }
+
+  const startedAt = run.run_started_at ?? run.created_at ?? null;
+  const startedMs = startedAt ? Date.parse(startedAt) : Number.NaN;
+  const ageHours = Number.isFinite(startedMs) ? (nowMs - startedMs) / 3_600_000 : null;
+  const completed = String(run.status ?? '') === 'completed';
+  const conclusion = run.conclusion ?? null;
+  const reasons = [];
+  if (completed && conclusion !== 'success') {
+    reasons.push(`concluded \`${conclusion ?? 'null'}\` rather than \`success\``);
+  }
+  if (period !== null && ageHours !== null && ageHours > period + H57_STALE_GRACE_HOURS) {
+    reasons.push(
+      `started ${Math.round(ageHours)}h ago, past the ${Math.round(period)}h period plus the ` +
+        `${H57_STALE_GRACE_HOURS}h grace`,
+    );
+  }
+  if (reasons.length === 0) return null;
+
+  const inFlight = completed ? '' : ` (still \`${run.status ?? 'an unread status'}\`, so its conclusion is not judged)`;
+  const seen = ageHours === null ? 'an unread start time' : `${Math.round(ageHours)}h ago`;
+  return (
+    `\`${repo}\` · \`${path}\` — the latest run whose \`event\` is \`schedule\` (run ` +
+    `\`${run.id ?? 'an unread id'}\`, started ${startedAt ?? 'at an unread instant'}, ${seen})` +
+    `${inFlight} ${reasons.join(', and ')}. Declared ${cronText} ⇒ ${periodText}. ⇒ RED.` +
+    remedy
+  );
+}
+
+/**
+ * Does the LOCAL checkout hold the workflow files of the repo being swept?
+ *
+ * The whole `on:`-block reading is a disk read, so this is the guard that keeps
+ * it honest. #11217's disease was a verbatim copy sweeping the WRONG board and
+ * rendering a full, green, entirely wrong report; the same disease points the
+ * other way here — reading objectstack's workflow files while judging objectui's
+ * runs would classify by one repo and alarm about another, with no symptom at
+ * all. So the answer is two definite readings and a refusal, never a guess:
+ *
+ *   the runner leg   `GITHUB_REPOSITORY` names the repo a runner checks out, so
+ *                    when it equals the swept repo the disk is that repo. This
+ *                    is the leg that answers on every real patrol run.
+ *   the terminal leg the checkout's own `origin` remote, for a seat running the
+ *                    sweep by hand.
+ *   otherwise        `unresolved`, with the reason — and the row reads nothing.
+ *
+ * @param {string} sweepRepo — `owner/name`.
+ * @param {Record<string, string|undefined>} env
+ * @param {string|null} originUrl — `git remote get-url origin`, or null.
+ */
+export function localCheckoutServes(sweepRepo, env = {}, originUrl = null) {
+  const want = String(sweepRepo ?? '').trim();
+  const fromEnv = String(env?.GITHUB_REPOSITORY ?? '').trim();
+  if (fromEnv) {
+    return fromEnv === want
+      ? { serves: true, source: 'GITHUB_REPOSITORY', reason: null }
+      : {
+          serves: false,
+          source: 'GITHUB_REPOSITORY',
+          reason: `the runner checked out \`${fromEnv}\` while this sweep reads \`${want}\``,
+        };
+  }
+  const m = /(?:[:/])([A-Za-z0-9._-]+\/[A-Za-z0-9._-]+?)(?:\.git)?\/?$/.exec(String(originUrl ?? ''));
+  if (!m) {
+    return {
+      serves: false,
+      source: 'origin',
+      reason: 'no `origin` remote resolved to an `owner/name` in this checkout',
+    };
+  }
+  return m[1] === want
+    ? { serves: true, source: 'origin', reason: null }
+    : {
+        serves: false,
+        source: 'origin',
+        reason: `this checkout's \`origin\` is \`${m[1]}\` while the sweep reads \`${want}\``,
+      };
+}
+
+/**
+ * H57's population reading, as the summary line prints it.
+ *
+ * UNCONDITIONAL, and every number in it is a bound on what the row could have
+ * said. A held-out workflow is a workflow this row is silent about, and this
+ * file's standing doctrine is that an unread input must never present as a
+ * clean one (#4690) — so each way of being held out is counted, the non-active
+ * ones are NAMED (that state is itself a death this row must not swallow), and
+ * the whole clause renders on a run that judged nothing.
+ *
+ * The `unresolved` branch is the one Zone-2 shape the ruling asks for by name:
+ * a repo whose workflow files this install cannot read prints `unresolved` and
+ * reads NOTHING — ⛔ never a retry loop and never a partial answer dressed as a
+ * complete one.
+ */
+export function h57PopulationClause(counts = {}) {
+  const requests = counts.scheduledRequests ?? 0;
+  if (counts.scheduledUnresolved) {
+    return (
+      `UNRESOLVED — ${counts.scheduledUnresolved}, so this row read NOTHING this sweep. ` +
+      'Its silence is an unread input, not a clean board, and no request was spent on it.'
+    );
+  }
+  const inactive = counts.scheduledInactive ?? 0;
+  const named = counts.scheduledInactiveNames
+    ? ` (${counts.scheduledInactiveNames})`
+    : '';
+  const short = counts.scheduledListingShort ?? 0;
+  return (
+    `${counts.scheduledDeclared ?? 0} workflow(s) on the swept repo declare a schedule; ` +
+    `${counts.scheduledJudged ?? 0} were judged against their latest \`event=schedule\` run and ` +
+    `${counts.scheduledUnreadRuns ?? 0} are UNJUDGED rather than clean because that read failed. ` +
+    `Held out: ${counts.scheduledGating ?? 0} declaring a PR-gating trigger ` +
+    `(\`${H57_PR_GATING_EVENTS.join('` / `')}\` — the structural reading of "not in the required set", ` +
+    'deliberately NARROWER than the ruleset\'s own answer, so a scheduled workflow that runs on pull ' +
+    `requests without being required is silence this row does not break), ${inactive} for a non-active ` +
+    `workflow state${named}. A further ${counts.scheduledUnreadable ?? 0} workflow file(s) carried an ` +
+    '`on:` block this file refused to read, so whether they belong to this population is UNJUDGED' +
+    `${short > 0 ? `, and ${short} more were never listed at the ${H57_WORKFLOW_PAGE_CEILING}-page ceiling` : ''}. ` +
+    `Cost ${requests} request(s): the workflows listing plus one \`event=schedule\` read per judged ` +
+    'workflow, and ⛔ never a `status=success` count.'
+  );
+}
+
+/**
+ * The subject a H57 row is filed against.
+ *
+ * Every other family here files against a card or a PR, and the renderers spell
+ * a subject as `#<number>` linked to `html_url`. This row's subject is a
+ * workflow RUN, so the number is a RUN id rather than a card number — which the
+ * sentence says in its own first clause, and which is the right target because
+ * the remedy the row prescribes is opening that run. A workflow that never ran
+ * on schedule has no run to open, so it falls back to the workflow's own page
+ * and number `0`; ⛔ not to a card number, which would file the row against
+ * whatever card happens to carry it. Extracted from the sweep so the fallback is
+ * pinned rather than written once inside a loop nothing can drive offline.
+ */
+export function h57RowSubject(entry) {
+  const run = entry?.run ?? null;
+  const runId = Number(run?.id ?? 0);
+  return {
+    number: Number.isFinite(runId) ? runId : 0,
+    html_url: String(run?.html_url ?? entry?.workflowUrl ?? ''),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// H58 — a `pm:queue` card whose own text declares it is a RULING, a DECISION
+// or a RECORD (#17417).
+//
+// ## The defect, in the filing card's measurement
+//
+// `pm:queue` carries two incompatible meanings. Seats label a card `pm:queue`
+// to mean 「triaged, registered, do not lose this」, and the execution seat's
+// card-selection total order reads every one of them as 「ready to hand to a
+// dev」. There is no third state for 「triaged, and deliberately not work」, so
+// the queue label absorbs it — 「a card that is `pm:queue` in the sense of
+// 'triaged and registered' being read by the candidate query as 'ready for a
+// dev'」, in the words of the second seat to measure it.
+//
+// Three independent seats measured the cost. One refill run could not dispatch
+// four `pm:queue` cards in a row and later recorded 6 of 6. A second seat
+// raised the same shape on five cards in one round and flagged its own rate as
+// 「a rate worth naming rather than absorbing」. The largest single sample — one
+// triage fire answering ten cards — found five of this exact shape. The price
+// of ONE instance is a dev round: a card was filed for work that had merged
+// 19.9 hours earlier, a dev was dispatched, spent a full round, and correctly
+// returned `premise_still_valid: false` with zero files changed.
+//
+// ## ⭐ The datum that shapes this row — it argues AGAINST a new state
+//
+// Every one of the five was resolved into a state that ALREADY EXISTS:
+// `tracking`, `needs-user-decision`, closed, or a corrected `pm:queue`. Not one
+// of them needed a state the protocol does not have. So the failure is not a
+// missing state — it is that ruling-shaped and record-shaped cards are GRADED
+// into `pm:queue` when the correct existing state was available at grading
+// time, which makes it a triage-discipline problem and not a state-machine
+// design problem. ⛔ This row therefore proposes NO fifth state and asks for no
+// new label: its remedy sentence enumerates exactly those four dispositions.
+//
+// ## The anchors are MEASURED as HEADINGS — and one candidate was REFUSED
+//
+// The three spellings the filing card names were re-read on the live cards
+// before being frozen here, and the reading moved the set:
+//
+//   objectui#8449  `## Why it is a ruling, not a mechanical fix`      HEADING ✓
+//   objectui#8365  `## Why this is a decision, not a mechanical fix`  HEADING ✓
+//   objectui#8429  「Both are dispositions」                            PROSE ✗
+//   objectui#7089  `## 5. Two rulings of mine you may want to overturn` HEADING ✓
+//   objectui#7233  `## 8. Two rulings of mine you may want to overturn` HEADING ✓
+//
+// 「Both are dispositions」 is NOT a heading on the card it was measured on: it
+// is a sentence inside a paragraph under that card's `## What this card is NOT
+// asking for`. A heading-anchored reader can therefore never match it, and
+// admitting it would be an anchor nobody writes — `PROSE_BLOCKER_ANCHORS`'s own
+// rule, for its own reason: an anchor nobody writes buys only false rows, and a
+// row is worth reading only while every heading it names was written by a seat.
+// So it is recorded here and deliberately absent from the set.
+//
+// The handover pair contributed a spelling the filing card did not quote. Their
+// bodies carry no marker in the card's three spellings at all; what BOTH carry
+// is a section 「Two rulings of mine you may want to overturn」, which is a card
+// declaring itself a RECORD of rulings exactly as squarely as the other two
+// declare themselves a ruling. That is the spelling measured on the live cards,
+// so that is the spelling pinned.
+//
+// ## Why HEADINGS, and only headings
+//
+// A marker quoted in prose, in a table, in a code span, in a blockquote or
+// inside a fence is a card TALKING ABOUT the shape rather than declaring it —
+// and the filing card is itself the specimen: its body quotes all three of the
+// spellings it names, in prose and in a table, and must produce no row. Section
+// headings are where a card declares what it IS. So the scan is line-anchored
+// on an ATX heading outside fenced code, which refuses every one of those
+// shapes structurally rather than by a list of exceptions.
+//
+// ## What this row is NOT
+//
+// ⛔ Not a gate: report-only, exit codes untouched, nothing blocked, no label
+// written. ⛔ Not a verdict on which carrier is wrong — the label is triage's
+// and the heading is the author's, and deciding between them belongs to the
+// seat that owns the second one. H54 holds the same posture one field over: it
+// reads a `[Decision]` TITLE against the same label, this reads the BODY and
+// the THREAD, and a card wearing both fires both because they are two readings
+// and not one restated.
+//
+// ## Quota — this row buys NOTHING
+//
+// The population is the `pm:queue` label page the sweep's loop already
+// consumes (`SEEN_LABEL_PAGES`), so membership and the BODY are free and no
+// card outside the listing can reach the row. The THREAD is read only where
+// another row already paid for it (`commentCache.get`, never a fetch), so a
+// queued card nobody bought a thread for is judged on its body ALONE and its
+// second channel is UNREAD rather than empty. That split is not visible per
+// card — it would take an UNJUDGED row on every queued card to say it, which
+// would flood the board — so it is disclosed on the summary line, which is
+// where this row's coverage lives.
+// ---------------------------------------------------------------------------
+
+/**
+ * The heading spellings by which a card declares its own deliverable is a
+ * ruling, a decision or a record, each frozen beside the live instance it was
+ * MEASURED on so a reader can check the anchor against the card that wrote it.
+ *
+ * ⛔ Never extend this list from imagination — `PROSE_BLOCKER_ANCHORS`'s rule,
+ * for its reason. Extend it when a new spelling is measured AS A HEADING on a
+ * live card, and record where it was measured. A spelling measured in prose
+ * (「Both are dispositions」, see the banner) is not a candidate for this list at
+ * all: this reader cannot see prose, by design.
+ *
+ * The regexes match the distinctive HEAD of each measured heading rather than
+ * the whole line, so a card writing 「Why this is a decision」 with no tail still
+ * fires and a numbered heading (「5. Two rulings of mine…」) is not defeated by
+ * its ordinal. Case-insensitive for `DECISION_TITLE_PREFIX`'s reason: one
+ * author's one intent, and a carrier missed on its capitalisation would read as
+ * a clean queue (#4690).
+ */
+export const H58_RULING_MARKER_ANCHORS = Object.freeze([
+  Object.freeze({
+    heading: /\bwhy it is a ruling\b/iu,
+    spelling: 'Why it is a ruling, not a mechanical fix',
+    instance: 'objectui#8449',
+  }),
+  Object.freeze({
+    heading: /\bwhy this is a decision\b/iu,
+    spelling: 'Why this is a decision, not a mechanical fix',
+    instance: 'objectui#8365',
+  }),
+  Object.freeze({
+    heading: /\brulings of mine you may want to overturn\b/iu,
+    spelling: 'Two rulings of mine you may want to overturn',
+    instance: 'objectui#7089 + objectui#7233',
+  }),
+]);
+
+/**
+ * The ceiling on that frozen set.
+ *
+ * A cap on the ANCHOR SET rather than on requests — this row buys none — and it
+ * is what keeps 「measured, then frozen」 from drifting into 「whatever seemed
+ * plausible」. Five is the room the measured population needs plus headroom for
+ * two more measured spellings; a sixth is not a one-line edit but an argument
+ * about whether the set is still a set of readings.
+ */
+export const H58_MARKER_ANCHOR_CAP = 5;
+
+/**
+ * An ATX heading line: up to three leading spaces, one to six `#`, whitespace,
+ * then the text. A blockquoted heading (`> ## …`) cannot match, which is one of
+ * the four shapes this row must refuse and the only one the fence stripper does
+ * not already remove.
+ */
+const H58_HEADING_LINE = /^[ \t]{0,3}(#{1,6})[ \t]+(.+)$/u;
+
+/**
+ * Every anchor this text carries AS A HEADING, in the order written, deduped by
+ * anchor so a card repeating a spelling names it once.
+ *
+ * Fenced code is blanked first through `stripMarkdownCode`'s `{ inline: false }`
+ * reading — the same fence parser H17 uses, deliberately shared rather than
+ * re-derived — so a marker inside a fence contributes nothing while an inline
+ * code span on the heading itself survives to be undecorated. Decoration is
+ * removed with `undecorateProseLine` for H4's reason: authors format these
+ * lines, and a decorated one means what the bare one means.
+ *
+ * Exported for the self-test: the anchor set and the heading anchoring are the
+ * whole design, and a spelling that silently stopped matching would cost every
+ * row without costing a case.
+ *
+ * @param {string} text
+ * @returns {{ spelling: string, instance: string, heading: string }[]}
+ */
+export function rulingMarkerHeadings(text) {
+  const out = [];
+  const claimed = new Set();
+  for (const raw of stripMarkdownCode(text, { inline: false }).split(/\r?\n/)) {
+    const m = H58_HEADING_LINE.exec(raw);
+    if (!m) continue;
+    const written = undecorateProseLine(m[2]).trim();
+    for (const anchor of H58_RULING_MARKER_ANCHORS) {
+      if (claimed.has(anchor.spelling)) continue;
+      if (!anchor.heading.test(written)) continue;
+      claimed.add(anchor.spelling);
+      out.push({ spelling: anchor.spelling, instance: anchor.instance, heading: `${m[1]} ${written}` });
+    }
+  }
+  return out;
+}
+
+/**
+ * Does H58 speak about this card at all?
+ *
+ * H54's gate exactly, and for H54's reasons: ⛔ ISSUES only (the subject is the
+ * DISPATCH POOL and a PR is not in it), a CLOSED card is out (a card nobody can
+ * dispatch is a card nothing over-reads as capacity, and `pm:queue` on one is
+ * residue the closed census already counts), and an unreadable `labels` is out
+ * rather than read as unlabelled (#4690 on the one field that decides
+ * membership).
+ */
+export function h58SpeaksAbout(issue) {
+  if (issue?.pull_request) return false;
+  if (issue?.state === 'closed') return false;
+  if (!Array.isArray(issue?.labels)) return false;
+  return labelNames(issue).includes('pm:queue');
+}
+
+/**
+ * H58 — null when clean, else the finding sentence.
+ *
+ * ## Three input states for the thread, never two (#4690)
+ *
+ *   - `undefined` — no thread was in hand this sweep. The BODY was still judged
+ *     (it rides in on the label page), so the row is a real reading of the
+ *     first channel and the sentence says the second went unread.
+ *   - `null` — the thread was consulted and UNREADABLE. Same sentence,
+ *     different cause, and neither is 「the thread carries no marker」.
+ *   - `string[]` — both channels judged, for real.
+ *
+ * @param {object} issue — a card from a listing this sweep already holds.
+ * @param {string[]|null|undefined} commentBodies — the thread, if one is in hand.
+ */
+export function h58QueuedRulingRow(issue, commentBodies) {
+  if (!h58SpeaksAbout(issue)) return null;
+  const bodies = Array.isArray(commentBodies) ? commentBodies : [];
+  const hits = rulingMarkerHeadings(issue?.body).map((hit) => ({ ...hit, where: 'the card BODY' }));
+  const claimed = new Set(hits.map((hit) => hit.spelling));
+  for (let i = 0; i < bodies.length; i++) {
+    for (const hit of rulingMarkerHeadings(bodies[i])) {
+      if (claimed.has(hit.spelling)) continue;
+      claimed.add(hit.spelling);
+      hits.push({ ...hit, where: `COMMENT ${i + 1} of ${bodies.length}` });
+    }
+  }
+  if (hits.length === 0) return null;
+  const where = hits.map((hit) => `「${hit.heading}」 in ${hit.where}`).join('; ');
+  const anchors = hits.map((hit) => `「${hit.spelling}」 (measured on ${hit.instance})`).join(', ');
+  const channel =
+    commentBodies === undefined
+      ? ' ⚠️ Only the BODY was read for this card — no comment thread was in hand this sweep, so a ' +
+        'marker written in a COMMENT is UNREAD rather than absent.'
+      : commentBodies === null
+        ? " ⚠️ This card's comment thread could NOT be read this sweep, so the second channel is " +
+          'UNJUDGED rather than empty.'
+        : ` Both channels were read (${bodies.length} comment(s) in hand).`;
+  return (
+    '`pm:queue` while the card\'s own text declares it is NOT queue work — ' +
+    `${where}. Anchor(s): ${anchors}. ` +
+    'The label puts this card in the DISPATCH pool, which the card-selection order reads as 「ready ' +
+    'to hand to a dev」; the heading declares the deliverable is a RULING, a DECISION or a RECORD. ' +
+    'The two meanings 「triaged and registered」 and 「ready for a dev」 are carried by ONE label, and ' +
+    'the selection order reads the second. Measured across three seats: one refill run could not ' +
+    'dispatch four queued cards in a row (6 of 6 by its own later count), a second raised the shape ' +
+    'on five cards in one round, and one triage fire found five of ten. The price of one instance is ' +
+    'a dev round — a card filed for work that had merged 19.9 hours earlier, dispatched, and ' +
+    'correctly returned `premise_still_valid: false` with zero files changed. ' +
+    '⛔ This row does NOT say which carrier is wrong: the label is the triage seat\'s and the heading ' +
+    'is the author\'s, and choosing between them is the seat\'s judgement, not a patrol\'s. ' +
+    'Remedy, and it belongs to the TRIAGE seat on its per-fire read — dispose the card into the state ' +
+    'that already fits: `tracking` for a handover or a record, `needs-user-decision` for a decision ' +
+    'still unruled (carrying its four-facet analysis at the moment the label lands), CLOSED when the ' +
+    'card has already done its whole job (「这张卡已经完成了它自己的全部工作」, measured), or a corrected ' +
+    '`pm:queue` when the heading is stale and the work really is mechanical. ' +
+    '⛔ No new state and no new label: all five measured instances resolved into one of exactly those ' +
+    'four, so the vocabulary is already sufficient and a fifth is the remedy this card\'s own evidence ' +
+    'argues against. ⛔ And no dev round until that disposition is written — a queued body is a ' +
+    'SNAPSHOT, and acting on one that declares itself a ruling costs a full round to establish that it ' +
+    'could not be picked up.' +
+    channel +
+    ' Report-only: this row writes no label, relabels nothing, and its verdict is a disagreement ' +
+    'between two carriers — ⛔ never a finding that the card is mislabelled. ' +
+    '⚠️ It reads HEADINGS only, and only the frozen measured set: a card declaring itself in prose, in ' +
+    'a table, in a code span, in a blockquote or inside a fence is invisible here by design, so a ' +
+    'quiet board is a LOWER BOUND and never a proof that no queued card is a ruling.'
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -11265,6 +12441,23 @@ export const SWEEP_COUNT_KEYS = [
   // unbought one, and either way an unjudged PR must not read as a clean one.
   'briefCandidates',
   'briefJudged',
+  // H57's population reading (#17132) — the only row here whose subject is a
+  // WORKFLOW rather than a card or a PR, so none of its numbers can be inferred
+  // from a listing another row already paid for. `scheduledUnresolved` and
+  // `scheduledInactiveNames` are STRINGS (or null) and ride the same contract
+  // for H43's `governedRegisterReason` reason: without them the clause would
+  // render a row that read NOTHING as `0 of 0`, which is the confusion the
+  // enumeration exists to end.
+  'scheduledDeclared',
+  'scheduledJudged',
+  'scheduledUnreadRuns',
+  'scheduledGating',
+  'scheduledInactive',
+  'scheduledInactiveNames',
+  'scheduledUnreadable',
+  'scheduledRequests',
+  'scheduledListingShort',
+  'scheduledUnresolved',
   // H49's coverage pair (#16003). `partialCandidates` is how many OPEN
   // `pm:dispatched` + assigned cards the row could speak about and
   // `partialJudged` how many had a comment thread in hand — this row buys none,
@@ -11361,6 +12554,16 @@ export const SWEEP_COUNT_KEYS = [
   'refUnjudged',
   'refDeferred',
   'refFloor',
+  // H58's coverage pair plus its body-only half (#17417). `rulingMarkerJudged`
+  // is how many open `pm:queue` cards had their BODY judged — never zero on a
+  // board with a queue, because the body rides in on a label page the sweep
+  // already consumed — and the other two split that population by whether the
+  // SECOND channel was in hand. This row buys no fetch, so the split is the only
+  // reading that separates "no queued card declares itself a ruling" from "most
+  // of the threads were never read".
+  'rulingMarkerJudged',
+  'rulingMarkerThreadRead',
+  'rulingMarkerUnread',
   'refBeyond',
 ];
 
@@ -11806,6 +13009,26 @@ export function summaryLine(counts, findingCount) {
     'whole shape UNJUDGED while looking healthy. An incomplete or failed walk is UNJUDGED rather than ' +
     "clean, since a full page may hide the newest claim. The PR leg is the open listing plus H8's " +
     'bounded merged window, so a landing older than that window is as invisible here as it is to H8. ' +
+    // H57's population reading (#17132). UNCONDITIONAL like every other
+    // window's, and it carries every narrowing this row makes: how many of the
+    // swept repo's workflows declare a schedule, how many of those were judged,
+    // and the ways one is held out. A held-out workflow is silence, and silence
+    // a reader cannot see is the exact failure this row exists to end — so the
+    // clause names them rather than only counting them.
+    `Scheduled non-blocking workflows (H57): ${h57PopulationClause(counts)} ` +
+    // H58's coverage reading (#17417). UNCONDITIONAL like every other window's,
+    // and it carries the two disclosures this row owes. It BUYS NOTHING, so the
+    // second channel is read only where another row already paid for it; and the
+    // body-only/body+thread split is the only place a reader can see how much of
+    // that channel went unread, because an UNJUDGED row on every queued card
+    // would flood the board rather than inform it.
+    `Queued ruling markers (H58): ${counts.rulingMarkerJudged ?? 0} open \`pm:queue\` card(s) had ` +
+    `their BODY judged against ${H58_RULING_MARKER_ANCHORS.length} frozen heading anchor(s) — ` +
+    `${counts.rulingMarkerThreadRead ?? 0} with a comment thread ALREADY in hand, ` +
+    `${counts.rulingMarkerUnread ?? 0} on the body ALONE. It fetches NOTHING of its own, so a card ` +
+    'whose thread no other row bought has an UNREAD second channel rather than a clean one, and the ' +
+    'rows are a LOWER BOUND. It matches ATX HEADINGS outside fenced code only: a marker quoted in ' +
+    'prose, in a table, in a code span or in a blockquote is invisible here by design. ' +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -11865,6 +13088,8 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h52OpenQuestions', 'Open questions (H52): '],
   ['h51Handoff', 'Contract-review handoffs (H51): '],
   ['h53Carrier', 'Carriers without increment (H53): '],
+  ['h57Scheduled', 'Scheduled non-blocking workflows (H57): '],
+  ['h58RulingMarkers', 'Queued ruling markers (H58): '],
   ['reportOnly', 'Report-only: '],
 ];
 
@@ -12307,6 +13532,60 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // losing this row to the trim is 17 days on a P0 whose deployment had served
   // 503 for a day. ⛔ Not `inventory`: it alarms about one card, not a population.
   H52: 'stall',
+
+  // H57 is a `stall` (#17132), and the three refusals are each taken on the
+  // refused band's own criterion rather than on this subject's vocabulary —
+  // which is how every band call since H51 has been argued.
+  //
+  // ⛔ NOT `gate`, and this is the close one. That band's criterion has two
+  // halves and H57 satisfies only the second: "the row's SUBJECT is a GATE that
+  // may have been stripped or split" — and this row's population is defined by
+  // the ruling as NOT blocking anything, so its subject is by construction not
+  // in the required set that H31/H35 are about. Reading `gate` off the second
+  // half alone ("its absence reads as a green light") would make the band mean
+  // "anything protective", which is the lenient-widening shape this file
+  // refuses everywhere else; the band stays about the required set.
+  // ⛔ NOT `state`: nothing on the board contradicts itself. There is no card,
+  // no label and no claim to repair — the repair is a workflow run.
+  // ⛔ NOT `inventory`: the row alarms about ONE workflow. The population
+  // reading — how many were scheduled, how many held out, and why — is a summary
+  // clause and takes no band at all (H39's shape).
+  //
+  // What is left is `stall`'s criterion exactly: forward motion is STOPPED and
+  // nothing else will move it. `stall`'s wording enumerates "a card or PR"
+  // because every subject it held when it was written was one; the criterion is
+  // the second clause, and this subject satisfies it more completely than any
+  // card does — a card at least has a board presence a person can stumble on,
+  // while a dead scheduled non-blocking workflow has none at all. Measured:
+  // objectui#8126 sat at 234 scheduled runs and zero successes for eight months
+  // with nothing anywhere saying so.
+  H57: 'stall',
+
+  // H58 is a `state` (#17417), and the other three bands are refused on their
+  // own criteria rather than on this subject's vocabulary.
+  //
+  // ⛔ NOT `gate`: that band exists for the row that can tell a STRIPPED gate
+  // from an ungated card — an ABSENCE reading as a green light, where 「被剥」 and
+  // 「从未挂过」 are indistinguishable in the evidence. Here nothing was stripped
+  // and nothing is absent: both carriers are PRESENT and legible, a label and a
+  // heading, and they disagree. That is H54's refusal, taken for H54's reason.
+  // ⛔ NOT `stall`: that band's criterion is forward motion STOPPED with nothing
+  // else to move it, and BOTH halves fail. Whether a card in this shape is
+  // stopped is UNMEASURED by this row — it sits in the dispatch pool and any
+  // seat may pick it up at any hour, which is the defect and not a halt — and
+  // something else DOES move it: the triage seat's per-fire read, which is
+  // exactly what disposed all five measured instances. H4 is `stall` because a
+  // blocked card with no machine-readable line is one the unlock scan can NEVER
+  // free; nothing here is waiting on a scan.
+  // ⛔ NOT `inventory`: the row alarms about ONE card, not a population. The
+  // population reading — how many queued cards were judged, and how many on the
+  // body alone — is a summary clause and takes no band at all (H39's shape).
+  //
+  // What is left is `state`'s criterion exactly: two carriers contradicting each
+  // other on a LIVE card, readable and repairable from the board, the repair
+  // being one disposition into a state that already exists. And it is H54's
+  // band, the row this one is the body-and-thread half of.
+  H58: 'state',
 
   H5: 'inventory',
   H6: 'inventory',
@@ -13706,6 +14985,22 @@ async function sweep(options = {}) {
     refDeferred: 0,
     refFloor: null,
     refBeyond: 0,
+    // H57's population reading (#17132), initialised for the reason every
+    // window pair above is: a sweep that throws before the workflow pass must
+    // render numbers rather than the string `undefined`. ⛔ `scheduledUnresolved`
+    // starts null and not a sentence — "this row ran and read the board" is the
+    // claim a null makes here, and a sweep that never reached the pass has made
+    // no claim at all; the pass writes the sentence the moment it declines.
+    scheduledDeclared: 0,
+    scheduledJudged: 0,
+    scheduledUnreadRuns: 0,
+    scheduledGating: 0,
+    scheduledInactive: 0,
+    scheduledInactiveNames: null,
+    scheduledUnreadable: 0,
+    scheduledRequests: 0,
+    scheduledListingShort: 0,
+    scheduledUnresolved: null,
   };
   // H17's gathering rides out of the sweep the same way, because it has the
   // same per-row failure mode as H16's detail pass and therefore owes the
@@ -15099,7 +16394,160 @@ export const SEEN_LABEL_PAGES = Object.freeze([
   'priority:p0',
 ]);
 
+/**
+ * The workflow-file source H57 classifies from — the LOCAL checkout, and the
+ * two git reads that make it honest.
+ *
+ * `git ls-files` already proves a git channel exists here (`readTrackedFiles`),
+ * and the shallow-checkout objection that keeps H23 on REST does not apply: a
+ * depth-1 checkout has every FILE, it only lacks history. So the `on:` blocks
+ * cost nothing, where classifying them through `GET /contents/…` would cost one
+ * request per workflow — 36 on this repo — for the same bytes.
+ */
+function readRepoRoot() {
+  try {
+    return execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function readOriginUrl() {
+  try {
+    return execFileSync('git', ['remote', 'get-url', 'origin'], { encoding: 'utf8' }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * H57's pass (#17132) — the swept repo's scheduled, non-blocking workflows,
+ * each judged on the latest run whose `event` is `schedule`.
+ *
+ * Every failure here is CONTAINED: a refusal writes `scheduledUnresolved` and
+ * returns, a failed runs read counts one UNJUDGED workflow and moves on. ⛔ No
+ * retry loop on any status, per the fleet-budget discipline (#17374) — a repo
+ * this install cannot read prints `unresolved` and the sweep continues, because
+ * this row must never be what stops the board from being swept.
+ *
+ * Its four seams are injectable, in the tradition of `familyRegistryCoverage`
+ * and `loadGovernedRegister`: the whole pass then runs offline, which is what
+ * lets the self-test drive it with a SPY transport that throws on any runs read
+ * reaching it without `event=schedule`. A structural refusal nobody can execute
+ * is a refusal that has never been observed to hold.
+ *
+ * @param {Array} findings
+ * @param {object} stats
+ * @param {object} [options] — `{ get, env, originUrl, root, readSource, nowMs, ownerRepo }`.
+ */
+export async function sweepScheduledWorkflows(findings, stats = {}, options = {}) {
+  const get = options.get ?? rest;
+  const env = options.env ?? process.env;
+  const ownerRepo = options.ownerRepo ?? OWNER_REPO;
+  const nowMs = options.nowMs ?? Date.now();
+  const serves = localCheckoutServes(
+    ownerRepo,
+    env,
+    options.originUrl === undefined ? readOriginUrl() : options.originUrl,
+  );
+  if (!serves.serves) {
+    stats.scheduledUnresolved = serves.reason;
+    return;
+  }
+  const root = options.root === undefined ? readRepoRoot() : options.root;
+  if (!root && !options.readSource) {
+    stats.scheduledUnresolved = 'no git checkout resolved under this working directory';
+    return;
+  }
+  const readSource =
+    options.readSource ?? ((path) => readFileSync(`${root}/${path}`, 'utf8'));
+
+  let listed = [];
+  let total = null;
+  try {
+    for (let page = 1; page <= H57_WORKFLOW_PAGE_CEILING; page++) {
+      const batch = await get(
+        `/repos/${ownerRepo}/actions/workflows?per_page=${H57_WORKFLOW_PAGE_SIZE}&page=${page}`,
+      );
+      stats.scheduledRequests = (stats.scheduledRequests ?? 0) + 1;
+      const rows = Array.isArray(batch?.workflows) ? batch.workflows : [];
+      if (total === null) total = Number(batch?.total_count ?? rows.length);
+      listed = listed.concat(rows);
+      if (rows.length < H57_WORKFLOW_PAGE_SIZE) break;
+    }
+  } catch (err) {
+    stats.scheduledUnresolved = `the workflows listing could not be read (${err?.message ?? 'unknown'})`;
+    return;
+  }
+  stats.scheduledListingShort = Math.max(0, (total ?? listed.length) - listed.length);
+
+  const inactive = [];
+  for (const workflow of listed) {
+    const path = String(workflow?.path ?? '');
+    if (!WORKFLOW_FILE_PATH.test(path)) continue;
+    let source = null;
+    try {
+      source = readSource(path);
+    } catch {
+      source = null;
+    }
+    const triggers =
+      typeof source === 'string'
+        ? workflowTriggers(source)
+        : { events: null, crons: [], reason: 'the file is not in this checkout' };
+    const where = h57Population(workflow, triggers);
+    if (where.kind === 'unreadable') {
+      stats.scheduledUnreadable = (stats.scheduledUnreadable ?? 0) + 1;
+      continue;
+    }
+    if (where.kind === 'not-scheduled') continue;
+    stats.scheduledDeclared = (stats.scheduledDeclared ?? 0) + 1;
+    if (where.kind === 'pr-gating') {
+      stats.scheduledGating = (stats.scheduledGating ?? 0) + 1;
+      continue;
+    }
+    if (where.kind === 'not-active') {
+      stats.scheduledInactive = (stats.scheduledInactive ?? 0) + 1;
+      if (inactive.length < H57_HELD_OUT_NAME_CAP) inactive.push(`\`${path}\` is \`${where.detail}\``);
+      continue;
+    }
+
+    // The one runs read, and the ONLY spelling of it (`scheduledRunsPath`).
+    let run;
+    try {
+      const runs = await get(scheduledRunsPath(ownerRepo, workflow.id));
+      stats.scheduledRequests = (stats.scheduledRequests ?? 0) + 1;
+      run = Array.isArray(runs?.workflow_runs) ? runs.workflow_runs[0] ?? null : null;
+    } catch {
+      stats.scheduledRequests = (stats.scheduledRequests ?? 0) + 1;
+      stats.scheduledUnreadRuns = (stats.scheduledUnreadRuns ?? 0) + 1;
+      continue;
+    }
+    stats.scheduledJudged = (stats.scheduledJudged ?? 0) + 1;
+    const entry = {
+      repo: ownerRepo,
+      path,
+      crons: where.crons,
+      periodHours: cronPeriodHours(where.crons, nowMs),
+      workflowUrl: String(workflow?.html_url ?? ''),
+      runsRead: true,
+      run,
+    };
+    const red = h57ScheduledWorkflowRed(entry, nowMs);
+    if (red) findings.push([h57RowSubject(entry), 'H57', red]);
+  }
+  stats.scheduledInactiveNames = inactive.length > 0 ? inactive.join(', ') : null;
+}
+
 async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seenClosed, stats = {}, hold = null, references = null) {
+  // H57 (#17132) — FIRST in the sweep, and the placement is mechanism rather
+  // than preference. This is the only pass here whose subject is not a card or
+  // a PR: it touches `seen`, the comment cache and the reference corpus not at
+  // all, so running it before the listings keeps H45's "LAST in the sweep"
+  // claim exactly as true as it was, and its own contained failure cannot
+  // consume the card budget it never shares.
+  await sweepScheduledWorkflows(findings, stats);
+
   for (const label of SEEN_LABEL_PAGES) {
     for (const issue of await listIssues(label, stats)) seen.set(issue.number, issue);
   }
@@ -15335,14 +16783,23 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     if (twoStates) findings.push([issue, 'H29', twoStates]);
     const rotting = h30QueueRotting(issue);
     if (rotting) findings.push([issue, 'H30', rotting]);
-    // H4 — judged across BOTH channels. The fetch is gated by
+    // H4's GATHERING — judged across BOTH channels. The fetch is gated by
     // `needsBlockedByComments`, so it costs a request only for the body-clean
     // cards whose verdict it can actually change (~2/3 of the blocked
     // population by the 2026-08-19 census); a card whose body already carries
     // the line is answered without touching the network, exactly as before.
+    //
+    // ⚠️ The gathering stays HERE while the row itself is emitted in the
+    // blocker-liveness loop below (#17365). The two halves separated because
+    // H4's prose clause needs `resolveBlockerTarget`, which does not exist
+    // until the open listings are complete — and the gather cannot follow it
+    // down, because the total-shortfall rethrow reads these stats and every
+    // fetch this sweep makes must be counted before that check runs. The
+    // populations are identical (`pm:blocked`, off the same `seen` map) and
+    // H4's answer cannot move between the two points: it returns `null` for
+    // any card whose BODY carries the line, so the only cards it can fire on
+    // are exactly the ones this gate has already fetched comments for.
     if (needsBlockedByComments(issue)) await gatherBlockedByComments(issue);
-    const unblockedByNothing = h4BlockedNoBlockedBy(issue, fallbackFor(issue));
-    if (unblockedByNothing) findings.push([issue, 'H4', unblockedByNothing]);
     // …and the LIVENESS read's own gathering, UNGATED (#11747). H19/H26/H28 ask
     // whether what the line names is still RUNNING, and for that a body line is
     // one channel's targets rather than an answer — so a card whose body line is
@@ -15462,6 +16919,29 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
       if (releaseRows !== undefined) stats.releaseJudged = (stats.releaseJudged ?? 0) + 1;
       const releaseDesync = h47ReleaseRecordDesync(issue, releaseRows);
       if (releaseDesync) findings.push([issue, 'H47', releaseDesync]);
+    }
+    // H58 (#17417) — the queued card whose own text says it is not queue work.
+    // At the FOOT of this iteration for H47's reason and no other: it reads the
+    // thread out of `commentCache`, which every gate above this line fills, so
+    // judged beside H54 at the top the cache would be empty on every iteration
+    // and the row would report every card body-only forever while looking
+    // perfectly healthy — #4690, self-inflicted by placement.
+    //
+    // ⛔ It buys NOTHING: `commentCache.get` never fetches. The BODY is never
+    // unjudged — it rides in on the label page this loop already consumed — so
+    // unlike H47's pair these counters split a JUDGED population by channel
+    // rather than saying whether the row ran, and `rulingMarkerUnread` is the
+    // second channel going unread rather than a card going unread.
+    if (h58SpeaksAbout(issue)) {
+      stats.rulingMarkerJudged = (stats.rulingMarkerJudged ?? 0) + 1;
+      const markerRows = commentCache.get(issue.number);
+      if (markerRows === undefined) stats.rulingMarkerUnread = (stats.rulingMarkerUnread ?? 0) + 1;
+      else stats.rulingMarkerThreadRead = (stats.rulingMarkerThreadRead ?? 0) + 1;
+      const declaresRuling = h58QueuedRulingRow(
+        issue,
+        markerRows === undefined ? undefined : markerRows.map((c) => c?.body ?? ''),
+      );
+      if (declaresRuling) findings.push([issue, 'H58', declaresRuling]);
     }
   }
 
@@ -16301,6 +17781,33 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     for (const target of blockerTargetsFor(issue, fallbackFor(issue))) {
       resolutions.push(await resolveBlockerTarget(target));
     }
+    // H4 — the missing-line row, emitted here rather than in the main loop so
+    // its prose clause can ride THIS resolver and THIS cache (#17365). The
+    // populations coincide exactly: `needsBlockerLiveness` is `pm:blocked` and
+    // so is H4's own first line, over the same `seen` map, with the comment
+    // thread already gathered above.
+    //
+    // The two-call shape is the cost gate, not a redundancy: the first call is
+    // the row's own predicate answering "does H4 fire at all", and ONLY a card
+    // it fires on pays for a prose scan or a single resolution. A card with a
+    // `Blocked-by:` line in either channel — the healthy majority — reaches
+    // neither.
+    const h4Fires = h4BlockedNoBlockedBy(issue, fallbackFor(issue)) !== null;
+    const proseCandidates = [];
+    let proseHeldBack = 0;
+    if (h4Fires) {
+      const named = proseBlockerCandidatesFor(issue, fallbackFor(issue));
+      proseHeldBack = Math.max(0, named.length - H4_PROSE_CANDIDATE_CAP);
+      // The cap is applied BEFORE the fetch — it bounds requests, and the
+      // clause states the remainder rather than dropping it in silence.
+      for (const candidate of named.slice(0, H4_PROSE_CANDIDATE_CAP)) {
+        proseCandidates.push(await resolveBlockerTarget(candidate));
+      }
+    }
+    const unblockedByNothing = h4Fires
+      ? h4BlockedNoBlockedBy(issue, fallbackFor(issue), proseCandidates, proseHeldBack)
+      : null;
+    if (unblockedByNothing) findings.push([issue, 'H4', unblockedByNothing]);
     const expired = h19BlockOutlivedBlocker(issue, resolutions);
     if (expired) findings.push([issue, 'H19', expired]);
     // H26 — the same resolutions, asked the OTHER question: not "has the target
@@ -16746,6 +18253,85 @@ async function selfTest() {
   // value character is a backtick, and H4 asks only whether SOMETHING follows
   // the key); pinned so the new "not just decoration" clause cannot take it.
   t('H4: a value wrapped in code still discharges the duty', blocked('Blocked-by: `#9612`'), null);
+
+  // -- H4's PROSE clause (#17365) -----------------------------------------
+  //
+  // The class: a seat states the block in words, the machine-readable line is
+  // never written, the upstream closes and nothing returns the card. Three
+  // measured specimens, each past a satisfied unlock — one `priority:p1` +
+  // `security` for four days — are the fixture population here, VERBATIM, so a
+  // relaxed anchor set cannot quietly stop reading the shapes it was built for.
+  const REPO4 = 'objectstack-ai/objectstack';
+  const proseNums = (text) => proseBlockerRefs(text).map((r) => r.number).join(',');
+  const cand = (number, state, extra = {}) => ({
+    ...blockerTargetKey({ repo: null, number }, REPO4),
+    state,
+    closedAt: null,
+    detail: null,
+    ...extra,
+  });
+  const SPECIMEN_15942 =
+    'State: `needs-user-decision` → `pm:blocked` (blocker: #16293) … Unblocks to `pm:queue` when #16293 merges';
+  const SPECIMEN_16674 = '解锁条件:PR #16628 合并(或其分支释放)';
+  const SPECIMEN_16545 = '解除条件(唯一):PR #16380 合并或关闭';
+  t('H4 prose: the #15942 specimen names its blocker', proseNums(SPECIMEN_15942), '16293,16293');
+  t('H4 prose: the #16674 specimen names its blocker', proseNums(SPECIMEN_16674), '16628');
+  t('H4 prose: the #16545 specimen names its blocker', proseNums(SPECIMEN_16545), '16380');
+  // The live H4 population on 2026-09-10 — the other half of the measured
+  // corpus. Each of these is a card that WAS firing H4 with a bare row.
+  t('H4 prose: a decorated `pm:blocked` on #N (#15610)', proseNums('⇒ `pm:blocked` on #15162 / PR #15434, unblocking automatically on that merge.'), '15162,15434');
+  t('H4 prose: `pm:blocked` behind a bolded ref (#15638)', proseNums('This card is `pm:blocked` behind **#16049**, and #16049 is still **open**'), '16049,16049');
+  t('H4 prose: HELD by an open PR (#17069)', proseNums('packages/cli/src/commands/lint.ts       HELD by open PR #17438'), '17438');
+  t('H4 prose: an Unblock condition line (#17069)', proseNums('**Unblock condition (the only one): PR #17438 merges or closes.**'), '17438');
+  t('H4 prose: a run of held PRs on one line (#15927)', proseNums('that page is `merge=os-regen` routed and currently held by **eight** open PRs — #15889, #15888, #15879'), '15889,15888,15879');
+  t('H4 prose: 机械解除条件 (#17193)', proseNums('⭐ **机械解除条件**:#16194 的 PR 合并后转 `pm:queue`'), '16194');
+  // Negatives — the anchors are a measured list, so what they must NOT read is
+  // as load-bearing as what they read.
+  t('H4 prose: an unanchored line naming a card is not a candidate', proseNums('Related: #16183 (same round, same ADR)'), '');
+  t('H4 prose: the DIRECTIVE is not prose — its hyphen is not a space', proseNums('Blocked-by: #9612'), '');
+  t('H4 prose: `pm:blocking` being discussed is not a block being stated (#16184)', proseNums('- 建议保持 `priority:p2`;`pm:blocking` 我倾向**也撤**,理由见 #16183'), '');
+  t('H4 prose: an HTML numeric entity is not a card number', proseNums('blocked on the same page&#8203;'), '');
+  // `.map(...).join()` rather than `[0].repo`, for the reason stated at the
+  // `blockedByTargets` cases above and MEASURED on this very block: the
+  // ablation leg that empties the anchor set made the indexed form THROW,
+  // which aborts the whole self-test and hides every case after it — exactly
+  // what a regression in this reader produces.
+  const proseRepos = (text) => proseBlockerRefs(text).map((r) => r.repo ?? 'LOCAL').join(',');
+  t('H4 prose: a cross-repo ref keeps its qualifier', proseRepos('blocked on objectstack-ai/objectui#4356'), 'objectstack-ai/objectui');
+  t('H4 prose: `PR#N` names this repo, not a repo called PR', proseRepos('blocked on PR#17438'), 'LOCAL');
+  // Candidate gathering — both channels, deduped, self-reference dropped.
+  const proseCard = { number: 17069, labels: [{ name: 'pm:blocked' }], body: 'blocked on #17438' };
+  t('H4 prose: the union of both channels, deduped', proseBlockerCandidatesFor(proseCard, ['also blocked on #17438 and #16049'], REPO4).map((c) => c.number).join(','), '17438,16049');
+  t('H4 prose: a card is never its own candidate', proseBlockerCandidatesFor({ number: 17438, body: 'blocked on #17438' }, [], REPO4).length, 0);
+  t('H4 prose: an unconsulted comment channel contributes nothing', proseBlockerCandidatesFor(proseCard, undefined, REPO4).map((c) => c.number).join(','), '17438');
+  t('H4 prose: an UNREADABLE comment channel contributes nothing either', proseBlockerCandidatesFor(proseCard, null, REPO4).map((c) => c.number).join(','), '17438');
+  t('H4 prose: the gatherer is UNCAPPED — the cap is the caller’s, where the request is', proseBlockerCandidatesFor({ number: 1, body: 'held by #2, #3, #4, #5, #6, #7, #8, #9' }, [], REPO4).length, 8);
+  // The clause itself, in every direction the row can read.
+  const proseRow = (comments, candidates, held) =>
+    h4row(issue(['pm:blocked'], [], 'the block is stated in prose'), comments, candidates, held);
+  t('H4 prose: a CLOSED upstream — the row says the block already expired', proseRow(['nothing'], [cand(16293, 'closed')]).includes('ALREADY CLOSED'), true);
+  t('H4 prose: …and names the candidate it read', proseRow(['nothing'], [cand(16293, 'closed')]).includes('`#16293` CLOSED'), true);
+  t('H4 prose: …and says where the card is due back', proseRow(['nothing'], [cand(16293, 'closed')]).includes('due back in `pm:queue`'), true);
+  t('H4 prose: …and still carries the original missing-line finding', proseRow(['nothing'], [cand(16293, 'closed')]).includes('NEITHER channel'), true);
+  t('H4 prose: …and still names the unlock sweep as the stake', proseRow(['nothing'], [cand(16293, 'closed')]).includes('unlock sweep greps'), true);
+  t('H4 prose: a closed candidate renders its closure date when the resolver has one', proseRow(['nothing'], [cand(16293, 'closed', { closedAt: '2026-09-06T00:00:00Z' })]).includes('CLOSED (2026-09-06T00:00:00Z)'), true);
+  t('H4 prose: an OPEN upstream — the row says the block still looks live', proseRow(['nothing'], [cand(17438, 'open')]).includes('still read OPEN'), true);
+  t('H4 prose: …and never claims an expiry', proseRow(['nothing'], [cand(17438, 'open')]).includes('ALREADY CLOSED'), false);
+  t('H4 prose: a MIXED reading counts the closed half', proseRow(['nothing'], [cand(16293, 'closed'), cand(17438, 'open')]).includes('1 of 2 is ALREADY CLOSED'), true);
+  t('H4 prose: an UNRESOLVED cross-repo candidate claims nothing about the block', proseRow(['nothing'], [{ ...blockerTargetKey({ repo: 'objectstack-ai/objectui', number: 4356 }, REPO4), state: 'unresolved', closedAt: null, detail: 'HTTP 404' }]).includes('says NOTHING about whether'), true);
+  t('H4 prose: …and renders the cross-repo address, not a bare number', proseRow(['nothing'], [{ ...blockerTargetKey({ repo: 'objectstack-ai/objectui', number: 4356 }, REPO4), state: 'unresolved', closedAt: null, detail: 'HTTP 404' }]).includes('`objectstack-ai/objectui#4356` UNRESOLVED'), true);
+  t('H4 prose: the cap is DECLARED, never silent', proseRow(['nothing'], [cand(2, 'closed')], 3).includes('+3 more candidate(s) named but NOT resolved'), true);
+  t('H4 prose: the clause never reads as a verdict', proseRow(['nothing'], [cand(16293, 'closed')]).includes('CANDIDATES read off anchored prose'), true);
+  t('H4 prose: …and says no label is written from here', proseRow(['nothing'], [cand(16293, 'closed')]).includes('no label is written from here'), true);
+  // The three shapes that must leave the row EXACTLY as it was.
+  t('H4 prose: no candidates -> the row is byte-identical to the pre-clause sentence', proseRow(['nothing'], []), h4row(issue(['pm:blocked'], [], 'the block is stated in prose'), ['nothing']));
+  t('H4 prose: an unrun scan -> byte-identical too', proseRow(['nothing'], undefined), h4row(issue(['pm:blocked'], [], 'the block is stated in prose'), ['nothing']));
+  t('H4 prose: the clause rides the body-only sentence as well', proseRow(undefined, [cand(16293, 'closed')]).includes('ALREADY CLOSED'), true);
+  t('H4 prose: …and the unreadable-thread sentence', proseRow(null, [cand(16293, 'closed')]).includes('ALREADY CLOSED'), true);
+  t('H4 prose: a proper `Blocked-by:` line still clears the row, candidates or not', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'Blocked-by: #123'), ['nothing'], [cand(16293, 'closed')]), null);
+  t('H4 prose: the label gate still outranks everything', h4BlockedNoBlockedBy(issue(['pm:queue'], [], 'blocked on #16293'), ['nothing'], [cand(16293, 'closed')]), null);
+  t('H4 prose: an empty clause is the empty string, not the word undefined', proseBlockerClause(undefined), '');
+  t('H4 prose: …and so is a scan that found nothing', proseBlockerClause([]), '');
 
   // The index side of the same lines — H4 asking "is there a line" and the
   // index asking "which card" must agree about what a line IS.
@@ -23727,6 +25313,532 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   t('H56 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
   t('H56 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
   t('H56 band: a gate row still outranks it', familyRank('H31') < familyRank('H56'), true);
+
+
+  // -- H57 — a scheduled, NON-BLOCKING workflow whose latest `event=schedule`
+  // -- run is not green (#17132). Both directions, per the card's acceptance.
+  //
+  // The fixtures are the two workflows the ruling names, VERBATIM in the shapes
+  // measured on 2026-09-10: objectui's `check-links.yml` (weekly cron, both
+  // PR-gating triggers commented OUT — the comment stripper is load-bearing
+  // here, because reading one of them would remove the workflow the acceptance
+  // criterion is written about) and objectstack's `stale.yml` (daily cron).
+  const WF_CHECK_LINKS = [
+    'name: Check Links',
+    '',
+    'on:',
+    '  workflow_dispatch:',
+    '',
+    "  # Weekly sweep, Sundays at 04:17 UTC.",
+    '  schedule:',
+    "    - cron: '17 4 * * 0'",
+    '',
+    "  # ⛔ Do NOT enable the two triggers below — ruling B still stands.",
+    '  # push:',
+    '  #   branches:',
+    '  #     - main',
+    '  # pull_request:',
+    '',
+    'jobs:',
+    '  check-links:',
+    '    runs-on: ubuntu-latest',
+  ].join('\n');
+  const WF_STALE = [
+    'name: Stale Issues and PRs',
+    '',
+    'on:',
+    '  schedule:',
+    "    # Run daily at 01:00 UTC",
+    "    - cron: '0 1 * * *'",
+    '  workflow_dispatch:',
+    '',
+    'jobs:',
+    '  stale:',
+    '    name: Clean up stale issues and PRs',
+  ].join('\n');
+  const WF_GATING = [
+    'name: Lint',
+    'on:',
+    '  push:',
+    '    branches: [main]',
+    '  pull_request:',
+    '  merge_group:',
+    '  schedule:',
+    "    - cron: '0 * * * *'",
+    'jobs:',
+    '  lint:',
+    '    runs-on: ubuntu-latest',
+  ].join('\n');
+
+  // Comment stripping — the leg that keeps a commented-out trigger commented.
+  t('H57 yaml: a trailing comment after whitespace is dropped', stripYamlComment("  - cron: '0 1 * * *' # daily"), "  - cron: '0 1 * * *' ");
+  t('H57 yaml: a `#` inside a quoted span survives', stripYamlComment("  path: 'a#b'"), "  path: 'a#b'");
+  t('H57 yaml: a `#` with no whitespace before it survives', stripYamlComment('  tag: v1#2'), '  tag: v1#2');
+  t('H57 yaml: a whole-line comment strips to nothing', stripYamlComment('  # pull_request:').trim(), '');
+
+  // The `on:` scanner — the four spellings this fleet uses, and every refusal.
+  t('H57 triggers: a block map reads its keys', workflowTriggers(WF_STALE).events.join(','), 'schedule,workflow_dispatch');
+  t('H57 triggers: …and the cron under `schedule`', workflowTriggers(WF_STALE).crons.join('|'), '0 1 * * *');
+  t('H57 triggers: a COMMENTED-OUT `pull_request` is not a trigger', workflowTriggers(WF_CHECK_LINKS).events.includes('pull_request'), false);
+  t('H57 triggers: …and the workflow still reads as scheduled', workflowTriggers(WF_CHECK_LINKS).events.join(','), 'schedule,workflow_dispatch');
+  t('H57 triggers: …with the weekly cron read', workflowTriggers(WF_CHECK_LINKS).crons.join('|'), '17 4 * * 0');
+  t('H57 triggers: a nested key under a trigger is NOT itself a trigger', workflowTriggers(WF_GATING).events.includes('branches'), false);
+  t('H57 triggers: …while the sibling triggers all read', workflowTriggers(WF_GATING).events.join(','), 'merge_group,pull_request,push,schedule');
+  t('H57 triggers: a flow sequence reads', workflowTriggers('on: [push, pull_request]\njobs:').events.join(','), 'pull_request,push');
+  t('H57 triggers: a sequence block reads', workflowTriggers('on:\n  - push\n  - pull_request\njobs:').events.join(','), 'pull_request,push');
+  t('H57 triggers: a bare scalar reads', workflowTriggers('on: push\njobs:').events.join(','), 'push');
+  t('H57 triggers: the YAML-1.1 quoted key reads at the same position', workflowTriggers("'on':\n  schedule:\n    - cron: '0 1 * * *'").crons.join('|'), '0 1 * * *');
+  t('H57 triggers: two crons both read', workflowTriggers("on:\n  schedule:\n    - cron: '0 1 * * *'\n    - cron: '0 13 * * *'").crons.length, 2);
+  t('H57 triggers: a `jobs:` key at column 0 ends the block', workflowTriggers('on:\n  schedule:\n    - cron: "0 1 * * *"\njobs:\n  a:\n    pull_request: x').events.includes('pull_request'), false);
+  t('H57 triggers: ⛔ a file with no `on:` key REFUSES', workflowTriggers('name: x\njobs:\n  a: {}').events, null);
+  t('H57 triggers: …and names why', workflowTriggers('name: x').reason, 'no top-level `on:` key');
+  t('H57 triggers: ⛔ a flow-mapping `on:` REFUSES rather than half-reading', workflowTriggers('on: {push: null}').events, null);
+  t('H57 triggers: ⛔ an unreadable inline value REFUSES', workflowTriggers('on: !!weird').events, null);
+  t('H57 triggers: ⛔ an unreadable key inside the block REFUSES', workflowTriggers('on:\n  ??? nonsense\n').events, null);
+  t('H57 triggers: an empty file REFUSES, and never crashes', workflowTriggers('').events, null);
+  t('H57 triggers: a missing file REFUSES, and never crashes', workflowTriggers(undefined).events, null);
+
+  // Cron fields.
+  t('H57 cron: `*` expands to the whole range', expandCronField('*', 0, 23).length, 24);
+  t('H57 cron: a step reads', expandCronField('*/6', 0, 23).join(','), '0,6,12,18');
+  t('H57 cron: a list reads', expandCronField('7,22,37,52', 0, 59).join(','), '7,22,37,52');
+  t('H57 cron: a stepped range reads', expandCronField('1-5/2', 0, 59).join(','), '1,3,5');
+  t('H57 cron: a start-step reads to the ceiling', expandCronField('5/10', 0, 59).join(','), '5,15,25,35,45,55');
+  t('H57 cron: ⛔ a NAME is refused, never guessed at', expandCronField('MON', 0, 7), null);
+  t('H57 cron: ⛔ an out-of-range value is refused', expandCronField('70', 0, 59), null);
+  t('H57 cron: ⛔ an inverted range is refused', expandCronField('5-1', 0, 59), null);
+  t('H57 cron: ⛔ a four-field expression is refused', parseCron('0 1 * *'), null);
+  t('H57 cron: day-of-week 7 folds onto Sunday', parseCron('0 1 * * 7').dow.join(','), '0');
+  t('H57 cron: a restricted day field is recorded as restricted', parseCron('0 1 5 * *').domRestricted, true);
+  t('H57 cron: …and `*` is not', parseCron('0 1 * * *').domRestricted, false);
+
+  // The period — the WIDEST gap, which is the whole point.
+  const AT57 = Date.parse('2026-09-10T19:30:00Z');
+  t('H57 period: a daily cron is 24h', cronPeriodHours(['0 1 * * *'], AT57), 24);
+  t('H57 period: a weekly cron is 168h', cronPeriodHours(['17 4 * * 0'], AT57), 168);
+  t('H57 period: a six-hourly cron is 6h', cronPeriodHours(['0 */6 * * *'], AT57), 6);
+  t('H57 period: a four-times-hourly cron is 15 minutes', cronPeriodHours(['7,22,37,52 * * * *'], AT57), 0.25);
+  t('H57 period: two crons are read as ONE timeline', cronPeriodHours(['0 1 * * *', '0 13 * * *'], AT57), 12);
+  t('H57 period: …so a denser second cron SHORTENS the answer', cronPeriodHours(['17 4 * * 0', '0 1 * * *'], AT57), 24);
+  // The case the "shortest interval" reading gets wrong: Monday and Tuesday
+  // only. Its narrowest gap is 24h and its widest is 144h, and a period of 24h
+  // would report RED every Wednesday for a schedule doing exactly what it says.
+  t('H57 period: a Mon+Tue cron is 144h, NOT its 24h narrow gap', cronPeriodHours(['0 0 * * 1,2'], AT57), 144);
+  t('H57 period: ⛔ an unparseable cron is UNJUDGED, never a default', cronPeriodHours(['0 1 * * MON'], AT57), null);
+  t('H57 period: ⛔ no cron at all is UNJUDGED', cronPeriodHours([], AT57), null);
+  t('H57 period: ⛔ a missing list is UNJUDGED, and never crashes', cronPeriodHours(undefined, AT57), null);
+  t('H57 period: a yearly cron still shows two fires inside the horizon', cronPeriodHours(['0 0 1 1 *'], AT57) > 8000, true);
+  t('H57 period: the horizon is two years plus a margin', H57_CRON_HORIZON_DAYS, 800);
+
+  // Population — the four ways out, each by its own criterion.
+  const wf57 = (path, state = 'active') => ({ path, state, id: 42, html_url: `https://x/${path}` });
+  t('H57 population: a scheduled non-blocking ACTIVE workflow is judged', h57Population(wf57('.github/workflows/check-links.yml'), workflowTriggers(WF_CHECK_LINKS)).inPopulation, true);
+  t('H57 population: …carrying its crons for the period', h57Population(wf57('.github/workflows/check-links.yml'), workflowTriggers(WF_CHECK_LINKS)).crons.join('|'), '17 4 * * 0');
+  t('H57 population: a PR-gating workflow is held out', h57Population(wf57('.github/workflows/lint.yml'), workflowTriggers(WF_GATING)).kind, 'pr-gating');
+  t('H57 population: …and names WHICH triggers made it blocking', h57Population(wf57('.github/workflows/lint.yml'), workflowTriggers(WF_GATING)).detail, 'pull_request, merge_group');
+  t('H57 population: an unscheduled workflow is not in it at all', h57Population(wf57('.github/workflows/ci.yml'), workflowTriggers('on:\n  pull_request:\n')).kind, 'not-scheduled');
+  t('H57 population: a disabled workflow is held out and its STATE is carried', h57Population(wf57('.github/workflows/stale.yml', 'disabled_inactivity'), workflowTriggers(WF_STALE)).detail, 'disabled_inactivity');
+  t('H57 population: ⛔ an unreadable `on:` block is UNREADABLE, never clean', h57Population(wf57('.github/workflows/x.yml'), workflowTriggers('name: x')).kind, 'unreadable');
+  t('H57 population: …carrying the reason the scanner gave', h57Population(wf57('.github/workflows/x.yml'), workflowTriggers('name: x')).detail, 'no top-level `on:` key');
+  t('H57 population: a dynamic (fileless) workflow is out of scope', h57Population(wf57('dynamic/dependabot/dependabot-updates'), workflowTriggers(WF_STALE)).kind, 'not-a-file');
+  t('H57 population: …and so is a coding-agent row, for the same absent extension', h57Population(wf57('dynamic/agents/anthropic-code-agent'), workflowTriggers(WF_STALE)).kind, 'not-a-file');
+  t('H57 population: the `.yaml` spelling is a workflow file too', WORKFLOW_FILE_PATH.test('.github/workflows/a.yaml'), true);
+  t('H57 population: …and the `.yml` one', WORKFLOW_FILE_PATH.test('.github/workflows/a.yml'), true);
+  t('H57 population: an extensionless listing row is not a file', WORKFLOW_FILE_PATH.test('dynamic/copilot-swe-agent/copilot'), false);
+  // ⛔ The discriminator is an EXTENSION and must stay one. A directory-shaped
+  // STRING literal here is read by `scripts/pm/dispatch-gates.mjs` as a watch
+  // surface and places `check:pm-half-states` on every card touching
+  // `.github/workflows/**` — a placement #15753 removed, on a gate CI runs only
+  // as `--self-test`. A regex carries the same meaning and no such claim.
+  t('H57 population: the file discriminator is a REGEX, never a directory string', WORKFLOW_FILE_PATH instanceof RegExp, true);
+
+  // The predicate — BOTH directions, which is the card's acceptance criterion.
+  const run57 = (over = {}) => ({
+    id: 34011606950,
+    status: 'completed',
+    conclusion: 'success',
+    run_started_at: '2026-09-10T04:28:58Z',
+    html_url: 'https://github.com/objectstack-ai/objectui/actions/runs/34011606950',
+    ...over,
+  });
+  const entry57 = (over = {}) => ({
+    repo: 'objectstack-ai/objectui',
+    path: '.github/workflows/check-links.yml',
+    crons: ['17 4 * * 0'],
+    periodHours: 168,
+    workflowUrl: 'https://github.com/objectstack-ai/objectui/actions/workflows/check-links.yml',
+    runsRead: true,
+    run: run57(),
+    ...over,
+  });
+  const h57row = (over) => String(h57ScheduledWorkflowRed(entry57(over), AT57) ?? '');
+  // ✅ The SILENT half — green and fresh emits NOTHING.
+  t('H57 clean: a green, fresh latest scheduled run is SILENT', h57ScheduledWorkflowRed(entry57(), AT57), null);
+  // The threshold pair, one hour either side of period + grace (168 + 24 = 192h).
+  t('H57 clean: …and a green run one hour INSIDE the threshold is still silent', h57ScheduledWorkflowRed(entry57({ run: run57({ run_started_at: '2026-09-02T20:30:00Z' }) }), AT57), null);
+  t('H57 red: …while one hour OUTSIDE it fires', String(h57ScheduledWorkflowRed(entry57({ run: run57({ run_started_at: '2026-09-02T18:30:00Z' }) }), AT57) ?? '').includes('past the 168h period'), true);
+  // 🚨 The RED half — three reasons, and they compose.
+  const RED_FAIL = h57row({ run: run57({ conclusion: 'failure' }) });
+  t('H57 red: a non-success conclusion fires', RED_FAIL.length > 0, true);
+  t('H57 red: …naming the conclusion it actually read', RED_FAIL.includes('concluded `failure` rather than `success`'), true);
+  t('H57 red: …the repo', RED_FAIL.includes('`objectstack-ai/objectui`'), true);
+  t('H57 red: …the workflow FILE, which is what a person opens', RED_FAIL.includes('`.github/workflows/check-links.yml`'), true);
+  t('H57 red: …the run id', RED_FAIL.includes('34011606950'), true);
+  t('H57 red: …and the cron the period came from', RED_FAIL.includes('`17 4 * * 0`'), true);
+  t('H57 red: a `cancelled` conclusion is non-success too', h57row({ run: run57({ conclusion: 'cancelled' }) }).includes('concluded `cancelled`'), true);
+  const RED_STALE = h57row({ run: run57({ run_started_at: '2026-08-20T04:17:00Z' }) });
+  t('H57 red: a stale run fires even when it concluded green', RED_STALE.length > 0, true);
+  t('H57 red: …stating the age against the derived period', RED_STALE.includes('past the 168h period'), true);
+  t('H57 red: …and the ruled one-day grace', RED_STALE.includes('24h grace'), true);
+  t('H57 red: the two reasons COMPOSE rather than one hiding the other', h57row({ run: run57({ conclusion: 'failure', run_started_at: '2026-08-20T04:17:00Z' }) }).includes(', and '), true);
+  const RED_NEVER = h57row({ run: null });
+  t('H57 red: a declared schedule that NEVER ran is its own red', RED_NEVER.includes('NEVER produced a run'), true);
+  t('H57 red: …and files against the workflow page, number 0', h57RowSubject(entry57({ run: null })).number, 0);
+  t('H57 red: …under the workflow page URL', h57RowSubject(entry57({ run: null })).html_url.endsWith('check-links.yml'), true);
+  t('H57 red: an ordinary row files against the RUN, so the remedy is one click', h57RowSubject(entry57()).number, 34011606950);
+  // ⛔ The distinction a bare `run: null` cannot make on its own.
+  t('H57 unjudged: a FAILED runs read is not "never ran on schedule"', h57ScheduledWorkflowRed(entry57({ run: null, runsRead: false }), AT57), null);
+  t('H57 unjudged: …and neither is a missing entry', h57ScheduledWorkflowRed(undefined, AT57), null);
+  // An in-flight run carries `conclusion: null`, which is the ABSENCE of a
+  // conclusion and not a non-success one.
+  t('H57 in flight: a queued run is NOT judged on its absent conclusion', h57ScheduledWorkflowRed(entry57({ run: run57({ status: 'queued', conclusion: null }) }), AT57), null);
+  const RED_WEDGED = h57row({ run: run57({ status: 'queued', conclusion: null, run_started_at: '2026-08-20T04:17:00Z' }) });
+  t('H57 in flight: …but one wedged past the period still ages into a row', RED_WEDGED.includes('past the 168h period'), true);
+  t('H57 in flight: …and the row says the conclusion was not judged', RED_WEDGED.includes('so its conclusion is not judged'), true);
+  // An underivable period leaves the STALENESS leg unjudged and says so, while
+  // the conclusion leg keeps working.
+  t('H57 unjudged period: an old run with no derivable period does not fire on age', h57ScheduledWorkflowRed(entry57({ periodHours: null, crons: ['0 1 * * MON'], run: run57({ run_started_at: '2026-01-01T00:00:00Z' }) }), AT57), null);
+  t('H57 unjudged period: …and a non-success one still fires, saying the leg is UNJUDGED', h57row({ periodHours: null, crons: ['0 1 * * MON'], run: run57({ conclusion: 'failure' }) }).includes('staleness leg is UNJUDGED'), true);
+  // The remedy, and the two refusals it carries.
+  t('H57 remedy: the reader is EXTERNAL, which is refusal B in one clause', RED_FAIL.includes('cannot report its own death'), true);
+  t('H57 remedy: ⛔ the `status=success` count is refused in the row itself', RED_FAIL.includes('never reads a `status=success` count'), true);
+  t('H57 remedy: report-only, like every other row here', RED_FAIL.includes('not a gate verdict'), true);
+
+  // The request path — the 217-run trap, refused structurally.
+  t('H57 path: the ONE spelling carries the filter', scheduledRunsPath('o/r', 7).includes('event=schedule'), true);
+  t('H57 path: …and asks for exactly one run', scheduledRunsPath('o/r', 7).includes('per_page=1'), true);
+  t('H57 path: ⛔ it can never carry a `status=` filter', scheduledRunsPath('o/r', 7).includes('status='), false);
+  t('H57 path: every runs path in this file is filtered', h57RunsPathAudit().unfiltered.length, 0);
+  t('H57 path: …and there is one of them, not zero (the audit can fail)', h57RunsPathAudit().paths.length, 1);
+  // ⚠️ ASSEMBLED, never written literally. A literal unfiltered runs path in
+  // this file would be the one hit that defeats the file-wide audit two cases
+  // above — the same trap `RETIRED_ASSIGNEE_COINAGE` names, in a new costume.
+  const BACKTICK57 = String.fromCharCode(96);
+  const UNFILTERED57 =
+    BACKTICK57 + '/repos/o/r/actions/workflows/1/runs?status=success' + BACKTICK57;
+  t('H57 path: the audit SEES an unfiltered path when one exists', h57RunsPathAudit(UNFILTERED57).unfiltered.length, 1);
+  t('H57 path: …and the assembled needle did not defeat the file-wide audit', h57RunsPathAudit().unfiltered.length, 0);
+
+  // The pass, driven offline through a SPY that refuses an unfiltered read.
+  const spyGet = (calls) => async (path) => {
+    calls.push(path);
+    if (/\/actions\/workflows\/\d+\/runs/.test(path) && !path.includes('event=schedule')) {
+      throw new Error(`H57 SPY: a runs listing reached the transport without event=schedule — ${path}`);
+    }
+    if (path.includes('/actions/workflows?')) {
+      return {
+        total_count: 4,
+        workflows: [
+          { id: 1, path: '.github/workflows/check-links.yml', state: 'active', html_url: 'https://x/1' },
+          { id: 2, path: '.github/workflows/lint.yml', state: 'active', html_url: 'https://x/2' },
+          { id: 3, path: '.github/workflows/stale.yml', state: 'disabled_inactivity', html_url: 'https://x/3' },
+          { id: 4, path: 'dynamic/dependabot/dependabot-updates', state: 'active', html_url: 'https://x/4' },
+        ],
+      };
+    }
+    // The 217-run trap in one fixture: the newest SCHEDULED run failed, while
+    // the newest run overall is a green `workflow_dispatch` from days later.
+    return {
+      total_count: 5,
+      workflow_runs: [
+        { id: 900, status: 'completed', conclusion: 'failure', run_started_at: '2026-09-06T04:28:58Z', html_url: 'https://x/runs/900' },
+      ],
+    };
+  };
+  const sources57 = {
+    '.github/workflows/check-links.yml': WF_CHECK_LINKS,
+    '.github/workflows/lint.yml': WF_GATING,
+    '.github/workflows/stale.yml': WF_STALE,
+  };
+  const runPass = async (over = {}) => {
+    const calls = [];
+    const rows = [];
+    const st = {};
+    await sweepScheduledWorkflows(rows, st, {
+      get: spyGet(calls),
+      env: { GITHUB_REPOSITORY: 'objectstack-ai/objectui' },
+      ownerRepo: 'objectstack-ai/objectui',
+      originUrl: null,
+      root: null,
+      readSource: (p) => {
+        if (!(p in sources57)) throw new Error('absent');
+        return sources57[p];
+      },
+      nowMs: AT57,
+      ...over,
+    });
+    return { calls, rows, st };
+  };
+  const PASS57 = await runPass();
+  // ⚠️ Row access goes through this, never through `PASS57.rows[0][…]`. An
+  // ABLATION that removes the filter makes the spy refuse, the pass counts one
+  // unread runs read, and the row list is EMPTY — and a bare index would then
+  // throw while evaluating a `t()` argument, aborting the suite before it
+  // prints a single verdict (`selfTest`'s own row-wrapper note). The whole
+  // point of these cases is to be readable when they go red.
+  const firstRow57 = (pass) => pass.rows[0] ?? [{}, '', ''];
+  t('H57 pass: the spy saw a runs read and did not throw', PASS57.calls.some((p) => p.includes('/runs?')), true);
+  t('H57 pass: …and every runs read it saw carried the filter', PASS57.calls.filter((p) => p.includes('/runs?') && !p.includes('event=schedule')).length, 0);
+  t('H57 pass: ⛔ and not one carried a `status=` filter', PASS57.calls.filter((p) => p.includes('status=')).length, 0);
+  t('H57 pass: …so no runs read was refused by the spy', PASS57.st.scheduledUnreadRuns ?? 0, 0);
+  t('H57 pass: the failing scheduled run becomes ONE row', PASS57.rows.length, 1);
+  t('H57 pass: …filed under H57', firstRow57(PASS57)[1], 'H57');
+  t('H57 pass: …naming the workflow the ruling names', String(firstRow57(PASS57)[2]).includes('check-links.yml'), true);
+  t('H57 pass: …and linked to the run, not to a card', firstRow57(PASS57)[0].html_url ?? null, 'https://x/runs/900');
+  t('H57 pass: the PR-gating workflow bought no runs read', PASS57.st.scheduledGating, 1);
+  t('H57 pass: the disabled workflow bought none either', PASS57.st.scheduledInactive, 1);
+  t('H57 pass: …and is NAMED, because a disabled schedule is a death too', String(PASS57.st.scheduledInactiveNames ?? '').includes('disabled_inactivity'), true);
+  t('H57 pass: three workflow files declare a schedule', PASS57.st.scheduledDeclared, 3);
+  t('H57 pass: exactly one of them was judged', PASS57.st.scheduledJudged, 1);
+  t('H57 pass: the request bound is one listing plus one read per judged workflow', PASS57.st.scheduledRequests, 2);
+  t('H57 pass: the listing was not ceiling-bound', PASS57.st.scheduledListingShort, 0);
+  t('H57 pass: a completed pass claims no `unresolved`', PASS57.st.scheduledUnresolved ?? null, null);
+  // ✅ The silent direction, through the whole pass: same fixture, green run.
+  const GREEN57 = await runPass({
+    get: async (path) =>
+      path.includes('/actions/workflows?')
+        ? { total_count: 1, workflows: [{ id: 1, path: '.github/workflows/check-links.yml', state: 'active', html_url: 'https://x/1' }] }
+        : { total_count: 5, workflow_runs: [{ id: 901, status: 'completed', conclusion: 'success', run_started_at: '2026-09-06T04:28:58Z', html_url: 'https://x/runs/901' }] },
+  });
+  t('H57 pass: a green, fresh scheduled run emits NOTHING at all', GREEN57.rows.length, 0);
+  t('H57 pass: …while still reporting that it read the workflow', GREEN57.st.scheduledJudged, 1);
+  // The refusals — each one reads NOTHING rather than reporting a clean board.
+  const WRONG57 = await runPass({ env: { GITHUB_REPOSITORY: 'objectstack-ai/objectstack' } });
+  t('H57 refusal: a checkout of another repo reads nothing', WRONG57.rows.length, 0);
+  t('H57 refusal: …spends no request', WRONG57.st.scheduledRequests ?? 0, 0);
+  t('H57 refusal: …and says so as `unresolved`, never as a clean board', String(WRONG57.st.scheduledUnresolved).includes('objectstack-ai/objectstack'), true);
+  const NOLIST57 = await runPass({
+    get: async () => {
+      throw new Error('HTTP 403');
+    },
+  });
+  t('H57 refusal: an unreadable workflows listing is `unresolved`', String(NOLIST57.st.scheduledUnresolved).includes('403'), true);
+  t('H57 refusal: …with no row invented from it', NOLIST57.rows.length, 0);
+  const NORUNS57 = await runPass({
+    get: async (path) =>
+      path.includes('/actions/workflows?')
+        ? { total_count: 1, workflows: [{ id: 1, path: '.github/workflows/check-links.yml', state: 'active', html_url: 'https://x/1' }] }
+        : Promise.reject(new Error('HTTP 500')),
+  });
+  t('H57 refusal: a failed runs read is UNJUDGED, not "never ran"', NORUNS57.rows.length, 0);
+  t('H57 refusal: …and is counted so the silence is visible', NORUNS57.st.scheduledUnreadRuns, 1);
+  t('H57 refusal: …and never counted as judged', NORUNS57.st.scheduledJudged ?? 0, 0);
+  const NOFILES57 = await runPass({ readSource: () => { throw new Error('ENOENT'); } });
+  t('H57 refusal: a workflow file absent from the checkout is UNREADABLE', NOFILES57.st.scheduledUnreadable, 3);
+  t('H57 refusal: …and contributes no row', NOFILES57.rows.length, 0);
+
+  // The local-checkout guard.
+  t('H57 checkout: a runner sweeping its own repo serves', localCheckoutServes('o/r', { GITHUB_REPOSITORY: 'o/r' }).serves, true);
+  t('H57 checkout: …and names the reading it used', localCheckoutServes('o/r', { GITHUB_REPOSITORY: 'o/r' }).source, 'GITHUB_REPOSITORY');
+  t('H57 checkout: a runner pointed at another board REFUSES', localCheckoutServes('o/other', { GITHUB_REPOSITORY: 'o/r' }).serves, false);
+  t('H57 checkout: an https origin resolves', localCheckoutServes('o/r', {}, 'https://github.com/o/r').serves, true);
+  t('H57 checkout: …with a `.git` suffix too', localCheckoutServes('o/r', {}, 'https://github.com/o/r.git').serves, true);
+  t('H57 checkout: an ssh origin resolves', localCheckoutServes('o/r', {}, 'git@github.com:o/r.git').serves, true);
+  t('H57 checkout: a DIFFERENT origin refuses and names both repos', localCheckoutServes('o/r', {}, 'https://github.com/o/other').reason.includes('o/other'), true);
+  t('H57 checkout: no origin at all refuses', localCheckoutServes('o/r', {}, null).serves, false);
+
+  // Census and forwarding.
+  t('H57 census: every count key rides the enumerated forwarding contract', ['scheduledDeclared', 'scheduledJudged', 'scheduledUnreadRuns', 'scheduledGating', 'scheduledInactive', 'scheduledInactiveNames', 'scheduledUnreadable', 'scheduledRequests', 'scheduledListingShort', 'scheduledUnresolved'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  const SUM57 = saidBy('h57Scheduled', summaryLine({ scheduledDeclared: 22, scheduledJudged: 7, scheduledUnreadRuns: 0, scheduledGating: 15, scheduledInactive: 0, scheduledUnreadable: 0, scheduledRequests: 8 }, 0));
+  t('H57 census: the declared population is reported', SUM57.includes('22 workflow(s) on the swept repo declare a schedule'), true);
+  t('H57 census: …the judged half', SUM57.includes('7 were judged'), true);
+  t('H57 census: …the PR-gating hold-out, which is the narrowing this row makes', SUM57.includes('15 declaring a PR-gating trigger'), true);
+  t('H57 census: …stated as NARROWER than the ruleset, not as equal to it', SUM57.includes('deliberately NARROWER'), true);
+  t('H57 census: …and the request the row cost', SUM57.includes('Cost 8 request(s)'), true);
+  t('H57 census: ⛔ the refused count is named in the clause too', SUM57.includes('never a `status=success` count'), true);
+  t('H57 census: the clause renders on a zero run — silence is never absence', saidBy('h57Scheduled', summaryLine({}, 0)).includes('0 workflow(s) on the swept repo'), true);
+  const UNRES57 = saidBy('h57Scheduled', summaryLine({ scheduledUnresolved: 'the workflows listing could not be read (HTTP 403)' }, 0));
+  t('H57 census: an unresolved row says it read NOTHING', UNRES57.includes('read NOTHING this sweep'), true);
+  t('H57 census: …and refuses to be read as a clean board', UNRES57.includes('not a clean board'), true);
+
+  // Band.
+  t('H57 band: registered as a STALL row', familyBand('H57'), 'stall');
+  t('H57 band: ⛔ NOT `gate` — the population is by ruling NOT in the required set', familyBand('H57') === 'gate', false);
+  t('H57 band: ⛔ NOT `state` — there is no card contradicting itself', familyBand('H57') === 'state', false);
+  t('H57 band: ⛔ NOT `inventory` — the row alarms per workflow; the census is a clause', familyBand('H57') === 'inventory', false);
+  t('H57 band: the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H57'), true);
+  t('H57 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  t('H57 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
+  t('H57 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
+  t('H57 band: a gate row still outranks it', familyRank('H31') < familyRank('H57'), true);
+  t('H57 band: …and it outranks an inventory row', familyRank('H57') < familyRank('H14'), true);
+
+  // -- H58 — a `pm:queue` card whose own text declares it a RULING (#17417) ---
+  // ⛔ The self-test never touches GitHub. Every heading below is a spelling
+  // MEASURED on a live card (the banner's table says which), the refused
+  // candidate included — it is exercised here precisely BECAUSE it must not
+  // fire.
+  const H58_RULING = '## Why it is a ruling, not a mechanical fix';
+  const H58_DECISION = '## Why this is a decision, not a mechanical fix';
+  const H58_HANDOVER = '## 5. Two rulings of mine you may want to overturn';
+  const H58_REFUSED = 'Both are dispositions, and picking one is a ruling this card leaves open.';
+  const card58 = (extra = {}) => ({
+    number: 8449,
+    state: 'open',
+    labels: [{ name: 'pm:queue' }],
+    assignees: [],
+    title: 'bug(plugin-kanban): swimlanes below the fold are UNREACHABLE',
+    body: `## Measured (Chromium 1194, three swimlanes)\n\nthe document does not scroll.\n\n${H58_RULING}\n\nthree arms, none mechanical.\n`,
+    ...extra,
+  });
+  const h58 = (extra = {}, comments) => h58QueuedRulingRow(card58(extra), comments);
+  const h58row = (extra = {}, comments) => String(h58QueuedRulingRow(card58(extra), comments) ?? '');
+
+  // ⭐ The positive control, in each measured spelling and in each channel.
+  t('H58 fires: a queued card whose BODY carries the ruling heading', typeof h58(), 'string');
+  t('H58 fires: …the decision spelling too', typeof h58({ body: `## What\n\n${H58_DECISION}\n\nthe two readings differ.\n` }), 'string');
+  t('H58 fires: …and the handover/record spelling, ordinal and all', typeof h58({ body: `## 4. Open state you inherit\n\n${H58_HANDOVER}\n\nboth are mine.\n` }), 'string');
+  t('H58 fires: a marker in a COMMENT fires when the body is clean', typeof h58({ body: '## What\n\nnothing here.\n' }, ['graded p2', H58_DECISION]), 'string');
+  t('H58 fires: …and the row names WHICH comment', h58row({ body: '## What\n\nnothing here.\n' }, ['graded p2', H58_DECISION]).includes('COMMENT 2 of 2'), true);
+  t('H58 fires: a body marker is reported against the BODY, not a comment', h58row().includes('in the card BODY'), true);
+  t('H58 fires: …quoting the heading AS WRITTEN, depth included', h58row().includes(`「${H58_RULING}」`), true);
+  t('H58 fires: …and naming the anchor with the live card it was measured on', h58row().includes('measured on objectui#8449'), true);
+  t('H58 fires: two distinct markers are both named', h58row({ body: `${H58_RULING}\n\n${H58_DECISION}\n` }).includes('objectui#8365'), true);
+  t('H58 fires: …while one spelling written twice is named once', (h58row({ body: `${H58_RULING}\n\ntext\n\n${H58_RULING}\n` }).match(/objectui#8449/g) ?? []).length, 1);
+
+  // ⛔ The SILENT half — the four quoting shapes this row refuses structurally,
+  // plus the population gates. Length-pinned and driven whole: a fixture that
+  // stops being exercised fails here rather than going quiet.
+  const NEGATIVES58 = [
+    ['an ordinary queued card with no marker at all', { body: '## What\n\na `groupBy` survives the lane resolve.\n' }],
+    ['the same words in PROSE — a card talking about the shape, not declaring it', { body: `## The finding\n\nIts heading reads Why it is a ruling, not a mechanical fix.\n` }],
+    ['…inside an inline CODE SPAN in prose', { body: '## The finding\n\nthe `Why it is a ruling, not a mechanical fix` heading is the marker.\n' }],
+    ['…inside a BLOCKQUOTED heading — a card quoting another card', { body: `## The finding\n\n> ${H58_RULING}\n` }],
+    ['…inside a FENCED block', { body: `## The finding\n\n\`\`\`\n${H58_RULING}\n\`\`\`\n` }],
+    ['…inside a tilde-fenced block, the other fence spelling', { body: `## The finding\n\n~~~\n${H58_RULING}\n~~~\n` }],
+    ['…in a TABLE cell', { body: `## The measurements\n\n| card | body |\n|:--|:--|\n| objectui#8365 | *"Why this is a decision, not a mechanical fix"* |\n` }],
+    ['⛔ 「Both are dispositions」 — measured in PROSE on its own card, so never an anchor', { body: `## What this card is NOT asking for\n\n${H58_REFUSED}\n` }],
+    ['a card with NO pm:queue — nothing over-reads it as capacity', { labels: [{ name: 'tracking' }] }],
+    ['a CLOSED card — the queue label on it is residue', { state: 'closed' }],
+    ['a PULL REQUEST — the dispatch pool is cards, ⛔ never PRs', { pull_request: { url: 'x' } }],
+    ['an unreadable `labels` — ⛔ never read as unlabelled', { labels: undefined }],
+    ['an empty body', { body: '' }],
+    ['a missing body, which must not crash', { body: undefined }],
+  ];
+  t('H58 controls: the negative table is exercised WHOLE — fourteen fixtures, none quietly dropped', NEGATIVES58.length, 14);
+  for (const [why, extra] of NEGATIVES58) t(`H58 silent: ${why}`, h58(extra), null);
+  t('H58: the predicate does not crash on a missing card either', h58QueuedRulingRow(undefined), null);
+  t('H58 silent: a marker quoted in a COMMENT rather than headed there', h58({ body: '## What\n\nnothing.\n' }, ['it says "Why this is a decision, not a mechanical fix" in prose']), null);
+
+  // ⚠️ The negatives above are only worth their line while the fixtures really
+  // carry the words. Without these, deleting the phrase from a fixture would
+  // turn a live control into a vacuous pass.
+  t('H58 controls: the PROSE fixture really contains the phrase', NEGATIVES58[1][1].body.includes('Why it is a ruling, not a mechanical fix'), true);
+  t('H58 controls: …the FENCED one too', NEGATIVES58[4][1].body.includes('Why it is a ruling, not a mechanical fix'), true);
+  t('H58 controls: …the TABLE one too', NEGATIVES58[6][1].body.includes('Why this is a decision, not a mechanical fix'), true);
+  t('H58 controls: …and the refused candidate really says it', NEGATIVES58[7][1].body.includes('Both are dispositions'), true);
+
+  // ⭐ The filing card's OWN body shape — it quotes all three spellings, in the
+  // three shapes it uses (italic prose, a table cell, prose), under headings of
+  // its own. It must produce NO row, and that is the acceptance this row was
+  // cut for.
+  const H58_FILING_BODY = [
+    '## The finding',
+    '',
+    'Cards are labelled `pm:queue` to mean 「triaged, registered, do not lose this」.',
+    '',
+    '## The measurements, from three independent seats',
+    '',
+    '#8449 (*"Why it is a ruling, not a mechanical fix"*, three arms), #8429 (*"Both are dispositions"*).',
+    '',
+    '| card | what it actually was | disposed as |',
+    '|:--|:--|:--|',
+    '| objectui#8365 | its own body: *"Why this is a decision, not a mechanical fix"* | `needs-user-decision` |',
+    '',
+    '## Why it costs more than a re-read',
+    '',
+    'A `pm:queue` body is a snapshot.',
+  ].join('\n');
+  t('H58 control: the filing card quotes all three spellings…', ['Why it is a ruling', 'Why this is a decision', 'Both are dispositions'].every((s) => H58_FILING_BODY.includes(s)), true);
+  t("H58 control: …and its own body produces NO row", h58({ body: H58_FILING_BODY }), null);
+
+  // The heading scanner, read on its own — depth, indent and order.
+  t('H58 scan: an `h3` heading matches and is returned AS WRITTEN', rulingMarkerHeadings('### Why this is a decision')[0].heading, '### Why this is a decision');
+  t('H58 scan: `h6` matches too', rulingMarkerHeadings('###### Why it is a ruling').length, 1);
+  t('H58 scan: ⛔ seven hashes is not a heading', rulingMarkerHeadings('####### Why it is a ruling').length, 0);
+  t('H58 scan: ⛔ nor a hash with no space after it', rulingMarkerHeadings('##Why it is a ruling').length, 0);
+  t('H58 scan: three leading spaces still open a heading', rulingMarkerHeadings('   ## Why it is a ruling').length, 1);
+  t('H58 scan: ⛔ four do not — that is an indented code block', rulingMarkerHeadings('    ## Why it is a ruling').length, 0);
+  t('H58 scan: decoration on the heading is read through', rulingMarkerHeadings('## **Why it is a ruling**, not a mechanical fix').length, 1);
+  t('H58 scan: …a backticked heading too', rulingMarkerHeadings('## `Why this is a decision`').length, 1);
+  t('H58 scan: two distinct anchors come back in the order written', rulingMarkerHeadings(`${H58_DECISION}\n\n${H58_RULING}`).map((h) => h.instance).join(','), 'objectui#8365,objectui#8449');
+  t('H58 scan: CRLF bodies read the same', rulingMarkerHeadings('## Why it is a ruling\r\n').length, 1);
+  t('H58 scan: an empty text is not a crash', rulingMarkerHeadings(undefined).length, 0);
+
+  // The anchor set — measured, frozen, capped, and checkable from outside.
+  t('H58 anchors: the set is at or under its declared cap', H58_RULING_MARKER_ANCHORS.length <= H58_MARKER_ANCHOR_CAP, true);
+  t('H58 anchors: …and the cap is 5, so a sixth is an argument rather than an edit', H58_MARKER_ANCHOR_CAP, 5);
+  t('H58 anchors: every anchor names the live card it was measured on', H58_RULING_MARKER_ANCHORS.every((a) => /objectui#\d+/u.test(a.instance)), true);
+  t('H58 anchors: every declared spelling fires against its OWN regex', H58_RULING_MARKER_ANCHORS.every((a) => a.heading.test(a.spelling)), true);
+  t('H58 anchors: …and every one of them fires as a real heading', H58_RULING_MARKER_ANCHORS.every((a) => rulingMarkerHeadings(`## ${a.spelling}`).length === 1), true);
+  t('H58 anchors: ⛔ 「Both are dispositions」 is NOT in the set — it was measured in PROSE', H58_RULING_MARKER_ANCHORS.some((a) => a.heading.test('Both are dispositions')), false);
+  t('H58 anchors: the set is frozen', Object.isFrozen(H58_RULING_MARKER_ANCHORS), true);
+
+  // Three input states for the thread, never two (#4690).
+  t('H58 thread: an UNCONSULTED channel says the thread was not in hand', h58row().includes('no comment thread was in hand'), true);
+  t('H58 thread: an UNREADABLE one says so instead, and never "empty"', h58row({}, null).includes('could NOT be read'), true);
+  t('H58 thread: a READ one reports both channels judged', h58row({}, ['graded p2']).includes('Both channels were read (1 comment(s) in hand)'), true);
+  t('H58 thread: …and an empty thread is a real reading, not an unread one', h58row({}, []).includes('Both channels were read (0 comment(s) in hand)'), true);
+
+  // Population — the same three-input-states care every row here takes.
+  t('H58 population: an open `pm:queue` card is in', h58SpeaksAbout(card58()), true);
+  t('H58 population: a closed one is out', h58SpeaksAbout(card58({ state: 'closed' })), false);
+  t('H58 population: a PR is out', h58SpeaksAbout(card58({ pull_request: { url: 'x' } })), false);
+  t('H58 population: an unreadable `labels` is out, never read as unlabelled', h58SpeaksAbout(card58({ labels: undefined })), false);
+  t('H58 population: a missing card is out, never a crash', h58SpeaksAbout(undefined), false);
+  t('H58 population: it is the label page the sweep already lists', SEEN_LABEL_PAGES.includes('pm:queue'), true);
+
+  // Adjacency — ⛔ this row restates no neighbour's verdict on its own specimen.
+  t('H58 adjacency: H54 is silent — the title carries no `[Decision]` prefix', h54DecisionTitledQueueCard(card58()), null);
+  t('H58 adjacency: H24 is silent — the card is UNASSIGNED, correct for `pm:queue`', h24QueuedWithAssignee(card58()), null);
+  t('H58 adjacency: H3 is silent — one pm state label, not two', h3QueueAndDispatched(card58()), false);
+  t('H58 adjacency: a card wearing BOTH carriers fires both — two readings, not one restated', [typeof h58({ title: '[Decision] the unwrap door' }), typeof h54DecisionTitledQueueCard(card58({ title: '[Decision] the unwrap door' }))].join(','), 'string,string');
+
+  // The row's own sentence — the halves the direction requires.
+  t('H58 row: it reports a DISAGREEMENT rather than a verdict', h58row().includes('does NOT say which carrier is wrong'), true);
+  t('H58 row: it names the two meanings the one label carries', h58row().includes('「triaged and registered」 and 「ready for a dev」'), true);
+  t('H58 row: the remedy names the reader — the TRIAGE seat, on its per-fire read', h58row().includes('belongs to the TRIAGE seat on its per-fire read'), true);
+  t('H58 row: …and the four EXISTING dispositions, all of them', ['`tracking`', '`needs-user-decision`', 'CLOSED', 'corrected `pm:queue`'].every((s) => h58row().includes(s)), true);
+  t('H58 row: ⛔ no fifth state is proposed — the card\'s own datum', h58row().includes('⛔ No new state and no new label'), true);
+  t('H58 row: ⛔ and no dev round until the disposition is written', h58row().includes('no dev round until that disposition is written'), true);
+  t('H58 row: report-only — it writes nothing and relabels nothing', h58row().includes('writes no label, relabels nothing'), true);
+  t('H58 row: it declares what it CANNOT see, so a reader does not over-trust it', h58row().includes('a quiet board is a LOWER BOUND'), true);
+  t('H58 row: not a loud finding', isLoudFinding(h58row()), false);
+
+  // Census and forwarding.
+  t('H58 census: every count key rides the enumerated forwarding contract', ['rulingMarkerJudged', 'rulingMarkerThreadRead', 'rulingMarkerUnread'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  const SUM58 = saidBy('h58RulingMarkers', summaryLine({ rulingMarkerJudged: 96, rulingMarkerThreadRead: 11, rulingMarkerUnread: 85 }, 0));
+  t('H58 census: the judged population is reported', SUM58.includes('96 open `pm:queue` card(s) had'), true);
+  t('H58 census: …the half with a thread in hand', SUM58.includes('11 with a comment thread ALREADY in hand'), true);
+  t('H58 census: …and the half judged on the body ALONE', SUM58.includes('85 on the body ALONE'), true);
+  t('H58 census: it states that the row buys nothing', SUM58.includes('fetches NOTHING of its own'), true);
+  t('H58 census: …that an unbought thread is UNREAD rather than clean', SUM58.includes('UNREAD second channel rather than a clean one'), true);
+  t('H58 census: …and that only HEADINGS are matched', SUM58.includes('ATX HEADINGS outside fenced code only'), true);
+  t('H58 census: the clause renders on a zero run — silence is never absence', saidBy('h58RulingMarkers', summaryLine({}, 0)).includes('0 open `pm:queue` card(s) had'), true);
+  t('H58 census: the anchor count in the clause comes from the frozen set', saidBy('h58RulingMarkers', summaryLine({}, 0)).includes(`against ${H58_RULING_MARKER_ANCHORS.length} frozen heading anchor(s)`), true);
+
+  // Band.
+  t('H58 band: registered as a STATE row — the repair is on the board', familyBand('H58'), 'state');
+  t('H58 band: ⛔ NOT `gate` — both carriers are PRESENT, so no absence reads as a green light', familyBand('H58') === 'gate', false);
+  t('H58 band: ⛔ NOT `stall` — the triage fire moves these cards, and none is claimed stopped', familyBand('H58') === 'stall', false);
+  t('H58 band: ⛔ NOT `inventory` — the row alarms per card; the census is a clause', familyBand('H58') === 'inventory', false);
+  t('H58 band: …and it is H54\'s band, the row this one is the body half of', familyBand('H58'), familyBand('H54'));
+  t('H58 band: the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H58'), true);
+  t('H58 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  t('H58 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
+  t('H58 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
+  t('H58 band: a gate row still outranks it, so H31/H35 survive the trim longer', familyRank('H31') < familyRank('H58'), true);
+  t('H58 band: …and it outranks an inventory row', familyRank('H58') < familyRank('H14'), true);
 
   // -- The `[::]` collapse (#12090): behaviour-preserving, asserted as such ---
   // The class held U+003A TWICE, never the fullwidth U+FF1A its shape implied.

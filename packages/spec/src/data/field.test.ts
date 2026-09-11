@@ -1905,6 +1905,91 @@ describe('ADR-0113 — required is a write contract; storage.notNull is the colu
   });
 });
 
+/**
+ * #16867 — the flattened column-constraint spellings must not be renamed onto
+ * `required`.
+ *
+ * The defect these pin against was not a silent one: the refusal fired, loudly,
+ * and then prescribed `required` — the one key ADR-0113 exists to say is NOT the
+ * column constraint. The author complied and got a nullable column plus a write
+ * gate, with nothing downstream to refuse it. So the assertions come in pairs:
+ * the ADR-0113 sentence is PRESENT, and the rename to `required` is ABSENT.
+ * Asserting only the first would pass on a message that carried both.
+ *
+ * `not_null` is pinned separately from `notNull` on purpose. The two channels
+ * fold differently — `aliases` is indexed by `aliasProbe` (case and `_`/`-`
+ * folded), exact `guidance` is not — so a repair that moved the entry between
+ * them without a pattern would keep `notNull` green while `not_null` fell
+ * through to the edit-distance fallback, and no single-spelling pin would see it.
+ */
+describe('ADR-0113 / #16867 — flat `notNull` spellings prescribe `storage.notNull`, never `required`', () => {
+  const refusalMessage = (field: Record<string, unknown>): string => {
+    const r = FieldSchema.safeParse({ type: 'text', label: 'F', ...field });
+    expect(r.success).toBe(false);
+    if (r.success) throw new Error('unreachable — the key was ADMITTED, not refused');
+    const issue = r.error.issues.find((i) => i.code === 'unrecognized_keys');
+    expect(issue, 'the key must be refused as unrecognized, not accepted').toBeDefined();
+    return String(issue!.message);
+  };
+
+  // The three flattened spellings an author actually reaches for. `notNull` and
+  // `not_null` are what the card measured being renamed onto `required`;
+  // `storageNotNull` already carried the sentence and must keep it.
+  for (const spelling of ['notNull', 'not_null', 'storageNotNull']) {
+    it(`\`${spelling}\` is refused WITH the ADR-0113 sentence and WITHOUT a rename to \`required\``, () => {
+      const message = refusalMessage({ [spelling]: true });
+
+      // Lit: the correct target is named, nested spelling and all.
+      expect(message).toContain('storage: { notNull: true }');
+      expect(message).toContain('ADR-0113');
+
+      // Dark: the rename channel did not answer. `Did you mean` is the rename
+      // channel's own template (`suggestions.zod.ts`), so its absence is what
+      // proves the alias row is gone rather than merely outvoted.
+      expect(message).not.toMatch(/Did you mean/);
+      expect(message).not.toMatch(/→ `required`/);
+    });
+  }
+
+  it('names the write contract too, so an author who meant `required` is not sent the other way', () => {
+    // The defect is that the author cannot tell which of the two axes they are
+    // getting. A prescription naming only the column half would fix the
+    // measured direction and open the mirror-image one.
+    const message = refusalMessage({ notNull: true });
+    expect(message).toContain('`required`');
+    expect(message).toMatch(/WRITE contract/);
+  });
+
+  it('the genuine write-contract synonyms still RENAME onto `required` (the set is anchored)', () => {
+    // Guards the blast radius of the pattern: ADR-0113 moved neither of these,
+    // and `/^(?:storage[_-]?)?not[_-]?null$/i` must not reach them.
+    for (const spelling of ['isRequired', 'mandatory']) {
+      const message = refusalMessage({ [spelling]: true });
+      expect(message).toMatch(/Did you mean/);
+      expect(message).toContain('`required`');
+      expect(message).not.toContain('ADR-0113');
+    }
+  });
+
+  it('clause \u2461 — both spellings are REFUSED, before and after; only the sentence moved', () => {
+    // A `guidance` / `guidanceSets` table decorates a rejection and never
+    // admits a key (`strict-object.ts`: it "runs only from the
+    // `unrecognized_keys` path"). This pin is what would go red if a future
+    // edit turned either spelling into an accepted key.
+    for (const spelling of ['notNull', 'not_null', 'storageNotNull']) {
+      const r = FieldSchema.safeParse({ type: 'text', label: 'F', [spelling]: true });
+      expect(r.success, `\`${spelling}\` must stay REFUSED — it is not an authorable key`).toBe(false);
+    }
+  });
+
+  it('the instrument can still say "fine" — the real keys parse', () => {
+    // Negative controls, so a pin above cannot pass by refusing everything.
+    expect(FieldSchema.parse({ type: 'text', label: 'F' }).storage).toBeUndefined();
+    expect(FieldSchema.parse({ type: 'text', label: 'F', storage: { notNull: true } }).storage?.notNull)
+      .toBe(true);
+  });
+});
+
 describe('FieldSchema — authored `radio` + `multiple: true` is REFUSED (#11437, maintainer ruling 2026-08-22 on objectui#4015, Option C)', () => {
   // Option C rejects the contradiction at the entrance: the data layer
   // honoured the flag while the widget rendered a single-value radio group —
