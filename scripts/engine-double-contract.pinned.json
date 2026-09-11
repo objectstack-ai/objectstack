@@ -2297,6 +2297,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-approvals/src/stranded-resubmit-second-door.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/stranded-resubmit-second-door.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-approvals/src/stranded-run-repairability.test.ts",
       "verb": "delete",
       "pinned": 1
