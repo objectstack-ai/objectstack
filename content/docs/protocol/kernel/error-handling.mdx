@@ -428,9 +428,6 @@ never crosses HTTP. The refusal is emitted as the flat body shown above, and
 **HTTP Headers:**
 ```http
 HTTP/1.1 429 Too Many Requests
-X-RateLimit-Limit: 1000
-X-RateLimit-Remaining: 0
-X-RateLimit-Reset: 1705412460
 Retry-After: 45
 ```
 
@@ -462,28 +459,15 @@ async function fetchWithRetry(url, options = {}, maxRetries = 3) {
 **HTTP Status:** 429  
 **Meaning:** Monthly/daily quota exceeded
 
-**Example:**
-```json
-{
-  "success": false,
-  "error": {
-    "code": "QUOTA_EXCEEDED",
-    "message": "Monthly API quota exceeded",
-    "details": {
-      "quota": 10000,
-      "used": 10000,
-      "period": "monthly",
-      "reset": "2024-02-01T00:00:00Z",
-      "upgrade_url": "https://app.acme.com/billing/upgrade"
-    }
-  }
-}
-```
+**Not emitted today.** `QUOTA_EXCEEDED` is a registered member of the standard
+error-code catalog (`StandardErrorCode`, `packages/spec/src/api/errors.zod.ts`),
+but no ObjectStack producer emits it. No response carries this code, and none
+carries a quota `details` bag — do not write a client branch against it.
 
-**How to fix:**
-- Wait for quota reset
-- Upgrade to higher plan
-- Optimize API usage
+Quota enforcement that does exist answers with its own code rather than this one
+(the SMS daily quota answers `TOO_MANY_REQUESTS`). For request pacing, the code
+on the wire is `RATE_LIMIT_EXCEEDED` above, whose `Retry-After` header and
+`retryAfterSeconds` / `resetAt` details are what a client acts on.
 
 ### Server Errors
 
@@ -631,9 +615,6 @@ Authorization: Bearer <token>
 **Response:**
 ```http
 HTTP/1.1 429 Too Many Requests
-X-RateLimit-Limit: 1000
-X-RateLimit-Remaining: 0
-X-RateLimit-Reset: 1705412460
 Retry-After: 45
 Content-Type: application/json
 
