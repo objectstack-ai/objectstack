@@ -149,12 +149,28 @@ export default {
  *
  * ⚠️ The top level carries `probe_account`, so `objects` is PRESENT and
  * `authoringRuleUnionStack` folds nothing into it — it only ever fills ABSENT
- * keys. The union run therefore never sees `probe_order`'s fields at all, and
- * whatever this build reports about them was produced by the per-package leg
- * and by nothing else. That is what makes this a pin on `compile.ts`'s half
- * rather than a second copy of `packages/lint`'s rule test, whose input is a
- * local three-key REPLICA of `packageBodyAsStack` (`perPackageStack`) and stays
- * green if this command stops building that shape.
+ * keys, which `src/utils/stack-collections.test.ts` pins BY IDENTITY on exactly
+ * this shape (a stack carrying both its collections and `packages[]`). So the
+ * union run never sees `probe_order`'s fields, and this is a pin on
+ * `compile.ts`'s half rather than a second copy of `packages/lint`'s rule test,
+ * whose input is a local three-key REPLICA of `packageBodyAsStack`
+ * (`perPackageStack`) and stays green if this command stops building that
+ * shape.
+ *
+ * ⭐ That last claim is MEASURED rather than argued. Three ablations, each
+ * reddening THIS case alone and leaving the other six in this file green:
+ *
+ *   1. drop `packages[]` from `packageBodyAsStack` (the pre-#16611 shape) — the
+ *      equality below receives BOTH paths, `account` first;
+ *   2. hand the per-package leg no `objects` at all, i.e. the "skip the site per
+ *      package" option the ruling rejected — `os build` exits **0** with
+ *      `success: true`, so the union run is NOT a second reporter for these
+ *      paths and nothing else in the command catches the dangling reference
+ *      either;
+ *   3. add `probeOrder` to the TOP-LEVEL `objects` — the union run does report
+ *      it, and `error` reads `author-time rules failed`. That is why the error
+ *      string is asserted BEFORE the paths are read: it is the only thing that
+ *      tells the two exits apart from outside.
  */
 const CONFIG_PKG_REFS = `
 const coreManifest = { id: 'com.example.probe.core', name: 'core', version: '1.0.0', type: 'app', namespace: 'probe' };
