@@ -10636,8 +10636,14 @@ export class ObjectQL implements IObjectQLEngine {
             rowHookContexts[i].input.data = stripped;
           }
           // One line per CALL, not per row, and only when the exemption was
-          // ASKED FOR and something was actually removed — the union is
-          // faithful because the strip is schema-uniform.
+          // ASKED FOR and something was actually removed. Per CALL because a
+          // log line has no per-row slot: the union of what the batch lost is
+          // the only view one line can represent — ⛔ NOT because every row
+          // lost the same set. `hookWrittenKeys: rowHookWrittenKeys[i]` above
+          // is armed per ROW and its only power is to turn a strip into a
+          // KEEP, so a hook that stamps a protected key on some rows and not
+          // others makes those rows lose DIFFERENT sets. Read a name in this
+          // line as "at least one row lost this field", never "every row did".
           if (preserveAuditIgnored.length > 0) {
             this.logger.warn(preserveAuditIgnoredOnInsertWarning(object, preserveAuditIgnored));
           }
