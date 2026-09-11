@@ -564,19 +564,62 @@ function resolveCompareDimension(selection: DatasetSelection): string {
   );
 }
 
-/** Compute the comparison window for a [start,end] range. */
+/**
+ * Compute the comparison window for a [start,end] range.
+ *
+ * ## Why an unrecognised `kind` is REFUSED here, not fallen through
+ *
+ * `kind` is declared as the closed pair `'previousPeriod' | 'previousYear'`
+ * (`DatasetCompareTo`, `spec/contracts/analytics-service.ts`) and enforced on
+ * the wire by NOTHING: `DatasetSelection` has no Zod schema anywhere, and
+ * `/analytics/dataset/query`'s own door projects `compareTo` away before its
+ * parse and forwards the caller's selection untouched (`analytics-selection-door`
+ * says so in its header). So a body carrying `compareTo: { kind: 'previousQuarter' }`
+ * reaches this function with its declared type unenforced.
+ *
+ * The shape this function used to have — one `if` for `previousYear`, then the
+ * previousPeriod arm as a FALL-THROUGH — answered that body with a
+ * previous-period window under an ordinary 200. The caller is told nothing, a
+ * dashboard renders a window nobody asked for as fact, and no status, header or
+ * field in the response distinguishes it from a real answer. That is the
+ * silently-wrong answer the refusal families in this package exist to replace,
+ * one layer down.
+ *
+ * So it is the FOURTH member of {@link resolveCompareDimension}'s family —
+ * `DATASET_INVALID` / 400, a verdict about the SELECTION, the caller fixes the
+ * request — and it is spelled as an exhaustive `switch` so that a third kind
+ * added to the contract fails to COMPILE here (`const exhaustive: never`)
+ * instead of arriving as a silent previous-period answer a second time.
+ *
+ * ⛔ This is deliberately the ONLY site in this module that judges `kind`.
+ * {@link alignedCompareBucketKey} branches on the same two-valued `kind` and
+ * carries no refusal of its own — its docblock states why that is sufficient
+ * rather than an omission.
+ */
 export function shiftRange(range: [string, string], kind: CompareTo['kind']): [string, string] {
   const [start, end] = range;
-  if (kind === 'previousYear') {
-    return [shiftYear(start, -1), shiftYear(end, -1)];
+  switch (kind) {
+    case 'previousYear':
+      return [shiftYear(start, -1), shiftYear(end, -1)];
+    case 'previousPeriod': {
+      // The equal-length window ending the day before `start`.
+      const startMs = parseUTC(start);
+      const endMs = parseUTC(end);
+      const lengthDays = Math.round((endMs - startMs) / DAY_MS) + 1;
+      const prevEndMs = startMs - DAY_MS;
+      const prevStartMs = prevEndMs - (lengthDays - 1) * DAY_MS;
+      return [toISODate(prevStartMs), toISODate(prevEndMs)];
+    }
+    default: {
+      const exhaustive: never = kind;
+      throw datasetInvalidError(
+        `[dataset-executor] compareTo.kind ${JSON.stringify(exhaustive)} is not a comparison window `
+        + 'this executor implements. The two it runs are \'previousPeriod\' (the equal-length window '
+        + 'ending the day before this one starts) and \'previousYear\' (the same window one calendar '
+        + 'year back). Name one of those, or drop compareTo.',
+      );
+    }
   }
-  // previousPeriod — the equal-length window ending the day before `start`.
-  const startMs = parseUTC(start);
-  const endMs = parseUTC(end);
-  const lengthDays = Math.round((endMs - startMs) / DAY_MS) + 1;
-  const prevEndMs = startMs - DAY_MS;
-  const prevStartMs = prevEndMs - (lengthDays - 1) * DAY_MS;
-  return [toISODate(prevStartMs), toISODate(prevEndMs)];
 }
 
 // ── compareTo bucket alignment (#6007) ───────────────────────────────────────
@@ -718,6 +761,33 @@ export function bucketKeyAtOrdinal(ordinal: number, granularity: DateGranularity
  *    to a bucket the caller did not ask for would trade a visibly foreign row
  *    for a plausible-looking wrong one; it keeps its own key and appends, as it
  *    did before.
+ *
+ * ## Why this carries no `kind` refusal of its own
+ *
+ * It branches on the same two-valued `kind` with the same shape {@link shiftRange}
+ * used to have — `previousYear` named, the previousPeriod arm taken by everything
+ * else — so the obvious reading is that it needs the same refusal. It does not,
+ * for three reasons, and the first two are PINNED rather than asserted
+ * (`__tests__/dataset-compare-kind-refusal.test.ts`):
+ *
+ *  - it is **not on the package's public surface**. `src/index.ts` re-exports
+ *    `shiftRange` and not this function, and the manifest maps only `.`, so no
+ *    consumer outside this package can call it at all — the asymmetry that makes
+ *    `shiftRange` owe a refusal and this function not;
+ *  - its **only caller is {@link DatasetExecutor.runCompare}**, which calls
+ *    `shiftRange` unconditionally — and needs its result to build the very
+ *    `shiftedRange` argument passed here — BEFORE the row map that reaches this.
+ *    So there is no path on which this function sees a `kind` that `shiftRange`
+ *    did not already accept; a refusal here would be unreachable code;
+ *  - a throw would **contradict the posture stated above**. Every uncertainty this
+ *    function knows about answers `null` — "leave this row's key alone" — and it
+ *    runs inside a per-row map, where failing the whole request is a different
+ *    contract from the one this docblock commits to.
+ *
+ * ⚠️ Export this function, or give it a second caller that does not go through
+ * `shiftRange` first, and the pin goes red: that is the moment the `kind`
+ * judgment has to be made here too, and the red is what makes it a decision
+ * instead of a silent regression.
  *
  * @param currentRange - the selection's own window for the anchor dimension.
  * @param shiftedRange - what {@link shiftRange} made of it.

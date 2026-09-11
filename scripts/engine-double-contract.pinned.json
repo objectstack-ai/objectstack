@@ -777,6 +777,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.meta-types-degenerate-derivation.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.meta-types-degenerate-derivation.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.meta-types-degenerate-derivation.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.meta-types-mint-door-agreement.test.ts",
       "verb": "delete",
       "pinned": 1
