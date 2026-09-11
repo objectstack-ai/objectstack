@@ -56,7 +56,12 @@ import {
   checkListViewCalendarVisualization,
 } from './view.zod';
 import { PageSchema, checkPageSourceCompleteness } from './page.zod';
-import { GlobalFilterSchema, checkGlobalFilterDateDefaultValue } from './dashboard.zod';
+import {
+  GlobalFilterSchema,
+  checkGlobalFilterDateDefaultValue,
+  DashboardWidgetSchema,
+  checkDashboardWidgetStageOrder,
+} from './dashboard.zod';
 import * as ui from './index';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -229,6 +234,44 @@ const dateDefaultFixtures: Fixture[] = [
   { label: 'a non-date filter with the bad spelling', value: { field: 'period', type: 'select', defaultValue: 'last_7_dayz' }, refusesAt: [] },
 ];
 
+/**
+ * The widget base every stage-order fixture builds on — shape-valid on purpose
+ * (`id` two characters or more, a `dataset`, at least one `values` member), for
+ * the reason the file header gives: zod 4 skips object-level checks when the
+ * shape itself failed, so a shape-invalid fixture would make "refused" true for
+ * the wrong reason.
+ */
+const WIDGET = { id: 'stage_widget', dataset: 'contracts', dimensions: ['status'], values: ['count'] } as const;
+
+const stageOrderFixtures: Fixture[] = [
+  {
+    label: '`stageOrder` on a widget type that does not read it',
+    value: { ...WIDGET, type: 'horizontal-bar', options: { stageOrder: ['draft', 'approved'] } },
+    refusesAt: ['options.stageOrder'],
+  },
+  {
+    label: '`stageOrder` on a second non-funnel type — the message interpolates, the check does not',
+    value: { ...WIDGET, type: 'pie', options: { stageOrder: ['draft'] } },
+    refusesAt: ['options.stageOrder'],
+  },
+  {
+    label: '`stageOrder` on a widget that declares NO type (the `metric` default)',
+    value: { ...WIDGET, options: { stageOrder: ['draft'] } },
+    refusesAt: ['options.stageOrder'],
+  },
+  {
+    label: '`stageOrder` on the one type that reads it',
+    value: { ...WIDGET, type: 'funnel', options: { stageOrder: ['draft', 'approved'] } },
+    refusesAt: [],
+  },
+  {
+    label: 'a non-funnel carrying the SIBLING options, which every type reads',
+    value: { ...WIDGET, type: 'horizontal-bar', options: { sortBy: 'count', sortOrder: 'desc', limit: 10 } },
+    refusesAt: [],
+  },
+  { label: 'a non-funnel with no `options` at all', value: { ...WIDGET, type: 'horizontal-bar' }, refusesAt: [] },
+];
+
 // ---------------------------------------------------------------------------
 // The population — every mirrored spec object that carries an object-level check
 // ---------------------------------------------------------------------------
@@ -254,6 +297,23 @@ const MIRRORED: MirroredSchema[] = [
     schema: GlobalFilterSchema,
     exports: [{ name: 'checkGlobalFilterDateDefaultValue', check: checkGlobalFilterDateDefaultValue, fixtures: dateDefaultFixtures }],
     cleanFixtures: [{ field: 'created_at', type: 'date' }],
+  },
+  // `dashboard.widgets[]` is mirrored the same way and for the same reason, so
+  // the ADR-0049 `stageOrder` type gate belongs in this catalogue: measured at
+  // the `.objectui-sha` pin `53ded82bf7a494f54e344e19099dbf00854b8694`,
+  // objectui's `packages/types/src/zod/complex.zod.ts` builds its own
+  // `DashboardWidgetSchema` from
+  // `specFieldsExcept(SpecDashboardWidgetSchema.shape, …)` — a `.shape` spread,
+  // which carries the FIELDS and drops every object-level check. That mirror
+  // re-attaches none of these exports today, which is a live gap recorded on
+  // the check's own docblock rather than a reason to leave the export
+  // uncatalogued: an export nothing pins here can drift away from the rule the
+  // door runs, and then a mirror that DOES re-attach it re-attaches the drift.
+  {
+    name: 'DashboardWidgetSchema',
+    schema: DashboardWidgetSchema,
+    exports: [{ name: 'checkDashboardWidgetStageOrder', check: checkDashboardWidgetStageOrder, fixtures: stageOrderFixtures }],
+    cleanFixtures: [{ ...WIDGET, type: 'horizontal-bar' }],
   },
 ];
 
@@ -384,6 +444,11 @@ describe('each schema attaches its export BY IDENTIFIER — no inline copy', () 
 // ---------------------------------------------------------------------------
 
 describe('`./index` (the `@objectstack/spec/ui` surface) exports the same function objects', () => {
+  // NOT the full export list: `checkDashboardWidgetStageOrder` is catalogued in
+  // `MIRRORED` above (legs 1-2) and carries its own legs 3-4 — barrel identity
+  // and attached-by-identifier — beside the schema it guards, in
+  // `dashboard.test.ts`. Read this `it.each` as the rows that live here, not as
+  // an enumeration of every exported refinement.
   it.each([
     ['checkListViewCalendarVisualization', checkListViewCalendarVisualization],
     ['checkPageSourceCompleteness', checkPageSourceCompleteness],

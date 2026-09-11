@@ -420,6 +420,7 @@
     "chartAggregateCategoryKey": "src/ui/chart-aggregate.ts#chartAggregateCategoryKey (function)",
     "chartAggregateResultKeys": "src/ui/chart-aggregate.ts#chartAggregateResultKeys (function)",
     "chartAggregateValueKey": "src/ui/chart-aggregate.ts#chartAggregateValueKey (function)",
+    "checkDashboardWidgetStageOrder": "src/ui/dashboard.zod.ts#checkDashboardWidgetStageOrder (function)",
     "checkGlobalFilterDateDefaultValue": "src/ui/dashboard.zod.ts#checkGlobalFilterDateDefaultValue (function)",
     "checkListViewCalendarVisualization": "src/ui/view.zod.ts#checkListViewCalendarVisualization (function)",
     "checkPageSourceCompleteness": "src/ui/page.zod.ts#checkPageSourceCompleteness (function)",

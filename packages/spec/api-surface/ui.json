@@ -434,6 +434,7 @@
     "chartAggregateCategoryKey (function)",
     "chartAggregateResultKeys (function)",
     "chartAggregateValueKey (function)",
+    "checkDashboardWidgetStageOrder (function)",
     "checkGlobalFilterDateDefaultValue (function)",
     "checkListViewCalendarVisualization (function)",
     "checkPageSourceCompleteness (function)",
