@@ -77,17 +77,17 @@ function declared(status: number, code: string, message: string) {
  */
 function fourDoors(logger?: Logger): HonoHttpServer {
     const s = server(logger);
-    const envelopeThrow = () => {
-        throw declared(503, 'SERVICE_UNAVAILABLE', 'The authorization store could not be read.');
-    };
-    const plainThrow = () => {
-        throw new Error('connect ECONNREFUSED 127.0.0.1:5432');
-    };
+    // The two throws are built by a factory and thrown AT each door, rather
+    // than thrown inside a shared helper: a Hono handler must not return
+    // `void`, and only a body whose statement IS the `throw` infers `never`.
+    const envelopeError = () =>
+        declared(503, 'SERVICE_UNAVAILABLE', 'The authorization store could not be read.');
+    const plainError = () => new Error('connect ECONNREFUSED 127.0.0.1:5432');
 
-    s.getRawApp().get('/raw/envelope', () => { envelopeThrow(); });
-    s.getRawApp().get('/raw/plain', () => { plainThrow(); });
-    s.get('/wrapped/envelope', async () => { envelopeThrow(); });
-    s.get('/wrapped/plain', async () => { plainThrow(); });
+    s.getRawApp().get('/raw/envelope', () => { throw envelopeError(); });
+    s.getRawApp().get('/raw/plain', () => { throw plainError(); });
+    s.get('/wrapped/envelope', async () => { throw envelopeError(); });
+    s.get('/wrapped/plain', async () => { throw plainError(); });
     return s;
 }
 
@@ -181,14 +181,13 @@ describe('the raw door reads the ONE rule, not a second one', () => {
         const s = server();
         // `plugin-approvals`' lifecycle hooks and `metadata-protocol` throw
         // `statusCode`; both spellings are produced in this repo.
-        const thrower = () => {
-            throw Object.assign(new Error('locked by another process'), {
+        const conflict = () =>
+            Object.assign(new Error('locked by another process'), {
                 statusCode: 409,
                 code: 'LOCK_CONFLICT',
             });
-        };
-        s.getRawApp().get('/raw/conflict', () => { thrower(); });
-        s.get('/wrapped/conflict', async () => { thrower(); });
+        s.getRawApp().get('/raw/conflict', () => { throw conflict(); });
+        s.get('/wrapped/conflict', async () => { throw conflict(); });
 
         const raw = await call(s, '/raw/conflict');
         const wrapped = await call(s, '/wrapped/conflict');
@@ -204,11 +203,10 @@ describe('the raw door reads the ONE rule, not a second one', () => {
         // declaration (#16545 recorded this as its widest limb), so a bare
         // ValidationError answers 400/VALIDATION_FAILED at BOTH doors rather
         // than the raw door inventing its own rule.
-        const thrower = () => {
-            throw Object.assign(new Error('name is required'), { name: 'ValidationError' });
-        };
-        s.getRawApp().get('/raw/invalid', () => { thrower(); });
-        s.get('/wrapped/invalid', async () => { thrower(); });
+        const invalid = () =>
+            Object.assign(new Error('name is required'), { name: 'ValidationError' });
+        s.getRawApp().get('/raw/invalid', () => { throw invalid(); });
+        s.get('/wrapped/invalid', async () => { throw invalid(); });
 
         const raw = await call(s, '/raw/invalid');
         const wrapped = await call(s, '/wrapped/invalid');
