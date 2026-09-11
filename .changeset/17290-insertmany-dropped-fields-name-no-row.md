@@ -6,16 +6,14 @@
 
 fix(metadata-protocol): `insertManyData` reports the dropped-field union at BATCH level instead of naming rows it cannot identify (#17290)
 
-**BREAKING** — `insertManyData`'s response moves `droppedFields` from each
-outcome to the response itself:
+<!-- adr-0087: not-required (no-migration-prescription) nothing authored or stored moves: no authorable key, no Zod schema and no stored `sys_metadata` shape changes — `packages/spec` declares no response schema for this face at all, so `objectstack migrate meta` has nothing to visit, `spec-changes.json` has nothing to project and the upgrade guide gains no row. What moves is one optional member on an inline TypeScript response type of a runtime protocol method, and the channel that reaches every affected consumer is the compiler at their own call site, which names the site more precisely than a ledger line could. The `packages/spec` file in this diff is a `.describe()` STRING — customer-facing prose that this change would otherwise leave false — not a schema, a key or an accept set; nothing it declares moves. -->
 
-```
-FROM  { object, outcomes: [{ ok, record, droppedFields? }, …] }
-TO    { object, outcomes: [{ ok, record }, …], droppedFields? }
-```
-
-The set reported is the same set. What is gone is a per-row attribution that
-could not be computed here and was wrong whenever it mattered.
+**BREAKING** — `@objectstack/metadata-protocol`'s `insertManyData` no longer hangs
+`droppedFields` on each entry of `outcomes`; the response itself carries it, beside
+`outcomes`, exactly as `createManyData` already does. A TypeScript consumer that read
+the per-row member stops compiling, and the compiler names the site. The set reported
+is the same set — what is gone is a per-row attribution that could not be computed
+here and was wrong whenever it mattered. Nothing authored or stored changes shape.
 
 **What it got wrong.** Every create-side strip is the engine's, and its
 `onFieldsDropped` event is the UNION over the batch — the listener signature
