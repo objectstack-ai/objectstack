@@ -69,17 +69,19 @@ import { z } from 'zod';
  *   freezes the **vocabulary**. One property is worth stating here
  *   because it is authored against: a `*_end` token is the period's
  *   last calendar DAY (`{current_year_end}` → `2026-12-31`). What a
- *   bare day then DENOTES on each side of an operator is not this
- *   file's rule and is deliberately not restated here — it is the
- *   platform-wide rule in `./calendar-day.ts` (ADR-0053 D-D): as an
- *   upper bound (`$lte`, a `$between` max, a `dateRange` end) a bare
- *   day means the WHOLE day, compiled half-open to the next calendar
- *   day, so `<= {current_year_end}` reaches the final instant of Dec
- *   31; as `$gte` / `$gt` / `$lt` it means that day's `00:00:00.000`.
+ *   bare day DENOTES once it lands on one side of an operator is a
+ *   separate contract, stated once in
+ *   `packages/spec/src/data/calendar-day.ts` (ADR-0053 D-D) and
+ *   deliberately not restated here: as an upper bound (`$lte`, a
+ *   `$between` max, a `dateRange` end) a bare day means the WHOLE
+ *   day, compiled half-open to the next calendar day, so
+ *   `<= {current_year_end}` reaches the final instant of Dec 31; as
+ *   `$gte` / `$gt` / `$lt` it means that day's `00:00:00.000`.
  *   ⛔ Do NOT hand-write a half-open detour (`< {next_year_start}`)
- *   to cover the last day of a period on a `datetime` column: every
- *   backend already applies that widening, and `./temporal-conformance.ts`
- *   pins it cross-driver.
+ *   to cover a period's last day on a `datetime` column: every
+ *   backend already applies the widening, and
+ *   `packages/spec/src/data/temporal-conformance.ts` pins it
+ *   cross-driver.
  */
 
 /** Single-point tokens — moments in time. */
