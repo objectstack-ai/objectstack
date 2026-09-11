@@ -958,12 +958,15 @@ export interface IApprovalService {
    * then nobody who could: {@link decide}, {@link recall}, {@link sendBack}
    * and {@link resubmit} each guard on a LIVE request — `pending` for
    * {@link decide} and {@link sendBack}, `returned` for {@link resubmit},
-   * and `pending` or the revise window for {@link recall} — and the row is
-   * terminal, none of those: it was written by the very call that stranded
-   * the run. Meanwhile a generic engine resume is refused at a node
-   * declaring `resumeAuthority: 'service'`. The only verb left was cancel,
-   * which discards the branch's downstream work. This is the issuer that
-   * exits that dead end.
+   * and `pending` or the revise window for {@link recall} — and the stranding
+   * call left the row where none of them can issue the continuation it owes.
+   * ⚠️ Not because the row is never `returned`: a stranded send-back leaves
+   * it exactly there, and {@link resubmit} is still no way back — it is
+   * submitter-only, and it owes the `resubmit` edge where the stranded
+   * continuation was the `revise` one. Meanwhile a generic engine resume is
+   * refused at a node declaring `resumeAuthority: 'service'`. The only verb
+   * left was cancel, which discards the branch's downstream work. This is the
+   * issuer that exits that dead end.
    *
    * What it does, exactly, and what it does not:
    *  - it replays the outcome the request ALREADY recorded onto the pause that
