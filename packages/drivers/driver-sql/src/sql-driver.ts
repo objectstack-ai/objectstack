@@ -4554,6 +4554,34 @@ export class SqlDriver implements IDataDriver {
   protected fileColumnsMoved = false;
   /** The unresolved resolver from config, cleared once it has been asked. */
   private fileColumnsMovedResolver?: () => boolean | Promise<boolean>;
+  /**
+   * The columns whose DECLARED type is `boolean` or `toggle` — a READ-COERCION
+   * registry: its readers present the stored form (SQLite INTEGER 0/1, MySQL
+   * `tinyint(1)`) as one JS boolean.
+   *
+   * ⚠️ [#17586] SCALAR only. A `multiple: true` boolean/toggle is deliberately
+   * NOT here — the same carve-out {@link mediaFields} states just above, and
+   * the one `numericFields` / `numericValueFields` carry in both fills. Its
+   * value is a LIST of booleans in a JSON column ({@link isJsonField} reduces
+   * to `!!field.multiple` for these two types, neither being in
+   * `JSON_COLUMN_TYPES`), and "present this as ONE boolean" has no meaning
+   * over an array: `Boolean(v)` is `true` for EVERY non-empty array, so a
+   * stored `[false]` presented as `true` is the OPPOSITE of what is stored,
+   * silently. The fills spell the condition rather than each reader because
+   * no reader needs the entry — measured, all four:
+   *
+   * 1. the [#11635] Postgres aggregate CAST — would emit `cast(?? as int)`
+   *    over a `json` column, which is not a defined cast there;
+   * 2. {@link readPresentationKind} — hands the same one-boolean presenter to
+   *    the `aggregate()` / `distinct()` doors, where the raw cell is the JSON
+   *    STRING `'[false]'` and `Boolean('[false]')` is `true`: the identical
+   *    inversion one door over;
+   * 3. `formatOutput`'s row pass — the [#11782] coercion this registry exists
+   *    for, and where the collapse was filed;
+   * 4. {@link isNonTextColumn} — already carves multi-valued out AT THE READER
+   *    (`&& !this.isJsonColumn(...)`, #17343), so its answer is UNCHANGED by
+   *    the narrowing rather than merely unharmed by it.
+   */
   protected booleanFields: Record<string, string[]> = {};
   protected numericFields: Record<string, string[]> = {};
   /**
@@ -10046,7 +10074,12 @@ export class SqlDriver implements IDataDriver {
         // Unconditional, on BOTH arms — see {@link mediaFields}. The read-side
         // legacy-encoding repair runs on a deployment that has not moved too.
         if (!field.multiple && FILE_REFERENCE_TYPES.has(type)) mediaCols.push(name);
-        if (type === 'boolean' || type === 'toggle') booleanCols.push(name);
+        // [#17586] SCALAR only — `&& !field.multiple` is the house spelling
+        // its three neighbours in this block already carry, and this line was
+        // the single omission. See {@link booleanFields}: every reader of this
+        // registry presents its entry as ONE JS boolean, which for a
+        // multi-valued (JSON) column collapses the parsed array to `true`.
+        if ((type === 'boolean' || type === 'toggle') && !field.multiple) booleanCols.push(name);
         if (NUMERIC_SCALAR_TYPES.has(type) && !field.multiple) numericCols.push(name);
         // [#16318] The authorable half only — see {@link numericValueFields}.
         if (NUMERIC_VALUE_TYPES.has(type) && !field.multiple) numericValueCols.push(name);
@@ -10131,7 +10164,12 @@ export class SqlDriver implements IDataDriver {
         // `toggle` shares boolean storage/affinity, so it needs the same
         // read coercion (stored 1/0 → JS true/false) or it leaks back as a
         // number/string instead of a boolean (#field-zoo).
-        if (type === 'boolean' || type === 'toggle') {
+        // [#17586] SCALAR only, like the three neighbours below: a
+        // `multiple: true` boolean/toggle is a JSON column, and the read
+        // coercion this registry exists for presents ONE JS boolean — which
+        // collapses the parsed array to `true` whatever it holds. See
+        // {@link booleanFields}.
+        if ((type === 'boolean' || type === 'toggle') && !field.multiple) {
           booleanCols.push(name);
         }
         // Numeric scalars are coerced back to JS numbers on read so legacy
@@ -13830,18 +13868,26 @@ export class SqlDriver implements IDataDriver {
    * - **temporal** [#15683] — HERE. `dateFields` / `datetimeFields` /
    *   `timeFields` serve the read-presentation seam, which DOES apply to a
    *   multi-valued column, so narrowing them would break a seam that is right.
-   * - **boolean** [#17343] — HERE, for the same reason, and this limb had
-   *   NEITHER until then. `booleanFields` is a READ-COERCION registry (its
-   *   fills say so: stored 1/0 → JS `true`/`false`, and `toggle` shares boolean
-   *   affinity), read by three other seams — the Postgres aggregate cast, the
-   *   presentation-kind door and `formatOutput`'s row pass — so narrowing it
-   *   would move three answers to repair one. #14079 landed this predicate
-   *   describing itself as "a declared numeric or boolean SCALAR" and annotated
-   *   the numeric registry as non-`multiple`, so the omission was the gap
-   *   between that stated scope and `booleanFields`' silence, never a ruling
-   *   that a stored array of booleans is meaningless: `boolean` + `multiple:
-   *   true` is authorable, gets a JSON column here, and its `$contains`
-   *   answered correctly on every other declared class.
+   * - **boolean** [#17343] — HERE, and this limb had NEITHER until then.
+   *   #14079 landed this predicate describing itself as "a declared numeric or
+   *   boolean SCALAR" and annotated the numeric registry as non-`multiple`, so
+   *   the omission was the gap between that stated scope and `booleanFields`'
+   *   silence, never a ruling that a stored array of booleans is meaningless:
+   *   `boolean` + `multiple: true` is authorable, gets a JSON column here, and
+   *   its `$contains` answered correctly on every other declared class.
+   *
+   *   ⚠️ [#17586] `booleanFields` has SINCE been narrowed at both fills, for a
+   *   defect of its own (the read coercion collapsed a parsed array to a
+   *   single, inverted `true`). So this limb's carve-out is now REDUNDANT —
+   *   and it is kept deliberately, on two grounds: the registry's narrowing is
+   *   a read-coercion decision that must not silently become this gate's
+   *   correctness condition, and the carve-out is what states the rule for the
+   *   limb — a text operator is legal against a JSON column — where the
+   *   registry states only which columns take a coercion. The equivalence that
+   *   makes the two agree (for `boolean`/`toggle`, `isJsonColumn` IS
+   *   `!!field.multiple`) is pinned by execution in
+   *   `sql-driver-17586-multi-valued-boolean-read-inversion.test.ts`, so a
+   *   divergence turns that file red rather than moving this answer.
    */
   protected isNonTextColumn(table: string | null | undefined, localField: string): boolean {
     if (!table) return false;
