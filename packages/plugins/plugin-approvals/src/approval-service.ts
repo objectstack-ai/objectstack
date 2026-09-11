@@ -5052,8 +5052,10 @@ export class ApprovalService implements IApprovalService {
    * `true` — and its own reason string tells the operator to *re-issue the
    * continuation*. For an `approval` node there was then nobody who could:
    *
-   *  - `decide` / `recall` / `sendBack` / `resubmit` all guard on a `pending`
-   *    request, and the row is terminal — written by the very call that
+   *  - `decide` / `recall` / `sendBack` / `resubmit` each guard on a LIVE
+   *    request — `pending` for `decide` and `sendBack`, `returned` for
+   *    `resubmit`, and `pending` or the revise window for `recall` — and the
+   *    row is terminal, none of those: it was written by the very call that
    *    stranded the run;
    *  - the generic `engine.resume` refuses, because the `approval` node
    *    declares `resumeAuthority: 'service'` and the #3801 gate turns away any
