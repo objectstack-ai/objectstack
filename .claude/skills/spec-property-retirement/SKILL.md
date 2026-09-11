@@ -52,23 +52,23 @@ preview renderer 不算消费者)与 AGENTS.md §"Touched `packages/spec`?"(八�
       conversion 表的 fixture 不相交契约(§3)会因叠放而失败。先例:
       `agent.knowledge` 在发布前吞掉了 `topics`→`sources` 改名。
 - [ ] **台账判它 `live-elsewhere` 吗?** 本仓实测无消费者、姊妹仓真在强制执行的
-      键 —— **永不是删除候选**。单读 `dead` 会批准一次删除,而它删掉的是姊妹仓某
-      道门的输入。该核的不是删除面,是它的佐证纪律:外仓指针、
+      键 —— **永不是删除候选**。该核的不是删除面,是它的佐证纪律:外仓指针、
       `evidenceScope: "cross-repo"`、带日期的 `verifiedAt`、180 天过期 —— 四条由
       `packages/spec/scripts/liveness/elsewhere.mts` 执行,出处见 README 的
       `live-elsewhere` 一节。
+- [ ] **零编写实例普查要并跑一个同族已知存活的键作对照**,两读数都报;同得零即没测出。
+- [ ] **拿 `cross-repo` 行当论据,就当刻重核路径与行号**:漂了读作重新取证,⛔ 不是 `dead`。
+- [ ] **「零编写实例」≠「没有代码读它」。** 前者答的是示例应用,后者才是退役的证据。
 
 ## 1. 裁判是构建,不是台账
 
-台账的 `dead` 裁定是删除的**输入**,不能替代构建自己的证明。它是一条带时间戳的声
-明,代码在它底下双向移动(`flow.status` 与 `action.undoable` 都被*低估*过)。
+台账的 `dead` 裁定是删除的**输入**,不能替代构建自己的证明。代码在它底下双向移动
+(`flow.status` 与 `action.undoable` 都被*低估*过)。
 
 所以:**先尝试删除,让构建来裁。** #3896 收尾里,`view.form.data` 挂在工作清单上是
-dead(「两个仓都没有 form 路径的读者」),而删除打断了 `gen:schema` —— `defineForm`
-往每个 `*.form.ts` 写 `data: { provider: 'schema', schemaId }`,`metadata-protocol`
-把它喂给 metadata-admin 管线。正确的回应**不是**硬删:把台账条目改回 `live`、附真实
-证据与 `verifiedAt`,收窄 conversion,钉上 non-warn。十四个键里有一个是这样被证伪的
-—— 给它留预算。
+dead(「两个仓都没有 form 路径的读者」),而删除打断了 `gen:schema`。正确的
+回应**不是**硬删:把台账条目改回 `live`、附真实证据与 `verifiedAt`,收窄
+conversion,钉上 non-warn。十四个键里有一个是这样被证伪的 —— 给它留预算。
 
 两条推论:
 
