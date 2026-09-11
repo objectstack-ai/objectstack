@@ -5,6 +5,10 @@ import { TimeRelativeTriggerSchema, LoopConfigSchema, ParallelConfigSchema, TryC
 // [#5659] The shared identity reduction, asserted beside the rule that consumes
 // it — the rule's verdict and the drivers' verdict are one object now.
 import { reduceFilterVerdict } from '@objectstack/spec/data';
+// [#17495] The published sentence the blank-condition refusal leads with,
+// asserted from the spec's own export rather than re-spelled here — see the
+// re-judged pin in `flow-inert-node-condition` below.
+import { EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec';
 import { AUTHORING_RULES } from './authoring-rules.js';
 import {
   lintFlowPatterns,
@@ -28,6 +32,10 @@ import {
   FLOW_LOOP_BODY_UNCONTAINED,
   FLOW_TRY_CATCH_WITHOUT_CATCH,
 } from './lint-flow-patterns.js';
+// [#17495] Cross-site pin only — the re-judged `flow-inert-node-condition`
+// case below. This family's own coverage is unaffected by it;
+// `validate-expressions.test.ts` owns the rest of that rule's coverage.
+import { validateStackExpressions } from './validate-expressions.js';
 
 const CEL = (source: string) => ({ dialect: 'cel', source });
 /**
@@ -1274,9 +1282,31 @@ describe('flow-inert-node-condition (#4414)', () => {
     }).filter((f) => f.rule === FLOW_INERT_NODE_CONDITION)).toHaveLength(0);
   });
 
-  it('does NOT flag a node with no condition, or an empty one', () => {
+  it('does NOT flag a node with no condition, or an empty one — but validate no longer stays silent on the blank (#17495)', () => {
     expect(lintFlowPatterns(conditionNodeFlow('decision', {}))).toHaveLength(0);
     expect(lintFlowPatterns(conditionNodeFlow('decision', { condition: '   ' }))).toHaveLength(0);
+    // RE-JUDGED IN PLACE (#17495), not deleted — the two zeros above are
+    // deliberate and they still stand, but the REASON the blank one stands has
+    // changed and the pin now says so.
+    //
+    // What it recorded: this pin sat over the whole `lintFlowPatterns` answer,
+    // taken at a time when `objectstack validate` as a whole admitted a blank
+    // `config.condition` — `registerFlow` admitted it too, and #15662 ruled
+    // that agreement correct. It was therefore readable as "validate says
+    // nothing about a blank condition". Since #17322 rebound `registerFlow` to
+    // the edge door's non-blank rule, that reading would be a false record.
+    //
+    // What it records now: `flow-inert-node-condition` (#4414) is about a key
+    // NOTHING READS, and a blank condition is not that — this family has no
+    // opinion on blankness and never had one, so its zero is unchanged and is
+    // NOT a statement about validate's answer. The refusal lives one pass over,
+    // in `validateStackExpressions` (#17495), and the cross-site assertion
+    // below is what keeps the zero above from being read as silence again.
+    const blank = conditionNodeFlow('decision', { condition: '   ' });
+    const refusals = validateStackExpressions(blank);
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0].message).toBe(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
+    expect(refusals[0].where).toContain("node 'n' (decision) condition");
   });
 
   it('does NOT flag a PLUGIN node type — its executor may legitimately read it', () => {
