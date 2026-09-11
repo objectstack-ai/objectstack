@@ -118,7 +118,7 @@ dataset compiles to:
 | `sortBy` | `string` | Orders rows by a dimension or measure **this widget selects**. |
 | `sortOrder` | `asc \| desc` | Direction for `sortBy` (default `asc`). |
 | `limit` | `number` | Max rows, applied **after** ordering. |
-| `stageOrder` | `(string \| number \| boolean)[]` | Explicit stage order for `funnel` / `pyramid`, as the dimension's **stored values**. Omit to use the dimension field's picklist option order. |
+| `stageOrder` | `(string \| number \| boolean)[]` | Explicit stage order for a `funnel` widget, as the dimension's **stored values**. `funnel` is the only widget type that reads it — on any other type the key parses and is never consulted; order those with `sortBy` / `sortOrder`. Omit to use the dimension field's picklist option order. |
 
 Because they are declared, a misspelling (`sortDirection`, `granularity`) is an
 author-time error rather than an option that reads as if it works.
