@@ -376,9 +376,16 @@ function defaultListViewKey(object: string, container: any): string | undefined 
  *  - **`description` — read SERVER-SIDE ONLY**, by `resolveViewDescription`
  *    in that same resolver and through that same `translateView`. objectui#7219
  *    removed the `useObjectLabel().viewDescription()` member, so the server
- *    overlay is this key's ONE reader: the resolved value reaches the screen as
- *    the `description` the served view document already carries. ⛔ The
- *    absence of a browser-side helper is not evidence the key is inert.
+ *    overlay is this key's ONE reader: it lands on the `description` of the
+ *    served view document, which objectui relays (`ObjectView`) and renders
+ *    (`ListView`, via `pickLocalized`).
+ *    ⚠️ objectui pins this key as "an inert catalog entry", and no bundle in
+ *    this repo authors a `description` leaf under `_views` (the nine shipped
+ *    `en.objects.generated.ts` carry `label` and `emptyState` leaves only).
+ *    ⛔ Neither fact licenses deleting this emission: both are scoped to the
+ *    BROWSER path objectui#7219 removed, and the server reader above is
+ *    untouched by them. Absence of a browser-side helper, and absence of an
+ *    authored value, are not evidence the key is unread.
  *  - **`emptyState` — read CLIENT-SIDE ONLY**, by
  *    `useObjectLabel().viewEmptyState` in `@object-ui/i18n`. The spec resolver
  *    declares no empty-state reader at all, which is why `pushViewEmptyState`
