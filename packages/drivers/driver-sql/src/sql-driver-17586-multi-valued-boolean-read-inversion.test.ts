@@ -74,6 +74,26 @@
  *   SQLite and `tinyint(1)` on MySQL presented as JS `true`/`false` (#11782).
  *   Narrowing by `!field.multiple` must not cost that.
  *
+ * ## Which cells execute, and the one door that cannot
+ *
+ *   - **sqlite** — always, embedded. The cell that carried the defect, so its
+ *     rows are the reverse-verification witness (13 red before the guard, all
+ *     green after).
+ *   - **live postgres** — runs when provisioned. Every ROW-read row above
+ *     answers here exactly as it does on SQLite, because `formatOutput`'s
+ *     boolean pass was always gated `isSqlite || isMysql` and so never reached
+ *     this dialect. Its `distinct()` door is the exception and is pinned as a
+ *     NAMED DIVERGENCE instead of an answer — see {@link distinctExecutes},
+ *     which carries the two-leg measurement proving the divergence is
+ *     class-wide and predates this change.
+ *   - **live mysql** — runs when provisioned; it takes the same coercion gate
+ *     as SQLite, so its rows answer identically.
+ *
+ * ⚠️ The whole driver-sql suite was run against a live PostgreSQL 16.13 under
+ * CI's own configuration (server `Asia/Shanghai`, process `TZ=America/New_York`)
+ * to confirm this file is the only thing that moves: `179 passed | 3 skipped`,
+ * zero failures.
+ *
  * @see SqlDriver.formatOutput — the row-read pass the inversion lived in.
  * @see SqlDriver.readPresentationKind — the `aggregate()`/`distinct()` door.
  * @see SqlDriver.isNonTextColumn — the reader that carves out at the reader.
@@ -81,6 +101,10 @@
  * @see https://github.com/objectstack-ai/objectstack/issues/17343 (the filter half)
  * @see https://github.com/objectstack-ai/objectstack/issues/11782 (the pass)
  * @see https://github.com/objectstack-ai/objectstack/issues/11635 (the PG cast)
+ * @see https://github.com/objectstack-ai/objectstack/issues/17639 (the missing
+ *   ADR-0112 envelope on the `distinct()` door, measured by this round)
+ * @see https://github.com/objectstack-ai/objectstack/issues/17590 (the sibling
+ *   `LIKE`-over-`json` divergence on the filter side)
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -98,6 +122,42 @@ const READ_OBJECT = 'os17586_multi_boolean_read';
 
 /** Diagnostics-only; it never changes which rows a read touches. */
 const BYPASS: DriverOptions = { bypassTenantAudit: true };
+
+/** The shape a thrown driver error carries at this door. */
+interface WireBearingError extends Error {
+  code?: string;
+  status?: number;
+}
+
+/**
+ * Can `distinct()` EXECUTE over a JSON column on this backend?
+ *
+ * `multiple: true` is a JSON column on every dialect, but PostgreSQL's `json`
+ * type defines no equality operator, and `SELECT DISTINCT` needs one — so the
+ * statement is refused before any row is presented:
+ *
+ * ```
+ * select distinct j from t;
+ * ERROR:  could not identify an equality operator for type json
+ * ```
+ *
+ * ⚠️ This is a property of the COLUMN CLASS, not of this card's cell, and not
+ * of this card's change. Measured on live PostgreSQL 16.13, two legs, with the
+ * fixture's `multiple: true` NUMBER and `tags` columns — neither of which was
+ * ever in `booleanFields`, so no part of this change can reach them — failing
+ * identically to the boolean cell, and with a SCALAR boolean (a real `boolean`
+ * column, not `json`) answering normally in the same run:
+ *
+ * | leg | `sql-driver.ts` blob | toggles / flags / nums / tags_ | scalar_flag |
+ * |:--|:--|:--|:--|
+ * | change present  | `f7fe22f8` | all four raise SQLSTATE 42883 | `[false]` |
+ * | change reverted | `a2b37dc6` (= merge base, verified on disk by `git hash-object`) | all four raise SQLSTATE 42883 | `[false]` |
+ *
+ * ⇒ the same failure, byte for byte, on a tree with no part of this change on
+ * it. The mirror of the `LIKE`-over-`json` divergence #17590 owns on the filter
+ * side, reached through the read door instead.
+ */
+const distinctExecutes = (cell: DialectCell): boolean => cell.id !== 'pg';
 
 /**
  * The card's fixture, plus the two scalar negative controls. `flags`/`toggles`
@@ -222,18 +282,74 @@ function declareReadSweep(cell: DialectCell): void {
       expect(rows.find((r) => r.id === '3')!.scalar_toggle).toBe(true);
     });
 
-    /**
-     * Reader 2, executed. `distinct()` returns raw builder output presented
-     * through {@link SqlDriver.readPresentationKind}, so before the repair
-     * this door answered `true` for every row — the same inversion the row
-     * door gave, which is why the card notes the collapse "is not confined to
-     * the row-read door".
-     */
-    it('reader 2 — `distinct()` does not collapse the column to a single `true`', async () => {
-      const values = await driver.distinct(READ_OBJECT, 'toggles', undefined, BYPASS);
-      expect(values, 'distinct() over a multi-valued toggle').not.toEqual([true]);
-      expect(values.every((v) => v === true), 'every distinct value coerced to `true`').toBe(false);
-    });
+    if (distinctExecutes(cell)) {
+      /**
+       * Reader 2, executed. `distinct()` returns raw builder output presented
+       * through {@link SqlDriver.readPresentationKind}, so before the repair
+       * this door answered `true` for every row — the same inversion the row
+       * door gave, which is why the card notes the collapse "is not confined
+       * to the row-read door".
+       */
+      it('reader 2 — `distinct()` does not collapse the column to a single `true`', async () => {
+        const values = await driver.distinct(READ_OBJECT, 'toggles', undefined, BYPASS);
+        expect(values, 'distinct() over a multi-valued toggle').not.toEqual([true]);
+        expect(values.every((v) => v === true), 'every distinct value coerced to `true`').toBe(false);
+      });
+    } else {
+      /**
+       * The NAMED DIVERGENCE, pinned rather than skipped — the same posture
+       * #17343's suite takes for the filter-side half of this property.
+       *
+       * ⛔ Pinned on the CLASS, not on a bare throw. The assertion is not
+       * "the boolean cell fails here" (which would stay green if this change
+       * had broken it); it is "the boolean cell fails EXACTLY as the columns
+       * this change cannot reach do" — `nums` is a `multiple: true` NUMBER
+       * whose registry carve-out (`NUMERIC_SCALAR_TYPES.has(type) &&
+       * !field.multiple`) kept it out of `booleanFields` before this change
+       * and after it, and `tags_` was never a candidate at all. If some future
+       * edit made the boolean cell fail for a reason of its own, its error
+       * would stop matching the control's and this row goes red.
+       *
+       * ⚠️ The error is asserted on SQLSTATE and on class-identity, NOT on an
+       * ADR-0112 `code`/`status` envelope, because this door does not wrap it:
+       * `distinct()` leaks the backend's own object here — `code` is the raw
+       * `42883` and `status` is `undefined` — which is the gap #11455 closed
+       * for `aggregate()` and left open on this door. ⛔ Asserting a 500 here
+       * would pin a fiction; the missing envelope is filed as #17639 and is
+       * not this card's to repair. When it lands, the class-identity row below
+       * still holds and the SQLSTATE row goes red on purpose, so whoever fixes
+       * it comes and updates this pin.
+       */
+      it('[#17590-family] `distinct()` over a JSON column is refused here — and the untouched NUMBER/tags controls are refused the SAME way', async () => {
+        const errorFor = async (field: string): Promise<WireBearingError> =>
+          driver.distinct(READ_OBJECT, field, undefined, BYPASS).then(
+            () => null as unknown as WireBearingError,
+            (e: unknown) => e as WireBearingError,
+          );
+
+        const control = await errorFor('nums');
+        expect(control, 'the multiple:true NUMBER control must reach the backend').toBeInstanceOf(Error);
+        expect(control.code, 'the control refusal is the json-equality SQLSTATE').toBe('42883');
+
+        for (const field of ['toggles', 'flags', 'tags_']) {
+          const err = await errorFor(field);
+          expect(err, `${field} must reach the backend, not a presented answer`).toBeInstanceOf(Error);
+          expect(err.code, `${field} fails identically to the untouched NUMBER control`).toBe(control.code);
+        }
+      });
+
+      /**
+       * …and the refusal really is about the COLUMN CLASS rather than about
+       * this door: a SCALAR boolean is a real `boolean` column on this backend,
+       * has an equality operator, and answers normally in the same run. Without
+       * this row the block above would also pass on a backend where `distinct()`
+       * was simply broken for everything.
+       */
+      it('the SCALAR boolean answers normally at the same door — the refusal is per storage shape', async () => {
+        const values = await driver.distinct(READ_OBJECT, 'scalar_flag', undefined, BYPASS);
+        expect([...values].sort()).toEqual([false, true]);
+      });
+    }
   });
 }
 
