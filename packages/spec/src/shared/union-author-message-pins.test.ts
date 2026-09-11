@@ -127,11 +127,24 @@
  * 1. **The rendered message names the key, the surface and the rename.** This
  *    is the half that was missing. It reads `formatZodError`, the real
  *    `defineStack`/CLI door, not the raw issue tree.
- * 2. **Branch selection is structural, not an accident of one fixture.** Every
- *    fixture gives the object branch MORE THAN ONE issue, so a descent that
- *    happened to surface a single issue cannot pass for a working one; and the
- *    string arm's `expected string, received object` — a kind mismatch, not a
- *    prescription — must NOT be rendered.
+ * 2. **Branch selection is structural, not an accident of one fixture.** Each
+ *    row DECLARES how many issues the branch `selectUnionBranches` actually
+ *    picks carries, and that count is asserted exactly; twelve of the thirteen
+ *    declare two or more, so a descent that surfaced only a lone issue could
+ *    not pass for a working one. The thirteenth (`data/object.zod.ts:855`)
+ *    declares one and says so at the row — see there. The selected branch must
+ *    also be the object arm, and the string arm's `expected string, received
+ *    object` — a kind mismatch, not a prescription — must NOT be rendered.
+ *
+ *    ⚠️ This clause was VACUOUS in the first two revisions and is worth the
+ *    warning, because it is this card's own subject matter turning up inside
+ *    the fix for it. It read `(union.errors ?? []).flat().length > 1` — every
+ *    branch summed together. At a string-or-object site the string arm always
+ *    contributes exactly one `invalid_type`, so the bound held however few
+ *    issues the object arm raised: a pin that could not fail, certifying a
+ *    structural property nobody had measured. Measured once it counted the
+ *    right branch, two of the thirteen rows did not satisfy the claim the
+ *    header was making for all of them.
  * 3. **The accept side is unmoved.** A bare string entry and a legal object
  *    entry both still parse at every site.
  */
@@ -148,6 +161,7 @@ import { ChartGroupBySchema } from '../ui/chart.zod';
 import { RecordHighlightsProps } from '../ui/component.zod';
 import { FormSectionSchema, GanttConfigSchema, GanttQuickFilterSchema } from '../ui/view.zod';
 import { formatZodError } from './error-map.zod';
+import { selectUnionBranches } from './union-branch-policy';
 
 /** A door that renders through `formatZodError` — every schema below is one. */
 interface Door {
@@ -161,10 +175,23 @@ interface UnionMessageSite {
   readonly door: Door;
   /**
    * A body whose OBJECT arm carries more than one issue — pin 2's structural
-   * requirement. `issues` is how many the object branch raises, asserted so a
-   * fixture cannot silently decay into a single-issue one.
+   * requirement.
    */
   readonly reject: unknown;
+  /**
+   * How many issues the branch `selectUnionBranches` actually PICKS carries for
+   * {@link reject} — declared per row, and asserted exactly.
+   *
+   * ⚠️ Declared rather than bounded (`> 1`) because a bound is what went wrong
+   * here. Pin 2 first counted every branch flattened together, and at a
+   * string-or-object site the string arm always contributes one `invalid_type`,
+   * so `> 1` held no matter what the object arm did — a clause that could not
+   * fail. An exact count cannot be satisfied by an unrelated arm, and it fails
+   * loudly when a fixture stops measuring what its row says it measures, in
+   * EITHER direction. Measured, never guessed: the assertion prints the real
+   * per-branch codes when it fails.
+   */
+  readonly selectedBranchIssues: number;
   /** The undeclared key the fixture writes. */
   readonly key: string;
   /**
@@ -216,6 +243,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     site: 'automation/state-machine.zod.ts:120',
     door: GuardRefSchema,
     reject: { parms: { a: 1 } },
+    selectedBranchIssues: 2,
     key: 'parms',
     keyInMessage: '`parms`',
     surface: 'this guard reference',
@@ -227,6 +255,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     site: 'automation/state-machine.zod.ts:231',
     door: StateNodeSchema,
     reject: { on: { GO: { guard: 'isX', actions: 'not-an-array' } } },
+    selectedBranchIssues: 2,
     key: 'guard',
     keyInMessage: '`guard`',
     surface: 'this state transition',
@@ -239,6 +268,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     door: StateMachineSchema,
     reject: { id: 'machine', initial: 'idle', states: { idle: { initial: 'a', states: {} } },
       on: { GO: { guard: 'isX', actions: 'not-an-array' } } },
+    selectedBranchIssues: 2,
     key: 'guard',
     keyInMessage: '`guard`',
     surface: 'this state transition',
@@ -252,6 +282,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     site: 'automation/approval.zod.ts:791',
     door: ApprovalNodeConfigSchema,
     reject: { approvers: [{ type: 'user', value: 'u1' }], decisionOutputs: [{ widget: 'user' }] },
+    selectedBranchIssues: 2,
     key: 'widget',
     keyInMessage: '`widget`',
     surface: 'this decision-output declaration',
@@ -264,6 +295,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     site: 'automation/flow-function.zod.ts:252',
     door: FlowFunctionEntrySchema,
     reject: { efect: 'pure' },
+    selectedBranchIssues: 2,
     key: 'efect',
     keyInMessage: '`efect`',
     surface: 'this `functions` entry',
@@ -275,6 +307,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     site: 'data/field.zod.ts:1438',
     door: FieldSchema,
     reject: { name: 'owner', type: 'lookup', reference: 'account', lookupColumns: [{ name: 'amount' }] },
+    selectedBranchIssues: 2,
     key: 'name',
     keyInMessage: '`name`',
     surface: 'this lookup column',
@@ -286,6 +319,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     site: 'data/field.zod.ts:1464',
     door: FieldSchema,
     reject: { name: 'owner', type: 'lookup', reference: 'account', dependsOn: [{ local: 'account' }] },
+    selectedBranchIssues: 2,
     key: 'local',
     keyInMessage: '`local`',
     surface: 'this dependsOn entry',
@@ -297,6 +331,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     site: 'ui/chart.zod.ts:767',
     door: ChartGroupBySchema,
     reject: { granularity: 'day' },
+    selectedBranchIssues: 2,
     key: 'granularity',
     keyInMessage: '`granularity`',
     surface: 'this chart groupBy',
@@ -308,6 +343,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     site: 'ui/component.zod.ts:1181',
     door: RecordHighlightsProps,
     reject: { fields: [{ field: 'status' }] },
+    selectedBranchIssues: 2,
     key: 'field',
     keyInMessage: '`field`',
     surface: 'this `record:highlights` field',
@@ -319,6 +355,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     site: 'ui/view.zod.ts:1379',
     door: GanttQuickFilterSchema,
     reject: { field: 'stage', options: [{ title: 'Won' }] },
+    selectedBranchIssues: 2,
     key: 'title',
     keyInMessage: '`title`',
     surface: 'this gantt quick-filter option',
@@ -331,6 +368,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     door: GanttConfigSchema,
     reject: { startDateField: 's', endDateField: 'e', titleField: 't',
       tooltipFields: [{ name: 'amount' }] },
+    selectedBranchIssues: 2,
     key: 'name',
     keyInMessage: '`name`',
     surface: 'this gantt tooltip field',
@@ -350,7 +388,11 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
   ['FormSection.fields — a form field entry (curated map + separate `.strict()`)', {
     site: 'ui/view.zod.ts:2895',
     door: FormSectionSchema,
-    reject: { label: 'S', fields: [{ field: 'x', visibleWhenn: 'a', bogus: 1 }] },
+    // ⚠️ `field` is omitted deliberately: the object branch must carry a
+    //    SECOND issue (the missing required key) beside `unrecognized_keys`,
+    //    or pin 2's selected-branch count has nothing to discriminate.
+    reject: { label: 'S', fields: [{ visibleWhenn: 'a', bogus: 1 }] },
+    selectedBranchIssues: 2,
     key: 'visibleWhenn',
     keyInMessage: '`visibleWhenn`, `bogus`',
     surface: 'this form field',
@@ -366,6 +408,14 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     reject: { name: 'lead', label: 'Lead', fields: { a: { type: 'text', label: 'A' } },
       lifecycle: { class: 'audit', retention: { maxAge: '30d',
         onlyWhen: { status: { $in: ['closed'], bogusKey: 1 } } } } },
+    // ⚠️ ONE, and the only row below two. The `$in` arm is selected with a
+    //    lone `unrecognized_keys` (it ties on fewest-issues and wins the
+    //    unknown-key tiebreak over the `$null` arm's two), so this row does
+    //    NOT discriminate 'the WHOLE selected branch is rendered' — only
+    //    that the branch is rendered at all. Re-ordering its fixture to fix
+    //    that is an open card of its own and deliberately NOT done here; the
+    //    count is declared so the gap is visible rather than silent.
+    selectedBranchIssues: 1,
     key: 'bogusKey',
     keyInMessage: 'Unrecognized key: "bogusKey"',
     surface: null,
@@ -423,22 +473,46 @@ describe('[#15423] the AUTHOR-VISIBLE message at a string-or-object union site',
   // ── Pin 2 ─────────────────────────────────────────────────────────────────
   describe('pin 2 — branch selection is structural, not an accident of one fixture', () => {
     it.each(SITES)('%s', (_name, site) => {
-      // Every fixture gives the OBJECT branch more than one issue. A descent
+      // Every fixture gives the SELECTED branch more than one issue. A descent
       // that only ever surfaced a lone issue would pass a single-issue fixture
       // while dropping real diagnoses here.
+      //
+      // ⚠️ "Selected", emphatically not "all branches flattened". The first
+      // version of this clause counted `(union.errors ?? []).flat()`, which
+      // sums EVERY arm — and at a two-arm string-or-object site the string arm
+      // always contributes exactly one `invalid_type`. So `> 1` was satisfied
+      // by the kind mismatch alone, at every row, no matter what the object
+      // arm did: a clause that could not fail, inside a file whose whole
+      // purpose is pins that cannot silently certify coverage they do not
+      // have. It is measured against the branch `selectUnionBranches` really
+      // picks — the same policy the renderer runs — so the count is the one
+      // whose issues actually reach the author.
       const result = site.door.safeParse(site.reject) as {
         error: { issues: ReadonlyArray<{ code: string; errors?: ReadonlyArray<ReadonlyArray<unknown>> }> };
       };
-      type Nested = { code: string; errors?: ReadonlyArray<ReadonlyArray<Nested>> };
+      type Nested = { code: string; path?: PropertyKey[]; errors?: ReadonlyArray<ReadonlyArray<Nested>> };
       const flatten = (issues: ReadonlyArray<Nested>): Nested[] =>
         issues.flatMap((i) => [i, ...(i.errors ?? []).flat().flatMap((n) => flatten([n]))]);
       const union = flatten(result.error.issues as ReadonlyArray<Nested>)
         .find((i) => i.code === 'invalid_union');
       expect(union, `${site.site}: the refusal really is a union collapse`).toBeDefined();
-      const branchIssues = (union!.errors ?? []).flat();
-      expect(branchIssues.length,
-        `${site.site}: the fixture must give the object branch MORE THAN ONE issue`)
-        .toBeGreaterThan(1);
+
+      const { selected } = selectUnionBranches((union!.errors ?? []) as Nested[][]);
+      expect(selected.length,
+        `${site.site}: the policy must select a branch — an empty selection renders nothing`)
+        .toBeGreaterThan(0);
+      expect(selected[0]!.length,
+        `${site.site}: the SELECTED branch's issue count must equal what the row declares `
+        + `— per-branch codes were `
+        + `${JSON.stringify((union!.errors ?? []).map((b) => b.map((i) => i.code)))}`)
+        .toBe(site.selectedBranchIssues);
+
+      // ⛔ And the string arm is genuinely NOT what was selected — the clause
+      // above would be satisfied by any two-issue branch, including a string
+      // arm that somehow carried two complaints.
+      expect(selected[0]!.some((i) => i.code === 'unrecognized_keys'),
+        `${site.site}: the selected branch must be the object arm, which is where the prescription lives`)
+        .toBe(true);
 
       // …and the whole selected branch is rendered, not just its first issue.
       const rendered = formatZodError(
@@ -480,22 +554,38 @@ describe('[#15423] the AUTHOR-VISIBLE message at a string-or-object union site',
       expect(SITES).toHaveLength(13);
       // Each row names a distinct `z.union` coordinate.
       expect(new Set(SITES.map(([, s]) => s.site)).size).toBe(SITES.length);
+
+      // ⛔ The single-issue exemption is BOUNDED. `selectedBranchIssues: 1`
+      // means that row cannot discriminate "the whole selected branch is
+      // rendered", so it may not spread by copy-paste into new rows: exactly
+      // one row carries it today, and it is the one the header names. A
+      // fourteenth row declaring 1 turns this red and has to argue for itself.
+      const singleIssueRows = SITES.filter(([, s]) => s.selectedBranchIssues < 2);
+      expect(singleIssueRows.map(([, s]) => s.site)).toEqual(['data/object.zod.ts:855']);
     });
 
-    it('CONTROL — a class-C (open) arm raises no refusal at all, which is why it is excluded', () => {
+    it('CONTROL — a class-C (open) arm raises no UNKNOWN-KEY refusal, which is why it is excluded', () => {
       // The header's exclusion, asserted rather than asserted-about. The same
-      // probe, one undeclared key, two classes:
+      // probe, one UNDECLARED key, two classes:
       //
       //   class C (`data/query.zod.ts:200`, a non-strict `z.object` arm) —
-      //     the key is STRIPPED and the body parses, so there is no
-      //     author-visible message at that site to pin or to regress;
+      //     the key is STRIPPED and the body parses, so there is no curated
+      //     unknown-key prose at that site to pin or to regress;
       //   class A (`ui/chart.zod.ts:767`, the same shape closed) — refused,
       //     naming the key and the surface.
+      //
+      // ⛔ Read the class-C half narrowly, exactly as the header states it. It
+      // does NOT say a class-C site is silent: a wrong-typed or bad-enum
+      // DECLARED key there IS refused and IS rendered through this same
+      // descent. What these 17 sites lack is curated unknown-key prose — no
+      // surface, no rename — which is the only thing this file's pin shape
+      // knows how to assert. Their rendered half is covered generically by
+      // `shared/error-map.test.ts`.
       //
       // Without the second half the first is just a schema that happened to
       // accept something; together they are the boundary this file draws.
       const openArm = GroupByNodeSchema.safeParse({ field: 'created_at', bogusKey: 1 });
-      expect(openArm.success, 'class C: an undeclared key is stripped, not refused').toBe(true);
+      expect(openArm.success, 'class C: an UNDECLARED key is stripped, not refused').toBe(true);
       expect(openArm.data, 'class C: and it is gone from the parsed value')
         .toEqual({ field: 'created_at' });
 
