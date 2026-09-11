@@ -76,18 +76,48 @@ const reader = (): any => ({
     executionContext: { userId: 'u_admin', isSystem: false, systemPermissions: ['manage_metadata', 'studio.access'] },
 });
 
-/** `GET /packages/:id` with whatever query the case is about. */
-async function get(query: Record<string, unknown>) {
-    const dispatcher = make();
+/**
+ * `GET /packages/:id` against an EXISTING host.
+ *
+ * ⛔ Every case that compares two RESPONSE BODIES must issue both requests
+ * through this, against ONE `make()`. `SchemaRegistry.installPackage` stamps
+ * `installedAt` and `updatedAt` from a single `new Date()` per install
+ * (`packages/objectql/src/registry.ts`), and both are declared record fields
+ * that `toPackageResponse` carries to the wire. So two hosts hold two rows
+ * whose stamps differ whenever the installs straddle a millisecond boundary,
+ * and a whole-body `toEqual` between them fails on the clock rather than on
+ * anything this door did — a flake that passes on a re-run and comes back.
+ *
+ * One host makes it deterministic rather than merely likelier: both responses
+ * are projections of ONE row, so there is no second install and no second
+ * clock read to disagree. Nothing on the read path reads a clock at all —
+ * neither `toPackageResponse` (an allowlist copy) nor `withWritableVerdict` (a
+ * spread) nor the dispatcher's `success()` envelope — so with one install the
+ * stamps cannot move, at any scheduling.
+ *
+ * ⛔ The repair for such a failure is this shape, ⛔ never dropping the two
+ * stamps out of the comparison: whole-body equality is what makes «the same
+ * request» mean the same RESPONSE rather than the same status.
+ */
+async function read(dispatcher: HttpDispatcher, query: Record<string, unknown> | undefined) {
     const r = await dispatcher.handlePackages(`/${PKG}`, 'GET', undefined, query, reader());
     return { status: r.response?.status ?? 200, body: r.response?.body };
+}
+
+/** One request on a host of its own — for the cases that compare against no other body. */
+async function get(query: Record<string, unknown>) {
+    return read(make(), query);
 }
 
 describe('#17416 GET /packages/:id — ?version= scopes the read', () => {
     describe('§1 the discriminating pin — with and without ?version= are not the same answer', () => {
         it('a non-installed ?version= is NOT answered with the installed row', async () => {
-            const scoped = await get({ version: ABSENT });
-            const unscoped = await get({});
+            // ONE host: the criterion is «the SAME request with and without
+            // `?version=`», so both answers have to be about the same row —
+            // two hosts would let a difference come from the rows instead.
+            const host = make();
+            const scoped = await read(host, { version: ABSENT });
+            const unscoped = await read(host, {});
 
             // The discriminating field, not the status alone.
             expect(scoped.status).toBe(404);
@@ -132,18 +162,19 @@ describe('#17416 GET /packages/:id — ?version= scopes the read', () => {
         });
 
         it('is byte-identical to the read with no query object at all', async () => {
-            const dispatcher = make();
-            const withEmpty = await dispatcher.handlePackages(`/${PKG}`, 'GET', undefined, {}, reader());
-            const withNone = await dispatcher.handlePackages(`/${PKG}`, 'GET', undefined, undefined, reader());
-            expect(withNone.response?.status ?? 200).toBe(200);
-            expect(withNone.response?.body).toEqual(withEmpty.response?.body);
+            const host = make();
+            const withEmpty = await read(host, {});
+            const withNone = await read(host, undefined);
+            expect(withNone.status).toBe(200);
+            expect(withNone.body).toEqual(withEmpty.body);
         });
     });
 
     describe('§3 `latest` and absent name the SAME request', () => {
         it('?version=latest serves the installed row, exactly as no parameter does', async () => {
-            const latest = await get({ version: 'latest' });
-            const unscoped = await get({});
+            const host = make();
+            const latest = await read(host, { version: 'latest' });
+            const unscoped = await read(host, {});
             expect(latest.status).toBe(200);
             expect(latest.body).toEqual(unscoped.body);
         });
@@ -160,8 +191,9 @@ describe('#17416 GET /packages/:id — ?version= scopes the read', () => {
         });
 
         it('ONE occurrence encoded as a one-element array is one occurrence', async () => {
-            const arr = await get({ version: [INSTALLED] });
-            const str = await get({ version: INSTALLED });
+            const host = make();
+            const arr = await read(host, { version: [INSTALLED] });
+            const str = await read(host, { version: INSTALLED });
             expect(arr.status).toBe(200);
             expect(arr.body).toEqual(str.body);
         });
