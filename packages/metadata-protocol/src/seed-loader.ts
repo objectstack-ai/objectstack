@@ -38,6 +38,39 @@ interface Logger {
 const DEFAULT_EXTERNAL_ID_FIELD = 'name';
 
 /**
+ * [#17177] The scope every pass-2 "this column is NULL" line must carry.
+ *
+ * Those lines are emitted while the load is still running — inside
+ * `AppPlugin.start()`, which the kernel completes for EVERY plugin before it
+ * fires `kernel:ready`. Plenty of boot happens after that point, and some of
+ * it writes the very columns these lines report on: the first-admin handoff
+ * (`claimSeedOwnership`, `@objectstack/plugin-security`) re-owns every
+ * `owner_id IS NULL` row of every user-authored object the moment the first
+ * human is promoted to platform admin. That handoff is not an accident — this
+ * file's own seed-identity comment names it as the designed completion of a
+ * NULL owner column — so a line reading "`x.owner_id` stays NULL" is TRUE when
+ * it is printed and FALSE by the time the app is serving, with nothing in
+ * either reading to tell an operator that the other exists.
+ *
+ * ⛔ The loader cannot repair that by re-reading the table before it returns:
+ * the handoff runs strictly after the loader is done, and an inline seed that
+ * overruns `OS_INLINE_SEED_BUDGET_MS` finishes on the far side of
+ * `kernel:ready` entirely — so the two writes are not even in a fixed order to
+ * read after. What the loader CAN do is say which moment it is describing.
+ * That is this sentence, and it is why the two branches below now say "is NULL
+ * at the end of pass 2" instead of "stays NULL".
+ *
+ * Deliberately NOT carried by the two DROPPED branches: those report a row
+ * that never landed, and no later boot step can write a column of a row that
+ * does not exist, so their claim survives to the end of boot unchanged.
+ */
+const PASS_2_SCOPE_NOTE =
+  'SCOPE: this describes the column as of the END OF PASS 2, not as of the end of boot — a later boot ' +
+  'step can still write it (the first-admin handoff claims every NULL-owned `owner_id` row once that ' +
+  'account is promoted), so finding a non-NULL value in the table later is not evidence that this ' +
+  'reference resolved.';
+
+/**
  * [#8442] What a seed `errors[].message` says when the caught sentence may NOT
  * be quoted. Names the operation and points at the log; quotes nothing.
  */
@@ -1846,8 +1879,8 @@ export class SeedLoaderService implements ISeedLoaderService {
             // line is not printing.
             const causeSentence = seedFailureCause(err);
             this.logger.error(
-              `[SeedLoader] Deferred reference back-fill FAILED — ${deferred.objectName}.${deferred.field} stays NULL ` +
-                `on record '${recordName}'. The row itself was seeded, so every row counter looks healthy ` +
+              `[SeedLoader] Deferred reference back-fill FAILED — ${deferred.objectName}.${deferred.field} ` +
+                `is NULL at the end of pass 2 on record '${recordName}'. The row itself was seeded, so every row counter looks healthy ` +
                 `while the circular relationship is HALF-WRITTEN: nothing links it to ${deferred.targetObject}.` +
                 `${deferred.targetField} = '${this.formatAttempted(deferred.attemptedValue)}'. Nothing retries this — ` +
                 `fix the write error below (a transient failure that outlasted the retry budget, or a validation rule ` +
@@ -1855,7 +1888,7 @@ export class SeedLoaderService implements ISeedLoaderService {
                 // [#8442] Same cause vocabulary as the pass-1 write sites: the
                 // raw sentence always, MARKED when the payload half withheld it
                 // so an operator can see the reporter did not receive this line.
-                `${seedCauseLabel(err, causeSentence)}: ${causeSentence}`,
+                `${seedCauseLabel(err, causeSentence)}: ${causeSentence}. ${PASS_2_SCOPE_NOTE}`,
               err instanceof Error ? err : undefined,
               {
                 object: deferred.objectName,
@@ -1971,12 +2004,13 @@ export class SeedLoaderService implements ISeedLoaderService {
         const missedValue = this.formatAttempted(stillUnresolved ? missingItem : deferred.attemptedValue);
         this.logger.error(
           `[SeedLoader] Deferred reference UNRESOLVED after pass 2 — ${deferred.objectName}.${deferred.field} ` +
-            `stays NULL on record '${recordName}'. The row itself was seeded, so every row ` +
+            `is NULL at the end of pass 2 on record '${recordName}'. The row itself was seeded, so every row ` +
             `counter looks healthy while the relationship is MISSING: nothing links it to ` +
             `${deferred.targetObject}.${deferred.targetField} = '${missedValue}', because no such ` +
             `${deferred.targetObject} row exists — neither seeded in this load nor already in the database. ` +
-            `Nothing retries this: pass 2 is the last one. Add the missing ${deferred.targetObject} record to ` +
-            `the seed (or fix the natural key that names it) and re-run the seed to complete the link.`,
+            `No further seed pass retries this: pass 2 is the last one. Add the missing ${deferred.targetObject} ` +
+            `record to the seed (or fix the natural key that names it) and re-run the seed to complete the link. ` +
+            PASS_2_SCOPE_NOTE,
           undefined,
           {
             object: deferred.objectName,
