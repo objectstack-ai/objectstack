@@ -1587,6 +1587,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/seed-loader-summary-scope.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-summary-scope.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-summary-scope.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/seed-loader-summary-stale.test.ts",
       "verb": "delete",
       "pinned": 1

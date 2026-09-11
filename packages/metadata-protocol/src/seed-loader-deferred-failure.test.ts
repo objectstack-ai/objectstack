@@ -226,9 +226,9 @@ describe('seed deferred back-fill failure is reported, not swallowed (framework#
       .find((m: string) => m.includes('audit_department.head_id'));
     expect(line, 'the failed back-fill was not reported at error level').toBeDefined();
 
-    // The consequence, concretely: which reference stays NULL, and that
-    // everything else looks fine.
-    expect(line).toContain('stays NULL');
+    // The consequence, concretely: which reference is NULL, as of when
+    // (#17177), and that everything else looks fine.
+    expect(line).toContain('is NULL at the end of pass 2');
     expect(line).toContain('HALF-WRITTEN');
     expect(line).toContain('audit_worker.name');
     // The fix.
