@@ -1235,11 +1235,14 @@ export async function backfillSeedTenancy(
     fallbackSql: buildSequencesPresenceSql(client),
   });
   if (presence.verdict === 'unreadable') {
+    // [#8686, #17175] ⛔ The ids stay in this comment and out of the string: a
+    // runtime line reaches operators, who have no tracker to resolve them with
+    // (`check:doc-authoring`).
     logger?.warn?.(
-      `[metadata-protocol] the seed/API tenancy repair (#8686) could not read whether ` +
+      `[metadata-protocol] the seed/API tenancy repair could not read whether ` +
         `"${SEQUENCES_TABLE}" exists, so it did NOT run and nothing was changed. This is not the ` +
         `table being absent — that answer is silent and normal. Verify by hand with: ` +
-        `${buildSequencesPresenceSql(client)} (#17175).`,
+        `${buildSequencesPresenceSql(client)}`,
       { error: presence.detail, probe: presence.probe },
     );
     return { status: 'unreadable', ...empty, detail: presence.detail };

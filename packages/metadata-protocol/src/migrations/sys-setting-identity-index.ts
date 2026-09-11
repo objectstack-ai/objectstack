@@ -499,12 +499,15 @@ export async function ensureSysSettingIdentityIndex(
         // [#17175] Not 'absent'. The tightening did not run, the previous index
         // is kept, and — unlike absence, which is normal and silent — an
         // operator is told, because nothing here looked at anything.
+        // [#8629, #17175] ⛔ The ids stay in this comment and out of the string:
+        // a runtime line reaches operators, who have no tracker to resolve them
+        // with (`check:doc-authoring`).
         logProblem(
             logger,
             `[metadata-protocol] could not read whether "${SYS_SETTING_TABLE}" exists, so the row-identity ` +
-            `index tightening (#8629) did NOT run and the table keeps whatever unique index it had. ` +
+            `index tightening did NOT run and the table keeps whatever unique index it had. ` +
             `⛔ This is not the table being absent, which is a normal, silent no-op on a kernel without ` +
-            `service-settings. Verify by hand with: ${buildSysSettingPresenceSql()} (#17175).`,
+            `service-settings. Verify by hand with: ${buildSysSettingPresenceSql()}`,
             presence.detail ?? '',
         );
         return { status: 'failed', detail: presence.detail };
