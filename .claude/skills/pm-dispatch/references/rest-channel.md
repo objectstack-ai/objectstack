@@ -58,7 +58,7 @@
 3. 语义搜索:`/search/*` 被出口代理按设计拒绝。退路 = REST 列表端点加本地 grep。
    REST 也被会话门关掉的席位 = 一次定向 MCP `search_issues`,⛔ 不宽表扫。
 4. Projects field_values:GraphQL-only —— 舰队并不需要它;MCP 服务器端无条件抓它才是漏点。
-5. `issue transfer`:issues 端点表无 transfer 路由 ⇒ 同为 GraphQL-only。
+5. `issue transfer`:issues 端点表无 transfer 路由(核对文档,未实调)⇒ 同为 GraphQL-only。
    拿不到时当轮改走在目的仓重建配方,配方住 `platform-readings.md`。
 
 ## 第三桶 —— git 零配额等价物
