@@ -2200,8 +2200,12 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
    * `ViewFilterRule` ARRAY form, `[{ field, operator, value }, ...]`, the one
    * filter orthography the map's array-declared `filter` doors share
    * (`record:related_list`, its nested Add-affordance picker, and — since
-   * #12039 Key 2 — `element:number`; the four `object-*` blocks declare
-   * `filter` as `z.unknown()`, no orthography at all — #15449). Until #14406
+   * #12039 Key 2 — `element:number`; and, since #15449, the four `filter`
+   * doors of the six-entry `object-*` family — `object-grid`,
+   * `object-metric`, `object-kanban` and `object-calendar` — each of which
+   * declares this same `z.array(ViewFilterRuleSchema)`, while that family's
+   * remaining two entries, `object-form` and `object-master-detail-form`,
+   * declare no `filter` key at all). Until #14406
    * this entry alone still said `FilterConditionSchema`, the MongoDB-style
    * record form: the last record-form `filter` in `ComponentPropsMap` after
    * the ui#6206 ruling (2026-08-25, Option B, verbatim 「同意」: one filter
