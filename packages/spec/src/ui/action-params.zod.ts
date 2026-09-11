@@ -253,8 +253,8 @@ export interface ActionEngineFacade {
    * list does NOT have to unroll it into a loop to stay on the contract.
    *
    * What the array form is, exactly: a convenience over the SAME per-row path,
-   * never a bulk or atomic delete. `buildActionEngineFacade`'s `delete` arm
-   * (`packages/runtime/src/action-execution.ts`, `:1471` on `86c50528`)
+   * never a bulk or atomic delete. The `delete` arm of
+   * `packages/runtime/src/action-execution.ts#buildActionEngineFacade`
    * normalises the argument to a list and issues one `ql.delete` per id, in
    * order, under the caller's execution context. There is no transaction
    * around the set: a failure part-way through leaves the ids before it
