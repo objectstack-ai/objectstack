@@ -20,8 +20,15 @@ import type { ActionHandlerContext } from '@objectstack/spec/ui';
 //
 // `ActionHandlerContext` (`@objectstack/spec/ui`) is the PUBLISHED contract for
 // what an action body reads as `ctx` — `record`, `params`, `user`, `session` and
-// the trusted `engine` facade — and annotating a handler with it is what the
-// contract asks an author to do.
+// the trusted `engine` facade.
+//
+// What the contract asks for in its own words is `ActionHandler`. That is a
+// FUNCTION type, and the handlers below are function DECLARATIONS, which cannot
+// carry one; rebinding them as `const cloneTask: ActionHandler = ...` would also
+// erase their return types, because `ActionHandler` returns `unknown`. Annotating
+// the ctx parameter with `ActionHandlerContext` — the type `ActionHandler` is
+// defined in terms of — is the same contract, reached the way this file is
+// written.
 //
 // This file used to declare a local simplified copy of that context instead,
 // and the copy drifted: its `find` still took an ObjectQL-shaped `query` bag

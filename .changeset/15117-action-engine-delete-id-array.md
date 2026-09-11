@@ -1,5 +1,5 @@
 ---
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 ---
 
 fix(spec): `ActionEngineFacade.delete` declares the id ARRAY the runtime has always accepted, and says which convention is the contract (#15117)
@@ -25,6 +25,8 @@ from a runtime comment two packages away:
 
 Nothing is removed and nothing narrows: every existing single-id call still
 type-checks, and no runtime behaviour changes — this release makes the published
-type describe what was already being served. Handler authors who copied the
+type describe what was already being served. That makes it non-breaking, not a
+patch: widening a published parameter is a purely additive widening of a public
+surface, which takes at least `minor` whatever the commit type says. Handler authors who copied the
 facade into a local context type to reach the array form can delete the copy and
 annotate with `ActionHandlerContext` / `ActionHandler` from `@objectstack/spec/ui`.
