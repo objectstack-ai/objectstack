@@ -132,6 +132,61 @@ export default {
 };
 `;
 
+/**
+ * [#17169 — F1 of #17066's verdict] The per-package leg's RESOLUTION CONTEXT,
+ * both directions in ONE build.
+ *
+ * `compile.ts`'s `packageBodyAsStack` hands each package's body the artifact's
+ * own `packages[]` as resolution context (#16611), so a reference into an
+ * object a SIBLING package of the same artifact ships RESOLVES, while one no
+ * entry provides still ERRORS — the second half being the whole difference
+ * between the ruled fix and "skip the site per package".
+ *
+ * One fixture measures both, because the discriminating fact is WHICH of the
+ * two lookups on `probe_order` is reported: `account` (a sibling provides it)
+ * must not be, `ghost` (nothing provides it) must be. Dropping the `packages[]`
+ * pass-through reports both; dropping the judging reports neither.
+ *
+ * ⚠️ The top level carries `probe_account`, so `objects` is PRESENT and
+ * `authoringRuleUnionStack` folds nothing into it — it only ever fills ABSENT
+ * keys. The union run therefore never sees `probe_order`'s fields at all, and
+ * whatever this build reports about them was produced by the per-package leg
+ * and by nothing else. That is what makes this a pin on `compile.ts`'s half
+ * rather than a second copy of `packages/lint`'s rule test, whose input is a
+ * local three-key REPLICA of `packageBodyAsStack` (`perPackageStack`) and stays
+ * green if this command stops building that shape.
+ */
+const CONFIG_PKG_REFS = `
+const coreManifest = { id: 'com.example.probe.core', name: 'core', version: '1.0.0', type: 'app', namespace: 'probe' };
+const probeAccount = {
+  name: 'probe_account', label: 'Account', sharingModel: 'private',
+  fields: { name: { type: 'text', label: 'Name' } },
+};
+const probeOrder = {
+  name: 'probe_order', label: 'Order', sharingModel: 'private',
+  fields: {
+    name: { type: 'text', label: 'Number' },
+    account: { type: 'lookup', label: 'Account', reference: 'probe_account' },
+    ghost: { type: 'lookup', label: 'Ghost', reference: 'probe_nothing' },
+  },
+};
+
+export default {
+  manifest: coreManifest,
+  objects: [probeAccount],
+  packages: [
+    { manifest: { ...coreManifest, objects: [probeAccount] } },
+    {
+      manifest: {
+        id: 'com.example.probe.orders', name: 'orders', version: '1.0.0', type: 'module', namespace: 'probe',
+        dependencies: { 'com.example.probe.core': '^1.0.0' },
+        objects: [probeOrder],
+      },
+    },
+  ],
+};
+`;
+
 interface Artifact {
   manifest?: { id?: string };
   objects?: Array<{ name: string }>;
@@ -147,7 +202,7 @@ const artifactOf = (dir: string): Artifact =>
 
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'os-multi-package-'));
-  for (const [name, config] of Object.entries({ multi: CONFIG_MULTI, single: CONFIG_SINGLE, globs: CONFIG_GLOBS })) {
+  for (const [name, config] of Object.entries({ multi: CONFIG_MULTI, single: CONFIG_SINGLE, globs: CONFIG_GLOBS, refs: CONFIG_PKG_REFS })) {
     const dir = join(root, name);
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'objectstack.config.ts'), config);
@@ -216,6 +271,25 @@ describe('ADR-0130 D4 — `os build` emits one artifact carrying `packages[]`', 
     expect(payload.success).toBe(false);
     const paths = (payload.errors ?? []).map((e) => (e.path ?? []).join('.'));
     expect(paths).toContain('packages.0.manifest.objects.0');
+  }, 180_000);
+
+  it('resolves a SIBLING package\'s object on the per-package leg, and still errors on an artifact-wide dangling one', async () => {
+    const run = await runCli(['build', '--json'], dirs.refs);
+    expect(run.code, `${run.stdout}\n${run.stderr}`).toBe(1);
+    const payload = JSON.parse(run.stdout) as {
+      error?: string;
+      issues?: Array<{ rule: string; path: string; package?: string }>;
+    };
+    // WHICH leg spoke, asserted rather than assumed: the union run's own
+    // failure exit carries `error: 'author-time rules failed'`, so this string
+    // is the only thing that distinguishes the two exits from outside.
+    expect(payload.error).toBe('author-time rules failed for one or more packages');
+    const refs = (payload.issues ?? []).filter((i) => i.rule === 'object-reference-unknown');
+    // Both directions in one equality: `ghost` is present (the leg still
+    // JUDGES) and `account` is absent (the leg RESOLVED it through the
+    // artifact's `packages[]`). A pass-through that went missing reports both.
+    expect(refs.map((i) => i.path)).toEqual(['objects[0].fields.ghost.reference']);
+    expect(refs[0].package).toBe('com.example.probe.orders');
   }, 180_000);
 });
 
