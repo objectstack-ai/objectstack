@@ -298,8 +298,11 @@ describe('#17432 — the unscoped door runs the SAME isolation gates as the scop
         const viaHeader = await h.unscoped({ 'x-environment-id': ENV_BETA });
         const viaUrl = await h.scoped(ENV_BETA);
 
+        // Each side is pinned to the door's own answer FIRST, so the equality
+        // below cannot pass by both sides being absent.
         expect(reachedPackagesDoor(viaHeader)).toBe(true);
-        expect(viaUrl.response.status).toBe(viaHeader.response.status);
-        expect(viaUrl.response.body).toEqual(viaHeader.response.body);
+        expect(reachedPackagesDoor(viaUrl)).toBe(true);
+        expect(viaUrl.response?.status).toBe(viaHeader.response?.status);
+        expect(viaUrl.response?.body).toEqual(viaHeader.response?.body);
     });
 });
