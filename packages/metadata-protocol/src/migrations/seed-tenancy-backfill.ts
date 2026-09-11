@@ -1309,14 +1309,33 @@ export async function backfillSeedTenancy(
   //    "no organizations yet" is a known way to turn an outage into a benign-
   //    looking log line — objectql fixed that exact confusion in
   //    `resolveSystemWriteOrganization`'s probe (#9261). Unknown is not zero.
+  //
+  //    "Separately" is `undefined` versus a string, and the distinction is
+  //    load-bearing (#17167): the failure FACT must not ride on the failure
+  //    TEXT, because the operator channel is allowed to be empty — a thrown
+  //    `''`, a thrown `[]`, an `Error` whose `name` and `message` are both
+  //    empty. A site that reads "the text is empty" as "there was no failure"
+  //    routes exactly those throws down 4a's benign path: measured on this file,
+  //    with the probe's former `|| 'unknown error'` placeholder deleted and
+  //    nothing put in its place, a thrown `''` reports `no-organization-yet`
+  //    and warns about nothing, while the control `new Error('boom')` still
+  //    reports `skipped-ambiguous-organization`. So the fact travels in the
+  //    TYPE — `undefined` is "the probe did not fail" and EVERY string, empty
+  //    or not, is a failure — which leaves the text free to record what the
+  //    backend actually said, including nothing.
   let organizationIds: string[] = [];
-  let organizationProbeError = '';
+  let organizationProbeError: string | undefined;
   try {
     organizationIds = (await selectRows(exec, buildOrganizationProbeSql(client)))
       .map((r) => (r.id == null ? '' : String(r.id)))
       .filter((id) => id.length > 0);
   } catch (e) {
-    organizationProbeError = operatorFacingErrorText(e) || 'unknown error';
+    // [#16657, #17167] The record is the helper's return AS IS, `''` included —
+    // the rule the other four `operatorFacingErrorText` sites in this file
+    // follow. ⛔ No placeholder on top of it: a record reading `'unknown error'`
+    // where the backend said nothing is this migration writing operator-facing
+    // text nobody produced.
+    organizationProbeError = operatorFacingErrorText(e);
     organizationIds = [];
   }
   // 4a. NO organization yet — benign, and NOT the ambiguous case (#12395).
@@ -1341,7 +1360,7 @@ export async function backfillSeedTenancy(
   //     `info`, not silence. The split is real even though the hazard is not, and
   //     a diagnostic silenced in BOTH directions would be worse than the one it
   //     replaces — this still says what was seen, it just stops claiming harm.
-  if (organizationIds.length === 0 && organizationProbeError === '') {
+  if (organizationIds.length === 0 && organizationProbeError === undefined) {
     logger?.info?.(
       `[metadata-protocol] seed/API tenancy split detected on an install with no organization yet — ` +
         `nothing to adopt, and nothing at risk (#8686). Affected: ${affected}. ` +
@@ -1365,12 +1384,21 @@ export async function backfillSeedTenancy(
         `resolved these objects run two autonumber counters and can mint the same "unique" identifier ` +
         `twice. Remedy: as above — stamp the untenanted rows with the owning organization and merge the ` +
         `'${GLOBAL_TENANT}' counter row into the organization-scoped one. ` +
-        (organizationProbeError === ''
+        (organizationProbeError === undefined
           ? ''
-          : `NOTE: the ${ORGANIZATION_TABLE} probe FAILED (${organizationProbeError}), so the count ` +
-            `above is "unknown", not a measured zero — an unreadable probe is reported here rather ` +
-            `than through the benign no-organization-yet path (#9261). `) +
+          : // The parenthetical is dropped, never filled in, when the backend's
+            // operator channel was empty (#17167): the FAILURE is the load-
+            // bearing half of this note and it is stated either way, while the
+            // text is the backend's own or is not there at all.
+            `NOTE: the ${ORGANIZATION_TABLE} probe FAILED` +
+            (organizationProbeError === '' ? '' : ` (${organizationProbeError})`) +
+            `, so the count above is "unknown", not a measured zero — an unreadable probe is ` +
+            `reported here rather than through the benign no-organization-yet path (#9261). `) +
         SNAPSHOT_CAVEAT,
+      // `organizationProbeError` is `undefined` — and so serializes AWAY — when
+      // the probe answered; a probe that failed carries its text, `''` and all.
+      // Absent-versus-empty is what tells the two apart in the stored record
+      // now that no placeholder does it (#17167).
       { splits, organizationCount: organizationIds.length, organizationProbeError },
     );
     return { status: 'skipped-ambiguous-organization', splits, collisions: [], objectsStamped: 0 };
