@@ -333,7 +333,7 @@ describe('#13062 all THREE channels publish that one number', () => {
     expect(
       SERVE,
       'the banner no longer resolves its origin from `boundPort`',
-    ).toContain('externalBaseOrigin: resolveAuthBaseUrl(boundPort).baseOrigin');
+    ).toContain('externalBaseOrigin: resolveAuthBaseUrl(boundPort, boundProtocol).baseOrigin');
   });
 
   it('the ONE wiring site hands the seam the BOUND port, never the requested one', () => {
@@ -343,12 +343,61 @@ describe('#13062 all THREE channels publish that one number', () => {
     expect(
       SERVE,
       'the publish site no longer hands `publishBoundPort` the resolved bound port',
-    ).toContain('publishBoundPort(boundPort, runtimeBoundPortChannels(printBanner));');
+    ).toContain('publishBoundPort(boundPort, runtimeBoundPortChannels(printBanner), boundProtocol);');
     // Exactly two mentions in CODE: the declaration and that single call.
     expect(
       SERVE.match(/publishBoundPort\(/g) ?? [],
       'a second publish site can disagree with the first — that is the #13062 defect returning',
     ).toHaveLength(2);
+  });
+
+  describe('#16804 — the published url names the scheme the socket SPEAKS', () => {
+    it('plain http when nothing asked for TLS — today\'s bytes, unchanged', () => {
+      const seen: Array<{ port: number; url: string }> = [];
+      publishBoundPort(45070, {
+        writeRuntimeState: (published) => { seen.push(published); },
+        announceListening: (message) => { seen.push({ port: message.port, url: message.url }); },
+        printBanner: () => { /* not under test here */ },
+      });
+      expect(seen).toEqual([
+        { port: 45070, url: 'http://localhost:45070' },
+        { port: 45070, url: 'http://localhost:45070' },
+      ]);
+    });
+
+    it('https on BOTH channels under a TLS listener — an ABLATION beside the leg above', () => {
+      // Both consumers of this url OPEN it: the runtime state file is what an
+      // external supervisor dials, the IPC message is what the `os dev` parent
+      // learns the server from. Under `--cert`/`--key` a hardcoded `http://`
+      // hands both an address that answers a TLS handshake error.
+      const seen: Array<{ port: number; url: string }> = [];
+      publishBoundPort(45071, {
+        writeRuntimeState: (published) => { seen.push(published); },
+        announceListening: (message) => { seen.push({ port: message.port, url: message.url }); },
+        printBanner: () => { /* not under test here */ },
+      }, 'https');
+      expect(seen).toEqual([
+        { port: 45071, url: 'https://localhost:45071' },
+        { port: 45071, url: 'https://localhost:45071' },
+      ]);
+    });
+
+    it('the default parameter IS the old behaviour — omitted and `http` agree', () => {
+      const capture = (protocol?: 'http' | 'https') => {
+        const out: string[] = [];
+        const channels = {
+          writeRuntimeState: (published: { port: number; url: string }) => { out.push(published.url); },
+          announceListening: (message: { url: string }) => { out.push(message.url); },
+          printBanner: () => { /* not under test here */ },
+        };
+        if (protocol === undefined) publishBoundPort(45072, channels);
+        else publishBoundPort(45072, channels, protocol);
+        return out;
+      };
+      expect(capture()).toEqual(capture('http'));
+      // …and the legs discriminate, so agreeing is a reading and not a vacuum.
+      expect(capture()).not.toEqual(capture('https'));
+    });
   });
 
   it('⛔ and NONE of the three has drifted back onto the requested port', () => {
@@ -389,7 +438,13 @@ describe('#13062 all THREE channels publish that one number', () => {
       // The positive control for the negatives above: `port` has not been
       // globally renamed, so `not.toContain('port: Number(port)')` is a
       // measurement rather than a consequence of the variable disappearing.
-      expect(SERVE).toContain('new HonoServerPlugin({ port })');
+      //
+      // #16804 widened the construction literal to carry `tls` beside `port`;
+      // what this control needs is that `port` still reaches the transport
+      // under its own name, so it reads the construction site rather than one
+      // formatting of it.
+      expect(SERVE).toContain('new HonoServerPlugin({');
+      expect(SERVE.slice(SERVE.indexOf('new HonoServerPlugin({'))).toMatch(/^new HonoServerPlugin\(\{\s*\n\s*port,/);
       expect(SERVE).toContain('port = await getAvailablePort(requestedPort)');
     });
   });
