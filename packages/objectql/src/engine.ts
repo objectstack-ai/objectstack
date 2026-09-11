@@ -11091,10 +11091,18 @@ export class ObjectQL implements IObjectQLEngine {
    * outcome array — the records ARE written.
    *
    * `onFieldsDropped` (#3407) is forwarded to `insert`, so the runtime-owned
-   * strip (#5503) reports here too. The event carries no row index — it is the
-   * UNION over the batch — but the strip only ever removes keys the row itself
-   * supplied, so a caller holding the input rows can attribute each name back to
-   * the rows that carried it (`insertManyData` does exactly that).
+   * strip (#5503) reports here too. ⚠️ The event carries no row index — it is
+   * the UNION over the batch — and a caller holding the input rows CANNOT
+   * resolve it back to rows. "Which rows supplied N" is a different set from
+   * "which rows dropped N": since ruling C (#14147) the static-`readonly` strip
+   * runs after `beforeInsert` and exempts keys a hook assigned, per row
+   * (`hookWrittenKeys: rowHookWrittenKeys[i]`, above), so two rows that both
+   * supplied N can differ on whether N survived — and a row this method culled
+   * before the strip dropped nothing at all. Nor does the returned row answer
+   * it: a stripped `readonly` field is re-defaulted and a stripped `autonumber`
+   * is refilled, so the key is present on the row that did drop it. Read a
+   * reported name as "at least one row dropped this field"; `insertManyData`
+   * surfaces it at batch level for exactly this reason.
    */
   async insertMany(object: string, rows: any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<InsertManyRowOutcome[]> {
     if (!Array.isArray(rows)) throw new Error('insertMany expects an array of rows');

@@ -2369,8 +2369,10 @@ export const CreateManyDataResponseSchema = lazySchema(() => z.object({
     'tracked per row: rows where a hook stamped a protected key drop a different set from ' +
     'rows where it did not. Present ONLY when ≥1 field was dropped; the creates still succeeded ' +
     'without them (count/success unchanged). Optional — omit-when-empty keeps the shape ' +
-    'backward-compatible. (The per-row `insertMany`/`batch` paths carry per-row `droppedFields` ' +
-    'on each result instead — see BatchOperationResultSchema.)'
+    'backward-compatible. (The same reading applies to the partial-success bulk create, whose ' +
+    'batch-level `droppedFields` names no row for the same reason. The paths that DO carry ' +
+    'per-row `droppedFields` on each result are the bulk UPDATE and the mixed batch, where each ' +
+    'row is its own engine call — see BatchOperationResultSchema.)'
   ),
 }));
 
