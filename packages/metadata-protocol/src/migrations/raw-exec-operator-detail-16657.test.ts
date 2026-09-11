@@ -73,6 +73,7 @@ import {
     ORGANIZATION_TABLE,
     SEQUENCES_TABLE,
 } from './seed-tenancy-backfill.js';
+import { TABLE_IS_PRESENT_ROWS, isTablePresenceCatalogSql } from './read-probe.testkit.js';
 
 /** `rawStatementFaultError`'s composed message, verbatim (`sql-driver.ts`). */
 const COMPOSED =
@@ -230,6 +231,7 @@ describe('[#16657] seed-tenancy-backfill — the stored operator record', () => 
     function seamExec(refuse: (sql: string) => boolean) {
         return async (sql: string): Promise<unknown> => {
             if (refuse(sql)) throw rawStatementFault();
+            if (isTablePresenceCatalogSql(sql, SEQUENCES_TABLE)) return TABLE_IS_PRESENT_ROWS;
             if (sql.includes('WHERE 1 = 0')) return [];
             if (sql.includes('LEFT JOIN')) {
                 return [
