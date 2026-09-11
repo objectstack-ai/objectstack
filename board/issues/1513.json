@@ -1,0 +1,36 @@
+{
+  "number": 1513,
+  "kind": "pull_request",
+  "title": "refactor(service-datasource): merge federation + runtime admin into one package",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T03:36:54Z",
+  "updated_at": "2026-06-02T03:47:02Z",
+  "closed_at": "2026-06-02T03:43:11Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-02T03:43:11Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1513",
+  "body": "## What\n\nMerges `@objectstack/service-external-datasource` (federation) and `@objectstack/service-datasource-admin` (runtime UI lifecycle) into a single **`@objectstack/service-datasource`**.\n\n## Why\n\nThey were always one ADR-0015 capability — the split existed *only* because the runtime admin was once private/out-of-repo. Now that both are open-source (#1502, #1511), that reason is gone, and one package is the simpler, truer model. **Now is the cheapest time**: only the `cli` depended on either package, so the rename's blast radius is minimal.\n\nThe earlier \"keep them separate\" arguments (independent mounting, the open-core DI seam, audit surface) turned out **not** to require a *package* boundary — they live at the plugin-constructor / module level. The two plugins still mount independently (serve wires each in its own block); merging the package did not couple them.\n\n## How\n\n- `git mv` preserves history for **both** halves.\n- Unified `index.ts` re-exports both surfaces; single canonical `Logger`.\n- Plugin **runtime IDs** unchanged (`com.objectstack.service-external-datasource` / `com.objectstack.service-datasource-admin`), so dedup matching + persisted references keep working — only the npm package name changed.\n- `package.json`: driver packages as optional peers; exports `.` + `./contracts`; local tsup (index + contracts entries).\n- Consumers updated: `cli` dep, `serve.ts` dynamic imports, `.changeset/config.json`.\n\n## Verification\n\n- typecheck clean; **56 tests pass** (federation + admin combined).\n- merged package build (incl. dts) + cli build green.\n\n## Note for the cloud repo\n\n`cloud` doesn't import these directly (it consumes the framework CLI), so no cloud change is needed. The old package names are fully retired in framework live code/config.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

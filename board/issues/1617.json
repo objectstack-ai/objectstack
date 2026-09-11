@@ -1,0 +1,35 @@
+{
+  "number": 1617,
+  "kind": "pull_request",
+  "title": "fix(messaging): converge mark-read receipt on unique-index race",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-06T13:39:35Z",
+  "updated_at": "2026-06-06T13:44:17Z",
+  "closed_at": "2026-06-06T13:44:16Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-06T13:44:16Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1617",
+  "body": "## 问题\n\n点开消息通知时服务端报 `UNIQUE constraint failed: sys_notification_receipt.notification_id, sys_notification_receipt.user_id, sys_notification_receipt.channel`，mark-read 失败。\n\n## 根因\n\n`MessagingService.upsertReadReceipt` 用先查后写（check-then-act）：先 `findOne` 找 `(notification_id, user_id, channel)` 的 receipt，落空就 `insert` 一条 `state:'read'`。这中间存在竞态窗口——只要有第二个写入者抢先建了那一行，第二个 `insert` 就撞上 `UNIQUE(notification_id, user_id, channel)` 索引：\n\n- 前端点击常连发两次 mark-read（点击 + 打开），两个请求都 findOne 落空、都 insert；\n- 投递时那条 best-effort 的 `delivered` receipt 写入是异步的，可能与点击并发或刚好在其后落库。\n\n## 修复\n\n- `upsertReadReceipt`：insert 撞唯一索引时不再抛出，而是重新 findOne 把已存在的那行翻成 `read`（输了竞态就回退成 update）。\n- 新增跨驱动 `isUniqueViolation()`（SQLite / Postgres `23505` / MySQL `ER_DUP_ENTRY`），只对真正的唯一约束冲突回退，不吞其它错误。\n- 加回归测试 `markRead survives a unique-index race on the receipt insert`。\n\n## 验证\n\n- `pnpm vitest run src/messaging-service.test.ts` → 28 passed\n- `pnpm build` 通过\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

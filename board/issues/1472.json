@@ -1,0 +1,33 @@
+{
+  "number": 1472,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0031 — structured control-flow (loop/parallel/try-catch), BPMN as interop",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T14:25:31Z",
+  "updated_at": "2026-06-01T14:53:04Z",
+  "closed_at": "2026-06-01T14:53:00Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T14:53:00Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1472",
+  "body": "## What\n\nA decision record (no code) reframing how flows model `loop` / `parallel` / error-handling — driven by the **AI-authoring** lens ([ADR-0010/0011]).\n\n**The pivot**: instead of implementing the four BPMN token nodes (`loop` stub, `parallel_gateway`, `join_gateway`, `boundary_event`) as the native model, adopt **structured control-flow constructs** — a `loop` *container*, a `parallel` *block*, and `try/catch/retry` — as the native + AI-authored model. BPMN gateways/boundary stay in the protocol + `bpmn-interop` as the **import/export representation** that maps to/from the structured constructs.\n\n**Why (AI authoring is the design center)**: a free-form node+edge graph with gateways/boundary/back-edges is easy for an LLM to make *semantically broken* (orphan joins, unbalanced gateways, deadlocks, infinite cycles). Structured constructs are **well-formed by construction**, **locally composable** (AI emits a subtree), and **statically analyzable/terminating** — the right substrate for AI. (The per-item-subflow loop is worse for AI — it fragments one loop into two flows + I/O mapping.)\n\n## Decisions\n\n1. **Loop** = structured iteration *container* (bounded body region + after-path), not a back-edge, not a subflow.\n2. **Parallel** = structured *block* with implicit join at block end (engine-synchronized), not author-visible split/join gateways.\n3. **Errors** = structured `try/catch/retry`, surfacing the engine's existing `fault` edge + `errorHandling.retry`.\n4. **DAG invariant kept** — ordinary edges acyclic; iteration/parallel are scoped containers (so inline loops without losing termination analysis).\n5. **BPMN** gateways/boundary retained for interop only, mapped onto the constructs.\n6. **AI authoring** generates the constructs from the live registry (`/automation/actions` + `configSchema`); valid-by-construction.\n\nOpen question flagged: representation (A) marker-delimited scoped regions vs (B) nested sub-structure — decided in the implementation PR.\n\nSequenced: spec-define constructs → loop container → parallel block → try/catch → BPMN mapping. `wait` + `subflow` already shipped (subflow = reuse primitive, not the loop mechanism).\n\nDocs-only; no package changes. Awaiting direction, then implementation follows the roadmap.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

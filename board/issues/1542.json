@@ -1,0 +1,35 @@
+{
+  "number": 1542,
+  "kind": "pull_request",
+  "title": "feat(ai): blueprint app-building — draft the navigation app, not just the data model",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T11:47:25Z",
+  "updated_at": "2026-06-02T11:58:41Z",
+  "closed_at": "2026-06-02T11:58:36Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-02T11:58:36Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1542",
+  "body": "## What & why\n\nExtends the plan-first blueprint (ADR-0033 §4, [#1537](https://github.com/objectstack-ai/framework/pull/1537)) so it also designs the **app** — the navigation shell end users open in the App Launcher. Until now \"build me a project-management application\" drafted the objects, views, and dashboards, but the user had to hand-assemble an app to surface them. Now a single confirmation produces an **openable app** (still draft-gated — nothing live until Publish).\n\n## What changed\n\n- **`SolutionBlueprintSchema`** (`@objectstack/spec/ai`) gains an optional `app: { name, label?, icon?, nav? }`. Each `nav` entry (`{ type: 'object'|'dashboard', target, label?, icon? }`) targets a created object or dashboard; `nav` may be omitted to auto-surface every object (then dashboard).\n- **`apply_blueprint`** expands the app into an `AppSchema` body — a single-level `navigation` of object/dashboard nav items (`{ id:'nav_<target>', type, label, objectName|dashboardName, order }`) — and drafts it **last** (it references the rest), through the same draft-gated, per-type-validated, partial-tolerant `stageDraft` path. It never sets `isDefault` (won't hijack the default app).\n- **`propose_blueprint`** instructs the agent to include the app and reports `counts.app`.\n- `solution_design` skill copy updated.\n\n## Verification\n\n- **spec**: new `solution-blueprint` cases (app with explicit nav, omitted nav, optional, bad nav type / non-snake name rejected) — spec ai **134** green.\n- **service-ai**: new `apply_blueprint` cases (drafts an `app` via `mode:'draft'` with nav referencing the objects; auto-build path derives one nav item per object then dashboard; `isDefault` never set; `register` never called) — full suite **460** green.\n- Both packages build + DTS-typecheck clean; changed files tsc-clean.\n\n## Scope\n\nBasic app-building: one app, flat nav of object + dashboard items. Areas / groups / mobile-nav / branding stay author-it-later via `update_metadata`. `app` is already a runtime-creatable metadata type, so it drafts/publishes like any other.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

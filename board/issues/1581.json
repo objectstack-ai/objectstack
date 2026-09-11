@@ -1,0 +1,35 @@
+{
+  "number": 1581,
+  "kind": "pull_request",
+  "title": "feat(ai): actions opt in to AI tools via `ai:` block (ADR-0011)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-04T13:37:00Z",
+  "updated_at": "2026-06-04T13:47:44Z",
+  "closed_at": "2026-06-04T13:47:42Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-04T13:47:42Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1581",
+  "body": "## What\n\nImplements **ADR-0011 (Actions as AI Tools)** with the opt-in `ai:` block design, and realigns the ADR doc with what's now built.\n\nAn Action becomes an AI-callable tool **only when it opts in** (`ai.exposed: true`), which requires an explicit, LLM-facing `ai.description` (≥40 chars, distinct from the UI `label`). No heuristic auto-exposure, no label-derived descriptions.\n\n### Why opt-in (and why now)\nThe first implementation (same day as the original draft) shortcut to **opt-out + heuristic auto-exposure + label-derived descriptions** — contradicting two explicit points of the ADR. In an AI-authoring world, writing a description is no longer a burden (the AI author writes it for free), so the only thing opt-in costs is friction that no longer exists — while the governance gate it provides (a human decides *which* capabilities the agent fleet may invoke) becomes the platform's core value. Since the platform has **not yet shipped**, this is a **clean break**: the `aiExposed` field is removed outright, no compat shim.\n\n## Changes\n- **spec**: `ActionAiSchema` (`exposed` / `description` / `category` / `paramHints` / `outputSchema` / `requiresConfirmation`) on `ActionSchema` + refine rules (exposed⇒description; paramHints keys ⊆ params); remove flat `aiExposed`; extend `AIToolDefinition` with `category`/`outputSchema`/`objectName`/`requiresConfirmation`; Studio `action.form` `aiExposed` → `ai` block.\n- **service-ai**: `action-tools.ts` bridge gates on opt-in, uses `ai.description`, merges `paramHints`, summarises `outputSchema` into the description, honours the `requiresConfirmation` override (reuses the existing HITL approval queue), and emits a lint warning when an exposed destructive-looking action asserts itself safe.\n- **examples/app-todo**: migrate script actions to opt-in (ADR Phase 2 testbed).\n- **docs**: rewrite ADR-0011 → Accepted/Implemented with the AI-author rationale and the as-built bridge.\n\n## Verification\n- spec + service-ai unit tests: **96 passed** (new cases: ai-block validation, paramHints merge, outputSchema summary, category/requiresConfirmation passthrough, lint warning); full service-ai suite **328 passed**.\n- `@objectstack/spec` and `@objectstack/service-ai` build + DTS clean.\n- app-todo demo: exactly the 5 opted-in script actions register; modal + dangerous actions correctly excluded; HITL path registers `delete_completed` only when approval is wired. (The demo's `sys_user` \"no such table\" exit is **pre-existing** — confirmed identical on baseline with these changes stashed — and unrelated to exposure.)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

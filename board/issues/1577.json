@@ -1,0 +1,33 @@
+{
+  "number": 1577,
+  "kind": "pull_request",
+  "title": "fix(auth): serve set-initial-password on per-environment runtimes (#1544)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-04T10:44:50Z",
+  "updated_at": "2026-06-04T11:29:55Z",
+  "closed_at": "2026-06-04T11:29:55Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-04T11:29:55Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1577",
+  "body": "## Problem\nOn a per-environment (cloud) runtime, the SSO-as-owner recovery flow redirects to \"Set a recovery password\", which POSTs `/api/v1/auth/set-initial-password` → **404**, dead-ending first-time owner setup (#1544).\n\n## Root cause\n`set-initial-password` is a custom route registered only by the full `AuthPlugin`. That plugin is **skipped** on a per-environment kernel (auth is served by `AuthProxyPlugin`), which forwards `/api/v1/auth/*` to better-auth — and better-auth has no such route, because its `setPassword` op is **server-only by design** (`createAuthEndpoint({…})` with no HTTP path; setting a password without proving the old one is privilege-sensitive). So the route only ever existed on the host kernel.\n\n## Fix\n- **New shared helper** `runSetInitialPassword(authApi, request)` — wraps better-auth's `auth.api.setPassword` and maps better-call `APIError`s onto the `{ success, error: { code, message } }` envelope the client parses. Single source of truth so the two mount points can't drift.\n- **`AuthPlugin`** now calls the helper, dropping ~50 lines of hand-rolled `getSession`/`hash`/`createAccount`/length-checks that had drifted from better-auth's own validation surface.\n- **`AuthProxyPlugin`** short-circuits `set-initial-password` before forwarding (resolves the 404), using the same helper.\n- **Unit tests** for the helper: missing/non-JSON arg, success + session-header forwarding, `PASSWORD_ALREADY_SET`→409, length errors, 401, 500 fallback.\n\n## Not in this PR (follow-up)\nThe recovery UI currently lives inside the full-shell profile page (`/_console/system/profile?recovery_needed=true`). Making it a standalone, shell-less page like login (`/set-password`) is an objectui change; the one-line redirect-target flip here is paired with it to avoid a broken interim state.\n\n## Verification\n- `tsc --noEmit` clean: plugin-auth + runtime\n- plugin-auth tests: 95 pass (88 existing + 7 new)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

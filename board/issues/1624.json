@@ -1,0 +1,33 @@
+{
+  "number": 1624,
+  "kind": "pull_request",
+  "title": "feat(runtime): harden hand-rolled API-key auth (ADR-0036 Phase 1a)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/l",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-06T18:45:22Z",
+  "updated_at": "2026-06-06T18:49:25Z",
+  "closed_at": "2026-06-06T18:45:31Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-06T18:45:31Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1624",
+  "body": "## What\n\nPhase 1a of ADR-0036 (\"every app is a REST API + MCP server\"): harden the **hand-rolled API-key auth** in the runtime. This is the security foundation that Phase 1b (objectui surfacing) and Phase 2 (MCP transport) build on.\n\nbetter-auth 1.6.x ships **no apiKey plugin**, so the runtime owns the full `sys_api_key` lifecycle. The pre-existing `resolveExecutionContext` API-key path was insecure/buggy:\n\n- looked up by the **raw key** (implying plaintext storage)\n- filtered on a non-existent `active` field (real field is `revoked`)\n- no expiry check\n\n## Changes\n\n- **New `packages/runtime/src/security/api-key.ts`** — single audited source of truth for key crypto:\n  - `hashApiKey(raw)` — sha256 hex at-rest hash (lookup matches the indexed high-entropy hash exactly → constant-effort comparison).\n  - `generateApiKey(prefix?)` — 256-bit base64url secret; returns `{ raw, hash, prefix }`; **raw returned once, never persisted**.\n  - `extractApiKey` — `X-API-Key` or `Authorization: ApiKey <token>`; **Bearer deliberately excluded** (sessions own Bearer).\n  - `parseScopes` (JSON-string textarea or array) / `isExpired` (fail-open only for unparseable values).\n- **`resolveExecutionContext`** — hash the inbound key, look it up by the at-rest hash only, reject revoked (where-clause + defensive guard) and expired keys, merge scopes into `ctx.permissions`. Resolved principals flow through the **same** role/permission/RLS path as sessions.\n- Export primitives from the security barrel.\n\n## Tests (local, all green)\n\n- `api-key.test.ts` — crypto/parse/extract (determinism, uniqueness, base64url, Bearer-not-matched, scopes, expiry epoch/ISO/Date).\n- `resolve-execution-context.test.ts` — verify path: valid (x-api-key + ApiKey) / revoked / expired / unknown / **plaintext-stored not matched** / scopes / org→tenant / anonymous / Bearer-ignored.\n- Full runtime suite: **360 passed**. `tsc --noEmit`: **0 errors**.\n\n## Security\n\nRaw keys and hashes never enter logs, responses or error messages. Fail-closed on anything ambiguous. Whitelist matching, not blacklist.\n\n## Follow-ups (out of scope, per ADR)\n\n- Phase 1b: objectui Integrations page surfacing + a key-creation endpoint that calls `generateApiKey` (objectui #1540 lays the UI groundwork).\n- Phase 2: MCP Streamable HTTP transport.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

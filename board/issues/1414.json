@@ -1,0 +1,32 @@
+{
+  "number": 1414,
+  "kind": "pull_request",
+  "title": "feat(approvals): annotate approver value + escalateTo as typed references",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-31T14:18:29Z",
+  "updated_at": "2026-05-31T14:45:27Z",
+  "closed_at": "2026-05-31T14:20:27Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-05-31T14:20:27Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1414",
+  "body": "## Summary\n\nAdds `xRef` annotations to two Approval-node config strings so the Studio flow designer renders **pickers instead of free text** (ADR-0018 §configSchema), mirroring the `approvalStatusField` annotation already on `main`.\n\n- **`approvers[].value`** — a *polymorphic* reference (`kindFrom: 'type'`): the concrete picker follows the sibling `type` column (user / role / team / department / queue), or an **object-field** picker resolved from the flow's `$trigger` object when `type` is `field`. `manager` and any unmapped value carry no `value` and stay free text.\n- **`escalation.escalateTo`** — a `role` reference (the common case); free text is still accepted for a specific user id.\n\nBoth fold the annotation and description into a single `.meta()` so neither is dropped from the published `z.toJSONSchema` config contract.\n\n## Scope\nOne file (`packages/spec/src/automation/approval.zod.ts`), 28+/2−. Branched off current `origin/main`; structurally identical to the existing `approvalStatusField` `.meta({ description, xRef })`.\n\n## Companion\nConsumed by objectui PR [objectstack-ai/objectui#1424](https://github.com/objectstack-ai/objectui/pull/1424) (polymorphic reference pickers). The frontend degrades gracefully without these annotations.\n\n## Test plan\n- Verified (isolated tsx probe) that all three `xRef` annotations survive `z.toJSONSchema(ApprovalNodeConfigSchema, { io: 'input' })` with their descriptions preserved.\n- objectui adapter unit tests assert the published shape → reference fields/columns (12/12)."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 1483,
+  "kind": "pull_request",
+  "title": "feat(automation,messaging): unified http/notify executors + generic HTTP outbox (ADR-0018 M3)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T18:33:26Z",
+  "updated_at": "2026-06-01T18:38:17Z",
+  "closed_at": "2026-06-01T18:34:31Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T18:34:31Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1483",
+  "body": "## What\n\nImplements **ADR-0018 M3** — introduce outbox-backed `http` / `notify` executors and register `http_request` / `http_call` / `webhook` as deprecated aliases.\n\nThe generic, reliable outbound-HTTP delivery outbox is **promoted into `service-messaging`** (the raw-callout counterpart to the notification outbox) and the Flow `http` node routes through it, closing the \"`http_request` is a bare `fetch()` with no retry\" reliability gap. The five divergent outbound verbs collapse onto canonical **`http`** / **`notify`**.\n\n## Changes\n\n**`service-messaging` (new, additive):**\n- `http-outbox.ts` — `IHttpOutbox` / `HttpDelivery` generic raw-callout shape (`source`/`refId`/`dedupKey`/`label`/`signingSecret`), `HttpRedeliverError`\n- `http-sender.ts` — `sendOnce` + `classifyAttempt` + 7-step jittered retry schedule\n- `http-dispatcher.ts` — `HttpDispatcher` (per-partition cluster lock, claim/ack), reusing the existing `DispatchCluster`\n- `sql-http-outbox.ts` + `objects/http-delivery.object.ts` (`sys_http_delivery`) — durable store; dedup `(source, dedup_key)`, partition affinity on `ref_id`\n- `memory-http-outbox.ts` — in-memory backend for tests\n- `MessagingService` gains `setHttpOutbox()` / `isHttpDeliveryReady()` / `enqueueHttp()`; the plugin wires `SqlHttpOutbox` + `HttpDispatcher` at `kernel:ready`\n\n**`service-automation`:**\n- canonical **`http`** executor — `durable: true` enqueues onto the messaging HTTP outbox (retry/dead-letter); otherwise an inline `fetch()` preserving `http_request`'s request/response semantics\n- `engine.registerNodeAlias()` — delegating executor + `deprecated`/`aliasOf` descriptor; **`http_request` / `http_call` / `webhook`** registered as aliases of `http` (old flows keep running)\n- `notify` descriptor marked `needsOutbox` (its delivery is outbox-backed via `emit`)\n\n**`spec`:** `flow.zod` adds `http` to the builtin node-type seed set.\n\n## Tests\n\n- New: `http-outbox.test.ts` (6), `http-nodes.test.ts` (7)\n- Full suites green: **service-messaging 108**, **service-automation 125**; `spec` / `plugin-approvals` / `rest` build clean\n\n## Follow-up (not in this PR)\n\n- **Phase 5** — cut `plugin-webhooks` over to the shared `sys_http_delivery` outbox (it still uses its own `sys_webhook_delivery` outbox/dispatcher). The generic substrate is already in place and shared-ready.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

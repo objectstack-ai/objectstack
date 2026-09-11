@@ -1,0 +1,35 @@
+{
+  "number": 1537,
+  "kind": "pull_request",
+  "title": "feat(ai): ADR-0033 Phase C — plan-first blueprint authoring",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T09:54:43Z",
+  "updated_at": "2026-06-02T10:05:37Z",
+  "closed_at": "2026-06-02T10:05:32Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-02T10:05:32Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1537",
+  "body": "## What & why\n\nImplements **Phase C** of [ADR-0033](docs/adr/0033-ai-assisted-metadata-authoring.md) — *plan-first blueprint authoring*. Builds on Phase A ([#1529](https://github.com/objectstack-ai/framework/pull/1529)).\n\nReal authors say *\"build me a project-management system,\"* not a field list. For high-level goals the agent must **design, not transcribe, and confirm before it builds** (ADR §4). This adds that plan-first layer on top of Phase A's draft-gated writes.\n\n## What changed\n\n- **`SolutionBlueprintSchema`** (`@objectstack/spec/ai`) — a simplified proposal shape: objects + fields + relationships (as lookup/master_detail `reference` fields) + views + dashboards + seed data, with stated `assumptions` and ≤2 `questions`. References the real `FieldType` enum so proposed types are valid.\n- **`propose_blueprint(goal)`** — emits the blueprint via `generateObject` (structured output). **Persists nothing.** Returns `{ status:'blueprint_proposed', blueprint, counts, questions }`; the agent presents it for conversational confirm.\n- **`apply_blueprint(blueprint)`** — only after the human approves, batch-drafts each object/view/dashboard through the Phase A draft path (`protocol.saveMetaItem({mode:'draft'})`), **per-type validated and partial-tolerant** (a bad item is reported in `failed`, the rest still draft). Seed data is reported as proposed — not auto-applied (no runtime `dataset` type exists).\n- **`solution_design` skill** carries the plan-first instructions (propose → confirm → apply; never claim \"live\"); bound to `metadata_assistant` alongside `metadata_authoring`.\n- Exported **`stageDraft`** from the metadata tools and reused it — one draft-write path, one error shape.\n\n## Two safety gates\n\n1. **Blueprint-confirm** (conversational) — guards against mass-generating unreviewed artifacts from a vague prompt.\n2. **Draft gate** (Phase A) — even after apply, nothing is live until a human publishes the drafted diffs.\n\n## Verification\n\n- **`@objectstack/spec`**: 7 new `solution-blueprint` schema tests (valid parses; bad field type / missing summary / non-snake_case / >2 questions rejected). Full `spec/ai` suite green (129).\n- **`@objectstack/service-ai`**: 12 new blueprint-tool tests — propose persists nothing, apply drafts via `mode:'draft'` and never calls `register`, per-item failure isolation, seed reported-not-applied, malformed-blueprint rejection, view-column defaulting. Full suite green (**458**, was 446).\n- Both packages build + DTS-typecheck clean; new files tsc-clean.\n\n## Scope\n\nPhase C only (framework / OSS). Phase B (objectui blueprint review UI) and Phase D (EE) remain out of scope. Flow authoring is explicitly deferred (\"flow last\").\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

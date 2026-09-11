@@ -1,0 +1,35 @@
+{
+  "number": 1407,
+  "kind": "pull_request",
+  "title": "feat(automation): approval as a durable-pause flow node (ADR-0019 P1–P3)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-31T06:52:58Z",
+  "updated_at": "2026-05-31T06:53:51Z",
+  "closed_at": "2026-05-31T06:53:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-05-31T06:53:51Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1407",
+  "body": "## Summary\n\nRealizes the core of **ADR-0019** — *collapse approval into the one flow engine, approval as a durable-pause node*. This lands the **additive, non-breaking foundation (phases A1–A3)**: the Approval node suspends a flow run on entry and resumes it on a human decision, riding the same engine as every other node. The standalone process-driven approval engine is left fully intact for the migration window; the destructive removal (A4/A5) is a deliberate follow-up PR.\n\n## What's in this PR\n\n### P1 — engine durable suspend/resume (`service-automation`)\n- `FlowSuspendSignal` thrown from `executeNode`, caught in `execute()`/`resume()`, persisted to an in-memory `suspendedRuns` map.\n- `AutomationResult` gains `status: 'completed' | 'paused' | 'failed'` + `runId`; `IAutomationService` gains optional `resume(runId, signal?)` and `listSuspendedRuns()`.\n- On resume, the engine selects the out-edge whose `label` matches `ResumeSignal.branchLabel`. `$runId` is injected into flow variables.\n- `screen` node opts into pause via `config.waitForInput`.\n\n### P2 — Approval node contract (`spec`)\n- `APPROVAL_NODE_TYPE`, `ApprovalDecision`, `APPROVAL_BRANCH_LABELS`, `ApprovalNodeConfigSchema` — lowers `approvers` / `behavior` / `lockRecord` / `escalation` / `approvalStatusField` into node config.\n- `ApprovalProcessSchema` + `ApprovalActionType` deprecated via JSDoc (not removed).\n\n### P3 — node provider bridge (`plugin-approvals`, additive)\n- Registers the `approval` node (`supportsPause`, `category: 'human'`) via the ADR-0018 registry. On entry it opens a `sys_approval_request` (reusing approver resolution / audit / record lock / status mirror verbatim) and **suspends**; `decideApprovalNode` finalizes the decision and **resumes** the run down the matching `approve` / `reject` edge.\n- `sys_approval_request` gains correlation fields: `flow_run_id` / `flow_node_id` / `node_config_json`.\n\n## Deferred to a follow-up PR (A4/A5)\nDeleting `action-executor.ts`, `ApprovalActionType`, top-level `ApprovalProcessSchema` + `approval.form.ts`, retiring `process_hash` pinning, and removing `connector_action` remnants. Held back because these are a **destructive removal of a still-functioning subsystem** with active consumers (`metadata-form-registry.ts`, `stack.zod.ts`, CRM examples/seeders, and the constrained `metadata-type-schemas.ts`). The ADR itself frames the process model as \"retained for the migration window.\"\n\n## Test plan\n- `spec` — **6605** pass\n- `service-automation` — **79** pass (incl. 6 new durable suspend/resume tests + screen `waitForInput`)\n- `plugin-approvals` — **41** pass (incl. 6 new node-bridge tests: suspend-on-entry, approve/reject resume, unanimous hold-then-resume, non-approver FORBIDDEN)\n- All three packages build clean (tsup ESM/CJS/DTS).\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 1469,
+  "kind": "pull_request",
+  "title": "feat(automation): implement the wait node executor (durable timer/signal pause)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T13:38:55Z",
+  "updated_at": "2026-06-01T13:48:16Z",
+  "closed_at": "2026-06-01T13:48:13Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T13:48:13Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1469",
+  "body": "## What\n\nThe flow designer offered a **`wait`** node, but the engine had **no executor** for it — so a flow using `wait` couldn't actually run (it would hit \"no executor for type 'wait'\"). This implements it as a built-in node.\n\n`wait` **suspends the run on entry** (ADR-0019 durable pause — the same suspend/resume machinery as `screen` / `approval`, reading the engine-injected `$runId`), and resumes by one of two paths per `waitEventConfig.eventType`:\n\n- **timer** — schedules a one-shot job (`IJobService`, `{ type: 'once', at }`) that calls `engine.resume(runId)` when the ISO-8601 `timerDuration` elapses. With **no job service**, the run still suspends and is resumable via an external `resume(runId)` (logged) — it never silently no-ops or fails the flow (matches the platform's degrade-don't-crash convention).\n- **signal / webhook / manual / condition** — suspends with the signal name as the correlation key; an external producer resumes when the event arrives.\n\nAdds a `parseIsoDuration` helper (`PT1H`, `P3D`, `PT90M`, `P1DT12H`, bare ms). A bare `AutomationServicePlugin` now installs **13** executors including `wait`.\n\n## Why\n\nFirst of the \"designer can draw it, engine can't run it\" gaps (the others: `subflow`, `boundary_event`, `parallel_gateway`/`join_gateway`). Implementing the executors makes the designer's node palette honest and the showcase examples runnable + testable. `wait` is the highest-value + most tractable (reuses existing suspend/resume).\n\n## Tests\n\n`builtin/wait-node.test.ts`:\n- `parseIsoDuration` (ISO durations, bare ms, unparseable/non-positive → undefined)\n- suspend on entry → `resume(runId)` continues traversal downstream\n- timer: schedules one `{ type: 'once' }` job ~duration out; firing its handler resumes the run + cancels the one-shot\n- named signal: suspends with the signal as correlation, resumes\n\n`@objectstack/service-automation` **113 passing**. Worked example **`showcase_task_follow_up`** (wait → notify) added to the showcase; showcase suite green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

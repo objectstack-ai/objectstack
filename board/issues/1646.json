@@ -1,0 +1,33 @@
+{
+  "number": 1646,
+  "kind": "pull_request",
+  "title": "feat(spec): report can bind to a dataset (ADR-0021 B-P1, dual-form)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-07T10:49:17Z",
+  "updated_at": "2026-06-07T10:49:30Z",
+  "closed_at": "2026-06-07T10:49:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-07T10:49:19Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1646",
+  "body": "Additive dual-form ReportSchema: a report may bind a `dataset` + `rows`/`values`/`runtimeFilter` instead of inline `objectName`+`columns`. superRefine enforces one shape; existing inline reports unchanged. The value unlock for ADR-0021 (report consumes the governed dataset). Bumps .objectui-sha to the matching objectui commit (#1573). Tests: report.test +5. Verified live: dataset-bound report renders revenue-by-stage table in Studio preview.\n\nNote: Studio editor client validation recognises the new shape only after objectui bumps @objectstack/spec (cross-repo skew); rendering already works.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

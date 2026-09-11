@@ -1,0 +1,30 @@
+{
+  "number": 1008,
+  "kind": "issue",
+  "title": "feat(service-ai): Add auth middleware metadata to AI route definitions",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-31T06:47:27Z",
+  "updated_at": "2026-05-25T07:27:02Z",
+  "closed_at": "2026-05-25T07:27:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1008",
+  "body": "\n\n当前 `buildAIRoutes()` 返回的 `RouteDefinition` 不包含任何认证/授权元数据。8 条 AI 路由直接暴露，无法区分：\n\n- 需要认证的路由（如 `POST /api/v1/ai/chat`）\n- 公开路由（如 `GET /api/v1/ai/models` 可能允许匿名）\n- 需要特定权限的路由（如 conversation 管理可能需要 `ai:manage` 权限）\n\n### 任务\n\n1. **扩展** `RouteDefinition` 接口（`packages/services/service-ai/src/routes/ai-routes.ts`）：\n   ```typescript\n   export interface RouteDefinition {\n     method: 'GET' | 'POST' | 'DELETE';\n     path: string;\n     description: string;\n     handler: (req: RouteRequest) => Promise<RouteResponse>;\n     // ── 新增 ──\n     /** Whether authentication is required (default: true) */\n     auth?: boolean;\n     /** Required permission scopes */\n     permissions?: string[];\n   }\n   ```\n2. **为每条路由标注** auth 和 permissions：\n\n   | Route | auth | permissions |\n   |:---|:---:|:---|\n   | `POST /api/v1/ai/chat` | `true` | `['ai:chat']` |\n   | `POST /api/v1/ai/chat/stream` | `true` | `['ai:chat']` |\n   | `POST /api/v1/ai/complete` | `true` | `['ai:complete']` |\n   | `GET /api/v1/ai/models` | `false` | `[]` |\n   | `POST /api/v1/ai/conversations` | `true` | `['ai:conversations']` |\n   | `GET /api/v1/ai/conversations` | `true` | `['ai:conversations']` |\n   | `POST .../conversations/:id/messages` | `true` | `['ai:conversations']` |\n   | `DELETE .../conversations/:id` | `true` | `['ai:conversations:delete']` |\n\n3. **扩展** `RouteRequest` 增加 user context：\n   ```typescript\n   export interface RouteRequest {\n     body?: unknown;\n     params?: Record<string, string>;\n     query?: Record<string, string>;\n     // ── 新增 ──\n     /** Authenticated user context (populated by auth middleware) */\n     user?: { id: string; roles?: string[]; permissions?: string[] };\n   }\n   ```\n4. **Conversation 路由增加 ownership 校验**：`GET /conversations` 和 `DELETE /conversations/:id` 应仅返回/操作当前用户的对话\n5. **新增测试**验证 auth metadata 正确性\n6. **更新** CHANGELOG.md\n\n### 说明\n\n- 实际的 auth 中间件由 HTTP server plugin（如 `plugin-hono-server`）在消费 `ai:routes` hook 时挂载\n- service-ai 只负责 **声明** auth 需求，不负责 **执行** auth 逻辑\n- 这与 ObjectStack 的 \"协议声明 + 运行时注入\" 架构模式一致\n\n### 验收标准\n\n- [ ] `RouteDefinition` 包含 `auth` 和 `permissions` 字段\n- [ ] 所有 8 条路由标注了正确的 auth 元数据\n- [ ] `RouteRequest` 包含可选的 `user` context\n- [ ] conversation 路由有 ownership 意识\n- [ ] 新增 ≥5 个测试用例\n- [ ] 全部测试通过\n"
+}

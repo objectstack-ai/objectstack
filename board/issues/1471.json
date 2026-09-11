@@ -1,0 +1,33 @@
+{
+  "number": 1471,
+  "kind": "pull_request",
+  "title": "fix(spec,showcase): trim ChartType taxonomy to renderable types; bump pin",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T14:04:00Z",
+  "updated_at": "2026-06-01T14:04:38Z",
+  "closed_at": "2026-06-01T14:04:22Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T14:04:22Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1471",
+  "body": "## Summary\nThe `ChartType` taxonomy advertised 38 families, but the Console can only draw ~27. The rest need data shapes the platform doesn't model (OHLC → candlestick/stock; per-record distributions → box-plot/violin), geographic data (choropleth/bubble-map/gl-map), or a renderer the default Recharts engine lacks (sunburst, heatmap, word-cloud, waterfall). Advertising a chart type that can't render is worse than not offering it.\n\n## Changes\n- **spec**: remove 11 unrenderable types from `ChartTypeSchema` (keep `treemap` & `sankey` — now rendered via Recharts in objectstack-ai/objectui#1438). Update chart/dashboard/report tests; add a guard asserting the dropped types are now **rejected**.\n- **showcase**: drop the corresponding chart-gallery widgets; the coverage test now asserts the gallery covers exactly the trimmed taxonomy.\n- **bump** `.objectui-sha` → `5265dd31` (treemap/sankey renderer + the field-type coverage regression guard).\n\nRemoved families can return via an opt-in chart renderer plugin once there's real demand and a data model to back them.\n\n## Verification\n- `@objectstack/spec` full suite: 6609 passed.\n- showcase coverage + seed tests: 8 passed (gallery ↔ trimmed taxonomy consistent).\n- Chart Gallery in-app: treemap + sankey render via Recharts; 0 \"Unknown component type\".\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 1394,
+  "kind": "pull_request",
+  "title": "fix: resolve build and test errors",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-30T13:04:57Z",
+  "updated_at": "2026-05-30T13:19:23Z",
+  "closed_at": "2026-05-30T13:19:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-05-30T13:19:23Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1394",
+  "body": "## What\n\nFixes three stale tests/tooling that didn't match intentional source behavior, so `pnpm build` / `pnpm test` are green again. **No shipped runtime behavior changes** — only tests and the docs generator.\n\n| # | Failing task | Fix |\n|---|---|---|\n| 1 | `@objectstack/docs#build` (gen:docs) | `escapeMdxDescription` (packages/spec/scripts/build-docs.ts) used two separate regex passes for `{...}` and `<...>`. On nested tokens like `{<id>}` it double-wrapped into `` `{`<id>`}` `` — the inner backticks closed the inline-code span early and leaked `<id>` as raw JSX (`Expected a closing tag for <id>`). Replaced with a single backtick-aware pass that skips fragments already inside code spans; regenerated the affected `.mdx`. |\n| 2 | `@objectstack/objectql#test` | `loads from a complete artifact` asserted strict `toEqual` against `objDef`, but object schemas pass through `registerObject -> applyProtection`, which stamps internal envelope markers (ADR-0010 §3.7). Switched to `toMatchObject` so it asserts the author-supplied shape is preserved rather than equality against intentional system fields. |\n| 3 | `@objectstack/cli#test` | `serve-defaults` pinned `ALWAYS_ON_CAPABILITIES` to exactly six items, but the shipped fail-closed allowlist now also includes `sharing`. The six foundational capabilities must still lead the slate in order, so the test pins that prefix (`slice(0, 6)`) plus a no-duplicates invariant — letting the list grow without churning the assertion. |\n\n## Verification\n\n- `pnpm build` → **63/63 tasks pass**\n- `pnpm test` → **123/123 tasks pass**\n\n## Reviewer notes\n\n- The regenerated `content/docs/**` `.mdx` files are the legitimate output of the fixed `gen:docs` (which had been crashing). Regenerating against this branch produces no further diff.\n- Fix #3 deliberately does **not** reorder the shipped allowlist — it only relaxes an over-specific test to match the intentional addition of `sharing`."
+}

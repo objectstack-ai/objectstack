@@ -1,0 +1,33 @@
+{
+  "number": 1473,
+  "kind": "pull_request",
+  "title": "docs(agents): multi-agent working discipline in AGENTS.md",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T14:28:26Z",
+  "updated_at": "2026-06-01T14:33:50Z",
+  "closed_at": "2026-06-01T14:33:47Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T14:33:47Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1473",
+  "body": "Codifies the git/workflow rules for operating in this parallel-agent repo (the lessons from a long multi-agent session): touch only your task's files, one feature branch + PR per task, never force-push / push main, verify the current branch before every commit/push (HEAD can be switched by another agent), edit+commit shared barrels atomically and verify the commit contains your lines, don't rebase shared branches. Docs-only.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

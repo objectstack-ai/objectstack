@@ -1,0 +1,32 @@
+{
+  "number": 1389,
+  "kind": "issue",
+  "title": "Seed data: no way to bind records to users (required lookup('user') makes objects un-seedable, fails silently)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-30T06:51:10Z",
+  "updated_at": "2026-05-30T10:45:32Z",
+  "closed_at": "2026-05-30T10:45:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1389",
+  "body": "## Summary\n\nThere is no documented or ergonomic way to reference **users** from declarative seed data (`defineDataset` / `defineStack({ data })`). Any `lookup('user')` field that is `required: true` makes its object **impossible to seed**, because the platform users that a seed record would point to do not exist until *after* first signup / auth provisioning.\n\nThis silently breaks templates: every record whose object has a required `user` lookup fails validation at boot and is dropped, leaving the table empty with **no error surfaced** to the developer.\n\n## Repro\n\n1. Define an object with a required user lookup:\n\n   ```ts\n   export const Resource = ObjectSchema.create({\n     name: 'pm_resource',\n     fields: {\n       project: Field.lookup('pm_project', { required: true }),\n       person:  Field.lookup('user',       { required: true }), // <-- problem\n       allocated_hours_per_week: Field.number({ required: true }),\n     },\n   });\n   ```\n\n2. Provide seed data for it:\n\n   ```ts\n   export const resources = defineDataset(Resource, {\n     mode: 'upsert',\n     externalId: 'role',\n     records: [\n       { role: 'iOS Dev', project: { name: 'Mobile App Redesign' },\n         person: '???', allocated_hours_per_week: 40 },\n     ],\n   });\n   ```\n\n3. `os compile` succeeds (the artifact contains the records).\n4. `os dev` against a **fresh** environment seeds **0 rows** for that object — no log line, no validation error, no hint.\n\n## Expected\n\nA first-class, documented mechanism to bind seed records to users, plus a loud failure when a seed record can't resolve a required reference.\n\n## Questions / discussion\n\n1. **How should seed data reference users?** Options I can think of:\n   - A reserved seed-only sentinel for the bootstrap/admin user, e.g. `person: { ref: '@admin' }` or `cel\\`currentUser()\\``, resolved at seed time to the first/admin user.\n   - Allow seeding `user` records themselves in `data`, then referencing them by `externalId` (needs confirmation that the auth-provided `user` object is writable from a project stack's seed).\n   - A documented \"seed runs as / on behalf of\" identity so `created_by` / required user lookups can default.\n\n2. **Ordering / availability** — is the admin user guaranteed to exist at the point `data` seeding runs? If not, can seeding be deferred until after first-run auth provisioning?\n\n3. **Fail loudly** — when a seed record fails validation (e.g. unresolved required lookup), the runtime should emit a warning/error per dropped record rather than silently inserting nothing. The silent-drop behavior is what made this hard to diagnose.\n\n## Impact\n\nDiscovered while building the `project` template in `objectstack-ai/templates`: all five seed datasets produced **0 rows** in a fresh environment. The root cause for `pm_resource` specifically was a required `lookup('user')` (`person`) that seed data could not satisfy. As a workaround we made `person` optional and dropped the user reference from seed records, but a real binding mechanism is needed so templates can ship realistic, user-attributed sample data.\n\n## Environment\n\n- `@objectstack/*` `7.3.0`\n- Driver: `SqlDriver(better-sqlite3)`, single-tenant local dev (`os dev`)\n"
+}

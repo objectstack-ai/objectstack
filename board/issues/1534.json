@@ -1,0 +1,33 @@
+{
+  "number": 1534,
+  "kind": "issue",
+  "title": "automation: flow conditions on numeric string-serialized fields (rating/currency/percent) fault under strict CEL and silently dead-end the flow (sibling of #1530)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T09:35:02Z",
+  "updated_at": "2026-06-02T10:10:52Z",
+  "closed_at": "2026-06-02T10:10:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1534",
+  "body": "## Summary\n\nRecord-change flow **decision / edge conditions** that compare a numeric field against a literal (e.g. `record.rating >= 4`, `record.amount > 100000`) fault at runtime whenever the field's value serializes as a **string** — `Field.rating(allowHalf)` → `\"5.0\"`, `Field.currency(scale)` → `\"250000.00\"`, `Field.percent` likewise. Strict CEL raises `no such overload: dyn<string> >= int`, so the comparison can never be satisfied. Two compounding defects:\n\n1. **Build vs runtime mismatch (false green).** The ADR-0032 §1a build validator accepts `record.rating >= 4` (treats `rating` as numeric per schema) and `objectstack build` passes. At runtime the bound value is a string and the comparison faults.\n2. **Silent dead-end.** `@objectstack/service-automation` `evaluateCondition` (CEL branch) binds the **raw** row into the CEL activation — the same un-hydrated-value root cause as #1530, but in the automation path rather than objectql `applyFormulaPlan`. When a decision node's outgoing conditional edges all fault, `traverseNext` matches no edge → the flow reports **success with no node after the decision executed** (no `update_record`, no `notify`, no error surfaced).\n\n## Version\n\n`@objectstack/*` **7.6.0**.\n\n## Evidence\n\nProbe inside `evaluateCondition` for a hot-lead insert (rating = 5):\n\n```\n[PROBE-CEL] expr=`record.rating >= 4` ok=false value=undefined\n            err=no such overload: dyn<string> >= int\n            ratingVal=\"5.0\" ratingType=string\n```\n\nThe record-change handler fired (`handler invoked` → `callback completed`), but `next_followup_date` was never stamped — routing dead-ended at the decision node.\n\n## Affected fields / flows (hotcrm, but the pattern is generic)\n\n- `Field.rating(allowHalf)` → lead routing decision on `record.rating >= 4`\n- `Field.currency(scale)` → opportunity approval start/decision on `record.amount > 100000`, `oppRecord.amount > 500000`\n- `Field.percent` would behave the same\n\n## Relationship to #1530\n\n#1530 is the **date / formula-field** variant (raw string dates vs CEL `Timestamp`, swallowed to `null` in objectql `applyFormulaPlan`). **This** issue is the **numeric / flow-condition** variant in `service-automation` `evaluateCondition`, with an extra failure mode: instead of swallow-to-null, the decision **silently dead-ends the whole flow**. Same ADR-0032 §1c hydration gap — please consider fixing both projection paths (objectql formula + automation condition) consistently.\n\n## Workaround (app side)\n\nCast in the condition: `double(record.rating) >= 4`, `double(record.amount) > 100000`. (Applied in hotcrm.)\n\n## Suggested fix\n\n- Schema-aware value hydration before CEL evaluation in the automation condition path (mirror the planned #1530 fix in objectql) so `rating` / `currency` / `percent` bind as numbers.\n- And/or: a faulting decision/edge condition should **not** silently dead-end — surface it as an attributed error (ties into the CLI logger / \"fail loudly\" gap) rather than \"no edge matched\".\n\n---\n\nFound while upgrading **objectstack-ai/hotcrm** to 7.6 (objectstack-ai/hotcrm#365).\n"
+}

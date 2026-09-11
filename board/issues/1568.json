@@ -1,0 +1,33 @@
+{
+  "number": 1568,
+  "kind": "pull_request",
+  "title": "feat(runtime): MarketplaceProxyPlugin browse-only — drop the install 405 dead-end (ADR §5.2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-03T10:46:39Z",
+  "updated_at": "2026-06-03T10:56:53Z",
+  "closed_at": "2026-06-03T10:56:53Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-03T10:56:53Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1568",
+  "body": "## What\n\nRemoves the framework's hardcoded marketplace **install-policy dead-end**. `MarketplaceProxyPlugin` is a **browse** mechanism — it forwards GET/HEAD reads and carries no credentialled cloud auth. It should not pretend to own install policy.\n\n**Before:** a non-GET marketplace request returned `405 marketplace_method_not_allowed` — \"install via cloud\" — a dead-end the in-env Install button hit (framework#1548).\n\n**After:** non-GET requests **pass through** (`next()`), so a host-supplied install route — mounted after this plugin via the `createObjectOSStack` **`extraPlugins`** seam (framework #1566) — can claim them. If none does, the app returns its normal 404 instead of a misleading policy 405.\n\n## Why now\n\nThis is the **\"remove framework's hardcoded policy\"** half of [ADR §5.2](../blob/main/docs/design/cloud-account-binding-marketplace-install.md), deliberately deferred until **the cloud side landed + deployed**. It has:\n\n- ObjectStack Cloud now owns install — the `/cloud-connection/install` route + `sys_package.install_package` action + the **tiered cloud-connection gate** (cloud PR #53, **merged + deployed to staging** ✅).\n- The `extraPlugins` seam (framework #1566, merged) is how cloud supplies that install route to the runtime.\n\nSo the framework can now drop its browse-only install policy and keep only the neutral browse forwarder.\n\n## Test\n```\npnpm --filter @objectstack/runtime exec vitest run src/cloud/marketplace-proxy-browse-only.test.ts\n# 3 passed: non-GET passes through (not 405); install-local still passes through; no-control-plane still 503s\n```\nFull `src/cloud` suite (40 tests) stays green.\n\n## Sequencing note\nPairs with cloud PR #53 (binding + install gate, deployed) and framework #1566 (extraPlugins seam, merged). The remaining cloud-side follow-ups (bump `.framework-sha`; migrate `apps/objectos/objectstack.config.ts` from `config.plugins.push` to the `extraPlugins` seam) are tracked separately and don't block this.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

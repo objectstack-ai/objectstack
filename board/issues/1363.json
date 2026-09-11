@@ -1,0 +1,33 @@
+{
+  "number": 1363,
+  "kind": "pull_request",
+  "title": "Re-align stale @objectstack/objectql tests with current overlay registry & sys_metadata schema",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-27T10:41:34Z",
+  "updated_at": "2026-05-27T10:41:53Z",
+  "closed_at": "2026-05-27T10:41:53Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-05-27T10:41:53Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1363",
+  "body": "`@objectstack/objectql#test` (the only failing CI job) blew up the first time the `Test Core` paths filter re-engaged after the project-mode/overlay refactor — `f0c87d977` touched `packages/**` LICENSE files and surfaced ~21 stale fixtures (4 real failures once workspace deps are built).\n\n### Root cause\n\n- `ba252da0b` (project mode, metadata forms, org overlays) flipped `allowOrgOverride: false → true` in `DEFAULT_METADATA_TYPE_REGISTRY` for `object`, `field`, `action`, `flow`, `workflow`, `approval`, `agent`. Whitelist tests still expected those types to be rejected.\n- `482eb67cc` + `feat(metadata): durable sys_metadata_history writes` reshaped `sys_metadata` rows (added `checksum`/`created_at`/`updated_at`, dropped `scope`), split history into a dedicated `sys_metadata_history` table, added `parentVersion` optimistic-concurrency, and stopped wrapping DB errors with `\"Failed to persist customization overlay…\"`. Persistence assertions never followed.\n\n### Changes — test files only, no production code touched\n\n- **`overlay-precedence.test.ts`** — denied list rebuilt around the types that are still `allowOrgOverride: false` (`trigger`, `validation`, `hook`, `datasource`, `router`, `function`, `service`); the \"registry-as-source-of-truth\" invariant now pins the current allowed/denied split and its plural-form coverage uses a denied type with a real `SINGULAR_TO_PLURAL` entry. Header docstring rewritten so the architectural intent stays accurate.\n- **`protocol-meta.test.ts`** — insert/update expectations match the new row shape; update-path tests now pass the correct `parentVersion` derived from the mocked existing row's checksum; fail-fast tests assert raw DB error propagation (`/Connection refused/`, `/Table not found/`) instead of the removed wrapper.\n- **`protocol-meta-types-rich.test.ts`** — switched the deny + `OBJECTSTACK_METADATA_WRITABLE` env-elevation cases to `function`/`trigger` (still non-overridable), and registered both in `beforeEach` so `getMetaTypes()` (which iterates `engine.registry.getRegisteredTypes()`) actually surfaces them.\n- **`sys-metadata-repository.test.ts`** — `put refuses non-allowOrgOverride types` cases switched from `object`/`flow` to `trigger`/`function`.\n\n### Result\n\n`pnpm turbo run test --filter @objectstack/objectql` → **23 files, 371/371 passing**. `CHANGELOG.md` updated."
+}

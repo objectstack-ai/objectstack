@@ -1,0 +1,35 @@
+{
+  "number": 1551,
+  "kind": "pull_request",
+  "title": "feat(packages): consolidate package subsystem so AI-built app packages surface in Studio",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T23:59:07Z",
+  "updated_at": "2026-06-03T00:10:56Z",
+  "closed_at": "2026-06-03T00:10:50Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-03T00:10:50Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1551",
+  "body": "## Context\n\nWhen the AI builds an app it auto-creates an `app.<name>` package (#1550) so the drafted artifacts have a home — but that package never appeared in Studio's package selector or detail. Root cause: the package subsystem was **split across two stores that never met**, with no reconciliation in either direction:\n\n- **In-memory `SchemaRegistry`** (`registry.ts`) — written by boot-time `registerApp()` and HTTP `POST /api/v1/packages`. **This is the only store Studio reads** (its selector hits the dispatcher's `/api/v1/packages`, whose list = `registry.getAllPackages()` and detail = `registry.getPackage()`).\n- **`sys_packages` table** (`service-package`) — where the AI writes (`ensureAppPackage` → `packageService.publish`). Nothing loaded it into the registry; the dispatcher never read it.\n\nSo the AI's package landed in `sys_packages`, Studio read the registry → invisible. And `protocol.installPackage` was declared in the interface but never implemented.\n\n## Change — one write primitive, one read source\n\n- **`@objectstack/objectql`**: implement `ObjectStackProtocolImplementation.installPackage` — the canonical write primitive. Registers the package in the in-memory registry **and** best-effort persists to `sys_packages` via the optional `package` service. Non-fatal when no `package` service is wired (registry write still succeeds).\n- **`@objectstack/runtime`**: dispatcher `POST /api/v1/packages` routes through `protocol.installPackage` (falls back to the bare registry write when the protocol is unavailable) — HTTP installs are durable too.\n- **`@objectstack/service-package`**: on boot, reconcile `sys_packages` rows back into the registry without clobbering filesystem-registered packages — persisted packages survive a restart and stay visible.\n- **`@objectstack/service-ai`**: `apply_blueprint`'s `ensureAppPackage` prefers `protocol.installPackage` (falls back to the legacy `package`-service publish), so an app package lands where Studio reads it.\n\n## Verification\n\n- **Live (showcase :3000):** `POST /api/v1/packages` (→ `protocol.installPackage`) returns 201, `GET /api/v1/packages/<id>` returns 200, and the package now appears in `GET /api/v1/packages` (list count 15 → 16) — the read path Studio's selector consumes.\n- **Unit (all green):** `protocol.installPackage` writes registry + calls publish, skips/persists gracefully when the service is absent or rejects; dispatcher POST routes through the primitive and falls back; service-package boot-hydration hydrates a persisted row and does not overwrite an existing id; `apply_blueprint` prefers `protocol.installPackage` and falls back to publish. Full suites: objectql 491, runtime 336, service-package 2, service-ai 471. ESM/CJS/DTS builds clean.\n\n## Scope\n\nStill the **legacy** `package_id` plane — sealed `sys_package_version` versioning and cross-environment promotion remain ADR-0027 follow-ups.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

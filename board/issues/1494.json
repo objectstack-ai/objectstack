@@ -1,0 +1,30 @@
+{
+  "number": 1494,
+  "kind": "issue",
+  "title": "sqlite-wasm: authenticated record insert fails with \"COMMIT; - cannot commit - no transaction is active\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T21:15:14Z",
+  "updated_at": "2026-06-02T02:03:54Z",
+  "closed_at": "2026-06-02T02:03:54Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1494",
+  "body": "## Summary\n\nWith the `sqlite-wasm` driver, an authenticated `POST` to the REST data API for **`crm_account`** repeatedly fails with:\n\n```\nCOMMIT; - cannot commit - no transaction is active\n```\n\nreturned as `{ \"error\": \"COMMIT; - cannot commit - no transaction is active\" }` (HTTP 500). The same authenticated session creates **`crm_lead`** records successfully, and the seed loader creates accounts fine at boot — so it's specific to a subset of user-context writes, not all writes.\n\nThis looks like a transaction begin/commit pairing bug in the driver (a `COMMIT` issued when no `BEGIN` is active — double-commit or a nested-transaction mismatch).\n\n## Environment\n\n- `@objectstack/driver-sqlite-wasm` **7.4.1**\n- `@objectstack/runtime` / `cli` / `objectql` **7.4.1**\n- Node **v25.9.0**, launched via `objectstack start` with `OS_DATABASE_DRIVER=sqlite-wasm`\n- Repro app: https://github.com/objectstack-ai/hotcrm\n\n## Observed (confirmed)\n\nIn one authenticated Console session (logged in, on `/home`):\n\n| Write | Path | Result |\n|---|---|---|\n| `crm_account` insert | `POST /api/v1/data/crm_account` | ❌ `COMMIT; - cannot commit - no transaction is active` — **3× consecutive** |\n| `crm_lead` insert | `POST /api/v1/data/crm_lead` | ✅ succeeds (other sessions) |\n| `crm_account` insert (seed, system context) | boot-time `defineDataset` | ✅ succeeds (Acme/Globex/Wayne exist) |\n\nSo: **system-context (seed) account inserts work; user-context (REST) account inserts fail; user-context lead inserts work.**\n\n## Repro\n\n```\nOS_DATABASE_DRIVER=sqlite-wasm objectstack start -p 4001\n# register + log in via /_console\n# in the authenticated browser context:\nfetch('/api/v1/data/crm_account', {\n  method: 'POST', credentials: 'include',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({ name: 'X', industry: 'technology', type: 'prospect' })\n}).then(r => r.json())   // → { error: \"COMMIT; - cannot commit - no transaction is active\" }\n```\n\n## Hypothesis\n\nThe failing object (`crm_account`) differs from the succeeding one (`crm_lead`) in two ways that add steps to the write transaction:\n\n1. **`crm_account` has a criteria sharing rule** (`AccountTeamSharingRule`); `crm_lead` has none. Opportunity/Case also have sharing rules and are good candidates to check.\n2. `crm_account` has a `beforeInsert`/`beforeUpdate`/`beforeDelete` protection hook.\n\nA plausible cause is the sharing-rule (or hook) path opening/closing an inner transaction that leaves the driver's transaction stack unbalanced, so the outer `COMMIT` runs with no active transaction. The seed path bypasses sharing recompute (system context), which is consistent with it succeeding.\n\n## Suggested checks\n\n- Audit `BEGIN`/`COMMIT`/`ROLLBACK` pairing in `driver-sqlite-wasm` when a write triggers nested operations (sharing-rule recomputation, cascade writes, hook-issued sub-queries). Compare against `driver-sql` (better-sqlite3), which I did not see exhibit this on the same write.\n- Add a regression test: authenticated insert of an object that has a criteria sharing rule, under `sqlite-wasm`.\n\n## Repro caveat\n\nI couldn't produce a fully isolated minimal repro in this pass (browser-auth flakiness + better-auth registration throttling after many test users interfered). Happy to add a LiteKernel-level repro (driver + objectql + an object with a sharing rule + authenticated insert) if useful for triage.\n\n## Possibly related\n\nMay share a root cause with the silent-trigger investigation in #1491 (both surface only under user-context writes), but filing separately since the symptom and layer (driver transaction lifecycle) are distinct."
+}

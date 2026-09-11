@@ -1,0 +1,32 @@
+{
+  "number": 1612,
+  "kind": "pull_request",
+  "title": "chore(showcase): config-driven master-detail (derive child columns)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-06T11:34:59Z",
+  "updated_at": "2026-06-06T11:35:14Z",
+  "closed_at": "2026-06-06T11:35:13Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-06T11:35:13Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1612",
+  "body": "Configures the project-workspace Tasks subtable with just `{ childObject: 'showcase_task' }` — the relationship FK (`showcase_task.project`) and the editable grid columns are auto-derived from the child object metadata by `@object-ui/plugin-form` (objectui #1526). Drops the hand-authored ~40-line `columns` + `relationshipField` block.\n\nDemonstrates the \"no hand-authored columns\" master-detail config. Verified live: the form derives columns at runtime and still posts the correct atomic `/api/v1/batch`.\n\nPairs with objectui #1526.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

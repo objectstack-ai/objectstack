@@ -1,0 +1,32 @@
+{
+  "number": 1584,
+  "kind": "pull_request",
+  "title": "docs: launch-readiness checklist for team sign-off",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-04T15:03:34Z",
+  "updated_at": "2026-06-04T15:07:51Z",
+  "closed_at": "2026-06-04T15:07:48Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-04T15:07:48Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1584",
+  "body": "Adds [`docs/launch-readiness.md`](docs/launch-readiness.md) — a sign-off checklist synthesized from a read-only, package-by-package launch-readiness sweep of the monorepo (system is preparing for production).\n\n## Structure\n- **P0 (blockers)** — auth secret weak fallback, metadata-service fail-open bypassing RBAC/RLS, unescaped LIKE metacharacters, unallowlisted MongoDB `$` operators, in-memory realtime/feed in clusters.\n- **P1** — external-call timeouts/retries, retention/unbounded growth, graceful shutdown, env-resolution cache, cluster pub/sub durability.\n- **P2** — test-coverage & hardening gaps (metadata-fs durability, cli serve test, webhooks dedup, queue CAS, audit of sessions, getService sync/async).\n- **Roadmap** — Proposed ADRs explicitly named out of v1; two packages to verify (knowledge-ragflow, connector-openapi).\n- **Release mechanics** — CI, changesets, env vars, topology decision.\n\n## Important\nEvery item has **separate Verify and Sign-off boxes**. The P0/security findings are **sweep-derived and not yet hand-verified** — the doc says explicitly they must be confirmed against `main` before any fix or acceptance. File:line refs are approximate.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

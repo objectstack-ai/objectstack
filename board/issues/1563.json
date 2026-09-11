@@ -1,0 +1,35 @@
+{
+  "number": 1563,
+  "kind": "pull_request",
+  "title": "fix(ai): AI-authored views bind to their object + render (kanban as a board, not a list)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-03T08:13:49Z",
+  "updated_at": "2026-06-03T08:25:03Z",
+  "closed_at": "2026-06-03T08:24:49Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-03T08:24:49Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1563",
+  "body": "## Problem\n\nAn AI-built app's views — including a \"kanban by status\" — never appeared as selectable view tabs and always rendered as the default list. The user pointed out the **showcase's own kanban renders fine**, which ruled out the renderer.\n\n## Diagnosis: metadata-shape bug in the blueprint's `viewBody` (not renderer, not skill)\n\nComparing the AI view to the working showcase view (`showcase_project.by_status`):\n\n| | showcase (works) | AI (broken) |\n|---|---|---|\n| `name` | `showcase_project.by_status` | _missing_ |\n| top-level `object` | `showcase_project` | _missing_ |\n| top-level `viewKind` | `list` | _missing_ |\n| config | under `config` | under `list` |\n\n`viewBody` emitted a bare `{ list: {…} }` fragment. Three concrete failures:\n1. **No top-level `name`** → `protocol.getMetaItems` only merges sys_metadata overlay rows whose body has `name` (protocol.ts ~L1188 `'name' in data`). Every AI view (always an overlay) was silently dropped from `getMetaItems({type:'view'})` → the object page's view list was empty → no tabs.\n2. **No top-level `object` / `viewKind`** → the console can't bind the view to its object.\n3. **Name not `<object>.<key>`-prefixed** → the convention the console keys an object's view tabs off.\n\n## Fix\n\n`viewBody` now emits the canonical view record (matching the showcase's own views):\n```\n{ name: '<object>.<key>', object, viewKind: 'list'|'form', config: <ListView|FormView> }\n```\nValidated against the real `ViewSchema` (`getMetadataTypeSchema('view')`).\n\n## Verification (end-to-end, browser)\n\nBuilt a fresh AI app with a \"kanban by stage\" view → published → opened the object page:\n- `getMetaItems({type:'view'})` now lists `feature_req.feature_req_kanban` + `feature_req.feature_req_list` (was empty).\n- The object page shows **view tabs** (需求看板 | 需求列表), and the kanban **renders as a board** grouped by stage (待评估/已排期/开发中/已上线/…) with cards — identical behaviour to the showcase kanban.\n\nservice-ai blueprint suite green (25).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

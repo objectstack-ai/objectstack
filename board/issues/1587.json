@@ -1,0 +1,35 @@
+{
+  "number": 1587,
+  "kind": "pull_request",
+  "title": "fix(hono-server): drain in-flight requests on shutdown (P1-3)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-05T01:01:15Z",
+  "updated_at": "2026-06-05T01:05:20Z",
+  "closed_at": "2026-06-05T01:05:18Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-05T01:05:18Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1587",
+  "body": "Addresses launch-readiness **P1-3**. Verifying it first (per the checklist) flipped most of the finding:\n\n## Verification: \"no SIGTERM/SIGINT handling\" is a false positive\nThe kernel **already** does coordinated graceful shutdown:\n- `Kernel.registerShutdownSignals()` (called at start) handles **SIGINT / SIGTERM / SIGQUIT** → `shutdown()` → `performShutdown()`: ordered plugin destroy (reverse), `kernel:shutdown` hook, then `onShutdown` handlers.\n- Bounded by a **default 60s** `shutdownTimeout` (the ≥60s grace floor the action asked for already exists).\n- `cli/serve.ts` boots through the kernel, so production inherits all of this.\n\n## The real, narrower bug — fixed\nThe standalone Hono server's `close()` called `closeAllConnections()`, which **force-terminated in-flight requests** mid-response. So a SIGTERM during a rolling deploy *did* drop active requests — but because of this, not missing signal handling.\n\nNow `close()` drains:\n1. `server.close()` — stop accepting new connections, let active requests finish.\n2. `closeIdleConnections()` — release idle keep-alive sockets so the process exits promptly (not `closeAllConnections`, which kills active ones).\n3. A bounded **drain window** (default **10s**, constructor-configurable, well under the kernel's 60s) force-closes only stragglers so shutdown can't hang.\n\n## Tests\n+2 integration tests (real ephemeral-port server): a slow request **completes** through `close()` (drained, not reset); a hung request is **force-closed within the drain window** (shutdown doesn't wait it out). `plugin-hono-server` 40 tests green.\n\n## Residual (noted in the doc, not blocking)\n- Embedding adapters (express/fastify/…) intentionally leave signals to the host app.\n- Cluster/Redis close should be registered via `kernel.onShutdown(...)` by the cluster plugin — worth a quick confirm.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

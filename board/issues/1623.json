@@ -1,0 +1,32 @@
+{
+  "number": 1623,
+  "kind": "pull_request",
+  "title": "feat(spec): add relatedList field flags (read-side mirror of inlineEdit)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-06T15:44:41Z",
+  "updated_at": "2026-06-06T15:48:45Z",
+  "closed_at": "2026-06-06T15:48:43Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-06T15:48:43Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1623",
+  "body": "## Summary\n\nA child's `master_detail`/`lookup` FK can now declare how it appears as a **related list** on the parent's record detail page — the read-side counterpart to `inlineEdit` (which pulls the child into the parent's entry form).\n\n- `relatedList: false` — suppress a child from the detail page (noisy association/audit links); related lists are otherwise shown by default.\n- `relatedListTitle` / `relatedListColumns` — override the derived title/columns.\n\n## Changes\n- `packages/spec/src/data/field.zod.ts`: add `relatedList`, `relatedListTitle`, `relatedListColumns` (mirroring `inlineEdit`/`inlineTitle`/`inlineColumns`).\n- Showcase: `showcase_project.account` declares `relatedListTitle: 'Projects'` + columns → the Account detail page auto-renders a Projects related list with no page config; `showcase_task.project` mirrors its `inlineEdit` with `relatedList*`.\n- Docs: ADR-0035 gains a read-side section; `objectstack-data` (Relationships) and `objectstack-ui` (Master-Detail Forms) skills document `relatedList` as the mirror of `inlineEdit`.\n\n## Verification\n- `@objectstack/spec` rebuilt; field tests 6647 ✓\n- app-showcase typecheck clean (only pre-existing page.ts errors unrelated to this change)\n- Rendering verified end-to-end via the objectui live e2e (Account detail → Projects related list).\n\nPairs with objectui#feat/detail-related-lists.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

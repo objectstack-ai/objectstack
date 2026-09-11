@@ -1,0 +1,30 @@
+{
+  "number": 1479,
+  "kind": "issue",
+  "title": "Implement structured control-flow constructs (ADR-0031): loop container / parallel block / try-catch",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T14:53:35Z",
+  "updated_at": "2026-06-02T02:14:19Z",
+  "closed_at": "2026-06-02T02:14:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1479",
+  "body": "Tracks the implementation of **ADR-0031** (`docs/adr/0031-advanced-flow-node-executors-and-dag.md`, merged): adopt **structured control-flow constructs** as the native + AI-authored flow model, with BPMN gateways/boundary kept in the protocol as the import/export representation.\n\n## Decision recap\n\n- **loop** = structured iteration **container** (bounded body region + after-path) — not a back-edge, not a subflow.\n- **parallel** = structured **block** with **implicit join** at block end (engine-synchronized) — no author-visible split/join gateways.\n- **errors** = structured **try/catch/retry**, surfacing the existing `fault` edge + `errorHandling.retry`.\n- **DAG invariant kept** — ordinary edges acyclic; iteration/parallel are scoped containers.\n- **BPMN** `parallel_gateway`/`join_gateway`/`boundary_event` retained for interop only, mapped onto the constructs.\n- **AI authoring** generates constructs from the live registry (`/automation/actions` + `configSchema`); valid-by-construction.\n\n## Open question (decide in task 1)\n\nRepresentation of structured containers in the `nodes[]`+`edges[]` model:\n- **(A) marker-delimited scoped regions** (recommended start; flat graph + single-entry/single-exit validation), or\n- **(B) nested sub-structure** (`config.body`; cleaner AST, diverges from flat graph).\n\n## Roadmap (each = own PR: spec/engine change + tests + showcase example, per multi-agent discipline in AGENTS.md — never push main, branch+PR only, mind shared `engine.ts`)\n\n- [ ] **1. Spec-define the constructs** — `loop` container, `parallel` block, `try/catch/retry`: schema + `configSchema` + **well-formedness validation** (single-entry/single-exit regions; bounded loop). Pick representation (A) vs (B).\n- [ ] **2. Loop container** — engine execution (bounded iteration over a collection) + designer + e2e. *(Highest value; replaces the current no-op `loop` stub.)*\n- [ ] **3. Parallel block** — implicit-join execution (per-run, race-free synchronization) + designer + e2e.\n- [ ] **4. Try/catch/retry** — surface existing `fault` + `retry` as a structured construct in spec + designer.\n- [ ] **5. BPMN mapping** — `bpmn-interop` import/export ↔ structured constructs.\n\n## Already shipped (this line of work)\n\n- `wait` executor (#1469) — durable timer/signal pause.\n- `subflow` executor — synchronous reusable invoke (depth-guarded; nested pause → clear error). Reuse primitive, **not** the loop mechanism.\n\n## Out of scope / non-goals\n\n- Author-visible low-level BPMN gateway/boundary as the *native* model (interop only).\n- Relaxing the DAG invariant to allow arbitrary cycles.\n- Runtime BPMN boundary events (timer/signal) — interop representation retained."
+}

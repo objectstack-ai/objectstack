@@ -1,0 +1,33 @@
+{
+  "number": 1399,
+  "kind": "pull_request",
+  "title": "feat(objectql): secret field type with encrypt-on-write to sys_secret",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/l",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-30T23:58:58Z",
+  "updated_at": "2026-05-31T00:01:17Z",
+  "closed_at": "2026-05-31T00:01:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-05-31T00:01:17Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1399",
+  "body": "## What\n\nAdds a reversible **`secret`** field type whose values are encrypted on write and never returned in plaintext through the normal read path — for DB passwords, API keys, tokens.\n\nDistinct from `password` (a one-way scrypt hash owned by the auth/better-auth subsystem; the two **never share a code path**): `secret` is reversible (`encrypt`/`decrypt`), `password` is verify-only.\n\n## Core encryption chain\n\n- **spec** — add `secret` to `FieldType` + a `Field.secret()` helper, documented as reversible / encrypted / fail-closed.\n- **objectql** — encrypt-on-write in insert/update (ciphertext → `sys_secret`, the business row keeps only an opaque `secret:<id>` ref); mask-on-read in find/findOne (returns a mask, never plaintext or the ref); `engine.resolveSecret(ref)` for privileged server-side dereference; `engine.setCryptoProvider(p)` injection point. **Fail-closed**: writing a secret with no registered `ICryptoProvider` throws — never persists cleartext.\n- **host wiring** — the `serve` composition root resolves the data engine after `runtime.start()` and injects an independent `InMemoryCryptoProvider` (dev); production hosts swap for KMS/Vault. objectql keeps **zero dependency** on the provider implementation — the host injects.\n\n## Driver contract fix\n\nmask-on-read mutates returned rows in place, so a driver **must return fresh row copies on read**. `InMemoryDriver.find` previously returned live references (it cloned the array, not the rows), which would corrupt a stored `secret:` ref into the mask on first read — permanently losing the secret. It now copies rows on the non-projected path, matching its own `create()` contract. This guards **all** read-time mutation (expand, afterFind hooks), not just secrets.\n\n## Tests\n\n- 7 end-to-end secret-field tests (encrypt-on-write, mask-on-read, `resolveSecret` round-trip, fail-closed, update re-encrypt / mask-echo no-op, non-secret zero-cost).\n- 2 driver read-isolation regression tests.\n- Verified end-to-end against the **real** `InMemoryCryptoProvider` + **real** `InMemoryDriver` (secret survives repeated masked reads; `resolveSecret` round-trips).\n\n## Notes\n\n- objectql build clean; secret-field tests green. There is **one pre-existing failure unrelated to this PR** in `metadata-validation-sweep.test.ts` (the `workflow` state-machine sweep fixture) inherited from `main`'s intermediate state — this PR touches no workflow/state-machine/field-validation code.\n- Follow-up (separate PR): objectui renders `secret` as a write-only input; driver `configSchema`-driven config widget; datasource \"Test connection\" action."
+}

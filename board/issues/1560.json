@@ -1,0 +1,32 @@
+{
+  "number": 1560,
+  "kind": "pull_request",
+  "title": "fix(formula): hydrate ISO date/datetime strings on CEL overload fault (#1530)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-03T07:15:59Z",
+  "updated_at": "2026-06-03T07:36:05Z",
+  "closed_at": "2026-06-03T07:34:58Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-06-03T07:34:58Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1560",
+  "body": "## Problem\nDate-typed formula fields — and any predicate comparing a date field to a temporal builtin — always evaluate to **`null`** (#1530). `Field.date` serializes to `\"YYYY-MM-DD\"` and `Field.datetime` to a full ISO string; cel-js compares that raw **string** against the `google.protobuf.Timestamp` returned by `today()` / `now()` / `daysFromNow()` and raises `no such overload`, which is swallowed to `null` (contrary to ADR-0032 §1c \"no silent failure\").\n\nRepro (templates `all` aggregate, 7.7.0): `contracts_contract.is_expiring_soon`, `todo_task.is_overdue`, `hr_employee.tenure_years` all return `null` even with clean date-only values.\n\n## Fix\nThis is the **date analogue of the numeric-string fix (#1534)**, so it reuses the *exact same* fault-retry path in `cel-engine.ts`: on a `no such overload`, hydrate the offending scope and retry **once**. I extended that hydration to also coerce strict ISO-8601 date / date-time strings → `Date`, alongside the existing numeric-string → number coercion (`hydrateNumericStrings` → `hydrateOverloadStrings`).\n\nFixing it **in the engine** (rather than in objectql's `applyFormulaPlan`, as the issue hypothesized) repairs *every* caller — formula fields, flow conditions, validation/workflow predicates — not just formula projection.\n\nSafety, matching the #1534 precedent:\n- Hydration runs **only after a fault**, so an expression that already type-checks is never re-interpreted.\n- A genuine non-temporal string (`\"soon\"`) still **faults loudly**.\n- `string == string` already type-checks → retry never runs → no spurious coercion of date-looking strings.\n- The ISO regex is strict and anchored (no ReDoS).\n\n## Tests\n8 new cases in `cel-engine.test.ts`: date-only `is_expiring_soon` window, unmet compare → `false` (not fault), `is_overdue`, full ISO datetime vs `now()`, timestamp arithmetic `today() - hire_date`, mixed date+numeric record, non-temporal string still faults, no spurious coercion on `string == string`.\n\n**Full `@objectstack/formula` suite green: 90/90.**\n\n> Note: I could not run the package's `BUILD_DTS` step in my environment (the spec declaration build OOMs — unrelated to this change, reproducible on `main`). The change is confined to `packages/formula` and is type-trivial (same shape as the existing helper). Please confirm CI's DTS/build pass.\n\nCloses #1530.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

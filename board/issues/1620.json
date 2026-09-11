@@ -1,0 +1,33 @@
+{
+  "number": 1620,
+  "kind": "pull_request",
+  "title": "fix(seed): complete Dataset->Seed rename + load published seed rows (locally verified)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-06T15:07:30Z",
+  "updated_at": "2026-06-06T15:15:21Z",
+  "closed_at": "2026-06-06T15:15:19Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-06T15:15:19Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1620",
+  "body": "## 本地已验证(106 spec + 163 runtime 测试全绿)后才提交\n\n之前分两次做都失败:改名那条 commit 因 auto-merge 抢跑没落到 main(#1611 只合了\"seed 类型 + SeedSchema 别名\"),seed-apply 钩子又被我在慢部署循环里盲改。这次按新纪律(AGENTS.md)本地跑通再提。\n\n## 1. 补完丢失的 Dataset->Seed 改名\n- 文件 data/dataset.zod.ts -> data/seed.zod.ts(+ 测试同改名)\n- DatasetSchema->SeedSchema(规范名)、Dataset->Seed、DatasetInput->SeedInput、DatasetMode->SeedMode、DatasetImportMode->SeedImportMode、DatasetLoadResult(Schema)->SeedLoadResult(Schema)、defineDataset->defineSeed\n- SeedLoaderRequest 字段 datasets->seeds(含全部构造/读取/测试)\n- 调用方:3 个 example、plugin-org-scoping、runtime seed-loader + app-plugin、spec stack/manifest/package-artifact/metadata-collection/solution-blueprint\n- 把 dataset 名让给 ADR-0021 分析层。**不改**(不同概念):env-artifact 的 datasets 桶、seed-datasets 服务键、manifest data、RAGFlow datasets。\n\n## 2. 修 publish-drafts seed-apply,让已发布 seed 真正落数据\n诊断(staging seedApplied 报错)显示:protocol.getMetaItem 直连返回的是 wrapper `{type,name,item,...}`,seed body 在 .item 下(HTTP 端点会解包,误导了之前的猜测)。修复:读 .item;先 active-org 再 env-wide 回退;读不到时返回 success:false 而非\"成功 0 行\"。\n\n新增集成测试 http-dispatcher.test.ts 跑真实 SeedLoaderService 端到端锁定。\n\n## 说明\nmain 当前 seed-apply 是坏的(#1618 传 seeds 但 schema 字段是 datasets)——本 PR 把字段统一为 seeds 后即一致。seed 是新功能,未影响线上。\n"
+}

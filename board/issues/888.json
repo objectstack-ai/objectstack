@@ -1,0 +1,34 @@
+{
+  "number": 888,
+  "kind": "issue",
+  "title": "【重大Bug】日志系统未严格过滤级别，导致日志信息丢失或过度输出",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-09T07:45:49Z",
+  "updated_at": "2026-05-23T01:39:00Z",
+  "closed_at": "2026-05-23T01:39:00Z",
+  "closed_by": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/888",
+  "body": "### 问题摘要\n排查 `objectstack-ai/spec` 日志系统发现，日志过滤机制存在多个严重缺陷，导致日志级别配置无效、日志丢失或过度输出。\n\n---\n\n#### 问题 1：浏览器环境下缺少日志级别过滤\n- logger.ts 中，所有 `debug/info/warn/error` 方法在浏览器环境直接输出，没有根据配置的 `level` 判断是否应该打印。\n- 如设置 `level='warn'`，`debug()`、`info()` 仍然输出。\n\n#### 问题 2：Node端 Pino 日志器异步初始化造成启动日志丢失。\n- logger 构造函数 `initPinoLogger()` 异步执行，日志调用早于初始化时会 fallback 到 console，日志结构及级别可能失真。\n\n#### 问题 3：SchemaRegistry 日志过滤过于粗暴\n- 仅有一个`log()`方法，无`warn`或`error`分级，`logLevel='warn'|'error'`会导致所有注册/注销等日志静默丢失。\n\n#### 问题 4：silent 级别无效\n- browser 下 silent 依然输出日志。\n\n#### 问题 5：测试未验证输出是否被正确过滤\n- logger.test.ts 只检查不抛异常，并未断言实际 console 输出，无法发现过滤失效问题。\n\n---\n\n## 推荐修复方案\n\n1. 补充浏览器端日志级别过滤：\n   - 增加 `shouldLog(level)` 方法，根据 config.level 检查优先级，过滤低级别日志。\n2. Pino初始化竞态修复：\n   - 支持异步/ready钩子，初始化完毕前缓存日志或直接丢弃。\n3. SchemaRegistry 增加分级日志支持：\n   - log/info/warn/error 四个方法，优先级比较后输出到相应 console API。\n4. 修正 silent 级别逻辑。\n5. 单元测试增强，验证实际console输出与filter逻辑。\n\n---\n\n## 受影响范围\n- packages/core/src/logger.ts\n- packages/objectql/src/registry.ts\n- packages/core/src/logger.test.ts\n\n---\n\n## 如需代码实现及PR，请通知我。 "
+}

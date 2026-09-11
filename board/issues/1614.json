@@ -1,0 +1,32 @@
+{
+  "number": 1614,
+  "kind": "pull_request",
+  "title": "feat(showcase): project Tasks as a form-view subform (Tier 0)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-06T12:01:35Z",
+  "updated_at": "2026-06-06T12:03:51Z",
+  "closed_at": "2026-06-06T12:01:50Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-06T12:01:50Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1614",
+  "body": "`showcase_project`'s default form view declares `subforms: [{ childObject: 'showcase_task' }]`, so the standard New/Edit Project modal renders an inline Tasks subtable (FK + columns derived from `showcase_task`) and saves parent + tasks in one atomic `/api/v1/batch` — no bespoke page. Demonstrates Tier 0 config-driven master-detail.\n\nPairs with objectui (ModalForm/AppContent subforms) + `@objectstack/spec` `FormViewSchema.subforms`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

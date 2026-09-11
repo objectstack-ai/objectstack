@@ -1,0 +1,30 @@
+{
+  "number": 1459,
+  "kind": "issue",
+  "title": "SQL driver does not materialize declared object-level indexes (UNIQUE guarantees unenforced)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T08:50:04Z",
+  "updated_at": "2026-06-01T09:26:00Z",
+  "closed_at": "2026-06-01T09:26:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1459",
+  "body": "## Summary\n\nThe SQL driver does **not** materialize object-level declared `indexes` (the `ObjectSchema.indexes: [{ fields, unique }]` array). As a result several documented uniqueness / dedup guarantees are **not actually enforced at the DB level**.\n\n## Evidence (reproducible)\n\nAfter `objectstack dev --fresh` (sqlite), a fresh DB has **only primary-key autoindexes** — no declared secondary or unique index exists on any `sys_*` table:\n\n```\n$ sqlite3 dev.db \"SELECT tbl_name,name FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_autoindex%';\"\n(empty)\n\n$ sqlite3 dev.db \"PRAGMA index_list(sys_notification);\"\n0|sqlite_autoindex_sys_notification_1|1|pk|0\n\n$ sqlite3 dev.db \"PRAGMA index_list(sys_notification_delivery);\"\n0|sqlite_autoindex_sys_notification_delivery_1|1|pk|0\n\n$ sqlite3 dev.db \"PRAGMA index_list(sys_api_key);\"\n0|sqlite_autoindex_sys_api_key_1|1|pk|0\n```\n\nChecked `sys_notification`, `sys_notification_delivery`, `sys_notification_receipt`, `sys_api_key`, `sys_organization` — all only have the PK autoindex.\n\n## Root cause (suspected)\n\n`packages/plugins/driver-sql/src/sql-driver.ts` ~line 137 has `indexes: false` in what appears to be a capabilities/features descriptor. Field-level `unique` *is* wired (~line 1649, `if (field.unique) col.unique()`), but object-level `indexes` (including `unique: true` entries) are not synced during schema creation.\n\n## Impact — guarantees that silently rely on an unenforced index\n\n- **`sys_notification_delivery`** `UNIQUE(notification_id, recipient_id, channel)`: the P1 outbox `enqueue()` (`sql-outbox.ts`) catches a unique violation to converge concurrent enqueues — but the violation can never fire without the index, so concurrent enqueues can double-insert.\n- **`sys_notification_receipt`** `UNIQUE(notification_id, user_id, channel)`: the bell's mark-read upsert and the inbox channel's delivered-receipt writes assume this is enforced.\n- **`sys_notification.dedup_key`** `UNIQUE` (added in #1458): `emit()` dedup convergence depends on it to be race-safe under a record-change storm.\n- **`sys_api_key.key`**, **`sys_organization.slug`**, and other platform objects that declare object-level unique indexes.\n\n## Proposed work\n\n1. Determine whether this is an intentional gap or a separate migration path that `dev` doesn't run.\n2. Either:\n   - (a) Wire declared-index sync into the SQL driver's schema sync — including **UNIQUE**, **multi-column**, and **NULL-distinct** semantics — so both `dev --fresh` and production create them; or\n   - (b) If index sync is deliberately migration-only, document it clearly and provide the migration path so these uniqueness guarantees are actually enforced.\n3. Add a test asserting a declared unique index is materialized and rejects duplicates (while allowing multiple NULLs). Verify with `PRAGMA index_list` on a fresh sqlite DB and, if feasible, Postgres.\n\n## Context\n\nSurfaced while implementing ADR-0030 notification-pipeline hardening (#1458). That PR is consistent with the existing convention (declare the unique index, converge on the conflict where a driver enforces it, fall back to the best-effort check-then-insert otherwise), so it does not regress anything — but the DB-level race-safety it (and the existing delivery/receipt convergence) describes is only realized once declared indexes are materialized."
+}

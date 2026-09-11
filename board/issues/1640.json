@@ -1,0 +1,32 @@
+{
+  "number": 1640,
+  "kind": "pull_request",
+  "title": "feat(showcase): invoice header tax_rate for the live totals stack",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-07T08:23:51Z",
+  "updated_at": "2026-06-07T08:25:52Z",
+  "closed_at": "2026-06-07T08:25:50Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-07T08:25:50Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1640",
+  "body": "## Why\n\nBacks the live Subtotal / Tax / Total stack in the invoice line-item entry form (objectui).\n\n## What\n\n- Add `tax_rate` (percent number, default 0) to `showcase_invoice`.\n- Relabel the line subtotal summary \"Subtotal\".\n\nThe objectui line-item form reads `tax_rate` live and renders **Subtotal → Tax (rate%) → Total** under the grid as lines are entered.\n\n## Verification\n\n- Backend serves `showcase_invoice.tax_rate` (number).\n- Live e2e (objectui): New Invoice → pick Widget A, Qty 2 → Subtotal ¥59.98, Tax (10%) ¥6.00, Total ¥65.98.\n\n> Pairs with objectui (master-detail totals stack).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

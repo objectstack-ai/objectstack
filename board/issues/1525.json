@@ -1,0 +1,32 @@
+{
+  "number": 1525,
+  "kind": "pull_request",
+  "title": "fix(build): externalize lazily-imported optional drivers (unbreak main from #1524)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T06:17:05Z",
+  "updated_at": "2026-06-02T06:17:28Z",
+  "closed_at": "2026-06-02T06:17:16Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-02T06:17:16Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1525",
+  "body": "## What\n\nUnbreaks `main`: #1524 (the fixed-group major-cascade fix) moved optional internal `@objectstack/*` peerDependencies off `peer`, after which tsup stopped auto-externalizing them and began **bundling** the lazily `await import()`-ed driver packages — pulling in their optional native clients (`mysql` / `oracledb` via `knex`) and failing the build for `service-datasource` and `plugin-dev`.\n\n## Fix\n\n- **service-datasource**: externalize `@objectstack/driver-*` in tsup (drivers stay devDeps for tests, never bundled — preserves their optionality).\n- **plugin-dev**: move framework packages from devDeps to `dependencies` (tsup auto-externalizes deps; dev-only plugin, so hard deps are fine).\n\nNeither re-introduces the major cascade (regular deps/devDeps don't cascade; only peerDeps did).\n\n## Verification\n\nFull `pnpm build` **71/71 green**; `changeset status` still **0 major** (next release 7.6.0).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

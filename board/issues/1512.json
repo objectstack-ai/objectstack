@@ -1,0 +1,34 @@
+{
+  "number": 1512,
+  "kind": "pull_request",
+  "title": "fix(cli): link dev banner to interactive API docs instead of root",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T03:36:46Z",
+  "updated_at": "2026-06-02T03:38:55Z",
+  "closed_at": "2026-06-02T03:38:40Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-02T03:38:40Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1512",
+  "body": "## What\n\nThe dev startup banner's `API:` line pointed at `/` — the server **root**, not the API. This replaces it with an **API Docs** link to the interactive Scalar/OpenAPI explorer:\n\n```\n  ➜  API Docs:  http://localhost:3999/api/v1/docs\n  ➜  Console:   http://localhost:3999/_console/\n```\n\n## Why\n\nProbing the running showcase:\n\n| Path | Result |\n|---|---|\n| `/api/v1/docs` | **200** HTML — interactive Scalar API explorer |\n| `/api/v1` | 200 JSON — machine-facing route index |\n| `/api/v1/` | **404** (trailing slash) |\n| `/` (old `API:` target) | 302 redirect — not the API |\n\nThe interactive docs is the useful human entry point; the bare `/api/v1` index is machine-facing and not worth a banner line, and the old `/` target was misleading. Adds an optional `apiBasePath` (default `/api/v1`).\n\nVerified: banner renders the two lines; `GET /api/v1/docs` → 200 HTML, `GET /api/v1/openapi.json` → 200. cli tests 144 ✓.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

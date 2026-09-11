@@ -1,0 +1,32 @@
+{
+  "number": 1639,
+  "kind": "pull_request",
+  "title": "feat(showcase): Product catalog + invoice line product lookup with auto-fill",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-07T08:00:09Z",
+  "updated_at": "2026-06-07T08:03:04Z",
+  "closed_at": "2026-06-07T08:03:01Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-07T08:03:01Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1639",
+  "body": "## Why\n\nCompletes the line-item editor story: the invoice line's **Product** should be a catalog typeahead that auto-fills the line (description, unit price) — not free text.\n\n## What\n\n- New `showcase_product` price-book object: `name`, `sku`, `description`, `unit_price`, `active`. Seeded with a few items (Widget A/B, Gadget X, Consulting Hour). Added a **Products** nav entry.\n- Rewired `showcase_invoice_line.product` from `text` → `lookup('showcase_product')`, and added a `description` line field.\n- Picking a product in the line-item grid auto-fills the line's `description` + `unit_price` (the objectui grid copies same-named fields from the chosen record); `amount = quantity × unit_price` then recomputes live and persists, so the parent `Invoice.total` rolls it up.\n\n## Verification\n\n- Backend serves `showcase_product` and `showcase_invoice_line.product` as a lookup → `showcase_product`; products seeded.\n- Live e2e (objectui): New Invoice → pick **Widget A** → unit_price 29.99 + description auto-fill → Qty 2 → Amount 59.98 → persisted in the atomic batch.\n\n> Pairs with objectui (item-typeahead auto-fill in `GridField`).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

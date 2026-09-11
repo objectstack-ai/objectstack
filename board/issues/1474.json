@@ -1,0 +1,32 @@
+{
+  "number": 1474,
+  "kind": "pull_request",
+  "title": "feat(showcase): complete the state_machine validation demonstration",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T14:29:41Z",
+  "updated_at": "2026-06-01T14:30:22Z",
+  "closed_at": "2026-06-01T14:30:18Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T14:30:18Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1474",
+  "body": "## Summary\nThe showcase had 3 `state_machine` validations (task/project/account) covering transition **topologies** (linear+reopen, branching+terminal, re-entrant) but not the rule's other knobs. Rounds out the demonstration so the showcase exercises — and verifies — the full state_machine surface:\n\n- **`events: ['update']`** on all three: state machines validate *transitions*, so they run on update only (an insert sets the initial state). Makes intent explicit.\n- **New advisory `project_health_progression`** with **`severity: 'warning'`**: health should change one step at a time (green↔yellow↔red); a skip is *flagged* (logged) but **not blocked** — demonstrating soft guards alongside the error-severity (blocking) status flows.\n\n## Verification (runtime enforcement is live)\n- error-severity invalid transition (`task done→backlog`) → **HTTP 400 `invalid_transition`**\n- warning-severity skip (`project health green→red`) → **HTTP 200** (flagged, not blocked)\n\n## Note (separate finding)\n`objectql/validation/rule-validator.ts` enforces only 3 of the spec's 9 rule types — `state_machine`, `script`, `cross_field` — exactly what the showcase covers. The other 6 (`unique`-rule, `format`, `json_schema`, `async`, `custom`, `conditional`) are declared but **not enforced** on the write path — same \"advertise only what you can deliver\" issue as the ChartType taxonomy; worth a follow-up (trim vs implement).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

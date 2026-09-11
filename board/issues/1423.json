@@ -1,0 +1,36 @@
+{
+  "number": 1423,
+  "kind": "pull_request",
+  "title": "feat(automation): schedule flow trigger — auto-launch flows on cron/interval/once",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-31T22:53:07Z",
+  "updated_at": "2026-05-31T23:34:08Z",
+  "closed_at": "2026-05-31T23:34:02Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-05-31T23:34:02Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1423",
+  "body": "## What\n\nThe **time-based** sibling of #1421 (record-change trigger). Completes the schedule arm of the automation engine's `FlowTrigger` extension point so a flow whose start node declares a schedule auto-launches on cron / interval / once — no manual `engine.execute()`.\n\n**No engine change** — the engine already parses a flow's start node into a `schedule` binding (`flow.type === 'schedule'` or a start-node `config.schedule` descriptor); that shipped with #1421. This PR is purely the concrete trigger plugin.\n\n## New plugin: `@objectstack/plugin-trigger-schedule`\n\n- **`ScheduleTrigger`** implements the engine's `FlowTrigger` extension point and **delegates timing to the platform `IJobService`** (the `'job'` service). It stays adapter-agnostic — the job service selects a cron-capable adapter (durable `DbJobAdapter` / `CronJobAdapter`) for cron schedules and the interval adapter for the rest.\n- **`normalizeSchedule`** accepts the canonical `JobSchedule` plus ergonomic shorthands: a bare cron string, `{ cron }` / `{ expression }`, `{ every }` / `{ intervalMs }`, `{ at }`.\n- On fire, the flow runs with `event: 'schedule'` and `params: { jobId, flowName, schedule }`; the engine's start-condition gate still applies.\n- **Error-isolated** — a scheduled flow failure is logged and swallowed, never crashing the job runner.\n- Per-flow job name (`flow-schedule:<flowName>`) so `stop()` cancels exactly one flow; idempotent re-bind.\n- **Lazy job-service resolution** per bind, so the job service's `kernel:ready` adapter upgrade (interval → durable Db) is always picked up.\n- Graceful degrade when the automation or job service is absent (`kernel:ready` + `getService`, mirroring `plugin-audit` / the record-change trigger).\n- Depends on `com.objectstack.service.job` so its adapter upgrade runs first.\n\n## Usage\n\n```ts\nkernel\n  .use(new AutomationServicePlugin())  // engine + flows\n  .use(new JobServicePlugin())         // the 'job' service (cron/interval/db)\n  .use(new ScheduleTriggerPlugin());   // ← makes schedule flows live\n```\n\n## Tests\n\n17 tests: `normalizeSchedule` shapes / shorthands / rejects, `schedule`+`cancel`, `config.schedule` fallback, fire→context, error isolation, stop, idempotency, plugin wiring + graceful degrade + lazy resolution. Builds clean (full DTS typecheck). `service-automation` 104 (no regression — no engine change).\n\n## Follow-up\n\nThis completes the two trigger types the plan scoped (record-change + schedule). Strong-typing the start-trigger config in spec (engine reads it defensively today) remains an optional later cleanup."
+}

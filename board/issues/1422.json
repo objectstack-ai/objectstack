@@ -1,0 +1,36 @@
+{
+  "number": 1422,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0023 OpenAPI→Connector generator + ADR-0024 MCP servers as connectors",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-31T22:43:18Z",
+  "updated_at": "2026-05-31T22:44:41Z",
+  "closed_at": "2026-05-31T22:44:39Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-05-31T22:44:38Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1422",
+  "body": "## Summary\n\nTwo sibling ADRs for populating the connector registry **without hand-writing each integration**, both staying inside the ADR-0022 open/enterprise boundary.\n\n### ADR-0023 — OpenAPI → Connector Generator\nGenerate a `Connector` from an OpenAPI 3.x document: one operation → one action (`parameters`+`requestBody` → `inputSchema`, 2xx response → `outputSchema`, `securitySchemes` → static auth). Built **on top of** `@objectstack/connector-rest` — no new engine surface. Covers 'the vendor published a REST spec.'\n\n### ADR-0024 — MCP Servers as Connectors\nA generic adapter turns **any MCP server** into a `Connector`: `tools/list` → actions, `connector_action` → `tools/call`. MCP tool shape ≈ `ConnectorActionSchema`, so it's an **adapter, not a port**. One adapter unlocks the whole MCP ecosystem; each server is pure config. The same tools double as ADR-0011 AI tools.\n\n### Why not just import activepieces/n8n pieces?\nBoth ADRs record the finding: those integrations are **engine-bound code** (`run(ctx)` needs a sandboxed `ActionContext`), not a portable spec. They can be used as endpoint *reference material*, but cannot be dropped into our serializable `Connector` + `(input, ctx)` handler model.\n\n## Status\nBoth **Proposed**; no shipped code changes. Each ends with concrete follow-ups (scaffold package, CLI, worked example). All code references verified against real files (engine registry, `connector_action` node, `GET /api/v1/automation/connectors` discovery route)."
+}

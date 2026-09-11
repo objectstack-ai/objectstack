@@ -1,0 +1,33 @@
+{
+  "number": 1411,
+  "kind": "pull_request",
+  "title": "docs(adr-0020): state machine — converge to one enforced `state_machine` rule",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-31T13:22:51Z",
+  "updated_at": "2026-05-31T13:23:23Z",
+  "closed_at": "2026-05-31T13:23:12Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-05-31T13:23:12Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1411",
+  "body": "## Summary\n\nProposes **ADR-0020**: retire the `workflow` metadata type and `object.stateMachines`, converging the \"legal status transitions\" guardrail onto the single **`state_machine` validation rule** (already in use in app-showcase), and wiring it into the write path so illegal transitions are actually rejected.\n\nAnswers the recurring question *\"do we still need the `workflow` metadata type?\"* → **no.** Its only job was the state-machine concept, which is now the `state_machine` validation rule; its orchestration features are Flow's job (ADR-0019); and it has zero runtime enforcement today.\n\n## What's in this PR\n\n- **`docs/adr/0020-state-machine-converge-and-enforce.md`** (Proposed). Documents:\n  - The three current declaration shapes (`workflow` type / `object.stateMachines` / `state_machine` rule) and **zero runtime enforcement** (verified: `validateRecord` reads only `fields`, never `validations`; no XState interpreter; `IWorkflowService` unimplemented).\n  - The **prior-state plumbing gap** — update-path validation only gets the PATCH, not the prior record, so transition checks need the prior/merged record plumbed in (a fix that also unblocks `cross_field`/`script`).\n  - AI-author naming rationale (`state_machine` matches model priors; `lifecycle` is overloaded), industry precedent (AASM / django-fsm / Dataverse / Jira), and the difference vs a Salesforce validation rule (structured introspectable transition table vs free-form formula).\n- **`examples/app-showcase/src/objects/account.object.ts`** — adds an `account_lifecycle` `state_machine` rule (re-entrant topology) as a third example alongside Task/Project, and a future enforcement test fixture.\n\n## Scope / status\n\nDocs + example only. **No behavior change** — the implementation (retiring `workflow`, wiring write-path enforcement, rewriting app-crm `*.workflow.ts`) is tracked in the ADR's blast-radius checklist as follow-on work. Showcase typecheck passes."
+}

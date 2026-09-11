@@ -1,0 +1,32 @@
+{
+  "number": 1382,
+  "kind": "issue",
+  "title": "env: enforce OS_ prefix for all ObjectStack-owned environment variables",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-29T13:00:45Z",
+  "updated_at": "2026-05-29T15:26:45Z",
+  "closed_at": "2026-05-29T15:26:45Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1382",
+  "body": "## Background\n\nAll ObjectStack-owned environment variables should be prefixed `OS_*` for namespace hygiene. Audit ([see chat](#)) surfaced inconsistencies in three buckets:\n\n1. **Internal vars without OS_ prefix** — should be renamed (no upstream convention to honour).\n2. **Existing OS_ canonical with legacy alias** — alias should be deprecated.\n3. **Third-party / SDK conventions** — keep as-is (e.g. `OPENAI_API_KEY`, `TURSO_DATABASE_URL`, `BETTER_AUTH_URL`, OAuth `*_CLIENT_ID/SECRET`, `RESEND_API_KEY`). Out of scope for this issue.\n\n`PORT` and `DATABASE_URL` are Heroku/12-factor industry conventions; they keep working as silent fallbacks for `OS_RUNTIME_PORT` / `OS_DATABASE_URL` without deprecation noise.\n\n## Scope (Categories ① + ②)\n\n### ① Rename (internal, no upstream)\n| Current | New |\n|---|---|\n| `AUTH_BASE_URL` | `OS_AUTH_BASE_URL` |\n| `CORS_ENABLED` | `OS_CORS_ENABLED` |\n| `CORS_ORIGIN` | `OS_CORS_ORIGIN` |\n| `CORS_CREDENTIALS` | `OS_CORS_CREDENTIALS` |\n| `CORS_MAX_AGE` | `OS_CORS_MAX_AGE` |\n| `AI_MODEL` | `OS_AI_MODEL` |\n| `MCP_SERVER_ENABLED` | `OS_MCP_SERVER_ENABLED` |\n| `MCP_SERVER_NAME` | `OS_MCP_SERVER_NAME` |\n| `MCP_SERVER_TRANSPORT` | `OS_MCP_SERVER_TRANSPORT` |\n| `OBJECTSTACK_DEV_CRYPTO_KEY` | `OS_DEV_CRYPTO_KEY` |\n| `OBJECTSTACK_METADATA_WRITABLE` | `OS_METADATA_WRITABLE` |\n| `OBJECTSTACK_NODE_ID` | `OS_NODE_ID` |\n\nAffected files: `packages/cli/src/commands/serve.ts`, `packages/plugins/plugin-hono-server/src/hono-plugin.ts`, `packages/adapters/hono/src/index.ts`, `packages/plugins/plugin-auth/src/auth-manager.ts`, `packages/services/service-ai/src/plugin.ts`, `packages/plugins/plugin-mcp-server/src/plugin.ts`, `examples/app-crm/test-backend.mjs`, `packages/objectql/src/protocol-meta-types-rich.test.ts`, `packages/plugins/plugin-webhooks/src/webhook-outbox-plugin.ts`.\n\n### ② Deprecate legacy alias (canonical OS_ already exists)\n| Legacy | Canonical | Action |\n|---|---|---|\n| `AUTH_SECRET` | `OS_AUTH_SECRET` | Keep fallback, log deprecation warning once |\n| `ROOT_DOMAIN` | `OS_ROOT_DOMAIN` | Keep fallback, log deprecation warning once |\n| `OS_MULTI_TENANT` | `OS_MULTI_ORG_ENABLED` | Keep fallback, log deprecation warning once |\n\n## Behaviour\n\n- For ①: keep reading legacy name as silent fallback for at least one minor release so user `.env` files don't break, but emit a one-shot `console.warn('[OS] Env var X is deprecated; use OS_X')` on first read.\n- For ②: same — fallback + one-shot deprecation warning.\n- No legacy reads for brand-new vars (would never have been published).\n\n## Out of scope\n- Category ③ third-party conventions.\n- `PORT` / `DATABASE_URL` industry fallbacks remain silent.\n\n## Acceptance\n- All call sites read OS_-prefixed name first, fall back to legacy.\n- Deprecation warning helper is centralised (not duplicated).\n- Docs / `.env.example` / changesets updated.\n- AGENTS.md guard: \"All new env vars MUST start with `OS_`\".\n- `pnpm test` green.\n"
+}

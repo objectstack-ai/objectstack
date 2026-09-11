@@ -1,0 +1,32 @@
+{
+  "number": 1403,
+  "kind": "pull_request",
+  "title": "fix(example-crm): migrate workflows to state-machine schema",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-31T01:33:25Z",
+  "updated_at": "2026-05-31T01:36:08Z",
+  "closed_at": "2026-05-31T01:36:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-05-31T01:36:08Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1403",
+  "body": "## What\n\nMigrate app-crm's two example workflows from the legacy `Automation.WorkflowRule` to the state-machine `StateMachineConfig` (the `workflow` metadata type now maps to `StateMachineSchema`).\n\n## Why\n\nThe `workflow` type was reclaimed for state machines, but the example workflows were never migrated — so `defineStack` validation fails (`workflows.0.id / initial / states` required) and the example build/boot is broken on `main`. This also blocks every framework PR, since CI's **Build Core** compiles the example app.\n\n## Changes\n\n- **high-value-deal**: `open` —`UPDATE`[amount>100k]→ `high_value` (email_alert to sales managers); `won`/`lost` final.\n- **stale-opportunity**: `active` —`STALE_30D`[open]→ `flagged` (email_alert + task_creation follow-up); `UPDATED` clears back to `active`; `won`/`lost` final.\n\nBoth preserve the original rules' intent as guarded transitions + entry actions.\n\n## Notes\n\n`@objectstack/example-crm` is `private` → no changeset. Prerequisite for the datasource-action refactor PR (#1402), which will rebase onto this."
+}

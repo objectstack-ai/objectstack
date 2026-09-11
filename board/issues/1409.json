@@ -1,0 +1,33 @@
+{
+  "number": 1409,
+  "kind": "pull_request",
+  "title": "docs(approvals): sync docs + skill to the flow-node model (ADR-0019)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-31T10:33:36Z",
+  "updated_at": "2026-05-31T10:33:53Z",
+  "closed_at": "2026-05-31T10:33:47Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-05-31T10:33:47Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1409",
+  "body": "## What\n\nFollow-up to #1408 (ADR-0019 P4/P5), which removed the standalone approval-process engine — approval now exists **only** as a `type: 'approval'` flow node. This PR brings the documentation and the automation skill back in sync. **No code changes.**\n\n## Changes\n\n**Hand-written**\n- `skills/objectstack-automation/SKILL.md` — removes the deleted `ApprovalProcess.create({...})` API; rewrites the approval section to the node model (config schema, `approve`/`reject` edges, decision via `ApprovalService.decide`), adds `approval` to the Flow node table (18→19, new \"Human Decision\" group), adds an old→new re-home mapping, refreshes best practices + CRM blueprint.\n- `README.md`, `content/docs/guides/packages.mdx`, `content/docs/concepts/packages.mdx` — fix the plugin one-liner (no more \"approval-process engine\" / `sys_approval_process`).\n\n**Regenerated auto-docs (`content/docs/references/*`)**\n- `approval.mdx` now shows `ApprovalNodeConfig` / `ApprovalDecision` / `ApprovalEscalation` / `ApproverType` (deleted `ApprovalAction`/`ApprovalActionType` gone).\n- Also syncs other auto-docs that had drifted but were never regenerated: `workflow.mdx` → `state-machine.mdx`, `field` `secret` type, ADR-0018 open-registry text in `flow.mdx`/`node-executor.mdx`, etc. Deterministic generator output.\n\n## Left as-is (historical)\nCHANGELOGs, ROADMAP milestone, ADR 0009/0018 — point-in-time records, not retro-edited."
+}

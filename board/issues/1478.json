@@ -1,0 +1,33 @@
+{
+  "number": 1478,
+  "kind": "pull_request",
+  "title": "docs(agents): file issues for out-of-scope findings; never fake capability coverage",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T14:37:54Z",
+  "updated_at": "2026-06-01T14:38:58Z",
+  "closed_at": "2026-06-01T14:38:54Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T14:38:54Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1478",
+  "body": "Adds **Prime Directive #10** to `AGENTS.md`:\n\n> File issues for out-of-scope findings — don't silently expand scope or leave them buried. When you hit a bug/gap/unenforced capability unrelated to the task (or too large to fix in scope), open a GitHub issue and link it from your PR. Corollary: never advertise or demo a capability the runtime doesn't actually deliver (declared ≠ enforced).\n\nMotivated by this session's finding that the spec declares 9 validation-rule types but the write-path validator enforces only 3 — now tracked in #1475 (plus #1476 map basemap, #1477 exotic-chart plugin) instead of being faked in the showcase.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

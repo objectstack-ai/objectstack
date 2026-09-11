@@ -1,0 +1,36 @@
+{
+  "number": 1517,
+  "kind": "pull_request",
+  "title": "feat(expression): ADR-0032 phase 1 — validate-by-default expression layer (no silent failure)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T04:33:52Z",
+  "updated_at": "2026-06-02T05:03:41Z",
+  "closed_at": "2026-06-02T05:03:16Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-02T05:03:16Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1517",
+  "body": "## What\n\nPhase 1 of [ADR-0032](docs/adr/0032-unified-expression-layer.md) — the **AI-safety spine**: make a malformed expression impossible to ship silently, and give authors (esp. agents) a precise, fixable error. Fixes the **#1491** class where a brace-in-CEL condition (`{record.rating} >= 4`) was silently swallowed to `false`, so a flow \"fired\" with `success` but did nothing.\n\nScope = the parts that are **non-breaking and verifiable**; the breaking cutovers are staged follow-ups (see below).\n\n## Changes\n\n- **service-automation** — `evaluateCondition` no longer swallows a CEL failure to `false`; it throws an **attributed, corrective** error. `registerFlow` now **parse-validates every predicate** (start / decision / edge condition) at registration and fails loudly with location + source + the fix.\n- **formula** — new **shared validator** `validateExpression(role, src, schema?)` + `introspectScope` + `CEL_STDLIB_FUNCTIONS` (schema-aware field-existence with did-you-mean). The `{{ }}` template engine gains a **formatter whitelist** (`currency`/`number`/`percent`/`date`/`datetime`/`truncate`/`upper`/`lower`/`default`/`json`) with defined value→string semantics; arbitrary-logic holes rejected; plain `{{ path }}` stays back-compatible.\n- **cli** — `objectstack compile` validates every flow / validation-rule / field-formula predicate against the **resolved object schema** and fails the build with located, corrective messages. (Resolves ADR open question #1.)\n- **service-ai** — agent-callable `validate_expression` tool for author-time self-correction.\n- **spec** — fix the `FlowSchema` JSDoc example that taught the bad single-brace `condition: \"{amount} < 500\"` form.\n\nBoth ADR open questions resolved: #1 (schema available at compile) and #2 (formatter catalog decided).\n\n## Verification\n\nAll green locally: formula **74**, service-automation **149**, service-ai **412**, cli **152**, spec **6608**, objectql **484**, runtime **334**. All touched packages build. New negative tests cover brace-in-CEL rejection at runtime/registration/build; formatter tests cover the catalog.\n\n## Deliberately NOT in this PR (staged, breaking / cross-repo)\n\n- **Step 3 cutover** — remove `string→CEL` coercion + migrate authoring sites to typed builders (examples + templates).\n- **Step 6 finish** — delete the single-brace resolver + migrate ~191 `{x}` node-field usages to `{{x}}`.\n- **Step 7** — designer (`../objectui`, separate repo).\n- **Step 4 v2** — bool-return / type inference (CEL type env) + converging remaining objectql runtime swallows.\n\nPhase 1 already contains the #1491 risk (loud at runtime, registration, and build).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

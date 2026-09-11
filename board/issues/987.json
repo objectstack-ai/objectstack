@@ -1,0 +1,35 @@
+{
+  "number": 987,
+  "kind": "issue",
+  "title": "统一前后端 API 查询语法为 Spec 正典格式，重写相关文档",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation"
+  ],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-03-27T03:39:13Z",
+  "updated_at": "2026-05-25T07:27:09Z",
+  "closed_at": "2026-05-25T07:27:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/987",
+  "body": "## 背景\n当前项目的前后端 API 查询语法文档存在和 objectstack-ai/spec 正典（canonical）协议不一致的情况：\n- 协议层 Zod Schema（`filter.zod.ts`、`query.zod.ts`）已规范（where + $op + orderBy ...）。\n- 但文档如 `query-syntax.mdx`、`data-engine.mdx` 存在 filters/tuple/三元组/sort/group_by/aggregate 等用法偏差。\n\n## 问题\n- 前后端查询语法未统一，影响开发者体验、协议一致性和长期可维护性。\n- 文档示例容易造成迷惑，降低开发效率。\n\n## 解决方案\n1. 重写 `content/docs/protocol/objectql/query-syntax.mdx`，所有示例、接口定义、字段名、语法对齐 `@objectstack/spec` 下的 `QuerySchema` 及相关正典 Zod 类型。\n   - 必须全部采用 `where` + MongoDB-style `$op` 语法（对象语法），淘汰 filters/tuple/三元组等老格式。\n   - 排序 `orderBy`，分组 `groupBy`，聚合 `aggregations` 等字段全部统一，示例代码严格遵循最新 Spec。\n   - 旧内容移至专门的 legacy/compat 说明节。\n2. 重写 `content/docs/guides/contracts/data-engine.mdx`，匹配真实 IDataEngine 合同签名与协议语法。\n   - 查询相关统一为 `find/findOne/count/aggregate`，所有 option 字段与正典命名一致（如 where, orderBy, offset, fields, aggregations...）。\n3. 在文档中明确声明：\"tuple/filters/三元组\"仅为部分 UI 层 builder 的输入格式，进入协议必须转换为 Spec 正典格式。\n\n## 参考资料\n- `packages/spec/src/data/query.zod.ts`\n- `packages/spec/src/data/filter.zod.ts`\n- `packages/spec/src/data/data-engine.zod.ts`\n- `packages/spec/src/contracts/data-engine.ts`\n\n---\n\n**是否需要我来直接提交 PR？**\n\n> 优先级：高\n> 目标：长期维护、全栈开发一致性、对外开放 API 一致性\n> 标签：documentation, query syntax, spec\n\n> 完成后：务必回归测试并更新 CHANGELOG.md"
+}

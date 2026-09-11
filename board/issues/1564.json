@@ -1,0 +1,35 @@
+{
+  "number": 1564,
+  "kind": "pull_request",
+  "title": "fix(metadata): stamp top-level name on view bodies at the write path (no dropped views)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-03T08:52:24Z",
+  "updated_at": "2026-06-03T09:27:06Z",
+  "closed_at": "2026-06-03T09:26:46Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-03T09:26:46Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1564",
+  "body": "## What\n\n`getMetaItems` only overlays a `sys_metadata` row when its parsed body has a **top-level `name`**. Some view producers — notably loose `{ list: <ListView> }` / `{ form: … }` fragments that AI tools and hand-authoring emit — pass schema validation but carry no top-level `name`, so the view was silently dropped from the object's view list and **never appeared as a tab** (\"validates ≠ surfaces\").\n\nThis was the root cause behind the AI-built kanban/list views that validated but didn't render (follow-up to #1559 / #1563).\n\n## Fix\n\n`saveMetaItem` now guarantees a top-level `name` on every `view` body at the single write chokepoint, **before** validation + persistence, so a nameless view is auto-corrected no matter which authoring path produced it.\n\nIt **deliberately does NOT reshape** the document. Both legitimate forms are kept verbatim:\n- the `defineView` **container** form (`{ list, listViews, … }`, expanded by the loader), and\n- the `{ name, object, viewKind, config }` **record** form.\n\nReshaping a container into a record risks producing an invalid record (a non-`<object>.<key>` name) and drops Studio-only fields (`isPinned`, `sortOrder`, `isDefault`). Exported as `normalizeViewMetadata` and unit-tested (7 cases).\n\n## Scope note (why no schema tightening here)\n\nAn earlier draft of this PR also tightened the `view` metadata schema to reject garbage bodies (unknown `viewKind`, kanban config missing `groupByField`, `{}`). I backed that out: the `view` schema is a tangle of **four** loosely/inconsistently-validated shapes (record / container / flat-list / flat-form), and tightening it correctly requires first **consolidating those shapes** — done hastily it rejects real views (artifact/Studio/flat). That's a separate spec change; this PR keeps the safe, high-value core (every view becomes listable).\n\n## Tests\n- `normalize-view-metadata.test.ts` — 7 cases (name-stamping without reshaping; containers/records/Studio-extras preserved; non-view types untouched; plural alias).\n- `protocol-meta.test.ts` — view save/overlay regression (container, record, Studio-aux preservation, plural types, artifact overlay) all green.\n- Full `objectql` suite green (505 tests).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

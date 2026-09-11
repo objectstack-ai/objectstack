@@ -1,0 +1,33 @@
+{
+  "number": 1343,
+  "kind": "pull_request",
+  "title": "Restore lockstep release: add missing service-cluster packages to changesets `fixed` + CI guard",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T09:28:11Z",
+  "updated_at": "2026-05-25T09:29:28Z",
+  "closed_at": "2026-05-25T09:29:28Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-05-25T09:29:28Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1343",
+  "body": "`@objectstack/service-cluster` and `@objectstack/service-cluster-redis` were absent from `fixed` in `.changeset/config.json`, so the last release bumped them out of lockstep with the rest of `@objectstack/*`. Nothing prevented this drift from happening again the next time a public package is added.\n\n### Fix\n- Add both packages back into the `fixed` group; the workspace now has 60/60 public packages covered.\n\n### Guard against recurrence\n- **`scripts/check-changeset-fixed.mjs`** — zero-dependency validator. Reads `pnpm-workspace.yaml`, enumerates every non-private `package.json`, and diffs against `fixed`. Reports both *missing* names (new package not enrolled) and *stale* names (renamed/deleted package still listed). Non-zero exit on drift.\n- **`package.json`** — exposed as `pnpm run lint:changeset` for local use.\n- **`.github/workflows/validate-deps.yml`** — runs the validator on PRs touching `**/package.json`, `pnpm-workspace.yaml`, `.changeset/config.json`, or the script. Fast feedback before merge.\n- **`.github/workflows/release.yml`** — runs the validator before `pnpm run build` / `changeset publish`. Final gate so a release cannot ship while the group is out of sync.\n- **`CHANGELOG.md`** — entry under `[Unreleased]`.\n\n### Why a custom script and not `@changesets/*`\nChangesets has no built-in \"all public packages must be in a fixed/linked group\" lint. The script is ~140 LOC, has no runtime deps, and runs before `pnpm install`, so it adds no dependency surface and works on a cold CI runner.\n\n### Failure output (verified locally)\n```\n✗ .changeset/config.json \"fixed\" group is out of sync.\n\nPublic packages missing from \"fixed\" (add them to keep versions in lockstep):\n  - @objectstack/service-cluster\n\nNames in \"fixed\" that no longer exist in the workspace (remove them):\n  - @objectstack/no-such-package\n```"
+}

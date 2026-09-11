@@ -1,0 +1,33 @@
+{
+  "number": 1566,
+  "kind": "pull_request",
+  "title": "feat(runtime): extraPlugins host seam on createObjectOSStack (ADR §5.2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-03T09:45:27Z",
+  "updated_at": "2026-06-03T09:57:49Z",
+  "closed_at": "2026-06-03T09:57:49Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-03T09:57:49Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1566",
+  "body": "## What\n\nOpens the official **`extraPlugins`** seam on `createObjectOSStack` so a host stack (e.g. the ObjectStack Cloud repo) can add **product/policy** plugins — marketplace install, cloud-account binding, set-initial-password — to the otherwise-neutral framework runtime **without a framework release** and without mutating the returned `plugins` array by hand.\n\n```ts\nconst config = await createObjectOSStack({\n  controlPlaneUrl,\n  extraPlugins: [createCloudConnectionPlugin(), createMarketplaceInstallPlugin()],\n});\n```\n\n`extraPlugins` are appended **last**, after the framework defaults, so host policy mounts its routes after (and can augment) the browse-only `MarketplaceProxyPlugin`. This converts the cloud repo's pragmatic `config.plugins.push(...)` reverse-dependency into a clean, intentional seam — the ADR §5.2 move (\"framework exposes seams; cloud supplies metadata + policy\").\n\n**Purely additive**: omitting `extraPlugins` leaves the default stack byte-for-byte unchanged (covered by a test).\n\n## Also: latent test-config fix\n\nThe runtime vitest alias map was missing `@objectstack/spec/ui`, so it fell through to the `@objectstack/spec` catch-all and resolved to `spec/src/index.ts/ui` (`ENOTDIR`) — which broke **any** runtime test that transitively imports `spec/ui` (e.g. anything constructing `createObjectOSStack`). Added the subpath alias; the new `objectos-stack.test.ts` now runs.\n\n## Scope / sequencing\n\nThis is the **\"open the seam\"** half of [ADR §5.2](../blob/main/docs/design/cloud-account-binding-marketplace-install.md). **Removing** framework's hardcoded marketplace/auth policy (the `MarketplaceProxyPlugin` `405 \"install via cloud\"` dead-end, etc.) is intentionally **deferred until the cloud side lands + deploys** (ADR: \"after cloud lands\") to avoid breaking the framework→cloud contract. Tracked as the cloud-D follow-up.\n\nRelates to cloud-side ADR Phase 1 (cloud PR #53: `sys_cloud_connection` + device-code binding + tiered install gate).\n\n## Test\n```\npnpm --filter @objectstack/runtime exec vitest run src/cloud/objectos-stack.test.ts\n# 2 passed — extraPlugins appended in order after defaults; no-op when omitted\n```\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

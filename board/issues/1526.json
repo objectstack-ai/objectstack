@@ -1,0 +1,30 @@
+{
+  "number": 1526,
+  "kind": "pull_request",
+  "title": "chore: version packages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T06:26:01Z",
+  "updated_at": "2026-06-02T06:55:48Z",
+  "closed_at": "2026-06-02T06:55:48Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-06-02T06:55:48Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1526",
+  "body": "This PR was opened by the [Changesets release](https://github.com/changesets/action) GitHub action. When you're ready to do a release, you can merge this and the packages will be published to npm automatically. If you're not ready to do a release yet, that's fine, whenever you add more changesets to main, this PR will be updated.\n\n\n# Releases\n\n> The changelog information of each package has been omitted from this message, as the content exceeds the size limit.\n\n## @objectstack/cli@7.6.0\n\n\n## @objectstack/client@7.6.0\n\n\n## @objectstack/formula@7.6.0\n\n\n## @objectstack/objectql@7.6.0\n\n\n## @objectstack/plugin-webhooks@7.6.0\n\n\n## @objectstack/runtime@7.6.0\n\n\n## @objectstack/service-ai@7.6.0\n\n\n## @objectstack/service-automation@7.6.0\n\n\n## @objectstack/service-messaging@7.6.0\n\n\n## @objectstack/service-settings@7.6.0\n\n\n## @objectstack/spec@7.6.0\n\n\n## @objectstack/express@7.6.0\n\n\n## @objectstack/fastify@7.6.0\n\n\n## @objectstack/hono@7.6.0\n\n\n## @objectstack/nestjs@7.6.0\n\n\n## @objectstack/nextjs@7.6.0\n\n\n## @objectstack/nuxt@7.6.0\n\n\n## @objectstack/sveltekit@7.6.0\n\n\n## @objectstack/client-react@7.6.0\n\n\n## @objectstack/connector-mcp@7.6.0\n\n\n## @objectstack/connector-openapi@7.6.0\n\n\n## @objectstack/connector-rest@7.6.0\n\n\n## @objectstack/connector-slack@7.6.0\n\n\n## @objectstack/core@7.6.0\n\n\n## @objectstack/metadata@7.6.0\n\n\n## @objectstack/metadata-fs@7.6.0\n\n\n## @objectstack/observability@7.6.0\n\n\n## @objectstack/platform-objects@7.6.0\n\n\n## @objectstack/driver-memory@7.6.0\n\n\n## @objectstack/driver-mongodb@7.6.0\n\n\n## @objectstack/driver-sql@7.6.0\n\n\n## @objectstack/driver-sqlite-wasm@7.6.0\n\n\n## @objectstack/embedder-openai@7.6.0\n\n\n## @objectstack/knowledge-memory@7.6.0\n\n\n## @objectstack/knowledge-ragflow@7.6.0\n\n\n## @objectstack/plugin-approvals@7.6.0\n\n\n## @objectstack/plugin-audit@7.6.0\n\n\n## @objectstack/plugin-auth@7.6.0\n\n\n## @objectstack/plugin-dev@7.6.0\n\n\n## @objectstack/plugin-email@7.6.0\n\n\n## @objectstack/plugin-hono-server@7.6.0\n\n\n## @objectstack/plugin-mcp-server@7.6.0\n\n\n## @objectstack/plugin-msw@7.6.0\n\n\n## @objectstack/plugin-org-scoping@7.6.0\n\n\n## @objectstack/plugin-reports@7.6.0\n\n\n## @objectstack/plugin-security@7.6.0\n\n\n## @objectstack/plugin-sharing@7.6.0\n\n\n## @objectstack/plugin-trigger-record-change@7.6.0\n\n\n## @objectstack/plugin-trigger-schedule@7.6.0\n\n\n## @objectstack/rest@7.6.0\n\n\n## @objectstack/service-analytics@7.6.0\n\n\n## @objectstack/service-cache@7.6.0\n\n\n## @objectstack/service-cluster@7.6.0\n\n\n## @objectstack/service-cluster-redis@7.6.0\n\n\n## @objectstack/service-datasource@7.6.0\n\n\n## @objectstack/service-feed@7.6.0\n\n\n## @objectstack/service-i18n@7.6.0\n\n\n## @objectstack/service-job@7.6.0\n\n\n## @objectstack/service-knowledge@7.6.0\n\n\n## @objectstack/service-package@7.6.0\n\n\n## @objectstack/service-queue@7.6.0\n\n\n## @objectstack/service-realtime@7.6.0\n\n\n## @objectstack/service-storage@7.6.0\n\n\n## @objectstack/types@7.6.0\n\n\n## @objectstack/account@7.6.0\n\n\n## @objectstack/console@7.6.0\n\n\n## create-objectstack@7.6.0\n\n\n## @objectstack/metadata-core@7.6.0\n\n\n## objectstack-vscode@7.6.0\n\n\n## @objectstack/example-crm@4.0.34\n\n\n## @objectstack/example-showcase@0.1.4\n\n\n## @example/app-todo@4.0.34\n\n"
+}

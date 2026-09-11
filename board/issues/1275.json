@@ -1,0 +1,30 @@
+{
+  "number": 1275,
+  "kind": "issue",
+  "title": "try.hotcrm.ai: zero-friction try lane needs tenant provisioning API",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-24T06:26:10Z",
+  "updated_at": "2026-05-25T05:30:44Z",
+  "closed_at": "2026-05-25T05:30:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1275",
+  "body": "## Context\n\nThe HotCRM v1 launch plan (W7) included a 'try.hotcrm.ai' surface — a\nzero-friction lane where a visitor clicks 'Try it' and lands inside a\npre-seeded HotCRM tenant within ~10s, no signup required, expiring after\n60 minutes.\n\nWe deferred W7 from the launch because the platform does not yet expose\na tenant-provisioning API a CRM app can call to spin one up\nprogrammatically.\n\n## What we need from the platform\n\nA signed HTTP endpoint (or kernel method) that:\n\n1. **Creates a fresh tenant** with a generated id and a default driver\n   (sqlite-memory is fine for the trial lane).\n2. **Loads a named seed bundle** into it — same shape as our existing\n   build artifact (`dist/objectstack.json`).\n3. **Returns a short-lived (≤60 min) session token** the caller can\n   redirect the visitor into.\n4. **Self-evicts** when the TTL expires, tearing down the kernel and\n   the driver.\n\nBonus: a webhook `tenant.expired` so the calling app can show a\n'Trial expired, install for real?' page.\n\n## Why this can't live in the CRM\n\n- Kernel creation is a platform-level concern (driver wiring, plugin\n  registration, route mounting).\n- The token issuance needs the same trust anchor as the rest of auth,\n  and CRM apps shouldn't be minting tokens.\n- TTL eviction needs to be in the kernel manager, not in a peer app.\n\n## Acceptance\n\n- Reference impl in @objectstack/runtime or a dedicated\n  @objectstack/service-trial package.\n- HotCRM can call it from a static landing page with no server of its\n  own.\n- A CLI command `objectstack trial create --seed dist/objectstack.json\n  --ttl 60m` for local testing.\n\n## Related\n\n- HotCRM v1 launch plan, todo `w7-try-tenant`.\n- ADR-0010 (NL→Flow authoring) — same pattern: feature too\n  platform-shaped to live in an app."
+}

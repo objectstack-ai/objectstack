@@ -1,0 +1,32 @@
+{
+  "number": 1635,
+  "kind": "pull_request",
+  "title": "fix(rest): advertise routes.mcp in /discovery when MCP enabled (cloud#152)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-07T02:50:04Z",
+  "updated_at": "2026-06-07T02:50:51Z",
+  "closed_at": "2026-06-07T02:50:49Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-07T02:50:49Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1635",
+  "body": "Fixes the root cause of objectstack-ai/cloud#152.\n\nobjectui's Integrations page reads `discovery.routes.mcp` to show the 'Connect an AI agent' card, but it stayed absent on live envs even with MCP enabled. **Root cause (NOT a cache, as #152 first suspected):** `@objectstack/rest` serves its OWN `/discovery` (`protocol.getDiscovery()`), separate from the dispatcher's `getDiscoveryInfo` where the `mcp` field was added — so the REST-served discovery never advertised it.\n\nThe REST discovery handler now adds `routes.mcp` (unscoped `/api/v1/mcp` — the route is mounted bare) when `OS_MCP_SERVER_ENABLED=true`, omits otherwise. 2 tests; rest suite 90 green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 1594,
+  "kind": "pull_request",
+  "title": "fix(rest): map schema-mismatch & not-null driver errors to structured 4xx",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-05T02:12:51Z",
+  "updated_at": "2026-06-05T02:17:05Z",
+  "closed_at": "2026-06-05T02:13:54Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-05T02:13:53Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1594",
+  "body": "## What\n`mapDataError` collapsed any SQL-looking driver error into a generic `500 DATABASE_ERROR`. A bad write payload to the data API therefore leaked a 500 instead of a fixable 4xx — e.g. `POST /api/v1/data/sys_team` with an unknown `label` field, or omitting required `organization_id`.\n\nAdds two structured branches **before** the unknown-object / SQL-leak fallbacks:\n\n| Driver error (SQLite / Postgres / MySQL) | Before | After |\n|---|---|---|\n| unknown column (`has no column named` / `no such column` / `column … of relation … does not exist` / `Unknown column`) | `500 DATABASE_ERROR` | `400 INVALID_FIELD { field, object }` |\n| not-null (`NOT NULL constraint failed` / `null value in column` / `cannot be null`) | `500 DATABASE_ERROR` | `400 VALIDATION_FAILED { fields:[{required}] }` |\n\nThe unknown-column branch is placed before the unknown-object branch so Postgres `column \"x\" of relation \"y\" does not exist` isn't mis-mapped to `404 object_not_found`. Genuine driver faults (`SQLITE_IOERR`) still → 500; unique violations still → 409 (unchanged).\n\n## Why\nFound running cloud `LOCAL-E2E-CHECKLIST` B7 (per-env data API CRUD). This is a **last-resort safety net** — the durable fixes are upstream validation, tracked in #1590 (reject unknown fields), #1591 (enforce `managedBy`), #1592 (provenance-aware required checks). This PR closes the 500-leak symptom now.\n\n## Test\n- 8 new unit tests for `mapDataError` (SQLite/Postgres/MySQL phrasings, both error classes, plus genuine-leak-still-500 and unique-still-409 guards).\n- Full `@objectstack/rest` suite: **86/86 green**. `tsup` build clean.\n- `mapDataError` exported package-internally (not added to `index.ts`) for testability.\n\nCloses none directly; unblocks B7.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

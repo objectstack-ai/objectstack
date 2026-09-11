@@ -1,0 +1,33 @@
+{
+  "number": 1636,
+  "kind": "pull_request",
+  "title": "feat(spec): inlineEdit form factor — boolean | 'grid' | 'form'",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-07T05:44:15Z",
+  "updated_at": "2026-06-07T05:45:19Z",
+  "closed_at": "2026-06-07T05:45:16Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-07T05:45:16Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1636",
+  "body": "## Summary\nMaster-detail inline editing now selects the **entry form factor**, not just on/off.\n\n`field.inlineEdit` accepts:\n- `true` → **smart default**: pick grid/form from the child's shape (rich types or >~8 fields → form, else grid)\n- `'grid'` → editable line-item grid (fast bulk entry; thin children)\n- `'form'` → read-only list; Add / per-row edit opens the child's **full form** (fat children — long text, attachments, many fields)\n\n## Changes\n- `packages/spec/src/data/field.zod.ts`: `inlineEdit` widened to `boolean | enum('grid','form')` (`true` stays valid). Spec rebuilt; field tests 6647 ✓.\n- `examples/app-showcase`: `showcase_task.project` pinned to `'grid'` to keep the line-item grid demo (smart default would pick `form` for this fat child).\n- Docs: objectstack-data (Relationships → Inline-edit form factor) + objectstack-ui (Master-Detail Forms).\n\nUI side (resolveInlineMode + grid/list rendering) ships in objectui#feat/inline-edit-mode.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

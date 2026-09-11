@@ -1,0 +1,33 @@
+{
+  "number": 1606,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0034 robust multi-write transactions (diagnosis + fix plan)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-06T07:02:06Z",
+  "updated_at": "2026-06-06T07:02:20Z",
+  "closed_at": "2026-06-06T07:02:10Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-06T07:02:10Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1606",
+  "body": "Foundation for #1603/#1604. Documents the multi-write transaction deadlock (knex+sqlite single-connection contention: internal queries during a write don't reuse the transaction's connection) and the fix: AsyncLocalStorage ambient transaction + per-transaction connection, with a cross-driver multi-write test plan. Also notes driver-sql already has a persistent atomic sequence, so #1603 consolidates rather than rebuilds. Docs-only.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

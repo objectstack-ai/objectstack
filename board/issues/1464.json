@@ -1,0 +1,32 @@
+{
+  "number": 1464,
+  "kind": "pull_request",
+  "title": "fix(showcase): use supported ai:input block + bump objectui console pin",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T12:02:18Z",
+  "updated_at": "2026-06-01T12:02:37Z",
+  "closed_at": "2026-06-01T12:02:30Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T12:02:30Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1464",
+  "body": "## Summary\nTwo related fixes for the `example-showcase` rendering issues (field types / charts / page component all displayed wrong because of Console renderer-registry gaps):\n\n1. **Showcase page** — the component-gallery page used `ai:chat_window`, which the Console *intentionally* does not register as an inline page component (the floating chatbot overlay is the canonical entry point; referencing it is meant to surface a loud \"Unknown component type\" so it's fixed at the source). Switched to the supported `ai:input` inline AI block.\n\n2. **objectui pin bump** — `.objectui-sha` → `0af951f` to pick up objectstack-ai/objectui#1431, which fills the Console renderer registry gaps:\n   - **Fields**: ~25 types (toggle, multiselect, radio, checkboxes, tags, color, slider, rating, code, json, signature, avatar, address, …) now render correct widgets instead of a plain text input; `toggle` detail no longer shows \"0.0\".\n   - **Dashboard**: chart families normalized to supported renderers (column→bar, spline→line, pyramid→funnel, radar, kpi/bullet→metric); unsupported families show a clean placeholder instead of a raw \"Unknown component type\" error.\n\n## Verification\nBuilt the console at the new pin and ran `pnpm dev` (example-showcase): Field Zoo form, record detail, Chart Gallery dashboard, and the Component Gallery page all render cleanly with zero \"Unknown component type\" errors.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

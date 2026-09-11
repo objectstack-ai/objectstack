@@ -1,0 +1,35 @@
+{
+  "number": 1608,
+  "kind": "pull_request",
+  "title": "fix(autonumber): single owner = persistent driver sequence (#1603)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-06T07:59:32Z",
+  "updated_at": "2026-06-06T08:00:05Z",
+  "closed_at": "2026-06-06T08:00:02Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-06T08:00:02Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1608",
+  "body": "## Summary\n\nCloses the #1603 \"persistent autonumber sequence\" gap by making autonumber generation **single-owner**.\n\nToday autonumber values are generated in **two** places:\n- the SQL driver's persistent, atomic `_objectstack_sequences` table (`getNextSequenceValue` / `fillAutoNumberFields`), and\n- a non-persistent in-memory counter in the ObjectQL engine (`applyAutonumbers`).\n\nBecause the engine pre-fills the field **before** calling the driver, the driver always sees a value already set and skips (`fillAutoNumberFields` line ~618). So the persistent sequence is effectively **dead code**, and a multi-instance / post-restart deployment can mint **duplicate** numbers from the in-memory counter.\n\n## Changes\n\n**`@objectstack/spec`**\n- `DriverCapabilities` gains an optional `autonumber` flag — \"driver natively generates persistent autonumber/sequence values\".\n\n**`@objectstack/driver-sql`**\n- Advertises `supports.autonumber = true`.\n- `bulkCreate()` now fills autonumber fields too — previously only `create()` / `upsert()` did, so bulk inserts skipped the sequence.\n- Field parsing honors either the spec-canonical `autonumberFormat` key **or** the `format` shorthand (both appear in metadata). This prevents a format-loss regression now that the driver path is the live one.\n\n**`@objectstack/objectql`**\n- When the driver advertises native autonumber support, the engine **no longer pre-fills** — it defers entirely to the persistent driver sequence (single source of truth). For drivers without native support (memory, mongodb) the in-memory fallback is unchanged.\n- The fallback also reads either `autonumberFormat` or `format`.\n- Record-validation **exempts `autonumber` from the `required` check** — the value is runtime-owned and assigned after validation, so a required record number is never rejected as \"missing\".\n\nNo metadata changes required. Existing data is respected — the driver bootstraps each sequence from the current max numeric tail on first use (`scanMaxNumericTail`).\n\n## Testing\n\n- **driver-sql** (140 pass): new tests for `bulkCreate` autonumber fill, the `autonumberFormat` key, and the `supports.autonumber` capability — plus the existing per-tenant / bootstrap / concurrency / global-sequence suite.\n- **objectql** (526 pass): new `engine-autonumber-defer.test.ts` (native driver → engine does NOT pre-fill and never scans; non-native driver → engine fallback fills) and `record-validator.test.ts` (required autonumber missing → no error; required non-autonumber missing → error).\n- Both packages build type-clean.\n\n## Risk\n\nThis activates a previously-dormant-but-fully-tested driver path. The driver's `autoNumberFields` map is already populated in production via `syncSchema → initObjects`, so generation does not silently stop. The format-key harmonization removes the one regression vector (metadata declaring `autonumberFormat`).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

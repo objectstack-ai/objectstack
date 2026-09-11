@@ -1,0 +1,32 @@
+{
+  "number": 1321,
+  "kind": "issue",
+  "title": "[P3] enterprise: SSO / SAML / OIDC not verified in any template",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:27:06Z",
+  "updated_at": "2026-05-31T12:29:24Z",
+  "closed_at": "2026-05-31T12:29:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1321",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 19 条（**P3**）。\n\n## 现象\n\n平台未在任何模板中验证 SSO / SAML / Okta / Azure AD / OIDC 登录通道。\n中大型客户的安全合规清单普遍要求 SSO，缺失会直接被 RFP 否决。\n\n## 建议范围\n\n**M1：SSO 抽象**\n- `auth_provider` 系统对象 + plugin\n- 内置：SAML 2.0、OIDC（Okta / Azure AD / Google Workspace）\n\n**M2：Just-in-Time provisioning**\n- 首次登录创建 user，按 IDP claims 映射到 role / profile / team\n\n**M3：会话与多 tenant**\n- 多 IDP 共存（按邮箱域名路由）\n- 会话生命周期与 IDP 一致\n\n**M4：验证**\n- 模板模式：每个模板支持 SSO 接入示例\n- 真实 IDP 集成自动化测试（Auth0 sandbox）\n\n## 验收\n\n- [ ] SAML + OIDC 通道可用\n- [ ] 模板文档化 SSO 配置\n- [ ] 缺陷库 gap #19 标记为已解决\n"
+}

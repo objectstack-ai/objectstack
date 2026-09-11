@@ -1,0 +1,34 @@
+{
+  "number": 1615,
+  "kind": "pull_request",
+  "title": "feat(spec): inlineEdit on relationship fields — declarative master-detail",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-06T12:57:43Z",
+  "updated_at": "2026-06-06T12:58:01Z",
+  "closed_at": "2026-06-06T12:57:59Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-06T12:57:59Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1615",
+  "body": "## Summary\n\nLets a relationship declare master-detail inline editing **in the data model**, so the parent's standard form auto-renders it — answering \"why not define inline editing at the object/relationship level instead of per-form?\"\n\nA `master_detail`/`lookup` field can set `inlineEdit: true` (+ optional `inlineTitle`/`inlineColumns`/`inlineAmountField`):\n\n```ts\n// the whole declaration — on the relationship, once:\nproject: Field.masterDetail('showcase_project', { inlineEdit: true, inlineTitle: 'Tasks' })\n```\n\n→ every standard New/Edit **Project** form renders an atomic master-detail (project fields + inline Tasks grid). No form view config, no bespoke page. The objectui metadata layer derives the `subforms` from this (PR pairs with objectui).\n\n- `master_detail` children **without** `inlineEdit` are NOT inlined → associations (comments/attachments) stay out of the entry form.\n- An explicit `form.subforms` overrides the derived one.\n\n**Showcase:** `showcase_task.project` sets `inlineEdit`; the project view's explicit `subforms` is removed (now derived from the relationship).\n\nSpec field suite: 6647 pass. Live-verified end-to-end via objectui's e2e.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

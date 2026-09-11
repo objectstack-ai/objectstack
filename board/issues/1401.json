@@ -1,0 +1,34 @@
+{
+  "number": 1401,
+  "kind": "pull_request",
+  "title": "feat(automation): open action registry + fold built-in nodes into core (ADR-0018 M1+M2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-31T00:56:47Z",
+  "updated_at": "2026-05-31T00:58:37Z",
+  "closed_at": "2026-05-31T00:58:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-05-31T00:58:37Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1401",
+  "body": "## What & why\n\nImplements **ADR-0018 M1 + M2**: make the automation engine's node/action vocabulary an **open, marketplace-extensible registry** instead of a closed enum, and make `automation` a **self-contained capability** — *plugins are plugins; the platform's foundational capabilities are built in.*\n\n## M1 — open registry\n- **spec**: canonical `ActionDescriptorSchema` (+ `defineActionDescriptor`); new `source: 'builtin' | 'plugin'` field; `FlowNodeSchema.type` becomes a validated `string` checked against the live registry at `registerFlow()` (soft-fail/warn, not a closed enum).\n- **engine**: descriptor registry (`getActionDescriptors()` / `getActionDescriptor()`), published on `registerNodeExecutor` and dropped on `unregister`; `IAutomationService` gains optional `getActionDescriptors()`.\n\n## M2 — built-ins are built in, and exposed over HTTP\n- Fold logic / crud / screen-script / `http_request` executors into the core `AutomationServicePlugin` via `installBuiltinNodes()`. A bare `new AutomationServicePlugin()` now seeds all **10** built-in node types. The four `*NodesPlugin` classes become `register*Nodes(engine, ctx)` functions under `src/builtin/` (was `src/plugins/`).\n- **Drop `connector_action` from the baseline** — it's an integration concern needing a connector registry the platform doesn't ship; third parties register it (and any node type) via the still-open `registerNodeExecutor()`.\n- `capability-loader.ts` / `serve.ts`: remove the 4 `extras`; `automation` is now a single self-contained provider like every other capability.\n- **`GET /api/v1/automation/actions`** via `HttpDispatcher.handleAutomation` (`?paradigm` / `?source` / `?category` filters), `AutomationActionsResponseSchema`, and a declarative entry in `DEFAULT_AUTOMATION_ROUTES`. Backs the designer palette + flow validation.\n\n## Migration / compat\n- Existing built-in flows keep working from the core plugin alone.\n- Hosts that hand-assembled the four `*NodesPlugin` classes drop them (the classes are gone; the capability loader + CLI no longer reference them).\n\n## Verification\n- spec: **6604 tests** pass; build clean\n- service-automation: **74 tests** pass (core plugin alone installs `decision, assignment, loop, get/create/update/delete_record, screen, script, http_request`)\n- runtime: **105 http-dispatcher tests** pass (+5 for `/actions`: list, `/:name`-shadow guard, `?source`, `?paradigm`, missing-method empty registry); build clean\n- cli build clean (full `tsc`)\n\n## Follow-up (not in this PR)\n- **M3**: outbox-backed `http` / `notify` (reuse `plugin-webhooks` outbox; register `http_request`/`http_call`/`webhook` as deprecated aliases).\n- M4 (registry-driven designer palette), M5 (Workflow-Rule → Flow compiler)."
+}

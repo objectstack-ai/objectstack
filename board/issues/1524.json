@@ -1,0 +1,35 @@
+{
+  "number": 1524,
+  "kind": "pull_request",
+  "title": "fix(release): stop fixed-group major cascade from internal peerDependencies",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T05:59:43Z",
+  "updated_at": "2026-06-02T06:00:19Z",
+  "closed_at": "2026-06-02T05:59:58Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-02T05:59:58Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1524",
+  "body": "## What\n\nFixes the **fixed-group major cascade**: every minor changeset was escalating the whole 69-package suite to **8.0.0** instead of 7.6.0.\n\n## Root cause (verified)\n\nSeveral packages in the changesets `fixed` group declared **internal `@objectstack/*` peerDependencies** (adapters→`runtime`, `cli`→`core`, `plugin-msw`→`runtime`; optional: `plugin-dev`, `service-datasource`, `service-ai`). Inside a `fixed` group, changesets rewrites those peer ranges on every release and treats a **peer-range change as breaking → major**, which cascades to all 69 packages. `onlyUpdatePeerDependentsWhenOutOfRange` does not prevent this within a fixed group.\n\nProven by bisection: removing any one changeset still left 69-major; a *lone* minor on a peer-free package (`observability`) still produced 8.0.0; and converting the internal peers dropped it to **0 major**.\n\n## Fix\n\n- Required internal peers → `dependencies` (they're lockstep-versioned anyway).\n- Optional internal peers → `devDependencies` (still available for in-workspace tests; no longer a published peer edge that cascades).\n\n## Verification\n\n`changeset status` before: **69 packages → major (8.0.0)**. After: **0 major**, next release bumps correctly (patch/minor → **7.6.0**). `pnpm install` clean (no cycles).\n\nUnrelated to ADR-0032 — pre-existing release-config debt that *any* minor changeset triggered.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 1570,
+  "kind": "pull_request",
+  "title": "fix(ai): solution_design no longer models a process/approval as a table",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-03T11:41:19Z",
+  "updated_at": "2026-06-03T14:04:19Z",
+  "closed_at": "2026-06-03T14:04:16Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-03T14:04:16Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1570",
+  "body": "## The bug (root cause of the original report)\n\nAsking the assistant *\"帮我设计费用报销 / design expense reimbursement\"* made it, **by default**, create an `审批记录 / approval_record` **table** to represent the approval process — a non-functional \"process-as-data\" anti-pattern (the rows just sit there; nothing drives transitions or routing). It only switched to a flow *after* the user pushed back. Verified against the live showcase: the first blueprint contained an approval table; after correction the agent modeled status as a `select` field + approver lookups and offered a flow — proving it *knows* the right pattern, it just didn't use it by default.\n\n## Fix — make the default correct, in the two places that decide\n\n1. **`propose_blueprint` generation prompt** (the \"metadata architect\" system message that actually emits the objects):\n   - status / lifecycle → a single `select` field, never a table;\n   - MUST NOT create `approval` / `approval_record` / `approval_step` / `workflow` / `process` objects — a process is a **flow**, its trail comes from platform history;\n   - the people a process references (approver / reviewer / owner) → `lookup` fields;\n   - if the goal implies a process, add an `assumption` that the approval *flow* is a separate step.\n\n2. **`solution_design` skill instructions**: the same modeling rules, plus — when the goal involves a process — the agent now **proactively drafts the approval flow** after `apply_blueprint` (`get_metadata_schema('flow')` → `create_metadata(type:'flow', …)` with the approval node(s), bound to the same app package) instead of waiting for the user to say \"now create the flow\". Optional `state_machine` rule to block illegal status transitions.\n\n## Tests\n- `solution-design-guardrail.test.ts` — asserts the skill instructions carry: no-process-as-table, status-as-select, and the proactive-flow step (regression guard).\n- Full `service-ai` suite green (480).\n\nIndependent of the draft/package-lifecycle backend (framework#1569) and the objectui buttons (objectui#1472) — this is the upstream \"don't build it wrong in the first place\" fix.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

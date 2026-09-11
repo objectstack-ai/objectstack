@@ -1,0 +1,33 @@
+{
+  "number": 1419,
+  "kind": "pull_request",
+  "title": "feat(automation): connector discovery endpoint + worked connector_action example (ADR-0022)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-31T16:23:11Z",
+  "updated_at": "2026-05-31T16:23:32Z",
+  "closed_at": "2026-05-31T16:23:23Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-05-31T16:23:23Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1419",
+  "body": "## What\n\n**Tier 1** of the connector roadmap — make the live connector registry discoverable so the flow designer can populate the `connector_action` node's connector → action → input pickers.\n\n### Changes\n- **engine** (`service-automation`): `getConnectorDescriptors()` returns a designer-facing view per registered connector (identity + each action's input/output JSON Schema). Handlers are runtime code and are deliberately omitted from the metadata. New `ConnectorDescriptor` / `ConnectorActionDescriptor` types exported.\n- **runtime**: `GET /api/v1/automation/connectors` (ADR-0022), mirroring `GET /actions` — ordered before the `/:name` flow catch-all, supports a `?type` filter, and reports an empty (valid) registry rather than a 404 when the service lacks the optional method.\n- **examples/app-showcase**: `TaskCompletedSlackFlow`, the worked `connector_action` example dispatching to the `slack` connector's `chat.postMessage` (the \"raw API call\" path from ADR-0022). The node is baseline; the `slack` connector is contributed at runtime by `@objectstack/connector-slack`.\n\n## Why\n\nCloses the discovery gap left after the connector baseline (ADR-0018 §Addendum) + the `connector-rest`/`connector-slack` plugins landed: the registry existed but nothing exposed it to the designer.\n\n## Tests\n- engine: `getConnectorDescriptors` unit tests; dispatcher: `/connectors` route tests (listing, `?type` filter, catch-all shadowing, empty-registry fallback).\n- All `service-automation` (89) and `runtime` (329) tests green; `app-showcase` typechecks.\n\n## Scope\nTier 1 only. Does **not** touch service-messaging / `notify` (Tier 2) or the ADR-0013 Slack channel (Tier 3)."
+}

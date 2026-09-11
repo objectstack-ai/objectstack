@@ -1,0 +1,33 @@
+{
+  "number": 1431,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0028 metadata naming & namespace isolation + ADR-0029 kernel object ownership",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T02:38:53Z",
+  "updated_at": "2026-06-01T03:02:55Z",
+  "closed_at": "2026-06-01T03:02:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T03:02:54Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1431",
+  "body": "## Summary\n\nTwo **Proposed** design ADRs (docs-only, no code) addressing metadata naming conflicts as more marketplace packages get installed. Today only `object` is collision-protected — and by the *wrong mechanism* (hand-written `crm_account` literal prefix); the other ~23 metadata kinds collide silently (connectors literally `logger.warn('… replaced')` then overwrite).\n\nDeveloped collaboratively; grounded in a codebase scan (with `file:line` citations) and mainstream-platform practice (Salesforce 2GP / ServiceNow scoped apps / Dataverse / VS Code / Kubernetes).\n\n## ADR-0028 — Metadata Naming & Namespace Isolation\n\n1. **Namespace as identity dimension** — short authored names; identity = `(namespace, type, name)`. `crm.send_email` / `todo.send_email` stop colliding by construction.\n2. **Physical names derived at the storage boundary** — invert the existing `StorageNameMapping` pass-through; the prefix becomes invisible to authors/AI (the concrete answer to the hallucination concern that motivated the literal prefix).\n3. **Namespace as an addressing segment at transport** — `/api/v1/data/{namespace}/{object}` + namespaced generated GraphQL/OData/SDK/MCP.\n4. **Apps sandboxed** — no cross-app references (security boundary); only `app → kernel` is legal.\n5. **Unified kernel contract (`sys`)** — one well-known import (`sys.user`); ownership distributed (see ADR-0029).\n\n**Breakage-controlled migration:** per-package `namingMode: 'literal' | 'short'` flag + idempotent dual-read `resolveTableName` + never force-republishing sealed artifacts ⇒ **no flag day**; the only breaking step (P4) is per-package opt-in and codemod-driven (`os migrate namespace`).\n\n## ADR-0029 — Kernel Object Ownership & `platform-objects` Decomposition (prerequisite)\n\nCarved out from 0028 because it is a distinct, lower-risk, **template-transparent** concern that 0028's D5/D6 depend on, and should ship **first**.\n\n- First-party capabilities become plugins that own their `sys_*` objects **and** behavior (fixing the monolith where plugins declare `namespace:'sys'` but objects are defined centrally in `platform-objects`).\n- Small core (identity/org hub + metadata) vs capability plugins (audit/jobs/email/approvals/sharing/ai/webhooks).\n- Shared reserved `sys` namespace, **single-owner-per-object** (not per-namespace, not a monolith owner).\n- Hub + `dependencies`/`loadOrder` instead of centralization; decompose `platform-objects` behind a re-export facade.\n- Phased K0–K4 with exit gates; sequenced before 0028's naming flip.\n\n## Sequencing\n\nADR-0029 (kernel ownership, template-transparent) → ADR-0028 P0–P1 (foundations + warn-only) can run in parallel → ADR-0028 P3–P4 (transport + authoring flip).\n\n## Open questions for reviewers\n\n- Qualified kernel-reference syntax (`sys.user` vs `sys:user`).\n- Confirm kernel = unified `sys` (vs domain-partitioned) — argued from the cross-reference graph (~60 lookups converge on `sys_user`/`sys_organization`).\n- Home of the security/RBAC objects (`plugin-sharing` vs a dedicated `plugin-rbac`); base tier as `plugin-identity` vs `platform-objects-base`.\n\nhttps://claude.ai/code/session_01Tv6F1Ub6bhCedrx3r8sZM4"
+}

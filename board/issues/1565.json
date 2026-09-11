@@ -1,0 +1,33 @@
+{
+  "number": 1565,
+  "kind": "pull_request",
+  "title": "docs(automation-skill): align objectstack-automation with the engine contract",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-03T09:30:27Z",
+  "updated_at": "2026-06-03T09:33:05Z",
+  "closed_at": "2026-06-03T09:33:05Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-06-03T09:33:05Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1565",
+  "body": "## Problem\nThe `objectstack-automation` skill documents a flow/trigger contract that **does not match the runtime**, so `record_change` flows authored by following it **never fire** (or silently no-op). This is the root cause behind a class of \"my trigger flow doesn't run\" issues — including the ObjectStack templates' inert automation.\n\nVerified by probing a running 7.7 stack: a flow using the **corrected** shape fires and applies its `update_record`; the shapes the skill currently teaches silently do nothing.\n\n## Corrections (each checked against source)\n| Skill taught (wrong) | Engine actually requires | Source of truth |\n|---|---|---|\n| `update_record`/`create_record` → `values` | **`fields`** | `service-automation/src/builtin/crud-nodes.ts` reads `cfg.fields` |\n| `update_record` → `recordId` | **`filter`** (`filter ?? filters`) | same |\n| standalone `trigger: { object, event: 'after_update' }` + `type: 'record_triggered'` | **`start` node `config.triggerType: 'record-after-update'`** | `engine.ts` `resolveTriggerBinding` (reads start-node config only); `plugin-trigger-record-change` `triggerTypeToHookEvent` |\n| (no mention) | **`triggers` capability** required in `requires` or the trigger plugin never loads | `runtime/src/cloud/capability-loader.ts` (`triggers` → `RecordChangeTriggerPlugin`) |\n| `next:` node property | nodes connect via **`edges`** | `engine.ts` traverses `flow.edges` |\n| flow `type` `record_triggered` / `platform_event` | `record_change` / `api` | spec `FlowSchema` enum `['autolaunched','record_change','schedule','screen','api']` |\n\n## Scope\nDocumentation only — `skills/objectstack-automation/SKILL.md`. No code changes. Three worked examples (scheduled, record-change/approval, trigger config) + the Flow Types & Trigger Events tables + Best Practices were brought in line with the executors.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

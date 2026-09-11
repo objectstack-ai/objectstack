@@ -1,0 +1,35 @@
+{
+  "number": 1429,
+  "kind": "pull_request",
+  "title": "fix(automation,objectql): conditional & record-change flows silently skipping",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T01:37:35Z",
+  "updated_at": "2026-06-01T01:49:23Z",
+  "closed_at": "2026-06-01T01:49:18Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T01:49:18Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1429",
+  "body": "## Problem\n\nEvery flow with a start-node / edge **condition** silently skipped. Record-change triggers fired (`engine.execute` ran), but the flow body never executed — `previous.*` gates, `budget > 100000`, and `status == \"done\" && previous.status != \"done\"` all evaluated to `false` and the flow returned `{skipped, condition_not_met}`. Only condition-less flows (e.g. the interval schedule) worked.\n\nDiscovered while testing the showcase automation suite end-to-end in a browser.\n\n## Two independent root causes\n\n### 1. service-automation — CEL engine unreachable in ESM (the universal blocker)\n`AutomationEngine.evaluateCondition` loaded the formula engine lazily:\n```ts\nconst { ExpressionEngine } = require('@objectstack/formula');\n```\nThe package ships ESM (`\"type\": \"module\"`), where tsup compiles that `require` into a `__require` stub that **throws** `Dynamic require of \"...\" is not supported`. The surrounding `catch { return false }` swallowed it, so **every CEL evaluation returned false** — platform-wide, for all condition sites (start gates, decision nodes, edge predicates). Fixed with a static top-level `import`, which binds in both ESM and CJS builds.\n\n### 2. objectql — prior record not exposed to update hooks\n`HookContext` documents a `previous` snapshot \"for update/delete\", but `engine.update` never populated it — the row it fetched for validation (`needsPriorRecord`) stayed a local variable. So even once CEL worked, record-change conditions referencing `previous.*` had nothing to read. The engine now attaches the pre-update record to `hookContext.previous` for single-id updates whenever a validation rule needs it **or** an `afterUpdate` hook is registered.\n\n## Verification\n\nEnd-to-end in the showcase (record-change triggers + capability tokens from #1426):\n- **reassign task** → `assigned_notify` completed → `task.assigned` inbox row, keyed to the resolved `admin` user id (email→userId from #1426).\n- **mark in_review → done** → `rest_ping` (REST `connector_action` `GET /api/v1/health`), `completed` (email), and `slack` (`connector_action`) all completed.\n- **project budget → 250000** → `budget_approval` launched and paused at `manager_review`.\n- state-machine rule still enforced (in_progress→done rejected; in_review→done allowed).\n\n## Tests\n- `@objectstack/objectql`: 451 passed — new test asserts `afterUpdate` hooks receive `ctx.previous`, and that no prior-record fetch happens absent hooks/rules.\n- `@objectstack/service-automation`: 105 passed — new test asserts the CEL path evaluates record-change conditions (`previous.*` + bare fields).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

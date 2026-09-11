@@ -1,0 +1,34 @@
+{
+  "number": 1466,
+  "kind": "pull_request",
+  "title": "fix(showcase): seed Accounts + task map coordinates; bump objectui pin",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T12:51:00Z",
+  "updated_at": "2026-06-01T12:53:29Z",
+  "closed_at": "2026-06-01T12:51:14Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T12:51:14Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1466",
+  "body": "## Summary\nResolves the two showcase seed-data gaps found while sweeping the example app, plus a related renderer bump.\n\n1. **Accounts list was empty** — `Account.status` is `required: true`, but the seed records omitted it (no default is applied at seed-insert time), so all 3 records were rejected. Now sets `status` explicitly (+ adds `hq` coordinates).\n2. **Map view excluded every task** (\"10 records with missing or invalid coordinates\") — tasks had no `location`. Each task now carries real `{ lat, lng }`, so the Map renders 10 markers and the warning is gone.\n3. **Bump `.objectui-sha`** → `3442c55` to pick up objectstack-ai/objectui#1435, so the `hq`/`location` cells render as `\"47.6062, -122.3321\"` (pin icon) instead of `[Object]`.\n\n## Verification\nRebuilt the console at the new pin and restarted `pnpm dev`:\n- Accounts list shows Northwind / Contoso / Fabrikam with industry, revenue, website, and HQ coordinates.\n- Task Map view renders 10 markers, no \"excluded\" banner.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

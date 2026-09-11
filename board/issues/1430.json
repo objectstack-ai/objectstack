@@ -1,0 +1,33 @@
+{
+  "number": 1430,
+  "kind": "pull_request",
+  "title": "feat(showcase): wire the automation demo end-to-end",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T02:31:39Z",
+  "updated_at": "2026-06-01T02:49:39Z",
+  "closed_at": "2026-06-01T02:49:39Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T02:49:39Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1430",
+  "body": "## What\n\nActivates the showcase's automation chains now that the platform supports them (capability tokens from #1426; conditional / record-change flows fixed in #1429).\n\n- **`requires`** → `['ui','automation','approvals','messaging','triggers','job']` so the `notify` node delivers to the inbox and record-change / schedule flows auto-fire.\n- **Connectors** → register `rest` + `slack` for the `connector_action` node. `rest` targets the running server (`SHOWCASE_SELF_URL`), so its call + response are observable with no external dependency.\n- **Two worked flows** → `ScheduledDigestFlow` (interval schedule → `notify` → inbox) and `TaskCompletedRestPingFlow` (record-change → `rest` connector `GET /api/v1/health`).\n- **Decision-node fix** → `BudgetApprovalFlow` now branches on **edge `condition`** (`budget > 500000` / `<= 500000`) per the flow spec, instead of the unevaluated node-level `config.condition` + `true`/`false` labels. Budgets ≤ $500k now correctly **skip** the executive approval step.\n- **Ambient `process` decl** so `pnpm typecheck` stays green without adding `@types/node`.\n\n## Verification (browser, end-to-end)\n- Schedule digest fires every 20s → inbox rows.\n- Reassign → `notify` → inbox row, keyed to the resolved user id (email→user-id from #1426).\n- Mark done → REST `connector_action` (`GET /health`), Slack `connector_action`, script email — all complete.\n- Budget > $100k → approval launches; **decision routes correctly** (≤ $500k skips exec review, > $500k requires it); approve → resume → complete.\n\n## Tests\n`pnpm --filter @objectstack/example-showcase verify` (typecheck + coverage) green — 8 tests pass.\n\n## Notes\nPrivate example package, so no changeset. The two parked `dev`-script tweaks (this package's `--fresh` and the root `package.json` default-app switch) are intentionally **not** included. The remaining gaps (interactive screen-flow runner; approval decision UI) live in `../objectui`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

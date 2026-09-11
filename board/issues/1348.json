@@ -1,0 +1,33 @@
+{
+  "number": 1348,
+  "kind": "pull_request",
+  "title": "fix(spec): use nested import/require exports so TypeScript bundler mode resolves .d.mts declarations",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T09:52:10Z",
+  "updated_at": "2026-05-25T10:02:28Z",
+  "closed_at": "2026-05-25T10:02:28Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-05-25T10:02:27Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1348",
+  "body": "`@objectstack/driver-sql` DTS build was intermittently failing with `TS2306: File '…/spec/dist/system/index.d.ts' is not a module` in CI. The flat `types` condition on spec's subpath exports always directed `moduleResolution: \"bundler\"` to the CJS declaration file, whose `.js`-suffixed chunk imports (`'../object.zod-BntYUReb.js'`) rely on an indirect `.js` → `.d.ts` lookup that TypeScript 6 resolves non-deterministically under CI load.\n\n## Changes\n\n- **`packages/spec/package.json`** — migrated all 16 subpath exports (including root `.`) from a flat `types` condition to nested `import`/`require` conditions:\n\n```json\n// before\n\"./system\": {\n  \"types\": \"./dist/system/index.d.ts\",\n  \"import\": \"./dist/system/index.mjs\",\n  \"require\": \"./dist/system/index.js\"\n}\n\n// after\n\"./system\": {\n  \"import\": { \"types\": \"./dist/system/index.d.mts\", \"default\": \"./dist/system/index.mjs\" },\n  \"require\": { \"types\": \"./dist/system/index.d.ts\",  \"default\": \"./dist/system/index.js\"  }\n}\n```\n\n`moduleResolution: \"bundler\"` now follows the `import` branch and lands on `index.d.mts`, whose `.mjs`-suffixed chunk imports resolve deterministically to `.d.mts` counterparts — no indirect lookup needed. CJS consumers are unaffected; they continue to get `index.d.ts` via the `require` branch."
+}

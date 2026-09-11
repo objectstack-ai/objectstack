@@ -1,0 +1,32 @@
+{
+  "number": 1629,
+  "kind": "issue",
+  "title": "feat(mcp): sys_api_key generation endpoint — show-once key (ADR-0036 Phase 2b, security-critical)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-06T22:14:07Z",
+  "updated_at": "2026-06-06T22:23:50Z",
+  "closed_at": "2026-06-06T22:23:50Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1629",
+  "body": "## Context\n\nADR-0036 Phase 2b. Phase 1a shipped API-key **verification** (#1624) + the `generateApiKey()` primitive (`@objectstack/mcp`/security); Phase 2 shipped the MCP HTTP transport (#1626); package renamed to `@objectstack/mcp` (#1627); generic Skill generator (#1628). **Missing: a way to MINT a key.** Without it, a user can't self-serve a `sys_api_key` to connect an agent — so the whole \"connect your app to Claude/Cursor\" flow is blocked.\n\nThis is **security-critical** and per the auth red-line must be its **own focused PR** with a full test matrix (do not fold into unrelated work).\n\n## Goal\n\nAn authenticated endpoint that generates a `sys_api_key`, stores only the hash, and returns the **raw secret exactly once**.\n\n## Design\n\n- **Route:** `POST /api/v1/keys` (dispatcher `handleKeys`), body `{ name, scopes?, expires_at? }`. (List/revoke already exist via the `sys_api_key` data API + the `revoke_api_key` action — this issue is generation only.)\n- **Auth:** require `context.executionContext.userId`. Anonymous → 401.\n- **Generate:** use `generateApiKey()` from `@objectstack/mcp` (security) → `{ raw, hash, prefix }`.\n- **Insert:** `sys_api_key` is protection-locked (`isSystem`), so insert with an **elevated** `{ context: { isSystem: true } }` — BUT pin `user_id` to the **caller's** `executionContext.userId`, never from the request body.\n- **Response:** `{ id, name, prefix, key: <raw> }` — the raw key **once**. Never re-displayable.\n\n## Security constraints (zero-tolerance)\n\n- `user_id` is taken from the resolved principal, **never** from the request body (no impersonation).\n- The raw key and its hash never enter logs, error messages, or any response other than the single creation response.\n- Whitelist inputs; reject unknown/elevated fields in the body (e.g. caller cannot set `revoked:false` tricks, `key`, `user_id`, `id`).\n- Fail-closed on anything ambiguous.\n\n## Test matrix\n\n- authed → returns `{ id, prefix, key }`; `key` is the raw secret.\n- `hashApiKey(returned.key)` === the stored `sys_api_key.key` (hash, not plaintext).\n- round-trip: the returned raw key authenticates via `resolveExecutionContext` (x-api-key / `Authorization: ApiKey`) → resolves to the caller's principal.\n- anonymous → 401, no row created.\n- `user_id` is the caller's even if the body tries to set a different `user_id` (impersonation blocked).\n- body cannot inject `key`/`id`/`revoked` to forge a known-secret key.\n- (optional) `expires_at` / `scopes` from body are honored and round-trip through the verify path.\n\n## Acceptance criteria\n\n- New endpoint + tests green locally; raw key shown once; nothing secret logged; isolated PR.\n- ADR-0036 Status updated (key-gen shipped).\n\nBlocks: objectstack-ai/objectui connect-surface issue (Phase 2b UI).\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1415,
+  "kind": "pull_request",
+  "title": "docs(adr-0021): analytics — one semantic `dataset` layer, report/dashboard as pure presentation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-31T15:19:16Z",
+  "updated_at": "2026-05-31T15:19:44Z",
+  "closed_at": "2026-05-31T15:19:33Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-05-31T15:19:33Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1415",
+  "body": "## What\n\nProposes **ADR-0021**: redesign the analytics surface from a clean sheet.\n\n- Introduce **one semantic layer — `dataset`** — a thin wrapper over the existing `QuerySchema` engine (`packages/spec/src/data/query.zod.ts`), declaring named **dimensions** and **measures**.\n- Collapse **`report`** (pivot grid) and **`dashboard`** (widget canvas) into **pure presentations** that bind to a dataset by reference and pick dimensions/measures *by name* — never re-declaring `object` / `field` / `aggregate`.\n\n## Why\n\nToday three surfaces each re-implement their own crippled, single-object inline query: `Report.columns/groupings`, `DashboardWidget.category/value/aggregate`, and `ListChartConfig`. That means **no joins** (half of enterprise reporting impossible), **triple metric drift** (revenue defined 3×), and **no single source of truth** (no drill-through / certification / reuse) — while a full join/aggregation/window engine already exists, unused, one layer down.\n\n## Key decisions recorded\n\n- **D1** add `dataset`; **D2** `report` → pivot over a dataset; **D3** `dashboard` widgets reference a dataset, select measures/dimensions by name.\n- **Why `dataset`, not `report`** — `dashboard→report` is a symptom of having no semantic layer (Salesforce/ServiceNow); mature stacks (Power BI/Looker/dbt) bind tiles to the semantic layer. Includes maturity table + 4-point rationale + a report-embed widget for genuine table-in-dashboard composition.\n- **Airtable ergonomics preserved** via inline-dataset desugaring.\n- **Big-bang migration, no back-compat**; one-time codemod (§6).\n\nStatus: **Proposed** — discussion doc only, no code/schema changes in this PR."
+}

@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repo": "objectstack-ai/objectstack",
-  "generated_at": "2026-09-11T02:34:21.262Z",
+  "generated_at": "2026-09-11T08:31:51.568Z",
   "walk_phase": "history",
   "walk": {
     "open_set": {
@@ -11,24 +11,24 @@
     },
     "history": {
       "complete": false,
-      "cursor": "2026-05-22T08:44:58Z"
+      "cursor": "2026-06-07T12:18:38Z"
     }
   },
-  "since": "2026-03-02T02:59:50Z",
-  "since_reason": "the open set is complete — the closed history resumes at 2026-03-02T02:59:50Z",
+  "since": "2026-05-22T08:44:58Z",
+  "since_reason": "the open set is complete — the closed history resumes at 2026-05-22T08:44:58Z",
   "next_since": null,
   "resume": {
-    "since": "2026-05-22T08:44:58Z",
+    "since": "2026-06-07T12:18:38Z",
     "phase": "history",
     "stopped_by": "budget",
     "reason": "the per-run budget of 800 requests is spent"
   },
   "counts": {
     "issues_open": 580,
-    "issues_closed": 332,
+    "issues_closed": 368,
     "pulls_open": 18,
-    "pulls_closed": 859,
-    "records": 1789
+    "pulls_closed": 1121,
+    "records": 2087
   },
   "board": {
     "open_issues_count": null,
@@ -47,8 +47,8 @@
   },
   "requests": 800,
   "run": {
-    "numbers_read": 356,
-    "files_written": 735,
+    "numbers_read": 299,
+    "files_written": 581,
     "walk_complete": false,
     "open_set_completed_here": false
   }

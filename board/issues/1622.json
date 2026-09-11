@@ -1,0 +1,33 @@
+{
+  "number": 1622,
+  "kind": "pull_request",
+  "title": "docs(adr-0036): every app is a REST API + MCP server — surface it after build",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-06T15:39:54Z",
+  "updated_at": "2026-06-06T18:48:57Z",
+  "closed_at": "2026-06-06T18:48:55Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-06T18:48:55Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1622",
+  "body": "把'把 app 暴露成 REST API + MCP server 并在建完后亮出'写成 ADR(复杂跨仓功能先写 ADR)。REST CRUD + discovery、plugin-mcp-server 已存在;缺口=MCP 仅 stdio(需 HTTP transport)、外部认证(复用 sys_api_key Bearer)、未呈现。分阶段:Phase 1 = objectui Integrations 页(纯呈现现有端点 + 自助 API Key + 样例);Phase 2 = MCP HTTP transport + 每 env opt-in + Claude/Cursor 连接配置。ADR-0024(inbound 消费外部 MCP)的 outbound 姊妹篇。机制开源/智能闭源/UI 在 objectui。"
+}

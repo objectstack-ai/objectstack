@@ -1,0 +1,35 @@
+{
+  "number": 1327,
+  "kind": "issue",
+  "title": "[P3] docs: services.{data,sharing,audit,queue,email,settings,storage} APIs undocumented",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:27:34Z",
+  "updated_at": "2026-05-25T10:06:02Z",
+  "closed_at": "2026-05-25T10:06:02Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1327",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 23 条（**P3**）。\n\n## 现象\n\n`services.data.{get, list, update, create, delete}` 等运行时 API 在文档中未系统化呈现，模板作者 / 插件开发者只能读源码。\n\n涉及：\n- `services.data`\n- `services.sharing`\n- `services.audit`\n- `services.queue`\n- `services.email`\n- `services.settings`\n- `services.storage`\n\n## 建议范围\n\n**M1：服务 API 参考页**\n- 每个 service 一页：方法签名 / 参数 / 返回 / 错误 / 示例\n- 自动从 TS 类型生成 + 手写说明\n\n**M2：示例**\n- 「在 flow 自定义节点里读关联记录」\n- 「在 hook 里查 sharing 权限」\n- 「在 plugin 中订阅事件」\n\n**M3：版本化**\n- API 稳定性等级标记（stable / experimental）\n- 破坏性变更记录\n\n## 验收\n\n- [ ] services.* 全部文档化\n- [ ] 文档站独立章节 + 示例\n- [ ] 缺陷库 gap #23 标记为已解决\n"
+}

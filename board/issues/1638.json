@@ -1,0 +1,32 @@
+{
+  "number": 1638,
+  "kind": "pull_request",
+  "title": "feat(showcase): computed (expression) amount on invoice line",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-07T07:41:43Z",
+  "updated_at": "2026-06-07T07:43:55Z",
+  "closed_at": "2026-06-07T07:43:53Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-07T07:43:53Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1638",
+  "body": "## Why\n\nBacks the spreadsheet-style line-item grid (objectui): the invoice line's **Amount** should be computed (`quantity × unit_price`), read-only, and recomputed live as you type — not hand-typed.\n\n## What\n\n`showcase_invoice_line.amount` gains `expression: 'record.quantity * record.unit_price'`. It stays a **stored `currency`** column on purpose:\n\n- The server only treats `type: 'formula'` fields as computed/virtual. A `currency` field with an `expression` keeps a real DB column, is accepted/persisted from the client, and is **not** overwritten on read — so the parent `Invoice.total` summary (which aggregates stored columns) keeps rolling it up unchanged.\n- The objectui line-item grid reads the `expression` from metadata to render Amount **read-only** and recompute it client-side, then persists the computed value in the atomic batch.\n\n## Verification\n\n- Backend serves `amount.expression = { dialect: 'cel', source: 'record.quantity * record.unit_price' }` and `amount.type = currency` (writable).\n- Live e2e (objectui): New Invoice computes amount live (2 × 50 → 100), persists it, and the server total rolls it up.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

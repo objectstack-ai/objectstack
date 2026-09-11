@@ -1,0 +1,36 @@
+{
+  "number": 1418,
+  "kind": "pull_request",
+  "title": "feat(connector-slack): Slack Web API connector + connector/channel reconciliation (ADR-0022)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-31T15:57:48Z",
+  "updated_at": "2026-05-31T16:03:00Z",
+  "closed_at": "2026-05-31T15:59:56Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-05-31T15:59:56Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1418",
+  "body": "ADR-0022 reconciles Connector (integration mechanism, built) vs MessagingChannel (human-notification, ADR-0012/0013 draft): notify-a-human => MessagingChannel; raw API call => connector_action; channel delegates transport to a Connector. Back-refs added to 0012 §2 / 0013 §9. Adds @objectstack/connector-slack (2nd reference connector after connector-rest): static bot-token auth, chat.postMessage/chat.update/call actions, surfaces Slack's logical ok without throwing. Tests 8/8 incl. e2e kernel boot dispatching connector_action -> slack.chat.postMessage."
+}

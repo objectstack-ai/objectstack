@@ -1,0 +1,33 @@
+{
+  "number": 1345,
+  "kind": "pull_request",
+  "title": "fix(plugin-auth): restore better-auth request state inside WebContainer (StackBlitz)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T09:32:50Z",
+  "updated_at": "2026-05-25T09:33:05Z",
+  "closed_at": "2026-05-25T09:33:04Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-05-25T09:33:04Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1345",
+  "body": "Sign-up / sign-in on the StackBlitz template returned `500 INTERNAL_SERVER_ERROR: No request state found. Please make sure you are calling this function within a runWithRequestState callback.` on every auth request. WebContainer reports itself as Node.js but its `node:async_hooks` does not propagate `AsyncLocalStorage` context across `await`, so the `runWithRequestState` wrap in `AuthManager.handleRequest` was lost the moment the inner `customSession → getSession()` chain awaited anything, and every endpoint reading `defineRequestState()` (`should-session-refresh`, `oauth`, …) threw.\n\n### Changes (`packages/plugins/plugin-auth/src/auth-manager.ts`)\n\n- **Detect once.** Extract `isWebContainerRuntime()` (reuses the existing `process.versions.webcontainer` / jsh / `STACKBLITZ` checks) and route both `resolvePasswordHasher` and the new polyfill through it.\n- **Sync ALS polyfill.** `WebContainerRequestStateAsyncLocalStorage` sets the store synchronously, returns `fn()`, and restores the previous store in `.finally()`. The store therefore survives every `await` reached from inside a single `run()` call — sufficient for WebContainer's single-flight dev server.\n- **Seed before better-auth loads.** `installWebContainerRequestStatePolyfill()` writes the polyfill into `globalThis[Symbol.for('better-auth:global')].context.requestStateAsyncStorage` from the `AuthManager` constructor, ahead of `await import('better-auth')`. Both copies of `@better-auth/core` (the one bundled in `better-auth` and the one `plugin-auth` imports directly) resolve the slot via the same global symbol, so they share the working instance and `ensureAsyncStorage()` never creates the broken native one.\n- **No-op in production.** Native `AsyncLocalStorage` is preserved on Node, Bun, and edge runtimes.\n\n```ts\n// auth-manager.ts (excerpt)\nconstructor(config: AuthManagerOptions) {\n  this.config = config;\n  installWebContainerRequestStatePolyfill();   // must precede betterAuth()\n  if (config.authInstance) this.auth = config.authInstance;\n}\n```\n\n### Tests\n\nFour unit tests in `auth-manager.test.ts` lock in: no install outside WebContainer; install when detected; store visible across awaited promises inside `run()`; nested `run()` + thrown-error paths both restore the prior store.\n\nA changeset is included."
+}

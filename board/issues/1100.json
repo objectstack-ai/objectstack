@@ -1,0 +1,33 @@
+{
+  "number": 1100,
+  "kind": "issue",
+  "title": "实现 User Preferences 支持通用用户偏好与 Favorites 长期方案",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Claude",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-04-09T10:04:01Z",
+  "updated_at": "2026-05-25T07:26:55Z",
+  "closed_at": "2026-05-25T07:26:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1100",
+  "body": "## 目标\n设计并落地实现符合 ObjectStack Config Resolution 协议的 User Preferences Service。\n\n- 支持所有用户个性化配置，包括通用 scalar、结构型数据（如 favorites, recent_items）\n- 能安全替换现有 MVP 方案 (localStorage)\n- 长期架构可持续、盲升为 config 系统第2层实现\n\n---\n\n## 方案概要\n1. **规范 Schema（Spec 层）**：\n    - 创建 `packages/spec/src/identity/user-preference.zod.ts`，定义 UserPreferenceEntry、FavoriteEntry、FavoritesValueSchema 等规范。\n    - key 支持 well-known (`theme, locale, favorites` 等) 及插件自定义。\n2. **服务接口定义**：\n    - 创建 `packages/spec/src/contracts/user-preferences.ts`，声明 `IUserPreferencesService` 统一交互接口，提供 get/set/delete/getAll/setMany 等方法。\n3. **服务插件实现**：\n    - 使用 objectql 读写数据。\n    \n4. **内核注册与暴露**：\n    - 插件 init 时 `ctx.registerService('user-preferences', impl)`。\n    - 其他插件通过 `ctx.getService('user-preferences')` 消费。\n5. **HTTP 路由对外暴露统一接口**：\n    - `/api/v1/user/preferences` 支持 get, set, batch, delete, prefix 查询\n    - `/api/v1/user/preferences/favorites` 专门支持收藏功能的 get/set\n6. **前端与 Studio 集成**：\n    - Studio/Launcher 调用与本地缓存完全解耦。\n---\n"
+}

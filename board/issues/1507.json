@@ -1,0 +1,33 @@
+{
+  "number": 1507,
+  "kind": "issue",
+  "title": "Default ICryptoProvider can silently degrade to an ephemeral key — all sys_secret data (settings, secret fields, datasource creds) becomes undecryptable after restart in containers / multi-node",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T02:18:28Z",
+  "updated_at": "2026-06-02T03:36:28Z",
+  "closed_at": "2026-06-02T03:36:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1507",
+  "body": "## Summary\n\nThe platform's default `ICryptoProvider` is `InMemoryCryptoProvider`, wired in by `SettingsServicePlugin` and the `serve` command. Its key resolution falls back, **silently**, to a fresh per-process random key when neither a stable env key nor a readable on-disk key file is available. When that happens, every secret in `sys_secret` encrypted under the previous key becomes **undecryptable** on the next boot.\n\nThis is a **platform-wide** secret-at-rest concern, not specific to any one feature. The same provider + `sys_secret` table backs:\n\n- `SettingsService` encrypted settings (`sys_setting.value_enc`, e.g. `storage.s3_secret_access_key`)\n- any ObjectQL `Field.secret()` field\n- runtime datasource credentials (`@objectstack/service-datasource-admin`, added in #1502 — it rides on this exact layer)\n\nSo if the default is fragile, it is fragile for **all** of the above at once.\n\n## Current behaviour\n\n`packages/services/service-settings/src/in-memory-crypto-provider.ts` resolves its AES-256-GCM key in three tiers:\n\n1. `OS_DEV_CRYPTO_KEY` env var (stable) →\n2. on-disk file `~/.objectstack/dev-crypto-key` (auto-created on first run, mode 0600 — survives restart on the same host/FS) →\n3. **ephemeral `randomBytes(32)`** when the file can't be read/written, or in test mode.\n\nDefault wiring (no explicit provider passed):\n- `packages/services/service-settings/src/settings-service-plugin.ts`: `cryptoProvider: this.opts.cryptoProvider ?? new InMemoryCryptoProvider()`\n- `packages/cli/src/commands/serve.ts`: `dataEngine.setCryptoProvider(new InMemoryCryptoProvider())`\n\nNo KMS/Vault/env-master-key provider ships today — `InMemoryCryptoProvider` is the de-facto production default; the contract (`packages/spec/src/contracts/crypto-provider.ts`) mentions `AwsKmsCryptoProvider` / `GcpKmsCryptoProvider` / `HashicorpVaultCryptoProvider` only as future vision.\n\n## Why this is a footgun\n\nSingle-node bare-metal dev is actually fine (the file fallback persists the key). The danger is the **silent** degradation to tier 3 in exactly the environments people deploy to:\n\n| Scenario | Key persistence | Secrets survive restart? |\n|---|---|---|\n| Single-node dev, writable `$HOME` | file fallback | ✅ |\n| `OS_DEV_CRYPTO_KEY` set | stable env key | ✅ |\n| **Container with ephemeral FS** | new file each container | ❌ |\n| **Multi-node** (no shared/identical key) | per-node file | ❌ (node A's ciphertext ≠ node B) |\n| **`$HOME` unwritable / IO error** | ephemeral random | ❌ |\n\nThe failure mode is the worst kind: **no error at encrypt or boot time** — the system happily mints a new key and only surfaces later as \"all my saved passwords/API keys/DB credentials decrypt-fail\" after a restart or on a second node.\n\n## Proposed changes\n\n1. **Fail loud instead of silently going ephemeral.** When not in dev/test and no stable key source (env var or readable persisted file) is available, refuse to start (or refuse secret writes) with an explicit, actionable error — turn silent data-loss into a config error at boot.\n\n2. **Ship a persistent, env-master-key provider as the documented production default.** An AES-256-GCM provider keyed off something like `OS_SECRET_KEY` (32-byte hex/base64). Far cheaper to adopt than KMS, and it closes the \"no production provider exists\" gap. KMS/Vault stay as future/enterprise plug-ins behind the same `ICryptoProvider` seam.\n\n3. **Reframe `InMemoryCryptoProvider`.** The name reads as \"ephemeral / insecure\" when in practice it persists to disk. Consider renaming (e.g. `LocalCryptoProvider`) and/or documenting the env-key path as the recommended default, so operators don't assume it's dev-only and reach for a missing KMS provider.\n\n## Boundary note (open-source vs paid)\n\nSecrets surviving a restart is **correctness**, not a premium feature — the persistent local / env-key provider must stay open-source. This mirrors the existing tiering principle (don't charge for correctness; charge for managed custody + scale): KMS, automatic key rotation, and per-tenant key isolation are the paid layer; \"your stored password is still there after a reboot\" is not.\n\n## Out of scope\n\n- Actual KMS/Vault provider implementations (future).\n- Key-rotation tooling beyond the existing `rotateKey` contract.\n\n## Evidence\n\n- `packages/services/service-settings/src/in-memory-crypto-provider.ts` (key resolution + ephemeral fallback)\n- `packages/services/service-settings/src/settings-service-plugin.ts` (default wiring)\n- `packages/cli/src/commands/serve.ts` (engine crypto wiring)\n- `packages/spec/src/contracts/crypto-provider.ts` (`ICryptoProvider` / `CryptoHandle`)\n- `sys_secret` object definition + ObjectQL secret-field handling"
+}

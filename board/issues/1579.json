@@ -1,0 +1,32 @@
+{
+  "number": 1579,
+  "kind": "pull_request",
+  "title": "chore: ignore local .codex/ agent tooling directory",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-04T13:12:07Z",
+  "updated_at": "2026-06-04T13:27:50Z",
+  "closed_at": "2026-06-04T13:27:48Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-04T13:27:48Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1579",
+  "body": "Adds `.codex/` to `.gitignore`. The Codex CLI writes a per-developer `.codex/config.toml` into the repo root; it's local tooling, not project source, so it shouldn't be tracked.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

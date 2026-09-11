@@ -1,0 +1,34 @@
+{
+  "number": 1613,
+  "kind": "pull_request",
+  "title": "feat(spec): FormViewSchema.subforms for config-driven master-detail",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-06T11:53:35Z",
+  "updated_at": "2026-06-06T11:53:49Z",
+  "closed_at": "2026-06-06T11:53:48Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-06T11:53:48Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1613",
+  "body": "Adds an optional `subforms` array to `FormViewSchema` so a form view can declare inline child collections. This lets an object's standard create/edit form render as an atomic master-detail form (object fields + child grids) with no bespoke page. Each entry needs only `childObject` — the relationship FK and grid columns are derived from the child object metadata (override via `relationshipField`/`columns`).\n\nAdditive/optional; the spec suite passes (6647). Pairs with objectui: `ObjectForm` already renders `subforms`, and `ObjectView` forwards `form.subforms`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

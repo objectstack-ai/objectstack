@@ -1,0 +1,36 @@
+{
+  "number": 1484,
+  "kind": "pull_request",
+  "title": "feat(webhooks,messaging)!: webhooks deliver via the shared HTTP outbox (ADR-0018 M3 Phase 5)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T18:45:09Z",
+  "updated_at": "2026-06-01T18:45:33Z",
+  "closed_at": "2026-06-01T18:45:33Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T18:45:33Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1484",
+  "body": "## What\n\nCompletes **ADR-0018 M3** by cutting `plugin-webhooks` over to the shared outbound-HTTP delivery substrate introduced in #1483. Webhooks stop being their own delivery engine — the durable outbox, cluster-coordinated dispatcher, retry/backoff/dead-letter, and retention now live once in `@objectstack/service-messaging` (`sys_http_delivery` + `HttpDispatcher`) and are shared by the Flow `http` node and webhook fan-out alike.\n\nThis is the \"build the reliability machinery once, reuse it everywhere\" goal of ADR-0018 §4, fully realized.\n\n## Changes\n\n**`@objectstack/service-messaging`:**\n- `MessagingService` gains `redeliverHttp(id)` + `listHttp(filter)` over the HTTP outbox (backs the webhook redeliver endpoint / admin).\n\n**`@objectstack/plugin-webhooks` — ⚠️ BREAKING:**\n- Now **requires** `MessagingServicePlugin` (declared as a plugin dependency; it's a foundational always-on capability).\n- `AutoEnqueuer` enqueues `source: 'webhook'` rows via `messaging.enqueueHttp` — `dedupKey = '<webhookId>:<eventId>'` (preserves the old `(event_id, webhook_id)` at-most-once enqueue), `refId = webhookId` (partition affinity), `label = eventType`, `signingSecret = secret`. Still fire-and-forget, off the write path.\n- Redeliver endpoint (`POST /api/v1/webhooks/redeliver`) now calls `messaging.redeliverHttp`.\n- Removed the `sys_webhook_delivery` object — deliveries are rows in `sys_http_delivery` (`source = 'webhook'`); the Setup nav points there.\n- **Deleted**: `outbox` / `sql-outbox` / `memory-outbox` / `dispatcher` / `http-sender` / `partition` / `retention` + their tests; dropped the `./sql` subpath export and the now-unused `WebhookDispatcher` / `*Outbox` / `RedeliverError` / sender exports.\n- `WebhookOutboxPluginOptions` reduced to `{ autoEnqueue }` (dispatcher / outbox / retention / nodeId options moved to `MessagingServicePlugin`).\n- `AutoEnqueuer` constructor takes an `HttpEnqueueFn` instead of an `IWebhookOutbox`.\n\n## Notes\n\n- **No data migration** — system is not yet live, so `sys_webhook_delivery` is simply dropped (per maintainer direction).\n- No source code imported the removed exports (`@objectstack/plugin-webhooks` is loaded dynamically by the CLI capability loader); remaining `sys_webhook_delivery` mentions in the tree are doc comments only.\n\n## Tests\n\n- `plugin-webhooks` `auto-enqueuer.test.ts` (10) rewired to the shared enqueue function; typecheck + build clean.\n- `service-messaging` 108 green.\n\nBuilds on #1483.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 1456,
+  "kind": "pull_request",
+  "title": "feat(messaging): synthesize inbox action_url from event source (ADR-0030 L5)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T07:59:22Z",
+  "updated_at": "2026-06-01T08:15:51Z",
+  "closed_at": "2026-06-01T08:15:48Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T08:15:48Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1456",
+  "body": "## What\n\nThe Console bell reads `sys_inbox_message` (the ADR-0030 L5 in-app materialization), which carries only `action_url` — **not** the L2 `sys_notification` event's `source_object`/`source_id`. Producers that pass a `source` but no explicit `payload.url` (collaboration `@mention`, record assignment) materialized inbox rows with **no navigable link**, so clicking the bell entry could not deep-link to the originating record.\n\nThis synthesizes an app-relative `/{object}/{id}` link from `emit()`'s `source` when no explicit `payload.url`/`payload.actionUrl` is supplied, in **both** the inline fan-out and the durable-outbox enqueue paths (`actionUrlFor()` helper). Precedence: explicit url → source-derived link → `undefined`.\n\nKeeps the L5 materialization **self-sufficient for navigation**, which the objectui bell cut-over consumes (companion objectui PR repoints the bell to `sys_inbox_message` + `sys_notification_receipt`).\n\n## Why\n\nPart of the ADR-0030 objectui cut-over. The re-modeled `sys_notification` is now the L2 event (no recipient/read columns); the bell can no longer fall back to `source_object`/`source_id` on the event, so the link must ride on the materialization.\n\n## Tests\n\n3 new `messaging-service.test.ts` cases — source→`/obj/id`, explicit-url precedence, neither→`undefined`. All **95** `@objectstack/service-messaging` tests green.\n\n## Verification\n\nVerified live in the showcase Console (fresh sqlite, full pipeline): a materialized `sys_inbox_message` with a `delivered` receipt lit the bell badge; the popover rendered the row; \"mark all read\" updated the existing receipt in place to `read` (no duplicate, unique index respected) and cleared the badge.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1514,
+  "kind": "pull_request",
+  "title": "feat(cli): os plugin publish — upload a signed .osplugin (ADR-0025 §3.4)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T03:52:28Z",
+  "updated_at": "2026-06-02T04:07:59Z",
+  "closed_at": "2026-06-02T04:07:59Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-02T04:07:59Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1514",
+  "body": "Completes the **build → sign → publish** CLI pipeline for marketplace plugins.\n\n- **`osplugin.ts`**: add the tar **reader** (`readTar` / `readTarGz` / `readOspluginManifest`) — inverse of `createTar` — so publish can extract the compiled `objectstack.plugin.json` from inside the artifact.\n- **`os plugin publish <artifact.osplugin>`**: reads the artifact + its detached `.sig`, extracts the manifest, then POSTs `/cloud/packages` then `/cloud/packages/:id/versions` with `{ artifact_kind:'plugin', osplugin (base64), plugin_manifest, signature, artifact_checksum (sha256) }`, plus `--submit` / `--auto-approve` / `--visibility` / `--org`. Warns when publishing unsigned (the server rejects a `node`-tier plugin from an unverified publisher). The platform counter-signature is written by the marketplace review/approve flow.\n\nVerified: 9 tests (tar round-trip + manifest extraction; an e2e publish against a mocked cloud asserting the exact request contract). `tsc` clean.\n\nThis is the CLI half. The cloud side needs `pluginArtifactStore` (R2) + `pluginSigning` (platform key + publisher key registry) wired into apps/cloud for the endpoint to accept plugin publishes — separate cloud PR.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

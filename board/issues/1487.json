@@ -1,0 +1,33 @@
+{
+  "number": 1487,
+  "kind": "pull_request",
+  "title": "feat: ADR-0025 plugin package distribution — framework F1–F5",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T19:00:20Z",
+  "updated_at": "2026-06-01T19:04:34Z",
+  "closed_at": "2026-06-01T19:04:34Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T19:04:34Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1487",
+  "body": "Implements the framework-side prerequisites (F1–F5) that unblock the cloud control plane's plugin distribution work (cloud PD0–PD3 are already merged against a stopgap mirror of these shapes). Shapes/format/payloads are aligned **byte-for-byte** with cloud so the cloud swap is a one-line import.\n\n## Commits\n- **F1** `feat(spec)` — structured plugin manifest schema. `ManifestSchema` gains structured `permissions {services,hooks,network,fs}` (backward-compatible union with legacy `string[]`), `runtime` (node|sandbox|worker), `packaging` (bundled|manifest-deps), `integrity`, and `engines {platform,protocol}` (protocol-first); legacy `engine` retained. New schemas/types exported from `@objectstack/spec/kernel` — the authoritative shapes cloud mirrors.\n- **F2** `feat(cli)` — `os plugin build` + `.osplugin`. esbuild bundle (externalizing `@objectstack/*`), per-file `integrity` as **`sha256-<base64>` (SRI)** — the canonical format the runtime/cloud verify — and a dependency-free, reproducible ustar+gzip writer. Validates the manifest against the F1 schema.\n- **F3** `feat(core,cli)` — Ed25519 signature contract + `os plugin sign`. `core/security/plugin-artifact-signature.ts` mirrors cloud's `package-signing.ts` exactly: `ed25519:<keyId>:<base64url>`, publisher sig over artifact bytes, platform counter-sign over `[package_id,version,blob_key,signature].join(\"\\n\")`, combined `verifyPluginArtifact` (ADR §3.7). `os plugin sign` emits a detached sidecar over the exact bytes cloud verifies.\n- **F4** `feat(core)` — enforce install-time `granted_permissions`. `registerGrantedPermissions()` / `buildPermissionsFromGrants()` turn cloud's persisted consent set into the runtime `PluginPermissions` that `SecurePluginContext` checks (least-privilege default).\n- **F5** `feat(spec)` — plugin fields on the `uploadArtifact` contract (`kind`, `signature`, `expectedChecksum`; result `versionId`/`listingStatus`/`signatureVerified`). Additive + optional.\n\n## Verification\n- spec: **6609** tests · core: **275** · cli: **138** — all green.\n- Cross-compat tests assert cloud-contract alignment (signature format/payload, integrity SRI vector) and an end-to-end build → sign → verify against the exact artifact bytes.\n\n## Landing in cloud (after merge)\n`pnpm bump-framework` → delete cloud's `STOPGAP` mirrors → import the F1 schemas from `@objectstack/spec/kernel` and re-export the shared F3 contract from `@objectstack/core/security`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

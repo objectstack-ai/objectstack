@@ -1,0 +1,33 @@
+{
+  "number": 1643,
+  "kind": "pull_request",
+  "title": "feat(analytics): dataset semantic layer (ADR-0021) — schema, compiler, RLS, REST",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-07T09:45:09Z",
+  "updated_at": "2026-06-07T09:45:41Z",
+  "closed_at": "2026-06-07T09:45:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-07T09:45:39Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1643",
+  "body": "Implements the analytics `dataset` semantic layer (ADR-0021) end-to-end on the backend.\n\n**spec**: new `dataset` metadata type (object + include relationships + dimensions/measures + derived measures) registered across the 7 surfaces; context-aware `getReadScope`/`getAllowedRelationships` on StrategyContext; `IAnalyticsService.query/generateSql` take an optional ExecutionContext.\n\n**service-analytics**: dataset→Cube compiler (resolves `include` to TARGET TABLES, fixing lookup-field-name ≠ table-name, e.g. `account`→`crm_account`); DatasetExecutor (filters, measure-scoped filters, derived measures, compareTo); NativeSQLStrategy D-C hardening (per-object tenant/RLS scope on base + joined tables; reject undeclared joins); fail-closed FilterCondition→SQL compiler; plugin wires context-bound read-scope + relationshipResolver.\n\n**rest**: `POST /api/v1/analytics/dataset/query` (inline draft or saved name), threads ExecutionContext; D-C errors → 400.\n\n**cli**: `analytics` is now an always-on built-in capability.\n\n**Verified live** (app-crm, SqlDriver): cross-object `revenue by account.industry` → correct rows + correct `LEFT JOIN \"crm_account\" \"account\"`; D-C guard → 400; single-object path OK. Tests: service-analytics 85, rest analytics 6, spec dataset+contracts 240.\n\nPairs with objectui PR #1570 (Studio designer + preview); `.objectui-sha` pins that commit.\n\nFollow-up (separate, security-reviewed): SecurityPlugin to expose `getReadFilter` so multi-org cross-object analytics auto-scopes in production.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

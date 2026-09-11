@@ -1,0 +1,33 @@
+{
+  "number": 1571,
+  "kind": "pull_request",
+  "title": "feat(service-ai): extract AI metadata authoring into cloud-only AI Studio",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-03T14:52:38Z",
+  "updated_at": "2026-06-03T15:07:25Z",
+  "closed_at": "2026-06-03T15:07:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-03T15:07:25Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1571",
+  "body": "Extracts the AI-driven metadata-authoring layer out of the open-source `@objectstack/service-ai` so the authoring **intelligence** ships only in the cloud / as an installable enterprise plugin, while the generic AI runtime and the metadata **write mechanism** stay open. Pairs with cloud `@objectstack/service-ai-studio` (cloud ADR-0002).\n\n## Changes\n- Remove the `metadata_assistant` agent, metadata/blueprint/package authoring tools, and `metadata_authoring`/`solution_design` skills (+ their tests) from `service-ai`; clean barrels and the inline plugin registration. The `ai:ready` hook is retained so the cloud package attaches.\n- `capability-loader`: add install-aware `aiStudio` capability (`@objectstack/service-ai-studio` → `AIStudioPlugin`; dynamic import, silently skipped when absent).\n- `cli serve`: auto-register `AIStudioPlugin` when the package is installed.\n- `ArtifactKernelFactory` / `createObjectOSStack`: add `defaultRequires` to force-mount capabilities (e.g. `['ai','aiStudio']`) on every per-environment kernel.\n- `RuntimeConfigPlugin`: add `features.aiStudio` (default true; override-to-hide).\n\n## Verification\n- `service-ai` builds + **320 tests pass**; no external consumer imports the removed exports.\n- `runtime` + `cli` build clean.\n\n## Coordination\n⚠️ Touches `solution_design` code also under active work in `feat/solution-design-process-guardrail` — coordinate merge order.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

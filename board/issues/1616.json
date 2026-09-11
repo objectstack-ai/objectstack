@@ -1,0 +1,33 @@
+{
+  "number": 1616,
+  "kind": "pull_request",
+  "title": "docs(master-detail): ADR-0035 + skills for config-driven master-detail",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-06T13:15:35Z",
+  "updated_at": "2026-06-06T13:15:48Z",
+  "closed_at": "2026-06-06T13:15:45Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-06T13:15:45Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1616",
+  "body": "Documents the config-driven master-detail design so authors **and AI generators** target the convention (metadata is AI-authored, so the skills/docs are the real interface).\n\n- **ADR-0035** (`docs/adr/0035-config-driven-master-detail.md`): intent lives on the relationship (`inlineEdit`), forms derive the UI. Covers the layered surface (relationship → view `subforms` → page block), derivation rules (FK + columns + total), the \"only inline true line-items, not associations\" rule, and the runtime backbone (atomic `/api/v1/batch` + `$ref`, server-side `summary` rollup, ADR-0034 transactions).\n- **objectstack-data skill** (Relationships): new **Inline Editing** section for `inlineEdit` (+ `inlineTitle`/`inlineColumns`/`inlineAmountField`); also **corrected the roll-up summary example** to the actually-implemented `summaryOperations` shape and noted server-side recompute (the prior `summaryType`/`summaryField` example didn't match the engine).\n- **objectstack-ui skill** (Form Views): new **Master-Detail Forms** section — relationship `inlineEdit` (default, zero config) → form-view `subforms` (override) → `object-master-detail-form` page block (bespoke).\n\nDocs/skills only (no package change). Pairs with the shipped `field.inlineEdit` + renderer/metadata work (framework #1615 / objectui #1532 and the master-detail series).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

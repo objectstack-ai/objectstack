@@ -1,0 +1,36 @@
+{
+  "number": 1485,
+  "kind": "pull_request",
+  "title": "feat(objectql,spec): enforce all declared validation-rule types; trim the unenforceable three (#1475)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T18:52:09Z",
+  "updated_at": "2026-06-01T18:55:31Z",
+  "closed_at": "2026-06-01T18:52:42Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T18:52:42Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1485",
+  "body": "## Summary\n\nCloses #1475. The `ObjectSchema.validations` union declared **9** rule types but the write-path evaluator enforced only **3** (`state_machine`, `cross_field`, `script`); the other six were accepted by the schema yet silently did nothing — the \"advertise a capability we don't deliver\" anti-pattern. This closes the gap on **both** sides: implement the synchronous types, trim the ones that don't belong on a write path.\n\nThe governing principle: **a validation rule is a deterministic, synchronous, side-effect-free predicate over a single record.**\n\n## Implemented enforcement (`@objectstack/objectql`)\n- **`format`** — a field value against a `regex` and/or named format (`email`/`url`/`phone`/`json`). Runs only when the write touches the field and the value is non-empty (requiredness stays the field validator's job); a malformed regex fails open.\n- **`json_schema`** — a JSON field validated against a JSON Schema via **ajv** (compiled result memoised per schema object). Accepts a parsed object or a JSON string (unparseable string = `invalid_json`); an uncompilable schema fails open.\n- **`conditional`** — evaluates `when`, recurses into `then`/`otherwise` via a shared dispatch. The nested rule supplies the message; the outer conditional's `severity` decides blocking. `needsPriorRecord` now recurses into conditional branches.\n\nAdds `ajv` as a dependency and three `FieldValidationError` codes (`invalid_format`, `invalid_json`, `json_schema_violation`).\n\n## Trimmed from the schema (`@objectstack/spec`)\n`unique`, `async`, `custom` — each needs I/O or a handler model a write-path rule must not carry, so removed rather than left as silent no-ops, and redirected to the layer that already does it correctly:\n- **uniqueness** → a unique **index** (`ObjectSchema.indexes`, `partial` for scope) or field-level `unique: true` (a SELECT-then-INSERT rule is racy; a DB constraint isn't). Field-level `unique: true` is **unaffected**.\n- **async/remote** → the client form layer (its `debounce`/`validatorUrl` are keystroke concepts; SSRF/latency on the server write path).\n- **custom** → `beforeInsert`/`beforeUpdate` lifecycle hooks (the existing typed extension point).\n\n## Showcase (demonstrated **and** verified)\n`examples/app-showcase`'s Account object gains a `format` (EIN regex), `json_schema` (support-config shape), and `conditional` (churn requires a reason) example, each exercised against the **real evaluator** in `test/validation.test.ts`.\n\n## Docs\nADR-0020 gains an addendum recording this as the completion of its D3 (\"enforce the whole `validations` union\").\n\n## Verification\n- `@objectstack/objectql` — **484 pass** (incl. new `format`/`json_schema`/`conditional` suites)\n- `@objectstack/spec` — **6578 pass** (validation parse tests updated + `json_schema` coverage added)\n- `@objectstack/example-showcase` — **17 pass** (incl. new write-path verification)\n- typecheck clean: objectql, spec, runtime, showcase\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

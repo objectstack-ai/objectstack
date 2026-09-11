@@ -1,0 +1,35 @@
+{
+  "number": 1553,
+  "kind": "pull_request",
+  "title": "feat(metadata): publish a whole app's drafts in one shot (ADR-0033)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-03T02:47:11Z",
+  "updated_at": "2026-06-03T03:06:15Z",
+  "closed_at": "2026-06-03T03:06:06Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-03T03:06:06Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1553",
+  "body": "## Context\n\nAfter an AI builds an app, its metadata is drafted (bound to an app package). Publishing meant doing it one item at a time — the package-level `POST /packages/:id/publish` needs the `metadata` service (503 when absent, e.g. the showcase) and reads the in-memory registry, not the drafts. This adds a true \"publish whole app\" action. (Builds on #1552, which added the draft list + `promoteDraft`-reuse path.)\n\n## Change\n\n- **`protocol.publishPackageDrafts({ packageId, organizationId?, actor? })`** — promotes every `sys_metadata` draft row bound to the package to active by reusing the per-item `publishMetaItem` primitive (overridable/lock guards + runtime registry refresh). Per-item failures are collected, not fatal. **No `metadata`-service dependency.** Returns `{ success, publishedCount, failedCount, published, failed }`.\n- **`POST /api/v1/packages/:id/publish-drafts`** exposes it (distinct from the registry-based `/publish`), wired in the dispatcher plugin + `handlePackages`.\n\n## Verification\n\n- **Live (showcase):** an AI-built `app.asset_management` (4 drafts: location/asset/asset_list/app) published in one call → `{ success: true, publishedCount: 4, failedCount: 0 }`; `asset` went from 400 (draft-only) → 200 (active); remaining drafts cleared to `[]`.\n- **Unit:** orchestration (success / partial-failure-doesn't-abort / empty package) + the dispatcher route (+501 fallback). objectql (498) + runtime (341) suites green.\n\nCompanion objectui PR adds the \"Publish whole app\" button to the package detail.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

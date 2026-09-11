@@ -1,0 +1,32 @@
+{
+  "number": 1383,
+  "kind": "issue",
+  "title": "Naming collision: two different `PermissionSchema` exports cause downstream validators to reject all permission sets",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-29T13:01:18Z",
+  "updated_at": "2026-05-30T07:05:52Z",
+  "closed_at": "2026-05-30T07:05:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1383",
+  "body": "## Summary\n\n`@objectstack/spec` exports **two distinct symbols named `PermissionSchema`**, in two different sub-paths:\n\n| Export | Path | Shape | Intended use |\n|:--|:--|:--|:--|\n| `PermissionSchema` | `@objectstack/spec/kernel` (`kernel/plugin-security-advanced.zod.ts`) | `{ id, resource, actions, scope, ... }` with `resource` enum `data.object` \\| `ui.view` \\| `system.config` \\| ... | Plugin-sandbox permission declared in a plugin manifest |\n| `PermissionSetSchema` | `@objectstack/spec/security` (`security/permission.zod.ts`) | `{ name, isProfile, objects, fields, tabPermissions, ... }` | Runtime-editable **metadata permission set** (the `permission` metadata type) |\n\nThis is a footgun. Downstream consumers that try to validate the `permission` metadata type by reaching for \"the schema called `PermissionSchema`\" pick the wrong one and end up rejecting every legal permission-set payload (every record fails with errors like `id: expected string, received undefined`, `resource: invalid option`, `actions: expected array`).\n\nThe framework's own canonical mapping is correct (see `packages/spec/src/kernel/metadata-type-schemas.ts:95` — `permission: PermissionSetSchema`), but the naming collision makes it very easy to import the wrong one.\n\n## Repro\n\n```ts\n// WRONG (what name-based search lands on first):\nimport { PermissionSchema } from '@objectstack/spec/kernel';\nPermissionSchema.safeParse({ name: 'sales', isProfile: false, objects: { account: { allowRead: true } } });\n// → 4 errors: id missing, resource invalid, actions missing, ...\n\n// RIGHT:\nimport { PermissionSetSchema } from '@objectstack/spec/security';\nPermissionSetSchema.safeParse({ name: 'sales', isProfile: false, objects: { account: { allowRead: true } } });\n// → success\n```\n\nThe server returns the correct schema via `/api/v1/meta` (also `PermissionSetSchema`), so the asymmetry only shows up on consumers that re-validate client-side.\n\n## Real-world impact\n\nHit while wiring the studio metadata-admin create form in [`objectstack-ai/objectui`](https://github.com/objectstack-ai/objectui) (`packages/app-shell/src/views/metadata-admin/clientValidation.ts`). Workaround was a one-line import swap, but the next consumer will hit the same trap.\n\n## Suggested fix (pick one)\n\n1. **Rename** `kernel/plugin-security-advanced.zod.ts::PermissionSchema` → `PluginPermissionSchema` (or `SandboxPermissionSchema`). This is the smallest correct fix; the kernel one has clearly more specialized semantics.\n2. Re-export both from the top-level barrel with **distinct names** and add an ESLint rule banning the ambiguous import.\n3. Add a `/** @deprecated Use PluginPermissionSchema; for metadata, see PermissionSetSchema */` JSDoc tag on the kernel symbol now, plus a console warning when imported in dev.\n\nOption 1 is the cleanest — the kernel schema is the more specialized one and was added later; the security one is the documented \"permission set\" of the metadata protocol.\n\n## Affected files in framework\n\n- `packages/spec/src/kernel/plugin-security-advanced.zod.ts:78` — defines the colliding `PermissionSchema`.\n- `packages/spec/src/kernel/index.ts:24` — re-exports it from `@objectstack/spec/kernel`.\n- `packages/spec/src/kernel/metadata-type-schemas.ts:95` — uses `PermissionSetSchema` correctly (no change needed; documents intent).\n- `packages/spec/src/security/permission.zod.ts` — `PermissionSetSchema` (no change needed).\n\nHappy to send a PR if you confirm the rename approach.\n"
+}

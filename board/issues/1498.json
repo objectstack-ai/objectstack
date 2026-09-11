@@ -1,0 +1,35 @@
+{
+  "number": 1498,
+  "kind": "pull_request",
+  "title": "chore(security): bump transitive node-tar to >=7.5.11 (clear 6 high advisories)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xs",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T22:28:13Z",
+  "updated_at": "2026-06-02T00:27:27Z",
+  "closed_at": "2026-06-02T00:12:57Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-02T00:12:57Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1498",
+  "body": "## Summary\n\nClears the **Validate Dependencies** gate (`pnpm audit --audit-level=high`), which was red on `main` with 6 high-severity advisories — all the same dependency, **`node-tar@6.2.1`**, pulled transitively by `sqlite3`'s node-gyp toolchain (`driver-sql` → `sqlite3` → … → `tar`).\n\n`sqlite3` is only an **optional peer** of `driver-sql` (the real sqlite driver is `better-sqlite3`) and its build script is pnpm-ignored, so the vulnerable `tar` was never executed — but the audit gate flags it regardless.\n\n## Fix\n\nScoped `pnpm.override`:\n\n```jsonc\n\"tar@>=2.0.0 <7.5.11\": \"^7.5.11\"\n```\n\n- Bumps every vulnerable `node-tar` (6.2.1) to a patched 7.5.x+ — patched versions (`7.5.15`, `7.9.0`) already resolved elsewhere in the tree.\n- The `>=2.0.0` lower bound deliberately leaves the unrelated ancient `tar@1.1.11` (a different package line) untouched.\n\nAdvisories cleared: GHSA-34x7-hfp2-rc4v, -8qq5-rm4j-mr97, -83g3-92jg-28cx, -qffp-2rhf-9h96, -9ppj-qmqm-q256, -r6q2-hw4h-h46w.\n\n## Verification\n\n- `pnpm audit --audit-level=high` → **exit 0** (0 high / 0 critical; 2 low + 5 moderate remain, below the gate threshold).\n- `pnpm install --frozen-lockfile` → clean; `check-changeset-fixed.mjs` → in sync.\n- `tar@6.2.1` no longer in the lockfile; `tar@1.1.11` preserved.\n- `@objectstack/driver-sql` build + **132 tests pass**.\n\nLockfile/override-only; no published package code changes (empty changeset).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1600,
+  "kind": "pull_request",
+  "title": "feat(runtime)!: remove multi-tenant runtime — framework is single-environment only",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-05T16:15:48Z",
+  "updated_at": "2026-06-05T16:28:22Z",
+  "closed_at": "2026-06-05T16:28:20Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-05T16:28:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1600",
+  "body": "## ⚠️ BREAKING CHANGE — 需人工评审 + 与 cloud 协调，勿自动合并\n\n把**多租户 ObjectOS 运行时**整体移出开源 framework，迁到 cloud 私有发行包 `@objectstack/objectos-runtime`。framework 自此**只支持单环境本地运行时**。\n\n### 动机\ncloud 业务/多租户路由不应存在于开源 framework；演进 cloud 策略**绝不应要求改 framework**（参见已 revert 的 #1598——按 plan 门控 aiStudio 本应在 cloud）。\n\n### 删除（@objectstack/runtime 不再导出）\n`createObjectOSStack`、`KernelManager`(实现)、`ArtifactApiClient`、`FileArtifactApiClient`、`ArtifactEnvironmentRegistry`、`ArtifactKernelFactory`、`AuthProxyPlugin`、capability-loader、per-env owner/org seeds、platform-SSO。\n\n### 保留（本地 `os serve` 控制台需要）\n`RuntimeConfigPlugin`（已恢复为 plan-agnostic）、`MarketplaceProxyPlugin`、`MarketplaceInstallLocalPlugin`、`resolveCloudUrl`/`DEFAULT_CLOUD_URL`。\n另保留**纯接口契约**供宿主运行时接入外部多租户路由：`EnvironmentDriverRegistry` + 最小 `KernelManager`(`getOrCreate`)——http-dispatcher 的可选 `kernelManager` seam 现在类型指向它们。\n\n### 验证\n- runtime build（ESM+CJS+DTS）全绿；138 个 runtime 测试通过。\n- cloud 侧已先行：apps/objectos + apps/cloud 不再从 `@objectstack/runtime` 引任何多租户符号（改用 `@objectstack/objectos-runtime` / `@objectstack/service-cloud`）。\n\n### 合并顺序（重要）\n1. 先合 cloud 侧 PR（引入 `@objectstack/objectos-runtime` + 接线）。\n2. 再合本 PR。\n3. cloud `bump-framework` 钉到本 PR 的 SHA → cloud 在瘦身后的 framework 上构建。\n\n外部使用者若依赖多租户 API：迁移到 cloud 发行版。CLI `os serve`（单环境）不受影响。"
+}

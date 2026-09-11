@@ -1,0 +1,35 @@
+{
+  "number": 1396,
+  "kind": "pull_request",
+  "title": "feat(datasource): runtime-UI-creatable datasources (ADR-0015 Addendum)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-30T17:07:33Z",
+  "updated_at": "2026-05-31T17:49:31Z",
+  "closed_at": "2026-05-30T18:04:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-05-30T18:04:18Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1396",
+  "body": "## What\n\nEnable adding a datasource from the UI/API **at runtime**, alongside code-defined ones — the low-code persona's \"connect to a remote business DB in Studio\" goal (ADR-0015 Addendum). Two-tier model:\n\n- `origin:'code'` — declared in `*.datasource.ts`, GitOps-managed, **read-only**\n- `origin:'runtime'` — created via API, editable\n\n> Backend only. The Studio connection wizard (../objectui) is a follow-up (P-B).\n\n## Changes\n\n**Spec / contracts**\n- `DatasourceAdminService` contract — `list` / `test` / `create` / `update` / `remove`\n- `DatasourceDriverFactory` contract — host-provided (no universal driver-by-id registry); driver escape-hatch + `checkHealth` on the handle\n\n**Service (decoupled core + kernel plugin)**\n- `DatasourceAdminService` — origin gating (code read-only, code wins on name collision), removal refused while objects are bound, secret indirection. Pure + unit-tested.\n- `DatasourceAdminServicePlugin` — lazy per-call resolution of `metadata`/`data` (plugin init order safe), connection probe (build→connect→ping→close), hot pool (de)register, **fail-closed** `SecretBinder` (secret-bearing create/update throws when no secret store is wired)\n\n**Runtime host glue**\n- default datasource driver factory (postgres / sqlite / mongodb / memory)\n- datasource secret binder (encrypt → `sys_secret`, persist only `credentialsRef`)\n- `AppPlugin` registers code datasources **in-memory only** (never persisted)\n\n**Metadata**\n- `registerInMemory()` — in-memory-only registration so GitOps datasources are listable without leaking into the runtime DB store\n\n**REST**\n- datasource routes register unconditionally (previously gated behind the package service, which threw when the marketplace was absent → 404)\n\n**Fix (hono-server adapter)**\n- guard the response stream controller against double-close and return a null-body response on `res.end()`, fixing an `ERR_INVALID_STATE` process crash on 204 routes (also fixes 5 latent `.status(204).end()` DELETE routes in REST)\n\n## Security invariant\n\nCredentials are **never persisted in cleartext** — only an opaque `credentialsRef → sys_secret` handle is stored. Cleartext transits create/update/test only; the secret is unbound on remove. Verified by DB inspection: `sys_secret` holds aes-256-gcm ciphertext, no cleartext leak.\n\n## Verification\n\n- Unit tests: service-external-datasource **38**, hono-server **38**, metadata **238** — all pass.\n- E2E against `app-crm` dev server:\n  - `GET /datasources` → code (`crm_primary`/`crm_analytics`) + runtime entries\n  - `POST /datasources/test` (sqlite) → `ok:true, serverVersion:3.53.1`\n  - `POST /datasources` (+secret) → 201, `origin:runtime`\n  - `PATCH`/`DELETE` on code → 400 read-only; `DELETE` runtime → 204 (server survives), secret unbound\n  - `sys_metadata` datasource rows = 0 (code datasources never persisted)\n\n## Known dev limitation (not a defect)\n\nIn dev there is no writable `datasource:` loader, so runtime datasources live in-memory and don't survive restart; DB-backed deployments persist them. Boot-time pool rehydration with secret decryption is a later phase (P-D)."
+}

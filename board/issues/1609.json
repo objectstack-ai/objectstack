@@ -1,0 +1,33 @@
+{
+  "number": 1609,
+  "kind": "pull_request",
+  "title": "test(driver-sql): autonumber survives a driver restart (#1603)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-06T08:08:30Z",
+  "updated_at": "2026-06-06T08:09:06Z",
+  "closed_at": "2026-06-06T08:09:04Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-06T08:09:04Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1609",
+  "body": "## Summary\n\nLocks in the persistence guarantee behind the #1603 autonumber consolidation (merged in #1608) with a deterministic regression test — no manual restart of a running server required.\n\nA **file-backed** sqlite DB and **two independent `SqlDriver` instances** pointed at the same file:\n1. Driver #1 creates records → `CTR-0001`, `CTR-0002`, then `disconnect()` (in-memory state gone).\n2. Driver #2 (fresh instance, cold caches, same file) creates more → **continues** at `CTR-0003`, `CTR-0004`.\n\nA non-persistent counter would reset to `CTR-0001` here and mint a duplicate. A second case proves per-tenant sequences stay independent across the restart.\n\nThis is the \"survives restart\" verification that was previously only argued via the bootstrap-from-existing-data test; now it's exercised directly through teardown + reconnect.\n\n## Testing\n\n`pnpm --filter @objectstack/driver-sql test` — new file `sql-driver-autonumber-persistence.test.ts` (2 tests) passes; no changeset (test-only).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

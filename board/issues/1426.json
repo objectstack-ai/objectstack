@@ -1,0 +1,36 @@
+{
+  "number": 1426,
+  "kind": "pull_request",
+  "title": "feat(messaging,cli): messaging + triggers capability tokens; notify-by-email resolves to user id",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T00:32:42Z",
+  "updated_at": "2026-06-01T00:44:23Z",
+  "closed_at": "2026-06-01T00:44:23Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T00:44:23Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1426",
+  "body": "## What\n\nTwo related platform improvements that make the `notify` flow node and auto-firing flows usable from a plain `defineStack({ requires: [...] })` — no hand-wired plugin instances.\n\n### CLI / runtime — new capability tokens\n- **`messaging`** → `MessagingServicePlugin`, so the `notify` node delivers to a user's inbox channel (`sys_inbox_message` rows) instead of degrading to a logged no-op.\n- **`triggers`** → `RecordChangeTriggerPlugin` (+ `ScheduleTriggerPlugin` as an extra), so autolaunched / schedule flows actually fire. The automation engine ships the `FlowTrigger` wiring; these plugins are the concrete triggers. Pair `triggers` with `job` for cron/interval schedules.\n\nMirrored in **both** the CLI `CAPABILITY_PROVIDERS` table (`serve.ts`) and the runtime `capability-loader` so dev `objectstack serve` and the cloud artifact kernel resolve them identically. `cli/package.json` gains the workspace deps so the dynamic imports resolve.\n\n### Inbox channel — notify-by-email lands in the right inbox\nFlows commonly address recipients by email (e.g. a `{record.assignee}` field), but `sys_inbox_message` is keyed by user id. The inbox channel now resolves an email-shaped recipient to its `sys_user.id` via `findOne`, with a **verbatim fallback** when the recipient is not email-shaped, no user matches, or the lookup fails — so a failed resolution can never drop the row. Adds `InboxChannelOptions.userObject` for the lookup target.\n\n## Test\n- `pnpm --filter @objectstack/service-messaging test` — 24 passing (incl. 5 new resolution cases: resolve, userObject override, non-email verbatim, no-match fallback, lookup-throw fallback).\n- `service-messaging` + `cli` + `runtime` build clean.\n\n## Notes / follow-up (separate work)\nThe Console header bell currently reads `sys_notification` (ADR-0012 Layer-2 by name, but shipped as a per-user inbox), while the messaging inbox channel writes `sys_inbox_message` (ADR-0012 Layer-5). Reconciling those two — and the showcase wiring that demonstrates these tokens end-to-end — is intentionally **out of scope** here and will land separately (needs an ADR decision on which object is the canonical in-app inbox).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 1618,
+  "kind": "pull_request",
+  "title": "fix(runtime): seed-apply hook passes `seeds` + resilient read-back (loads published seed rows)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-06T14:01:18Z",
+  "updated_at": "2026-06-06T14:05:15Z",
+  "closed_at": "2026-06-06T14:05:13Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-06T14:05:13Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1618",
+  "body": "Follow-up to #1611. The publish-drafts seed-apply hook fired on staging (`seedApplied` appeared) but loaded 0 rows. Two defects:\n\n1. **Wrong field name**: `SeedLoaderRequestSchema.parse({ datasets, … })` — the field was renamed `datasets`→`seeds` in #1611 but this newly-added constructor was missed (`parse` takes `unknown`, so tsc didn't flag it). → `seeds: datasets`.\n2. **Scope-fragile read-back**: read each published seed with the active org only + swallowed misses → empty list → reported success/0-rows. Workspace seeds are stored env-wide (`organization_id IS NULL`), so the org-scoped read found nothing. Now: try active-org read, fall back to env-wide read; if no body is readable, return `success:false` + diagnostics (never claim success while loading 0 rows).\n\nDepends on / completes the staging story alongside cloud #141 (Turso remote null-where fix) which made the drafts readable in the first place."
+}

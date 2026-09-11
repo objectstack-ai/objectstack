@@ -1,0 +1,33 @@
+{
+  "number": 1527,
+  "kind": "pull_request",
+  "title": "docs(formula): document 7.6 expression syntax changes (ADR-0032)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T07:24:25Z",
+  "updated_at": "2026-06-02T07:28:41Z",
+  "closed_at": "2026-06-02T07:28:35Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-02T07:28:35Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1527",
+  "body": "## What\n\nUpdates the `objectstack-formula` **skill** and the **formula guide** for the 7.6 / ADR-0032 expression changes, so AI and human authors stop writing the pre-7.6 form (Decision 4 — \"correctness is training data\"). Docs/skills only.\n\n## Changes\n\n- **Bare-CEL predicates + brace warning.** Explicit `<Callout>` against `{record.x}` brace-in-CEL (the #1491 root cause — `{…}` is a CEL map literal → parse error). Braces belong only in `{{ }}` templates.\n- **No more silent failure.** Corrected the old \"evaluates to null / callers may silently fall back\" wording: `objectstack build` now fails with a located, schema-aware message and the runtime throws. Mentions the `validate_expression` agent tool.\n- **Template formatters.** Documented the `{{ path | formatter[:arg] }}` whitelist (currency/number/percent/date/datetime/upper/lower/trim/truncate/default/json) + value→string semantics; single-brace `{x}` is not a valid hole.\n\n(`references/shared/expression.mdx` is auto-generated from the spec — left untouched.)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

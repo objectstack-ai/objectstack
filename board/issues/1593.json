@@ -1,0 +1,35 @@
+{
+  "number": 1593,
+  "kind": "pull_request",
+  "title": "feat(spec): resilientFetch — timeout + backoff for outbound HTTP (P1-1)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-05T02:03:02Z",
+  "updated_at": "2026-06-05T02:10:54Z",
+  "closed_at": "2026-06-05T02:10:51Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-05T02:10:51Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1593",
+  "body": "Closes launch-readiness **P1-1**. Verified all 4 sites against `main` (all real: naked `fetch` / SDK call with no timeout or retry).\n\n## Fix\nNew shared **`resilientFetch`** (`@objectstack/spec/shared`) — dependency-free wrapper:\n- per-attempt **timeout** via `AbortController` (default **30s**);\n- **exponential backoff** + jitter, up to **3 attempts**, on network errors / **429** / **5xx**;\n- honours **`Retry-After`** on a 429;\n- **never retries a caller-initiated abort** (intentional cancellation ≠ transient failure).\n\nWired into the three raw-`fetch` packages: **`connector-rest`**, **`connector-slack`**, **`embedder-openai`**. **`connector-mcp`** talks through the MCP SDK transport, so it instead gets a 30s per-request **`timeout`** on `callTool` / `listTools`.\n\n## Scope decision\nA stateful per-host **circuit breaker** (in the original action) is deliberately **deferred** as a follow-up — timeout + backoff already removes the stated \"slow/rate-limited API hangs the agent turn with no recovery\" risk; a breaker is separate hardening that needs per-host state design. Per-call configurability of timeout/retry is a small follow-up too. Noted in the doc.\n\n## Tests (+13)\n`resilient-fetch.test.ts` (9): success-no-retry, 429-retry, 5xx-retry, give-up-after-N, non-retryable-4xx, Retry-After honoured, timeout, network-error-retry, caller-abort-no-retry. Plus a connector-rest end-to-end retry test. Existing connector/embedder suites green (rest 11, slack 7, mcp 8, embedder 14).\n\nAlso added the missing `@objectstack/spec/shared` alias to embedder's vitest config (it had `/contracts` but not `/shared`, so the new value-import didn't resolve under its coarse `@objectstack/spec → src/index.ts` alias).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

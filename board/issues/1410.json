@@ -1,0 +1,33 @@
+{
+  "number": 1410,
+  "kind": "pull_request",
+  "title": "fix(approvals): retire `approval` as a metadata type — flow-node only (ADR-0019)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-31T11:47:33Z",
+  "updated_at": "2026-05-31T11:56:40Z",
+  "closed_at": "2026-05-31T11:56:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-05-31T11:56:40Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1410",
+  "body": "## Why\n\nADR-0019 P4/P5 collapsed approval authoring into Flow (an **Approval node**, `type: 'approval'`), and `metadata-type-schemas.ts` already dropped `approval` from the schema map. But a few registrations of `approval` as a **standalone metadata type** were left behind. The visible symptom: Studio still rendered an **\"Approval Processes\"** nav entry routing to a `metadata/approval` designer for a type with no schema, and `/meta/types` still surfaced it.\n\n(Found while aligning the `../objectui` flow designer to the flow-node model — objectui's nav is data-driven, so the stale entry traced back to these framework registrations.)\n\n## What\n\n- Drop `approval` from `MetadataTypeSchema` (spec enum + its `metadata-core` mirror).\n- Drop the `Approval Process` descriptor — and its `**/*.approval.ts` loader patterns — from `DEFAULT_METADATA_TYPE_REGISTRY`.\n- Remove the hardcoded `nav_approvals` Studio nav item and its 4 hand-maintained locale labels (en/zh-CN/ja-JP/es-ES).\n- Strip the stale `approval` form block from the 4 `*.metadata-forms.generated.ts` files.\n- `metadata-plugin.test.ts`: drop `approval` from the accepted-types list; add a guard asserting it is now **rejected** as a metadata type.\n\n## Not touched\n\nApproval *state* (`sys_approval_request` / `sys_approval_action`, record lock, status mirror) and the Approval **node** config (`ApprovalNodeConfigSchema`) are unchanged — this PR only removes the dead \"approval is a metadata type\" surface.\n\n## Verification\n\n- `pnpm build` clean for `@objectstack/spec`, `@objectstack/metadata-core`, `@objectstack/platform-objects`.\n- **465 tests pass** (spec 307, platform-objects 78, metadata-core 80).\n- Grep confirms zero remaining `nav_approvals` / approval-as-metadata-type references."
+}

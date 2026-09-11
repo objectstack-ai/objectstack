@@ -1,0 +1,33 @@
+{
+  "number": 1619,
+  "kind": "pull_request",
+  "title": "fix(spec): raise DTS build heap 4096→12288 (fix flaky DTS OOM)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-06T14:35:44Z",
+  "updated_at": "2026-06-06T14:41:00Z",
+  "closed_at": "2026-06-06T14:40:59Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-06T14:40:59Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1619",
+  "body": "spec build 的 DTS 单独步骤硬编码 `NODE_OPTIONS=--max-old-space-size=4096`,**覆盖了 Docker/CI 外层的 12288**——所以类型声明构建被限在 4GB,schema/类型面变大后偶发 `ERR_WORKER_OUT_OF_MEMORY`,导致 objectos 镜像构建失败(本会话 #143 部署即因此挂)。调到 12288 与外层一致;`--max-old-space-size` 是上限非预留,小机器也安全。"
+}

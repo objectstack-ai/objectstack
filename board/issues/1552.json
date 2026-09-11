@@ -1,0 +1,34 @@
+{
+  "number": 1552,
+  "kind": "pull_request",
+  "title": "feat(metadata): list pending drafts — Studio draft discoverability backend (ADR-0033)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-03T02:26:54Z",
+  "updated_at": "2026-06-03T02:40:15Z",
+  "closed_at": "2026-06-03T02:40:11Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-03T02:40:11Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1552",
+  "body": "## Context\n\nAfter an AI builds an app, its objects/views land as **drafts** (`sys_metadata` rows with `state='draft'`, bound to the app package). But the only list path — `getMetaItems` — reads the active registry, so drafts were invisible: a just-built app package looked empty in Studio and there was no \"pending changes\" surface. (Diagnosed live: the metadata is created and correctly package-bound, just hidden because the browsers are active-only.)\n\nThis adds the backend so the console can surface drafts. (Frontend is a companion objectui PR.)\n\n## Change\n\n- **`SysMetadataRepository.listDrafts({type?, packageId?})`** — lists draft rows (mirrors `list()` but scoped to `state='draft'`, optionally narrowed by package), returning a light header projection (no body) carrying `packageId`.\n- **`protocol.listDrafts({packageId?, type?, organizationId?})`** — exposes it over the overlay repo.\n- **`GET /api/v1/meta/_drafts?packageId=&type=`** — registered in the REST server **before** the greedy `/meta/:type` param route (mirroring the `diagnostics` route) so `_drafts` isn't captured as a type name; mirrored in the dispatcher as a fallback.\n\nRead-only; no change to existing list/publish paths.\n\n## Verification\n\n- **Live (showcase):** an AI build of a \"customer support\" app produced 5 drafts; `GET /api/v1/meta/_drafts` returns all 5 with their `packageId`, and `?packageId=app.customer_support` filters to them.\n- **Unit:** repo projection/filtering by state+package+type; dispatcher route (+501 fallback, no type collision); REST route registered before `/meta/:type`. Full objectql (495) + runtime (339) + rest (78) suites green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

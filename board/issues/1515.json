@@ -1,0 +1,30 @@
+{
+  "number": 1515,
+  "kind": "issue",
+  "title": "client SDK: add `approvals` namespace; remove dead `workflow` surface (ADR-0019)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T04:09:57Z",
+  "updated_at": "2026-06-02T05:59:09Z",
+  "closed_at": "2026-06-02T05:59:09Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1515",
+  "body": "## Summary\nThe `@objectstack/client` SDK is out of sync with the server REST surface around approvals/workflow:\n\n1. **Missing:** there is **no `client.approvals` namespace**, even though the server exposes the canonical approval-decision API. This is the only path that resumes a suspended flow run (ADR-0019), so without a typed method every consumer hand-rolls `fetch`, or worse, bypasses it by `data.update`-ing the request status (which mirrors the status but does **not** resume the flow).\n2. **Dead:** `client.workflow.*` and the `workflow` route/contract are leftovers from the workflow engine that was removed (Workflow Rules removed in #1398; approval collapsed into Flow in **ADR-0019**). Nothing implements `/api/v1/workflow` anywhere in the monorepo — these methods can never succeed.\n\nFound while building the mobile app's approvals UI: `client.workflow.approve` silently no-ops and there's no typed approvals call, so we had to `data.update` the status (semantically wrong — the blocked flow run is never resumed).\n\n## Evidence\n**Server HAS the approvals API** — `packages/rest/src/rest-server.ts` `registerApprovalsEndpoints()` (always mounted; service via `ctx.getService('approvals')`):\n- `GET  /api/v1/approvals/requests` (filters: status, object, recordId, approverId, submitterId)\n- `GET  /api/v1/approvals/requests/:id`\n- `POST /api/v1/approvals/requests/:id/approve` -> `svc.decide()` -> **finalizes the request and resumes the owning flow run**\n- `POST /api/v1/approvals/requests/:id/reject`\n- `GET  /api/v1/approvals/requests/:id/actions` (audit trail)\n\n**Client LACKS it** — `packages/client/src/index.ts`: no `approvals` namespace and no `approvals` key in the route map (`getRoute`, ~line 3277).\n\n**`workflow` is dead** — no `/api/v1/workflow` route is registered anywhere; no `service-workflow` / `plugin-workflow` package exists. Only leftovers remain:\n- `packages/client/src/index.ts:2464` — `workflow = { getConfig, getState, transition, approve, reject }`\n- `packages/client/src/index.ts:3288` — route map `workflow: '/api/v1/workflow'`\n- `packages/spec/src/contracts/workflow-service.ts` — `IWorkflowService` contract (+ `Workflow*` types), unimplemented/unregistered\n- `packages/spec/src/system/core-services.zod.ts:42,84` — `'workflow'` CoreServiceName (`optional`), surfaces as `workflow: { status: 'unavailable' }` in discovery\n\nPer **ADR-0019** (\"Collapse Approval into Flow\"): *\"Workflow Rules were already removed in #1398, and `workflow` was reclaimed for state machines.\"* — but no state-machine workflow service was ever shipped, so the surface is dangling.\n\n## Proposed changes\n**Add `client.approvals`** (mirror the existing `automation` namespace style):\n```ts\napprovals = {\n  list:    (filters?) => GET  /api/v1/approvals/requests?…,\n  get:     (id)       => GET  /api/v1/approvals/requests/:id,\n  approve: (id, { comment?, actorId? }) => POST /api/v1/approvals/requests/:id/approve,\n  reject:  (id, { comment?, actorId? }) => POST /api/v1/approvals/requests/:id/reject,\n  actions: (id)       => GET  /api/v1/approvals/requests/:id/actions,\n}\n```\n+ add `approvals: '/api/v1/approvals'` to the route map.\n\n**Remove the dead `workflow` surface:**\n- delete the `workflow` namespace + route-map entry in `packages/client/src/index.ts`\n- delete `packages/spec/src/contracts/workflow-service.ts` (`IWorkflowService`, `Workflow*` types) and its test\n- drop `'workflow'` from `CoreServiceName` (`core-services.zod.ts`) and any discovery default that advertises it\n\n> Note: object state machines now live as Flow nodes / field-level, so `transition/getState/getConfig` have no replacement — remove, don't re-point.\n\n## Acceptance criteria\n- [ ] `client.approvals.{list,get,approve,reject,actions}` exist and hit `/api/v1/approvals/requests…`\n- [ ] No `workflow` references remain in `@objectstack/client` (namespace + route map)\n- [ ] `IWorkflowService` / `Workflow*` types and the `'workflow'` CoreServiceName removed (or explicitly kept with a deprecation note if state-machine work is still planned)\n- [ ] `discovery` no longer advertises a `workflow` service\n- [ ] spec + client typecheck/test green\n\n## Secondary (separate issue?)\n`reports` (`/api/v1/reports…`, 8 routes) and `sharing`/`sharingRules` (`/api/v1/sharing/rules…`) also have server routes but no client namespace.\n\n---\n_Filed from the `mobile` app, which will switch its approvals decision to `client.approvals.approve` once this lands (currently using a `data.update` workaround that doesn't resume the flow)._\n"
+}

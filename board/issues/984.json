@@ -1,0 +1,35 @@
+{
+  "number": 984,
+  "kind": "issue",
+  "title": "Discovery API endpoint 路由&协议一致性问题汇总与修复提案：client/server (多适配器) 规范统一",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-03-27T02:18:40Z",
+  "updated_at": "2026-05-25T07:27:15Z",
+  "closed_at": "2026-05-25T07:27:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/984",
+  "body": "### 问题概要\n\n本 Issue 汇总了 Discovery 协议在 ObjectStack 体系中 client/server（多适配器）间的所有一致性与实现偏差问题，覆盖 @objectstack/client、spec 协议、dispatcher 路由与各类服务端适配器。\n\n---\n\n#### 1. Discovery 回退 API 路由不一致\n- **协议** 明确要求 Fallback 必须为 `GET /api/v1/discovery`（见 DEFAULT_DISPATCHER_ROUTES, DEFAULT_DISCOVERY_ROUTES 等定义）\n- **现状**：@objectstack/client 在 connect() fallback 使用 `GET /api/v1`，与协议不符，只是恰好能命中部分 adapter 错误实现\n- **多服务端 Adapter**（hono/nuxt/nextjs/express/fastify等）全部将 Discovery 挂在 `{prefix}` 根（如 `/api/v1`），协议要求却是 `GET /api/v1/discovery`\n- **dispatcher-plugin.ts** 正确实现了 `/api/v1/discovery`\n\n**风险：** 生产环境协议演进后将导致 discovery 失败、前后端错配。\n\n#### 2. Client 路由命名空间&协议对齐性问题\n\n- `storage` 在 ApiRoutesSchema 可选但 dispatcher 缺少 `/api/v1/storage` 路由，所有 storage 相关调用在服务端未注册时均会 404\n- `feed` fallback 到 `/api/v1/data`，协议没有明确说明 feed，但应该在 ApiRoutesSchema 显示定义 feed，为以后多后端兼容保留通用性\n- `DiscoverySchema` / `GetDiscoveryResponseSchema` 两个定义有字段分裂，推荐合并统一 schema，消除未来分歧\n\n---\n\n### 建议修复方案\n#### P0 - 必须修复\n- 客户端 connect() 默认地址统一改为 `/api/v1/discovery`\n- 各 adapter/中间件将 discovery 路由明确挂载到 `/api/v1/discovery`\n\n#### P1 - 应该修复\n- storage 路由在 dispatcher 默认注册到 `/api/v1/storage`\n- feed/Discovery 等可选路由都在 ApiRoutesSchema（spec）中完全显式声明\n- DiscoveryResponse Schema 统一为单一权威来源\n\n#### P2 - 推荐善后\n- client 路由表类型安全提升, 路由自发现结构类型全覆盖\n\n---\n\n涉及文件：\n- /packages/client/src/index.ts\n- /packages/spec/src/api/discovery.zod.ts\n- /packages/spec/src/api/protocol.zod.ts\n- /packages/spec/src/api/dispatcher.zod.ts\n- /packages/spec/src/api/plugin-rest-api.zod.ts\n- Main adapters: /adapters/(hono|express|nextjs|nuxt|fastify|sveltekit)\n\n请按下述建议修复，并补充或更新相关协议文档、CHANGELOG、及集成测试。\n"
+}

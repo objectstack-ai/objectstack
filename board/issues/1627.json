@@ -1,0 +1,36 @@
+{
+  "number": 1627,
+  "kind": "pull_request",
+  "title": "refactor(mcp)!: rename @objectstack/plugin-mcp-server → @objectstack/mcp + ADR-0036 amendment",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-06T22:03:26Z",
+  "updated_at": "2026-06-06T22:03:41Z",
+  "closed_at": "2026-06-06T22:03:38Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-06T22:03:38Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1627",
+  "body": "## What\n\nRenames the outbound MCP-server package **`@objectstack/plugin-mcp-server` → `@objectstack/mcp`** and records the related decisions in ADR-0036. This is PR① of the agreed sequence (rename + ADR, then Phase 2b surfacing).\n\n## Why\n\n`plugin-` is legacy naming. The package is the **outbound** twin of `@objectstack/rest` — \"your app exposed over a protocol\" — and the repo already names that kind of capability as a top-level, no-prefix package (`packages/rest`). So `rest` (old surface) + `mcp` (new surface) sit as peers; inbound MCP (consuming external servers) stays `@objectstack/connector-mcp`.\n\n## Changes\n\n- `packages/plugins/plugin-mcp-server` → **`packages/mcp`**; package name → `@objectstack/mcp`; internal plugin id → `com.objectstack.mcp`; `build`/`tsconfig` relative paths fixed for the new depth. **Exported API unchanged** (`MCPServerPlugin`, `MCPServerRuntime`, `registerObjectTools`, `McpDataBridge`, …).\n- `@objectstack/cli`: dependency + dynamic-loader pkg id updated.\n- Inbound refs updated: runtime test comment, `spec/ai/mcp.zod.ts` comment, `.changeset/config.json` fixed-group, the #1626 changeset, README/docs.\n- **Pre-launch clean break — no compat shim** (only `@objectstack/cli` depended on it internally).\n\n## ADR-0036 amendment (2026-06-07)\n\nAdds an amendment block capturing three decisions that refine/supersede the original text:\n- **A. Naming** → `@objectstack/mcp`.\n- **B. Granularity = environment, not app.** One MCP server per env covers all that env's apps (apps are metadata groupings; the data surface is objects). Dozens of apps → **one** connection. Dynamic apps are a non-issue: discovery is live (`list_objects`/`describe_object`), new app → zero reinstall. Narrowing via `sys_api_key.scopes`, not separate servers.\n- **C. Distribution = \"skills + MCP\", not vendor config snippets** (supersedes §3/§4's primary artifact). Verified 2026-06 that Agent Skills (`SKILL.md`) is now an open cross-platform standard (Claude Code, OpenAI Codex, Gemini CLI, Copilot, Cursor, …). MCP = live governed access (the moat); a single generic ObjectStack **Skill** = the portable how-to layer on top. Status updated: Phase 1a (#1624) + Phase 2 (#1626) shipped; Phase 2b next.\n\n## Verification (local)\n\n- `@objectstack/mcp` build incl. DTS ✓; `@objectstack/cli` + `@objectstack/runtime` build ✓ (51 tasks).\n- `tsc --noEmit` clean (mcp, cli).\n- Tests: mcp **36**, runtime mcp **5** — all green. Lockfile regenerated (no `plugin-mcp-server` left).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

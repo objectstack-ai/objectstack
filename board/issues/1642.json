@@ -1,0 +1,32 @@
+{
+  "number": 1642,
+  "kind": "pull_request",
+  "title": "docs(skills): document line-item grid behaviors (data + ui)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-07T09:23:18Z",
+  "updated_at": "2026-06-07T09:23:52Z",
+  "closed_at": "2026-06-07T09:23:51Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-07T09:23:51Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1642",
+  "body": "## What\n\nDocuments the spreadsheet-style line-item grid so low-code authors can reuse it from the data model alone (no UI config):\n\n- **objectstack-ui → Master-Detail Forms**: new \"Line-item grid behaviors\" — computed columns (stored field + `expression`), trailing ghost row, item-typeahead auto-fill (same-named sibling copy), persisted drag-reorder (`position` field), the live Subtotal/Tax/Total stack (parent `tax_rate` / `taxRateField`), inline validation + duplicate.\n- **objectstack-data → Relationships**: a \"Modeling a 'grid' line item\" recipe (expression computed column kept stored for rollup, catalog lookup auto-fill, `position` sort field, parent `tax_rate` + `summary`).\n\nDocs-only. Pairs with objectui ADR-0001 amendment.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

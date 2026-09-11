@@ -1,0 +1,35 @@
+{
+  "number": 1420,
+  "kind": "pull_request",
+  "title": "feat(messaging): notify baseline node + lean service-messaging vertical slice (ADR-0012)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-31T16:49:01Z",
+  "updated_at": "2026-05-31T16:49:31Z",
+  "closed_at": "2026-05-31T16:49:16Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-05-31T16:49:16Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1420",
+  "body": "## What\n\nTurns the `notify` flow node into a real capability (it was a declared-but-unexecutable node type) backed by a **minimal, ADR-0012-aligned messaging vertical slice** — chosen over the full 13-table platform.\n\n### Spec\n- `flow.zod.ts`: add `notify` to the builtin flow-node action enum (+ test).\n\n### `@objectstack/service-messaging` (new)\n- **MessagingChannel seam** — `Notification`/`Delivery`/`SendResult` + `MessagingChannel` interface (`id`, `send`, optional `classifyError`).\n- **MessagingService** — channel registry + `emit()`: defaults channels to `['inbox']`, fans out per *(channel × recipient)*, isolates a throwing / failing / unregistered channel into a failed delivery — **never throws**.\n- **Always-on inbox channel** — writes `sys_inbox_message` rows via the data engine; degrades to a logged no-op when no data engine is present.\n- `sys_inbox_message` object + `MessagingServicePlugin` (registers the `messaging` service, the inbox channel, and the object via the manifest).\n\n### `service-automation`\n- `notify-node.ts`: baseline `notify` **io** node. Interpolates recipients/title/body/channels/topic/severity/actionUrl/payload; resolves the `messaging` service through a **local structural surface** (no runtime dep on service-messaging, mirroring `ConnectorRegistrySurface`). Degrades to a logged success when messaging isn't installed; emits otherwise. Wired into `installBuiltinNodes`.\n\n### Example\n- `app-showcase`: `TaskAssignedNotifyFlow` — worked `notify` example (inbox channel). Install the plugin and the flow starts landing inbox rows with no edit.\n\n## Deferred to follow-ups\nEmail/push/webhook channels, topic↔preference matrix, outbox/retry extraction.\n\n## Tests\nservice-messaging **19**, service-automation **95**, spec + runtime green."
+}

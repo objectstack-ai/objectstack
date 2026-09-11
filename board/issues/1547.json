@@ -1,0 +1,35 @@
+{
+  "number": 1547,
+  "kind": "pull_request",
+  "title": "fix(ai): make ADR-0033 blueprint authoring work with OpenAI structured outputs",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T14:19:50Z",
+  "updated_at": "2026-06-02T14:49:49Z",
+  "closed_at": "2026-06-02T14:49:44Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-02T14:49:44Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1547",
+  "body": "## What & why\n\nTwo bugs found by a **live end-to-end run** of the ADR-0033 loop in Studio (chat → blueprint → draft → review → publish) against a **real model** — OpenAI `gpt-5.5` via the Vercel AI Gateway. Both were invisible to the existing unit tests (they validate the Zod schema directly and never round-trip through OpenAI's strict JSON-schema check or a multi-turn conversation).\n\n### 1. `propose_blueprint` failed against OpenAI strict structured outputs\n`SolutionBlueprintSchema` uses `.optional()` fields and a free-form `seedData` `z.record`. OpenAI's **strict** structured outputs (what `generateObject` uses through the gateway) require **every** property in `required` and reject open `additionalProperties`, so the call errored:\n> `Invalid schema for response_format 'SolutionBlueprint': … 'required' … must include every key in properties. Missing 'label'.`\n\n…and the agent silently fell back to free-text — the blueprint→draft path never ran on OpenAI models.\n\n**Fix:** add `SolutionBlueprintStrictSchema` — a strict-compatible mirror (optional → `nullable`, no `z.record`) used **only** as the `generateObject` output contract. The lenient `SolutionBlueprintSchema` (and every existing consumer/test) is unchanged; the blueprint tools `stripNulls` the values the strict contract emits so downstream stays clean.\n\n### 2. Tool-only assistant turns failed to persist → context loss\n`ai_messages.content` is required, but an assistant turn that only emits a tool call has no text. The insert failed, the turn was dropped, and the **next** turn was rebuilt without it — so after the user confirmed, the agent **re-proposed** instead of applying. **Fix:** `ObjectQLConversationService.addMessage` now synthesizes a readable placeholder from the tool names (`(called propose_blueprint)`) + a defensive non-empty fallback.\n\n## Verification\n\n- **Live e2e (Studio + gpt-5.5):** propose → \"确认\" → `apply_blueprint` drafts 8 artifacts (objects/views/app, self-correcting a dashboard) → chat **\"查看 8 项变更\"** → designer generic **DraftReviewPanel** diff → **Publish** → `GET /meta/object/project` returns the live object, `?state=draft` → 404 (promoted). 0 schema errors, 0 persist failures in the log post-fix.\n- **Unit:** new strict-schema tests (spec) + propose-uses-strict/strips-nulls + apply-tolerates-nulls (service-ai) + tool-only-turn-persists (conversation). Full suites green: **service-ai 463**, **spec ai 138**. New files tsc-clean.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

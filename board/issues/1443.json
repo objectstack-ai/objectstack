@@ -1,0 +1,33 @@
+{
+  "number": 1443,
+  "kind": "pull_request",
+  "title": "docs(agents): document frontend dev loop (showcase backend :3000, fast objectui dev server)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T05:11:25Z",
+  "updated_at": "2026-06-01T05:16:06Z",
+  "closed_at": "2026-06-01T05:16:00Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T05:16:00Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1443",
+  "body": "Adds the showcase frontend-debug recipe (`PORT=3000 pnpm dev`) and the fast `../objectui` src iteration path (objectui console dev server on :5180, /api proxy → :3000) to AGENTS.md, alongside the existing `objectui:refresh` loop. Clarifies that the backend-served `_console` is the published build, not src. Captures the dev topology that caused avoidable thrash debugging showcase UI.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

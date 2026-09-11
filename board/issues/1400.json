@@ -1,0 +1,33 @@
+{
+  "number": 1400,
+  "kind": "pull_request",
+  "title": "feat(metadata): declarative type-level actions for metadata-admin",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-31T00:23:39Z",
+  "updated_at": "2026-05-31T00:24:27Z",
+  "closed_at": "2026-05-31T00:24:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-05-31T00:24:27Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1400",
+  "body": "## What\n\nGive metadata **types** the same action mechanism business objects already have, so the Studio metadata-admin engine can render per-type buttons — the canonical example being a `datasource` **Test connection** button. Reuses the existing `ActionSchema` verbatim; no third button concept is introduced.\n\n## Design (声明式 + 运行注册表)\n\n| Layer | Where | What |\n|---|---|---|\n| **Declarative (per type)** | `MetadataTypeRegistryEntryBaseSchema` | `actions?: ActionSchema[]` on the registry entry; built-in types declare directly in `DEFAULT_METADATA_TYPE_REGISTRY`. |\n| **First action** | `datasource` entry | `test_connection` (`type:'api'`, `POST /api/v1/datasources/${ctx.recordId}/test`). |\n| **Runtime registry (plugins)** | `metadata-type-schemas.ts` | `registerMetadataTypeActions()` / `getMetadataTypeActions()`, mirroring `registerMetadataTypeSchema()`. Merges declarative + registered, deduped by `name` (registered wins). |\n| **Emission** | `MetadataManager.getTypeInfo()` | merges the live registry entry's `actions` + the runtime overlay onto `MetadataTypeInfo.actions`, so `/api/v1/meta/types/:type` carries the buttons. |\n\nThe `test_connection` route lives in the host's datasource-admin backend (private package). When that backend is absent the button is still emitted; the call degrades to \"unavailable\" rather than 404-ing.\n\n## Files (7)\n\n- `packages/spec/src/kernel/metadata-plugin.zod.ts` — `actions` field + datasource action\n- `packages/spec/src/kernel/metadata-type-schemas.ts` — runtime registry\n- `packages/spec/src/contracts/metadata-service.ts` — `MetadataTypeInfo.actions`\n- `packages/spec/src/api/metadata.zod.ts` — response schema\n- `packages/metadata/src/metadata-manager.ts` — `getTypeInfo()` merge + emit\n- `packages/spec/src/kernel/metadata-type-actions.test.ts` (new, 6 tests)\n- `packages/metadata/src/metadata-service.test.ts` — getTypeInfo emission (2 tests)\n\n## Tests\n\n- spec: **6604 passed**; metadata: **240 passed**\n- spec / metadata / objectql / rest build clean (incl. dts)\n\n## Not in this PR\n\nFrontend rendering of `MetadataTypeInfo.actions` in the metadata-admin engine lives in the separate `objectui` repo (follow-up)."
+}

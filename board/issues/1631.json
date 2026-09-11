@@ -1,0 +1,35 @@
+{
+  "number": 1631,
+  "kind": "pull_request",
+  "title": "fix(runtime): mount /mcp and /keys HTTP routes — were unreachable (ADR-0036)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-06T23:26:49Z",
+  "updated_at": "2026-06-06T23:27:02Z",
+  "closed_at": "2026-06-06T23:26:52Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-06T23:26:52Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1631",
+  "body": "## What\n\nThe dispatcher mounts HTTP routes **explicitly** (no catch-all). #1626 (MCP transport) and #1630 (key-gen) added branches inside `dispatch()` but never registered the matching `server.<verb>()` routes — so **`/api/v1/mcp` and `/api/v1/keys` 404'd at the HTTP layer** before reaching the dispatcher. Unit tests called the handlers directly, which hid the gap; it surfaced in **live staging e2e** (generic `{\"error\":\"Not found\"}`, no `routes.mcp` in discovery).\n\n## Fix\n\n- Register `/mcp` (GET/POST/DELETE → `dispatch()`, transport reads the method) and `/keys` (POST) in the dispatcher plugin, routed through `dispatch()` so the host's project-aware kernel swap + executionContext resolution run first.\n- `dispatcher-plugin.routes.test.ts` — the regression test that asserts the routes are registered (would have caught this).\n\n## Verify\n\nFull runtime suite **379** green; tsc clean. After merge + cloud bump + a fresh env spawn, `/api/v1/mcp` and `/api/v1/keys` are reachable on staging.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 1402,
+  "kind": "pull_request",
+  "title": "refactor(meta): relocate datasource Test-connection action to backend plugin",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-31T01:23:37Z",
+  "updated_at": "2026-05-31T01:24:33Z",
+  "closed_at": "2026-05-31T01:24:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-05-31T01:24:33Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1402",
+  "body": "## What\n\nType-level metadata actions (`MetadataTypeInfo.actions`) are now sourced from the **merged** registry — declarative entries + the plugin-contributed overlay (`registerMetadataTypeActions`). The datasource **Test connection** action moves out of the open-source registry into the `datasource-admin` backend plugin (separate repo) that owns the route it calls.\n\n## Why\n\nThe `registerMetadataTypeActions` overlay existed but was **never wired into the emit path**: `/api/v1/meta` spread the registry entry's declarative `.actions` directly, so plugin-registered actions were never surfaced. Separately, the framework hardcoded a `test_connection` button whose backend route (`POST /api/v1/datasources/:name/test`) lives only in the private `datasource-admin` plugin — so the open example emitted a button that 404'd.\n\n## Changes\n\n- **`objectql/protocol.ts`** — `getMetaTypes()` sources `actions` from `getMetadataTypeActions(type)` (declarative + overlay, deduped by name) in both the registry-backed and runtime-registered branches. Key omitted when empty (preserves prior response shape).\n- **`spec/metadata-plugin.zod.ts`** — drop the hardcoded datasource `test_connection` action; document that it's now plugin-contributed.\n- **Tests** — `metadata-type-actions.test.ts` + `metadata-service.test.ts` updated to the new contract: datasource has no declarative action; actions surface only after a plugin registers them.\n\n## Result\n\nThe button is emitted **iff** the backend plugin that serves it is installed. Open example (no plugin) → datasource emits no actions → no 404-ing button. A cloud host with `datasource-admin` installed → button appears AND the route exists.\n\n> Companion PR in the `cloud` repo registers the action from the plugin's `init()`.\n\n## Verification\n\n- `@objectstack/spec` build ✓ + full suite 6605 passed ✓\n- `@objectstack/metadata` 241 passed ✓ · `@objectstack/objectql` build ✓\n- E2E: open example backend restarted → `/api/v1/meta` datasource entry emits **no** `actions` key."
+}

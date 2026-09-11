@@ -1,0 +1,34 @@
+{
+  "number": 1490,
+  "kind": "pull_request",
+  "title": "fix(platform-objects): drop unenforceable sys_user email_unique validation (#1485 regression)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T20:50:29Z",
+  "updated_at": "2026-06-01T20:50:53Z",
+  "closed_at": "2026-06-01T20:50:53Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T20:50:53Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1490",
+  "body": "## What & why\n\n`main` has been **red since [#1485](https://github.com/objectstack-ai/framework/pull/1485)** (\"enforce all declared validation-rule types; trim the unenforceable three\"). That PR removed `unique` / `async` / `custom` from the `ValidationRuleSchema` discriminated union, but `sys_user` still declared:\n\n```ts\nvalidations: [{ name: 'email_unique', type: 'unique', ... }]\n```\n\nSo `ObjectSchema.create(SysUser)` throws at module load:\n\n```\nZodError: Invalid discriminator value at validations[0].type.\nExpected 'script' | 'state_machine' | 'format' | 'cross_field' | 'json_schema' | 'conditional'\n```\n\n…which fails `packages/platform-objects/src/platform-objects.test.ts` (CI \"Test Core\"). CI history: `11905faf8` (#1484) green → `764824299` (#1485) red → still red through `f950b43d9` (#1487).\n\n## Fix\n\nThe validation rule was **redundant**: `sys_user` already declares a unique index on `email` (`indexes: [{ fields: ['email'], unique: true }]`), and the table is `managedBy: 'better-auth'` which enforces email uniqueness at the source. `unique` was trimmed precisely because it's unenforceable as a synchronous validation rule. So the rule is removed (not migrated). Swept the repo — **no other object** uses a trimmed validation type.\n\n## Verification\n\n`platform-objects.test.ts` → **52/52 pass** locally with the fix (was a failing suite before).\n\nUnblocks #1488 (notification dispatcher test) which is red only due to this pre-existing failure.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

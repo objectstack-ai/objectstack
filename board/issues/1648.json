@@ -1,0 +1,33 @@
+{
+  "number": 1648,
+  "kind": "pull_request",
+  "title": "feat(spec): dashboard widget can bind to a dataset (ADR-0021 B-P1)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-07T11:24:19Z",
+  "updated_at": "2026-06-07T11:24:30Z",
+  "closed_at": "2026-06-07T11:24:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-07T11:24:21Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1648",
+  "body": "Additive dual-form DashboardWidgetSchema: a widget may bind a dataset + dimensions + values instead of inline object query; superRefine enforces values when dataset set. Completes the symmetric half of B-P1 (report + dashboard both consume the governed dataset). Bumps .objectui-sha to matching objectui commit (#1576). Tests: dashboard.test +3. Verified live in Studio.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

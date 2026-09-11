@@ -1,0 +1,35 @@
+{
+  "number": 915,
+  "kind": "issue",
+  "title": "后续开发：系统对象与命名规范统一架构补完善工程",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-12T04:13:51Z",
+  "updated_at": "2026-05-25T07:27:31Z",
+  "closed_at": "2026-05-25T07:27:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/915",
+  "body": "## 背景\n基于 #906 已推动系统对象 namespace/tableName 命名规范与归档方案落地，协议层统一已完成。当前主线开发已合并，但后续仍存在运行时消费和应用层完善任务。\n\n---\n\n## 待办事项\n1. **前端与 Studio 全量消费 `sys` namespace 对象**\n   - Studio 系统对象管理面板需完整支持 sys 域所有对象。\n   - 通用对象渲染与自动生成 UI（form、table）需按对象协议自动适配。\n   - 文档和组件示例需同步。\n\n2. **路由统一**\n   - 前端统一 `/system/{name}`，API `/api/v1/objects?namespace=sys`。当前仅部分路由已适配，需全平台覆盖。\n   - 管理后台/对象中心应按 namespace/type 自动分组。\n\n3. **权限声明、事件管理与系统对象引用一致性**\n   - 权限声明、事件类型等需统一以 `sys::{name}` 进行辨识和管理。\n   - 各插件与消费端（如流程引擎、角色管理、审批）应禁止硬编码对象名，全部引用常量。\n\n4. **E2E 验证与集成测试**\n   - 完成系统对象相关功能端到端（对象管理、创建、授权、审计）测试。\n\n5. **ROADMAP 与文档补全**\n   - 明确后续 breaking change 节点。\n   - 附录核心设计方案与示例代码。\n\n---\n\n## 建议\n- 本 issue 为 #906 后续完善型工程任务，建议打入 ROADMAP。\n- 按优先级拆分为子任务（前端适配、路由统一、权限和事件、测试、文档）。"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 1649,
+  "kind": "pull_request",
+  "title": "feat: field conditional rules (CEL) — spec + server enforcement (B2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-07T11:47:38Z",
+  "updated_at": "2026-06-07T12:01:23Z",
+  "closed_at": "2026-06-07T12:01:21Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-07T12:01:21Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1649",
+  "body": "## Why\n\nB2 — field-level conditional visibility / read-only / validation. Before: spec had only `conditionalRequired` (CEL) and it **wasn't enforced**; no conditional visibility/read-only. Goal: a CEL-unified trio evaluated on **both** sides (client UX in a follow-up; server enforcement here so rules can't be bypassed).\n\n## What\n\n**Spec (`@objectstack/spec`)** — three CEL-predicate field props over `record`:\n- `visibleWhen` — shown only when TRUE.\n- `readonlyWhen` — read-only when TRUE (e.g. `record.status == 'paid'`).\n- `requiredWhen` — required when TRUE (canonical; **`conditionalRequired` kept as alias**).\n\n**Server (`@objectstack/objectql`)** — enforcement so the rules aren't decoration:\n- `evaluateValidationRules` now also enforces field `requiredWhen`/`conditionalRequired` over the **merged** record → a `required` error when the predicate is TRUE and the value is missing.\n- `stripReadonlyWhenFields` drops update-payload fields whose `readonlyWhen` is TRUE for the record's state (keeps the persisted value); wired into `engine.update`.\n- `needsPriorRecord` accounts for conditional fields so the prior record is fetched on update (predicates over unchanged fields evaluate correctly). Broken predicates fail-open (logged, skipped).\n\n## Verification\n\n- `field.test.ts` 115 pass (props normalize to the CEL envelope).\n- `rule-validator.test.ts` 46 pass (requiredWhen insert/update-merged, `conditionalRequired` alias, readonly-strip true/false/no-op, needsPriorRecord).\n- spec + objectql build clean.\n\nNext: PR objectui client CEL evaluator → ObjectForm dynamic visible/readonly/required (same engine = client/server parity); then showcase + live e2e + docs.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

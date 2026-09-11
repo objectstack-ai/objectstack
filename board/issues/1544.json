@@ -1,0 +1,30 @@
+{
+  "number": 1544,
+  "kind": "issue",
+  "title": "Per-environment runtime: POST /api/v1/auth/set-initial-password → 404 (recovery flow dead-ends)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T13:15:53Z",
+  "updated_at": "2026-06-03T09:33:23Z",
+  "closed_at": "2026-06-03T09:33:23Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1544",
+  "body": "## Symptom\nOn a per-environment ObjectOS runtime (cloud distribution, `*.objectos.app`/`*.objectos.ai`), after an owner enters via **SSO-as-owner**, the auth-proxy redirects them (no local credential yet) to `/_console/system/profile?recovery_needed=true` to **\"Set a recovery password\"**. Submitting that form **POSTs `/api/v1/auth/set-initial-password` and gets `404`** — the recovery flow dead-ends and the user is stuck.\n\n## Empirical confirmation (staging `crm.objectos.app`)\n```\nPOST /api/v1/auth/set-initial-password  → 404   (route not found)\nGET  /api/v1/auth/get-session           → 200   (better-auth IS mounted & responding)\n```\nSo better-auth itself is fine; the specific route is simply absent on the runtime.\n\n## Root cause\n- `set-initial-password` is a **custom route registered by the full `AuthPlugin`** — `packages/plugins/plugin-auth/src/auth-plugin.ts` (`rawApp.post(\\`${basePath}/set-initial-password\\`, …)`, ~L483).\n- On a per-environment kernel the **`AuthPlugin` is skipped** (\"⚠ AuthPlugin skipped on host kernel — runtime mode (ObjectOSEnvironmentPlugin detected)\"). Auth there is served by **`packages/runtime/src/cloud/auth-proxy-plugin.ts`**, which special-cases `sso-handoff-issue` and `sso-exchange` and otherwise **forwards `/api/v1/auth/*` to better-auth**. better-auth has no `set-initial-password` route → **404**.\n\nNet: the recovery flow (auth-proxy redirect → \"Set local password\") promises an endpoint that only exists on the host-kernel AuthPlugin, not on the runtime. It can never have worked on a per-environment runtime.\n\n## Suggested fix\nAdd a `set-initial-password` handler to `runtime/src/cloud/auth-proxy-plugin.ts` (alongside the existing `sso-exchange` special-case), mirroring the AuthPlugin logic against the **environment's** auth service (which is already resolvable there — `get-session` works, so `getAuthContext()` → `internalAdapter` + `password.hash` + `createAccount` are available):\n1. require a valid session (else 401),\n2. reject if a `credential` account with a password already exists (409 → \"use change-password\"),\n3. enforce min/max length,\n4. `internalAdapter.createAccount({ userId, providerId: 'credential', accountId: userId, password: hash })`.\n\nThis is the same body as `auth-plugin.ts` L483–536; factoring it into a shared helper both call sites can reuse would avoid drift.\n\n## Impact / context\nExposed now that per-environment runtimes boot cleanly (the prior `LocalCryptoProvider` crash-loop masked it — the runtime never stayed up long enough to reach the recovery page). Blocks the \"Open environment as admin\" → first-time owner UX end-to-end. framework @ `654a2fd9` (also present at the cloud-pinned `cf03ef2f7`)."
+}

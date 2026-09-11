@@ -1,0 +1,33 @@
+{
+  "number": 1528,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0033 — AI-assisted metadata authoring",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T07:48:27Z",
+  "updated_at": "2026-06-02T07:56:51Z",
+  "closed_at": "2026-06-02T07:54:54Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-02T07:54:54Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1528",
+  "body": "## Summary\nProposes the **authoring loop for an AI-authored platform** — how an AI generates/modifies *any* metadata type and how a human safely confirms it before it goes live. Status: **Proposed** (for discussion).\n\nDecisions:\n1. **One brain, many surfaces** — AI authoring lives in the agent + global chat; designers contribute context + an in-context \"Ask AI\", never bespoke per-type generators.\n2. **AI never publishes** — every agent write lands in the **ADR-0027 draft**; the change is confirmed in the designer's **review/diff**; the human's **Publish** is the only path to live. The draft *is* the gate (retires the unenforced `requiresConfirmation`).\n3. **Type-agnostic apply** — one `update_metadata(type,name,patch,mode:'draft')` (+ create/describe) validated against the per-type Zod schema (ADR-0005), instead of N per-type write tools.\n4. **Plan-first for vague intent** — for \"build me a project-management system,\" the agent emits a structured **blueprint** the human confirms *before* batch-drafting. No mass-generating unreviewed artifacts.\n5. **Type-agnostic review in the shared host** — generic draft↔published structural diff for all types; rich per-type diffs as enhancements; flow (graph) last.\n6. **Open-core boundary** — agent framework + generic tools + **BYO-model** (incl. local/offline) ship OSS; **managed AI** + **governance** (approval gate, env promotion, audit, publish RBAC) are EE.\n\nBuilds on ADR-0010 (NL→flow) / ADR-0011 (actions-as-tools) / ADR-0027 (authoring lifecycle) / ADR-0032 (validate-by-default) / ADR-0005 / ADR-0019.\n\n## Why now\nThe pieces exist but aren't a safe loop: the metadata tools **publish immediately** (no draft, `requiresConfirmation` unenforced); write tools cover only objects/fields; and nothing handles low-specificity \"design me a system\" input. This ADR specifies the target end-state (pre-launch, no deprecation path).\n\n## Note\nDoc-only. The objectui side already shipped the client foundations referenced here (per-designer designers, review/diff, designer→chat context + \"Ask AI\"). The framework-side changes (draft-routed tools, generic `update_metadata`, blueprint) are the Phase A/C work this ADR motivates.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

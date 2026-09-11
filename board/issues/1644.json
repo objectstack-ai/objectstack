@@ -1,0 +1,32 @@
+{
+  "number": 1644,
+  "kind": "pull_request",
+  "title": "feat(studio): add Datasets nav entry (ADR-0021)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-07T10:08:25Z",
+  "updated_at": "2026-06-07T10:08:39Z",
+  "closed_at": "2026-06-07T10:08:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-07T10:08:27Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1644",
+  "body": "Surfaces the analytics `dataset` type in the Studio sidebar (under User Experience, after Reports) so authors can discover/manage datasets without a direct URL. Mirrors the reports/dashboards nav entries; i18n for en/zh-CN/es-ES/ja-JP.\n\nFound during browser e2e of the dataset designer + live preview (the type was functional but only reachable by URL). Follow-up to #1643 / objectui #1570.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

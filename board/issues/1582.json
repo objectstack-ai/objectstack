@@ -1,0 +1,35 @@
+{
+  "number": 1582,
+  "kind": "pull_request",
+  "title": "feat(messaging): digest batching for notifications (ADR-0030 P3b-2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-04T14:17:57Z",
+  "updated_at": "2026-06-04T14:28:21Z",
+  "closed_at": "2026-06-04T14:28:18Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-04T14:28:18Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1582",
+  "body": "Completes **ADR-0030 P3b-2** — the digest middleware the platform declared in P2 (`sys_notification_preference.digest`) but never consumed.\n\n## What\n\nRecipients can batch a topic into a `daily` / `weekly` **digest** instead of getting every notification immediately. Builds directly on P3b-1's deferral seam.\n\n- **PreferenceResolver** now reads the `digest` field. `digestDeferral()` defers a batched recipient to the next window (local midnight for daily, Monday 00:00 for weekly) and tags the target with a stable `window` label. Digest takes precedence over quiet-hours; `critical` and mandatory topics bypass it entirely.\n- **`sys_notification_delivery`** gains `digest_key` (`recipient|channel|window`) + a grouping index. Batched rows **partition by that key** so a window's rows co-locate in one partition; the normal outbox `claim()` **skips** them and a new **`claimDigest()`** drains a window whole (implemented in both memory + sql outbox).\n- **Dispatcher digest pass**: under the existing per-partition cluster lock, it claims due batched rows, groups by `digest_key`, and collapses each `(recipient, channel, window)` group into **one** `renderDigest()` message, then acks every row in the group with that single outcome (failure re-defers the whole group).\n\nPartition-by-`digest_key` + the existing lock means exactly one node assembles each digest — no double-send across a cluster.\n\n## Scope\n\nAdditive: non-digest notifications are completely unchanged. Deferred follow-ups (noted in the ADR): timezone fallback to a `sys_user` field (windows currently use `quiet_hours.tz` → UTC), a configurable daily send-hour, and MJML digest emails.\n\n## Tests\n\n+13 (`127` total in service-messaging): `digestDeferral` daily/weekly + tz; resolver stamps window + precedence + critical bypass; `renderDigest` collapse; outbox `claim`/`claimDigest` separation + window deferral; end-to-end dispatcher collapse (3 rows → 1 message, all acked) + group re-defer on failure.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

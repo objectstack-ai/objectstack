@@ -1,0 +1,36 @@
+{
+  "number": 1502,
+  "kind": "pull_request",
+  "title": "feat(service-datasource-admin): open-source the runtime datasource admin mechanism (ADR-0015 Addendum)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T01:43:21Z",
+  "updated_at": "2026-06-02T01:46:40Z",
+  "closed_at": "2026-06-02T01:44:07Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-02T01:44:06Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1502",
+  "body": "## What\n\nAdds `@objectstack/service-datasource-admin` — the runtime UI-created datasource lifecycle (list / test-connection / create / update / remove) from **ADR-0015 Addendum**. Moved wholesale out of the private `cloud` repo into the open framework, next to its federation sibling `@objectstack/service-external-datasource`.\n\n## Why open-source\n\nThe package is **mechanism only** — there was no actual paid feature in it. Credential storage is delegated to a host-provided `SecretBinder` over any `ICryptoProvider` (framework default: `InMemoryCryptoProvider`), and drivers to a swappable factory. The tier line falls on *which crypto provider / driver factory a host injects* — a neutral technical seam — so a managed credential vault + multi-tenant overlay can be layered on by a private host **without forking**.\n\nThis makes the datasource split exactly mirror the connector / outbox / approval tiering principle: charge for credential custody + multi-tenant ops + scale, **not** for the ability to manage a datasource at all.\n\n## Notes\n\n- `workspace:*` deps, Apache-2.0, exports `.` and `./contracts`\n- `serve` is **not** wired to mount this by default yet (OSS-edition identity is a pending product decision)\n- ✅ 29 tests pass; typecheck + build (incl. dts) clean\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

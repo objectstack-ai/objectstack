@@ -1,0 +1,35 @@
+{
+  "number": 1559,
+  "kind": "pull_request",
+  "title": "fix: AI-built apps usable immediately — table sync on publish + valid kanban config",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-03T06:49:48Z",
+  "updated_at": "2026-06-03T07:13:46Z",
+  "closed_at": "2026-06-03T07:13:06Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-03T07:13:06Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1559",
+  "body": "## Context\n\nFound by testing a *complex* AI-built app (招聘管理 / ATS: 3 objects, lookups, a kanban) end-to-end as a real user. Two genuine gaps surfaced — the kind that make an AI-built app feel broken even though the metadata pipeline \"succeeded\".\n\n## Fixes\n\n### 1. A freshly-published object couldn't accept records until a server restart\nPublishing a drafted object registered it in the in-memory registry but **never created its physical table** — table sync (`driver.syncSchema`) only ran at boot. So inserting into a just-published object failed with `object_not_found` (\"no such table\") until the next restart.\n\n- Added `ObjectQL.syncObjectSchema(objectName)` — a targeted, idempotent single-object schema sync.\n- New `protocol.ensureObjectStorage(type, name)` calls it after the registry mutation in **both** publish paths (`publishMetaItem` and `saveMetaItem` mode:`'publish'`). Best-effort + non-fatal.\n\n**Verified live:** built an app via the AI, published it, created a record **with no restart** — previously this threw `object_not_found`.\n\n### 2. AI-generated kanban views rendered as lists (and could fail validation)\n`viewBody` emitted `list.type:'kanban'` with no `kanban` config. `KanbanConfigSchema` requires **both** `groupByField` and `columns`.\n\n- Added an optional `groupBy` to the blueprint view schema (lenient + strict mirror).\n- `apply_blueprint` now sets `list.kanban = { groupByField, columns }` — explicit `groupBy` when provided, else **inferred from the object's first `select` field**.\n\n**Verified live:** an AI-built kanban app publishes the kanban view (4/4 artifacts) with `kanban: { groupByField: 'bug_state', columns: [...] }`.\n\n## Tests\nNew blueprint-tools kanban test; full suites green: service-ai + objectql + spec/ai = **1108 passing**.\n\n## Known follow-up (objectui, out of scope)\nThe console still renders the kanban as a list / doesn't surface AI views as tabs — a frontend renderer gap, now unblocked because the metadata is valid.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

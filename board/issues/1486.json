@@ -1,0 +1,35 @@
+{
+  "number": 1486,
+  "kind": "pull_request",
+  "title": "feat(messaging,runtime): implement /api/v1/notifications REST surface (ADR-0030)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T18:52:11Z",
+  "updated_at": "2026-06-01T18:57:33Z",
+  "closed_at": "2026-06-01T18:55:43Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T18:55:43Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1486",
+  "body": "## What & why\n\nADR-0030 (Notification Convergence) follow-up. While repointing the objectui SDK consumer ([objectui#1440](https://github.com/objectstack-ai/objectui/pull/1440)) I found the framework side was **not a repoint but a gap**: the notification REST routes (`GET /notifications`, `POST /notifications/read`, `/read/all`) are declared in the spec but were **never implemented** —\n\n- no plugin registered the `notification` core service, so `hasNotification` was always false and the routes were never advertised in discovery;\n- there was no `handleNotification` in the dispatcher;\n- `client.notifications.list/markRead/markAllRead` therefore 404'd.\n\n(The Console bell works today only because objectui bypasses these endpoints and reads the inbox via the generic data API.)\n\nThis wires the surface end-to-end against the ADR-0030 L5 model.\n\n## Changes\n\n- **`MessagingService`** — inbox read API:\n  - `listInbox(userId, { read?, type?, limit? })` reads `sys_inbox_message` joined with `sys_notification_receipt` for read-state (unread until a `read`/`clicked`/`dismissed` receipt exists); `read` filter applied after the join; returns `{ notifications, unreadCount }`.\n  - `markRead(userId, ids)` / `markAllRead(userId)` upsert the receipt to `read`, keyed `(notification_id, user_id, channel:'inbox')` — updating the existing `delivered` receipt **in place**, inserting only when absent. Returns `{ success, readCount }`.\n- **`MessagingServicePlugin`** — also registers the messaging service under the `notification` core slot so the dispatcher resolves + advertises the routes. The legacy `INotificationService.send()` abstraction is unused/unconsumed.\n- **`HttpDispatcher`** — `handleNotification` + `/notifications` dispatch branch; takes the authenticated user from `executionContext`; 401 when anonymous. Responses match the spec schemas.\n\nDevice-registration and preference endpoints remain out of scope (unimplemented as before).\n\n## Verification\n\n- **`@objectstack/service-messaging`**: typecheck clean (sole remaining error is a pre-existing unused-var in the untouched `email-channel.test.ts`); **27 tests pass**, incl. 6 new inbox-API tests covering the join, read-filter, in-place receipt update (no duplicate), insert-when-absent, mark-all, and no-engine degradation.\n- **`@objectstack/client`**: notification tests pass; response shapes reconciled to the spec schemas (`{ success, readCount }`).\n- **`@objectstack/runtime`**: `handleNotification` + dispatch branch add **no new type errors** (the 13 errors in `tsc` are pre-existing missing-`.d.ts` noise for sibling packages in a partial build graph, none in the changed code).\n\nMirrors the read/mark-read logic already browser-verified on the objectui bell.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

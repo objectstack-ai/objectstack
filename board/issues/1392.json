@@ -1,0 +1,35 @@
+{
+  "number": 1392,
+  "kind": "pull_request",
+  "title": "fix(seed): bind seed records to users via os.user + fail loudly on unresolved refs",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-30T10:39:12Z",
+  "updated_at": "2026-05-30T10:59:55Z",
+  "closed_at": "2026-05-30T10:45:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-05-30T10:45:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1392",
+  "body": "## Summary\n\nFixes #1389 — _\"Seed data: no way to bind records to users (required `lookup('user')` makes objects un-seedable, fails silently)\"_.\n\nRecords seeded via `defineDataset` / `defineStack({ data })` can now bind to a platform user with `` cel`os.user.id` `` (and to the org with `` cel`os.org.id` ``). Previously this never resolved at boot, so any object with a **required** owner lookup was un-seedable and the records were **silently dropped**.\n\n## What changed\n\n**1. `os.user` / `os.org` now resolve (first-class binding)**\n- New `SeedLoaderConfig.identity` (`@objectstack/spec`) carries the `os.user` / `os.org` subject into CEL evaluation.\n- The seed loader threads it into the eval context; `os.org` falls back to `organizationId` when not explicitly set.\n- Convention is the existing `os.user` / `os.org` — no new syntax (`currentUser()`, `@admin`, …).\n\n**2. Admin availability / ordering guarantee**\n- `AppPlugin` provisions a deterministic, **non-loginable** system user (`usr_system`, role `system`) **before** any seed runs and binds it as `os.user`, so identity-derived seeds resolve even on a fresh boot — before the first human sign-up.\n- The human login admin stays a separate better-auth identity (ADR-0010 lock on `sys_user` respected — no credential is minted here). Analogous to Salesforce's \"Automated Process\" user.\n- Exposed as the canonical `SystemUserId.SYSTEM` constant.\n\n**3. Loud failure instead of silent drop**\n- A record whose CEL value can't resolve (e.g. a required `` cel`os.user.id` `` with no identity) — or that fails to write — is now counted as an error, marks the load `success === false`, and logs an actionable message.\n- Applied to both the inline seed run and the per-tenant replayer; boot logs a success/warn summary.\n\n**4. Docs**\n- `content/docs/guides/seed-data.mdx` gains a \"Dynamic Values (CEL)\" section covering the `os.user` binding, the `usr_system` ordering guarantee, and the loud-failure behavior.\n\n## Reviewer notes\n- A changeset (`minor` for `@objectstack/spec` + `@objectstack/runtime`) is included.\n- `@objectstack/spec` must be rebuilt so its `dist` `.d.ts` exposes the new `identity` field + `SystemUserId` (vitest resolves spec from src, but `tsc` resolves via dist).\n\n## Testing\n- 4 new seed-identity tests (resolve `os.user.id`; loud failure when unbound; `os.org` → `organizationId` fallback; write-failure surfaced).\n- Full runtime suite: **307 tests / 19 files passing**. `tsc --noEmit` clean on both `runtime` and `spec`."
+}

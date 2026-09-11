@@ -1,0 +1,33 @@
+{
+  "number": 1599,
+  "kind": "pull_request",
+  "title": "revert: remove plan-gating from runtime-config (cloud policy must not live in framework)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-05T15:44:44Z",
+  "updated_at": "2026-06-05T15:46:55Z",
+  "closed_at": "2026-06-05T15:45:08Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-05T15:45:08Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1599",
+  "body": "撤销 #1598。该 PR 把 cloud 的计费策略（`plan !== 'free'` 门控 aiStudio）写进了开源 framework 的 `runtime-config-plugin`，违反「framework 不承载 cloud 业务、改 cloud 策略不应改 framework」的架构原则。\n\n恢复 `runtime-config-plugin` 为 plan-agnostic（`features.aiStudio` 用静态构造参数，由 host 注入）。AI 自动开发的 plan 门控将在 **cloud 侧**实现（cloud 已有 `plan-entitlements.ts` + resolve-hostname 暴露 plan）。\n\n更大的方向（按产品决策）：framework 将整体移除多租户运行时，只保留本地单环境 objectos——本 revert 是该方向的第一步。"
+}

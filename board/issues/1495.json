@@ -1,0 +1,35 @@
+{
+  "number": 1495,
+  "kind": "pull_request",
+  "title": "test(service-cluster-redis): de-flake Redis wiring test (hoist cold imports)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T21:16:59Z",
+  "updated_at": "2026-06-01T21:17:20Z",
+  "closed_at": "2026-06-01T21:17:20Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T21:17:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1495",
+  "body": "## Problem\n\n`Test Core` intermittently fails on `packages/services/service-cluster-redis/src/redis.contract.test.ts`:\n\n```\nFAIL  Redis driver — wiring > exports a registerable driver and defineCluster picks it up\nError: Test timed out in 5000ms.\n  ❯ redis.contract.test.ts:120  →  await import('./index.js') / await import('@objectstack/service-cluster')\n```\n\nBoth wiring tests did two `await import(...)` **inside the test body**, under the default 5000ms timeout. On a cold/slow CI runner the one-time module load alone exceeds 5s, so the first test times out (the second only passed because the first had warmed the module cache). It's a flake, unrelated to any product code — it red-flagged #1488's Test Core, for instance.\n\n## Fix\n\nHoist both to top-level static imports:\n\n```ts\nimport './index.js';                              // side-effect: registers the 'redis' driver\nimport { defineCluster } from '@objectstack/service-cluster';\n```\n\n`import './index.js'` still registers the driver as a side-effect at module eval, and `defineCluster` is a normal named export (`service-cluster/src/index.ts`). The cold import cost now lands once at file load, outside any per-test timeout. The two test bodies drop their local `await import(...)` lines; all assertions are unchanged.\n\nVerified by inspection (pure import hoist; `defineCluster` is a confirmed named export, `./testing` is a separate subpath import that's untouched). CI exercises the test.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

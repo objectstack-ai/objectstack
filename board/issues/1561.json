@@ -1,0 +1,35 @@
+{
+  "number": 1561,
+  "kind": "pull_request",
+  "title": "feat(ai): get_metadata_schema — let the AI read a type's contract before authoring",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-03T07:17:03Z",
+  "updated_at": "2026-06-03T07:36:47Z",
+  "closed_at": "2026-06-03T07:36:46Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-03T07:36:46Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1561",
+  "body": "## Why\n\nFollows the discussion of *why the AI generated an invalid kanban view* (#1559). Root cause: **the authoring agent never sees the real spec Zod schemas.** It works against a simplified blueprint or sends a free-form `definition`, and only learns the true shape from post-hoc validation errors. For complex types (`view` is 500+ lines, plus `dashboard`/`flow`/…) that means guessing — e.g. a kanban view's required `kanban: { groupByField, columns }` block.\n\nLetting the runtime agent read the spec *source folder* isn't the answer (source isn't present at runtime — only compiled dist; it's an end-user-facing sandboxed agent without a filesystem tool; raw Zod is the wrong format). The right move is to serve the **schema** it already validates against.\n\n## What\n\nNew **`get_metadata_schema`** tool: returns the JSON Schema for a metadata type, derived (Zod v4 `toJSONSchema`) from the SAME `getMetadataTypeSchema(type)` the write path (`saveMetaItem`) validates against. The agent can read the exact contract and author a correct payload in one shot instead of trial-and-error.\n\n- Registered on the type-agnostic apply surface (now 12 metadata tools).\n- The `metadata_authoring` skill instructs the agent to call it **before** authoring a non-trivial type (kanban block as worked example).\n- Read-only; tolerates a plural type name.\n\n## Covers ALL app-development metadata types\n\nNaively, `object` and `action` throw inside Zod v4's `toJSONSchema` because their schemas wrap/nest a `.transform()`/refine **pipe** (e.g. an object's `actions: z.array(ActionSchema)`). The handler uses a **robust converter** that peels pipes to their input side (`io:'input'`) and, if whole-schema conversion still fails, recurses property-by-property / element-by-element — so **every** app-dev type yields a usable contract: object, field, view, page, dashboard, report, app, flow, action, agent, role, … (a genuinely unrepresentable leaf degrades to a placeholder rather than failing the whole call).\n\n## Tests\n\n`metadata-tools`: returns a JSON-Schema-shaped contract for `view`, plural→singular resolution, graceful unknown-type error, **and a sweep asserting all 11 core app-dev types serialize** (object/action included). service-ai metadata + blueprint suites green (146).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

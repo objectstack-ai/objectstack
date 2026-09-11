@@ -1,0 +1,30 @@
+{
+  "number": 1475,
+  "kind": "issue",
+  "title": "Validation rules: 6 of 9 spec rule types are declared but not enforced at runtime",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T14:34:55Z",
+  "updated_at": "2026-06-01T18:52:43Z",
+  "closed_at": "2026-06-01T18:52:43Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1475",
+  "body": "## Summary\n`packages/spec/src/data/validation.zod.ts` defines **9** validation rule types, but the write-path validator `packages/objectql/src/validation/rule-validator.ts` only enforces **3** of them. The other 6 are accepted by the schema (so authors can declare them) but silently do nothing on insert/update — the same \"advertise a capability we don't deliver\" problem we just fixed for the `ChartType` taxonomy.\n\n## Enforced (3)\n- `state_machine` — transition guard (✅ verified: invalid transition → HTTP 400 `invalid_transition`)\n- `script` — CEL predicate\n- `cross_field` — CEL predicate across fields\n\nSee `rule-validator.ts` ~L152-157:\n```ts\nif (rule.type === 'state_machine') { ... }\nelse if (rule.type === 'script' || rule.type === 'cross_field') { ... }\n// Other rule types are not enforced on the write path (yet).\n```\n\n## Declared but NOT enforced (6)\n- `unique` (the validation-*rule* variant; note field-level `unique: true` is a separate, working mechanism via the driver index)\n- `format`\n- `json_schema`\n- `async`\n- `custom`\n- `conditional`\n\n## Why it matters\n- A schema author can add, e.g., a `format` or `json_schema` validation and reasonably expect it to run; it won't. Silent no-op is worse than an explicit \"unsupported\".\n- The showcase (`@objectstack/example-showcase`) deliberately only demonstrates the 3 enforced types, because demonstrating the others would be misleading (declared ≠ validated).\n\n## Options (pick a direction)\n1. **Implement enforcement** for the missing types on the write path (at least the synchronous ones: `unique`, `format`, `json_schema`, `conditional`; `async`/`custom` need a handler-execution model).\n2. **Trim the spec** to the enforced set (like the ChartType taxonomy trim), and reintroduce types as they get real enforcement.\n3. **Hybrid**: keep the schema but make the validator `console.warn` once per unsupported rule type at load so misconfiguration is visible.\n\n## Acceptance\n- Every `ValidationRuleSchema` variant either runs on the write path or is removed from the schema (no silent no-ops).\n- Showcase gains a demonstrated + verified example for each newly-enforced type.\n\n_Found while completing the state_machine showcase coverage (framework #1474)._"
+}

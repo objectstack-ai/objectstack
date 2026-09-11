@@ -1,0 +1,34 @@
+{
+  "number": 1602,
+  "kind": "pull_request",
+  "title": "feat(app-showcase): inline-editable record:line_items on project detail",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-06T00:50:37Z",
+  "updated_at": "2026-06-06T00:50:53Z",
+  "closed_at": "2026-06-06T00:50:48Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-06T00:50:48Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1602",
+  "body": "Slotted `showcase_project` detail page that surfaces the project's tasks as an **inline-editable** `record:line_items` grid (the 'view + edit children together' half of master-detail; ObjectUI ADR-0001). `kind:'slotted'` overriding only the `tabs` slot — synthesizer fills header/highlights/details/discussion.\n\nVerified end-to-end against app-showcase: tasks load by the `master_detail` FK, inline edit + Save persists the diff (estimate 20→25), cascade delete confirmed. Example-only change.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

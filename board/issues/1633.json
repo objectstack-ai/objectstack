@@ -1,0 +1,30 @@
+{
+  "number": 1633,
+  "kind": "issue",
+  "title": "REST data API (@objectstack/rest) doesn't honor sys_api_key — only MCP/dispatch path does (ADR-0036)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-07T01:50:52Z",
+  "updated_at": "2026-06-07T02:41:31Z",
+  "closed_at": "2026-06-07T02:41:31Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1633",
+  "body": "## Finding (from staging MCP e2e)\n\nThe MCP surface authenticates a `sys_api_key` (via `resolveExecutionContext`, Phase 1a), but the **REST data API does NOT**:\n\nOn a live staging env, same key:\n- `POST /api/v1/mcp` with `x-api-key` → works (initialize, tools/list, tools/call all succeed).\n- `GET /api/v1/data/<obj>` with `x-api-key` → **401 unauthenticated**.\n- `GET /api/v1/data/<obj>` with the **session cookie** → 200.\n\n## Root cause (likely)\n\n`/api/v1/data` + `/api/v1/meta` are mounted by `@objectstack/rest` (not the dispatcher-plugin), and that package's auth gate only accepts the better-auth session/Bearer — it doesn't run the `sys_api_key` resolution that `resolveExecutionContext` (the dispatch/MCP path) does. So Phase 1a wired the key into the dispatch path but the REST surface has a separate, un-updated auth check.\n\n## Impact\n\nThe \"every app is a REST API you can drive with a key\" story (ADR-0036 Phase 1b, the Integrations page cURL sample using `x-api-key`) doesn't actually work against `/api/v1/data` yet — only MCP honors the key.\n\n## Fix direction\n\nHave `@objectstack/rest`'s auth middleware resolve `sys_api_key` (x-api-key / `Authorization: ApiKey`) into the principal the same way `resolveExecutionContext` does — ideally share the one code path so REST + MCP never drift. Add a live/integration test (not just a handler unit test) that a minted key authenticates `GET /api/v1/data/<obj>`.\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 1637,
+  "kind": "pull_request",
+  "title": "feat(showcase): add Invoice + InvoiceLine master-detail demo; drop Task inline entry",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-07T06:36:44Z",
+  "updated_at": "2026-06-07T06:49:07Z",
+  "closed_at": "2026-06-07T06:49:04Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-07T06:49:04Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1637",
+  "body": "## Why\n\nAuto-embedding a Tasks subtable in **New Project** felt heavy and odd from an end-user perspective — a task is added to a project *over time*, not entered together with the project. Inline master-detail entry belongs to true **header + line items** shapes (invoice + lines), not to a project's task backlog.\n\n## What\n\n- **Remove** `inlineEdit: 'grid'` / `inlineTitle: 'Tasks'` from `showcase_task.project`. Kept the read-side `relatedListTitle` / `relatedListColumns` so Tasks still appear on the Project **detail** page (added later, where they belong).\n- **Add** the canonical inline-entry demo: `Invoice` (`showcase_invoice`) + `InvoiceLine` (`showcase_invoice_line`).\n  - `showcase_invoice_line.invoice` is `masterDetail` with `deleteBehavior: 'cascade'`, `inlineEdit: 'grid'`, `inlineTitle: 'Line Items'`.\n  - `showcase_invoice.total` is a `summary` rollup (sum of line `amount`) recomputed server-side.\n- **Add** an `Invoices` nav entry to the Showcase app.\n\n## Verification\n\n- Backend restarted on :3000; metadata confirms `showcase_invoice_line.invoice.inlineEdit = \"grid\"` and `showcase_task.project.inlineEdit` is now absent.\n- Browser-verified: **New Project** is now clean (header fields only, no Tasks subtable); **New Invoice** renders header fields + a \"Line Items\" editable grid (Product / Qty / Unit Price / Amount + Add line + Total row).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

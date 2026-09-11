@@ -1,0 +1,32 @@
+{
+  "number": 1465,
+  "kind": "pull_request",
+  "title": "chore: bump objectui pin to include chart list-view fix",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T12:34:44Z",
+  "updated_at": "2026-06-01T12:34:58Z",
+  "closed_at": "2026-06-01T12:34:50Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T12:34:50Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1465",
+  "body": "Bumps `.objectui-sha` to pick up objectstack-ai/objectui#1434, which fixes a `type: 'chart'` list view rendering an empty plot (app-shell's ObjectView now hands ObjectChart a structured `aggregate`/`xAxisKey`/`series` instead of the flat spec keys it ignored).\n\nSurfaced by the `example-showcase` Task view gallery (\"Hours by Status (Chart)\"), which now renders a correct bar chart.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1395,
+  "kind": "pull_request",
+  "title": "fix: align provisioning-adapter service key; clarify turso lives in cloud repo",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-30T14:48:41Z",
+  "updated_at": "2026-05-30T15:49:54Z",
+  "closed_at": "2026-05-30T15:48:49Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-05-30T15:48:49Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1395",
+  "body": "## Summary\n\nTwo generic, turso-agnostic framework changes split out of the cloud-side\n\\\"remove built-in templates / turso-only\\\" work. All turso *policy* stays in\nthe cloud repo — framework stays neutral.\n\n### 1. `http-dispatcher.ts` — service-key alignment (bug fix)\nThe provisioning-adapter registry was renamed `project-provisioning-adapters`\n→ `environment-provisioning-adapters` (project→environment rename), but the\nframework dispatcher still read the old key. This left `listRegisteredDrivers()`\nand `getRealAdapter()` unable to see adapters registered by the cloud tenant\nplugin / objectos host, surfacing as `Unknown driver 'turso'. Available: [memory]`.\n\nFix reads the canonical `environment-provisioning-adapters` key first and keeps\n`project-provisioning-adapters` as a fallback for older hosts not yet rebuilt.\n\n### 2. Docs cleanup — turso is NOT bundled in framework\nThe libsql/turso driver was extracted to `@objectstack/driver-turso` in the\ncloud repo (May 2026) and is loaded via dynamic import on demand. Corrected\nthree stale docs that implied framework ships a turso driver, so agents don't\nadd libsql code to framework or assume the unified SQL driver speaks libsql:\n- README feature list + metrics table\n- `http-dispatcher` `listRegisteredDrivers` comment (unified sql knex backends\n  are better-sqlite3 / pg / mysql2 only)\n\n## Risk\nLow. Change 1 is a one-line key lookup with a backward-compatible fallback;\nchange 2 is comment/doc-only. No behavior change beyond restoring adapter\ndiscovery. No publish / version bump.\n\n## Test\n- framework runtime suite: 314 passed\n- builds clean (ESM + CJS + DTS)"
+}

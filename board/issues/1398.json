@@ -1,0 +1,35 @@
+{
+  "number": 1398,
+  "kind": "pull_request",
+  "title": "refactor(automation): remove Workflow Rules; reclaim `workflow` for state machines",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-30T23:47:45Z",
+  "updated_at": "2026-05-30T23:48:03Z",
+  "closed_at": "2026-05-30T23:48:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-05-30T23:48:02Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1398",
+  "body": "## What & why\n\n**Workflow Rules** (`WorkflowRuleSchema` + its 7 action sub-schemas: `field_update`, `email_alert`, `http_call`, `task_creation`, `push_notification`, `custom_script`, `connector_action`) was a **spec-only paradigm with no runtime** — nothing ever executed it. It also **squatted on the `workflow` metadata-type slot**, even though the `workflow` *core service* contract is the **State Machine Engine + approval state management** (`getWorkflowConfig` / `workflowTransition` / `workflowApprove` / `workflowReject`). The slot was mis-bound.\n\nAs a next-gen low-code platform, a separate declarative rule engine is redundant with **Flow** (Flow is a strict superset; this mirrors Salesforce retiring Workflow Rules in favor of Flow). The low-altitude authoring experience it served is better delivered as a simplified entry over the **one** Flow engine (and via NL→Flow, ADR-0010).\n\n## Changes\n\n**Removed**\n- `packages/spec/src/automation/workflow.zod.ts`, `workflow.form.ts`, `workflow.test.ts`\n\n**Reclaimed `workflow` → `StateMachineSchema`** (matches the service contract; core service / `/api/v1/workflow` routes / client SDK unchanged)\n- `kernel/metadata-type-schemas.ts` — `workflow: StateMachineSchema`\n- `stack.zod.ts` — `Stack.workflows: StateMachineSchema[]`\n- `api/protocol.zod.ts` — `GetWorkflowConfigResponse.workflows: StateMachineSchema[]`\n- Dropped the now-inapplicable workflow→object cross-reference check (state machines carry no `objectName`; approval/hook cross-ref coverage retained)\n\n**Cleanup** — barrel exports, form registry, skill-reference build list, a stale comment\n\n**Docs** — adds **ADR-0018: Unified Node/Action Registry** documenting the broader direction: one registry-backed node/action contract across Flow / Workflow-Rule / Approval, Workflow Rules compiled down to Flow rather than run as a separate engine, and the duplicated outbound verbs (`http_request`/`http_call`/`webhook`/`notify`) consolidated onto the ADR-0012 outbox.\n\n## Verification\n- `tsc --noEmit` on spec — clean\n- Full spec suite — **234 files / 6598 tests** green\n- spec build OK; `client` + `objectql` typecheck clean\n- Repo-wide scan for the removed symbols — **0 dangling references**\n\n## Notes\n- The objectui simplified `WorkflowDesigner` (separate repo) corresponds to this deleted paradigm; it converges once ADR-0018's registry-driven palette lands.\n- Scope intentionally narrow: only the declarative-rules content is removed; the `workflow` state-machine/approval service is preserved."
+}

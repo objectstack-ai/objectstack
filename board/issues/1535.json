@@ -1,0 +1,30 @@
+{
+  "number": 1535,
+  "kind": "issue",
+  "title": "Object-level `workflows: [...]` (and any unknown ObjectSchema key) is silently stripped at build — no error/warning (ADR-0032 'no silent failure', metadata layer)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T09:47:40Z",
+  "updated_at": "2026-06-03T03:59:05Z",
+  "closed_at": "2026-06-02T10:40:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1535",
+  "body": "## Summary\n\nObject-level `workflows: [...]` authored on an `ObjectSchema` is **silently dropped** at build — no error, no warning, and `tsc --noEmit` passes. The result: declarative on-update automation that authors believe they shipped never runs, and nothing anywhere tells them.\n\nThis surfaced in `objectstack-ai/templates`: **15 object-level workflows across 8 objects / 6 packages** (timestamp stamping, contract auto-activate/expire, order auto-receive, etc.) were authored, built green, and were **completely absent from every built artifact** — dead from day one. We have since migrated them to lifecycle hooks (templates-side fix), but the silent-drop behavior is the platform problem.\n\nThis is the **metadata-key analogue of ADR-0032's \"no silent failure\"** principle: today a misauthored *expression* is caught at build, but a misauthored *schema key* is silently discarded.\n\n## Root cause\n\n`ObjectSchemaBase` is a plain `z.object({...})` (Zod default = `.strip()`), and `ObjectSchema.create()` parses through it:\n\n- `packages/spec/src/data/object.zod.ts:334` — `const ObjectSchemaBase = z.object({ ... })`\n- `:524` — `validations: z.array(ValidationRuleSchema).optional()` ✅ (supported)\n- **No `workflows` key anywhere in `ObjectSchemaBase`** (grep for `workflow` in `packages/spec/src/data/` returns only unrelated hits).\n- `:740` — `create: <const T extends z.input<typeof ObjectSchemaBase>>(config) => ObjectSchemaBase.parse(withDefaults)` → unknown keys are stripped on parse.\n\nSo any unknown top-level key (`workflows`, or a typo'd `validation`/`indexs`/etc.) is silently removed. The generic `create()` signature also did **not** trigger a TypeScript excess-property error for the extra `workflows` key (the templates typechecked clean with it present).\n\n## Reproduction\n\n```ts\nimport { ObjectSchema } from '@objectstack/spec/data';\n\nconst Obj = ObjectSchema.create({\n  name: 'demo',\n  fields: { status: { type: 'text' } },\n  workflows: [{                       // ← not a real ObjectSchema field\n    name: 'stamp', objectName: 'demo', triggerType: 'on_update',\n    criteria: 'record.status == \"done\"', active: true,\n    actions: [{ name: 'x', type: 'field_update', field: 'done_at', value: 'now()' }],\n  }],\n});\n\nconsole.log('workflows' in Obj);   // → false  (silently stripped; no error, no warning)\n```\n\n`objectstack build` on a package full of these prints `✓ Build complete` with no diagnostic; the composed artifact contains `0` object-workflows.\n\n## Why this is bad\n\n1. **Silent no-op automation.** Exactly the failure mode ADR-0032 set out to eliminate (\"a malformed thing must come back to the author as a precise, fixable error, never a runtime no-op\") — but for schema shape rather than expressions. An AI author (the ADR's design center) gets zero signal and ships dead metadata with full confidence.\n2. **The platform's own guidance teaches the dropped shape.** The `objectstack-data` skill's \"CRM Schema Blueprint\" table lists:\n   > Lifecycle workflow | `src/objects/*.object.ts` | Use `workflows[]` for field updates triggered by record changes\n   So authors (and agents) are actively told to write `workflows[]` on objects — a field the spec doesn't accept.\n\n## Asks\n\n1. **Don't strip silently.** Reject unknown top-level keys on `ObjectSchema.create()` / at `objectstack build` (or at minimum emit a located build warning). Mirrors ADR-0032 §1c \"no silent fallback\", applied to metadata shape. A typo'd `validation`/`hoooks`/`workflows` should be a fixable build error, not a vanished field.\n2. **Decide the object-workflow story.** Either (a) make object-level declarative on-update automation a first-class `ObjectSchema` field, or (b) if lifecycle **hooks** and top-level **record_change flows** are the only supported paths, say so — and have the build flag `workflows` explicitly pointing authors at the supported mechanism.\n3. **Fix the docs/skill.** Remove/repair the `objectstack-data` CRM-blueprint row that teaches `workflows[]`.\n\n## Refs\n\n- ADR-0032 (`docs/adr/0032-unified-expression-layer.md`) — \"validate-by-default, never fail silently\" (same principle, applied here to schema keys).\n- Sibling of #1530 (date-typed formula fields → null) — both found while taking `objectstack-ai/templates` to 7.6.0 (templates issue #14). #1530 is silent-null in expression *evaluation*; this is silent-strip in metadata *authoring*.\n"
+}

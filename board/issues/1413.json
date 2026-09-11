@@ -1,0 +1,35 @@
+{
+  "number": 1413,
+  "kind": "pull_request",
+  "title": "feat(state-machine): converge to one enforced state_machine rule (ADR-0020)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-31T14:14:51Z",
+  "updated_at": "2026-05-31T14:15:14Z",
+  "closed_at": "2026-05-31T14:15:14Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-05-31T14:15:14Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1413",
+  "body": "## Summary\n\nImplements **ADR-0020**: make the `state_machine` validation rule a real write-path guardrail and converge the three overlapping \"state machine\" declaration shapes into one.\n\nBefore this change, a record state machine could be declared three ways — a `workflow` metadata type, an `object.stateMachines` map, or a `state_machine` validation rule — and **none were enforced at runtime**. A declarative guardrail that was decoration, and a hallucination trap for AI authors (pick one of three, get silent no-op).\n\n## What changed\n\n**Enforcement — `@objectstack/objectql`**\n- New `validation/rule-validator.ts`: `evaluateValidationRules`, `needsPriorRecord`, `legalNextStates` (exported from the package root).\n- `state_machine` rules reject illegal `field` transitions on update with the rule's `message`. `script` / `cross_field` predicate rules now fire too — they were silently broken on PATCH updates (only the patch, not the prior record, was available).\n- `engine.ts` plumbs the prior record into rule evaluation on single-row update; multi-row `updateMany` logs a warning and skips (surfaced, not hidden).\n\n**Convergence / retirement — `@objectstack/spec` (breaking)**\n- Retires the `workflow` metadata type (enum, registry, schema map, `workflows` collection key, plural mapping).\n- Removes `object.stateMachines` and `stack.workflows`. The `state_machine` validation rule is the single canonical home.\n- **Kept** `StateMachineSchema` (still used by the agent conversation lifecycle + discovery protocol) and the optional `workflow` **RPC service** surface (`CoreServiceName.workflow`, `/api/v1/workflow`, `IWorkflowService`) — documented as a follow-up. See ADR §Implementation notes.\n\n**Introspection — `@objectstack/runtime`**\n- `GET /metadata/objects/:name/state/:field?from=:state` returns the legal next states (`null` when no FSM governs the field, `[]` for a declared dead-end).\n\n**Surfaces — `@objectstack/platform-objects`, `@objectstack/cli`**\n- Studio drops the standalone \"Workflow Rules\" nav.\n- `explain` no longer lists `workflow` as a related metadata type.\n\n**Examples + skill docs**\n- `examples/app-crm`: workflows migrated — the transition table is the `opp_stage_transitions` `state_machine` rule; side effects became record-triggered / scheduled Flows (`high-value-deal`, `stale-opportunity`).\n- `examples/app-showcase`: predicate conditions corrected to the `record.<field>` CEL scope so enforcement fires.\n- `objectstack-automation` SKILL.md rewritten for the converged shape.\n\n## Migration\n\nReplace a `workflow` / `StateMachineConfig` declaration with a `state_machine` validation rule on the object (`field` + `{ from: [allowedTo] }`), and move side-effecting actions into a record-triggered / scheduled Flow (ADR-0019). See the migrated `examples/app-crm` flows.\n\n## Testing\n\n- `rule-validator.test.ts` — 16 new cases (allow/reject/no-op transitions, execution-control, predicate fail-open, introspection).\n- Updated `object.test.ts`, `metadata-plugin.test.ts`, `metadata-collection.test.ts`, `overlay-precedence.test.ts`, `metadata-validation-sweep.test.ts` for the retired shapes.\n- Full suites green: spec 6609, objectql 449, runtime 325, platform-objects 78, cli 137. `tsc --noEmit` clean across all five packages.\n\nChangeset: `.changeset/adr-0020-state-machine-converge-enforce.md` (spec/objectql minor; runtime/platform-objects/cli patch)."
+}

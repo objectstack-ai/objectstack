@@ -1,0 +1,35 @@
+{
+  "number": 1391,
+  "kind": "pull_request",
+  "title": "fix(i18n): metadata labels follow language switch without refresh (#1319)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-30T10:35:53Z",
+  "updated_at": "2026-05-30T10:42:18Z",
+  "closed_at": "2026-05-30T10:39:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-05-30T10:39:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1391",
+  "body": "## What\n\nResolves the framework half of #1319: switching the UI language (zh-CN ↔ English) left the app **half-translated** — static strings flipped instantly but server-resolved metadata labels (object/field/view labels, action-dialog text) stayed in the old language until a hard refresh.\n\nRoot cause: metadata labels are resolved **server-side** and cached per fetch, with no locale awareness in the request or the protocol ETag, so a language switch never refetched them.\n\n## Changes\n\n- **`@objectstack/client`** — add `setLocale`/`getLocale`; send `Accept-Language` on every request so the server resolves labels in the active locale.\n- **`@objectstack/objectql` + `@objectstack/spec`** — make the protocol ETag **locale-aware** so cached metadata no longer collides across languages.\n- **`@objectstack/client-react`** — metadata hooks refetch when the active locale changes (`ObjectStackLocaleContext`, render-phase `setLocale` sync).\n- **`@objectstack/rest`** — honor the request locale when resolving metadata labels.\n- **`apps/account`** — thread the router locale through `__root.tsx` so a language switch relabels in place.\n\n## Why this matters\n\nThis is the platform half of a two-repo fix. The companion renderer change ships in **objectui** (`createAuthenticatedFetch` Accept-Language injection + a render-phase cache clear and `key={language}` metadata-subtree remount), because objectui consumes `@objectstack/client` from the registry and can't depend on the unpublished `setLocale`. Together they satisfy the issue's acceptance criterion: **switch language without a page refresh**.\n\n## Testing\n\n- `packages/client` — `client.test.ts` covers `setLocale`/`getLocale` + `Accept-Language` header.\n- `packages/objectql` — `protocol-meta.test.ts` covers the locale-aware ETag.\n- All touched packages type-check clean.\n\n## Notes for reviewers\n\n- This branch was at `origin/main`; the PR contains a single commit. Unrelated in-progress seed-loader/system-names work in the working tree was deliberately **left out**.\n- A changeset is included (`client`/`client-react` minor; `objectql`/`rest`/`spec` patch).\n- Follow-up milestones from the issue are also done on the objectui side: **M2** dev-mode missing-key warnings, **M3** date/number/RTL (verified already complete)."
+}

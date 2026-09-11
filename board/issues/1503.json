@@ -1,0 +1,34 @@
+{
+  "number": 1503,
+  "kind": "pull_request",
+  "title": "fix(dev): unify dev admin seed in-process; remove port-drift HTTP seed",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T02:09:15Z",
+  "updated_at": "2026-06-02T02:20:50Z",
+  "closed_at": "2026-06-02T02:20:36Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-02T02:20:36Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1503",
+  "body": "## Problem\n\n`pnpm dev:showcase` often failed to auto-seed a usable admin:\n\n- **Port drift (the real bug):** `os dev` seeded over HTTP against a hard-coded `localhost:3000`. In dev, `serve` auto-shifts off a busy port (3000 → 3001), but the parent never learned the new port and POSTed to 3000 — hitting the wrong server (or nothing). The showcase instance never got an admin.\n- **Ghost admin:** a second, divergent seed in `plugin-dev` inserted a raw `sys_user` row with no credential (`admin@dev.local`), producing an un-loginable account. It also wasn't even loaded by the showcase.\n\nSo we had two seeds: one in the right place (in-process) but broken (no credential, no promotion), and one correct (real auth path, promoted) but in the wrong place (HTTP, racing readiness, hard-coded port).\n\n## Fix — consolidate to one in-process seed\n\n- **`plugin-auth`**: `maybeSeedDevAdmin()` runs on `kernel:ready`. Creates `admin@objectos.ai` / `admin123` through better-auth's real server-side `signUpEmail` pipeline (hashed credential + hooks) → fully loginable; `plugin-security`'s first-user middleware promotes it to platform admin. Empty-DB only (excludes the `SystemUserId.SYSTEM` service account), idempotent, never overwrites an existing account. **Hard-gated to `NODE_ENV=development`**; opt out with `OS_SEED_ADMIN=0`. No port, no readiness race.\n- **`cli/dev`**: deleted the HTTP `seedAdminAccount`; `--seed-admin` now only passes `OS_SEED_ADMIN[_EMAIL|_PASSWORD]` to the serve child. Removed a dead `port` param from the watch loop.\n- **`cli/serve`**: publishes the actually-bound port — `process.send({type:'objectstack:listening', port, url})` over IPC + a `runtime.<env>.json` state file under `OS_HOME` for external supervisors.\n- **`plugin-dev`**: removed the credential-less raw insert; `seedAdminUser` now maps to the unified `OS_SEED_ADMIN` toggle.\n\n## Verification (real showcase runs)\n\n| Behavior | Result |\n|---|---|\n| Seed creates loginable admin | sign-in `admin@objectos.ai/admin123` → **200** |\n| Platform-admin promotion | `sys_user_permission_set` → `admin_full_access`, `organization_id: null` ✓ |\n| **Port auto-shift** | 3999 busy → bound **4000**; parent logged the shift; seed landed on 4000 (old code seeded stale 3999) |\n| `runtime.json` written | `{pid, port, url, environmentId, startedAt}` ✓ |\n| Opt-out (`--no-seed-admin`) | child `OS_SEED_ADMIN=0` → no seed → **401** |\n| Idempotent on persistent DB | RUN2 same DB: sign-in 200, perm-set total **1** (no dup), sys_user count **2** |\n\nTests: plugin-auth **88**, plugin-dev **7**, cli **144** — all green. Typecheck/build clean.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

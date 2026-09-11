@@ -1,0 +1,32 @@
+{
+  "number": 1412,
+  "kind": "pull_request",
+  "title": "feat(approvals): server-driven approval config form + xRef reference hints",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-31T13:27:14Z",
+  "updated_at": "2026-05-31T13:27:38Z",
+  "closed_at": "2026-05-31T13:27:24Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-05-31T13:27:24Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1412",
+  "body": "## Summary\nMakes the automation engine the single source of truth for the Approval node's property form, so the Studio flow designer renders from the backend rather than a hardcoded client form (ADR-0018/0019).\n\n- **plugin-approvals**: publish `configSchema` (`getApprovalNodeConfigJsonSchema()`) on the approval `ActionDescriptor` (ADR-0018 §configSchema).\n- **spec**: annotate `approvalStatusField` with `.meta({ xRef: { kind: 'object-field', objectSource: '$trigger' } })` so the designer renders an object-field picker scoped to the flow's trigger object instead of free text. A single `.meta()` carries both description and the annotation so neither is dropped through `z.toJSONSchema`.\n- **examples** (app-crm, app-showcase): require the `approvals` capability so the `approval` flow node is contributed to the engine and surfaces in the designer palette.\n\nThe objectui client counterpart (generic `reference` field kind + `FlowReferenceField` combobox + `xRef`→picker adapter) ships in a companion PR in the objectui repo.\n\n## Test plan\n- `@objectstack/spec` automation suite: 263 passed.\n- `@objectstack/plugin-approvals`: 29 passed.\n- Verified `GET /api/v1/automation/actions` publishes `approvalStatusField.xRef = { kind: 'object-field', objectSource: '$trigger' }`.\n- Verified live in the running designer: the Approval Status Field renders as a field-picker combobox listing the trigger object's fields."
+}

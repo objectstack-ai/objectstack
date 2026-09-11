@@ -1,0 +1,33 @@
+{
+  "number": 1621,
+  "kind": "pull_request",
+  "title": "docs: sync recent architecture updates",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-06T15:10:45Z",
+  "updated_at": "2026-06-06T15:18:00Z",
+  "closed_at": "2026-06-06T15:17:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-06T15:17:58Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1621",
+  "body": "## Summary\n- align docs with environment-scoped runtime terminology and current repo layout\n- update automation, AI action exposure, master-detail, summary rollup, and notification status docs\n- regenerate reference docs from updated spec descriptions\n\n## Verification\n- pnpm --filter @objectstack/spec gen:docs\n- pnpm docs:build"
+}

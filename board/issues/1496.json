@@ -1,0 +1,35 @@
+{
+  "number": 1496,
+  "kind": "pull_request",
+  "title": "docs(showcase): demonstrate format named-format + conditional otherwise",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T21:17:32Z",
+  "updated_at": "2026-06-02T00:27:27Z",
+  "closed_at": "2026-06-01T21:43:54Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T21:43:54Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1496",
+  "body": "## Summary\n\nFollow-up to #1485 — enriches the `app-showcase` Account validation examples so each enforced rule type shows more than one shape (nice-to-have, example-only).\n\n- **`format` — named format:** adds a `billing_email` field (plain `Field.text`, *not* `Field.email`) with a `format: 'email'` rule, so the rule itself enforces validity. Complements the existing regex (`tax_id`) example and exercises the `email`/`url`/`phone`/`json` named-format branch.\n- **`conditional` — `otherwise`:** the churn rule (`churn_reason_consistency`) gains an `otherwise` branch: a churned account needs a reason; a non-churned account must not carry a stale one. The `otherwise` condition `has()`-guards the absent case, so ordinary non-churned writes are untouched (no interference with the other focused examples/tests).\n\n## Verification\n\n`pnpm --filter @objectstack/example-showcase typecheck && test` → **20 tests pass** (the two new behaviors are checked against the real `evaluateValidationRules`).\n\nTouches only the private `@objectstack/example-showcase` package (empty changeset; no release).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 1550,
+  "kind": "pull_request",
+  "title": "feat(ai): zero-package app building — auto app package",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T15:21:03Z",
+  "updated_at": "2026-06-02T15:31:50Z",
+  "closed_at": "2026-06-02T15:31:44Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-02T15:31:44Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1550",
+  "body": "## What & why\n\nMainstream AI app builders never make a business user create a \"package/solution\" to start building — the **App** is the user's unit; packaging is opt-in/later, and there's always a default container (Power Apps' *default solution*, Salesforce orgs). ObjectStack did the opposite by omission: AI-built metadata landed with `package_id = null` — ungrouped env-local overlays with no home. This makes the blueprint flow give an app a **writable home package automatically** — one app ⇒ one `app.<name>` package — with **zero user package steps**.\n\n## Changes\n\n- **`apply_blueprint`** (when the blueprint has an `app`): `ensureAppPackage` creates/reuses an `app.<name>` package and threads its `packageId` through **every** `stageDraft` → `sys_metadata.package_id`. Result envelope gains `package: { id, name, created }`.\n- **Lazy `package`-service resolution** in `plugin.ts` (resolved per call, not at init) so it's init-order-safe and picks up the opt-in `marketplace` capability when present.\n- **Best-effort, non-fatal:** no `package` service wired → drafting proceeds package-less exactly as before; the build never fails on packaging.\n- **showcase:** enables the `marketplace` capability so the package service loads (exercises the path).\n\n## Verification\n\n- **Unit (5 new, `blueprint-tools.test.ts`):** creates `app.<name>` once + binds `packageId` to every artifact; reuses an existing package (no second publish); graceful package-less fallback when no service; no app → no package calls; publish-fails → still drafts. Full suites green: **service-ai 468**, tsc-clean.\n- **Live (showcase + gpt-5.5):** \"build a project management app\" → confirm → apply envelope shows `package: { id:\"app.project_management\", name:\"项目管理\", created:true }` — the feature **activates** (resolves the service, publishes, binds).\n\n## Honest scope / known gaps\n\n- Stamps the **legacy** `sys_metadata.package_id` — a real grouping + the foundation for later version/export/promote — **not** the sealed `sys_package_version` model. Full cross-environment promotion + Studio package-selector visibility depend on finishing the runtime package subsystem (ADR-0027), tracked separately.\n- In the **showcase dev** (`sqlite :memory:`), the published package record didn't surface via `GET /api/v1/packages` (404). Most likely a sqlite `:memory:` multi-connection artifact (publish INSERT and REST read on different in-memory DBs); in a shared DB it persists+surfaces. The blueprint code is correct (publish returns success, binding is unit-proven); finishing the package subsystem's persistence/REST surface is the follow-up.\n\nThis is the \"default home\" half of the package story; the sealed-version ALM + marketplace publish are deliberately separate, opt-in follow-ups.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

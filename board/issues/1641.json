@@ -1,0 +1,32 @@
+{
+  "number": 1641,
+  "kind": "pull_request",
+  "title": "feat(showcase): invoice line position field for persisted drag-reorder",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-07T08:43:00Z",
+  "updated_at": "2026-06-07T08:45:06Z",
+  "closed_at": "2026-06-07T08:45:04Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-07T08:45:04Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1641",
+  "body": "## Why\n\nSo drag-reordering invoice lines persists across reloads.\n\n## What\n\nAdd a numeric `position` to `showcase_invoice_line`. The objectui line-item grid excludes it from the editable columns and stamps it on drag-reorder (`row[position] = index`).\n\n## Verification\n\n- Backend serves `showcase_invoice_line.position`.\n- Live e2e (objectui): the created line carries `position: 0` from its row order.\n\n> Pairs with objectui (de-frame + compact lookup + sort_field wiring).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

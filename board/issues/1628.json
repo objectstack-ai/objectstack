@@ -1,0 +1,35 @@
+{
+  "number": 1628,
+  "kind": "pull_request",
+  "title": "feat(mcp): generic ObjectStack Agent Skill generator (ADR-0036 Phase 2b)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-06T22:08:51Z",
+  "updated_at": "2026-06-06T22:09:05Z",
+  "closed_at": "2026-06-06T22:08:59Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-06T22:08:59Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1628",
+  "body": "## What\n\n**ADR-0036 Phase 2b (part 1)** — the generic, portable **ObjectStack Agent Skill** generator. `renderSkillMarkdown({ mcpUrl, envName })` emits a `SKILL.md` (the open Agent Skills standard — Claude Code, OpenAI Codex, Gemini CLI, Copilot, Cursor, …) that teaches any skills-capable agent how to drive an ObjectStack environment over MCP.\n\n> Stacked on #1627 (the `@objectstack/mcp` rename). Base will retarget to `main` when #1627 merges. Diff here is only the 4 skill files.\n\n## Why this shape (ADR-0036 Amendment B/C)\n\n- **One generic skill, not per-app.** A customer with dozens of apps in one env installs it **once**. The content never enumerates a tenant's schema — it instructs the agent to **discover live** via `list_objects` / `describe_object`, so a newly built app needs **zero reinstall**.\n- **Only the connection URL is env-specific**, slotted in by the caller (objectui/cloud). Everything else is generic.\n- This is the cross-agent distributable we chose over hand-maintained vendor config snippets.\n\n## Contents of the skill\n\nConnect (MCP URL + **`x-api-key`** auth — Bearer is session auth), discover-first instruction, the object-CRUD tool reference, and the governance model: **every call runs under the caller's permissions + RLS** — fewer rows / write rejections are expected, not bugs; confirm destructive ops.\n\n## API\n\nExports `renderSkillMarkdown`, `OBJECTSTACK_SKILL_NAME`, `OBJECTSTACK_SKILL_DESCRIPTION`, `RenderSkillOptions`.\n\n## Tests (local)\n\n`skill.test.ts` — 8 cases (valid frontmatter, URL slotting + placeholder fallback, env-name intro, `x-api-key`-not-Bearer, all 7 tools present + discover-first, generic/no-schema, URL trim). Full `@objectstack/mcp` suite **44** green; build incl. DTS green.\n\n## Next in Phase 2b (separate PRs)\n\n- **Key-generation endpoint** (framework) — security-critical, isolated PR per the auth red-line: generate a `sys_api_key` via Phase 1a's `generateApiKey`, store hash, return raw **once**.\n- **objectui connect surface** — Integrations page: show-once key + the env's remote-MCP URL + one-click skill download (calls `renderSkillMarkdown`).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

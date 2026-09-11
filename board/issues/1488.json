@@ -1,0 +1,35 @@
+{
+  "number": 1488,
+  "kind": "pull_request",
+  "title": "test(runtime): cover handleNotification dispatch (ADR-0030)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T19:02:59Z",
+  "updated_at": "2026-06-01T21:12:57Z",
+  "closed_at": "2026-06-01T21:12:56Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T21:12:56Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1488",
+  "body": "Follow-up to [#1486](https://github.com/objectstack-ai/framework/pull/1486). Adds dispatcher-level integration coverage for the `/api/v1/notifications` surface — the one seam #1486 verified only by type-check.\n\nCases (mirroring the existing `handleAnalytics` dispatcher tests):\n- `GET /notifications` → `listInbox(userId, { read, type, limit })`, asserts `unreadCount` in the envelope and the parsed `read=false&limit=10` filters.\n- `POST /notifications/read` → `markRead(userId, ids)` from the body.\n- `POST /notifications/read/all` → `markAllRead(userId)`.\n- Anonymous request → **401**, service never called.\n- No `notification` service registered → **unhandled** (→ 404).\n\n**Note:** this sandbox SIGKILLs the large-package `tsup` DTS builds (`@objectstack/spec` etc.), so I couldn't run the full `@objectstack/runtime` suite locally — relying on CI to execute it. The test is constructed to match the proven `handleAnalytics` test harness and the `success`/`error` response helpers. The substantive inbox logic is already covered by the 27 passing `@objectstack/service-messaging` unit tests in #1486.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

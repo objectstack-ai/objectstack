@@ -1,0 +1,35 @@
+{
+  "number": 1556,
+  "kind": "pull_request",
+  "title": "fix(cli): objectstack dev persists data by default (no :memory: wipe on restart)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-03T05:27:31Z",
+  "updated_at": "2026-06-03T05:39:44Z",
+  "closed_at": "2026-06-03T05:39:14Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-03T05:39:14Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1556",
+  "body": "## Problem\n\n`objectstack dev` fell back to a `:memory:` SQLite database whenever no `--database` / `OS_DATABASE_URL` was provided. Every restart silently wiped **all data and AI-authored metadata** — you build an app in the Studio assistant, restart the dev server, and everything is gone. That makes local app-building (and the whole AI metadata-authoring loop) effectively unusable.\n\nThis was surfaced while verifying that an AI-built app is actually usable locally: after publishing an app, a restart lost it entirely because the showcase ran on `:memory:`.\n\n## Fix\n\n`dev` now defaults to a **persistent, project-anchored SQLite file** at `<cwd>/.objectstack/data/dev.db` (gitignored, per-project) when the user hasn't chosen a database another way. All existing opt-outs are unchanged and take precedence:\n\n- `--fresh` — ephemeral temp DB (auto-deleted on exit)\n- `--database <url>` / `-d`\n- `OS_DATABASE_URL` / `DATABASE_URL`\n- explicit in-memory driver: `--database-driver memory` or `OS_DATABASE_DRIVER=memory`\n\nResolution is extracted into a pure, exported `resolveDefaultDevDbUrl()` helper (unit-tested).\n\nThe **app-showcase** example also drops its explicit `:memory:` datasource override (`datasources` + `datasourceMapping`), which would otherwise route data back to memory and defeat the new default. (Its plugins are instantiated objects → it's a \"host config\", so it never got the standalone file default — hence the override mattered.)\n\n## Verification\n\n- **Unit:** `resolveDefaultDevDbUrl()` — defaults to the file path; yields to `--database`, `--fresh`, `OS_DATABASE_URL`/`DATABASE_URL`, and the memory-driver opt-outs (6 cases).\n- **Live e2e (showcase):** plain `objectstack dev --seed-admin` → driver resolves to `file:.../app-showcase/.objectstack/data/dev.db`; built `客户回访 (app.customer_visit_app)` via the AI assistant, published it, **restarted, and the app + its `visit` object survived** (active). Previously this was wiped on every restart.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

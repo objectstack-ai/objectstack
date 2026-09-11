@@ -1,0 +1,33 @@
+{
+  "number": 989,
+  "kind": "issue",
+  "title": "全面统一前后端 API 查询语法为 Spec 正典格式（包含文档、后端与前端 SDK/Studio）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-03-27T03:42:40Z",
+  "updated_at": "2026-05-25T07:27:26Z",
+  "closed_at": "2026-05-25T07:27:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/989",
+  "body": "## 目标\n将前后端所有 API 查询语法彻底统一为 Spec 协议正典格式，减少歧义与兼容层，为生态长期可维护性和开发者体验打下基础。\n\n## 需要覆盖的范围\n\n### 1. 后端 Runtime（REST Transport）\n- [{HttpDispatcher}](packages/runtime/src/http-dispatcher.ts)\n  - 将 HTTP Query 层参数（filter/filters, sort, top, skip, select, expand）归一化为 QuerySchema (`where`, `orderBy`, `limit`, `offset`, `fields`, `expand`) 只传递 Spec 正典协议�� broker 层。\n  - 明确 legacy 兼容段落和所有兼容代码标为 `@deprecated`，代码与注释加标记。\n\n### 2. 前端 Client SDK\n- [{Client SDK}](packages/client/src/index.ts)\n  - 新增全新 QueryOptionsV2，仅保留正典协议字段名（where, orderBy, limit, offset, fields ...）\n  - 现有 `find`, `findById`、`query` 方法参数应支持新版，老版参数保留一版 deprecated\n  - 重要提醒：所有 legacy 字段（filter, filters, sort, top, skip, select）加 deprecated 标记，完善注释和类型提示。\n- [{QueryBuilder}](packages/client/src/query-builder.ts)\n  - `.skip()` 等方法名保留，推进 `.offset()` alias 统一；所有构建 query JSON 的地方内部归一化输出为正典格式\n\n### 3. 前端 UI（Hooks + Studio）\n- [{useQuery, useMutation}](packages/client-react/src/data-hooks.tsx)\n  - options 上全部改为 `where`、`orderBy`、`limit`、`offset`、`fields` ...，旧参数 deprecated\n  - 向下调用统一走新版 SDK 正典 API\n- [{Studio QueryBuilder}](apps/studio/src/components/QueryBuilder.tsx)\n  - buildQueryJson 产出符合 spec 正典定义的 query，数据流全线升级\n\n### 4. 文档\n- protocol、objectql/query-syntax.mdx\n- guides/contracts/data-engine.mdx\n- guides/client-sdk.mdx\n- references/api/protocol.mdx\n- protocol/objectos/http-protocol.mdx\n- 等所有涉及 Query API 的文档\n- 所有示例仅用 spec 正典格式\n- 各页面说明 HTTP transport 参数（filter/top/skip/expand）与协议模型字段名（where/limit/offset）关系，并补充拆分归一化过程，并强调优先级（如 only use `filter`, `filters` is deprecated...）\n\n### 5. 自动化与测试\n- 检查所有自动化测试、mock handlers、及 E2E、MSW、Hono 测试，所有 query 相关的字段名统一并 drop 所有兼容判断。\n\n## 交付标准\n- 后端、SDK、前端、Studio 与文档完全对齐正典语法，所有兼容层和别名明确 deprecated，开发体验一贯性。\n- 自动测试覆盖所有新旧字段，保证兼容性提示无遗漏。\n- 代码/文档/注释清晰指出任何即将移���或保留兼容期限的功能点。\n- 完成后及时 update ROADMAP.md。\n- 完成每项子任务后务必运行测试，确保未引入回归问题，并在对应 issue 及时更新进展。\n\n---\n\n这一 Issue 融合了原 #987 及实际代码库各层次发现的问题，务必注重代码长期演进的可维护性。"
+}

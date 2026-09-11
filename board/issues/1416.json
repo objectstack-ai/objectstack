@@ -1,0 +1,36 @@
+{
+  "number": 1416,
+  "kind": "pull_request",
+  "title": "feat(automation): connector_action as baseline generic dispatch + connector-rest (ADR-0018)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-31T15:32:10Z",
+  "updated_at": "2026-05-31T15:35:30Z",
+  "closed_at": "2026-05-31T15:34:00Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-05-31T15:34:00Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1416",
+  "body": "## What\n\nPromotes `connector_action` to a **built-in baseline node** — the generic-dispatch counterpart to `http_request`. Where `http_request` calls *any raw URL*, `connector_action` invokes *any registered connector's declared action*. Adds the first concrete connector, `@objectstack/connector-rest`, as the reference plugin.\n\nResolves ADR-0018 §Open-questions #1 and supersedes M2's \"connector_action dropped from baseline\". See the [ADR-0018 §Addendum](docs/adr/0018-unified-node-action-registry.md).\n\n## Changes\n\n**Baseline mechanism — `service-automation`**\n- `engine.ts`: connector registry (`registerConnector` / `unregisterConnector` / `resolveConnectorAction` / `getRegisteredConnectors`) + `ConnectorActionHandler` / `ConnectorActionContext` / `RegisteredConnector` types. `registerConnector` validates via `ConnectorSchema` and asserts every declared action has a handler.\n- `builtin/connector-nodes.ts` (new): the `connector_action` executor — `source:'builtin'`, `category:'io'`, all three paradigms. Wired into `installBuiltinNodes()` → core plugin now seeds **11** baseline node types. A missing connector fails the *step* (not flow registration) with a clear error.\n\n**Reference connector — `packages/connectors/connector-rest` (`@objectstack/connector-rest`)**\n- `createRestConnector` + `ConnectorRestPlugin`, `request` action, static auth (`none`/`api-key`/`basic`/`bearer`). **No OAuth2 refresh** — that's the enterprise tier.\n- New `packages/connectors/` workspace category, alongside `plugins/` / `services/` / `adapters/`.\n\n## Open/enterprise boundary\n\nMechanism (registry + dispatch node) + static auth = open-source. Managed credentials/vault, OAuth2 refresh, multi-tenant lifecycle, premium connectors, marketplace = enterprise (ADR-0015 datasource precedent). Boundary documented in the `cloud` repo's `connector-tiering.md` design note (separate repo).\n\n## Tests\n\n- `@objectstack/service-automation`: **87/87** (flipped 2 old \"NOT baseline\" assertions; added `connector-nodes.test.ts`).\n- `@objectstack/connector-rest`: **10/10**, including an end-to-end kernel boot — both plugins → `connector_action` flow → REST handler with bearer auth + body, output propagated back."
+}

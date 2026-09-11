@@ -1,0 +1,34 @@
+{
+  "number": 1630,
+  "kind": "pull_request",
+  "title": "feat(runtime): API-key generation endpoint — show-once sys_api_key (closes #1629)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-06T22:23:41Z",
+  "updated_at": "2026-06-06T22:23:54Z",
+  "closed_at": "2026-06-06T22:23:49Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-06T22:23:49Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1630",
+  "body": "Closes #1629.\n\n## What\n\n`POST /api/v1/keys` — the **only** path that mints a `sys_api_key`, returning the raw secret **exactly once**. Phase 1a shipped key *verification* (#1624) + the `generateApiKey()` primitive; this is the missing *generation* half that unblocks the self-serve connect flow (ADR-0036 Phase 2b), and the backend for objectui's show-once key UX (objectstack-ai/objectui#1550).\n\n## Behavior\n\n- Authenticated principal required → returns `{ id, name, prefix, key }`; `key` is the raw secret, shown once. Only the **sha256 hash** is persisted.\n- Body whitelisted to `name` (+ optional `expires_at`).\n\n## Security (zero-tolerance — red-line)\n\n- **`user_id` pinned to the caller**, never read from the body → no impersonation.\n- Body `key` / `id` / `user_id` / `revoked` / `prefix` are **ignored** → a caller cannot forge a known-secret key or pre-set state.\n- Raw key + hash **never** logged, never in error messages, never re-displayable.\n- Elevated `{ isSystem: true }` insert (sys_api_key is protection-locked) with **server-controlled** row contents.\n- Fail-closed: anonymous → 401; non-POST → 405; past/unparseable `expires_at` → 400; generation happens only *after* validation.\n- **`scopes` deliberately NOT accepted from the body in v1** — the verify path *adds* scopes to the principal's permissions, so honoring arbitrary body scopes would be an escalation vector. A generated key acts exactly **as the caller** via `user_id` resolution. Scoped/narrowing keys need subset-enforcement → deferred.\n\n## Tests (local, all green)\n\n`http-dispatcher.keys.test.ts` — **11** cases: show-once 201; **only the hash is stored** (`hashApiKey(raw) === row.key`, raw ≠ stored); **round-trip** (minted raw authenticates through `resolveExecutionContext`); anonymous → 401 (no row); **impersonation blocked** (body `user_id` ignored); **forgery blocked** (body `key`/`id`/`revoked` ignored); 405; default name; valid/past/unparseable `expires_at` (201/400/400); **expired key rejected end-to-end** by the verify path. Full runtime suite **376** green; `tsc` clean.\n\n## Follow-up\n\nobjectstack-ai/objectui#1550 (connect surface) consumes this endpoint.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

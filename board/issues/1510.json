@@ -1,0 +1,34 @@
+{
+  "number": 1510,
+  "kind": "pull_request",
+  "title": "fix(dev): print seeded dev-admin credentials in the serve startup banner",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T02:40:36Z",
+  "updated_at": "2026-06-02T02:51:23Z",
+  "closed_at": "2026-06-02T02:50:52Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-02T02:50:52Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1510",
+  "body": "## Problem\n\nAfter [#1503](https://github.com/objectstack-ai/framework/pull/1503) moved dev-admin seeding in-process, the confirmation line went **silent**. The seed runs inside `runtime.start()`, which is within `serve`'s boot-quiet window (stdout is suppressed to produce a clean banner, restored only afterward). So the `ctx.logger.info('🔑 Dev admin seeded …')` line was swallowed — a DX regression vs the old HTTP seed, which printed the credentials.\n\n## Fix\n\n`plugin-auth` records the seed result on the `auth` service (`AuthManager.devSeedResult`). `serve` reads it after `restoreOutput()` and renders it inside the ready banner:\n\n```\n  ✓ Server is ready\n\n  ➜  API:       http://localhost:3999/\n  ➜  Console:   http://localhost:3999/_console/\n\n  🔑  Dev admin: admin@objectos.ai / admin123\n      seeded on empty DB · dev only — do not use in production\n```\n\n- **Single print point.** Because `os dev` spawns `serve` with inherited stdout, printing from the serve child covers both `serve --dev` standalone and the `os dev` console — no IPC needed for this.\n- **Never stale.** The line shows only when an admin was actually seeded this boot (empty DB). On a populated DB the seed skips, `devSeedResult` stays undefined, and nothing prints.\n- **Dev-only** by construction (the seed itself is hard-gated to `NODE_ENV=development`).\n\n## Verification (showcase)\n\n| Case | Result |\n|---|---|\n| Fresh DB → seeds | banner shows `🔑 Dev admin: …` ✓ |\n| Second run, same DB → skip | banner has **no** Dev-admin line ✓ |\n\nTests: cli **144**, plugin-auth **88** — all green. Typecheck/build clean.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

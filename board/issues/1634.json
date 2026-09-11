@@ -1,0 +1,35 @@
+{
+  "number": 1634,
+  "kind": "pull_request",
+  "title": "fix(rest): REST data API honors sys_api_key — shared verifier with MCP (closes #1633)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-07T02:41:20Z",
+  "updated_at": "2026-06-07T02:45:23Z",
+  "closed_at": "2026-06-07T02:41:30Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-07T02:41:30Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1634",
+  "body": "Closes #1633. Staging e2e found MCP authenticated a sys_api_key but REST /api/v1/data 401'd the same key. Converged both onto ONE verifier: @objectstack/core/security owns the shared primitives + new resolveApiKeyPrincipal (fail-closed); runtime re-exports core + resolveExecutionContext delegates to it; rest's resolveExecCtx tries it before getSession so /data+/meta authenticate the key under permissions+RLS like MCP. Tests: core 9 + runtime 381 + rest 88 green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 1421,
+  "kind": "pull_request",
+  "title": "feat(automation): record-change flow trigger — auto-launch flows on data mutations",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-31T22:27:45Z",
+  "updated_at": "2026-05-31T22:43:24Z",
+  "closed_at": "2026-05-31T22:43:22Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-05-31T22:43:22Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1421",
+  "body": "## What\n\nCompletes the `FlowTrigger` extension point so flows declaring a record-change trigger on their start node (`config: { objectName, triggerType: 'record-after-update', condition }`) **actually auto-launch** on the matching mutation. Previously the slot was dead — nothing ever called `trigger.start`, so these flows (e.g. showcase `TaskAssignedNotifyFlow`) only ran via a manual `engine.execute()`.\n\nThird tier of the connector/automation work (after #1419 connector discovery and #1420 notify node). Scope per plan: **record-change only**; the `schedule` trigger (ticker/cron + `sys_job` lifecycle) is the immediate follow-up PR.\n\n## Engine baseline (`service-automation`)\n\n- **Redefine `FlowTrigger` around a parsed `FlowTriggerBinding`** (flowName / object / event / condition / schedule / raw config). The engine — not the trigger — parses the start node, keeping trigger plugins decoupled from flow-definition internals (mirrors `connector_action` ↔ `connector-rest`).\n- **Ordering-independent, bidirectional wiring**: `registerFlow`/`toggleFlow` activate bindings; `registerTrigger` retro-binds already-registered flows (a trigger plugin wires up on `kernel:ready`, *after* `AutomationServicePlugin.start()` pulls flows into the engine). `unregisterFlow` / `unregisterTrigger` / disable tear them down.\n- **Centralized start-condition gate** in `execute()`: the start node's `condition` (e.g. `status == 'done' && previous.status != 'done'`) is evaluated once for every trigger type *and* manual runs; false ⇒ `{ skipped: true, reason: 'condition_not_met' }`.\n- Seed `record` / flattened record fields / `previous` into flow variables; expose bare identifiers to CEL without breaking existing `vars.*` usage.\n- `getActiveTriggerBindings()` for observability/tests.\n\n## Spec\n\n- Add `previous?` to `AutomationContext` — the pre-update \"old\" row, so flows can gate on transitions.\n\n## New plugin: `@objectstack/plugin-trigger-record-change`\n\nThe **concrete** trigger (engine ships the mechanism, plugin ships the trigger — same split as connector-rest):\n\n- Subscribes to ObjectQL lifecycle hooks (`record-after-update` → `afterUpdate`, `-create` → `afterInsert`, `-delete` → `afterDelete`, + before-* variants), filtered to the binding's object.\n- Builds an `AutomationContext` from the new (`ctx.result`/`input.doc`) and old (`ctx.previous`/`__previous`) record, then runs the flow.\n- **Error-isolated** — a flow failure is logged and swallowed, never breaking the CRUD write that triggered it.\n- Per-flow `packageId` so `stop()` unbinds exactly one flow's hook.\n- Graceful degrade when the automation service or ObjectQL engine is absent (`kernel:ready` + `getService`, mirroring `plugin-audit`).\n\n## Tests\n\n- **17 plugin tests**: event→hook mapping, object filter, context build, result/input/previous fallbacks, error isolation, stop/idempotency, plugin wiring + graceful degrade.\n- **Engine**: flow-trigger-wiring (parse, ordering-independence, stop on unregister/disable) + start-condition-gate suites.\n- Regression green: `service-automation` 104, `spec` 6609, new plugin builds clean (full DTS typecheck).\n\n## Out of scope (next PR)\n\n- `schedule` trigger plugin (ticker/cron runner + `sys_job` lifecycle).\n- Formally strong-typing the start-trigger config in spec (engine reads it defensively today, compatible with the showcase convention)."
+}

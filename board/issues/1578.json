@@ -1,0 +1,35 @@
+{
+  "number": 1578,
+  "kind": "pull_request",
+  "title": "chore(automation): retire the workflow_rule authoring paradigm (ADR-0018 M5 dropped)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-04T12:52:37Z",
+  "updated_at": "2026-06-04T13:11:25Z",
+  "closed_at": "2026-06-04T13:11:22Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-04T13:11:22Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1578",
+  "body": "## What\n\n`workflow_rule` was already dropped as a concept in [ADR-0019](docs/adr/0019-approval-as-flow-node.md) (the Workflow-Rule → Flow compiler was removed; Workflow Rules went away in #1398 and `workflow` was reclaimed for state machines), but the **paradigm tag** lingered in `ActionParadigmSchema` and on every built-in node descriptor. This finishes the cleanup and aligns the ADR-0018 doc to reality.\n\n## Changes\n\n- **spec**: `ActionParadigmSchema` → `['flow','approval']` (removed `'workflow_rule'`)\n- **service-automation**: `http` / `notify` / `connector_action` descriptors + the deprecated-alias fallback advertise `['flow','approval']`\n- **tests**: builtin descriptor assertions + `http-dispatcher` `?paradigm` filter switched off the retired tag (filter test now uses `approval`)\n- **docs**: ADR-0018 status + migration table → **M3 shipped, M4 framework-complete, M5 dropped** (approval execution convergence is delivered by the ADR-0019 approval Flow node, not a compiler)\n\n## Verification\n\n- `@objectstack/service-automation`: 158 passed\n- `@objectstack/runtime` http-dispatcher: 124 passed\n- `@objectstack/spec` build (incl. DTS typecheck): clean\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

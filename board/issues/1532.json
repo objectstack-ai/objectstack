@@ -1,0 +1,33 @@
+{
+  "number": 1532,
+  "kind": "issue",
+  "title": "audit: every data write fails to persist sys_audit_log — \"table sys_audit_log has no column named organization_id\" (sql driver)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T09:33:18Z",
+  "updated_at": "2026-06-02T10:31:38Z",
+  "closed_at": "2026-06-02T10:31:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1532",
+  "body": "## Summary\n\nOn the SQL (better-sqlite3) driver, **every** record insert/update triggers an audit write that fails, because the audit writer's `INSERT INTO sys_audit_log` includes an `organization_id` column the table doesn't have. The error is caught (`Audit write failed`) so the business mutation still succeeds — but **no audit row is ever persisted**.\n\n## Version\n\n`@objectstack/*` **7.6.0**, `driver-sql` (better-sqlite3), single-tenant.\n\n## Error (verbatim, on every write)\n\n```\nERROR Insert operation failed {\"object\":\"sys_audit_log\",\"error\":{\"message\":\n  \"insert into `sys_audit_log` (`action`, `created_at`, `created_by`, `id`, `new_value`,\n   `object_name`, `old_value`, `organization_id`, `record_id`, `tenant_id`, `updated_at`,\n   `updated_by`, `user_id`) values (...) returning *\n   - table sys_audit_log has no column named organization_id\"}}\n   at SqlDriver.create (@objectstack/driver-sql/dist/index.mjs:322)\n   at _ObjectQL.triggerHooks (@objectstack/objectql/dist/index.mjs:5935)\nWARN  Audit write failed {\"object\":\"crm_lead\",\"action\":\"create\", ...}\n```\n\nNote the INSERT column list emits **both** `organization_id` and `tenant_id`; the created `sys_audit_log` table is missing `organization_id`.\n\n## Repro\n\n1. Any stack on the sqlite driver with the audit service active (default slate).\n2. Create or update any record via REST / ObjectQL.\n3. Server log shows `Insert operation failed {object: sys_audit_log …}` followed by `Audit write failed`.\n\n## Impact\n\n- Audit logging is **silently non-functional** on this driver — compliance / audit-trail gap that looks fine from the app's perspective (writes succeed).\n- Every mutation pays a failed SQL round-trip + caught exception (noise + minor perf).\n\n## Likely cause\n\nThe `sys_audit_log` system-object definition / migration in the audit plugin is out of sync with the columns the audit writer INSERTs (`organization_id`, and possibly `tenant_id`). Either the table needs those columns added to its schema/migration, or the writer should stop emitting columns the object doesn't declare.\n\n---\n\nFound while upgrading **objectstack-ai/hotcrm** to 7.6 (objectstack-ai/hotcrm#365). The audit failure is non-fatal but reproduces on 100% of writes.\n"
+}

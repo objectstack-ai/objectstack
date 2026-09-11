@@ -1,0 +1,35 @@
+{
+  "number": 1586,
+  "kind": "pull_request",
+  "title": "fix(security): close four P0 launch-readiness findings",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-05T00:21:00Z",
+  "updated_at": "2026-06-05T00:55:46Z",
+  "closed_at": "2026-06-05T00:55:44Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-05T00:55:44Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1586",
+  "body": "Fixes the four code-level **P0** blockers from [`docs/launch-readiness.md`](docs/launch-readiness.md). Each was **hand-verified against `main`** before fixing (per the checklist's Verify-before-fix rule) — all four confirmed real.\n\n| ID | Package | Fix |\n|----|---------|-----|\n| **P0-1** | `plugin-auth` | `generateSecret()` **throws (fails boot)** when `OS_AUTH_SECRET` is unset and `NODE_ENV==='production'` — no more predictable `dev-secret-<timestamp>` (session forgery). Dev/test fallback unchanged. |\n| **P0-2** | `plugin-security` | Permission-resolution `catch` now **fails closed**: logs ERROR + throws `PermissionDeniedError` instead of `return next()`. A degraded metadata service can no longer let authenticated requests bypass RBAC/RLS. System ops still bypass (decided + recorded). |\n| **P0-3** | `driver-sql` | `contains`/`$contains` escapes LIKE metacharacters (`%` `_` `\\`) and binds an explicit `ESCAPE '\\'` (SQLite has no default escape char). A `%` value now matches literally, not every row. |\n| **P0-4** | `driver-mongodb` | Field-operator translator **rejects unknown `$`-operators** instead of passing them through — blocks `$where`/`$function`/`$expr` (server-side JS / query-intent bypass). All legitimate ObjectQL operators stay allowlisted. |\n\n## Tests\n**+12 regression tests** (all four packages green): auth secret prod-throw / dev-fallback / env-set; security fail-closed-denies + system-bypass-preserved; SQL `%`/`_` literal-match; Mongo `$where`/`$function`/`$expr` rejected + allowlist still works.\n\n## Docs\n`docs/launch-readiness.md` P0-1..4 marked **Verify ✅ (fixed)**; **Sign-off left blank** for a human reviewer — the doc's two-gate model is preserved.\n\n## Notes\n- **P0-4 open question** (in the doc): confirm whether MongoDB is a v1 launch driver.\n- **P0-5** (in-memory realtime/feed in clusters) is a deployment-topology decision, not a code fix — intentionally **not** in this PR.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

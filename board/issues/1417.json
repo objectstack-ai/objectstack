@@ -1,0 +1,33 @@
+{
+  "number": 1417,
+  "kind": "pull_request",
+  "title": "docs(adr-0021): revise after implementation scan — engine join gap, Cube reconciliation, task list",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-31T15:49:51Z",
+  "updated_at": "2026-05-31T16:10:06Z",
+  "closed_at": "2026-05-31T16:10:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-05-31T16:10:06Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1417",
+  "body": "Follow-up to #1415. A four-area code scan (spec / runtime / frontend / examples) surfaced three findings that change the plan, now folded into ADR-0021.\n\n## What changed in the ADR\n\n1. **Corrected the central premise.** The original doc claimed \"the engine already does joins/having/window, unused one layer down.\" The runtime scan shows that's false: `groupBy`+`aggregations` execute (single-object only), but **`joins` / `having` / `windowFunctions` are schema-only — not executed** by `IDataEngine` or the SQL driver. \"Revenue by `account.region`\" cannot run via `IDataEngine` today. Joins are the gating runtime gap.\n\n2. **Reconcile with a pre-existing semantic layer.** `CubeSchema` + `IAnalyticsService` are already **implemented** (Cube.io-style measures/dimensions); its `NativeSQLStrategy` is the only cross-object JOIN path, but it bypasses RLS/tenant. Recommendation: don't build a third layer — compile `dataset` → `AnalyticsQuery` / reuse the Cube runtime and harden its RLS.\n\n3. **Naming collisions.** `Dataset` (seed data), `Dimension`/`Metric` (Cube) are already taken — the ADR's literal names can't land.\n\n## Added\n\n- Pre-work decisions **D-A / D-B / D-C** (Cube relationship, naming, join-execution + safety).\n- An **Implementation scan** section with a workstream task list (WS0–WS5) and rough sizing (~6–8 weeks across both repos; **rendering lives in sibling repo `objectui`** — every field change is a two-repo change).\n- Registration touches **4 surfaces** (not 1) and **2 inline shapes** to migrate across 8 source files.\n\nStatus remains **Proposed** — discussion doc only, no code changes."
+}

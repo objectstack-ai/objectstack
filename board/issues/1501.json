@@ -1,0 +1,35 @@
+{
+  "number": 1501,
+  "kind": "pull_request",
+  "title": "fix(driver-sqlite-wasm): defer flush during transactions (#1494)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T01:30:49Z",
+  "updated_at": "2026-06-02T02:04:11Z",
+  "closed_at": "2026-06-02T02:03:52Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-02T02:03:52Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1501",
+  "body": "## Summary\n\nFixes #1494 — under the `sqlite-wasm` driver, an authenticated insert could fail with `COMMIT; - cannot commit - no transaction is active`.\n\n## Root cause\n\nIt's a `sql.js` `export()` colliding with an open transaction, **not** a sharing-rule/hook bug.\n\n1. `objectstack start` with a file-backed DB uses `persist: 'on-write'` (`standalone-stack.ts:182`).\n2. In `'on-write'` mode every write fires a fire-and-forget `void this.flush()`.\n3. `flush()` calls `db.export()`. In sql.js 1.14.1 `export()` is implemented as *finalize-statements → `sqlite3_close` → reopen* — it **closes and reopens** the database (no in-place serialize).\n4. Closing a connection with an open transaction **rolls it back**. When that flush lands while a Knex transaction is mid-flight (e.g. the autonumber `getNextSequenceValue` `BEGIN…COMMIT`), the transaction is silently aborted and the trailing `COMMIT` runs with no active transaction.\n\nThe failure is timing-dependent, which is why objects with extra in-transaction writes (autonumber + sharing-rule recompute, like `crm_account`) tripped it reliably while a bare `crm_lead` insert usually committed before the flush fired. The reporter's sharing-rule hypothesis was a correlated symptom, not the cause.\n\nVerified directly: `db.export()` inside `BEGIN…INSERT` makes the following `COMMIT` throw the exact error, reproduced end-to-end through the driver.\n\n## Fix\n\nMake the connection transaction-aware so `export()` never runs mid-transaction:\n\n- **`wasm-connection.ts`**: track `BEGIN/COMMIT/ROLLBACK/SAVEPOINT/RELEASE` (`noteTransactionControl`). `flush()` now **defers** while a transaction is open and runs once it fully closes. `close()` clears the state so the final flush still persists committed data.\n- **`knex-wasm-dialect.ts`**: the dialect notifies the connection of every transaction-control statement, before `markDirty` (so a `COMMIT` has already cleared the flag when the deferred flush fires).\n\n## Test plan\n\n- New regression test `sqlite-wasm-driver-transaction-persist.test.ts` — multi-statement transactions, on-write disk persistence, autonumber inserts, nested savepoints. Fails without the fix.\n- Full driver suite: **116/116 pass**. Build + DTS clean.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

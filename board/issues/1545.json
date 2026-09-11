@@ -1,0 +1,36 @@
+{
+  "number": 1545,
+  "kind": "pull_request",
+  "title": "fix(metadata): home sys_metadata storage objects in metadata-core; register from ObjectQL",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T13:21:17Z",
+  "updated_at": "2026-06-02T13:50:55Z",
+  "closed_at": "2026-06-02T13:50:49Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-02T13:50:49Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1545",
+  "body": "## Problem\n\nStandalone **host-config** apps (e.g. `examples/app-showcase`) boot via the `isHostConfig` path and **never load** `@objectstack/metadata`'s `MetadataPlugin`. So nobody registered the metadata-storage objects (`sys_metadata`, `_history`, `_audit`, `sys_view_definition`) into ObjectQL → `syncRegisteredSchemas` never created their tables → ObjectQL's **own** protocol (`loadMetaFromDb` at boot, `getMetaItems` on REST `/meta` requests) failed with `no such table: sys_metadata` on every read (swallowed but log-spamming; metadata persistence effectively broken).\n\nDiagnosed by temporarily capturing the synchronous caller stack in `engine.find` — the readers were ObjectQL's protocol, **not** the metadata `DatabaseLoader` as initially assumed.\n\n## Fix — \"put the table in the package that uses it\"\n\n- **Move** the 4 storage-object definitions from `@objectstack/platform-objects/metadata` → **`@objectstack/metadata-core`** (`src/objects/`), the lowest package shared by their real consumers (the ObjectQL protocol + the metadata `DatabaseLoader`). `platform-objects/metadata` keeps a thin re-export shim for back-compat.\n- **`ObjectQLPlugin.init()`** registers these objects itself so their tables are always schema-synced — gated on `environmentId === undefined` (the same condition as `restoreMetadataFromDb`): standalone/platform kernels own their local `sys_metadata`; per-project cloud kernels skip and source metadata from the control plane.\n- Update `@objectstack/metadata` imports to `metadata-core`; add `@objectstack/spec` dep to `metadata-core` and `@objectstack/metadata-core` dep to `platform-objects`.\n\n## Verification\n\nShowcase dev server: `no such table: sys_metadata` → **0**, all `/api/v1/meta/*` + data reads **200**, full boot log **ERROR=0**.\n\nTests green: metadata-core 80 · platform-objects 52 · objectql 486 · metadata 246 · runtime 334 · rest 78 · example-showcase 20 · example-crm 29.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

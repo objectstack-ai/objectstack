@@ -1,0 +1,34 @@
+{
+  "number": 1533,
+  "kind": "issue",
+  "title": "cli: serve/start hardcodes logger level \"silent\" — flow & hook execution failures are invisible (defeats ADR-0032 \"fail loudly\")",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T09:34:53Z",
+  "updated_at": "2026-06-02T10:40:38Z",
+  "closed_at": "2026-06-02T10:40:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1533",
+  "body": "## Summary\n\n`os serve` / `os start` construct the runtime with a **hardcoded** `{ level: 'silent' }` logger and no override. As a result every plugin `logger.info/warn/error` is suppressed — including the record-change trigger's flow-execution-failure warnings and the automation engine's internal errors. A flow that faults at runtime fails **completely silently**, which directly undercuts ADR-0032's \"fail loudly with an attributed, corrective message\" promise when running via the CLI.\n\n## Version\n\n`@objectstack/cli` **7.6.0**.\n\n## Where\n\n`@objectstack/cli/dist/commands/serve.js`:\n\n```js\n// Set kernel logger to 'silent' — the CLI manages its own output\nconst loggerConfig = { level: 'silent' };\nconst runtime = new Runtime({ kernel: { logger: loggerConfig } });\n```\n\nThere is no env (`OS_LOG_LEVEL` / `LOG_LEVEL`) or flag to raise it. `ObjectLogger` defaults to `info`, but this overrides everything to `silent`.\n\nCompounding swallow points (both go through the now-silenced logger):\n\n- `@objectstack/plugin-trigger-record-change` handler:\n  `catch (err) { this.logger.warn(\"[record-change] flow '<name>' execution failed: \" + err.message) }`\n- `@objectstack/service-automation` engine: flow register / trigger-bind / execution logs are `logger.info` / `logger.warn`.\n\n## Impact\n\nA record-change flow whose condition or node faults produces **zero operator-visible output** — the flow just has no effect. While debugging objectstack-ai/hotcrm#365 I had to patch `node_modules` to set `level: 'debug'` before any of the binding/execution diagnostics appeared. Related historical report: #888.\n\n## Suggested fix\n\n- Honor `OS_LOG_LEVEL` / `LOG_LEVEL` (and/or a `--log-level` CLI flag) instead of hardcoding `silent`.\n- Ensure flow/hook **execution failures** surface on a channel the CLI's \"manages its own output\" mode does not suppress (e.g. always emit to stderr at `warn`+, or a dedicated automation-error sink), so the ADR-0032 corrective messages actually reach the operator.\n\n---\n\nFound while upgrading **objectstack-ai/hotcrm** to 7.6 (objectstack-ai/hotcrm#365).\n"
+}

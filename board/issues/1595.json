@@ -1,0 +1,33 @@
+{
+  "number": 1595,
+  "kind": "pull_request",
+  "title": "perf(build): OS_SKIP_DTS gating + fix optional AI plugin \"Cannot find package\" skip",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-05T09:01:00Z",
+  "updated_at": "2026-06-05T09:12:27Z",
+  "closed_at": "2026-06-05T09:12:25Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-05T09:12:25Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1595",
+  "body": "Implements the framework-side changes tracked in [objectstack-ai/cloud#107](https://github.com/objectstack-ai/cloud/issues/107). The companion cloud PR sets `ENV OS_SKIP_DTS=1` in the image build; the big build-time win lives here (framework's build dominates image time).\n\n## Part 1 — `OS_SKIP_DTS` gating (build-time only; default behavior unchanged)\n\nSkip `.d.ts` emission **only when `OS_SKIP_DTS` is set**. Default `pnpm build` / `turbo typecheck` / npm publish keep generating full types.\n\n- 12 tsup configs: `dts: true` → `dts: !process.env.OS_SKIP_DTS`\n- `packages/spec/package.json`: skip the separate `BUILD_DTS=true tsup` pass (~80–90s) when `OS_SKIP_DTS` is set\n- `packages/cli/package.json`: cli builds via `tsc`; when `OS_SKIP_DTS` is set, deps have no `.d.ts`, so build with `--noCheck --declaration false` to still emit runnable JS (full typecheck preserved by default)\n- `turbo.json`: declare `OS_SKIP_DTS` in `globalEnv` (Turbo 2.x strict env mode otherwise filters it out; also part of the cache key)\n\nMeasured: framework `turbo run build` **~5m03s → ~1m12s** (the `@objectstack/spec` DTS pass alone is ~80–90s).\n\n## Part 2 — fix optional AI plugin \"failed to start\" false alarm\n\n`serve.ts` loads `@objectstack/service-ai` and optional `@objectstack/service-ai-studio` via `importFromHost()`, meant to silently skip when absent. The old guard only matched `Cannot find module` / `ERR_MODULE_NOT_FOUND`, but ESM throws **`Cannot find package '...'`** (the code is on `err.code`, not in the message). Control-plane hosts (e.g. `apps/cloud`) logged a scary `[AI Studio] AIStudioPlugin failed to start: Cannot find package ...` on every boot.\n\nFix: detect missing module via `err.code === 'ERR_MODULE_NOT_FOUND'` and also match `Cannot find package`. Applied to both the AIService and AIStudio guards.\n\n## Verification\n- `tsc -p tsconfig.build.json --noEmit` on the cli package: **exit 0** (serve.ts change typechecks).\n- tsup config gating spot-check: default → `dts = true`; `OS_SKIP_DTS=1` → `dts = false`.\n- JSON validity confirmed for `turbo.json`, `packages/cli/package.json`, `packages/spec/package.json`.\n\nAfter merge, bump `cloud/.framework-sha` to this PR's merge commit.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

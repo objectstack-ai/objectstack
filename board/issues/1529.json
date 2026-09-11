@@ -1,0 +1,35 @@
+{
+  "number": 1529,
+  "kind": "pull_request",
+  "title": "feat(service-ai): ADR-0033 Phase A — draft-gate AI metadata authoring",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T09:01:26Z",
+  "updated_at": "2026-06-02T09:15:26Z",
+  "closed_at": "2026-06-02T09:15:13Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-02T09:15:13Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1529",
+  "body": "## What & why\n\nImplements **Phase A** of [ADR-0033](docs/adr/0033-ai-assisted-metadata-authoring.md) — *AI-assisted metadata authoring*. The design center: **the AI authors metadata; the human confirms and publishes.**\n\nToday every AI metadata tool persists via `metadataService.register(...)`, which **publishes straight to the live schema** — no draft, no review, no human gate (the `requiresConfirmation` flag existed but was never enforced). This PR closes that hazard structurally.\n\n## What changed (all in `packages/services/service-ai`)\n\n- **AI never publishes — it drafts.** Every metadata mutation routes through one helper `applyDraft()` that calls `protocol.saveMetaItem({ …, mode:'draft' })` — the same draft path Studio's designer already uses. Nothing goes live until a human publishes. The draft *is* the approval gate; the unenforced `requiresConfirmation` comments are retired.\n- **Type-agnostic apply surface (§3).** New tools `create_metadata` / `update_metadata` / `describe_metadata` / `list_metadata` work for **any** type (view, dashboard, flow, …), not just objects. `update_metadata` applies an RFC-7386 JSON merge patch to the single draft (read-modify-write, never forks).\n- **Per-type validation + error feedback.** Reuses `saveMetaItem`'s built-in Zod validation (`getMetadataTypeSchema`, ADR-0005) — `422 invalid_metadata` issues are returned to the agent as a fixable string error, never thrown.\n- **Object/field tools** become thin draft-writing wrappers; reads are draft-first so repeated field ops stack into one draft.\n- Result envelope: `{ status:'drafted', type, name, summary, changedKeys }`. Skill + agent instructions updated to \"propose drafts, never publish.\"\n\n## Verification\n\n- **446 service-ai tests pass** (117 in the rewritten `__tests__/metadata-tools.test.ts`), DTS build clean, changed files tsc-clean.\n- New tests assert the invariant: `saveMetaItem` called with `mode:'draft'`, `register` **never** called, validation errors fed back, drafts stack into one body, writes refuse safely when no protocol is wired.\n- Confirmed `object`/`field` (`allowRuntimeCreate:true`) draft through the repo path; editing a code-shipped object intentionally `403`s and is surfaced to the agent.\n\n## Scope\n\nPhase A only (framework / OSS). Out of scope, unblocked by this: B (objectui review/diff), C (blueprint + view/dashboard tools), D (EE governance).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

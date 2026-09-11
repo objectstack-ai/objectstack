@@ -1,0 +1,32 @@
+{
+  "number": 1650,
+  "kind": "pull_request",
+  "title": "feat(service-ai): registerRoutes option (suppress host route mounting)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-07T12:18:23Z",
+  "updated_at": "2026-06-07T12:18:38Z",
+  "closed_at": "2026-06-07T12:18:36Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-07T12:18:36Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1650",
+  "body": "Adds registerRoutes?: boolean (default true) to AIServicePluginOptions. When false, caches route defs on the kernel (__aiRoutes) but does NOT fire the ai:routes hook, so concrete routes are not mounted on the shared HTTP server. Lets a multi-tenant host AIService stop shadowing the dispatcher /ai/* wildcard so per-env kernels serve each tenant's chat (per-plan model + per-env metering). Single-env default true = unchanged. Verified: pro->sonnet-4-5, free->haiku-4-5; ai-service.test.ts 95 passed."
+}

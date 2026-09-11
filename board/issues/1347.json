@@ -1,0 +1,33 @@
+{
+  "number": 1347,
+  "kind": "pull_request",
+  "title": "docs: add runtime services API reference chapter for `services.{data,sharing,audit,queue,email,settings,storage}`",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T09:45:41Z",
+  "updated_at": "2026-05-25T10:06:00Z",
+  "closed_at": "2026-05-25T10:06:00Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-05-25T10:06:00Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1347",
+  "body": "`services.*` runtime APIs were discoverable only by reading source, which created a DX gap for template/plugin authors. This PR adds a dedicated docs chapter covering signatures, params, returns, errors, examples, and API stability labeling for the requested service surfaces.\n\n- **New chapter: Runtime Services API reference**\n  - Added `content/docs/guides/runtime-services/` with per-service pages:\n    - `services.data`\n    - `services.sharing`\n    - `services.audit`\n    - `services.queue`\n    - `services.email`\n    - `services.settings`\n    - `services.storage`\n  - Added canonical source pointers on each page so docs map directly to TS contracts/runtime sources.\n\n- **Examples added (M2 scope)**\n  - Added concrete examples page with:\n    - reading related records in a flow custom node\n    - checking sharing permissions in a hook\n    - subscribing to kernel lifecycle/service events in a plugin\n\n- **Versioning/stability (M3 scope)**\n  - Added dedicated versioning page with `stable` / `experimental` semantics.\n  - Added current stability matrix for all documented runtime services.\n  - Documented expectation to record breaking API changes in changelog + service page updates.\n\n- **Docs IA + gap tracking updates**\n  - Registered the new chapter in guides navigation (`content/docs/guides/meta.json` + chapter `meta.json`).\n  - Marked `docs/PLATFORM_GAPS_FROM_TEMPLATES.md` item #23 as resolved with traceable reference to the new chapter.\n  - Updated root `CHANGELOG.md` with the runtime services docs addition.\n\n### Example\n\n```ts\nconst order = await ctx.services?.data?.get('sales_order', ctx.input.orderId);\nconst lines = await ctx.services?.data?.list('sales_order_line', {\n  filter: { sales_order_id: order.id },\n  sort: [{ field: 'line_no', order: 'asc' }],\n  top: 200,\n});\n```\n\n> [!WARNING]\n>\n> <details>\n> <summary>Firewall rules blocked me from connecting to one or more addresses (expand for details)</summary>\n>\n> #### I tried to connect to the following addresses, but was blocked by firewall rules:\n>\n> - `fastdl.mongodb.org`\n>   - Triggering command: `/home/REDACTED/work/_temp/ghcca-node/node/bin/node node ./postinstall.js` (dns block)\n>   - Triggering command: `/opt/hostedtoolcache/node/24.15.0/x64/bin/node /opt/hostedtoolcache/node/24.15.0/x64/bin/node --experimental-import-meta-resolve --require /home/REDACTED/work/framework/framework/node_modules/.pnpm/vitest@4.1.7_@opentelemetry&#43;api@1.9.1_@types&#43;node@25.9.1_@vitest&#43;coverage-v8@4.1.7_happ_72174171d7a0abbbb70f6d3c93d7d962/node_modules/vitest/suppress-warnings.cjs --conditions node --conditions development /home/REDACTED/work/framework/framework/node_modules/.pnpm/vitest@4.1.7_@opentelemetry&#43;api@1.9.1_@types&#43;node@25.9.1_@vitest&#43;coverage-v8@4.1.7_happ_72174171d7a0abbbb70f6d3c93d7d962/node_modules/vitest/dist/workers/forks.js --global` (dns block)\n>\n> If you need me to access, download, or install something from one of these locations, you can either:\n>\n> - Configure [Actions setup steps](https://gh.io/copilot/actions-setup-steps) to set up my environment, which run before the firewall is enabled\n> - Add the appropriate URLs or hosts to the custom allowlist in this repository's [Copilot coding agent settings](https://github.com/objectstack-ai/framework/settings/copilot/coding_agent) (admins only)\n>\n> </details>"
+}

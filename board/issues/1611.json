@@ -1,0 +1,33 @@
+{
+  "number": 1611,
+  "kind": "pull_request",
+  "title": "feat(spec,runtime): make `seed` a first-class, publish-applied metadata type",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-06T10:45:51Z",
+  "updated_at": "2026-06-06T10:49:04Z",
+  "closed_at": "2026-06-06T10:46:09Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-06T10:46:09Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1611",
+  "body": "## 动机\n初始化/示例数据应当是平台一等公民,而不是旁路 insert。本 PR 把 `seed` 做成**运行时可草拟、发布即落数据**的元数据类型——和 object/view/app 一样走 stageDraft → 发布(ADR-0033)。发布一条 seed 草稿 = 把它的记录真正写入目标对象。\n\n这样 AI 元数据助手(或任何作者)可以把示例/种子数据当作**可审阅的草稿**暂存,一键发布即生效。**机制开源、智能闭源**:生成 seed 行的 AI 在私有 studio 包,这里只放类型 + 应用路径。\n\n`dataset` 名保留给未来的数据分析能力,故新类型独立命名为 `seed`(当前复用 Dataset 形状)。\n\n## 改动\n**spec**\n- `MetadataTypeSchema` + `DEFAULT_METADATA_TYPE_REGISTRY` 注册 `seed`(domain: data、allowRuntimeCreate、loadOrder 95 使被引用对象先就绪),在 type→schema 映射绑定 `SeedSchema`。\n- 新增 `SeedSchema`/`Seed`(复用 Dataset 形状,独立命名以便 `seed` 与分析向的 `dataset` 各自演进)。\n\n**runtime**\n- publish-drafts handler 对每个刚发布的 `seed` 调用既有 `SeedLoaderService` 落数据(best-effort、幂等 upsert、**绝不因 seed 失败而让发布失败**,结果并入响应的 `seedApplied`)。放在 runtime 层是因为 loader 需要 data engine + metadata service,objectql 不能反向依赖 runtime。\n\n## 验证\n- spec 单测 45 通过(含新增 seed 注册契约测试)。\n- runtime `tsc --noEmit` 0 错误。\n- SeedLoaderService 自身已有充分单测,本 PR 复用之。\n\n## 后续(分开 PR)\n- cloud service-ai-studio:`create_seed` 工具,AI 用 ai.generateObject 生成符合对象 schema 的行 → stageDraft(type:'seed');skill 指示\"建完→提议填充示例数据\"。"
+}

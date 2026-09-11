@@ -1,0 +1,35 @@
+{
+  "number": 1452,
+  "kind": "pull_request",
+  "title": "feat(automation): screen-flow runtime — interactive screen nodes (suspend→render→resume)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T06:27:39Z",
+  "updated_at": "2026-06-01T07:01:42Z",
+  "closed_at": "2026-06-01T07:01:31Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T07:01:31Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1452",
+  "body": "## What\nCompletes the screen-flow arm of the automation engine. A `screen` node with input fields now **suspends** the run on entry (reusing the ADR-0019 durable pause), surfaces a **`ScreenSpec`** for the client to render, and **resumes** with the collected values applied as **bare flow variables** (so downstream nodes read `{new_assignee}` etc.). Previously `screen` nodes were no-op pass-throughs — the showcase Reassign Wizard's input was never collected and its `apply` step failed.\n\n- **spec**: `AutomationResult.screen`, `ResumeSignal.variables` (bare vars), `IAutomationService.getSuspendedScreen`.\n- **service-automation**: screen executor builds the `ScreenSpec` and suspends when fields are present (`waitForInput:false` forces pass-through); suspend/resume threads the screen through `FlowSuspendSignal → SuspendedRun → paused result`; `resume()` sets `signal.variables` as bare vars; `getSuspendedScreen` getter. **+2 unit tests.**\n- **runtime**: `POST /api/v1/automation/:name/runs/:runId/resume` (body `{ inputs }`) + `GET …/runs/:runId/screen`, wired in both the dispatcher route table (`dispatcher-plugin`) and `handleAutomation`.\n- **docs/design/screen-flow-runtime.md** — the protocol.\n\n## Verification (headless, end-to-end)\nShowcase Reassign Wizard against the running backend:\n`launch → { status:'paused', runId, screen:{nodeId:'collect', fields:[new_assignee]} }` → `resume { inputs:{ new_assignee:'casey@example.com' } } → completed` → **task reassigned** (sam→casey).\n\nTests: service-automation 107 ✓, runtime 329 ✓, spec 6609 ✓.\n\n## Follow-up\nThe objectui **`FlowRunner`** that renders these screens (and wires the launch action to open it) ships as a separate objectui PR."
+}

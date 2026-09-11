@@ -1,0 +1,33 @@
+{
+  "number": 1598,
+  "kind": "pull_request",
+  "title": "feat(runtime): gate features.aiStudio on the environment's plan",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-05T15:15:20Z",
+  "updated_at": "2026-06-05T15:15:48Z",
+  "closed_at": "2026-06-05T15:15:46Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-05T15:15:46Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1598",
+  "body": "## 背景\nObjectStack Cloud 能力付费墙 MVP：**Free 跑 app，付费档解锁在线 Studio + AI 开发**。门控按用户决策是**纯 UI 区分**（共享容器里 `AIStudioPlugin` 对所有租户环境照常挂载，不做按环境动态挂载）。\n\n## 改动\n租户运行时的 `RuntimeConfigPlugin`（`GET /api/v1/runtime/config`）本就按 hostname per-request 解析环境。本 PR 让它读取解析出的环境 `plan`，据此设 `features.aiStudio`：`free → off`，任何付费档 `→ on`。\n\nSPA（objectui `ConsoleLayout`）已经在 `features.aiStudio === false` 时隐藏 Studio/AI 开发入口，所以这是纯 UI flag。\n\n`plan` 由控制面 `GET /api/v1/cloud/resolve-hostname` 提供（见 objectstack-ai/cloud PR #117）。**解析不到 plan 时**（file/CLI 模式、旧控制面）保留静态默认 flag，绝不误锁。\n\n## 测试\n新增 `runtime-config-plugin.test.ts`（5 例）：free→off、paid→on、plan 缺失保留默认、显式 `aiStudio:false` 默认、free 覆盖 `aiStudio:true` 默认。\n\n## 配套\n- cloud PR #117（暴露 `plan`）已合/在合。\n- 合并后 cloud 侧 `bump-framework` 钉到本 SHA。"
+}

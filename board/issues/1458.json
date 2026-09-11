@@ -1,0 +1,35 @@
+{
+  "number": 1458,
+  "kind": "pull_request",
+  "title": "feat(messaging): race-safe dedup + opt-in retention (ADR-0030 hardening)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T08:44:05Z",
+  "updated_at": "2026-06-01T08:47:47Z",
+  "closed_at": "2026-06-01T08:47:44Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T08:47:44Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1458",
+  "body": "## What\n\nTwo correctness/ops gaps in the ADR-0030 notification pipeline, flagged as remaining hardening work.\n\n### 1. Race-safe dedup\n\n`emit()` idempotency was a non-transactional **check-then-insert** against a *non-unique* `sys_notification.dedup_key` index — under a record-change storm two concurrent emits with the same `dedupKey` could both write events → **duplicate bell notifications**.\n\n- `dedup_key` is now declared a **UNIQUE** index. SQL treats NULLs as distinct, so the (common) events with no `dedup_key` are unconstrained.\n- `emit()` **converges on a unique-key conflict**: the pre-insert check stays as a fast-path, but if a concurrent emit inserted first, our insert hits the violation — caught and converged to the winner's event (a dedup hit) instead of throwing or double-emitting. Mirrors the delivery outbox's enqueue convergence.\n- Strictly an improvement: before a conflict would throw (or, unenforced, double-emit); now it converges.\n\n> **Enforcement note.** The SQL driver currently doesn't materialize declared object indexes (`indexes: false`) — verified in dev sqlite, where *no* declared index exists (only PK autoindexes), so the **delivery/receipt** unique indexes the existing P1/ADR-0030 convergence relies on aren't enforced there either. This change is consistent with that established convention (declare the unique index; converge on the conflict where a driver enforces it; fall back to the fast-path where it doesn't). The driver-side index-sync gap is pre-existing and platform-wide — flagged for separate follow-up.\n\n### 2. Opt-in retention\n\nEvery `emit()` writes a `sys_notification` event (+ delivery/materialization/receipt), so a high-frequency periodic flow grows the tables unbounded.\n\n- New `NotificationRetention` sweeper + plugin options `retentionDays` / `retentionSweepMs`.\n- When `retentionDays > 0`, a low-frequency sweep (default hourly, timer `unref`'d) bulk-deletes events, deliveries, inbox messages and receipts older than the cutoff — a notification **ages out wholesale** (no dangling `notification_id`); the bell (recent-only) is unaffected.\n- Delivery's epoch-ms `created_at` vs the others' ISO `created_at` is handled per target.\n- **Default off** — no notification data is ever deleted without explicit operator policy. Targets are isolated (one failure doesn't abort the sweep); the sweep runs under a system (cross-tenant) context.\n\n## Tests\n\n+7 `@objectstack/service-messaging` cases (converge-on-conflict, non-conflict rethrow, retention cutoff-formatting per target, no-engine / non-positive no-ops, failure isolation, missing-count). **102** messaging tests + **58** platform-objects tests green; package builds clean.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

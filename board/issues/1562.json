@@ -1,0 +1,32 @@
+{
+  "number": 1562,
+  "kind": "pull_request",
+  "title": "fix(runtime): mount set-initial-password on per-environment auth-proxy (#1544)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-03T07:44:20Z",
+  "updated_at": "2026-06-03T09:33:22Z",
+  "closed_at": "2026-06-03T09:33:22Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-06-03T09:33:22Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1562",
+  "body": "Closes #1544.\n\nAfter SSO-as-owner, the env auth-proxy redirects a credential-less user to `?recovery_needed=true` to **Set a local password** — but that form POSTs `/api/v1/auth/set-initial-password`, a route only the full **AuthPlugin** registers. AuthPlugin is **skipped on per-environment runtimes**, so the request fell through to better-auth (no such route) → **404 dead-end** (confirmed on staging: `POST set-initial-password → 404` while `get-session → 200`).\n\nThis adds a `set-initial-password` handler to the runtime `AuthProxyPlugin` (alongside `sso-exchange`), mirroring AuthPlugin's logic against the **environment's own** auth context: require a valid env session (401 else), reject if a credential password already exists (409 → use change-password), enforce min/max length, then `internalAdapter.createAccount({ providerId: 'credential', password: hash })`.\n\nVerified: `@objectstack/runtime` builds clean (22/22).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

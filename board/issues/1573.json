@@ -1,0 +1,32 @@
+{
+  "number": 1573,
+  "kind": "pull_request",
+  "title": "fix(runtime,cli): resolve optional capability packages from host app context",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-03T15:56:28Z",
+  "updated_at": "2026-06-04T06:38:48Z",
+  "closed_at": "2026-06-04T06:38:45Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-04T06:38:45Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1573",
+  "body": "`loadCapabilities()` (per-environment kernels, apps/objectos) and the CLI `serve` auto-register both did a **bare** dynamic `import(pkg)` of optional capability packages. A bare specifier resolves relative to the **framework** package's own location, so a private/optional package linked into the **app's** `node_modules` — e.g. `@objectstack/service-ai-studio`, which the framework itself does not depend on — is invisible. It failed with `Cannot find package … imported from …/framework/…`, so **cloud tenants never actually loaded AI Studio** despite `apps/objectos` declaring the dependency (and the same for enterprise objectos-ee).\n\n## Fix\nResolve via `createRequire` anchored at `process.cwd()` (the host app), import the resolved path, and fall back to a bare import for framework-owned packages.\n\n- `packages/runtime/src/cloud/capability-loader.ts` — `importFromHost()` helper used for the main provider + extras.\n- `packages/cli/src/commands/serve.ts` — same host-context resolution for the AI + AI Studio auto-register.\n\n## Verified\n- `createRequire(<app>/package.json).resolve('@objectstack/service-ai-studio')` → resolves to its `dist`; the old framework-relative resolution returns `MODULE_NOT_FOUND`.\n- `runtime` + `cli` build clean.\n\nUnblocks the cloud multi-tenant path for `@objectstack/service-ai-studio` (and any private capability package). Enterprise objectos-ee already works via explicit `plugins:[...]` registration; this makes the auto-discovery path correct too.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

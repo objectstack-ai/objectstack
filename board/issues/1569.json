@@ -1,0 +1,35 @@
+{
+  "number": 1569,
+  "kind": "pull_request",
+  "title": "feat(metadata): draft/package lifecycle for publish-as-preview (overlay reads, teardown, discard, delete)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-03T10:56:53Z",
+  "updated_at": "2026-06-03T14:05:04Z",
+  "closed_at": "2026-06-03T14:05:01Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-03T14:05:01Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1569",
+  "body": "Backend for the **draft/package lifecycle** behind \"publish-as-preview\" (ADR-0033 review loop) — drafts as a first-class state for both humans and the AI. Five composable capabilities, each independently tested.\n\n## 1. Draft-overlay reads (`previewDrafts`)\nRender the console (or let the AI discover) pending drafts before publish. `getMetaItems`/`getMetaItem` overlay `state='draft'` on active (draft wins; draft-only surfaces; `_draft:true` tag); dispatcher threads `?preview=draft`.\n\n## 2. Storage teardown on delete (`dropStorage`)\nObject storage was create-only — delete left an orphan table. `engine.dropObjectSchema` → driver `dropTable`; `deleteMetaItem({dropStorage})` DESTRUCTIVE/opt-in, gated (object+active only, never `sys_`); `DELETE /meta/:type/:name?dropStorage=true`.\n\n## 3. `discardPackageDrafts` — abandon edits, revert to baseline\nNON-destructive: drops only draft rows. `POST /packages/:id/discard-drafts`. *\"Edited a while, it's worse — abandon all changes.\"*\n\n## 4. `deletePackage` — remove an unwanted package entirely\nDESTRUCTIVE: all package rows + object tables (`keepData=true` preserves tables). `DELETE /packages/:id` now does this persisted removal (was registry-only). *\"Don't want this package anymore.\"*\n\n## 5. AI authoring is draft-aware + package-aware (Fix 4)\nFound while verifying the [process guardrail](https://github.com/objectstack-ai/framework/pull/1570):\n- `list_objects`/`list_metadata` were active-only → the agent couldn't find an object it **just drafted** when authoring a flow for it. Now pass `previewDrafts:true` (reusing #1, the unifying mechanism).\n- `apply_blueprint` now surfaces a top-level `packageId` + `bindingHint` so the agent binds the follow-up flow to the app package instead of orphaning it.\n\n## Why this shape (design note)\nTrue *data* preview of a brand-new draft object is hard (no table until publish; the platform had no drop-table teardown at all). Chosen approach: cheap draft-overlay for structural/AI discovery, and lean on **publish (into a dev sandbox) for data-level confirmation** — made safe by reversible item teardown + package discard/delete. Admin-gating `?preview=draft` is a deliberate follow-up. See `docs/notes/draft-overlay-preview-plan.md`.\n\n## Tests\n`protocol-meta` (overlay), `protocol-publish-rollback` (teardown), `protocol-package-lifecycle` (discard/delete), `metadata-tools` + `blueprint-tools` (Fix 4). Full `objectql` green (519); `service-ai` green (one pre-existing env-dependent embedder test aside). Dispatcher/rest typecheck clean.\n\nPairs with objectui#1472 (Discard/Delete buttons) and framework#1570 (process guardrail).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

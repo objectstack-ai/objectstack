@@ -1,0 +1,33 @@
+{
+  "number": 1432,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0030 notification platform convergence (supersedes 0012)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T03:11:14Z",
+  "updated_at": "2026-06-01T03:15:58Z",
+  "closed_at": "2026-06-01T03:15:50Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T03:15:50Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1432",
+  "body": "## What\n\nHandoff artifact for the agent implementing the notification work. No code changes.\n\nDocuments the decision to fix the two drifted, overlapping in-app inbox objects — **`sys_notification`** (UI-read, written directly by collaboration) and **`sys_inbox_message`** (written by the `notify` node, **zero readers**) — by **un-conflating them back into ADR-0012's layered pipeline under a single `emit()` ingress**, rather than merging into one table.\n\n- **`docs/adr/0030-notification-platform-convergence.md`** — the decision: drift finding + evidence, the single-ingress rule, the target object model (L2 event / L3 resolve+preference / L4 delivery outbox / L5 materialize+receipt), resolved design decisions, phased plan P0–P3.\n- **`docs/design/notification-platform-convergence.md`** — the executable build spec: table schemas, `emit()` contract, per-phase tasks with file/package targets + acceptance criteria, migration sequencing, open decisions, risks.\n- **`docs/adr/0012-notification-platform.md`** — status line marked *Superseded by ADR-0030* (body left intact as the historical draft).\n\n## Why a new ADR (not editing 0012)\n0012 is a Draft that drifted in implementation; 0030 is a genuinely new decision (un-conflate + single ingress + phased realization) and supersedes it, preserving the audit trail and the references from ADR-0019/0022. Numbered 0030 because 0028/0029 were taken by #1431.\n\n## Context\nFindings from this session's end-to-end automation testing (PRs #1426/#1429/#1430): the `notify` flow node delivers to `sys_inbox_message`, but the Console bell only reads `sys_notification`, so notify-based notifications never surface in the UI. The root cause is a violated principle — producers writing per-user inbox rows directly with no pipeline.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

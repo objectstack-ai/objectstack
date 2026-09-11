@@ -1,0 +1,32 @@
+{
+  "number": 1585,
+  "kind": "pull_request",
+  "title": "fix(runtime): SSO handoff value must be unique (embed token) — opening same env twice 500s",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-05T00:14:01Z",
+  "updated_at": "2026-06-05T00:14:15Z",
+  "closed_at": "2026-06-05T00:14:04Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-05T00:14:04Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1585",
+  "body": "## Bug\nThe cloud-minted SSO handoff (`sso_as_owner` / the \"Open\" / \"打开\" button) writes a `sys_verification` row via `AuthProxyPlugin`'s `POST /api/v1/auth/sso-handoff-issue`. The unique handoff token lives in `identifier` (`sso-handoff:<token>`), while `value` held a **static** JSON payload `{email,name,by,envId}`.\n\nBut `sys_verification.value` carries a **UNIQUE index** (it's the OTP/token column for email-verification flows — see `platform-objects/.../sys-verification.object.ts`). So issuing a handoff for the **same owner+env twice** produces identical `value` JSON and the second one fails:\n\n```\nUNIQUE constraint failed: sys_verification.value\n```\n\n→ An operator who opens the same environment a second time gets a **500**.\n\n## Fix\nEmbed the unique handoff token (`t`) in the value payload so every issuance is distinct. The `sso-exchange` consumer only reads `email`/`name` from the parsed value, so the extra field is inert.\n\n## Verified (local 2-process stack)\n`sso_as_owner` minted **3× in a row → all 200** with distinct tokens (previously: 1st 200, 2nd+ 500). Browser handoff then lands the owner authenticated in the env console home.\n\n> The cloud control plane has a mirror of this write (single-process/preview path) — fixed in the cloud repo alongside the harness build fix.\n"
+}

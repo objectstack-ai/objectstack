@@ -1,0 +1,30 @@
+{
+  "number": 1519,
+  "kind": "issue",
+  "title": "plugin-approvals: support a platform/org-independent approver type",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T04:58:06Z",
+  "updated_at": "2026-06-02T05:07:21Z",
+  "closed_at": "2026-06-02T05:07:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1519",
+  "body": "## Problem\n\n`plugin-approvals` resolves every approver through **organization-scoped membership**. In `packages/plugins/plugin-approvals/src/approval-service.ts`, `expandApprovers(step, record, organizationId)` handles approver types `user` / `field` / `team` / `department` / `role` / `manager` — and all of the group/role paths query `sys_member` / `sys_team_member` / `sys_department_member` filtered by `organization_id`.\n\nThere is **no approver type for a platform-level (org-independent) approver group** — e.g. \"anyone in the platform `admin_full_access` permission set\", which has `organization_id = NULL`.\n\n## Impact\n\nPlatform-level approval use cases can't express their approver without hardcoding literal user ids:\n\n- **Marketplace listing review** (ADR-0025): the reviewer is a *platform admin* (unscoped `sys_user_permission_set` → `admin_full_access`), not a member of any one org. See cloud `docs/design/marketplace-review-on-approvals.md` — this is the blocker for using the approval engine's approver resolution for marketplace review.\n- Any future platform/control-plane approval (e.g. publisher onboarding, payout release) has the same need.\n\nToday the only workaround is approver type `user` with literal platform-admin user ids baked into the node config — brittle (breaks when the admin set changes) and not declarative.\n\n## Proposed solution\n\nAdd a platform-scoped approver type, e.g. `platform_admin` (or a generic `permission_set` type with an optional `org-independent` flag):\n\n- Resolve it by querying `sys_user_permission_set` rows with `organization_id IS NULL` that point at a named permission set (default `admin_full_access`), independent of any org.\n- Make it composable with the existing types (a step can mix org-scoped and platform approvers).\n- Keep it opt-in; existing org-scoped behaviour unchanged.\n\nReuse the same \"unscoped permission-set = platform admin\" definition already used elsewhere (cloud `package-review.ts isPlatformAdmin`, and `plugin-auth` `customSession`).\n\n## Acceptance criteria\n\n- An approval step can declare a `platform_admin` (org-independent) approver and `expandApprovers` resolves it to the set of platform-admin user ids without an `organization_id` filter.\n- Existing org-scoped approver tests pass unchanged.\n- Works when `organizationId` is null/absent (platform context).\n\n## References\n- `packages/plugins/plugin-approvals/src/approval-service.ts` (`expandApprovers`)\n- cloud `docs/design/marketplace-review-on-approvals.md` (dependent use case)\n- Related: framework#1518 (durable suspended runs) — the other enabler for the full flow-orchestrated marketplace review"
+}

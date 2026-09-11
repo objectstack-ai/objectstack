@@ -1,0 +1,35 @@
+{
+  "number": 1580,
+  "kind": "pull_request",
+  "title": "feat(automation): surface structured-region body steps in run observability (#1505)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-04T13:27:34Z",
+  "updated_at": "2026-06-04T13:39:04Z",
+  "closed_at": "2026-06-04T13:39:01Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-04T13:39:01Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1580",
+  "body": "Resolves the ADR-0031 follow-up [#1505](https://github.com/objectstack-ai/framework/issues/1505) (the `TODO(#1479)` in `engine.ts`).\n\n## Problem\n\n`loop` / `parallel` / `try_catch` executed their body / branch / handler regions via `AutomationEngine.runRegion()`, which ran them against a **region-local** `StepLogEntry[]` that was **discarded**. Run logs (`listRuns` / `getRun`) therefore showed the container as a single opaque step — the per-iteration / per-branch / handler steps that actually ran were invisible for debugging and audit.\n\n## Change\n\n- `runRegion()` now **returns** its body steps instead of dropping them.\n- A new optional `NodeExecutionResult.childSteps` lets a container node hand those steps back; `executeNode()` appends them to the parent run log **right after** the container's own step.\n- Three new optional fields on `ExecutionStepLogSchema` (spec) and the engine's `StepLogEntry` tag each surfaced step with its **immediate** container:\n  - `parentNodeId` — the enclosing `loop` / `parallel` / `try_catch` node\n  - `iteration` — zero-based loop iteration or parallel branch index\n  - `regionKind` — `loop-body` | `parallel-branch` | `try` | `catch`\n\nTagging fills only fields left undefined, so **nested** regions keep each step's innermost container. A failed try-region attempt's partial steps stay unsurfaced, preserving `try_catch` retry semantics. Fully additive — existing run logs/consumers unaffected.\n\n## Tests\n\n+4 (`162` total in service-automation): loop surfaces per-iteration steps with index; parallel tags branch index; try_catch tags `try` and `catch` regions. `@objectstack/spec` execution + automation suites green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 1647,
+  "kind": "pull_request",
+  "title": "feat(service-ai): per-instance gatewayModel option",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-07T10:52:52Z",
+  "updated_at": "2026-06-07T10:53:04Z",
+  "closed_at": "2026-06-07T10:53:01Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-07T10:53:01Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1647",
+  "body": "## What\n`AIServicePluginOptions` gains an optional `gatewayModel?: string`. `detectAdapter()` now uses:\n\n```ts\nconst gatewayModel = this.options.gatewayModel ?? process.env.AI_GATEWAY_MODEL;\n```\n\nSo a host can select the Vercel AI Gateway model **per plugin instance** instead of only via the process-wide `AI_GATEWAY_MODEL` env var.\n\n## Why\nA multi-tenant runtime builds one `AIServicePlugin` per environment kernel and needs to route the model **per tenant/plan** (e.g. free → haiku, paid → sonnet) within a single process. The env var is process-global and can't express that. Omitting the option preserves the exact current behavior (env fallback).\n\nThis is the open-core **mechanism**; the routing **policy** stays in the (closed) cloud runtime (cloud ADR-0005).\n\n## Tests\n- option wins over `AI_GATEWAY_MODEL`\n- falls back to env when option absent\n- full `ai-service.test.ts` suite: 95 passed\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

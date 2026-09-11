@@ -1,0 +1,32 @@
+{
+  "number": 1555,
+  "kind": "pull_request",
+  "title": "docs(agents): codify merge/worktree discipline + shared read-only permission allowlist",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-03T04:07:20Z",
+  "updated_at": "2026-06-03T05:01:57Z",
+  "closed_at": "2026-06-03T05:01:50Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-03T05:01:50Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1555",
+  "body": "## What\n\nTwo small, agent-facing housekeeping changes for parallel multi-agent work.\n\n### `AGENTS.md`\n- **Drop the stale `.github/copilot-instructions.md` mirror instruction.** That file doesn't exist in the repo, and GitHub Copilot (coding agent + CLI, since Aug 2025) reads `AGENTS.md` natively as primary instructions — no mirror needed. AGENTS.md is now the single source of truth for Claude Code / Copilot / etc.\n- **Prefer one git worktree per agent/task** for physical isolation; the existing defensive rules are reframed as the shared-working-tree fallback.\n- **New rule #7 — merge only after remote CI is fully green; never `gh pr merge --auto`.** Auto-merge can land a still-red PR onto shared `main` and break it for every parallel agent (see #1475).\n\n### `.claude/settings.json` (new, committed/shared)\nRead-only permission allowlist derived from recent transcript usage so parallel agents prompt less. Covers browser/preview **observation** tools (screenshot / snapshot / logs / network / list) plus `agent-browser snapshot|skills`.\n\nDeliberately **excludes**:\n- mutating / arbitrary-exec calls — `preview_eval`, `preview_click`/`fill`/`start`/`stop`, `pnpm`, `node`, `npx`\n- anything Claude Code already auto-allows — git/gh read-only subcommands, `grep`, `cat`, `ls`, …\n\n`.claude/settings.local.json` (gitignored, per-machine) is untouched.\n\n## Notes\n- Docs/config only — no changeset required.\n- `examples/app-showcase/objectstack.config.ts` was already modified in the working tree by other in-flight work and is intentionally **not** part of this PR.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

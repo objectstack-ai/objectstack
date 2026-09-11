@@ -1,0 +1,35 @@
+{
+  "number": 1589,
+  "kind": "pull_request",
+  "title": "perf(rest): cache hostname→env resolution (P1-4); document cluster pub/sub durability (P1-5)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-05T01:42:58Z",
+  "updated_at": "2026-06-05T01:46:52Z",
+  "closed_at": "2026-06-05T01:46:50Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-05T01:46:50Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1589",
+  "body": "Closes launch-readiness **P1-4** (real fix) and **P1-5** (verified by-design; documented & accepted). Both hand-verified against `main` first.\n\n## P1-4 — hostname→env resolution cache (real fix)\n`RestServer.resolveProtocol()` called `envRegistry.resolveByHostname()` on **every unscoped request** — a control-plane lookup (typically a DB query) in the hot path, at **3 call sites**, with no caching.\n\nFix: `resolveHostnameCached()` caches `hostname → environmentId` in-memory with a **30s TTL**, used at all 3 sites. It caches **negative** results too (so unknown hosts don't hammer the registry) but **not** errors (a transient control-plane blip self-heals next request).\n\n## P1-5 — cluster pub/sub durability (verified by-design, documented)\nRedis pub/sub is **at-most-once by design** — `publish()` already awaits the PUBLISH command, but there's no subscriber-delivery guarantee. Verified that `metadata.changed` is a **cache-invalidation hint only**: the durable source of truth is the transactional `sys_metadata` (+ `sys_metadata_history`) write. A node that misses the event serves a stale cached schema until its next reload and **loses no data** (self-heals against the DB).\n\nNo delivery-semantics change. Recorded the **durability contract** in `pubsub.ts publish()` and the doc; risk **accepted** for v1 (no exactly-once state may flow through this channel — durable state uses an outbox).\n\n## Tests\n+3 (`rest` 80 green): caches within TTL (1 lookup for 3 calls), refreshes after TTL, caches negative results.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

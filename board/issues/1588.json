@@ -1,0 +1,33 @@
+{
+  "number": 1588,
+  "kind": "pull_request",
+  "title": "docs: make docs site the homepage",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-05T01:34:25Z",
+  "updated_at": "2026-06-05T01:37:47Z",
+  "closed_at": "2026-06-05T01:37:44Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-05T01:37:44Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1588",
+  "body": "## Summary\n- replace the marketing-style docs landing page with a documentation index\n- remove unused homepage-only components and i18n copy\n- simplify docs navigation by removing the external Website link and transparent homepage mode\n\n## Verification\n- pnpm --filter @objectstack/docs types:check\n- pnpm --filter @objectstack/docs build"
+}

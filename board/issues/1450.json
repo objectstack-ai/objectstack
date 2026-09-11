@@ -1,0 +1,33 @@
+{
+  "number": 1450,
+  "kind": "pull_request",
+  "title": "feat(auth): source email brand name from branding.workspace_name setting",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T05:54:17Z",
+  "updated_at": "2026-06-01T06:58:36Z",
+  "closed_at": "2026-06-01T06:58:33Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-01T06:58:33Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1450",
+  "body": "Refs #1447 — wires the existing (but unconsumed) `branding.workspace_name` setting into the auth email brand name.\n\n## Problem\n\nThe Branding settings page already exposes a **Workspace name** field (`branding.workspace_name`), editable in the UI and persisted via the settings service — but **nothing consumes it**. Auth emails (`{{appName}}`) instead use a static `config.appName`, so renaming the product in the UI does nothing.\n\n## Change\n\n`AuthPlugin` now binds the email brand name to the live setting, mirroring `EmailServicePlugin`'s settings binding:\n\n- On `kernel:ready` (right after the email service is wired), read `branding.workspace_name` and push it into `AuthManager.setAppName()`.\n- Subscribe to the `branding` namespace so edits apply **without a redeploy**.\n- **Backward-compatible precedence:** only an *explicitly set* value overrides. When the resolver returns the manifest **default** (`source === 'default'`), the override is cleared so the configured `appName` (e.g. a deployment's `OS_APP_NAME`) keeps precedence.\n\n**Resolution order:** `branding.workspace_name` (when set) → `config.appName` → `'ObjectStack'`.\n\nThe settings service is treated as optional — if it's absent, behaviour is unchanged.\n\n## Files\n\n- `auth-manager.ts` — add `setAppName(name?)` + `appNameOverride`; `getAppName()` now resolves override → config → default.\n- `auth-plugin.ts` — `kernel:ready` binding + `subscribe('branding', …)`, guarded by try/catch.\n- `auth-plugin.test.ts` — 3 new tests: explicit value overrides; `default` source clears the override; read failure degrades gracefully. (21/21 pass.)\n\n## Out of scope (remaining #1447 checklist)\n\nThese are separate layers and not touched here:\n- [ ] `apps/account/index.html` `<title>` — Vite SPA; needs a client-side `document.title` update on boot.\n- [ ] `packages/rest/src/rest-server.ts` `/docs` `<title>` — needs the settings service threaded into `RestServer`.\n- [ ] Align conflicting defaults (`ObjectStack` vs `ObjectOS Account`).\n\n## Note on tenant scope\n\n`branding` is `scope: 'tenant'`, but the brand name is read globally here (no tenant ctx in email callbacks). For the single-brand control plane this is correct; per-tenant email branding would be a follow-up.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

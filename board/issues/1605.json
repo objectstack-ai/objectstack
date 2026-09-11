@@ -1,0 +1,32 @@
+{
+  "number": 1605,
+  "kind": "pull_request",
+  "title": "feat(app-showcase): richer project detail (explicit highlights + details)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-06T03:20:33Z",
+  "updated_at": "2026-06-06T03:20:48Z",
+  "closed_at": "2026-06-06T03:20:42Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-06T03:20:42Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1605",
+  "body": "Enhances showcase_project_detail with explicit record:highlights (account/status/health/budget/end_date) and a Details tab containing record:details sections (Overview/Financials/Timeline) bound to showcase_project. A richer record-page example that also gives the page editor's new field pickers real content to resolve.\n\nBrowser-verified: the rendered project detail shows the highlights strip + Details/Tasks tabs with the details sections (Financials/SPENT) and the master-detail Tasks grid. Example-only change.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

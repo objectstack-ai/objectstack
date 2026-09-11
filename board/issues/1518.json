@@ -1,0 +1,30 @@
+{
+  "number": 1518,
+  "kind": "issue",
+  "title": "service-automation: persist suspended flow runs (durable resume across process restarts)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T04:41:36Z",
+  "updated_at": "2026-06-02T05:05:28Z",
+  "closed_at": "2026-06-02T05:05:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1518",
+  "body": "## Problem\n\n`service-automation` keeps **suspended flow runs in memory only**. A flow that pauses at a long-lived node (an `approval` node, `wait`, `screen`, etc.) cannot be resumed after the process restarts.\n\n- `packages/services/service-automation/src/engine.ts` — `private suspendedRuns = new Map<string, SuspendedRun>()` and `private executionLogs: ExecutionLogEntry[] = []` are in-memory.\n- `engine.execute(flowName, ctx)` returns `{ status: 'paused', runId }` when a node suspends; `engine.resume(runId, signal)` continues from the paused node.\n- The engine registers **no `sys_*` objects** — flow run state is never persisted.\n\n`plugin-approvals` persists the *request* (`sys_approval_request`, with `flow_run_id`), and on a human decision calls `automation.resume(runId, …)` (see `packages/plugins/plugin-approvals/src/approval-service.ts`). But the **run state itself is not durable**, so the resume target is gone after a restart.\n\n## Impact\n\nThis blocks running approval-node flows (and any durable-pause flow) on **serverless / hibernating** hosts:\n\n- The ObjectStack **cloud control plane runs on Cloudflare Workers**, which hibernate/restart. A marketplace-review flow that suspends at an approval node and waits for a platform admin to decide (minutes → days later) will have its in-memory run evicted; the approval record persists but `resume(runId)` fails → the decision can't continue (e.g. the post-approval side-effects never run).\n- This is the main blocker for the \"marketplace review on approvals + automation\" design (dogfooding approvals/automation in the control plane). See cloud `docs/design/marketplace-review-on-approvals.md`.\n- More generally: ADR-0019's \"durable pause\" is only durable within a single process lifetime today.\n\n## Proposed solution\n\nMake suspended-run state durable and rehydratable:\n\n1. Introduce a pluggable `SuspendedRunStore` (default: the current in-memory Map for tests/dev; a DB-backed implementation for production). Persist on suspend, delete on terminal completion.\n2. Persist the resumable run state: `runId`, `flowName`, serialized `variables` (JSON-safe — the engine uses a `Map`), current/paused node id, pending branch/edge, correlation, `userId`, timestamps. Suggest a `sys_automation_run` (or `sys_flow_run`) object so it migrates like other `sys_*` tables and correlates to `sys_approval_request.flow_run_id`.\n3. In `resume(runId, signal)`: when the run is not in memory, **rehydrate from the store** and continue. Make resume idempotent (a duplicate resume after a partial restart must not double-run side-effects).\n4. Bound/serialize `executionLogs` if they need to survive too (or accept ephemeral logs — the run state is the critical part).\n\n## Acceptance criteria\n\n- A flow suspended at an `approval` node **survives a full process restart**: cold-boot the kernel, then `resume(runId)` continues from the paused node down the correct (`approve`/`reject`) branch and runs the downstream nodes.\n- Works with the DB-backed store on the control-plane driver; the in-memory store remains the default for unit tests.\n- Existing service-automation + plugin-approvals tests pass unchanged.\n- `variables` round-trip correctly (including nested objects) through the store.\n- Resume is idempotent.\n\n## References\n- `packages/services/service-automation/src/engine.ts` (`suspendedRuns`, `execute`, `resume`)\n- `packages/plugins/plugin-approvals/src/approval-service.ts` (`decide` → `automation.resume`)\n- ADR-0019 (durable pause / approval-as-flow-node)\n- cloud `docs/design/marketplace-review-on-approvals.md` (the dependent use case)"
+}

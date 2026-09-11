@@ -1,0 +1,36 @@
+{
+  "number": 1583,
+  "kind": "pull_request",
+  "title": "chore: speed up build and test tasks",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-04T14:34:29Z",
+  "updated_at": "2026-06-04T23:05:12Z",
+  "closed_at": "2026-06-04T23:05:10Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-04T23:05:10Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1583",
+  "body": "## Summary\n- reduce Turbo test graph by depending on upstream builds instead of same-package builds\n- cache Turbo task outputs in CI for test/build-core jobs\n- run build-core through the root Turbo build script\n- include packages/types tests in the root test task\n\n## Verification\n- pnpm build\n- pnpm test"
+}

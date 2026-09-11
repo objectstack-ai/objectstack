@@ -1,0 +1,35 @@
+{
+  "number": 1632,
+  "kind": "pull_request",
+  "title": "fix(runtime): adapt node/Hono req → Web Request for MCP transport",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-07T00:53:29Z",
+  "updated_at": "2026-06-07T00:55:43Z",
+  "closed_at": "2026-06-07T00:53:38Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-07T00:53:38Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1632",
+  "body": "Staging e2e (round 3) found `initialize` → **400 \"MCP transport requires a standard HTTP request\"**. The MCP transport needs a Web-standard `Request`, but the runtime HTTP adapter passes a node/Hono-style req (plain `headers` object, path-only `url`). Unit tests passed a real `Request`, hiding it.\n\n`handleMcp` now reconstructs a Web `Request` (method, absolute URL from host+path, normalised headers, JSON body from the parsed body) when the inbound req isn't already Web-standard. +2 regression tests (node-style POST + GET). Full runtime suite 381 green.\n\nAfter merge + cloud framework bump + redeploy + kernel rebuild, the keyed `tools/list` should work end-to-end.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

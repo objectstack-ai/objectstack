@@ -1,0 +1,35 @@
+{
+  "number": 1610,
+  "kind": "pull_request",
+  "title": "feat(objectql): compute roll-up summary fields server-side",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-06T10:39:32Z",
+  "updated_at": "2026-06-06T10:41:27Z",
+  "closed_at": "2026-06-06T10:41:25Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-06T10:41:24Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1610",
+  "body": "## Summary\n\nThe `summary` field type was declared in `@objectstack/spec` but **never computed** by the engine — the value stayed empty. This makes it real: ObjectQL recomputes a parent's roll-up summary (`count`/`sum`/`min`/`max`/`avg` over a child field) automatically whenever a child record is inserted, updated, or deleted.\n\nThis is the server-side counterpart to the master-detail work — parent totals no longer need to be summed on the client; the server is the single source of truth.\n\n## Changes\n\n**`@objectstack/spec`**\n- `summaryOperations` gains optional `relationshipField` (the child→parent FK). Auto-detected from the child's `lookup`/`master_detail` field whose `reference` points back at the parent when omitted.\n\n**`@objectstack/objectql`**\n- After `afterInsert`/`afterUpdate`/`afterDelete` on a child, the engine resolves the affected parent (current FK + prior FK on update/delete so a re-parented or removed child updates the old parent too), re-aggregates the child collection, and writes the result onto the parent's summary field.\n- Runs in the caller's execution context → when a transaction is open (e.g. the cross-object `/api/v1/batch`) the rollup commits **atomically** with the child writes.\n- Lazy child→summary descriptor index, invalidated on package registration.\n- Empty collections → `0` for count/sum, `null` for min/max/avg.\n\n**Showcase**\n- `showcase_project.task_count` (COUNT) + `total_estimate` (SUM of `showcase_task.estimate_hours`) demonstrate the feature.\n\n## Testing\n\n- `summary-rollup.test.ts` — 4 unit tests (sum + count on insert, recompute on update, delete→0, parent isolation).\n- Full **objectql 530** + **spec 6646** suites pass.\n- **Live-verified against the real SQL driver** via `/api/v1/batch` (objectui `e2e/live/summary-rollup.spec.ts`, 2 passing): SUM/COUNT computed on atomic create; recomputed to 0 on child delete.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

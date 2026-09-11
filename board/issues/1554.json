@@ -1,0 +1,33 @@
+{
+  "number": 1554,
+  "kind": "issue",
+  "title": "lint: `required/label` false-positives on list-views (checks top-level view.label; schema only supports list.label)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-03T02:56:56Z",
+  "updated_at": "2026-06-03T06:28:11Z",
+  "closed_at": "2026-06-03T06:28:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1554",
+  "body": "## Summary\n\n`objectstack lint` rule **`required/label`** false-positives on standard list-views. For every view in a stack it checks `view.label` (top-level), but the supported view schema places the label inside `list.label` / `listViews.*.label` — a **top-level `label` is rejected by the `defineView` types and stripped by the compiler**. So a correctly-authored app reports one `required/label` error per view, and the rule is effectively unsatisfiable.\n\n## Repro\n\nAny app whose views use the canonical `defineView({ list: { label: '…', … } })` shape (incl. `examples/app-crm`). `objectstack lint` →\n```\n✗ View \"?\" is missing a label\n    required/label  at views[0].label\n… (one per view)\n```\nAdding a top-level `label`/`name` to `defineView({...})` fails `tsc` (`Object literal may only specify known properties, and 'name' does not exist in type …`) and is dropped by `objectstack validate`, so the lint error persists.\n\n## Source\n\n`packages/cli/src/commands/lint.ts` (~L147):\n```ts\npush(checkLabelExists(view, `${viewPath}.label`, 'View'));\n```\n`checkLabelExists` tests `item.label`, but a view's display label lives at `view.list.label` (or `view.listViews.<key>.label`).\n\n## Suggested fix\n\nResolve the view label from where the schema actually stores it, e.g. check `view.label ?? view.list?.label ?? Object.values(view.listViews ?? {})[0]?.label` before flagging `required/label` — or scope the rule to `list`/`listViews` entries.\n\n## Impact\n\nMakes `objectstack lint` unusable as a hard CI gate for any view-bearing app (we had to run it advisory in objectstack-ai/hotcrm). Found during the 7.4→7.7 upgrade (objectstack-ai/hotcrm#365).\n"
+}
