@@ -239,6 +239,10 @@ export const AgentSchema = lazySchema(() => strictObject({
     'This is NOT a rename — there is no key the value moves to: the migration ' +
     'DELETES the key and emits a notice naming each tool that was listed, and ' +
     'you re-declare each one in a skill by hand. ' +
+    'ADR-0064 itself still reads `Proposed` and is cloud-owned — that scopes its ' +
+    'RUNTIME half (tool resolution, which lives in cloud `service-ai`), not this ' +
+    'rejection: the authoring invariant binds you here, and ADR-0109 ' +
+    '(Accepted — implemented) is the in-repo record that carries it. ' +
     'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
 
