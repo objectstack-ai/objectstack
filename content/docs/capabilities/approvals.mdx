@@ -8,7 +8,18 @@ Discounts, contracts, spend — anything that needs a human "yes" becomes an app
 
 ## Who approves — eight resolution styles
 
-A specific person · everyone holding a position (e.g. sales managers) · the submitter's direct manager · a team · a department (optionally including sub-departments) · organization leadership · **a person named on the record itself** (e.g. the "regional director" field) · a shared queue (first responder claims it).
+A specific person · everyone holding a position (e.g. sales managers) · the submitter's direct manager (needs a provisioned reporting chain — see below) · a team · a department (optionally including sub-departments) · organization leadership · **a person named on the record itself** (e.g. the "regional director" field) · a shared queue (first responder claims it).
+
+<Callout type="warn">
+**Routing to the submitter's manager needs a reporting chain you provide.** Unlike a position you
+staff, a team you add people to, or a field you name on the record, this style does not get its
+data from inside the product: it resolves `sys_user.manager_id`, and no Console field, data-API
+write or auth admin endpoint sets that column. Your own provisioning fills it — a seed or other
+system-context write, or a SCIM / directory-sync path your deployment supplies. Until it is
+filled, a manager-only approval step resolves to nobody and the request waits. The exact remedy,
+and the fallback that needs no provisioning at all, are in
+[Automation → Approvals](/docs/automation/approvals).
+</Callout>
 
 ## How it passes — four decision modes
 

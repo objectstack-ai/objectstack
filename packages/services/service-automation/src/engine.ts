@@ -4865,19 +4865,108 @@ export class AutomationEngine implements IAutomationService {
 
             const durationMs = Date.now() - startTime;
 
-            // Record execution log
-            const logged = this.recordLog({
-                id: runId,
-                flowName,
-                flowVersion: flow.version,
-                status: 'completed',
-                startedAt,
-                completedAt: new Date().toISOString(),
-                durationMs,
-                trigger: buildRunTrigger(context),
-                steps,
-                output,
-            }, context);
+            // [#16274] THE RUN IS OVER AND IT SUCCEEDED. Everything from here
+            // to the return is BOOKKEEPING ABOUT that fact, and the `catch`
+            // below this `try` exists for NODE failures — so a throw out of the
+            // history write was handled as though a node had thrown: the arm
+            // recorded a `failed` row carrying the history driver's own text as
+            // the run's error and answered `status: 'failed'` for a run whose
+            // every node succeeded. This is the guard PR #16273 landed on
+            // {@link resumeInternal}'s completion path, now on the two
+            // INITIAL-execution paths that card deliberately scoped out — this
+            // one and {@link executeWithoutRetry}'s.
+            //
+            // ⚠️ MEASURED, and sharper than the report assumed: under
+            // `errorHandling.strategy: 'retry'` that false `failed` is handed
+            // to {@link retryExecution} by the strategy branch in the catch
+            // below, whose loop reads `result.success` — so it RE-EXECUTES a
+            // flow that already finished. `1 + maxRetries` runs of every node,
+            // unattended, inside this one call, with the side effects repeated
+            // each time and one `failed` history row per attempt. That is the
+            // DOUBLE RUN #15944 was graded sharp for, reached here with no
+            // operator action at all, where #15944's needed an operator to
+            // restore and resume.
+            //
+            // Two statements inside `recordLog` reach that catch on the
+            // terminal path, and neither is hypothetical:
+            //
+            //  1. the run-summary line `this.logger.info(line, meta)` — on by
+            //     default (`runSummaryLog: 'info'`) and calling a
+            //     HOST-INJECTED `Logger`, so it needs no store at all;
+            //  2. `store.recordTerminal(record)` throwing SYNCHRONOUSLY — the
+            //     `void write.catch(...)` beneath that call only ever sees a
+            //     returned promise's rejection (both shipped stores are
+            //     `async` and cannot; `SuspendedRunStore` is an exported
+            //     interface with an optional `recordTerminal`, so a host store
+            //     is unconstrained, and one returning a non-thenable makes
+            //     `write.catch` itself a synchronous `TypeError`). On THAT
+            //     variant the unguarded code did not even answer `failed`: the
+            //     catch arm's own `recordLog({ status: 'failed' })` threw again
+            //     out of the same store and escaped `execute()` entirely,
+            //     rejecting a promise `AutomationResult` is declared for.
+            //
+            // The guard restores the invariant `recordLog`'s own doc states —
+            // "a history write must NEVER block or break the run that produced
+            // it" — which that call was relied upon to keep and did not.
+            //
+            // ⛔ NOT a widening of anything: no exit gains a status it did not
+            // have, the node-failure arm below is untouched (a genuine node
+            // throw still lands there, still records `failed`, still retries),
+            // and the failure is REPORTED rather than swallowed — see the
+            // catch.
+            let logged: ExecutionLogEntry | undefined;
+            try {
+                logged = this.recordLog({
+                    id: runId,
+                    flowName,
+                    flowVersion: flow.version,
+                    status: 'completed',
+                    startedAt,
+                    completedAt: new Date().toISOString(),
+                    durationMs,
+                    trigger: buildRunTrigger(context),
+                    steps,
+                    output,
+                }, context);
+            } catch (bookkeeping) {
+                // #4632 verdict: DURABILITY, so `error` — the caller is told
+                // the truthful thing (the run completed), which is exactly
+                // what makes the rest invisible from the outside: the terminal
+                // history row never landed, nothing retries it, and no
+                // envelope carries a word about it. Consequence and fix in the
+                // first line, per AGENTS.md. Said ONCE per run, not once per
+                // failed write.
+                //
+                // ⚠️ The level is the precedent's (#16273, #15555) and is NOT
+                // a #13398-class raise: that ruling forbids raising a site to
+                // `error` where doing so means GROWING `error?` onto a
+                // published sink that lacks it, and this sink — `Logger` from
+                // `@objectstack/spec/contracts` — declares `error(message,
+                // error?, meta?)` as a REQUIRED member (only `fatal?`,
+                // `child?` and `withTrace?` are optional). Nothing is widened,
+                // which is also why the two precedents on this same sink could
+                // land `error`.
+                //
+                // THIRD argument per `error(message, error?, meta?)`; the
+                // `Error` slot stays empty on purpose (#5575), and the thrown
+                // text goes to the structured slot rather than into the
+                // message (#6499).
+                this.logger.error(
+                    `[Automation] run '${runId}' of flow '${flowName}' COMPLETED successfully but its ` +
+                        `run-history bookkeeping threw, so its terminal history row never landed — nothing ` +
+                        `retries it, the caller is told the run succeeded, and after the next restart this ` +
+                        `run is invisible to the Runs surfaces while the approvals sweeps read it as ` +
+                        `never-finished. The run itself is COMPLETE and must NOT be re-run or retried. Fix ` +
+                        `the history failure in this record's meta.`,
+                    undefined,
+                    describeThrownForLog(bookkeeping),
+                );
+            }
+            // [#16274] Recomputed when the guard above had to abandon
+            // `recordLog`: the same pure function of the same steps that
+            // `recordLog`'s own first statement runs, so the two spellings
+            // cannot disagree. Same shape as `resumeInternal`'s (#15944).
+            const summary = logged?.summary ?? summarizeRun(steps);
 
             return {
                 success: true,
@@ -4908,7 +4997,7 @@ export class AutomationEngine implements IAutomationService {
                 // #4354 — hand the counts back synchronously so a caller
                 // (a `subflow` roll-up, a runtime test asserting the sweep wrote
                 // something) never has to re-read the run to learn what it did.
-                summary: logged.summary,
+                summary,
             };
         } catch (err: unknown) {
             // A node asked to suspend the run (ADR-0019 durable pause). Snapshot
@@ -10154,18 +10243,64 @@ export class AutomationEngine implements IAutomationService {
             }
 
             const durationMs = Date.now() - startTime;
-            const logged = this.recordLog({
-                id: runId,
-                flowName,
-                flowVersion: flow.version,
-                status: 'completed',
-                startedAt,
-                completedAt: new Date().toISOString(),
-                durationMs,
-                trigger: buildRunTrigger(context),
-                steps,
-                output,
-            }, context);
+            // [#16274] The SECOND initial-execution instance of the guard
+            // above in `execute()` — the retry path's own completion site, and
+            // the one where the consequence was measured worst. This method IS
+            // a retry attempt (it is only ever reached from
+            // {@link retryExecution}), so a `failed` answer here does not just
+            // mislead a caller: it is read by the loop that drives this method,
+            // which re-enters it for the next attempt. An attempt whose every
+            // node SUCCEEDED and whose only failure was its own history write
+            // therefore burned the rest of the budget re-running the flow,
+            // `1 + maxRetries` times in total, each attempt writing one more
+            // `failed` row for work that had already completed.
+            //
+            // ⚠️ Fixing `execute()` alone would NOT have closed that: a flow
+            // under `strategy: 'retry'` whose attempt 2 completes leaves
+            // through THIS exit and never crosses `execute()`'s again — the
+            // seventh instance of this method's documented drift from
+            // `execute()` (#9378, #9415, #9414, #9510, #9704, #9889 before it),
+            // and the same chokepoint discipline applies: one shape, both
+            // attempt paths.
+            //
+            // The reachable statements, the invariant and the #13398 reading
+            // are all stated at the `execute()` site; this is the same guard,
+            // not a second design.
+            let logged: ExecutionLogEntry | undefined;
+            try {
+                logged = this.recordLog({
+                    id: runId,
+                    flowName,
+                    flowVersion: flow.version,
+                    status: 'completed',
+                    startedAt,
+                    completedAt: new Date().toISOString(),
+                    durationMs,
+                    trigger: buildRunTrigger(context),
+                    steps,
+                    output,
+                }, context);
+            } catch (bookkeeping) {
+                // #4632 verdict: DURABILITY, so `error` — see the `execute()`
+                // site for why this is outside #13398's class. The message
+                // names the ATTEMPT, because the run id an operator finds in
+                // the Runs surfaces is this attempt's own and not the failed
+                // attempt's. Said ONCE per run, not once per failed write.
+                this.logger.error(
+                    `[Automation] run '${runId}' of flow '${flowName}' COMPLETED successfully on a RETRY ` +
+                        `attempt but its run-history bookkeeping threw, so its terminal history row never ` +
+                        `landed — nothing retries it, the caller is told the run succeeded, and after the next ` +
+                        `restart this run is invisible to the Runs surfaces while the approvals sweeps read it ` +
+                        `as never-finished. The run itself is COMPLETE and must NOT be re-run or retried. Fix ` +
+                        `the history failure in this record's meta.`,
+                    undefined,
+                    describeThrownForLog(bookkeeping),
+                );
+            }
+            // [#16274] The same recomputation as the `execute()` site's: one
+            // pure function of the same steps, so the abandoned `recordLog`
+            // costs the caller no counts.
+            const summary = logged?.summary ?? summarizeRun(steps);
 
             // #4354 — a retried run reports its own attempt's counts, not the
             // failed one's: `retryExecution` returns THIS result on success.
@@ -10175,7 +10310,7 @@ export class AutomationEngine implements IAutomationService {
             // The author's completion text has to be produced here as well, or
             // `successMessage` would be a function of which attempt happened to
             // work — the same route-dependent shape the fix is removing.
-            return { success: true, output, durationMs, successMessage: flow.successMessage, summary: logged.summary };
+            return { success: true, output, durationMs, successMessage: flow.successMessage, summary };
         } catch (err: unknown) {
             // [#9510] A node asked to suspend the run (ADR-0019 durable pause)
             // — here, on a RETRY attempt, the only way this method is ever
