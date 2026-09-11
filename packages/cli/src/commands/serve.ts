@@ -161,11 +161,20 @@ import { SEMCONV, OBSERVABILITY_METRICS_SERVICE, type MetricsRegistry } from '@o
 //
 // The canonical home for this list is `@objectstack/observability` — the
 // package BOTH sides already import (statically, a few lines above; the cloud
-// file imports it too) — not these two comments pointing at each other, which
+// file imports it too) — not these comments pointing at each other, which
 // is how the duty decayed to begin with: it is one-sided today, the cloud file
 // carries no reciprocal sentence, so nobody renaming a name over there is
 // prompted to come back here. Until the list lives in that package, this block
 // is it, and moving the cloud half is a change in the cloud repo (#17693).
+//
+// ⚠️ And the carriers are not two but three:
+// `content/docs/deployment/environment-variables.mdx` (`## Observability`)
+// publishes this same list with types and defaults, and it is the one most
+// readers reach first. Its `OS_OBS_SERVICE_NAME` row states the framework
+// default with no note that the cloud host differs on purpose, so the
+// NAMES-only rule above has to be honoured there too. Fixing that page is out
+// of this block's scope; the caveat rides with the canonical-home decision
+// (#17693).
 //   OS_OBS_EXPORTER       noop (default) | console | json | otlp
 //   OS_OTLP_ENDPOINT      OTLP/HTTP root, e.g. https://otlp.grafana.net/otlp
 //   OS_OTLP_HEADERS       comma-separated Key=Value; values may be URL-encoded
