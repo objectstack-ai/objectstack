@@ -385,6 +385,16 @@ const WIDGET_TYPE_DEFAULT = 'metric';
  * {@link GlobalFilterSchema} — and this follows it rather than inventing a
  * second shape.
  *
+ * ⚠️ What the export BUYS, stated precisely, because the looser version of this
+ * sentence is false. Attaching by identifier does NOT make the rule survive a
+ * `.shape` mirror — it only makes re-attachment POSSIBLE. Probed on this
+ * schema: `z.strictObject(DashboardWidgetSchema.shape)` ACCEPTS a
+ * `horizontal-bar` widget carrying `stageOrder` and reports zero object-level
+ * checks, while `.extend({})` keeps the refusal; a lit control (`type:
+ * 'ziggurat'`) is refused by BOTH, so the mirror does carry the fields and it
+ * is precisely the object-level check that is dropped. A mirror gets this rule
+ * only by importing the export and chaining it — see non-coverage 4 below.
+ *
  * ## What was wrong
  *
  * `options` is an open bag and `stageOrder` was an ungated member of it, so a
@@ -407,7 +417,7 @@ const WIDGET_TYPE_DEFAULT = 'metric';
  *
  * ## What this check deliberately does NOT reach
  *
- * Three shapes, named so the gate is not read as complete:
+ * Five shapes, named so the gate is not read as complete:
  *
  *  1. **A widget that declares no `type`.** `type` carries
  *     `.default(WIDGET_TYPE_DEFAULT)` and zod applies defaults BEFORE
@@ -428,6 +438,32 @@ const WIDGET_TYPE_DEFAULT = 'metric';
  *     stage in the sentinel position; whether a stored value exists is a fact
  *     about the dataset, not about the widget, and is not reachable from this
  *     schema.
+ *  4. **objectui's CLIENT-SIDE authoring door, which is a `.shape` mirror and
+ *     therefore runs no object-level check of this schema's at all.** At the
+ *     pinned `.objectui-sha` `53ded82bf7a494f54e344e19099dbf00854b8694`,
+ *     `packages/types/src/zod/complex.zod.ts:627` builds its own
+ *     `DashboardWidgetSchema` from
+ *     `specFieldsExcept(SpecDashboardWidgetSchema.shape, …).extend({…}).strict()`,
+ *     and that package re-attaches NONE of this spec's exported checks — 0
+ *     occurrences of any of the five names in `packages/types/src`, against a
+ *     lit control of 17 `specFieldsExcept` call sites and the mirror line
+ *     itself present. So until objectui imports and chains
+ *     {@link checkDashboardWidgetStageOrder}, its door keeps accepting
+ *     `stageOrder` on a `bar`: this refusal is the PUBLISH door's, not the
+ *     editor's. ⚠️ Note what that mirror does to `type` — it drops the key
+ *     from the spread and redeclares it `DashboardWidgetTypeSchema.optional()`
+ *     with NO default, so a typeless widget reaches a re-attached check as
+ *     `undefined` rather than as `metric`. This function defaults it itself
+ *     for exactly that caller, so re-attaching IS sufficient; the message's
+ *     "resolves to `metric`" sentence is this schema's vocabulary, and a
+ *     mirror that wants its own wording writes its own.
+ *  5. **Consumers that DERIVE from this schema with `.omit()` / `.pick()` /
+ *     `.partial()`.** zod 4 throws on all three once an object carries a
+ *     refinement (`.omit() cannot be used on object schemas containing
+ *     refinements`), so this change converts those three from working to
+ *     throwing. Latent rather than live: no consumer in either repo derives
+ *     the widget schema that way today. `.extend()` is unaffected and keeps
+ *     the refusal, which is the spelling the mirrors actually use.
  */
 export function checkDashboardWidgetStageOrder(
   widget: { type?: unknown; options?: { stageOrder?: unknown } | null },
@@ -436,7 +472,16 @@ export function checkDashboardWidgetStageOrder(
   const stageOrder = widget.options?.stageOrder;
   if (stageOrder === undefined) return;
 
-  const type = widget.type;
+  // `?? WIDGET_TYPE_DEFAULT` is UNREACHABLE through this schema's own door —
+  // zod applies `type`'s default before object-level checks, so `widget.type`
+  // is always a string by the time this runs, and the accept set is unmoved.
+  // It is here for the OTHER caller this function has: a mirror that imports
+  // the export and chains it onto a shape whose `type` carries no default (see
+  // non-coverage 4). Without it the export would refuse strictly less than the
+  // door it is exported FROM, which is the one thing an exported check may not
+  // do — `object-refinement-check-exports.test.ts` compares the two on the RAW
+  // fixture and pins the equivalence.
+  const type = widget.type ?? WIDGET_TYPE_DEFAULT;
   if (type === STAGE_ORDER_HONOURING_TYPE) return;
   // A `type` that is not a declared member never reaches here — measured: zod
   // treats `ChartTypeSchema`'s `invalid_value` as aborting, so the object-level
