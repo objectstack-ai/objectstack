@@ -167,6 +167,20 @@ export type CacheAvalanchePrevention = z.input<typeof CacheAvalanchePreventionSc
 /** Post-parse shape of {@link CacheAvalanchePrevention} — defaults applied, transforms run (ADR-0122). */
 export type CacheAvalanchePreventionParsed = z.infer<typeof CacheAvalanchePreventionSchema>;
 
+// Retired enum-value prescription. Declared with `//` (never `/** */`) so it cannot
+// be mistaken for the warmup schema's own doc blurb by build-docs.
+const WARMUP_STRATEGY_SCHEDULED_RETIRED =
+  "`CacheWarmup.strategy: 'scheduled'` was removed in @objectstack/spec 18 (ADR-0049 "
+  + 'enforce-or-remove) — the cron key it selected, `CacheWarmup.schedule`, was deleted in '
+  + 'this same major (#16320), and no cache-warmup engine has ever existed on the platform, '
+  + 'so the value named a cadence with nothing to configure it and nothing to run it. Use '
+  + "`'eager'` to warm at startup or `'lazy'` to warm on first access. For a warmup on a "
+  + 'cadence, declare a `job` with `schedule.expression` (`system/job.zod.ts`) whose handler '
+  + 'does the warming — that is the one cron slot this platform evaluates. There is no '
+  + '`os migrate meta` prescription to replay: `CacheWarmup` is bound to no metadata type '
+  + 'and embedded in no stack collection, so no authored source and no stored row has ever '
+  + 'carried this value.';
+
 /**
  * Cache Warmup Strategy Schema
  *
@@ -176,18 +190,34 @@ export const CacheWarmupSchema = lazySchema(() => z.object({
   /** Enable cache warming */
   enabled: z.boolean().default(false).describe('Enable cache warmup'),
   /** Warmup strategy */
-  strategy: z.enum(['eager', 'lazy', 'scheduled']).default('lazy')
-    .describe('Warmup strategy: eager (at startup), lazy (on first access), scheduled (cron)'),
+  strategy: z.enum(['eager', 'lazy'], {
+    // Only the value that USED to be legal gets the retirement prescription —
+    // telling the author of `sheduled` that their value "was removed" would
+    // misinform. Everything else keeps zod's own enum message, which already
+    // lists the legal values. (The `managedBy: 'system'` / `crypto.hash`
+    // precedent — data/object.zod.ts, data/hook-body.zod.ts.)
+    error: (issue) => (issue.input === 'scheduled' ? WARMUP_STRATEGY_SCHEDULED_RETIRED : undefined),
+  }).default('lazy')
+    .describe('Warmup strategy: eager (at startup), lazy (on first access)'),
   /*
    * `CacheWarmup.schedule` was DELETED here in @objectstack/spec 18 (ADR-0049
    * enforce-or-remove, #16320): declared, parsed into the cron envelope and read by
    * nothing — `CacheWarmupSchema` has no consumer outside `packages/spec`, so no
    * warmup ever ran on a schedule. Deleted outright — no `retiredKey()` tombstone, no
    * D2 conversion, no D3 semantic entry (maintainer ruling 2026-09-10 on the
-   * retirement PR). The `strategy` enum keeps its `scheduled` member: it is a value,
-   * not a position this ruling names, and it was exactly as inert before. The one cron
-   * slot the platform evaluates is `Job.schedule.expression` (`system/job.zod.ts`): a
-   * warmup on a cadence is a job whose handler you write.
+   * retirement PR). The one cron slot the platform evaluates is
+   * `Job.schedule.expression` (`system/job.zod.ts`): a warmup on a cadence is a job
+   * whose handler you write.
+   *
+   * The `strategy` enum's `scheduled` member left in the SAME major, one card later:
+   * that ruling declined it as "a value, not a position this ruling names", which is
+   * a statement about the ruling's scope and not a finding that the value was sound.
+   * With the cron key gone it named a cadence with no key to carry it and no engine
+   * to run it, while its own `.describe()` still promised "(cron)". An enum-VALUE
+   * narrowing is invisible to all four surface ratchets (they key on positions, on
+   * expression-typed slots and on names — never on a def's value set), so the
+   * prescription hangs on the enum's own `error` map above, and the D3 semantic entry
+   * `cache-warmup-scheduled-strategy-retired` IS the declaration.
    */
   /** Keys/patterns to warm up */
   patterns: z.array(z.string()).optional().describe('Key patterns to warm up (e.g., "user:*", "config:*")'),
