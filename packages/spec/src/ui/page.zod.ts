@@ -67,14 +67,19 @@ export const PageRegionSchema = lazySchema(() => strictObject({
 // retirements recorded as "a node-level refusal is not expressible here". It is
 // expressible one level up, and this map is what makes it so: the union carries
 // a check against it (see `PageComponentSchema.type`), so the name is refused
-// with this prescription at the element's own path (`code: 'custom'`), and
-// `ComponentPropsMap['user:profile']` (component.zod.ts) refuses the props bag
-// with the same string for every reader that dispatches on the row. One
-// prescription, three doors, no drift.
+// with this prescription at the element's own path (`code: 'custom'`), and the
+// kept `ComponentPropsMap` row (component.zod.ts) refuses the props bag with
+// the same text for every reader that dispatches on the row — as `z.never` for
+// `user:profile`, which never had an authorable key, and as the per-key
+// `retiredKey` tombstones whose element-grain tail this map reuses for the two
+// elements. One prescription, three doors, no drift.
 //
 // Adding a member here is an accept-set narrowing (Clause ②) — a contract
 // decision, never a convenience: an entry needs the ruling that retired the
 // type, the measured zero-renderer finding, and the row + enum edits beside it.
+// For a member retired BEFORE this map existed, one more thing: that member's
+// own docblock must already record the surviving bare node as unintended —
+// family resemblance to a member already here is NOT a reason to add one.
 //
 // The prescription names no issue id on purpose — `check:doc-authoring` refuses
 // citation-shaped tokens in text printed AT the customer (maintainer ruling
@@ -93,6 +98,34 @@ export const RETIRED_PAGE_COMPONENT_TYPES: ReadonlyMap<string, string> = new Map
     + 'additively). Removed from `PageComponentType` in @objectstack/spec 17 (ADR-0049 '
     + 'enforce-or-remove); the name stays refused here so the failure lands in front of the '
     + 'author, not the user.'],
+  // #9220 / #9249, ADR-0049 enforce-or-remove at ELEMENT grain. The node-level
+  // half of two retirements that could only reach their KEYS when they landed:
+  // each element's own docblock (component.zod.ts) recorded the remainder as
+  // structural — "A bare node with empty `properties` parses clean (the open
+  // `type` union accepts any string, so a node-level refusal is not expressible
+  // here)". It is expressible HERE, and this map is what makes it so.
+  //
+  // The prescription is the element-grain TAIL of that element's own
+  // `retiredKey` tombstones, reused verbatim: the node message is the key
+  // message with its `property \`<key>\`` clause dropped, so the two doors
+  // carry one text and cannot drift (pinned in `component.test.ts`). No new
+  // prose is authored here.
+  ['element:filter', '`element:filter` was removed in @objectstack/spec 17 '
+    + '(ADR-0049) — the whole `element:filter` element is retired: no renderer for it '
+    + 'ever shipped in objectui, framework or cloud (Studio\'s designer palette lists it as a '
+    + 'no-renderer exclusion), so every key on this element was a capability claim nothing '
+    + 'kept. Delete the `element:filter` component; list surfaces own their filtering — use a '
+    + "view's `userFilters` quick-filter bar or the list toolbar's filter builder. "
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.'],
+  ['element:form', '`element:form` was removed in @objectstack/spec 17 '
+    + '(ADR-0049) — the whole `element:form` element is retired: no renderer for it '
+    + 'ever shipped in objectui, framework or cloud (Studio\'s designer palette lists it as a '
+    + 'no-renderer exclusion — "use the object-bound `object-form` block"), so every key on '
+    + 'this element was a capability claim nothing kept. Delete the `element:form` component '
+    + 'and use the object-bound `object-form` block instead — it is rendered, '
+    + 'designer-publishable, and carries the same intent (`objectName`, `fields`, `mode`, '
+    + '`submitText`). '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.'],
 ]);
 
 /**
@@ -102,12 +135,14 @@ export const RETIRED_PAGE_COMPONENT_TYPES: ReadonlyMap<string, string> = new Map
  * objectstack#12183 ask, ruled 2026-09-01): a user profile is shell chrome (the
  * avatar menu), no mainstream product makes it a page-placeable component, and
  * no renderer for it ever existed anywhere (objectui#7135 measured the zero
- * with a positive control in the same query shape). Unlike the `element:filter`
+ * with a positive control in the same query shape). Like the `element:filter`
  * / `element:form` removals below, dropping the value is NOT de-advertisement
  * only: the name is refused through {@link RETIRED_PAGE_COMPONENT_TYPES} — by
  * this enum's error map, by the check on `PageComponentSchema.type` that the
  * open string arm would otherwise defeat, and by the kept `ComponentPropsMap`
- * row.
+ * row. (`user:profile` was refused by name from the day it left the enum; the
+ * two elements left the enum first and were refused by name later, once this
+ * map existed to express it.)
  */
 export const PageComponentType = z.enum([
   // Structure
@@ -130,13 +165,16 @@ export const PageComponentType = z.enum([
   'element:text', 'element:number', 'element:image', 'element:divider',
   // Interactive Elements (Phase B — Element Library)
   // `element:filter` REMOVED (#9220, ADR-0049): retired at element grain — no
-  // renderer ever shipped anywhere. Dropping the enum value is de-advertisement
-  // only (the `type` union's open string arm still accepts any string); the
-  // LOUD half of the retirement is `ElementFilterPropsSchema`'s retiredKey
-  // tombstones, dispatched through the kept `ComponentPropsMap` row.
+  // renderer ever shipped anywhere. Dropping the enum value was de-advertisement
+  // only while the `type` union's open string arm still accepted the name; the
+  // LOUD half of the retirement was `ElementFilterPropsSchema`'s retiredKey
+  // tombstones, dispatched through the kept `ComponentPropsMap` row. The bare
+  // node that survived both is refused by name through
+  // `RETIRED_PAGE_COMPONENT_TYPES` above, with the tombstones' own tail.
   // `element:form` REMOVED (#9249, ADR-0049): the same shape one element over
-  // — retired at element grain, same mechanism; the tombstones' prescription
-  // names the live replacement, the object-bound `object-form` block (#7751).
+  // — retired at element grain, same mechanism, same node-level refusal; the
+  // tombstones' prescription names the live replacement, the object-bound
+  // `object-form` block (#7751).
   'element:button', 'element:record_picker', 'element:text_input'
 ], {
   // Only a value that USED to be legal gets a retirement prescription; every
@@ -247,7 +285,8 @@ export const PageComponentSchema = lazySchema(() => strictObject({
    * here, with its prescription at this node's path. The enum's own error map
    * cannot deliver it through this door (the string arm admits whatever the
    * enum refuses), which is the gap the `element:filter` / `element:form`
-   * retirements recorded as "a node-level refusal is not expressible here".
+   * retirements recorded as "a node-level refusal is not expressible here" —
+   * and which this check now closes for those two members as well.
    */
   type: z.union([
     PageComponentType,
@@ -263,7 +302,7 @@ export const PageComponentSchema = lazySchema(() => strictObject({
     if (guidance) {
       ctx.addIssue({ code: 'custom', message: guidance, params: { retiredComponentType: type } });
     }
-  }).describe('Component Type — a standard vocabulary member, or a custom/registered component type in its own namespace (e.g. `object-grid`, `mcp:connect-agent`). The spec\'s own type namespaces are a closed vocabulary at author time: inside them, a type the vocabulary does not declare is refused by `os validate` / `os build` / `os lint` (rule `component-type-unknown`); a type the vocabulary RETIRED by name (`user:profile` — shell chrome, not author-placeable) is refused at the parse itself, with the retirement prescription.'),
+  }).describe('Component Type — a standard vocabulary member, or a custom/registered component type in its own namespace (e.g. `object-grid`, `mcp:connect-agent`). The spec\'s own type namespaces are a closed vocabulary at author time: inside them, a type the vocabulary does not declare is refused by `os validate` / `os build` / `os lint` (rule `component-type-unknown`); a type the vocabulary RETIRED by name (`user:profile` — shell chrome, not author-placeable; `element:filter` and `element:form` — retired whole, no renderer for either ever shipped) is refused at the parse itself, with the retirement prescription.'),
   id: z.string().optional().describe('Unique instance ID'),
   
   /** Configuration */

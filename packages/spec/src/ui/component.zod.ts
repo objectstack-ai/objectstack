@@ -8,9 +8,9 @@ import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { ExpressionInputSchema } from '../shared/expression.zod';
 import { retiredKey } from '../shared/retired-key';
-// `user:profile`'s retirement prescription — one string, three doors (#14159):
-// the enum's error map and the `PageComponentSchema.type` check in page.zod.ts,
-// and the kept `ComponentPropsMap` row below (`retiredComponentProps`).
+// The retired page-component TYPES' prescriptions — one string per type, three
+// doors (#14159): the enum's error map and the `PageComponentSchema.type` check
+// in page.zod.ts, and the kept `ComponentPropsMap` rows below.
 import { RETIRED_PAGE_COMPONENT_TYPES } from './page.zod';
 // `element:record_picker`'s flat `sort` shorthand is the SAME contract as
 // `ElementDataSourceSchema.sort` (page.zod.ts) — one shape, imported from the
@@ -2051,10 +2051,13 @@ const elementFilterRetired = (key: string): string =>
  * props gate keeps DISPATCHING on `type: 'element:filter'` and refusing every
  * authored key with the prescription — deleting the row would demote the type
  * to an unregistered custom string the gate deliberately skips, turning a loud
- * retirement back into a silent no-op. A bare node with empty `properties`
- * parses clean (the open `type` union accepts any string, so a node-level
- * refusal is not expressible here); the migration strips the keys and leaves
- * exactly that bare, inert node.
+ * retirement back into a silent no-op. The bare node the migration leaves
+ * behind — it strips the keys and nothing else — used to parse clean, because
+ * the open `type` union accepts any string and a node-level refusal was not
+ * expressible here. It is expressible one level up: `element:filter` is a
+ * member of `RETIRED_PAGE_COMPONENT_TYPES` (page.zod.ts), so
+ * `PageComponentSchema` now refuses the node by name and hands the author the
+ * element-grain tail of these very tombstones.
  */
 export const ElementFilterPropsSchema = lazySchema(() => strictObject({
   surface: 'this `element:filter`',
@@ -2101,10 +2104,13 @@ const elementFormRetired = (key: string): string =>
  * props gate keeps DISPATCHING on `type: 'element:form'` and refusing every
  * authored key with the prescription — deleting the row would demote the type
  * to an unregistered custom string the gate deliberately skips, turning a loud
- * retirement back into a silent no-op. A bare node with empty `properties`
- * parses clean (the open `type` union accepts any string, so a node-level
- * refusal is not expressible here); the migration strips the keys and leaves
- * exactly that bare, inert node.
+ * retirement back into a silent no-op. The bare node the migration leaves
+ * behind — it strips the keys and nothing else — used to parse clean, because
+ * the open `type` union accepts any string and a node-level refusal was not
+ * expressible here. It is expressible one level up: `element:form` is a
+ * member of `RETIRED_PAGE_COMPONENT_TYPES` (page.zod.ts), so
+ * `PageComponentSchema` now refuses the node by name and hands the author the
+ * element-grain tail of these very tombstones.
  */
 export const ElementFormPropsSchema = lazySchema(() => strictObject({
   surface: 'this `element:form`',
@@ -3134,9 +3140,12 @@ export const ComponentPropsMap = {
   // that dispatches on the row (the #5068 props gate, `check-yaml-examples`,
   // the vocabulary's known set) keeps recognising the name and refuses it with
   // the prescription instead of skipping it as an unregistered custom string.
-  // Unlike those two, the WHOLE bag is refused — `{}` included — because the
-  // node itself is refused by name at `PageComponentSchema.type`; a row that
-  // accepted the empty bag would contradict the door one level up.
+  // All three names are refused at the node by `PageComponentSchema.type`; the
+  // rows differ only in what they have to say about a bag that door no longer
+  // lets through. This type never had an authorable key, so the WHOLE bag is
+  // refused — `{}` included. The two elements below carry six tombstoned keys
+  // each, where a per-key prescription says more than one whole-bag refusal
+  // could.
   'user:profile': retiredComponentProps('user:profile'),
 
   // Plugin console widgets — #11575, the #8691/#8744 mechanism two instances
