@@ -3,27 +3,53 @@
 /**
  * Build-time form-layout diagnostics (#2578).
  *
- * Authored form views carry field references and column-layout hints that are
- * Zod-valid but can be silently wrong at render time — the "parsed, unmarked,
- * silently inert" shape ADR-0078 prohibits. This lint catches the two that
- * matter for multi-column, AI-authored forms, uniformly for `os build` /
- * `os validate`, MCP authoring and hand authors (ADR-0019).
+ * Authored form views carry field and field-group references that are Zod-valid
+ * but can be silently wrong at render time — the "parsed, unmarked, silently
+ * inert" shape ADR-0078 prohibits. This lint catches them uniformly for
+ * `os build` / `os validate`, MCP authoring and hand authors (ADR-0019).
  *
- * Both rules are warnings, not errors — nothing is fully broken (an unknown
- * field name is skipped; an over-wide colSpan is clamped) — but each is almost
- * certainly an authoring mistake worth surfacing at author time:
+ * Every rule here is a warning, not an error — nothing is fully broken (an
+ * unknown field name is skipped) — but each is almost certainly an authoring
+ * mistake worth surfacing at author time:
  *
  * - `form-field-unknown` — a section references a field that is not on the
  *   form's bound object, so the field silently does not render.
- * - `absolute-colspan-discouraged` — a field uses the absolute `colSpan`. Under
- *   a per-surface DERIVED column count (mobile 1 / modal 2 / page 3-4) a fixed
- *   span only lines up at the one width the author imagined; the renderer
- *   clamps it. The robust primitive is the relative `span: 'full'`.
+ * - `form-section-group-unknown` — see {@link FORM_SECTION_GROUP_UNKNOWN}.
+ *
+ * ## Retired: `absolute-colspan-discouraged` (#17328)
+ *
+ * It fired on EVERY authored `colSpan`, `colSpan: 1` included, and asserted a
+ * rendering consequence: "the form's column count is derived per surface
+ * (mobile 1 / modal 2 / page 3-4), so a fixed span only aligns at one width".
+ * Measured in Chromium on a real authored 3-column section at all three of the
+ * widths that sentence names (390 / 720 / 1700), the misalignment does not
+ * happen. The span is emitted as ONE container-query-scoped class clamped to
+ * the section's declared column count, so it is grid-aligned at every width and
+ * rendered overflow is 0px in every configuration — including `colSpan: 4` in a
+ * 3-column section, the case that would overflow if the clamp did not work. The
+ * clamp is the REASON the message was false, and this file's own note above
+ * already recorded the clamp: it contradicted itself.
+ *
+ * The hint was the sharper half. It steered authors to `span: 'full'`, and
+ * `span: 'full'` and `colSpan: 4` compile to the IDENTICAL class
+ * (`@2xl:col-span-3`) and measure byte-identically — the rule warned about one
+ * of them and recommended the other. At the modal width `span: 'full'` renders
+ * pixel-identical to writing nothing at all, so an author who complied was left
+ * worse off than one who ignored it.
+ *
+ * With no authored `colSpan` shape left that misbehaves there was nothing to
+ * re-ground, so the rule was WITHDRAWN rather than narrowed: `colSpan: 1` emits
+ * no class at all (inert), a `colSpan` within the column count renders exactly
+ * as authored, and one above it clamps. `colSpan` itself is untouched and still
+ * parses — only the diagnostic is gone. ⛔ Do not reintroduce a colSpan warning
+ * from source reading: it takes a browser measurement naming an authored shape
+ * that actually misrenders, and a positive control proving the probe fires on
+ * it.
  *
  * Scope: every form view reachable from a `views[]` entry — the entry itself
  * when it IS a bare form view, plus the container's default `form` and each
  * `formViews.<key>`, through the shared `view-walk.ts` ladder (#6381; see
- * {@link formViewSites} for why reading only the first shape left both rules
+ * {@link formViewSites} for why reading only the first shape left the rules
  * reporting clean on real app metadata, #6251). Forms embedded inside page
  * component trees are a follow-up — the walk deliberately stays shallow so it
  * never guesses at an arbitrary component's object binding.
@@ -42,7 +68,6 @@ import { formViewSites, viewObjectName } from './view-walk.js';
 import { recordsOf } from './object-graph.js';
 
 export const FORM_FIELD_UNKNOWN = 'form-field-unknown';
-export const FORM_COLSPAN_ABSOLUTE = 'absolute-colspan-discouraged';
 /**
  * [#13855] A section's `group` names a field group the bound object does not
  * declare. The reference form inherits the section's whole membership from that
@@ -195,24 +220,6 @@ export function validateFormLayout(stack: AnyRec): FormLayoutFinding[] {
                 hint:
                   `Fix the field name, or add "${fname}" to ${objName}. Section field ` +
                   `references must match the object's field names exactly.`,
-              });
-            }
-
-            // ── (b) absolute colSpan → steer to the surface-independent span ──
-            const colSpan = isRec(entry) ? entry.colSpan : undefined;
-            if (colSpan != null) {
-              findings.push({
-                severity: 'warning',
-                rule: FORM_COLSPAN_ABSOLUTE,
-                where,
-                path: `${fpath}.colSpan`,
-                message:
-                  `${viewName}: field "${fname ?? '?'}" sets absolute colSpan ${String(colSpan)} — ` +
-                  `the form's column count is derived per surface (mobile 1 / modal 2 / page 3-4), ` +
-                  `so a fixed span only aligns at one width`,
-                hint:
-                  `Prefer span: 'full' (whole row at any column count), or omit for auto ` +
-                  `width. The renderer clamps colSpan to the current column count.`,
               });
             }
           }
