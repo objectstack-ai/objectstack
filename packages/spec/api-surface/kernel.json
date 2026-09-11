@@ -376,6 +376,7 @@
     "SBOMEntrySchema (const)",
     "SBOMParsed (type)",
     "SBOMSchema (const)",
+    "SEED_WRITE_EXECUTION_CONTEXT (const)",
     "SandboxConfig (type)",
     "SandboxConfigParsed (type)",
     "SandboxConfigSchema (const)",
