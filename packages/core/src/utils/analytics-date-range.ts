@@ -116,9 +116,21 @@ export interface ResolvedAnalyticsDateRange {
  * `this_week` ends at `next_week_start`, not at `week_end`. That is why this
  * table states the ends itself instead of reading the spec's prescription
  * pair: `DATE_RANGE_PRESET_MACRO_WINDOWS` is written for `$between`, whose
- * bare-day upper bound is INCLUSIVE of that whole day, so its ends are one day
- * earlier for the eight period presets. The STARTS agree exactly, and the test
- * pins that they do.
+ * bare-day upper bound is INCLUSIVE of that whole day, so its end names one
+ * CALENDAR day earlier than the token here — for EVERY calendar preset, with
+ * no remainder; the rolling ones are `null` on both sides and have no end to
+ * be earlier. ⛔ A uniform offset is still not a derivable one: every boundary
+ * here is a macro token the one resolver answers, so shifting the spec's day
+ * by one would be calendar arithmetic performed in this file — the second
+ * implementation the module header exists to refuse. ⛔ And it is a CALENDAR
+ * day, never 86_400_000 ms: `Pacific/Chatham` ends DST on a Sunday, so
+ * `this_week`'s own prescribed last day is 25 hours long there.
+ *
+ * The STARTS agree exactly, and the test pins BOTH halves — deriving the
+ * calendar/rolling split from the spec table rather than counting presets in
+ * this sentence, which is how the count here came to read "the eight period
+ * presets" and stayed there after `today` and `yesterday` were corrected to
+ * close on their own last day (#17341).
  */
 const PRESET_WINDOW_TOKENS: Readonly<
   Record<DateRangePreset, readonly [start: string, endBefore: string | null]>
