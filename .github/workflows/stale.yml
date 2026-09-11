@@ -54,3 +54,6 @@ jobs:
           
           # Remove stale label when updated
           remove-stale-when-updated: true
+
+      - name: Probe step for the issue 17382 acceptance run #NOT-A-COMMENT
+        run: echo probe
