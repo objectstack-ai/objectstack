@@ -38,9 +38,9 @@ watching it.
 edited file is shipped as source verbatim. Measured on the built artifact as
 well: the new sentence is present in **18** built files under `dist/` and the
 old spelling in **0**, with two untouched sentences from the same region
-(`navigate straight to the detail page` and the `filters` docblock's TRUE
-`Mutually exclusive with \`recordId\` / \`viewName\``) present in **18** each as
-the lit controls, so the zero is a reading and not a mistyped anchor. The
+(`navigate straight to the detail page`, and the `filters` docblock's own TRUE
+exclusivity claim over `recordId` / `viewName`) present in **18** each as the
+lit controls, so the zero is a reading and not a mistyped anchor. The
 declaration files do not carry it — this is a field-level docblock inside a Zod
 shape — which is why the reach is stated as the bundles and the shipped source
 rather than as `.d.ts`.
