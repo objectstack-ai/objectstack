@@ -570,8 +570,10 @@ stopping at the first, so one pass shows the whole hole.
 `os validate`, `os build` and `os lint` share one rule registry, so a config that
 passes any of them will not fail another on schema/predicate/binding grounds — a
 CLI test fails the build if a rule that can gate runs on fewer than all three
-(#4409). In a scaffolded project these are wired as `npm run validate` and
-`npm run build`; your `AGENTS.md` tells coding agents to run `npm run validate`
+(#4409). In a scaffolded project all three are wired as `npm run validate`,
+`npm run build` and `npm run lint` — the three `os init` templates (`app`,
+`plugin`, `empty`) and the `create-objectstack` blank template each declare all
+three scripts; your `AGENTS.md` tells coding agents to run `npm run validate`
 after editing metadata. See
 [Validating metadata](/docs/deployment/validating-metadata).
 </Callout>
@@ -1400,7 +1402,34 @@ os lint --score        # Append a 0-100 metadata quality score (letter-graded)
 os lint --fix          # Show what would be fixed (dry-run)
 os lint --strict       # Warnings fail the run too (exit 1); suggestions stay advisory
 os lint --json         # JSON output for CI
+os lint --skip-i18n    # Skip the translation coverage checks entirely
+os lint --include-platform     # Audit the platform built-in i18n keys too
+os lint --eval --eval-min 80   # Score the bundled generation corpus instead
 ```
+
+**Options.** Every flag the command declares, and its one positional:
+
+| Flag | What it does |
+|---|---|
+| `config` (positional) | Configuration file path. Omitted, the config is auto-detected — see [Config File Auto-Detection](#config-file-auto-detection) |
+| `--json` | Output as JSON, for CI. The verdict fields are described below |
+| `--fix` | Show what would be fixed (dry-run). It prints the suggested fix; it never writes your sources |
+| `--strict` | Fail the run (exit 1) on warning-severity findings too, exactly as an error does; suggestions stay advisory. Without it only errors fail |
+| `--score` | Print a 0-100 metadata-quality score (the lint rubric) for this project |
+| `--skip-i18n` | Skip translation coverage checks |
+| `--include-platform` | Also report i18n coverage for the platform built-in metadata forms — hidden by default because the platform packages ship those translations. This is the flag the `N i18n issue(s) hidden — rerun with --include-platform` hint names |
+| `--i18n-strict` | Treat missing translations in non-default locales as errors |
+| `--default-locale <code>` | Default locale for i18n coverage (the one that must be 100% translated). Defaults to the config's `i18n.defaultLocale`, else `en` |
+| `--eval` | Run the metadata-generation eval over the bundled golden corpus and report scores — a different run, see below |
+| `--eval-min <n>` | Minimum passing score per eval case (default `75`) |
+| `--generator <path>` | Path to a module that default-exports `(prompt, id) => stack`; enables live eval, scoring generated output instead of fixtures. Requires `--eval` |
+
+**`--eval` is a different run, not an extra check.** It short-circuits the
+project lint entirely and scores the bundled generation corpus, so it does not
+combine with the style flags above. `--generator` applies only inside it:
+passed without `--eval` the run exits **1** and says so on both faces, rather
+than accepting a flag nothing outside eval mode reads (which is what it did
+before #15550 — including for a generator path that did not exist).
 
 It does not replace `os validate`: `os lint` never parses the stack against the
 Zod schema (a schema error is `os validate`'s verdict to give), and it emits no
@@ -1750,7 +1779,7 @@ token at all the command exits `1` and tells you to run `os cloud login`.
 | `artifact` (positional) | — | Path to the compiled artifact (default `dist/objectstack.json`) |
 | `-s, --server <url>` | `OS_CLOUD_URL` | Control-plane URL. Default `https://cloud.objectos.ai`, or the URL recorded by `os cloud login` |
 | `-t, --token <key>` | `OS_CLOUD_API_KEY` | Bearer token; `$OS_TOKEN` and `~/.objectstack/cloud.json` are the fallbacks |
-| `--manifest-id <id>` | `OS_PACKAGE_MANIFEST_ID` | Reverse-domain package id. Default: `artifact.manifest.id`, else `local.` + a slug of the artifact name |
+| `--manifest-id <id>` | `OS_PACKAGE_MANIFEST_ID` | Reverse-domain package id. Default: `artifact.manifest.id`, else `local.` + a slug of `manifest.name`, else `local.` + a slug of the artifact filename. A derived default is **not guaranteed usable** — see below |
 | `-v, --version <semver>` | — | Version to publish. Default: `artifact.manifest.version`, else `0.0.0-dev.` + a timestamp |
 | `--display-name <name>` | — | Name shown in the Marketplace (default `artifact.manifest.name`) |
 | `--description <text>` | — | Short package description |
@@ -1771,6 +1800,20 @@ token at all the command exits `1` and tells you to run `os cloud login`.
 | `--license <spdx>` | — | SPDX identifier (`Apache-2.0`, `MIT`, …) |
 | `-n, --note <markdown>` | — | Release notes |
 | `--timeout <ms>` | `OS_CLOUD_TIMEOUT_MS` | HTTP timeout in milliseconds, default `120000`. `0` disables it |
+
+**The derived `local.` id is a candidate, not a guaranteed default.** A derived
+id is held to exactly the rule an explicit one is — `PackageSchema.manifestId`,
+the schema for the very column publish writes — and slugifying has no
+letter-first rule, so a manifest named `2024 App` derives `local.2024-app`,
+which that schema rejects. `os package publish` then **refuses before any
+network call**, quoting the schema and naming which of the three sources above
+the id came from, rather than normalising it into a different permanent
+identifier or forwarding one the control plane would reject: `manifest_id` is
+immutable once published, so an id nobody wrote cannot be renamed afterwards.
+The remedy is the one the refusal prints for that source — pass
+`--manifest-id`, set `manifestId` in `objectstack.manifest.json`, or declare
+`manifest.id` in `objectstack.config.ts` and rebuild. A declared
+`manifest.id` is used or refused, never silently replaced by a derived one.
 
 **`objectstack.manifest.json` supplies the listing fields.** When that file is
 present in the working directory, publish reads `manifestId`, `displayName`,
