@@ -14,22 +14,4 @@
 
 **Latency bound.** A notification emitted in the process that runs the dispatcher goes out on the tick `wake()` starts, no later than before. While idle, work nobody announces is noticed within one backed-off interval, at most `maxIdleIntervalMs` (30 s by default): a deferred delivery coming due (retry schedule, quiet hours, digest window), a row enqueued by a process that does not run this dispatcher, and a crashed node's expired claim (recovered within `claimTtlMs` + `maxIdleIntervalMs`). Set `dispatchMaxIdleIntervalMs` to `dispatchIntervalMs` to keep the fixed interval.
 
-**BREAKING (interface member added):** `INotificationOutbox` gains `reap(opts: ReapOptions)`, and `ClaimOptions` gains an optional `skipReap`. A custom outbox implementation must add `reap()` — the visibility-timeout recovery it already runs at the top of `claim()`, as a method of its own (both built-in stores, `SqlNotificationOutbox` and `MemoryNotificationOutbox`, factor it out exactly that way). Callers of `claim()` / `claimDigest()` are unaffected: without `skipReap` they reap as before.
-
-FROM → TO, for an implementer:
-
-```ts
-// FROM
-class MyOutbox implements INotificationOutbox {
-  async claim(opts: ClaimOptions) { await this.reapExpired(opts.now ?? Date.now(), opts.claimTtlMs); /* … */ }
-}
-// TO
-class MyOutbox implements INotificationOutbox {
-  async reap(opts: ReapOptions) { await this.reapExpired(opts.now ?? Date.now(), opts.claimTtlMs); }
-  async claim(opts: ClaimOptions) { if (!opts.skipReap) await this.reapExpired(opts.now ?? Date.now(), opts.claimTtlMs); /* … */ }
-}
-```
-
-Breaking ships as `minor` per the launch-window convention (`scripts/check-changeset-no-major.mjs`).
-
-<!-- adr-0087: not-required (no-migration-prescription) The added member is a runtime TypeScript interface method (`INotificationOutbox.reap` in `packages/services/service-messaging/src/outbox.ts`) plus one optional options key (`ClaimOptions.skipReap`): no Zod schema, no `packages/spec` declaration, no authorable key and no stored representation changes shape — `sys_notification_delivery` rows are byte-identical before and after, so `objectstack migrate meta` has nothing to visit and there is no tombstone to mint. The only affected party, a third-party implementer of the interface, is told by the compiler at the class declaration, which is more precise than a ledger entry. The checkable `runtime-interface-only` spelling is deliberately not claimed, for the reason the `INotificationOutbox.ack` change recorded: `packages/spec/src/api/error-code-ledger.zod.ts` mentions `INotificationOutbox` in a prose comment about the shared `DELIVERY_NOT_ELIGIBLE` code, which that disposition's step-4 scan refuses as an unresolvable mention. -->
+**Contract additions — all optional, nothing to change on upgrade.** `INotificationOutbox` gains an optional `reap(opts: ReapOptions)` — the visibility-timeout recovery `claim()` / `claimDigest()` already open with, as a method of its own — and `ClaimOptions` gains an optional `skipReap`. Both built-in stores (`SqlNotificationOutbox`, `MemoryNotificationOutbox`) implement them. A custom outbox without `reap()` keeps working as it is: the dispatcher probes for the method and, when it is absent, lets each claim reap as before — correct, at the old per-claim cost; implementing `reap()` and honouring `skipReap` is what earns the once-per-tick cost. Direct callers of `claim()` / `claimDigest()` are unaffected: without `skipReap` they reap exactly as before. Also new: `NotificationDispatcher.wake()`, the dispatcher's `maxIdleIntervalMs` option, and `MessagingService.setOutbox`'s optional second argument.

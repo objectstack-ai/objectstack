@@ -241,8 +241,12 @@ export interface INotificationOutbox {
      * Safe at any moment and from any number of nodes: it moves only rows already
      * past their timeout, {@link claim} takes only `pending` rows, and an
      * {@link ack} whose claim was reaped matches nothing and is refused (#11859).
+     *
+     * Optional, so an outbox written before it keeps working unchanged: the
+     * dispatcher probes for it and, when it is absent, lets every claim reap as
+     * before — correct, at the per-claim cost. Both built-in stores implement it.
      */
-    reap(opts: ReapOptions): Promise<void>;
+    reap?(opts: ReapOptions): Promise<void>;
     claim(opts: ClaimOptions): Promise<ClaimedDeliveryRecord[]>;
     /**
      * Record the outcome of ONE dispatch attempt on a row this caller claimed,

@@ -40,6 +40,7 @@ import { SqlNotificationOutbox, DELIVERY_OBJECT } from './sql-outbox.js';
 import { NotificationDelivery } from './objects/notification-delivery.object.js';
 import { NotificationDispatcher } from './dispatcher.js';
 import type { MessagingChannel } from './channel.js';
+import type { INotificationOutbox } from './outbox.js';
 
 /** The production default. */
 const PARTITIONS = 8;
@@ -61,10 +62,10 @@ const recordingInbox: MessagingChannel = {
     },
 };
 
-function dispatcher(): NotificationDispatcher {
+function dispatcher(store: INotificationOutbox = outbox): NotificationDispatcher {
     return new NotificationDispatcher({
         nodeId: 'node-live',
-        outbox,
+        outbox: store,
         channels: { getChannel: (id) => (id === recordingInbox.id ? recordingInbox : undefined) },
         channelContext: { logger: { info() {}, warn() {}, error() {} } },
         partitionCount: PARTITIONS,
@@ -179,5 +180,28 @@ describe('#17610 NotificationDispatcher — idle tick cost', () => {
         expect(sent).toEqual([]);
         const [row] = await outbox.list();
         expect(row).toMatchObject({ status: 'in_flight', claimedBy: 'node-busy', attempts: 0 });
+    });
+
+    it('an outbox without reap() keeps working: its claims keep reaping, and an expired claim is still recovered', async () => {
+        // The shape of a store written before `reap()` existed: the same SQL
+        // store underneath, with that one method not exposed.
+        const skipReapSeen: unknown[] = [];
+        const legacy: INotificationOutbox = {
+            enqueue: (input) => outbox.enqueue(input),
+            claim: (opts) => { skipReapSeen.push(opts.skipReap); return outbox.claim(opts); },
+            claimDigest: (opts) => { skipReapSeen.push(opts.skipReap); return outbox.claimDigest(opts); },
+            ack: (claimed, result) => outbox.ack(claimed, result),
+            list: (filter) => outbox.list(filter),
+        };
+        await outbox.enqueue({ notificationId: 'n_legacy', recipientId: 'u1', channel: 'inbox', payload: { title: 't' } });
+        await outbox.claim({ nodeId: 'node-crashed', limit: 10, claimTtlMs: TTL, now: Date.now() - TTL - 1 });
+
+        await dispatcher(legacy).tick();
+
+        // No claim was told to skip the reap it is now the only source of…
+        expect(skipReapSeen).toHaveLength(2 * PARTITIONS);
+        expect(skipReapSeen.every((skip) => skip !== true)).toBe(true);
+        // …so the expired claim is still recovered and delivered in the same tick.
+        expect(sent).toEqual(['u1']);
     });
 });

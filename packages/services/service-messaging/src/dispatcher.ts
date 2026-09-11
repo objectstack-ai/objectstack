@@ -267,22 +267,32 @@ export class NotificationDispatcher {
         // rows, and an ack whose claim was reaped matches nothing (#11859) — while
         // the per-claim reap, run under partition p's lock, was already rewriting
         // rows in every other partition.
-        await this.opts.outbox.reap({ claimTtlMs: this.opts.claimTtlMs });
+        //
+        // `reap` is optional on the outbox contract, so a store written before it
+        // keeps working: without it every claim keeps reaping as it always did —
+        // correct, at the per-claim cost.
+        const { outbox } = this.opts;
+        let reapedForTick = false;
+        if (outbox.reap) {
+            await outbox.reap({ claimTtlMs: this.opts.claimTtlMs });
+            reapedForTick = true;
+        }
 
         const count = this.opts.partitionCount;
         const offset = stableNodeOffset(this.opts.nodeId, count);
         let claimed = 0;
         for (let step = 0; step < count; step++) {
-            claimed += await this.runPartition((offset + step) % count);
+            claimed += await this.runPartition((offset + step) % count, reapedForTick);
         }
         return claimed;
     }
 
     /**
      * Claim and send within one partition's lock. Resolves to the number of rows
-     * claimed — 0 when another node holds the lock.
+     * claimed — 0 when another node holds the lock. `skipReap` is true when this
+     * tick already ran the outbox's `reap()`.
      */
-    private async runPartition(index: number): Promise<number> {
+    private async runPartition(index: number, skipReap: boolean): Promise<number> {
         const handle = await this.opts.cluster.lock.acquire(`notify.dispatcher.partition.${index}`, {
             ttlMs: this.opts.lockTtlMs,
             waitMs: 0,
@@ -294,8 +304,9 @@ export class NotificationDispatcher {
                 limit: this.opts.batchSize,
                 partition: { index, count: this.opts.partitionCount },
                 claimTtlMs: this.opts.claimTtlMs,
-                // [#17610] Reaped once for the whole tick in runTick().
-                skipReap: true,
+                // [#17610] Reaped once for the whole tick in runTick(), when the
+                // outbox has a reap() to run.
+                skipReap,
             });
             if (claimed.length > 0) {
                 await handle.renew?.(this.opts.lockTtlMs);
@@ -313,7 +324,7 @@ export class NotificationDispatcher {
                 limit: this.opts.batchSize,
                 partition: { index, count: this.opts.partitionCount },
                 claimTtlMs: this.opts.claimTtlMs,
-                skipReap: true,
+                skipReap,
             });
             if (digestRows.length > 0) {
                 await handle.renew?.(this.opts.lockTtlMs);
