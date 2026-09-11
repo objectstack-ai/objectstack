@@ -2359,17 +2359,171 @@ export function h8MergedPrStillDispatched(issue, mergedPrs, openPrs) {
 // unreachable `closed …#N` target would make it fire on an input it ignores
 // today, and that is a behaviour change nobody has ruled on — deliberately NOT
 // made here.
+//
+// ## What #17377 DID change: the value is CLASSIFIED, and two classes report
+//
+// Everything above answers a SPELLING question — 「does some value not begin
+// with `manual`」 — so every shape that is not that one word read as fireable.
+// Two more were measured live in one lane on one day: a value naming TRACKED
+// REPO PATHS (a file trigger, which is `Restart-touch:`'s key — the unlock
+// sweep fires only `closed <owner/repo>#N`), and a value that is prose naming
+// no issue, no tracked path and no runnable command (a `manual` in disguise,
+// waiting on an actor nothing schedules). `classifyRestartWhen` sorts every
+// value into six classes, and fireability is now membership in three of them.
+//
+// ⛔ Report-only, and the boundary is exact: the two new classes produce H9
+// ROWS carrying their own remedy sentence. No refusal, no new exit code, no
+// band change, no state change — a completed sweep still exits 0 whatever it
+// finds, exactly as before.
+//
+// ⛔ The reserved class above is STILL reserved. `closed <owner/repo>#N`
+// classifies on its SPELLING alone, whatever #N's reachability; the paragraph
+// above says why that ruling is not this card's to make.
+//
+// The ruling spelling stays fireable: a value carrying an issue reference
+// (`#N` or `owner/repo#N`) is `issue-ref`, tested BEFORE the two unfireable
+// classes, so `Restart-when: #N rules on X` reads exactly as it did. That
+// order has a measured price — on the 2026-09-11 census of the 104 open holds,
+// four values name a tracked repo path and read clean on an unrelated issue
+// mention (#8753, #8607, #8589, #6009). Recorded here, not worked around: the
+// alternative is to rank `tracked-path` above `issue-ref`, which would make
+// the advertised ruling spelling fire, and that is the question above.
+//
+// ## H9's path test is WIDER than H17's, deliberately
+//
+// H17 harvests trigger paths from BACKTICKED SPANS ONLY, and `backtickedSpans`
+// says why: a wrong row there sends a seat to intersect its dispatch against a
+// file nobody nominated. H9 tokenises the whole value on whitespace and commas
+// and validates every token against the SAME `isTracked` oracle, because the
+// two error COSTS are not the same shape. Here the token choice cannot flip a
+// verdict in either direction — `tracked-path` and `prose` are both unfireable
+// and both fire the row — so a token read too eagerly changes WHICH REMEDY
+// SENTENCE prints, never whether the card is reported at all. That is the
+// entire licence for the wider read, and it expires the moment any class of
+// this classifier is allowed to CLEAR a card.
+//
+// `isTracked` defaults to `() => false`, so a caller that injects no oracle
+// sees every tracked-path value collapse into `prose` — same verdict, same
+// row, the generic remedy. The live sweep injects the ONE `git ls-files`
+// reading H17's own index consumes, so the two cannot disagree about what a
+// tracked file is.
 // ---------------------------------------------------------------------------
+
+/**
+ * The command heads a BARE (unbackticked) `Restart-when:` value may open with
+ * and still be the one-line executable predicate H9's row sentence advertises.
+ *
+ * DERIVED, never invented — every head here was read off a measured corpus and
+ * nothing else is admitted:
+ *
+ *   `git`   the open `pm:on-hold` census of 2026-09-11 (#7443 bare; #17446,
+ *           #17348, #17301, #17286 and #11331 backticked)
+ *   `pnpm`  the same census (#12799)
+ *   `npx`   the same census (#9613)
+ *   `npm`   this file's own pinned specimen, transcribed from a live card
+ *           (`npm view create-objectstack dist-tags reports >= 17.0.0`)
+ *
+ * A value opening with a BACKTICKED span needs no head at all — the span is
+ * the canonical spelling of an executable predicate — so this list only has to
+ * cover the un-backticked residue, which the census puts at one value. It
+ * grows by MEASUREMENT: a head is added when a census finds one, ⛔ never
+ * because it seemed likely.
+ */
+export const RESTART_WHEN_COMMAND_HEADS = ['git', 'npm', 'npx', 'pnpm'];
+
+/**
+ * Which classes of `Restart-when:` value some mechanism can actually fire.
+ *
+ * `closed-ref` is the only one the UNLOCK SWEEP itself fires; `issue-ref` is
+ * the ruling spelling H9's header admitted, and `command` the executable
+ * predicate its row sentence names. The other three — `manual`,
+ * `tracked-path`, `prose` — are what H9 reports.
+ */
+export const FIREABLE_RESTART_WHEN_CLASSES = ['closed-ref', 'issue-ref', 'command'];
+
+/**
+ * The tracked repo paths a `Restart-when:` value names.
+ *
+ * Whitespace- and comma-delimited tokens, stripped of the decoration prose
+ * puts around a path (backticks, brackets, quotes, a trailing sentence comma
+ * or period), each validated against the injected oracle. `isTracked` is
+ * injected for `h17TriggerFiles`'s reason — the extraction stays pure and the
+ * self-test drives it with a fixture set instead of a checkout.
+ *
+ * A token the oracle does not recognise is dropped in silence, so a LINE
+ * SUFFIX (`packages/x/y.ts:1186-1206`) correctly fails and a glob
+ * (`packages/adapters/**`) contributes nothing — the same two decoy shapes
+ * H17's stage 2 records.
+ *
+ * @param {string} value one `Restart-when:` value, decoration already removed
+ * @param {(path: string) => boolean} isTracked
+ * @returns {string[]} tracked paths in document order, deduped
+ */
+export function restartWhenTrackedPaths(value, isTracked = () => false) {
+  const out = [];
+  for (const raw of String(value ?? '').split(/[\s,;]+/)) {
+    const token = raw.replace(/^[`*_("'[{<]+/, '').replace(/[`*_)"'\]}>.:]+$/, '');
+    if (token && isTracked(token) && !out.includes(token)) out.push(token);
+  }
+  return out;
+}
+
+/**
+ * Which of the six shapes is this `Restart-when:` value? (#17377)
+ *
+ * The ORDER is the contract, and each step is here because a later one would
+ * otherwise swallow it:
+ *
+ *   1. `manual`       the opt-out, unchanged — the existing regex, first, so
+ *                      the one-word spelling can never be rescued by anything
+ *                      that follows it
+ *   2. `closed-ref`   the unlock sweep's own literal form
+ *   3. `issue-ref`    any issue reference the value CARRIES — the ruling
+ *                      spelling H9's header admitted (`#N rules on X`), which
+ *                      is why it is tested before the two unfireable classes
+ *   4. `command`      a backticked opening span, or one of the measured bare
+ *                      heads — a one-line executable predicate
+ *   5. `tracked-path` some token is a tracked repo file: a misfiled
+ *                      `Restart-touch:`, which the unlock sweep cannot fire
+ *   6. `prose`        none of the above: a `manual` in disguise
+ *
+ * ⛔ A pure function over ONE value. It reports a shape and never a verdict —
+ * `hasFireableRestartWhen` is what turns a shape into one.
+ *
+ * @param {string} value
+ * @param {(path: string) => boolean} [isTracked]
+ * @returns {'manual'|'closed-ref'|'issue-ref'|'command'|'tracked-path'|'prose'}
+ */
+export function classifyRestartWhen(value, isTracked = () => false) {
+  const v = String(value ?? '').trim();
+  if (!v) return 'prose';
+  if (/^manual\b/i.test(v)) return 'manual';
+  if (/^closed\b[^\n]*?#\d+\b/i.test(v)) return 'closed-ref';
+  if (/#\d+\b/.test(v)) return 'issue-ref';
+  if (/^`[^`\n]+`/.test(v)) return 'command';
+  if (RESTART_WHEN_COMMAND_HEADS.includes(v.split(/\s+/)[0].toLowerCase())) return 'command';
+  if (restartWhenTrackedPaths(v, isTracked).length > 0) return 'tracked-path';
+  return 'prose';
+}
 
 /**
  * Does this text carry a `Restart-when:` value some mechanism could fire?
  *
  * The one fireability test H9 and its comment-fetch gate share, so "the body
- * already answers this card" means the same thing in both places. `manual…`
- * counts as NOT fireable, deliberately — see H9's header note.
+ * already answers this card" means the same thing in both places. Since
+ * #17377 it asks the CLASSIFIER rather than testing a spelling: `manual…` is
+ * still NOT fireable, and so are the two unfireable shapes that word never
+ * covered — see H9's header note.
+ *
+ * @param {string} text
+ * @param {(path: string) => boolean} [isTracked] the tracked-file oracle; the
+ *   default recognises nothing, which collapses `tracked-path` into `prose` —
+ *   the same verdict, a less specific row
  */
-export function hasFireableRestartWhen(text) {
-  return directiveValues(text, 'Restart-when').some((v) => !/^manual\b/i.test(v));
+export function hasFireableRestartWhen(text, isTracked = () => false) {
+  return directiveValues(text, 'Restart-when').some((v) =>
+    FIREABLE_RESTART_WHEN_CLASSES.includes(classifyRestartWhen(v, isTracked)),
+  );
 }
 
 /**
@@ -2378,9 +2532,14 @@ export function hasFireableRestartWhen(text) {
  * is: a policy that decides what gets READ AT ALL is where a silent hole
  * would live. Gated on the body NOT already answering (a fireable body line
  * clears H9 without the network), then on the one label H9 judges.
+ *
+ * `isTracked` is forwarded rather than defaulted separately, or the gate and
+ * the row would answer 「does the body already answer this card」 differently
+ * and a tracked-path card would fire a row whose second channel was never
+ * fetched.
  */
-export function needsRestartWhenComments(issue) {
-  if (hasFireableRestartWhen(issue?.body)) return false;
+export function needsRestartWhenComments(issue, isTracked = () => false) {
+  if (hasFireableRestartWhen(issue?.body, isTracked)) return false;
   return labelNames(issue ?? {}).includes('pm:on-hold');
 }
 
@@ -2388,7 +2547,9 @@ export function needsRestartWhenComments(issue) {
  * H9 — null when clean, else the finding sentence.
  *
  * Legal iff SOME `Restart-when:` line in EITHER channel carries a value that
- * is not `manual…`. The line may be decorated (see the shared directive
+ * `classifyRestartWhen` puts in a FIREABLE class — `closed-ref`, `issue-ref`
+ * or `command` (#17377; it read 「not `manual…`」 before, which admitted two
+ * shapes nothing can fire). The line may be decorated (see the shared directive
  * reader) in either channel; the KEY may not. The spelling is case-sensitive
  * and byte-stable like `Blocked-by:` (H4): the scan that fires these lines
  * greps the literal, so a lowercase variant is a line the machinery cannot
@@ -2417,22 +2578,45 @@ export function needsRestartWhenComments(issue) {
  * the remedies: verify, unwrap, add — and only then, for a card that really
  * has no fireable exit, close.
  */
-export function h9OnHoldNoRestartWhen(issue, commentBodies) {
+export function h9OnHoldNoRestartWhen(issue, commentBodies, isTracked = () => false) {
   if (!labelNames(issue).includes('pm:on-hold')) return null;
-  if (hasFireableRestartWhen(issue.body)) return null;
+  if (hasFireableRestartWhen(issue.body, isTracked)) return null;
   const commentsRead = Array.isArray(commentBodies);
-  if (commentsRead && commentBodies.some((b) => hasFireableRestartWhen(b))) return null;
+  if (commentsRead && commentBodies.some((b) => hasFireableRestartWhen(b, isTracked))) return null;
   const values = [
     ...directiveValues(issue.body, 'Restart-when'),
     ...(commentsRead ? commentBodies : []).flatMap((b) => directiveValues(b, 'Restart-when')),
   ];
+  // Which unfireable shape to NAME when several coexist (#17377): the most
+  // specific remedy wins, because it is the one a seat can execute without
+  // re-reading the card. A tracked path names the exact rewrite; prose names
+  // the missing event; `manual` is last, being the shape whose author already
+  // said there is no event. Every one of them is a row either way — the order
+  // chooses a SENTENCE, never a verdict.
+  const classes = values.map((v) => classifyRestartWhen(v, isTracked));
+  const paths = [
+    ...new Set(
+      values.flatMap((v, i) =>
+        classes[i] === 'tracked-path' ? restartWhenTrackedPaths(v, isTracked) : [],
+      ),
+    ),
+  ];
   const shape =
-    values.length > 0
-      ? 'its only `Restart-when:` is `manual`, which no mechanism can fire'
-      : commentsRead
-        ? 'no `Restart-when:` line in EITHER channel — not in the body, and not in any comment ' +
-          'on the thread (both were read)'
-        : 'no `Restart-when:` body line this scan could read';
+    paths.length > 0
+      ? `its \`Restart-when:\` names tracked repo path(s) ${paths.map((p) => `\`${p}\``).join(', ')} — ` +
+        'a file trigger, which is `Restart-touch:`\'s key; the unlock sweep fires only ' +
+        '`closed <owner/repo>#N`. Rewrite the line as `Restart-touch: <path>` (one path per line) ' +
+        'and give `Restart-when:` a real exit or `manual`'
+      : classes.includes('prose')
+        ? 'its `Restart-when:` is prose naming no issue, no tracked path and no runnable ' +
+          'command — a `manual` in disguise; nothing schedules the actor it waits on. Mark it ' +
+          '`manual` or name the event'
+        : values.length > 0
+          ? 'its only `Restart-when:` is `manual`, which no mechanism can fire'
+          : commentsRead
+            ? 'no `Restart-when:` line in EITHER channel — not in the body, and not in any comment ' +
+              'on the thread (both were read)'
+            : 'no `Restart-when:` body line this scan could read';
   const unreadable =
     commentBodies === null
       ? ' And this card\'s comment thread could NOT be read this sweep — the second channel (a ' +
@@ -15289,6 +15473,15 @@ async function sweep(options = {}) {
   const pre = await probeTransport();
   if (pre && pre.kind !== 'reachable') reportPrerequisiteNotMet(pre);
 
+  // The tracked-file oracle, read ONCE per sweep and BEFORE gathering (#17377).
+  // It is a local `git ls-files`, not a request. It moved ahead of the sweep
+  // because H9 now classifies a `Restart-when:` value against it too, and the
+  // placement is what keeps ONE reading answering for both readers: H9's row
+  // and H17's index cannot disagree about what a tracked file is, and no
+  // second tracker exists to drift from this one.
+  const tracked = readTrackedFiles();
+  const isTracked = (path) => (tracked ? tracked.has(path) : false);
+
   const findings = [];
   const seen = new Map();
   const seenPrs = new Map();
@@ -15418,7 +15611,7 @@ async function sweep(options = {}) {
   // on `findings` (#13634).
   const references = { report: null };
   try {
-    await sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seenClosed, stats, hold, references);
+    await sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seenClosed, stats, hold, references, isTracked);
   } catch (err) {
     err.sweptSoFar = seen.size + seenPrs.size + seenMerged.size + seenUnscoped.size + seenClosed.size;
     throw err;
@@ -15444,12 +15637,11 @@ async function sweep(options = {}) {
     // is no longer a thing this assembly can do.
     ...Object.fromEntries(SWEEP_COUNT_KEYS.map((key) => [key, stats[key]])),
   };
-  // The oracle is read ONCE per sweep, after gathering: it is a local
-  // `git ls-files`, not a request, and every candidate token is checked
-  // against the same reading so the index cannot be internally inconsistent.
-  const tracked = readTrackedFiles();
+  // The index consumes the SAME reading H9 was handed above — one `git
+  // ls-files` per sweep, so every candidate token in either reader is checked
+  // against identical bytes and neither index can be internally inconsistent.
   const triggerIndex = {
-    rows: h17IndexRows(hold.entries, (path) => (tracked ? tracked.has(path) : false)),
+    rows: h17IndexRows(hold.entries, isTracked),
     candidates: hold.candidates,
     probed: hold.probed,
     tracked: tracked ? tracked.size : null,
@@ -16949,7 +17141,7 @@ export async function sweepScheduledWorkflows(findings, stats = {}, options = {}
   stats.scheduledInactiveNames = inactive.length > 0 ? inactive.join(', ') : null;
 }
 
-async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seenClosed, stats = {}, hold = null, references = null) {
+async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seenClosed, stats = {}, hold = null, references = null, isTracked = () => false) {
   // H57 (#17132) — FIRST in the sweep, and the placement is mechanism rather
   // than preference. This is the only pass here whose subject is not a card or
   // a PR: it touches `seen`, the comment cache and the reference corpus not at
@@ -17225,8 +17417,11 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     // trade as H4: a hold whose body already carries a fireable line is
     // answered without the network; a body-clean one buys (at most) the one
     // comment fetch H17 is about to make anyway, off the shared cache.
-    if (needsRestartWhenComments(issue)) await gatherRestartWhenComments(issue);
-    const restartless = h9OnHoldNoRestartWhen(issue, restartFor(issue));
+    // `isTracked` reaches BOTH halves (#17377): the gate and the row must
+    // answer 「does the body already answer this card」 identically, or a
+    // tracked-path hold would fire a row whose second channel was never read.
+    if (needsRestartWhenComments(issue, isTracked)) await gatherRestartWhenComments(issue);
+    const restartless = h9OnHoldNoRestartWhen(issue, restartFor(issue), isTracked);
     if (restartless) findings.push([issue, 'H9', restartless]);
     const staleP0 = h10StaleUnclaimedP0(issue);
     if (staleP0) findings.push([issue, 'H10', staleP0]);
@@ -19773,7 +19968,19 @@ async function selfTest() {
   // the old remedy text told the reading seat to close a maintainer-
   // commissioned card.
   const held9591 = '`Restart-when: the v18 major development cycle opens (first v18 changeset-major accepted on main), or a maintainer instruction pulls it forward`';
-  t('H9: the #9591 shape — a backticked line is a LEGAL hold', h9OnHoldNoRestartWhen(hold(held9591)), null);
+  // #17377 moved this case's EXPECTATION without moving its subject. The
+  // subject is decoration tolerance, and the #10102 incident it pins is that a
+  // backticked line read as ABSENT and the remedy text then told a seat to
+  // close a maintainer-commissioned card. Both halves of that are still pinned
+  // below — the line is READ, and the row it produces is a CLASS row carrying
+  // no 「maybe it is there」 hedge. What changed is the verdict on the VALUE:
+  // #9591's exit is prose naming no issue, no tracked path and no runnable
+  // command, so it is a row now, and the old `null` asserted the opposite.
+  // ⛔ Deleting the case would delete the decoration pin with it.
+  t('H9: the #9591 shape — a backticked line is still READ, not absent', directiveValues(held9591, 'Restart-when').length, 1);
+  t('H9: …so its row is the prose class, not the "no line" row', h9row(hold(held9591)).includes('is prose naming no issue'), true);
+  t('H9: …and carries no unparsed hedge (a line WAS read)', h9row(hold(held9591)).includes('cannot parse'), false);
+  t('H9: …and a decorated FIREABLE line is still a legal hold', h9OnHoldNoRestartWhen(hold('`Restart-when: closed acme/widgets#123`')), null);
   t('H9: bulleted line -> clean', h9OnHoldNoRestartWhen(hold('- Restart-when: closed acme/widgets#123')), null);
   t('H9: `*`-bulleted line -> clean', h9OnHoldNoRestartWhen(hold('* Restart-when: closed acme/widgets#123')), null);
   t('H9: bolded key -> clean', h9OnHoldNoRestartWhen(hold('**Restart-when:** closed acme/widgets#123')), null);
@@ -19850,6 +20057,84 @@ async function selfTest() {
   t('gate: a fireable body line buys no fetch', needsRestartWhenComments(hold('Restart-when: closed acme/widgets#123')), false);
   t('gate: a non-hold card buys no fetch from THIS item', needsRestartWhenComments(issue(['pm:blocked'], [], 'no line here')), false);
   t('gate: a missing issue does not crash', needsRestartWhenComments(undefined), false);
+
+  // -- H9: the `Restart-when:` value CLASSES (#17377) -------------------------
+  // H9 used to test the SPELLING of fireability — 「not `manual`」 — so every
+  // shape but that one word passed. `classifyRestartWhen` sorts a value into
+  // six classes and three of them are fireable. The three specimens below are
+  // VERBATIM live values, pinned as literal strings so a later reader can see
+  // what the classifier was built against rather than a paraphrase of it.
+  const v7898 =
+    'any PR touches packages/core/src/security/auth-gate.ts, packages/runtime/src/http-dispatcher.ts ' +
+    'or adds an adapter under packages/adapters/** (a second transport adapter is restart condition 1 by definition)';
+  const v3739 = 'the triage seat performs the contract-first split (parent + per-repo sub-issues)';
+  const v5499 = 'closed objectstack-ai/objectstack#5499';
+  // A stub oracle, for `h17TriggerFiles`'s reason: the classification stays
+  // testable without a checkout, and the fixture states exactly which paths
+  // are tracked instead of inheriting whatever this tree happens to hold.
+  const h9Tracked = (p) =>
+    ['packages/core/src/security/auth-gate.ts', 'packages/runtime/src/http-dispatcher.ts',
+      'scripts/check-type-check-coverage.mjs'].includes(p);
+
+  t('H9 class: `manual` still comes first', classifyRestartWhen('manual — first EE customer asking'), 'manual');
+  t('H9 class: …and only as a WHOLE word', classifyRestartWhen('manually re-check the npm tag'), 'prose');
+  t('H9 class: the unlock sweep\'s own form', classifyRestartWhen(v5499), 'closed-ref');
+  t('H9 class: …and `closed` without a reference is not it', classifyRestartWhen('closed the design question at last'), 'prose');
+  t('H9 class: the ruling spelling H9\'s header admitted', classifyRestartWhen('#13651 rules on the count an app cannot reach'), 'issue-ref');
+  t('H9 class: …in its cross-repo spelling too', classifyRestartWhen('objectstack-ai/cloud#861 (Phase 3 EE governance) is scheduled'), 'issue-ref');
+  t('H9 class: a backticked opening span is an executable predicate', classifyRestartWhen('`pnpm check:type-check-debt --re-measure` prints a non-empty surplus line'), 'command');
+  t('H9 class: …and a measured BARE head is too', classifyRestartWhen('git grep -n "AUTHORING_SURFACES" -- packages/lint/src shows a third value'), 'command');
+  t('H9 class: …including the head this file already pinned', classifyRestartWhen('npm view create-objectstack dist-tags reports >= 17.0.0'), 'command');
+  t('H9 class: …but the head list is CLOSED, not a guess at command-shaped words', classifyRestartWhen('gradle assemble reports a clean build'), 'prose');
+  t('H9 class: #7898 — a file trigger misfiled under Restart-when', classifyRestartWhen(v7898, h9Tracked), 'tracked-path');
+  t('H9 class: …which collapses into prose with NO oracle injected', classifyRestartWhen(v7898), 'prose');
+  t('H9 class: #3739 — prose waiting on a seat nothing schedules', classifyRestartWhen(v3739, h9Tracked), 'prose');
+  t('H9 class: an empty value is never fireable', classifyRestartWhen(''), 'prose');
+  // The oracle validates; it never guesses. Both decoys are shapes H17's own
+  // stage 2 records, and each would be a wrong row if the token were trusted.
+  t('H9 paths: #7898\'s two tracked paths extract, comma and all', restartWhenTrackedPaths(v7898, h9Tracked).join('|'), 'packages/core/src/security/auth-gate.ts|packages/runtime/src/http-dispatcher.ts');
+  t('H9 paths: a glob is not a tracked file', restartWhenTrackedPaths('packages/adapters/**', h9Tracked).length, 0);
+  t('H9 paths: a line suffix correctly fails', restartWhenTrackedPaths('scripts/check-type-check-coverage.mjs:1679', h9Tracked).length, 0);
+  t('H9 paths: a backticked path is accepted too', restartWhenTrackedPaths('touches `scripts/check-type-check-coverage.mjs` again', h9Tracked).join('|'), 'scripts/check-type-check-coverage.mjs');
+  t('H9 paths: …and one closing a parenthesis', restartWhenTrackedPaths('(see packages/runtime/src/http-dispatcher.ts).', h9Tracked).join('|'), 'packages/runtime/src/http-dispatcher.ts');
+  t('H9 paths: no oracle means no path, never a guess', restartWhenTrackedPaths(v7898).length, 0);
+  t('H9 class: the fireable set is exactly the three', FIREABLE_RESTART_WHEN_CLASSES.join('|'), 'closed-ref|issue-ref|command');
+  t('H9 class: the bare command heads are the measured four', RESTART_WHEN_COMMAND_HEADS.join('|'), 'git|npm|npx|pnpm');
+
+  // The rows the two new classes produce — report-only, each naming the remedy
+  // a seat can execute without re-reading the card.
+  const h7898 = hold(`Restart-when: ${v7898}`);
+  const h3739 = hold(`Restart-when: ${v3739}`);
+  t('H9: #7898\'s file trigger is a finding, not a legal hold', typeof h9OnHoldNoRestartWhen(h7898, undefined, h9Tracked), 'string');
+  t('H9: …and the row names both tracked paths', h9row(h7898, undefined, h9Tracked).includes('`packages/core/src/security/auth-gate.ts`, `packages/runtime/src/http-dispatcher.ts`'), true);
+  t('H9: …and prescribes the rewrite, not a close', h9row(h7898, undefined, h9Tracked).includes('Rewrite the line as `Restart-touch: <path>`'), true);
+  t('H9: …and says why the unlock sweep cannot fire it', h9row(h7898, undefined, h9Tracked).includes('the unlock sweep fires only'), true);
+  t('H9: …with no unparsed hedge — a line WAS read', h9row(h7898, undefined, h9Tracked).includes('cannot parse'), false);
+  t('H9: …and with no oracle it still fires, as prose', typeof h9OnHoldNoRestartWhen(h7898), 'string');
+  t('H9: #3739\'s prose is a finding', typeof h9OnHoldNoRestartWhen(h3739, undefined, h9Tracked), 'string');
+  t('H9: …and the row names the missing event', h9row(h3739, undefined, h9Tracked).includes('Mark it `manual` or name the event'), true);
+  t('H9: …calling it a `manual` in disguise', h9row(h3739, undefined, h9Tracked).includes('a `manual` in disguise'), true);
+  // ⛔ The reserved class (H9's header): an unreachable `closed …#N` target is
+  // NOT this card's ruling to make, so the well-formed spelling stays clean
+  // whatever #5499's reachability.
+  t('H9: the reserved unreachable-`closed #N` class stays CLEAN', h9OnHoldNoRestartWhen(hold(`Restart-when: ${v5499}`), undefined, h9Tracked), null);
+  t('H9: an executable predicate stays clean under the oracle', h9OnHoldNoRestartWhen(hold('Restart-when: `git grep -l foo` returns 0'), undefined, h9Tracked), null);
+  t('H9: the ruling spelling stays clean under the oracle', h9OnHoldNoRestartWhen(hold('Restart-when: #13651 rules on it'), undefined, h9Tracked), null);
+  // Class ordering when several unfireable values coexist: the most specific
+  // remedy wins, and it chooses a SENTENCE — every one of them is a row.
+  t('H9: a tracked path outranks a `manual` line in the sentence', h9row(hold(`Restart-when: manual — x\nRestart-when: ${v7898}`), undefined, h9Tracked).includes('Restart-touch'), true);
+  t('H9: prose outranks `manual` too', h9row(hold(`Restart-when: manual — x\nRestart-when: ${v3739}`), undefined, h9Tracked).includes('a `manual` in disguise'), true);
+  t('H9: a fireable line still clears a card carrying prose beside it', h9OnHoldNoRestartWhen(hold(`Restart-when: ${v3739}\nRestart-when: ${v5499}`), undefined, h9Tracked), null);
+  // Both channels classify the same way — the shared predicate, on both sides.
+  t('H9: a file trigger parked in a COMMENT is a finding too', typeof h9OnHoldNoRestartWhen(hold('parked'), [`Restart-when: ${v7898}`], h9Tracked), 'string');
+  t('H9: …and a fireable comment line still rescues a prose body', h9OnHoldNoRestartWhen(h3739, [`Restart-when: ${v5499}`], h9Tracked), null);
+  // The gathering policy moves with the verdict, or a card would fire a row
+  // whose second channel was never fetched.
+  t('gate: a tracked-path body now BUYS the comment fetch', needsRestartWhenComments(h7898, h9Tracked), true);
+  t('gate: a prose body buys it too', needsRestartWhenComments(h3739, h9Tracked), true);
+  t('gate: an executable-predicate body still buys nothing', needsRestartWhenComments(hold('Restart-when: `git grep -l foo` returns 0'), h9Tracked), false);
+  t('gate: the ruling spelling still buys nothing', needsRestartWhenComments(hold('Restart-when: #13651 rules on it'), h9Tracked), false);
+  t('gate: the reserved `closed …#N` class still buys nothing', needsRestartWhenComments(hold(`Restart-when: ${v5499}`), h9Tracked), false);
 
   // -- H10: stale unclaimed p0 (routing-gap backstop) -------------------------
   const NOW = Date.parse('2026-08-16T12:00:00Z');
