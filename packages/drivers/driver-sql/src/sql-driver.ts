@@ -13773,8 +13773,9 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * [#14079/#15683] Is `localField` a column on `table` a text operator must
-   * not be aimed at — a column DECLARED numeric, boolean or temporal?
+   * [#14079/#15683/#17343] Is `localField` a column on `table` a text operator
+   * must not be aimed at — a SCALAR column DECLARED numeric, boolean or
+   * temporal?
    *
    * Reads the registries `formatOutput`'s read-coercion and the temporal seam
    * already read — `numericFields` (`NUMERIC_SCALAR_TYPES`, non-`multiple`),
@@ -13812,25 +13813,41 @@ export class SqlDriver implements IDataDriver {
    * here: an uncertified column is still a declared datetime, and gating on
    * certification would make the answer depend on repair state.
    *
-   * ⚠️ A MULTI-VALUED temporal column is excluded, and the exclusion is load
-   * bearing. `multiple: true` stores a JSON TEXT array ({@link isJsonField}),
-   * where `$contains` is not a substring test at all — it is the MEMBERSHIP
-   * spelling, the one operator #7398 left working on a JSON column after
-   * refusing the equality family there, and downstream code depends on it
+   * ⚠️ A MULTI-VALUED column is excluded on EVERY limb, and the exclusion is
+   * load bearing. `multiple: true` stores a JSON TEXT array ({@link
+   * isJsonField}), where `$contains` is not a substring test at all — it is the
+   * MEMBERSHIP spelling, the one operator #7398 left working on a JSON column
+   * after refusing the equality family there, and downstream code depends on it
    * (`sql-driver-json-column-operator-refusal.test.ts` pins it on both lowering
-   * families). The numeric limb has the same carve-out already, spelled at the
-   * registry instead: `numericFields` is filled `NUMERIC_SCALAR_TYPES.has(type)
-   * && !field.multiple`. The temporal registries carry no such condition —
-   * `dateFields` / `datetimeFields` / `timeFields` serve the read-presentation
-   * seam, which does apply to a multi-valued column — so the condition is
-   * spelled HERE, where the two questions differ, rather than by narrowing a
-   * registry three other seams read.
+   * families). Gating it turns a working membership filter into "matches
+   * nothing" — the fail-CLOSED direction that suite's own table calls out.
+   *
+   * Each limb spells the exclusion where its own registry leaves it unsaid:
+   *
+   * - **numeric** — at the REGISTRY. `numericFields` is filled
+   *   `NUMERIC_SCALAR_TYPES.has(type) && !field.multiple`, so the condition
+   *   never reaches this predicate.
+   * - **temporal** [#15683] — HERE. `dateFields` / `datetimeFields` /
+   *   `timeFields` serve the read-presentation seam, which DOES apply to a
+   *   multi-valued column, so narrowing them would break a seam that is right.
+   * - **boolean** [#17343] — HERE, for the same reason, and this limb had
+   *   NEITHER until then. `booleanFields` is a READ-COERCION registry (its
+   *   fills say so: stored 1/0 → JS `true`/`false`, and `toggle` shares boolean
+   *   affinity), read by three other seams — the Postgres aggregate cast, the
+   *   presentation-kind door and `formatOutput`'s row pass — so narrowing it
+   *   would move three answers to repair one. #14079 landed this predicate
+   *   describing itself as "a declared numeric or boolean SCALAR" and annotated
+   *   the numeric registry as non-`multiple`, so the omission was the gap
+   *   between that stated scope and `booleanFields`' silence, never a ruling
+   *   that a stored array of booleans is meaningless: `boolean` + `multiple:
+   *   true` is authorable, gets a JSON column here, and its `$contains`
+   *   answered correctly on every other declared class.
    */
   protected isNonTextColumn(table: string | null | undefined, localField: string): boolean {
     if (!table) return false;
     return (
       this.numericFields[table]?.includes(localField) === true ||
-      this.booleanFields[table]?.includes(localField) === true ||
+      (this.booleanFields[table]?.includes(localField) === true && !this.isJsonColumn(table, localField)) ||
       (this.temporalFieldKind(table, localField) !== null && !this.isJsonColumn(table, localField))
     );
   }
