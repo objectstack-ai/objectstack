@@ -4,11 +4,16 @@ import { randomUUID } from 'node:crypto';
 import { hashPartition } from './backoff.js';
 import { deliveryBody, signBody } from './http-sender.js';
 import {
+    HttpAckError,
     HttpRedeliverError,
     assertEnqueueDeliverable,
+    assertHttpClaimCredential,
     assertRedeliverAllowed,
+    httpAckLostClaimMessage,
+    httpAckNotClaimedMessage,
     type EnqueueHttpInput,
     type HttpAckResult,
+    type HttpClaimCredential,
     type HttpClaimOptions,
     type HttpDelivery,
     type HttpDeliveryStatus,
@@ -135,9 +140,29 @@ export class MemoryHttpOutbox implements IHttpOutbox {
         }
     }
 
-    async ack(id: string, result: HttpAckResult): Promise<void> {
+    /**
+     * Record one attempt's outcome — see {@link IHttpOutbox.ack}.
+     *
+     * [#17634] Handed `claimed`, the row must still be held by that claim —
+     * `in_flight`, under the same (`claimedBy`, `claimedAt`) pair — or the ack
+     * is refused with {@link HttpAckError} and nothing is written, so a late ack
+     * from a reaped claim cannot land on the live re-claim. Single-threaded, so
+     * each test and the mutation below are one atomic step; `SqlHttpOutbox`
+     * spells the same guard as a conditional UPDATE because it is not. Without
+     * `claimed` — the deprecated arity — this is the by-id write it always was.
+     */
+    async ack(id: string, result: HttpAckResult, claimed?: HttpClaimCredential): Promise<void> {
+        if (claimed !== undefined) assertHttpClaimCredential(id, claimed);
         const row = this.rows.get(id);
         if (!row) return;
+        if (claimed !== undefined) {
+            if (row.status !== 'in_flight') {
+                throw new HttpAckError(httpAckNotClaimedMessage(id, row.status), 'DELIVERY_NOT_ELIGIBLE');
+            }
+            if (row.claimedBy !== claimed.claimedBy || row.claimedAt !== claimed.claimedAt) {
+                throw new HttpAckError(httpAckLostClaimMessage(id, row.status), 'DELIVERY_NOT_ELIGIBLE');
+            }
+        }
         const now = Date.now();
         row.attempts += 1;
         row.lastAttemptedAt = now;

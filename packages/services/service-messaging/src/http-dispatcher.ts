@@ -3,7 +3,7 @@
 import type { DispatchCluster, DispatchLockHandle } from './dispatcher.js';
 import { DispatchLoop } from './dispatch-loop.js';
 import { classifyAttempt, sendOnce, type FetchImpl } from './http-sender.js';
-import type { HttpDelivery, IHttpOutbox } from './http-outbox.js';
+import type { HttpAckResult, HttpClaimCredential, HttpDelivery, IHttpOutbox } from './http-outbox.js';
 
 /**
  * HttpDispatcher (ADR-0018 M3) — drains the generic outbound-HTTP outbox
@@ -19,6 +19,12 @@ import type { HttpDelivery, IHttpOutbox } from './http-outbox.js';
  * At-least-once: if the POST succeeds but the ack write fails, the row reverts
  * to pending after the claim TTL and is re-posted. Receivers MUST be idempotent
  * on the `X-Objectstack-Delivery` (== row id) header.
+ *
+ * A send that outruns the claim TTL can be reaped and re-claimed — by another
+ * node, or by this one — while it is still on the wire. Its ack hands the store
+ * the claim credential this node's `claim()` stamped, so the outcome is written
+ * only while that claim still holds the row; a lost claim's ack is refused,
+ * logged and absorbed, never written over the live attempt (#17634).
  *
  * ## What an idle tick costs (#17623)
  *
@@ -245,7 +251,7 @@ export class HttpDispatcher {
             | undefined;
         if (!fetchImpl) {
             this.opts.logger?.warn?.('http-dispatcher: no fetch impl available', { rowId: row.id });
-            await this.opts.outbox.ack(row.id, {
+            await this.ackAttempt(row, {
                 success: false,
                 error: 'no fetch implementation',
                 durationMs: 0,
@@ -255,8 +261,42 @@ export class HttpDispatcher {
         }
         const outcome = await sendOnce(row, fetchImpl);
         const result = classifyAttempt(outcome, row.attempts, this.opts.now?.() ?? Date.now(), this.opts.rng);
-        await this.opts.outbox.ack(row.id, result);
+        await this.ackAttempt(row, result);
         this.opts.onAttempt?.(row, result.success);
+    }
+
+    /**
+     * [#17634] Record one attempt's outcome with the claim credential this
+     * node's `claim()` stamped on the row, tolerating the ONE refusal a correct
+     * dispatcher can legitimately provoke — `NotificationDispatcher.ackAttempt`'s
+     * shape (#11453, #11859).
+     *
+     * A send slower than `claimTtlMs` lets the visibility-timeout reap return the
+     * row to `pending`, and another node — or this one, on a later tick —
+     * re-claims it. By the time this ack runs the row is not ours: a race we are
+     * ALLOWED to lose, because whoever holds the row now re-drives the delivery
+     * (at-least-once), and the store's refusal is it correctly declining to write
+     * our outcome over that live attempt. So the refusal is logged and absorbed.
+     * ⛔ It must not abort the tick: the rows still validly claimed by this node
+     * come after this one, and unwinding the partition loop would strand each of
+     * them `in_flight` until its own timeout. Only `DELIVERY_NOT_ELIGIBLE` is
+     * absorbed; a store fault still propagates.
+     */
+    private async ackAttempt(row: HttpDelivery, result: HttpAckResult): Promise<void> {
+        try {
+            // The row IS the record `claim()` returned, so its (claimedBy,
+            // claimedAt) pair is the credential — handed back whole, never
+            // rebuilt from this node's id. A store written before the parameter
+            // ignores it; a store that honours it re-checks it at run time.
+            await this.opts.outbox.ack(row.id, result, row as HttpClaimCredential);
+        } catch (err) {
+            if ((err as { code?: string })?.code !== 'DELIVERY_NOT_ELIGIBLE') throw err;
+            this.opts.logger?.warn?.('http-dispatcher: ack refused, claim no longer held', {
+                nodeId: this.opts.nodeId,
+                deliveryId: row.id,
+                error: (err as Error)?.message ?? String(err),
+            });
+        }
     }
 }
 
