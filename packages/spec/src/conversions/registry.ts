@@ -6801,11 +6801,13 @@ const elementInputTargetVariableRemoved: MetadataConversion = {
  * them together.
  *
  * Pure lossless deletes — no key ever had an effect to lose. The component
- * node itself is NOT removed: the open `type` union tolerates a bare inert
- * node (nothing rendered it before either), and deleting authored page nodes
- * is a layout decision a mechanical conversion must not make. The
+ * node itself is NOT removed: deleting authored page nodes is a layout
+ * decision a mechanical conversion must not make. The bare node it leaves is
+ * not the end state — `element:filter` is a member of
+ * `RETIRED_PAGE_COMPONENT_TYPES`, so the parse refuses it by name and the
  * prescription tells the author to delete the component and use the list
- * surface's own filtering instead.
+ * surface's own filtering instead. Mechanical where it can be, located where
+ * it cannot.
  */
 const elementFilterRemoved: MetadataConversion = {
   id: 'element-filter-removed',
@@ -6819,7 +6821,8 @@ const elementFilterRemoved: MetadataConversion = {
     "the whole 'element:filter' element retired (#9220 — no renderer for it ever shipped in "
     + 'any repo, so every key was a capability claim nothing kept; list surfaces own their '
     + "filtering via a view's userFilters / the list filter builder). All six props are "
-    + 'stripped; the bare node stays, inert as it always was',
+    + 'stripped; the bare node the conversion leaves is refused by name at the parse, with '
+    + 'the prescription to delete the component',
   apply(stack, emit) {
     return mapPageComponents(stack, (component, path) => {
       if (component.type !== 'element:filter') return component;
@@ -6949,13 +6952,14 @@ const elementFilterRemoved: MetadataConversion = {
  * together and this conversion strips them together.
  *
  * Pure lossless deletes — no key ever had an effect to lose. The component
- * node itself is NOT removed: the open `type` union tolerates a bare inert
- * node (nothing rendered it before either), and deleting authored page nodes
- * is a layout decision a mechanical conversion must not make. The
+ * node itself is NOT removed: deleting authored page nodes is a layout
+ * decision a mechanical conversion must not make. The bare node it leaves is
+ * not the end state — `element:form` is a member of
+ * `RETIRED_PAGE_COMPONENT_TYPES`, so the parse refuses it by name and the
  * prescription tells the author to delete the component and use the
  * object-bound `object-form` block (#7751) instead — rendered,
  * designer-publishable, and carrying the same intent (`objectName`, `fields`,
- * `mode`, `submitText`).
+ * `mode`, `submitText`). Mechanical where it can be, located where it cannot.
  */
 const elementFormRemoved: MetadataConversion = {
   id: 'element-form-removed',
@@ -6969,7 +6973,8 @@ const elementFormRemoved: MetadataConversion = {
     "the whole 'element:form' element retired (#9249 — no renderer for it ever shipped in "
     + 'any repo, so every key was a capability claim nothing kept; use the object-bound '
     + "'object-form' block instead — rendered and designer-publishable). All six props are "
-    + 'stripped; the bare node stays, inert as it always was',
+    + 'stripped; the bare node the conversion leaves is refused by name at the parse, with '
+    + 'the prescription to delete the component',
   apply(stack, emit) {
     return mapPageComponents(stack, (component, path) => {
       if (component.type !== 'element:form') return component;

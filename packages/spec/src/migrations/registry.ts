@@ -5149,7 +5149,8 @@ const step18: MigrationStep = {
     'the 2026-06 page-liveness audit recorded it rendering "Unknown component type" — so ' +
     'every one of its six authorable keys was a capability claim nothing kept. All six ' +
     'are retiredKey tombstones; the mechanical conversion strips them from old sources ' +
-    '(pure lossless deletes) and leaves the bare node, inert as it always was. List ' +
+    '(pure lossless deletes) and leaves the bare node, which the parse then refuses by ' +
+    'name — delete the component. List ' +
     'surfaces own their filtering: a view\'s `userFilters` quick-filter bar / the list ' +
     'toolbar\'s filter builder. ' +
     'It also retires the whole `element:form` element (#9249, ADR-0049 enforce-or-remove ' +
@@ -5160,7 +5161,8 @@ const step18: MigrationStep = {
     'rendering "Unknown component type" — so every one of its six authorable keys was a ' +
     'capability claim nothing kept. All six are retiredKey tombstones; the mechanical ' +
     'conversion strips them from old sources (pure lossless deletes) and leaves the bare ' +
-    'node, inert as it always was. Use the object-bound `object-form` block instead ' +
+    'node, which the parse then refuses by name — delete the component. ' +
+    'Use the object-bound `object-form` block instead ' +
     '(#7751) — rendered, designer-publishable, and carrying the same intent ' +
     '(`objectName`, `fields`, `mode`, `submitText`). ' +
     'It also closes the two explicit column lists on relationship fields (#9227): ' +
@@ -12965,7 +12967,9 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
     // Sources are rewritten by the D2 conversion `element-filter-removed`, which
-    // strips all six keys and leaves the bare node — inert as it always was.
+    // strips all six keys and leaves the bare node — which the parse then refuses
+    // by name (`RETIRED_PAGE_COMPONENT_TYPES`), with the prescription to delete the
+    // component.
     'ui/ElementFilterProps:aria',
     // #9220 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:filter` never
     // had a renderer or reader anywhere: objectui registers none (its
@@ -12985,7 +12989,9 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
     // Sources are rewritten by the D2 conversion `element-filter-removed`, which
-    // strips all six keys and leaves the bare node — inert as it always was.
+    // strips all six keys and leaves the bare node — which the parse then refuses
+    // by name (`RETIRED_PAGE_COMPONENT_TYPES`), with the prescription to delete the
+    // component.
     'ui/ElementFilterProps:fields',
     // #9220 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:filter` never
     // had a renderer or reader anywhere: objectui registers none (its
@@ -13005,7 +13011,9 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
     // Sources are rewritten by the D2 conversion `element-filter-removed`, which
-    // strips all six keys and leaves the bare node — inert as it always was.
+    // strips all six keys and leaves the bare node — which the parse then refuses
+    // by name (`RETIRED_PAGE_COMPONENT_TYPES`), with the prescription to delete the
+    // component.
     'ui/ElementFilterProps:layout',
     // #9220 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:filter` never
     // had a renderer or reader anywhere: objectui registers none (its
@@ -13025,7 +13033,9 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
     // Sources are rewritten by the D2 conversion `element-filter-removed`, which
-    // strips all six keys and leaves the bare node — inert as it always was.
+    // strips all six keys and leaves the bare node — which the parse then refuses
+    // by name (`RETIRED_PAGE_COMPONENT_TYPES`), with the prescription to delete the
+    // component.
     'ui/ElementFilterProps:object',
     // #9220 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:filter` never
     // had a renderer or reader anywhere: objectui registers none (its
@@ -13045,7 +13055,9 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
     // Sources are rewritten by the D2 conversion `element-filter-removed`, which
-    // strips all six keys and leaves the bare node — inert as it always was.
+    // strips all six keys and leaves the bare node — which the parse then refuses
+    // by name (`RETIRED_PAGE_COMPONENT_TYPES`), with the prescription to delete the
+    // component.
     'ui/ElementFilterProps:showSearch',
     // #9220 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:filter` never
     // had a renderer or reader anywhere: objectui registers none (its
@@ -13065,7 +13077,9 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
     // Sources are rewritten by the D2 conversion `element-filter-removed`, which
-    // strips all six keys and leaves the bare node — inert as it always was.
+    // strips all six keys and leaves the bare node — which the parse then refuses
+    // by name (`RETIRED_PAGE_COMPONENT_TYPES`), with the prescription to delete the
+    // component.
     'ui/ElementFilterProps:targetVariable',
     // #9249 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:form` never
     // had a renderer or reader anywhere — the #9220 shape one element over,
@@ -13087,7 +13101,9 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
     // Sources are rewritten by the D2 conversion `element-form-removed`, which
-    // strips all six keys and leaves the bare node — inert as it always was.
+    // strips all six keys and leaves the bare node — which the parse then refuses
+    // by name (`RETIRED_PAGE_COMPONENT_TYPES`), with the prescription to delete the
+    // component.
     'ui/ElementFormProps:aria',
     // #9249 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:form` never
     // had a renderer or reader anywhere — the #9220 shape one element over,
@@ -13109,7 +13125,9 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
     // Sources are rewritten by the D2 conversion `element-form-removed`, which
-    // strips all six keys and leaves the bare node — inert as it always was.
+    // strips all six keys and leaves the bare node — which the parse then refuses
+    // by name (`RETIRED_PAGE_COMPONENT_TYPES`), with the prescription to delete the
+    // component.
     'ui/ElementFormProps:fields',
     // #9249 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:form` never
     // had a renderer or reader anywhere — the #9220 shape one element over,
@@ -13131,7 +13149,9 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
     // Sources are rewritten by the D2 conversion `element-form-removed`, which
-    // strips all six keys and leaves the bare node — inert as it always was.
+    // strips all six keys and leaves the bare node — which the parse then refuses
+    // by name (`RETIRED_PAGE_COMPONENT_TYPES`), with the prescription to delete the
+    // component.
     'ui/ElementFormProps:mode',
     // #9249 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:form` never
     // had a renderer or reader anywhere — the #9220 shape one element over,
@@ -13153,7 +13173,9 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
     // Sources are rewritten by the D2 conversion `element-form-removed`, which
-    // strips all six keys and leaves the bare node — inert as it always was.
+    // strips all six keys and leaves the bare node — which the parse then refuses
+    // by name (`RETIRED_PAGE_COMPONENT_TYPES`), with the prescription to delete the
+    // component.
     'ui/ElementFormProps:object',
     // #9249 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:form` never
     // had a renderer or reader anywhere — the #9220 shape one element over,
@@ -13175,7 +13197,9 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
     // Sources are rewritten by the D2 conversion `element-form-removed`, which
-    // strips all six keys and leaves the bare node — inert as it always was.
+    // strips all six keys and leaves the bare node — which the parse then refuses
+    // by name (`RETIRED_PAGE_COMPONENT_TYPES`), with the prescription to delete the
+    // component.
     'ui/ElementFormProps:onSubmit',
     // #9249 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:form` never
     // had a renderer or reader anywhere — the #9220 shape one element over,
@@ -13197,7 +13221,9 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
     // Sources are rewritten by the D2 conversion `element-form-removed`, which
-    // strips all six keys and leaves the bare node — inert as it always was.
+    // strips all six keys and leaves the bare node — which the parse then refuses
+    // by name (`RETIRED_PAGE_COMPONENT_TYPES`), with the prescription to delete the
+    // component.
     'ui/ElementFormProps:submitLabel',
     // #9198 — ADR-0049 enforce-or-remove. `targetVariable` on
     // `element:record_picker` was a declarative hint with zero readers: the picker
