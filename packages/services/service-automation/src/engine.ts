@@ -5049,7 +5049,45 @@ export class AutomationEngine implements IAutomationService {
 
             // Record failed execution log
             const durationMs = Date.now() - startTime;
-            const logged = this.recordLog({
+            // [#17562] THE RUN IS OVER AND IT FAILED, and this `catch` IS the
+            // handler for that failure — there is no outer one. So a throw out
+            // of THIS history write escaped `execute()` entirely and left it a
+            // REJECTED PROMISE, where its declared return type is an
+            // `AutomationResult`. The FAILURE-arm half of the guard #16274
+            // landed on the completion arm of this same method, and the same
+            // shape #15555 landed on {@link resumeInternal}'s failure arm.
+            //
+            // ⚠️ What is lost is the SHAPE, not the verdict — which is why this
+            // is a narrower defect than #16274's and still a contract
+            // violation. The run genuinely failed, so nothing misleads an
+            // operator: no false `failed`, no double run. But the caller that
+            // branches on `{ success: false, status: 'failed' }` gets an
+            // exception instead, so the transport's `status` arm (#9378) is
+            // bypassed and `errorMessage` (#9414) and `summary` (#4354) never
+            // arrive — a REST route or SDK caller sees a 500-class throw for a
+            // run that had a perfectly good failure envelope waiting, and the
+            // NODE's own error text is replaced by the history driver's.
+            //
+            // The two statements inside `recordLog` that reach here are the
+            // ones stated at the completion site above: the default-on
+            // run-summary line `this.logger.info(line, meta)` calling a
+            // HOST-INJECTED `Logger`, and `store.recordTerminal(record)`
+            // throwing SYNCHRONOUSLY — which the `void write.catch(...)`
+            // beneath that call cannot see, because it only ever observes a
+            // RETURNED promise's rejection.
+            //
+            // The guard restores the invariant `recordLog`'s own doc states —
+            // "a history write must NEVER block or break the run that produced
+            // it" — which this call was relied upon to keep and did not.
+            //
+            // ⛔ NOT a widening of this arm's meaning: the suspend arm above,
+            // the `InputSchemaViolationError` refusal below and the
+            // `strategy: 'retry'` branch are all untouched, a genuine node
+            // failure still records `failed` with the node's own text, and the
+            // retry budget is unchanged — pinned by two controls.
+            let logged: ExecutionLogEntry | undefined;
+            try {
+                logged = this.recordLog({
                 id: runId,
                 flowName,
                 flowVersion: flow.version,
@@ -5061,6 +5099,45 @@ export class AutomationEngine implements IAutomationService {
                 steps,
                 error: errorMessage,
             }, context);
+            } catch (bookkeeping) {
+                // #4632 verdict: DURABILITY, so `error` — the caller is told a
+                // truthful thing (the run failed, with the node's own text),
+                // which is exactly what makes the rest invisible from the
+                // outside: the terminal history row never landed, nothing
+                // retries it, and no envelope carries a word about it.
+                // Consequence and fix in the first line, per AGENTS.md. Said
+                // ONCE per abandoned write.
+                //
+                // ⚠️ NOT the rule's third answer ("a failure handed to the
+                // CALLER is not a degradation at all"): what is handed to the
+                // caller is the NODE's failure. The bookkeeping failure is
+                // handed to nobody, and it is a durability loss — which is why
+                // `recordLog` is in `DURABILITY_CRITICAL_CALLEES`.
+                //
+                // ⚠️ The level is the precedent's (#15555, #16273, #16274) and
+                // is NOT a #13398-class raise: that ruling forbids raising a
+                // site to `error` where doing so means GROWING `error?` onto a
+                // published sink that lacks it, and this sink — `Logger` from
+                // `@objectstack/spec/contracts` — declares `error(message,
+                // error?, meta?)` as a REQUIRED member. Nothing is widened and
+                // no sink type changes in this diff.
+                //
+                // THIRD argument per `error(message, error?, meta?)`; the
+                // `Error` slot stays empty on purpose (#5575), and the thrown
+                // text goes to the structured slot rather than into the message
+                // (#6499).
+                this.logger.error(
+                    `[Automation] run '${runId}' of flow '${flowName}' FAILED and its run-history ` +
+                        `bookkeeping threw, so its terminal 'failed' row never landed — nothing retries the ` +
+                        `write, and after the next restart this run is invisible to the Runs surfaces while ` +
+                        `the approvals sweeps read it as never-finished. The run's OWN failure IS reported: ` +
+                        `the caller was answered status 'failed' carrying the node's error, so nothing ` +
+                        `needs re-driving on account of this line. Fix the history failure in this record's ` +
+                        `meta.`,
+                    undefined,
+                    describeThrownForLog(bookkeeping),
+                );
+            }
 
             // [#10025] NEVER DISPATCHED, ruled NON-RETRYABLE (maintainer,
             // 2026-08-20, Option B taken whole). The guard's verdict is a pure
@@ -5169,7 +5246,11 @@ export class AutomationEngine implements IAutomationService {
                 errorMessage: flow.errorMessage,
                 // A failed run's counts matter MORE, not less: they say how far
                 // it got before dying — how many rows it had already written.
-                summary: logged.summary,
+                // [#17562] Recomputed when the guard above had to abandon
+                // `recordLog`: the same pure function of the same steps that
+                // `recordLog`'s own first statement runs, so the two spellings
+                // cannot disagree. Same shape as #15555's.
+                summary: logged?.summary ?? summarizeRun(steps),
             };
         } finally {
             // Release the re-entrancy guard for this (flow, record). Runs before
@@ -10395,7 +10476,27 @@ export class AutomationEngine implements IAutomationService {
 
             const errorMessage = err instanceof Error ? err.message : String(err);
             const durationMs = Date.now() - startTime;
-            const logged = this.recordLog({
+            // [#17562] The SECOND initial-execution instance of the guard above
+            // in `execute()` — this path's own failure arm, one per RETRY
+            // attempt. The reachable statements, the invariant and the #13398
+            // reading are all stated at the `execute()` site; this is the same
+            // guard, not a second design.
+            //
+            // ⚠️ Fixing `execute()` alone would NOT have closed it, and the
+            // reachability is the opposite way round from #16274's: this method
+            // is only ever entered from {@link retryExecution}, which
+            // `execute()`'s catch reaches AFTER its own failed row. So a store
+            // that starts refusing mid-run (the first row lands, the driver's
+            // connection then drops) puts the throw in THIS arm and nowhere
+            // else, and the throw rejected out through `retryExecution` and
+            // `execute()` both — taking the remaining retry budget with it.
+            // The eighth instance of this method's documented drift from
+            // `execute()` (#9378, #9415, #9414, #9510, #9704, #9889, #16274
+            // before it), and the same chokepoint discipline applies: one
+            // shape, both attempt paths.
+            let logged: ExecutionLogEntry | undefined;
+            try {
+                logged = this.recordLog({
                 id: runId,
                 flowName,
                 flowVersion: flow.version,
@@ -10407,6 +10508,25 @@ export class AutomationEngine implements IAutomationService {
                 steps,
                 error: errorMessage,
             }, context);
+            } catch (bookkeeping) {
+                // #4632 verdict: DURABILITY, so `error` — see the `execute()`
+                // site for why this is outside #13398's class and why a failure
+                // handed to the caller does not exempt it. The message names
+                // the ATTEMPT, because the run id an operator finds in the Runs
+                // surfaces is this attempt's own and not the first attempt's.
+                // Said ONCE per abandoned write.
+                this.logger.error(
+                    `[Automation] run '${runId}' of flow '${flowName}' FAILED on a RETRY attempt and its ` +
+                        `run-history bookkeeping threw, so that attempt's terminal 'failed' row never ` +
+                        `landed — nothing retries the write, and after the next restart the attempt is ` +
+                        `invisible to the Runs surfaces while the approvals sweeps read it as ` +
+                        `never-finished. Neither the retry budget nor the caller's answer is affected: the ` +
+                        `loop still runs its remaining attempts and still answers status 'failed' carrying ` +
+                        `the node's error. Fix the history failure in this record's meta.`,
+                    undefined,
+                    describeThrownForLog(bookkeeping),
+                );
+            }
             // [#9378] The retry loop reads only `result.success` and this
             // result never escapes `retryExecution` on its own, but it is the
             // same ran-and-failed exit as the two above and is classified the
@@ -10423,7 +10543,11 @@ export class AutomationEngine implements IAutomationService {
                 durationMs,
                 status: 'failed',
                 errorMessage: flow.errorMessage,
-                summary: logged.summary,
+                // [#17562] Recomputed when the guard above had to abandon
+                // `recordLog`: the same pure function of the same steps that
+                // `recordLog`'s own first statement runs, so the two spellings
+                // cannot disagree. Same shape as #15555's.
+                summary: logged?.summary ?? summarizeRun(steps),
             };
         }
     }
