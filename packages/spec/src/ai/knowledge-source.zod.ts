@@ -102,8 +102,24 @@ export const KnowledgeSourceKindSchema = lazySchema(() => z.discriminatedUnion('
 ]));
 
 /**
- * Canonical KnowledgeSource. Stored as metadata, versioned, and
- * environment-scoped exactly like a view or a flow.
+ * Canonical KnowledgeSource — the shape of a **runtime registration**,
+ * ⛔ not a governed metadata type.
+ *
+ * It is not stored as metadata, not versioned and not
+ * environment-scoped: no knowledge-shaped entry exists in the governed
+ * metadata-type registry (`listMetadataTypeSchemaTypes()`), and
+ * `ObjectStackDefinitionSchema` carries no collection for it — so
+ * `defineStack({ knowledgeSources: [...] })` is refused as an
+ * unrecognized top-level key. `view`, `flow`, `skill`, `agent` and
+ * `tool` are the types that do work that way; this one does not.
+ *
+ * A source reaches the runtime through code, for the life of the
+ * process: `KnowledgeServicePlugin({ sources: [...] })` at kernel
+ * wiring, or `IKnowledgeService.registerSource(source)` afterwards;
+ * `listSources()` / `getSource()` read that in-memory registry back.
+ * Retrieval is restricted at the knowledge-service/source level —
+ * `search_knowledge` takes `sourceIds` — and an agent describes its
+ * grounding in `instructions`.
  */
 export const KnowledgeSourceSchema = lazySchema(() => z.object({
   /** Stable identifier. Snake_case. */
