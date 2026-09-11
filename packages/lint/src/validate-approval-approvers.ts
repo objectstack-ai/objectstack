@@ -139,6 +139,15 @@ const GROUP_ROUTED_TYPES = new Set(['position', 'team', 'department']);
  * a system-context write. Update them in the same change that opens the write
  * surface — and re-take the three grades above, which are readings of this
  * tree, not standing facts.
+ *
+ * Two other carriers assert the same fact and go stale with these strings, so
+ * the list is theirs too: the `manager` callout in
+ * `content/docs/automation/approvals.mdx`, and `ApproverType`'s `.describe()`
+ * in `packages/spec/src/automation/approval.zod.ts` (rendered verbatim into
+ * `content/docs/references/automation/approval.mdx`). Neither RESTATES the
+ * remedy — both point back here, which is why there is still exactly one copy
+ * to edit — but both assert that the column has no product write surface, and
+ * that is the sentence which stops being true.
  */
 // ⛔ The tracker ids stay in the comments above and never in this string:
 // `check:doc-authoring` Rule 3 — a runtime string reaches authors, operators and
