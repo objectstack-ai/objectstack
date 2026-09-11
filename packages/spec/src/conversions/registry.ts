@@ -3120,6 +3120,16 @@ const jobIdRemoved: MetadataConversion = {
  * rewritten in the same change to say rule messages are authored on the rule
  * (`object.validations[].message`), not translated through a group.
  *
+ * Since 17.3.0 (#14381, #14253) there is a group again and that same guidance
+ * entry names it: `objects.<object_name>._validations.<rule_name>.message`,
+ * which the write path resolves. It is not `validationMessages` returning —
+ * that one was keyed by rule name at the TOP level, so it could not tell two
+ * objects' rules apart, and nothing read it; this one is object-scoped and the
+ * rule evaluator reads it through the existing `i18nService` channel. The
+ * sentence above is what 17.0.0 said and it stays true of the retired key; an
+ * author arriving at this conversion needs both halves, so the summary below
+ * carries the route too.
+ *
  * Removed from the shared `translationDataShape()`, so it retires at BOTH doors
  * at once — the bundle entry and the registered item. #3778's original guard
  * ran on the item door only, which is exactly how the key survived this long in
@@ -3130,7 +3140,7 @@ const translationValidationMessagesRemoved: MetadataConversion = {
   toMajor: 17,
   retiredFromLoadPath: true,
   surface: 'translation.validationMessages',
-  summary: "translation key 'validationMessages' removed (#4667 — no resolver read it, so a translated rule message was stored and never shown; #3778's migration table had been steering retired `errors:` authors into it). Author the message on the rule itself (`object.validations[].message`)",
+  summary: "translation key 'validationMessages' removed (#4667 — no resolver read it, so a translated rule message was stored and never shown; #3778's migration table had been steering retired `errors:` authors into it). Author the message on the rule itself (`object.validations[].message`), and translate it under the object-scoped group `objects.<object_name>._validations.<rule_name>.message`, which the write path resolves (17.3.0, #14381)",
   apply(stack, emit) {
     return mapCollection(stack, 'translations', (t, path) =>
       stripKeys(t, ['validationMessages'], emit, path));
