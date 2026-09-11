@@ -102,6 +102,27 @@ export interface ClaimOptions {
     claimTtlMs: number;
     /** "Now" reference, ms. Defaults to Date.now(). */
     now?: number;
+    /**
+     * [#17610] Skip the visibility-timeout reap this call otherwise runs before
+     * claiming. Default `false`: a direct `claim()` stays self-contained — the
+     * call that wants stale `in_flight` rows back is the one that recovers them.
+     *
+     * A caller that already ran {@link INotificationOutbox.reap} for this pass
+     * passes `true`. `NotificationDispatcher` reaps once per tick and then claims
+     * every partition twice (normal + digest); the reap is environment-wide — its
+     * predicate names no partition — so repeating it per claim recovers nothing
+     * the first run did not, and on an idle outbox with the default 8 partitions
+     * it was 16 of a tick's 32 statements.
+     */
+    skipReap?: boolean;
+}
+
+/** [#17610] Options for {@link INotificationOutbox.reap}. */
+export interface ReapOptions {
+    /** Visibility timeout — `in_flight` rows claimed longer ago than this revert to `pending`. */
+    claimTtlMs: number;
+    /** "Now" reference, ms. Defaults to the store's clock. */
+    now?: number;
 }
 
 export interface AckSuccess {
@@ -209,6 +230,23 @@ export function notificationAckNoCredentialMessage(id: string): string {
  */
 export interface INotificationOutbox {
     enqueue(input: EnqueueDeliveryInput): Promise<string>;
+    /**
+     * [#17610] The visibility-timeout recovery on its own: every `in_flight` row
+     * whose claim is older than `claimTtlMs` reverts to `pending` with its claim
+     * credential cleared — across the WHOLE store, every partition and every
+     * organization. It is the step {@link claim} / {@link claimDigest} run first
+     * unless told `skipReap`, exposed so a dispatcher can run it once per pass
+     * instead of once per (partition × claim kind).
+     *
+     * Safe at any moment and from any number of nodes: it moves only rows already
+     * past their timeout, {@link claim} takes only `pending` rows, and an
+     * {@link ack} whose claim was reaped matches nothing and is refused (#11859).
+     *
+     * Optional, so an outbox written before it keeps working unchanged: the
+     * dispatcher probes for it and, when it is absent, lets every claim reap as
+     * before — correct, at the per-claim cost. Both built-in stores implement it.
+     */
+    reap?(opts: ReapOptions): Promise<void>;
     claim(opts: ClaimOptions): Promise<ClaimedDeliveryRecord[]>;
     /**
      * Record the outcome of ONE dispatch attempt on a row this caller claimed,

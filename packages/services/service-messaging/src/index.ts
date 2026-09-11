@@ -104,6 +104,8 @@ export type {
     DeliveryPayload,
     EnqueueDeliveryInput,
     ClaimOptions,
+    // [#17610] The dispatcher's once-per-tick visibility-timeout recovery.
+    ReapOptions,
     AckResult,
 } from './outbox.js';
 // [#11453] `ack()`'s status precondition refuses with this, so a caller that

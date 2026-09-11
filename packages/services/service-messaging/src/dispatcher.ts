@@ -43,6 +43,12 @@ export interface NotificationDispatcherLogger {
     info?: (msg: string, meta?: any) => void;
 }
 
+/**
+ * [#17610] Default ceiling of the idle backoff, in ms — see
+ * {@link NotificationDispatcherOptions.maxIdleIntervalMs}.
+ */
+export const DEFAULT_MAX_IDLE_INTERVAL_MS = 30_000;
+
 export interface NotificationDispatcherOptions {
     nodeId: string;
     outbox: INotificationOutbox;
@@ -53,7 +59,22 @@ export interface NotificationDispatcherOptions {
     cluster?: DispatchCluster;
     partitionCount?: number;
     batchSize?: number;
+    /** Tick interval in ms while ticks find work (default 500). */
     intervalMs?: number;
+    /**
+     * [#17610] Idle backoff ceiling in ms (default {@link DEFAULT_MAX_IDLE_INTERVAL_MS}).
+     * Each loop tick that claims nothing doubles the delay before the next one,
+     * from `intervalMs` up to this; a tick that claims anything, or a
+     * {@link NotificationDispatcher.wake} call, snaps it back to `intervalMs`.
+     * A value at or below `intervalMs` disables the backoff.
+     *
+     * While idle this bounds how late the loop notices work nobody woke it for:
+     * a deferred row coming due (retry schedule, quiet hours, a digest window),
+     * a row enqueued by a process this dispatcher does not serve, and a crashed
+     * node's `in_flight` rows — reaped at most `claimTtlMs` + this after their
+     * claim, where the fixed interval gave `claimTtlMs` + `intervalMs`.
+     */
+    maxIdleIntervalMs?: number;
     lockTtlMs?: number;
     claimTtlMs?: number;
     rng?: () => number;
@@ -68,22 +89,39 @@ export interface NotificationDispatcherOptions {
  * NotificationDispatcher (ADR-0030 P1) — drains the `sys_notification_delivery`
  * outbox and sends each row through its channel, retrying with backoff and
  * dead-lettering once the budget is exhausted. Structurally mirrors
- * `WebhookDispatcher`: an interval loop walks `partitionCount` partitions, each
+ * `WebhookDispatcher`: a timer loop walks `partitionCount` partitions, each
  * guarded by a per-partition cluster lock; within a held partition it claims a
  * batch (`pending → in_flight`), sends, and acks.
  *
  * At-least-once: if a channel send succeeds but the ack write fails, the row
  * reverts to pending after the claim TTL and is re-sent — the inbox channel's
  * receipt write is idempotent-friendly, and downstream channels should be too.
+ *
+ * ## What an idle tick costs (#17610)
+ *
+ * Against an empty outbox one tick is `1 + 2 × partitionCount` store round
+ * trips: ONE visibility-timeout reap for the whole environment, then a claim
+ * probe and a digest probe per partition. The reap used to run inside both
+ * claims of every partition — `2 × partitionCount` identical environment-wide
+ * UPDATEs a tick, 16 of the 32 statements a tick issued with the default 8
+ * partitions — on a fixed 500 ms interval that never let up, one loop per warm
+ * kernel. The loop now also backs off while idle
+ * ({@link NotificationDispatcherOptions.maxIdleIntervalMs}), and
+ * {@link NotificationDispatcher.wake} — which the messaging service calls when
+ * `emit()` enqueues deliveries — runs the next tick at once.
  */
 export class NotificationDispatcher {
     private readonly opts: Required<
         Omit<NotificationDispatcherOptions, 'rng' | 'logger' | 'onAttempt' | 'cluster' | 'now'>
     > &
         Pick<NotificationDispatcherOptions, 'rng' | 'logger' | 'onAttempt' | 'now'> & { cluster: DispatchCluster };
-    private timer: ReturnType<typeof setInterval> | undefined;
+    private timer: ReturnType<typeof setTimeout> | undefined;
     private running = false;
     private inflightTick: Promise<void> | undefined;
+    /** [#17610] Consecutive loop ticks that claimed nothing — the idle backoff's exponent. */
+    private idleTicks = 0;
+    /** [#17610] A tick was asked for while one was running: run one more the moment it settles. */
+    private tickRequested = false;
 
     constructor(options: NotificationDispatcherOptions) {
         const intervalMs = options.intervalMs ?? 500;
@@ -97,6 +135,8 @@ export class NotificationDispatcher {
             partitionCount: options.partitionCount ?? 8,
             batchSize: options.batchSize ?? 32,
             intervalMs,
+            // A ceiling below the base interval just means "no backoff".
+            maxIdleIntervalMs: Math.max(intervalMs, options.maxIdleIntervalMs ?? DEFAULT_MAX_IDLE_INTERVAL_MS),
             lockTtlMs,
             claimTtlMs: options.claimTtlMs ?? lockTtlMs * 2,
             rng: options.rng,
@@ -106,66 +146,167 @@ export class NotificationDispatcher {
         };
     }
 
-    /** Begin the periodic loop. Idempotent. */
+    /** Begin the loop; the first tick runs immediately. Idempotent. */
     start(): void {
         if (this.running) return;
         this.running = true;
-        this.scheduleTick();
-        this.timer = setInterval(() => this.scheduleTick(), this.opts.intervalMs);
-        // Don't keep the event loop alive solely for the dispatcher.
-        (this.timer as { unref?: () => void })?.unref?.();
+        this.idleTicks = 0;
+        this.loopTick();
     }
 
     /** Stop the loop and drain the in-flight tick. */
     async stop(): Promise<void> {
         if (!this.running) return;
         this.running = false;
-        if (this.timer) {
-            clearInterval(this.timer);
-            this.timer = undefined;
-        }
+        this.tickRequested = false;
+        this.clearTimer();
         if (this.inflightTick) {
             try { await this.inflightTick; } catch { /* already logged */ }
         }
     }
 
-    /** Run one full tick (all partitions). Exposed for deterministic tests. */
+    /**
+     * [#17610] Work was just enqueued: tick now and reset the idle backoff.
+     *
+     * The messaging service calls this after `emit()` enqueues deliveries, so a
+     * notification raised in this process never waits out a backed-off
+     * interval. A wake that lands while a tick is running queues ONE follow-up
+     * tick for the moment it settles — the running tick may already be past the
+     * partition the new row hashed into — and every wake in that window
+     * collapses into that one. No-op while stopped.
+     */
+    wake(): void {
+        if (!this.running) return;
+        this.idleTicks = 0;
+        this.loopTick();
+    }
+
+    /** Run one full tick (the reap, then all partitions). Exposed for deterministic tests. */
     async tick(): Promise<void> {
         await this.runTick();
     }
 
-    private scheduleTick(): void {
-        if (this.inflightTick) return;
+    /**
+     * One tick of the loop, then the timer for the next. Never two at once: a
+     * call that finds a tick in flight becomes a follow-up request instead.
+     */
+    private loopTick(): void {
+        if (!this.running) return;
+        this.clearTimer();
+        if (this.inflightTick) {
+            this.tickRequested = true;
+            return;
+        }
+        const startedAt = Date.now();
         this.inflightTick = this.runTick()
+            .then((claimed) => {
+                this.idleTicks = claimed > 0 ? 0 : this.idleTicks + 1;
+            })
             .catch((err) => {
+                // A failing store is not work: back off rather than hammer it.
+                this.idleTicks += 1;
                 this.opts.logger?.warn?.('notification-dispatcher: tick failed', {
                     nodeId: this.opts.nodeId,
                     error: (err as Error)?.message ?? String(err),
                 });
             })
-            .finally(() => { this.inflightTick = undefined; });
+            .finally(() => {
+                this.inflightTick = undefined;
+                if (!this.running) return;
+                if (this.tickRequested) {
+                    this.tickRequested = false;
+                    this.idleTicks = 0;
+                    this.loopTick();
+                    return;
+                }
+                this.schedule(Math.max(0, this.nextIntervalMs() - (Date.now() - startedAt)));
+            });
     }
 
-    private async runTick(): Promise<void> {
+    /**
+     * [#17610] Delay before the next loop tick, measured from the START of the
+     * last one: `intervalMs` while ticks claim work, doubled for every
+     * consecutive empty tick after that, capped at `maxIdleIntervalMs`.
+     */
+    private nextIntervalMs(): number {
+        const { intervalMs, maxIdleIntervalMs } = this.opts;
+        if (this.idleTicks === 0) return intervalMs;
+        // Exponent clamped so the product stays finite long after the cap wins.
+        return Math.min(maxIdleIntervalMs, intervalMs * 2 ** Math.min(this.idleTicks, 30));
+    }
+
+    private schedule(delayMs: number): void {
+        this.clearTimer();
+        this.timer = setTimeout(() => {
+            this.timer = undefined;
+            this.loopTick();
+        }, delayMs);
+        // Don't keep the event loop alive solely for the dispatcher.
+        (this.timer as { unref?: () => void })?.unref?.();
+    }
+
+    private clearTimer(): void {
+        if (this.timer === undefined) return;
+        clearTimeout(this.timer);
+        this.timer = undefined;
+    }
+
+    /** One full pass: the reap, then every partition. Resolves to the rows claimed. */
+    private async runTick(): Promise<number> {
+        // [#17610] Visibility-timeout recovery ONCE per tick, BEFORE any claim.
+        // Its predicate names no partition, so this one run hands every claim
+        // below each row that had already expired when the tick began — what
+        // reaping inside every claim achieved, less the rows that expire DURING
+        // this tick, which the next tick's reap returns. An abandoned claim is
+        // still recovered within one tick of `claimTtlMs` passing (one backed-off
+        // tick while idle, see `maxIdleIntervalMs`), and the TTL keeps its
+        // meaning: a claim is never re-taken before it.
+        //
+        // No partition lock is needed, and none was ever in force: the reap only
+        // moves rows already past their timeout, a claim only takes `pending`
+        // rows, and an ack whose claim was reaped matches nothing (#11859) — while
+        // the per-claim reap, run under partition p's lock, was already rewriting
+        // rows in every other partition.
+        //
+        // `reap` is optional on the outbox contract, so a store written before it
+        // keeps working: without it every claim keeps reaping as it always did —
+        // correct, at the per-claim cost.
+        const { outbox } = this.opts;
+        let reapedForTick = false;
+        if (outbox.reap) {
+            await outbox.reap({ claimTtlMs: this.opts.claimTtlMs });
+            reapedForTick = true;
+        }
+
         const count = this.opts.partitionCount;
         const offset = stableNodeOffset(this.opts.nodeId, count);
+        let claimed = 0;
         for (let step = 0; step < count; step++) {
-            await this.runPartition((offset + step) % count);
+            claimed += await this.runPartition((offset + step) % count, reapedForTick);
         }
+        return claimed;
     }
 
-    private async runPartition(index: number): Promise<void> {
+    /**
+     * Claim and send within one partition's lock. Resolves to the number of rows
+     * claimed — 0 when another node holds the lock. `skipReap` is true when this
+     * tick already ran the outbox's `reap()`.
+     */
+    private async runPartition(index: number, skipReap: boolean): Promise<number> {
         const handle = await this.opts.cluster.lock.acquire(`notify.dispatcher.partition.${index}`, {
             ttlMs: this.opts.lockTtlMs,
             waitMs: 0,
         });
-        if (!handle) return;
+        if (!handle) return 0;
         try {
             const claimed = await this.opts.outbox.claim({
                 nodeId: this.opts.nodeId,
                 limit: this.opts.batchSize,
                 partition: { index, count: this.opts.partitionCount },
                 claimTtlMs: this.opts.claimTtlMs,
+                // [#17610] Reaped once for the whole tick in runTick(), when the
+                // outbox has a reap() to run.
+                skipReap,
             });
             if (claimed.length > 0) {
                 await handle.renew?.(this.opts.lockTtlMs);
@@ -183,6 +324,7 @@ export class NotificationDispatcher {
                 limit: this.opts.batchSize,
                 partition: { index, count: this.opts.partitionCount },
                 claimTtlMs: this.opts.claimTtlMs,
+                skipReap,
             });
             if (digestRows.length > 0) {
                 await handle.renew?.(this.opts.lockTtlMs);
@@ -191,6 +333,7 @@ export class NotificationDispatcher {
                     await this.processDigestGroup(group);
                 }
             }
+            return claimed.length + digestRows.length;
         } finally {
             await handle.release();
         }
