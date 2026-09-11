@@ -1,0 +1,32 @@
+{
+  "number": 1761,
+  "kind": "pull_request",
+  "title": "feat(cloud-connection): LocalManifestSource — local desired-state ledger (cloud ADR-0007 ⑤)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T03:25:44Z",
+  "updated_at": "2026-06-12T03:33:47Z",
+  "closed_at": "2026-06-12T03:25:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T03:25:58Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1761",
+  "body": "## cloud ADR-0007 step ⑤(framework 侧:install-local 升格)\n\n- **`LocalManifestSource`**:install-local 的盘账本(`.objectstack/installed-packages/`)提名为一等、可导出的**本地期望态拥有者**——与云控制面的 `sys_package_installation`(管理面期望态)同构;宿主/将来的调谐器可不经 HTTP 直接读同一账本\n- `MarketplaceInstallLocalPlugin` 全部账本 I/O 委托给它,**行为逐点等价**(404/500 语义保留;恶意 manifest id 的文件名消毒在账本内,新增穿越测试)\n- **ADR-0003 修订注记**(ADR-0007 风险清单要求):安装行 = 期望态,任何运行路径不得当实际装了什么读;observed_* 是回报投影\n- 5 个新测试(round-trip/upsert/remove/损坏容忍/路径穿越),包内 30/30 全过\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

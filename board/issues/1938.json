@@ -1,0 +1,34 @@
+{
+  "number": 1938,
+  "kind": "pull_request",
+  "title": "chore(spec): agent access/permissions are live — correct stale liveness ledger (#1884 already enforced)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T05:26:31Z",
+  "updated_at": "2026-06-16T05:39:51Z",
+  "closed_at": "2026-06-16T05:39:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T05:39:49Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1938",
+  "body": "While picking up the next ADR-0049 \"enforce now\" item (#1884, agent access-control), I found it **already implemented and tested** on main — so this is a ledger-accuracy correction, not new enforcement.\n\n## What's already there\n`evaluateAgentAccess()` (`agent-access.ts`, with `agent-access.test.ts`) enforces, at the chat route (`agent-routes.ts:151`):\n- `agent.permissions` — caller must hold ALL required permissions/roles\n- `agent.access` — allow-list by userId/role\n- default-allow when neither is declared; fail-closed (auth required) when they are\n\nIt landed **after** the 2026-06 liveness audit, which still listed these as dead — so the audit-seeded ledger drifted.\n\n## The correction\n- `agent.access` / `agent.permissions`: **dead → live** (evidence: `agent-access.ts:50`)\n- `agent.visibility`: **dead → experimental** — intentionally not enforced (`agent-access.ts:41`); the `GET /ai/agents` list route doesn't filter by it, and gating listing needs owner/org semantics that aren't plumbed.\n\nGate green: agent 20 live / 5 experimental / 2 dead.\n\n## Meta-finding (worth noting)\nThe gate enforces classification **completeness**, not **correctness** — a `dead` entry that silently becomes live (exactly this case) does **not** fail CI. Catching dead→live drift needs a **periodic re-audit** (cf. the docs monthly cron). I can add that as a follow-up if you want.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

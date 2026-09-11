@@ -1,0 +1,36 @@
+{
+  "number": 1762,
+  "kind": "pull_request",
+  "title": "feat(triggers): trigger-api — inbound webhook trigger with HMAC + queue-backed ingestion (ADR-0041 Tier 1)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T03:45:16Z",
+  "updated_at": "2026-06-12T03:45:30Z",
+  "closed_at": "2026-06-12T03:45:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T03:45:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1762",
+  "body": "## Summary\n\nCompletes the ADR-0041 Tier-1 trigger trio (*data changed / time passed / someone called us*). Born in `packages/triggers/` per the new taxonomy.\n\n- **Engine**: `resolveTriggerBinding` now derives an `api` binding for `type: 'api'` flows — activating the enum value that has been schema-reserved (and a Studio trap) until now.\n- **`@objectstack/trigger-api`**: mounts `POST /api/v1/automation/hooks/:flowName/:hookId` on the host Hono app (`http-server` service). `hookId` is a rotatable URL token from the start-node config; unknown flows and wrong hookIds answer with **identical 404s** (no probing oracle). HMAC verification is GitHub/Stripe style (`x-objectstack-signature: sha256=<hmac of raw body>`, constant-time compare); secretless flows accept unsigned posts with an arm-time warning.\n- **Queue-backed ingestion from day one** (ADR-0041 §5): the handler validates, **enqueues** (`queue` service) and ACKs **202** — flow execution happens on the queue consumer, never in-band. `x-idempotency-key` → queue dedup window; at-least-once delivery. This establishes the ingestion seam every future boundary trigger (queue / connector-event / email) reuses.\n- Payload surfaces as the trigger record (`$record` / `record.*` / bare references) — same authoring surface as record-change flows.\n- `serve` auto-loads the trigger; showcase gains a worked example (`showcase_inbound_task_webhook`).\n\n## Test plan\n\n- trigger-api: **9 tests** (HMAC accept/reject, identical-404 anti-probing, 401 paths, unsigned-with-warning, non-JSON 400, idempotency passthrough, no-queue 503, stop() disarm) ✅\n- service-automation: 180 ✅ · CLI builds ✅ · changesets fixed-group check ✅ (caught the missing new package locally this time)\n- **Live e2e on showcase**: `curl` with correct HMAC → `202 {accepted, messageId}`; bad signature → 401; wrong hookId / unknown flow → identical 404; queue consumer executed the flow and created `showcase_task \"Webhook 进线：Acme 询价跟进\"` (title/assignee/project/status all interpolated from the payload) — verified in the Console record page with the system activity entry. Boot log shows `ApiTriggerPlugin` loaded alongside the other triggers.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

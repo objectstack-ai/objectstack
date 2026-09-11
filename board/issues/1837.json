@@ -1,0 +1,35 @@
+{
+  "number": 1837,
+  "kind": "pull_request",
+  "title": "feat(GA): close P0-5 (single-instance caps) + P1-2 (unbounded growth)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-14T06:13:05Z",
+  "updated_at": "2026-06-14T06:21:49Z",
+  "closed_at": "2026-06-14T06:21:48Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-14T06:21:47Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1837",
+  "body": "Lands the two GA-gating launch-readiness items, scoped to the **single-instance** v1 topology decision.\n\n## P0-5 — realtime/feed in-memory, no cluster coordination\nAccepted as single-instance / non-HA for v1 with default-on memory backstops:\n- `InMemoryFeedAdapter` defaults `maxItems` → `DEFAULT_MAX_FEED_ITEMS` (100k)\n- `InMemoryRealtimeAdapter` defaults `maxSubscriptions` → `DEFAULT_MAX_SUBSCRIPTIONS` (50k)\n- `0` = explicit unbounded opt-out; both plugin JSDocs state the non-HA contract\n- HA (Redis realtime adapter over existing `RedisPubSub` + DB-backed feed adapter) recorded as post-GA roadmap\n\n## P1-2 — unbounded execution logs / job runs / event log\nCorrected scope: only `sys_job_run` was truly unbounded.\n- **service-job**: new `JobRunRetention` (mirrors `NotificationRetention`) — bulk `delete sys_job_run where created_at < cutoff` under a system context, **default-on at 30d**, swept every 6h via an unref'd timer in `JobServicePlugin` `kernel:ready` (DB path only); `retentionDays: 0` disables.\n- **service-messaging**: retention flipped **default-on (`0 → 90d`)**. ⚠️ **Behaviour change** — notification history now auto-prunes at 90 days by default; set `retentionDays: 0` to keep the old keep-forever behaviour.\n- **service-automation**: exec-log ring buffer (already bounded; no OOM risk) cap made configurable via `AutomationServicePluginOptions.maxLogSize` (default unchanged at 1000).\n\n## Verification\n- +11 tests across feed/realtime/job/automation.\n- All touched packages green: feed 42, realtime 25, job 31, automation 187, messaging 128 (= 413).\n- All touched packages build incl. DTS.\n- `docs/launch-readiness.md` updated (P0-5/P1-2 → Verify ✓, topology checkbox ticked, HA fast-follow in roadmap). 3 changesets included.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

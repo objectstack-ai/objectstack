@@ -1,0 +1,32 @@
+{
+  "number": 1719,
+  "kind": "issue",
+  "title": "构建期告警：table/pivot dashboard widget 绑定到「count-only」数据集（很可能是应做成 ListView 的记录列表）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T09:46:41Z",
+  "updated_at": "2026-06-11T10:05:10Z",
+  "closed_at": "2026-06-11T10:05:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1719",
+  "body": "> 来自下游 templates 仓库的反馈。手动修复见 [objectstack-ai/templates#27](https://github.com/objectstack-ai/templates/pull/27)。\n\n## Problem\n\nADR-0021 单一形态切换后，`DashboardWidget` 是 analytics-only：绑定一个 `dataset`，选取 `values`（measures）+ 可选 `dimensions`。当一个 widget 的绑定**只解析出 count 类型的 measure、且没有任何 `dimensions`** 时，它向分析服务请求的是「一行汇总」——一个数字。\n\n这正是 `type:'metric'` widget 想要的形态，却是 `type:'table'`（或 `type:'pivot'`）widget 的**错误**形态——后者作者几乎总是想列出**逐行的记录**。表格照常渲染，但塌缩成一行（里面装着那个 count），作者想要的逐行明细悄悄消失了。\n\nv9 release notes 已经写明：*\"a flat record listing is not an analytics dataset — model it as an object-bound ListView (ADR-0017).\"* 但 `objectstack build` 对这种配置**既不报错也不告警**，于是错误一直隐形，直到页面在浏览器里渲染才暴露。\n\n## Impact\n\n- 在一个下游模板仓库里，这一类问题命中了 **11 个 dashboard 上的 19 个 `type:'table'` widget**——每一个都是记录列表，在 ADR-0021 切换后静默塌缩成单个 count。见 [objectstack-ai/templates#27](https://github.com/objectstack-ai/templates/pull/27)：它移除了这些 widget，并手工用 ADR-0017 的对象绑定 ListView 重建了这些列表。\n- 出问题期间 build 始终是绿的——`zod` schema 校验、`tsc`、marketplace compose 全部通过，没有任何东西标记它。这个回归只能靠人工逐页检查才发现。\n- 这是一个**可预测的迁移陷阱**，不是偶发的笔误：任何 v9 之前用 `table` widget 当记录列表的 dashboard，在单一形态切换时都会精确地变成这个坏形态。每个迁移到 v9 的团队都会暴露在这个风险下。\n\n## Minimal reproduction\n\n一个 `table` widget，绑定到只选取 `count` measure、且不分组（无 dimension）的绑定：\n\n\\`\\`\\`ts\n// dataset —— 有一个 count measure（widget 唯一选取的那个）\nexport const ExpenseReportDataset = defineDataset({\n  name: 'expense_report_metrics',\n  object: 'expense_report',\n  measures: [\n    { name: 'report_count', label: 'report_count', aggregate: 'count' },\n    // （还存在一个 sum measure，但下面的 widget 并没有选它）\n  ],\n  dimensions: [/* ... */],\n});\n\n// widget —— 本意是逐行列表，却 count-only 绑定且无 dimensions\n{\n  id: 'pending_reports_table',\n  type: 'table',\n  dataset: 'expense_report_metrics',\n  values: ['report_count'],          // ← 解析为单个 count measure\n  // （没有 dimensions）              // ← 不分组 → 只有一行\n  filter: { status: 'submitted' },\n  options: {\n    columns: ['title', 'requester', 'total_amount', 'cost_center', 'submitted_at'],\n    pageSize: 10,\n    sort: [{ field: 'total_amount', order: 'desc' }],\n  },\n}\n\\`\\`\\`\n\n**现象：** `objectstack build` 成功，无任何诊断。运行时表格显示**一行**（装着 count 值），而不是 submitted 报销单的列表。\n\n**关于判定 heuristic：** 信号在 **widget 的绑定**上，而不只在 dataset 上。这里 dataset *确实*有一个 `sum` measure 和一个 dimension，但 widget 仍然是坏的——因为*它*只选了 `report_count` 且没声明 `dimensions`。一条只看「dataset 的 measures 全是 count」的规则会漏掉这个 case。请把检查挂在 widget 实际请求的内容上。\n\n## Expected behavior\n\n当某个单独的 `DashboardWidget` 满足以下全部条件时，`objectstack build` 应发出**告警**（非致命，不破坏现有 build）：\n\n1. `type` 为 `'table'` 或 `'pivot'`，**且**\n2. 它选取的 `values` 解析出的 measures **全是 `aggregate: 'count'`**，**且**\n3. widget **没有声明 `dimensions`**（不分组）。\n\n建议文案：\n\n\\`\\`\\`\nwarning  dashboard \"expenses_overview_dashboard\" › widget \"pending_reports_table\":\n         a 'table' widget bound to dataset \"expense_report_metrics\" selects only\n         count measure(s) (report_count) and no dimensions, so it renders a single\n         summary row — not a per-record list.\n\n         A flat record listing is not an analytics dataset. Model it as an\n         object-bound ListView (ADR-0017) surfaced through app navigation, and use\n         a 'metric' widget here if you only need the count.\n\n         If a single-row table is intentional, add an explicit dimension or\n         suppress with: // objectstack-disable-next-line table-count-only\n\\`\\`\\`\n\n发成**告警**（而非 error）保证非破坏性、并允许压制有意为之的情况，同时让陷阱在 CI 日志和本地构建里可见。想让它致命的团队可以在 lint 配置里把它提升为 error。\n\n## Implementation notes\n\n- 把检查放在**构建/校验流水线**里、在 dataset 引用被解析*之后*的那一步——也就是每个 widget 的 `dataset` 名已链接到其 `defineDataset`、且 `values` 的每一项都已解析为带已知 `aggregate` 的具体 measure 之后。该检查需要解析后的 measure `aggregate` 类型，所以无法在纯 `zod` schema 校验阶段对原始 widget 字面量运行；它属于语义/交叉引用校验阶段（和现有的「widget 必须有 `dataset` + `values`」analytics-only 检查放在一起），不属于 schema parsing。\n- 这是一次对已加载 metadata 的纯静态分析，不需要运行时查询。每个 widget：解析 `values` → measures，检查 `every(m => m.aggregate === 'count')`，并检查 `!widget.dimensions?.length`，前置门槛是 `type ∈ {'table','pivot'}`。\n- 建议给它一个 registry 条目（如规则 id `table-count-only`），以便和其他 build 诊断一致地配置/压制，也让文案里的压制注释是真实可用的。\n- 一个更粗的 dataset 级变体（「dataset 只有 count measures 且无可用 dimensions，却被一个 table widget 绑定」）更易计算但更不精确——它既会漏掉上面 repro 这种（dataset 还有别的 measure），也更容易误报。优先选 widget-binding 级的规则。\n\n## Downstream reference\n\n[objectstack-ai/templates#27](https://github.com/objectstack-ai/templates/pull/27) — *\"fix(ui): migrate dashboard record-listing tables to ListViews (ADR-0017)\"* — 是下游的手动修复：移除了全部 19 个塌缩的 table widget，并把真正的记录列表重建为对象绑定的 ListView。本 issue 提议的构建期告警，本可以在迁移时就抓出这全部 19 个，而不是等到 render 时。"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 1796,
+  "kind": "pull_request",
+  "title": "feat(objectql): ADR-0048 — detect cross-package metadata collisions",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T21:07:45Z",
+  "updated_at": "2026-06-13T01:34:03Z",
+  "closed_at": "2026-06-13T01:34:01Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-13T01:34:01Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1796",
+  "body": "## Why\n\nThe metadata registry key is `org/type/name` with **no package coordinate** (`refKey` in `packages/metadata-core/src/types.ts`). Object names avoid collisions because the kernel namespace-prefix-validates them (they map to physical table names, and a duplicate `CREATE TABLE` fails loudly at the DB). But **bare-named UI/automation metadata is not prefix-validated** — `page`, `dashboard`, `flow`, `app`, `action`, `doc` only require snake_case.\n\nSo two installed packages that each define e.g. a `page` named `home` produce the same logical key. In the objectql `SchemaRegistry` they sit under distinct composite keys (`crm:home`, `hr:home`), but bare-name read resolution silently picks one:\n\n```ts\n// getItem() — returns the FIRST composite key matching `:<name>`\nfor (const [key, item] of collection) {\n  if (key.endsWith(`:${name}`)) return item as T;\n}\n```\n\n`getItem('page','home')` returns whichever package registered first; the other's `home` is unreachable, with no error and no warning. This is **last-write-wins, silent** — worse than the object case which fails loudly. Surfaced during ADR-0046 (`doc`) review; generalised here into its own work item.\n\n## Decision (ADR-0048)\n\n**Detect** cross-package same-key collisions in the code-defined base layer at registration time and **raise an explicit error** naming both packages and the type/name — rather than retrofitting namespace-prefix enforcement onto every legacy bare-named type (large migration cost / broken cross-refs). Prefix stays a *recommended convention* (the error message suggests `<namespace>_<name>`); brand-new types (e.g. `doc`) can be prefix-strict from day one.\n\n## What changed\n\n- **`packages/objectql/src/registry.ts`**\n  - `MetadataCollisionError` (exported) — names both packages + type/name + fix.\n  - `isRealPackage` — excludes absent provenance and the `'sys_metadata'` rehydration sentinel.\n  - Guard in `registerItem`: a real `packageId` registering a `(type, name)` already owned by a **different** real package → error. `findOtherPackageOwner` scans the live collection (same style as `getItem`/`unregisterItem`; no parallel index to drift across `reset`/`unregister`).\n  - `collisionPolicy: 'error' (default) | 'warn'` option + `OS_METADATA_COLLISION=warn` env for deliberate migrations.\n  - `ObjectQL.registerApp` and the nested-plugin loop already delegate to `registerItem`, so manifest + plugin metadata are both covered by the single choke point.\n- **Not a collision (pass through untouched):** same-package reloads, runtime/DB overlays (ADR-0005, bare-key or `sys_metadata`-sentinel rows), object ownership/extension, nav contributions (ADR-0029).\n- **`metadata-core`** is the *conceptual* root of the missing coordinate, but its optimistic-concurrency `parentVersion` check already rejects a blind base-layer double-create with `ConflictError`; the genuinely *silent* path is the objectql read resolution, so enforcement lands there. No metadata-core code change.\n\n## Tests\n\n- `registry-cross-package-collision.test.ts` (unit) — error + message contents, same-package reload, runtime overlay (both directions), `sys_metadata` sentinel, distinct names, cross-type same-name, `warn` policy.\n- `engine-cross-package-collision.test.ts` (e2e) — guard fires through real `ObjectQL.registerApp`; namespaced-apart and idempotent-reload pass.\n\n## Test results (this branch)\n\n| Suite | Result |\n|---|---|\n| `@objectstack/objectql` | **587 passed** (46 files; +12 new) |\n| `@objectstack/metadata-core` | **80 passed** (6 files) |\n| `@objectstack/spec` | **6542 passed** (241 files) |\n\nERROR/WARN lines in objectql output are pre-existing negative-path test logs, not failures.\n\n## Notes for reviewers\n\n- Default policy is `error` (loud at registration). If a real cross-package clash exists in a downstream package set today, boot will now fail with an actionable message — that is the intended behavior; `OS_METADATA_COLLISION=warn` is the migration escape hatch.\n- Follow-ups (out of scope): CLI lint warning for non-prefixed bare-named metadata; prefix-strict spec validation for the next net-new bare-named type.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

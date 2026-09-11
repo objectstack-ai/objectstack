@@ -1,0 +1,30 @@
+{
+  "number": 1823,
+  "kind": "issue",
+  "title": "Showcase joined report 'showcase_task_overview' fails spec validation: blocks expected array, got undefined",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-13T21:34:58Z",
+  "updated_at": "2026-06-13T22:02:41Z",
+  "closed_at": "2026-06-13T22:02:41Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1823",
+  "body": "## Summary\n\nThe showcase joined report **`showcase_task_overview`** (`type: joined`) fails load-time spec validation with **2 errors**:\n\n> 分块: 类型无效：应为 array，当前为 undefined\n> (`blocks`: invalid type — expected `array`, got `undefined`)\n\nSurfaced in the metadata-admin report editor's load-time diagnostics (\"元数据不符合规范 — 共 2 个校验错误\").\n\n## Repro\n\n1. Start the showcase backend (`examples/app-showcase`, `serve --dev`).\n2. `GET /api/v1/meta/report/showcase_task_overview?layers=true` → `_diagnostics` reports the `blocks` errors, **or**\n3. Open the report editor for `showcase_task_overview` — the editor shows the validation banner and \"Bind a dataset to preview this report\".\n\nThe other showcase reports are clean:\n- `showcase_hours_by_status` (`summary`) ✅\n- `showcase_status_priority_matrix` (`matrix`) ✅\n\n## Likely cause\n\nThe joined-report seed predates a `ReportSchema` change that now requires a `blocks: []` array for `type: joined` reports. The seed in `examples/app-showcase` (report definition for `showcase_task_overview`) needs a `blocks` array to match the current schema.\n\n## Suggested fix\n\nAdd the required `blocks` array to the `showcase_task_overview` report definition (or update it to the current joined-report shape) so the showcase seeds validate cleanly.\n\n## Notes\n\nFound during ADR-0047 editor-verification sweep. This is showcase **data**, not an editor bug — the objectui report editor surfaces the diagnostic correctly. Observed on the `framework-lookupfilter-wt` worktree (ADR-0047-era branch); please confirm against current `main` before fixing in case the seed was already updated."
+}

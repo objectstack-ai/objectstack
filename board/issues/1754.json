@@ -1,0 +1,33 @@
+{
+  "number": 1754,
+  "kind": "pull_request",
+  "title": "fix: update changesets fixed group for the trigger-* rename",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T02:54:43Z",
+  "updated_at": "2026-06-12T02:59:29Z",
+  "closed_at": "2026-06-12T02:54:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T02:54:46Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1754",
+  "body": "Release workflow's fixed-group verifier (scripts/check-changeset-fixed.mjs) failed after #1749/#1751: the group still listed the old plugin-trigger-* names. Swapped for @objectstack/trigger-record-change and @objectstack/trigger-schedule; verifier passes locally.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

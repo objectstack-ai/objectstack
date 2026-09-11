@@ -1,0 +1,36 @@
+{
+  "number": 1955,
+  "kind": "pull_request",
+  "title": "refactor(audit): retire service-feed; sys_comment canonical (ADR-0052 §5)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T08:35:14Z",
+  "updated_at": "2026-06-16T08:35:44Z",
+  "closed_at": "2026-06-16T08:35:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T08:35:41Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1955",
+  "body": "## What\n\nADR-0052 **§5 decision: `sys_comment` / `sys_activity` is the canonical record-collaboration + timeline backend; `@objectstack/service-feed` is retired.** Ends the split-brain.\n\nThere were two parallel implementations of \"comments + reactions + timeline + subscriptions on a record\":\n\n| | `sys_comment`/`sys_activity` (kept) | `service-feed` (retired) |\n|---|---|---|\n| Durability | ✅ DB-backed | ❌ in-memory only (data lost on restart) |\n| Default-loaded | ✅ | ❌ opt-in |\n| UI consumes it | ✅ ChatterPanel | ❌ never (enabling `feed` was a verified no-op) |\n| Nested REST | ✅ generic data API | ❌ `/data/{obj}/{id}/feed` unmounted (404) |\n\nPicking the durable, default, UI-wired system reaches \"one backend\" now at near-zero risk; `service-feed`'s only edge (a unified *typed* stream) is obtained on `sys_activity` (its `type` enum already carries event kinds). Investing in `service-feed` would mean weeks of cross-repo work (DB adapter + REST + ChatterPanel + migration) to duplicate a working system.\n\n## Changes\n\n- Delete the `@objectstack/service-feed` package.\n- Remove the `feed` capability from the CLI `CAPABILITY_PROVIDERS` + the cli→service-feed dep + the changeset package list.\n- ADR-0052 §5 records the decision + rationale.\n\nNo app depended on it (CLI was the only referencer; HotCRM had it transitively but never `require`d it; objectui doesn't consume it). The vestigial spec **contracts** (`feed.zod`/`feed-api.zod`/`IFeedService`) are woven into `component.zod`/`protocol.zod`/objectql — a separate type-surface cleanup, tracked as follow-up.\n\n## ⚠️ CI note\n\nThe CLI build is **already red on `main`** from a pre-existing CEL drift in `validate-expressions.ts` (`ExprSchemaHint`/`ExprValidationResult`, #1933 area — in-flight in another worktree). **This PR touches none of those files** (only `serve.ts`/`package.json`/`changeset` + the deleted package); `serve.ts` compiles cleanly. The red is not introduced here and clears when the CEL fix lands.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

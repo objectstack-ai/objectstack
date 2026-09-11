@@ -1,0 +1,34 @@
+{
+  "number": 1783,
+  "kind": "pull_request",
+  "title": "feat(cloud-connection): runtime-identity bind v2 — environment-less self-hosted binding",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T11:46:39Z",
+  "updated_at": "2026-06-12T11:50:57Z",
+  "closed_at": "2026-06-12T11:46:58Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T11:46:58Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1783",
+  "body": "## Summary\n\nFramework counterpart of [cloud ADR runtime-identity-binding](https://github.com/objectstack-ai/cloud/blob/main/docs/design/runtime-identity-binding.md) + [cloud#264](https://github.com/objectstack-ai/cloud/pull/264): a self-hosted runtime binds to the control plane like a device binding to an account.\n\n- **No environment id anywhere in the self-hosted flow**: `bind/start`/`bind/poll` work environment-less in `singleEnvironment` mode (the registration row is created cloud-side at approval). The Setup-page \"create an environment in the cloud console and paste its id\" dead-end is gone.\n- **Registration claim**: the bind call carries `hostname` + `runtime_version` (names the device on the approval surface / runtimes list) and the stored `runtime_id` on re-bind — identity survives token rotation; the claim is verified cloud-side (org match) against squatting.\n- **Store**: persists the cloud-minted `runtime_id`; `environmentId` optional (cloud-hosted binds only).\n- **status**: reports `runtimeId`; an env-less single-env runtime reads as unbound (200) instead of 404.\n- **unbind**: env-optional; revokes via the `oscc_` bearer (it self-identifies) before clearing the local credential.\n- **org-packages**: bearer-only forward when no env — the cloud derives the org from the connection (existing behavior). `installation`/`installed` degrade gracefully for registration-only runtimes (local installs are tracked by LocalManifestSource).\n\n## Tests\n- +4 cases (claim contents + runtime_id persistence; env-less bind/start; bearer-only unbind; bearer-only org-packages); 2 status-shape assertions updated\n- @objectstack/cloud-connection 40/40, build + dts clean\n\nConsumed by the cloud repo via SHA pin bump after merge.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

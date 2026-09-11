@@ -1,0 +1,32 @@
+{
+  "number": 1658,
+  "kind": "issue",
+  "title": "ADR-0021 Phase 2 — 存量内联 report/dashboard/list-chart 迁移到 dataset + 对账脚本 + 收敛单形态",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-07T21:00:44Z",
+  "updated_at": "2026-06-11T16:42:13Z",
+  "closed_at": "2026-06-11T16:42:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1658",
+  "body": "## 背景\nADR-0021 的 Phase 0/1 已全部落地：dataset 语义层、RLS 硬化 + 真实 getReadFilter 接通、REST 端点、Studio 设计器/预览、report+dashboard widget 绑定 dataset（增量双形态）、跨仓 spec skew 根治。\n\n剩下的是 **Phase 2 收口**：把存量内联分析迁到 dataset 形态，并最终移除旧形态，让 dataset 成为唯一写法（ADR 终态）。\n\n## 范围\n- [ ] **存量迁移（AI 直接转，不写 codemod）**：逐 app 把现有 `*.report.ts` / `*.dashboard.ts` / list-chart view 的内联 query 转成 dataset 形态，每个 app 转完跑测试 + 人工评审。\n- [ ] **只读对账校验脚本（关键兜底）**：对同一报表比较「旧形态查询结果」vs「转换后 dataset 查询结果」是否一致（数字对账），防止 AI 漏带 filter / 改聚合口径（count vs count_distinct、null/时区）/ 写错关系名。只验证不转换，作为删旧形态前的硬门禁。\n- [ ] **收敛单形态**：全部转完且 grep 确认无旧形态残留后，删除 report/dashboard 内联 query 字段与 `ListChartConfigSchema`（`packages/spec/src/ui/view.zod.ts`），把 union 双形态收敛为单一 dataset 形态。\n- [ ] **改测试到终态**：`packages/spec/src/ui/{view,dashboard,report}.test.ts`、`plugin-reports/src/report-service.test.ts`、`metadata/src/view-expand.test.ts` 及 example 集成测试。\n- [ ] **WS5 文档/skills**：~9 个 mdx + meta.json 导航；更新 `skills/objectstack-ui/SKILL.md`（大改）与 `objectstack-query`（小改）。\n\n## 门禁（删旧形态前必须满足）\n- 对账校验脚本全部通过（旧/新查询结果一致）。\n- `grep` 零旧形态残留。\n- 全量 `pnpm turbo build/test` 绿。\n\n## 风险（见 plan 风险表 R2/R3/R11）\n迁移正确性是财务对账红线——靠对账脚本 + 双形态窗口兜底；删旧形态以对账全绿为硬门禁。\n\n参考：plan `dataset-adr-buzzing-babbage.md` 的 WS4/WS5 与「Phase 2 · 收口」。"
+}

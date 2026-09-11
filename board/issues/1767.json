@@ -1,0 +1,33 @@
+{
+  "number": 1767,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0045 — additive materialization with a visibility gate; drafts narrow to mutations",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T06:34:11Z",
+  "updated_at": "2026-06-12T06:34:39Z",
+  "closed_at": "2026-06-12T06:34:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T06:34:37Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1767",
+  "body": "## What\n\nADR-0045 (**Accepted 2026-06-12**): additive AI builds **materialize real artifacts immediately** (real tables, real seed rows) behind a **hidden-app visibility gate**; **Publish = visibility flip** (instant, reversible). The ADR-0027 draft workspace **narrows to mutations** of published artifacts, where diff review is the right tool.\n\n## Why\n\nThe draft-overlay \"second world\" has an unbounded adaptation surface. The 2026-06-12 local E2E audit found five independent defects in one pass, all at second-world seams (REST dropping `?preview=draft`, client envelope mismatch, navigation dropping the flag, NavigationSync cross-world diff nearly issuing destructive writes, the magic-moment canvas rendering a false empty state) — plus the standing P3 gap: previews show **no row data** on the surfaces users actually judge (lists/kanban). Industry survivors (Power Apps/Retool, v0-class) all preview **real** apps; the gate varies, the half-world doesn't exist.\n\n## Key decisions\n\n- §1 additivity = **reachability from the visible surface**, not name-newness (closes the implicit `<object>.<key>` view-tab leak)\n- §3 \"complete semantics of invisible\": no discovery, API 404, outbound side-effects suppressed; ADR-0039 package-scoped preview tokens later\n- §6 discard = trash-can rename + 7-day GC + lossless restore (v1: typed-confirmation hard delete)\n- ADR-0038 L1 lint moves **before** materialization (failed lint lands nothing); L2/L3 probes exercise the real hidden app\n- v1 scope = \"magic moment on rails\": whole-app builds only; incremental edits keep today's draft+diff path\n\n## Impact\n\nFramework (materialize/teardown, visibility flip, lint pre-gate) → cloud (`apply_blueprint` cutover) → objectui (canvas → real URL, unpublished banner). P3 synthetic-data plumbing retires in v2.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

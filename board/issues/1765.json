@@ -1,0 +1,35 @@
+{
+  "number": 1765,
+  "kind": "pull_request",
+  "title": "feat(approvals): actionable approval links — single-use tokens + session-less confirm page (ADR-0043)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T05:40:06Z",
+  "updated_at": "2026-06-12T05:40:27Z",
+  "closed_at": "2026-06-12T05:40:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T05:40:09Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1765",
+  "body": "## Summary\n\nCloses #1743. Approvers act straight from an email/IM notification without signing in — implemented exactly along ADR-0043's threat table (`docs/adr/0043-actionable-approval-links.md`), every row enforced and tested:\n\n| axis | enforcement |\n|---|---|\n| scope | one token = one request + one action + one approver |\n| storage | SHA-256 hashes only in the new `sys_approval_token`; raw 256-bit tokens returned once |\n| single-use | consumed **before** deciding — failed decide still burns; replay → \"已使用\" page |\n| TTL | 72h default |\n| identity | decision audited as the **bound approver** (`Via action link`), never the page visitor |\n| invalidation | redemption re-checks the live request — decided / recalled / **reassigned-away** slots answer with explanatory pages |\n| scanner-proof | `GET /api/v1/approvals/act` renders the bilingual confirm page only; the decision happens exclusively on the `POST` form |\n\n`remind()` integrates with per-approver fan-out: each concrete identity gets its own approve/reject links in the notification payload (`role:*` literals keep the plain nudge). `publicBaseUrl` plugin option for absolute links in outbound email.\n\n## Test plan\n\n- plugin-approvals: **69 tests** (5 new: hash-only storage + binding, redeem-as-approver + replay burn, peek-never-mutates, the four dead-token paths incl. reassigned slots, per-approver reminder links — all 4 URLs distinct) ✅\n- **Live e2e on showcase**: remind → notification payload carried personal approve/reject URLs → opened the approve link in the browser (session-less confirm page with the full business summary, acting-as `ada@example.com`) → clicked Approve → \"✅ Approved · 已通过\" result page → audit row `approve by ada@example.com, \"Via action link\"` (NOT the signed-in Dev Admin). Replay → \"Already used\"; the sibling reject token → \"Already decided\"; garbage → \"Invalid link\" ✅\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

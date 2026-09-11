@@ -1,0 +1,33 @@
+{
+  "number": 1657,
+  "kind": "pull_request",
+  "title": "feat(security): expose getReadFilter; analytics enforces real RLS (ADR-0021 D-C) [security review]",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/l",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-07T15:40:44Z",
+  "updated_at": "2026-06-07T20:41:38Z",
+  "closed_at": "2026-06-07T20:41:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-07T20:41:37Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1657",
+  "body": "**⚠️ Security-sensitive — please review before merge.** Touches the RLS resolution shared by the engine `find` middleware (R1 hot path) and exposes it to the analytics raw-SQL path. Not auto-merged.\n\nCloses the last P0 gap of ADR-0021 D-C: the analytics raw-SQL path (which bypasses the ObjectQL engine middleware) can now enforce the **same** tenant/RLS row scoping the engine applies on `find`, **in production** — not just when a test wires a provider. The analytics auto-bridge seam (`getService('security').getReadFilter`) was already in place from the earlier P0 work; this supplies the security side + the async plumbing.\n\n## Security side (`plugin-security`)\n- Extracted the middleware's per-request RLS resolution into two shared private methods, used by **both** the engine middleware and the new public method, so the find-path and analytics-path scoping are provably in lock-step:\n  - `resolvePermissionSetsForContext()` — roles + explicit perms + implicit/post-resolution baseline fallback.\n  - `computeRlsFilter()` — collect applicable policies → field-existence safety (wildcard `organization_id` policy on a column the object lacks → **deny sentinel**; explicit tenancy opt-out → skip) → compile (+ deny sentinel).\n  The middleware now calls these; behavior is **byte-identical** (59 existing tests green).\n- New `async getReadFilter(object, context)`. Returns `undefined` (system / anonymous → no scope), a `FilterCondition` (AND into the object's scan), or the `RLS_DENY_FILTER` sentinel (policies applied but none compiled, **or resolution threw**) — **fail-closed**: a degraded permission subsystem denies (zero rows), never leaks cross-tenant data.\n- Registers the `security` service exposing `getReadFilter` (only once the metadata/ql/dbLoader handles are wired in `start()`).\n\n## Analytics side (`service-analytics`)\n- The provider may now be **async** (DB-backed RLS). Since the strategy builds SQL synchronously, `AnalyticsService` pre-resolves the scope for every object the query scans — base (`cube.sql`) + every `cube.joins[*].name`, a **superset** of what the strategy scopes — into a `Map` BEFORE the SQL builder runs; the strategy reads each object's filter synchronously from that map. `NativeSQLStrategy` is **untouched** (`StrategyContext.getReadScope` stays sync → **no spec contract change**).\n- Fail-closed: if the provider throws for any object, the whole query is rejected — no unscoped SQL is ever emitted/executed.\n\n## Review focus\n1. Parity: `computeRlsFilter` / `resolvePermissionSetsForContext` are exact extractions of the middleware logic — confirm no behavioral drift (the suite asserts find-path outputs unchanged).\n2. Fail-closed completeness: deny on missing column, on resolution throw (security side), and on provider rejection (analytics side).\n3. Object-set coverage: pre-resolved set (`cube.sql` + all `cube.joins[*].name`) ⊇ the objects `applyReadScope` scans.\n4. `getReadFilter` returning `undefined` for single-tenant (org-scoping off) — intended (tenant_isolation is stripped without `plugin-org-scoping`).\n\n## Tests\n- `plugin-security`: +8 (parity with find-path, fail-closed deny on missing column + resolution throw, tenancy opt-out, system/anon bypass, service registration) — **86 green**.\n- `service-analytics`: +2 (async provider scopes base+joined by tenant; async reject → fail-closed, **zero SQL emitted**) — **87 green**. Existing sync-provider + deny-sentinel gates unchanged.\n- Smoke: kernel boots clean with Security + AnalyticsServicePlugin.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

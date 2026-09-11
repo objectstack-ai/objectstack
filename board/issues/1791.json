@@ -1,0 +1,33 @@
+{
+  "number": 1791,
+  "kind": "pull_request",
+  "title": "docs(adr): prioritization review — status calibration + ranked next steps",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T15:28:41Z",
+  "updated_at": "2026-06-12T15:42:16Z",
+  "closed_at": "2026-06-12T15:42:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T15:42:13Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1791",
+  "body": null
+}

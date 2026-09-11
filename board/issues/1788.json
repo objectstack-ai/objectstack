@@ -1,0 +1,35 @@
+{
+  "number": 1788,
+  "kind": "pull_request",
+  "title": "feat(ai/settings): surface, reject, and recover AI provider misconfiguration",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T13:29:55Z",
+  "updated_at": "2026-06-12T13:34:35Z",
+  "closed_at": "2026-06-12T13:34:32Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T13:34:32Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1788",
+  "body": "## 背景\n\n本地 showcase 曾出现:Setup UI 半填的 AI 设置(provider=cloudflare、API key 为空)被存进 `sys_setting`,静默覆盖了 env 自动检测出的 adapter;唯一症状是聊天流里一句裸的 `Bad Request`。排查只能靠 sqlite 手术。本 PR 把这条链路上的四个缺口全部补上(服务端部分;前端按钮/错误展示由 manifest 与现有 toast 机制驱动,objectui 零改动)。\n\n## 改动\n\n### 1. 生效配置可见 — `GET /api/v1/ai/status`\n`AIServicePlugin` 全程追踪 adapter 来源(boot 检测 / settings 重建 / reset),新接口返回:\n```json\n{ \"adapter\": \"vercel\", \"description\": \"Vercel AI Gateway (model: …)\",\n  \"source\": \"env | settings | explicit | fallback\",\n  \"provider\": \"gateway\", \"model\": \"…\",\n  \"settingsProvider\": \"…\", \"settingsError\": null }\n```\n`settingsError` 非空 = 已保存的 settings 没有生效及其原因(此前只有一行服务端 warn)。\n\n### 2. 保存时服务端校验(spec 早已承诺,首次实现)\n`SettingsService.setMany` 现在按 manifest 校验:对\"当前可见(`visible` 表达式服务端求值)+ required + 被本次写入触及\"的字段拒绝空值;`pattern` 不匹配同样拒绝。整批原子拒绝,`400 SETTINGS_VALIDATION` 携带字段级错误,UI toast 直接可读。受限文法求值器见 `visibility-eval.ts`(`data.x === 'y'`、`&&`/`||`/`!`、括号、字面量);不可解析表达式与全空 patch(重置)保持宽松。`gateway_model`/`cloudflare_model` 增加 `provider/model` 格式 pattern。\n\n### 3. 一键恢复 — 内置 `reset` action + manifest 按钮\n每个 settings 命名空间获得内置 `reset`(清持久化行,回落 env/默认,留审计);`ai` 命名空间的覆盖版还会立即重跑 env adapter 检测。AI manifest 增加 \"Reset to environment defaults\" 按钮,前端自动渲染。\n\n### 4. chat 流错误可诊断\nchat/agents/assistant 三条流式路由的 provider 错误经 `error-hints.ts` 增强:带 adapter 描述 + 按状态码映射的下一步提示(400→model id 格式、401/403→凭据、404→模型不存在、429→限流、网络错误)。`Bad Request` 变成:\n> Model 'claude/sonnet-4.6' not found (HTTP 404) — adapter: Vercel AI Gateway (model: claude/sonnet-4.6) · The model id does not exist for this provider. Check the model name in Setup → AI.\n\n## 测试\n\n- 新增 `adapter-status.test.ts`(8)、`error-hints.test.ts`(6)、`visibility-eval.test.ts`(6)+ settings reset/校验用例;service-ai 359、service-settings 113 全绿。\n- 两个旧测试因新校验按预期拦截\"只存 provider 不带必填字段\"而补全为完整配置。\n- 浏览器实测(showcase :3000 → Setup → AI 与 Embedder):坏 cloudflare 配置保存被拒(字段级 toast,DB 零写入);`gpt-4o` 无斜杠被 pattern 拒;存入合规但错误的 model 后 status 立即显示 `source: settings` + 该 model;chat 错误带完整诊断;点 Reset 按钮 toast 报告 \"Cleared 2 saved value(s). Active adapter: …\" 且 chat 即刻恢复。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

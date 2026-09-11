@@ -1,0 +1,35 @@
+{
+  "number": 1732,
+  "kind": "pull_request",
+  "title": "feat(spec): Report matrix `columns` (across) + `drilldown` flag (ADR-0021 D2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T15:13:08Z",
+  "updated_at": "2026-06-11T15:21:38Z",
+  "closed_at": "2026-06-11T15:21:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T15:21:36Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1732",
+  "body": "## Summary\n\nImplements the remaining two fields of the ADR-0021 D2 report pivot grammar (see `docs/adr/0021-analytics-dataset-semantic-layer.md` §D2):\n\n- **`columns?: string[]`** — dimension names across. A `matrix` report pivots `rows` (down) × `columns` (across) with `values` in the cells, replacing the flattened rows-only stopgap. Also added to `JoinedReportBlockSchema`.\n- **`drilldown: boolean` (default `true`)** — declares click-through from an aggregated row/cell to the underlying records (dataset-backed; the host resolves the dataset's `object` and dimension→field mapping).\n\n`reportForm` surfaces both in the Dataset binding section (`columns` gated on `data.type == 'matrix'`). The showcase matrix fixture (`showcase_status_priority_matrix`) moves to the true pivot form (`rows: ['status'], columns: ['priority']`).\n\nChangeset: minor on `@objectstack/spec` (fixed group).\n\nDownstream: objectui implements the real cross-tab renderer + drill on these fields (PR to follow).\n\n## Test plan\n- [x] packages/spec: `pnpm build` + `pnpm test` — 6528 passed (new matrix/drilldown cases included)\n- [x] examples/app-showcase: `pnpm test` — 20 passed\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

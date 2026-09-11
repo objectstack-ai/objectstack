@@ -1,0 +1,32 @@
+{
+  "number": 1902,
+  "kind": "pull_request",
+  "title": "docs(spec): mark feature-absent security props EXPERIMENTAL (ADR-0049)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T08:44:41Z",
+  "updated_at": "2026-06-15T08:53:42Z",
+  "closed_at": "2026-06-15T08:53:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T08:53:39Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1902",
+  "body": "## What\n\nCompletes the pre-MVP no-regret sweep of the #1878 P0 security cluster under **ADR-0049**: a spec property naming a security boundary must be enforced, explicitly `experimental`, or absent — never parsed-but-silently-unenforced.\n\nThese three name security boundaries, have **no runtime enforcement**, and the underlying feature **doesn't exist yet**, so they are marked `[EXPERIMENTAL — not enforced]` (vs left silently dead). **No behaviour change.**\n\n- **PolicySchema (#1882)** — not registered, no consumer; `better-auth` runs hardcoded defaults. Schema-level warning + `name` annotated.\n- **SharingRuleSchema (#1887)** — live engine uses a divergent `sys_sharing_rule` model; the spec's CEL `condition` is never compiled. Schema-level warning.\n- **flow `runAs` (#1888)** — service-automation engine ignores it (no identity switch). Field annotated.\n\nEnforcement (or removal, with the feature) is deferred to M2 and tracked by each issue.\n\n## Tests\nspec security + flow suites: 208 passed (annotation-only change; no test asserts the edited describe strings).\n\nRefs #1878 #1882 #1887 #1888\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

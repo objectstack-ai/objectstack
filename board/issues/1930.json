@@ -1,0 +1,35 @@
+{
+  "number": 1930,
+  "kind": "pull_request",
+  "title": "fix(formula): register mixed double/int arithmetic overloads (#1928)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T18:09:49Z",
+  "updated_at": "2026-06-16T02:34:14Z",
+  "closed_at": "2026-06-16T02:34:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T02:34:12Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1930",
+  "body": "Part 1 of 2 for #1928 (runtime fix). Part 2 adds the build-time typed check.\n\n## Problem\n\ncel-js types a record field number as `double` and a bare integer literal as `int`, and ships arithmetic overloads only for *matching* numeric pairs. So an everyday `Field.formula` like `record.amount / 100` or `record.price * 2` faults at runtime — `no such overload: dyn<double> / int` — and the engine catches the fault and the formula **silently evaluates to `null`**. Build-green, empty at runtime (the class #1927 hit in `expected_revenue`).\n\n## Fix\n\n`registerNumericCoercions` registers the missing `double <op> int` and `int <op> double` overloads for `+ - * / %`, computing the result as a `double` (CEL's mixed-numeric promotion rule). Wired into the CEL engine's `buildEnv`.\n\n- Pure `int op int` is **untouched** → integer division `7 / 2 == 3` preserved. Overloads fire only on a genuine `double × int` pair.\n- Composes with the existing string-field hydration retry: `\"120000.00\" + 1 == 120001`.\n- Authors no longer need the `/ 100.0` ritual — reverts that workaround in `example-crm`'s `expected_revenue` back to plain `/ 100`.\n\n```\nrecord.amount / 100                    → 1200      (was: null)\nrecord.amount * record.probability/100 → 84000     (was: null)\n7 / 2                                   → 3         (unchanged — integer divide)\nrecord.a / record.b  (10, 4)           → 2.5       (unchanged)\n```\n\n## Tests\n\n7 new cases in `cel-engine.test.ts` (`mixed double/int arithmetic overloads`); full formula suite 102/102 green. `example-crm` builds clean and `expected_revenue` computes natively.\n\nRefs #1928. Follow-up PR: build-time typed `check()` to turn the genuinely-wrong cases (field typos, type mismatches, bare identifiers) into actionable build errors.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

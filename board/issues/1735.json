@@ -1,0 +1,33 @@
+{
+  "number": 1735,
+  "kind": "pull_request",
+  "title": "feat(service-ai): ADR-0040 — unify the platform assistant (data + authoring registers)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T15:43:18Z",
+  "updated_at": "2026-06-11T15:48:03Z",
+  "closed_at": "2026-06-11T15:48:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T15:48:01Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1735",
+  "body": "Implements the agent half of [ADR-0040](https://github.com/objectstack-ai/framework/pull/1734): `data_chat` becomes **the** platform assistant.\n\n- **skills** += `metadata_authoring`, `solution_design` (cloud AI Studio plugin registers them; without it the references don't resolve and the assistant gracefully degrades to data-only).\n- **Intent preamble**: classify build/change vs data intent first; apply that register's discipline; never mix registers or narrate tool failures.\n- **Persona**: label *Assistant*, role *Business Application Assistant*; temperature 0.2; 60s budget; react ×10 + replan.\n- **Guardrails**: blocklist union **minus** `alter_schema`/`drop_table` — the build register IS schema work and is already draft-gated (ADR-0033); keeps `delete_records`, `drop_database`, `raw_sql`, `system_tables`.\n\nTests updated to the new persona (role/label/instructions/temperature/skills). service-ai 334/335 — the 1 failure (`embedder binding`) **fails identically on unmodified origin/main in a fresh worktree** (env-dependent optional provider; user's built checkout passes it 97/97).\n\nNote: agent metadata registration is exists-gated — durable envs keep the old persona until their agent record refreshes; ephemeral staging kernels pick this up on next boot (known limitation, same as skills).\n\nobjectui half (picker removal) lands separately; the ADR-0038 L5 golden-prompt suite guards both registers post-unification.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1705,
+  "kind": "pull_request",
+  "title": "docs(releases): keep the v9 Cloud section developer-facing only",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T03:17:20Z",
+  "updated_at": "2026-06-11T03:23:30Z",
+  "closed_at": "2026-06-11T03:17:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T03:17:35Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1705",
+  "body": "## Summary\n\nFollow-up to #1704. Cloud is a closed-source repository, so the v9.0.0 release page should only describe what a framework developer interacts with — cloud package **publish & install** — not Cloud internals:\n\n- Reworded the **ObjectStack Cloud** section around the developer flow: `os package publish` → cloud catalog → install from the environment **Marketplace** in Console; the **Installed** view reflects Cloud-managed installs (CLI installs show up too).\n- Removed references to the private cloud-repo **ADR-0007** (collides with the framework's public ADR-0007, an unrelated settings ADR; third-party readers can't access the private document anyway).\n- Removed reconciliation/control-plane architecture vocabulary and the internal authorization-hardening bullet.\n- Releases overview: \"hosted control plane\" → \"hosted service\".\n\n## Verification\n\nRendered locally: section heading now \"ObjectStack Cloud: package publish & install\"; page body contains no \"ADR-0007\" and no \"control plane\" mentions; all sections render (TOC verified via DOM query).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

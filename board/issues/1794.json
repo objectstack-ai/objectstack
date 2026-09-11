@@ -1,0 +1,33 @@
+{
+  "number": 1794,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0049 — semantic-reference metadata embeds in package docs",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T20:59:39Z",
+  "updated_at": "2026-06-13T01:40:53Z",
+  "closed_at": "2026-06-13T01:40:52Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1794",
+  "body": "## Summary\n\nAdds **ADR-0048: Semantic-reference metadata embeds in package documentation** (Status: Proposed).\n\nADR-0046 made package docs flat `src/docs/*.md` Markdown and **banned MDX** (MDX is code; rendering publisher code in the platform origin crosses the ADR-0025 trust boundary), while §3.4 *reserved* semantic links like `object://crm_lead` \"renderers resolve\" and §3.5 said a diagram of an existing flow is *derived* metadata — rendered live, never committed. This ADR specifies what walks through that door: how an author shows a live flow/view/dashboard/object in a doc **without** re-opening the MDX boundary.\n\n**Core inversion:** the author supplies only a **NAME (data)**; the platform supplies the **COMPONENT (code)** — the opposite of author-written MDX/SDUI, which must stay banned (SDUI is worse than MDX: its nodes bind actions/data/server-calls).\n\n- **Syntax** — extends §3.4's protocol-link family: `flow://`, `view://`, `dashboard://`, `object://`. Markdown-native (a link) → GitHub/editor preview degrades to an inert link, lint stays a parse-only check. Resolves renderer-side to a read-only `SchemaRenderer` scoped to one item, **no author-supplied props**.\n- **Two guardrails** — (a) read-only + permission-scoped against the *current viewer* (no \"run this flow\" in a doc; no access bypass; previews show the viewer's own RLS-permitted rows); (b) cross-package refs degrade to a render-time \"not found\" notice, never coupling into install-time dependency resolution.\n- **Boundary on one line** — in-metadata → live embed (this ADR); not-in-metadata conceptual → Mermaid (deferred, separate ADR); author-written component code → never.\n- **Phasing** — **P3+**. Depends on (A) the §3.4 semantic-link resolution layer and (B) read-only embeddable metadata-view components in objectui (flow viewer, view/dashboard preview, object summary) — *neither built*. Changes nothing in the running platform on its own.\n\n**Alternatives explicitly rejected:** inline SDUI component JSON, MDX/author React, author-supplied `<iframe>`, custom fenced blocks, publish-time baking, and lint-time metadata resolution.\n\n## File\n\n- `docs/adr/0048-semantic-metadata-embeds-in-docs.md`\n\nTracking issue: see linked issue.\n\nReview only — do not merge.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

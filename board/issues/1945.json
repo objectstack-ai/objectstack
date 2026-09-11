@@ -1,0 +1,35 @@
+{
+  "number": 1945,
+  "kind": "pull_request",
+  "title": "chore(spec): prune 15 dead field display-config props (dead-surface plan, P2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T06:12:51Z",
+  "updated_at": "2026-06-16T06:25:35Z",
+  "closed_at": "2026-06-16T06:25:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T06:25:32Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1945",
+  "body": "First executed batch of the dead-surface disposition plan. Removes 15 FieldSchema enhanced-type **display** knobs with no runtime reader and no renderer consumer (dead in both layers per the field liveness audit): code theme/lineNumbers, rating allowHalf, location displayMap/allowGeocoding, address addressFormat, color colorFormat/allowAlpha/presetColors, slider showValue/marks, barcode/qr barcodeFormat/qrErrorCorrection/displayValue/allowScanning. Kept the wired knobs (language, maxRating, step) + functional nested configs (currencyConfig/vectorConfig/fileAttachmentConfig). Field types unchanged.\n\nVerification: full @objectstack/spec suite green (242 files, 6562 tests); grep-confirmed no object/seed usage; ran the real app (objectstack dev showcase, 37 plugins) — boots clean, Console 200, 75 objects load, showcase_field_zoo exercises all 9 affected field types and parses+serves correctly (code field has language, no theme), no field errors in server log. Liveness gate green. (Headed-SPA screenshot not captured — no controllable Chrome in this env; pruned props have no renderer consumer.)\n\nNote: confirmed pruning is a coupled refactor (schema → Field factory → tests → forms → translations; object props also hit NoExcessObjectKeys TS-strict defs) — remaining prunes proceed as small per-cluster verified PRs.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 1789,
+  "kind": "pull_request",
+  "title": "feat(docs-metadata): ADR-0046 — package docs as flat Markdown metadata",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T14:16:41Z",
+  "updated_at": "2026-06-12T14:25:59Z",
+  "closed_at": "2026-06-12T14:25:56Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T14:25:56Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1789",
+  "body": "## Summary\n\nRevises **ADR-0046** (package documentation as metadata) to the simplified flat design and ships the full **P1 framework implementation**.\n\n### ADR revision\n- One flat `src/docs/*.md` directory — no docSets, no `meta.json`, no directory taxonomy; flatness is the contract that keeps cross-references stable\n- Filename stem = metadata name = link anchor = URL (`/docs/<name>`); names are namespace-prefixed\n- Prefix rationale corrected: object names are kernel-validated because they are *physical* (table names); doc names need only *logical* uniqueness (registry key `org/type/name` has no package coordinate → silent last-write-wins overwrite), hence build/publish-lint enforcement\n- Hard requirements: kernel never parses `content`; list endpoint serves `name`+`label` without `content`\n- Two address spaces: instance routes are single-coordinate; registry/cloud surfaces use full coordinates (package id + version + name)\n\n### Implementation\n- **spec**: `DocSchema { name, label?, content }`, `StackDefinition.docs`, `doc` metadata type + registry entry (inert, runtime-creatable for AI drafting per ADR-0033) + canonical schema map, `docs → doc` plural mapping\n- **cli**: `os build` compiles flat `src/docs/*.md` (frontmatter `title:` / first `#` heading → label) and enforces the ADR lint — flat directory, namespace-prefixed snake_case names, namespace required when docs ship, MDX/image ban, same-package link resolution; same rules in `os lint`\n- **objectql**: `docs` joins the generic metadata registration loop (manifest + nested plugins)\n- **runtime**: docs count as app payload; `GET /metadata/doc` list omits `content` by default (`?include=content` opts in)\n- **examples/app-todo**: two cross-referencing docs as a living sample\n\n## Test plan\n- [x] New unit tests: `packages/spec/src/system/doc.test.ts`, `packages/cli/src/utils/collect-docs.test.ts` (12 cases)\n- [x] Full suites green locally: spec 6536, cli 287, objectql 569, runtime 370; builds (incl. DTS) pass\n- [x] E2E: `pnpm build` on app-todo embeds both docs into `dist/objectstack.json` with correct labels; subdirectory + broken-link cases fail the build with corrective messages\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 1816,
+  "kind": "pull_request",
+  "title": "feat(runtime): package-scoped single-item metadata resolution via ?package= (ADR-0048)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-13T13:50:59Z",
+  "updated_at": "2026-06-13T14:53:27Z",
+  "closed_at": "2026-06-13T14:53:24Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-13T14:53:24Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1816",
+  "body": "## What\n\nMake a single-item metadata GET (`/meta/:type/:name?package=<id>`) actually resolve **package-scoped** (prefer-local): when two installed packages ship an item of the same `type`/`name`, the requester's own package wins.\n\n## The bug this fixes\n\nThe first commit threaded `?package=` into the runtime HTTP dispatcher, but the **live** serving path (RestAPI + ObjectQL protocol) still dropped it for cacheable types. Browser verification surfaced the real gap:\n\n- **`rest-server`** — the cacheable single-item GET called `getMetaItemCached` (ETag keyed on `type+name` only) and never passed `packageId`. So a `?package=` read on a `doc`/`page`/etc. was served package-blind, and two same-named items shared one cache entry. A `?package=` read now **bypasses that cache** and takes the disambiguating `getMetaItem(type, name, packageId)` path.\n- **`protocol.getMetaItem`** — forwards `packageId` to the `sys_metadata` overlay query (`package_id` prefer-local filter), to `metadataService.get`, and to `registry.getItem`.\n- **`metadata-facade`** — `get()` gained an optional `currentPackageId`, forwarded to `registry.getItem`.\n- **runtime dispatcher** + **spec `doc.zod`** comments (first commit).\n\n## Why it matters\n\nLets the doc viewer (`/apps/:packageId/docs/:name`) resolve one doc scoped to its app, so `doc` names no longer need a namespace prefix for uniqueness (the prefix becomes a recommended convention, like `page`/`dashboard`/`report`).\n\nFrontend counterpart: [objectui#1708](https://github.com/objectstack-ai/objectui/pull/1708).\n\n## Verification\n\n- Unit: package-scoped prefer-local in `getMetaItem` (registry + overlay paths); REST cache-bypass on `?package=`. objectql 600 / rest 108 / runtime 370 green.\n- Live (real registry-level collision — two packages each shipping `doc/showcase_index`):\n  - `curl .../doc/showcase_index?package=com.example.showcase` → Showcase\n  - `curl .../doc/showcase_index?package=com.objectstack.studio` → \"STUDIO VERSION\"\n  - Browser: `/apps/<pkg>/docs/showcase_index` renders each package's own doc, no console errors.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

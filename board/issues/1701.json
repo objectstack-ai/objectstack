@@ -1,0 +1,33 @@
+{
+  "number": 1701,
+  "kind": "pull_request",
+  "title": "fix(analytics): fall back to aggregate strategy when the driver can't run SQL",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-10T17:14:13Z",
+  "updated_at": "2026-06-10T17:16:32Z",
+  "closed_at": "2026-06-10T17:14:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-10T17:14:19Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1701",
+  "body": "## The bug (live on staging)\n\nEvery dataset query on staging tenant environments returned `rows: []` with HTTP 200 and the compiled SQL attached — **all** dashboards read \"No rows\" forever while looking healthy. Even `COUNT(*) FROM sys_user` and queries against **nonexistent tables** came back empty (the discriminating probe).\n\n## Root cause chain\n\n1. Staging env kernels run on the **in-memory driver**, whose `execute()` logs a warning and **returns `null`** for raw SQL (memory-driver.ts:250).\n2. The analytics plugin's raw-SQL auto-bridge silently mapped `null` → `[]`.\n3. The default `queryCapabilities` **unconditionally advertise `nativeSql: true`** (the bridge closure always exists), so `NativeSQLStrategy` was selected on a driver that cannot execute SQL — compiled SQL attached, never executed.\n\n## Fix (both layers)\n\n- **Bridge**: `null`/`undefined` from `engine.execute` now throws a **typed** `RAW_SQL_UNSUPPORTED` error — an empty result is never fabricated.\n- **Orchestrator**: `AnalyticsService.query` treats that error as a runtime capability miss and **falls back to the next capable strategy** — `ObjectQLStrategy` over the aggregate bridge (the in-memory driver implements `aggregate()`), so memory-backed environments now return real numbers. Any other error propagates untouched; with no fallback available the failure is loud and names the skipped strategies.\n\n## Test\n\nservice-analytics **109** green — 3 new: fallback returns the aggregate rows; non-typed errors propagate without fallback masking; no-fallback case fails loudly (never silent `[]`).\n\nStaging validation follows via the cloud `.framework-sha` bump.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

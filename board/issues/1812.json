@@ -1,0 +1,33 @@
+{
+  "number": 1812,
+  "kind": "pull_request",
+  "title": "feat(spec): page form filter-mode widget + ADR-0047 §3.4a (omit-is-none)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-13T07:58:30Z",
+  "updated_at": "2026-06-13T10:26:23Z",
+  "closed_at": "2026-06-13T10:26:21Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-13T10:26:21Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1812",
+  "body": "## What\n\n- **`page.form.ts`**: the Interface section's `interfaceConfig` composite now lists its sub-fields explicitly, so `userFilters` can use the dedicated **`filter-mode`** selector widget (None / Tabs / Dropdown / Toggle) shipped in objectui#1694. Other sub-fields render as before.\n- **ADR-0047 §3.4a** records the design decision (raised in review): *\"no filter bar\" is the ABSENCE of `userFilters`, not a literal `element: 'none'`*. Rationale — declarative-metadata hygiene (off = key absent, consistent with every other optional capability), no orphaned sub-config, clean overlay diffs (deletion not mutation), and presence vs. style are orthogonal axes. The authoring UI provides the explicit None/Tabs/Dropdown/Toggle affordance; storage stays clean. A future \"disable but remember config\" need would use a separate `enabled: false` flag, never `element: 'none'`.\n\n## Verification\n\nSpec rebuilt + browser-verified (via the showcase backend): the page editor's User Filters control renders the segmented selector, reflects the saved element, and None removes `userFilters`. Pairs with objectui#1694; independently mergeable (unknown widget name degrades to the prior composite rendering).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

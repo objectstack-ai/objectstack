@@ -1,0 +1,33 @@
+{
+  "number": 1864,
+  "kind": "pull_request",
+  "title": "docs(audit): metadata property liveness & necessity — all types",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T05:26:31Z",
+  "updated_at": "2026-06-15T06:35:43Z",
+  "closed_at": "2026-06-15T06:35:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T06:35:41Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1864",
+  "body": "A protocol-level audit of **every ObjectStack metadata type**: for each schema property, cross-reference its spec definition against its **actual consumers** (`file:line`) in the runtime + renderers, to answer **(1) does it take effect?** then **(2) is it necessary/reasonable?** Liveness = code consumption, not browser observation.\n\n**17 per-type reports + a cross-type synthesis** in `docs/audits/` (see `README.md` for the index + patterns). Types covered: field, object, view, app, page, dashboard, report, dataset, action, flow, agent, tool, skill, hook, validation, security/identity (role/permission/policy/sharing), system/integration (email/i18n/theme/job/webhook/portal).\n\n## Headline cross-cutting findings (priority order)\n1. **🔴 Parsed-but-UNENFORCED security props (latent access-control gaps):** `PolicySchema` 100% dead (password/session/MFA/IP/audit — false compliance, not even registered); permission `allowTransfer/allowRestore/allowPurge` (destructive ops ungated); agent `permissions/visibility/access` (who-can-chat is a no-op); flow `runAs` (never switches identity); object `apiEnabled/apiMethods` (not enforced by REST); action `disabled`-CEL (silently ignored); role `parent` + `SharingRuleSchema` disconnected from the live engine.\n2. **🔴 ADR-0021 analytics debt:** chart view variant + dashboard renderer + Studio still read the *removed* legacy `object/valueField/aggregate` shape; report `chart` dead; `ReportColumn/ReportGrouping` obsolete. (Same debt that invalidated the showcase dashboard/report seeds.)\n3. **🟠 Naming drift → silent no-ops:** field `maxLength/minLength/referenceFilters/maxRating`; page `type→pageType`/`label→title`/`visibility`; dashboard `title` vs `label`; app `accentColor/badgeVariant/separator` (renderer reads, not in spec); action `disabled→enabled`; flow `http` vs `http_request`; skill `requiredPermissions`; agent `knowledge`; webhook `object_name`/`active`.\n4. **🟠 Aspirational config (rich spec, zero runtime):** field enhanced-type/governance configs; object `enable`/versioning/partitioning/cdc; agent autonomy (memory/guardrails/structuredOutput/lifecycle); job retryPolicy/timeout; portal (entire); webhook non-HMAC auth; translation `messageFormat:'icu'` (no ICU engine).\n5. **🟠 Write-only / disconnected metadata:** tool (can't author a working tool as metadata); EmailTemplateSchema (runtime reads `sys_email_template`); spec-bridge page/dashboard orphaned.\n6. Inverse drift (renderer reads undeclared props); designer authoring gaps (dataset/skill/flow).\n\n**Healthiest:** hook, validation. **Worst:** policy, portal, tool.\n\nSuggests three ADRs: security enforcement, finish ADR-0021, spec hygiene. Each doc has `file:line` evidence + per-property recommendations.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1763,
+  "kind": "pull_request",
+  "title": "fix(rest): /meta routes forward ?preview=draft (list + get, cache-bypassed) — Live Canvas draft apps",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T05:19:48Z",
+  "updated_at": "2026-06-12T05:24:01Z",
+  "closed_at": "2026-06-12T05:23:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T05:23:59Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1763",
+  "body": "Found in live staging verification of the Live Canvas: a freshly built draft app (`procurement_system`) opened the split-screen canvas, but the iframe showed **\"No Apps Configured\"**.\n\n## Root cause\nThe canvas iframe (`/apps/:name?preview=draft`) reads metadata through REST `/meta/:type` and `/meta/:type/:name`, which dropped the `?preview=draft` flag:\n- **list** never overlays pending drafts → a draft-only app is invisible to the app shell (verified live: the single-get with `?preview=draft` returns 200, the list omits it);\n- **get** could serve a cached 304 keyed on the *published* checksum even with the flag forwarded.\n\n## Fix\n- `GET /meta/:type`: thread `previewDrafts: true` to `protocol.getMetaItems` when `?preview=draft`.\n- `GET /meta/:type/:name`: same for `getMetaItem`, and bypass the cached path under preview.\n\n## Tests\n3 new route tests in `rest.test.ts` (forwarding, no-flag omission, cache bypass); package suite 103/103; build clean.\n\nNote: an equivalent uncommitted draft of this fix existed on a local working copy (branch `fix/rest-meta-preview-draft-passthrough`, mixed with unrelated approvals WIP) — this PR re-lands just the preview hunks cleanly from main. @os-zhuang 你本地 framework checkout 上那份未提交的同款改动合并本 PR 后可以丢弃(approvals 部分不受影响)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

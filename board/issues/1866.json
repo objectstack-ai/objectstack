@@ -1,0 +1,33 @@
+{
+  "number": 1866,
+  "kind": "pull_request",
+  "title": "docs: sync 46 hand-written docs with actual implementation (reader-facing audit)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T05:38:49Z",
+  "updated_at": "2026-06-15T05:48:38Z",
+  "closed_at": "2026-06-15T05:48:36Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T05:48:36Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1866",
+  "body": "## Why\n\nA reader following the docs hits APIs and commands that don't exist or have changed. This PR is the result of a **multi-agent audit**: each hand-written doc was read from a developer-reader's perspective, cross-checked against the real implementation in `packages/`, and **every finding was adversarially verified against the code** before being applied.\n\n## Scope\n\n- **46 hand-written docs** in `getting-started/`, `concepts/`, `guides/`.\n- **299 verified fixes** applied (out of 301 confirmed findings).\n- **Excluded:** the 223 auto-generated `references/` pages (marked `DO-NOT-EDIT`, generated from `packages/spec` via `build-docs.ts`) — fixing those means changing the generator / zod `.describe()` strings, a separate effort.\n\n## Recurring classes of fix\n\n- **broken-example / inaccurate** — samples calling APIs that don't exist or moved: `os studio` → `os dev --ui`; `client.meta.getObject()` → `meta.getItem('object', …)`; `client.ai.chat()` removed; `client.workflow.approve/reject` → request-id `client.approvals.*` (ADR-0019); non-existent `defineProfile` / `defineAction` / `defineHook` helpers.\n- **security model** — replaced the Salesforce-styled fabricated API (`Profile` type, `objectPermissions`/`fieldPermissions`) with the real `PermissionSet` schema (`objects`/`fields`, `allowCreate/allowRead/…`, `isProfile`); corrected sharing rules, OWD enums, role hierarchy.\n- **outdated** — Salesforce UPPERCASE formulas → CEL; portal `/_studio` → `/_console`; REST `/api/v1/{object}` → `/api/v1/data/{object}`; `AUTH_SECRET` → canonical `OS_AUTH_SECRET`; `PORT` → `OS_PORT`.\n- **fabricated features removed/qualified** — RAG / NLQ / Predictive sections in `ai-capabilities`; `VITE_RUNTIME_MODE` & `?mode=` switch in `deployment-vercel` (real flag is `VITE_USE_MOCK_SERVER`); GraphQL framed as contract-only (`IGraphQLService`), not a shipped generator.\n- **broken links/paths** repointed (`objectstack-ai/spec` → `…/framework`; dead anchors/files).\n\n## Safety & verification\n\n- No files moved; **frontmatter preserved on every doc** (no URL or nav changes).\n- `next build` compiles **all 1107 pages clean** (exit 0).\n- Spot-checked rendering in the browser (Callouts, code fences, TOC intact).\n\n## Follow-ups (out of scope, code-side)\n\n- `skills/objectstack-formula/SKILL.md` frontmatter `Use whenever` → `Use when` so `gen:skill-docs` stops duplicating the \"Do not use\" clause.\n- `ai-capabilities.mdx` frontmatter still mentions \"RAG pipelines\" (left as-is per preserve-frontmatter rule).\n- `os init` scaffold still emits an `ownership` literal in the generated object.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

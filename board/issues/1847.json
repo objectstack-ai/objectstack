@@ -1,0 +1,35 @@
+{
+  "number": 1847,
+  "kind": "pull_request",
+  "title": "feat(cloud-connection): open-ended, plan-agnostic runtime feature seam (cloud ADR-0012)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-14T10:18:25Z",
+  "updated_at": "2026-06-14T10:20:38Z",
+  "closed_at": "2026-06-14T10:20:36Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-14T10:20:36Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1847",
+  "body": "## Why\n\n`RuntimeConfigPlugin` is the open mechanism that serves the SPA's per-request `features` map. But it enumerated a **closed** feature set and used **billing vocabulary** (`resolvePlanFeatures` / `RuntimeConfigPlanFeatures`), so a distribution couldn't add a commercial feature (custom domain, SSO, …) without editing the open framework — commercial/pricing policy bleeding into open-core.\n\n## What\n\n- The `features` map is now **open-ended**: the policy hook's returned flags are merged verbatim, so a host injects **arbitrary keys** (e.g. the cloud control plane returns `customDomain`/`sso` from its plan entitlements) with **no framework change**.\n- Seam renamed **plan-agnostic**: `resolveFeatures` / `RuntimeFeatureOverrides`. `resolvePlanFeatures` / `RuntimeConfigPlanFeatures` stay as **deprecated, still-honoured** aliases (no breakage).\n- `aiStudio` / `autoPublishAiBuilds` remain the framework's own non-commercial mechanism defaults (ADR-0005: AI authoring is all-plan, cost-gated — not a paid tier).\n\n## Tests\n\nNew `runtime-config-plugin.test.ts`: base flags, **arbitrary-key passthrough**, deprecated-alias compatibility, static default. cloud-connection 48/48.\n\nEstablishes the boundary recorded in cloud **ADR-0012** (companion cloud PR wires `customDomain`/`sso` through this seam).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

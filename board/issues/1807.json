@@ -1,0 +1,34 @@
+{
+  "number": 1807,
+  "kind": "pull_request",
+  "title": "docs(metadata): doc-type authoring guide + objectstack-ui skill (ADR-0046)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-13T03:16:12Z",
+  "updated_at": "2026-06-13T03:21:13Z",
+  "closed_at": "2026-06-13T03:21:12Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-13T03:21:12Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1807",
+  "body": "## What\n\nADR-0046 (package docs as metadata) landed framework-side — `DocSchema`, CLI collection/lint, kernel registration — and a showcase example shipped in #1793. But the **developer docs site** and the **AI skills** never mentioned the `doc` metadata type. This closes that documentation gap.\n\n## Changes\n\n- **New** `content/docs/guides/metadata/doc.mdx` — authoring guide mirroring the other metadata-type guides: flat `src/docs/*.md`, namespace-prefixed naming, the platform-level `/docs/<name>` routing model, cross-references, Markdown support (anchors / highlight / GitHub alerts) and the MDX/image build bans.\n- Listed `doc` in the metadata **index table** + sidebar `meta.json`.\n- **objectstack-ui skill** — new \"Docs — Package Documentation\" section so AI agents author `src/docs/*.md` correctly (flat dir, namespace prefix, CommonMark+GFM, link-don't-embed for dynamic content), plus `description`/`tags` coverage.\n\n## Routing model documented (matches ADR-0046)\n\nThe viewer is **platform-level**: one global `/docs/<name>` route, single-coordinate URL (no package/app prefix). App-level entry is opt-in — a `url` nav item linking into that global URL. Per-app/per-package doc URLs are explicitly **not** the model (one doc → many URLs would break cross-references). A platform docs portal is a later additive concern.\n\n## Scope\n\nDocs + skill only — **no package code**. The frontend `/docs/<name>` route + `DocView` + nav entry in objectui remain the P2 follow-up (objectui does not yet consume `doc` metadata).\n\n## Changeset\n\nNon-user-facing (docs/skill) — `skip-changeset`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

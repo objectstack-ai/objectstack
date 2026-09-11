@@ -1,0 +1,33 @@
+{
+  "number": 1850,
+  "kind": "pull_request",
+  "title": "feat(ai): auto-title a conversation from its first user message",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-14T13:30:43Z",
+  "updated_at": "2026-06-14T13:31:03Z",
+  "closed_at": "2026-06-14T13:31:02Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-14T13:31:02Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1850",
+  "body": "## Problem\n\nThe console AI sidebar lists conversations straight off `ai_conversations` rows. An untitled conversation renders a generic \"New conversation\" label — so once a user has a few, the list is **a wall of identical rows** with no way to distinguish or find one. (Found dogfooding the AI app-builder: dozens of indistinguishable \"新对话\".)\n\nConversations are created untitled and the list endpoint already returns `title` when present — but it was never set.\n\n## Fix\n\nIn `ObjectQLConversationService.addMessage`, set `title` from the **first user message** the instant it lands (collapse whitespace, cap 60 chars). Deterministic, no extra model call.\n\n- Only seeds when the conversation has **no title yet** AND the turn is a **user** turn.\n- An explicit title is never clobbered; the optional LLM auto-titler (when enabled) still overwrites with a nicer title.\n\n## Verification\n\n- 4 unit cases: untitled→titled, existing-title-kept, assistant-first-turn-ignored, whitespace-collapse+truncation. `objectql-conversation-service` suite green (23).\n- End-to-end on the objectos-ee rig (the runtime loads the CJS build): a new chat \"帮我建一个会议室预订系统\" → conversation row `title = \"帮我建一个会议室预订系统\"`; the sidebar shows real titles instead of \"新对话\".\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

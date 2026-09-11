@@ -1,0 +1,32 @@
+{
+  "number": 1908,
+  "kind": "pull_request",
+  "title": "docs: regenerate references from current spec",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/l"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T11:36:10Z",
+  "updated_at": "2026-06-15T11:40:49Z",
+  "closed_at": "2026-06-15T11:40:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T11:40:47Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1908",
+  "body": "Closes the references-drift follow-up flagged in #1904. The committed `content/docs/references/**` (auto-generated from `packages/spec`, DO-NOT-EDIT) had fallen out of sync with the schemas — running `gen:docs` produced diffs across **18** generated files plus **3** that were missing entirely.\n\n### What regenerated\n- **18 updated** generated docs/meta — including spec additions like `UserFilters` / `UserFilterField` view config and the `chart` visualization enum value.\n- **3 new** — `contracts/` reference group, and `system/book.mdx` + `system/doc.mdx` (the ADR-0046 package-doc `doc`/`book` protocols).\n\n### Scope & safety\n- **Generated output only.** No hand-written docs, no package code touched — diff is entirely under `content/docs/references/`.\n- Reproducible: `pnpm --filter @objectstack/spec gen:schema && pnpm --filter @objectstack/spec gen:docs` (idempotent — re-running produces no further diff).\n- `next build` compiles **all 1113 pages clean** (exit 0).\n\nThis only realigns the generated docs with the **spec**. Where the spec itself diverges from runtime behavior, that's the separate metadata-liveness remediation track, not this PR.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

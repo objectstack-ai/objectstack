@@ -1,0 +1,32 @@
+{
+  "number": 1696,
+  "kind": "pull_request",
+  "title": "docs: align UI skill + analytics guides with ADR-0021 + ChartType trim",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-10T16:12:03Z",
+  "updated_at": "2026-06-10T16:16:53Z",
+  "closed_at": "2026-06-10T16:16:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-10T16:16:50Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1696",
+  "body": "Aligns hand-written docs with shipped state (auto-gen references already regenerated per-PR): objectstack-ui SKILL dashboard/report/compareTo examples → dataset form + categoryGranularity→dateGranularity rewrite; analytics-datasets gains a server-side display-resolution note; airtable gap-analysis gets a 'superseded' banner (grouped-bar/stacked-bar removed, not implemented). Docs-only; docs build green (1098 pages).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1904,
+  "kind": "pull_request",
+  "title": "docs: sync remaining 82 hand-written docs with actual implementation (audit pass 2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T09:11:36Z",
+  "updated_at": "2026-06-15T09:15:20Z",
+  "closed_at": "2026-06-15T09:15:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T09:15:17Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1904",
+  "body": "Finishes the implementation-accuracy audit started in #1866 (which covered 46 docs in getting-started/concepts/guides). This pass covers the **remaining 82 hand-written docs** — guides (incl. cheatsheets/contracts/metadata/runtime-services), protocol (objectos/objectql/objectui), releases, and the docs index.\n\n## What this does\nA multi-agent audit read each doc, located the real implementation in `packages/`, and **adversarially verified** every finding against the code — a second verifier re-checked each applied fix and repaired over-corrections.\n\n| Metric | Count |\n|---|---|\n| Docs processed | 82 / 82 |\n| Docs changed | 73 |\n| Fixes applied | 486 |\n| Verifier repairs (caught over-corrections) | 28 |\n| Residual items flagged for follow-up | 210 |\n\n## Recurring classes of fix\n- **broken-example / inaccurate-api** — methods/samples that don't exist or changed: fabricated transaction methods (`tx.insert`/`tx.update`), non-existent helpers (`definePlugin`), wrong package names (`@objectstack/services/service-cache` → `@objectstack/service-cache`), `ViewFieldSchema` → `FormFieldSchema`, wrong `@objectstack/spec` subpath imports.\n- **fabricated-feature** — field-type props absent from the schema (`sanitize`/`allowed_tags`/`protocols`/`region`/`rows`), a phantom `Workflow` metadata type with `*.workflow.ts` conventions, fabricated CLI scaffold output.\n- **naming/enum drift** — `max_length` → `maxLength`; relationship/complex type lists corrected to real enum values; OWDModel value spellings (`public_read`/…).\n- **security model** — FLS non-editable write rejects with `PermissionDeniedError` (403) rather than silent strip; real `PermissionSet` over Salesforce-style shapes.\n- **outdated paths/env** — `OS_EMAIL__PROVIDER` double-underscore, `/v1` REST prefixes, config-resolution precedence and envKey coercion examples.\n\n## Verification\n- Navigation-safe: **no files moved**, frontmatter preserved on every doc.\n- `next build` compiles **all 1113 pages clean (exit 0)**.\n- Diff is scoped to hand-written docs only — zero `references/`, zero code touched.\n\n## Follow-ups (out of scope here)\nResidual items the audit could not confirm against code — plus the observation that committed `content/docs/references/` have **drifted from spec** (16 files regenerate with diffs; 3 newly-added spec types missing entirely) — are recorded in `docs/audits/2026-06-handwritten-docs-accuracy-followups.md` for a dedicated regenerate-references pass.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

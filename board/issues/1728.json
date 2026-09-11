@@ -1,0 +1,33 @@
+{
+  "number": 1728,
+  "kind": "pull_request",
+  "title": "feat(approvals): recall endpoint + business-readable inbox contract",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T13:32:46Z",
+  "updated_at": "2026-06-11T13:34:23Z",
+  "closed_at": "2026-06-11T13:34:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T13:34:21Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1728",
+  "body": "## Summary\n\nE2E review of the showcase Approvals Inbox surfaced four service-level gaps. This PR fixes the backend half; the Console UI revamp that consumes it lands in objectui.\n\n- **Recall was a dead button.** The contract declares `recalled`/`recall`, the Console renders a Recall button, but neither the service nor REST implemented it — every click 404'd. Adds `ApprovalService.recall()` (submitter-only, audited `recall` action, status-field mirror, resumes the owning flow run down the `reject` branch with `output.decision='recall'` — the engine has no run-cancel primitive, and leaving the run suspended forever would leak it) plus `POST /approvals/requests/:id/recall` with the same error mapping as approve/reject.\n- **`submitted_at` never existed.** The inbox showed `—` in every time cell and its newest-first sort compared empty strings. Rows now expose `submitted_at` as an alias of `created_at`.\n- **Rows were machine-speak.** `flow:manager_review`, opaque record ids, raw user ids. The engine now seeds `$flowName` / `$flowLabel` variables (mirroring `$runId`), the approval node snapshots authored flow/node labels onto `node_config_json` (no schema migration), and rows surface `process_label` / `step_label` with a prettified fallback for legacy rows.\n- **No display enrichment.** `listRequests`/`getRequest` now resolve `record_title` (schema `displayNameField`, falling back to the payload snapshot when the record is gone) and `submitter_name` (`sys_user` by id or email), batched one query per distinct object.\n\n## Test plan\n\n- `plugin-approvals`: 43 tests (11 new: recall permissions/state/resume/mirror, submitted_at alias, label snapshot + fallback, enrichment incl. payload fallback and email submitter) ✅\n- `service-automation`: 180 tests ✅\n- E2E against the showcase app: recall via REST returns 200 → status `recalled`, audit trail `submit → recall`, suspended run resumed; new budget-approval requests carry `process_label: \"Project Budget Approval\"` / `step_label: \"Manager Review\"`; legacy rows enrich with record titles and submitter names ✅\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

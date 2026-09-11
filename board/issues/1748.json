@@ -1,0 +1,36 @@
+{
+  "number": 1748,
+  "kind": "pull_request",
+  "title": "feat(cloud-connection): @objectstack/cloud-connection — open runtime-side cloud client (ADR-0008 Phase 2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T02:15:36Z",
+  "updated_at": "2026-06-12T02:34:39Z",
+  "closed_at": "2026-06-12T02:34:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T02:34:37Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1748",
+  "body": "## ADR-0008 Phase 2(开源搬家,framework 侧)\n\n新开源包 **`@objectstack/cloud-connection`**(cloud 仓 ADR-0008 D1/D2):运行时连接控制面的客户端。\n\n- `MarketplaceProxyPlugin`(匿名公开目录浏览)+ `MarketplaceInstallLocalPlugin`(装进本运行时)\n- `CloudConnectionPlugin`(/api/v1/cloud-connection/*:status、RFC 8628 设备码 bind、org 目录、installed 视图、控制面安装;多租户/单环境双模式)\n- `RuntimeConfigPlugin`:**resolvePlanFeatures 政策注入缝** —— plan entitlements 留宿主(开放机制、闭合智能;framework 不含任何计划政策)\n- 源 = cloud `objectos-runtime` 当前 canonical(领先于 Phase 4 删除前的历史副本);cloud 侧下一个 PR 切 re-export、删平行实现(依赖方向反转,延续 ADR-0006 去重)\n- 已加入 changesets fixed 版本线 + changeset(minor)\n\n## 验证\n- 包构建绿(ESM/CJS/DTS),3 个测试文件 25/25 过(proxy browse-only、public-url、cloud-connection 双模式)\n- 不改任何现有包;CLI 不自动注入(维持 ADR-0006 Phase 4 语义,宿主显式 wire)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

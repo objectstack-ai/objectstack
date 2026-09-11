@@ -1,0 +1,32 @@
+{
+  "number": 1687,
+  "kind": "pull_request",
+  "title": "feat(automation): re-arm suspended wait timers after cold boot + log cleanup",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-10T13:51:43Z",
+  "updated_at": "2026-06-10T13:59:38Z",
+  "closed_at": "2026-06-10T13:59:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-10T13:59:33Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1687",
+  "body": "## Summary\n- **Wait-timer re-arm (ADR-0019 follow-up):** a timer-`wait` node's auto-resume one-shot job lives in the job service's process memory — a restart lost the wake-up while the suspended run survived in `sys_automation_run`, leaving the run paused forever unless resumed externally.\n  - wait node now persists the wake deadline as node output (`<nodeId>.waitUntil`), written to flow variables before the suspend snapshot (both the scheduled and the degraded no-job-service paths)\n  - new `rearmSuspendedWaitTimers()` walks the durable store on boot: overdue deadlines resume immediately; future ones re-schedule the same `flow-wait:<runId>:<nodeId>` one-shot; approval/screen/signal pauses untouched; double fires absorbed by `resume()` idempotency\n  - `AutomationServicePlugin.start()` runs the re-arm pass after the flow pull (resume needs flow definitions registered)\n- **Log cleanup:** leftover `console.warn` debug statements in `start()` replaced with `ctx.logger.debug/warn`\n\nNo `engine.ts` core-traversal changes (per ADR-0031 multi-agent discipline).\n\n## Test plan\n- [x] 4 new cross-\"restart\" tests (two engines sharing one `InMemorySuspendedRunStore`): future-timer re-arm fires on the new engine; overdue timer resumes inline; signal pauses skipped; no-job-service future timer left suspended\n- [x] `pnpm vitest run` in service-automation: 10 files / 166 tests green on top of latest main\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

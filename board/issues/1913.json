@@ -1,0 +1,34 @@
+{
+  "number": 1913,
+  "kind": "pull_request",
+  "title": "fix(objectql): validation `field == null` fires on insert when field omitted (#1871)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T14:01:18Z",
+  "updated_at": "2026-06-15T14:06:02Z",
+  "closed_at": "2026-06-15T14:06:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T14:06:00Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1913",
+  "body": "Closes #1871.\n\n## Problem (confirmed)\nA `script` / `cross_field` validation predicate such as `record.priority == \"urgent\" && record.due_date == null` did **not** fire on **insert** when `due_date` was omitted entirely from the payload. It worked on update and when the field was explicitly `null`.\n\nRoot cause: on insert there's no prior record, so `evaluateValidationRules` builds the rule scope as just the input `data`. An omitted field is absent from that map, and CEL `record.due_date` on a map without the key does not equal `null` (missing key ≠ null) — so the predicate silently can't match. (Confirmed with a repro test: omitted → no fire; explicit `null` → fires.)\n\n## Fix\nIn `evaluateValidationRules`, on insert, default declared-but-absent schema fields to `null` in the `merged` evaluation scope ([rule-validator.ts](packages/objectql/src/validation/rule-validator.ts)). An omitted optional now reads as `null`, matching an explicit `null` and the update path (where the prior record already supplies the field). Scoped to insert so update semantics are untouched.\n\n## Tests\n- New regression covering: omitted field (now fires), explicit `null` (still fires), value present (doesn't fire), predicate not applicable (doesn't fire).\n- `@objectstack/objectql` validation suite **53 pass**; full suite **613 pass**.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 1947,
+  "kind": "pull_request",
+  "title": "fix(spec): correct 9 field props mis-classified dead — they are objectui-live",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T06:42:02Z",
+  "updated_at": "2026-06-16T06:49:27Z",
+  "closed_at": "2026-06-16T06:49:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T06:49:24Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1947",
+  "body": "The liveness ledgers' renderer-side verdicts are unreliable — seeded from the 2026-06 audits, which did NOT re-check the frontend repo ../objectui. Verifying against objectui shows 9 field props marked dead are actually LIVE in the renderer: externalId (metadataConverters.ts:125 reads field.externalId), currencyConfig (fields/src/index.tsx:469), searchable (plugin-dashboard WidgetConfigPanel), and the master-detail/related-list overrides inlineTitle/inlineColumns/inlineAmountField/relatedList/relatedListTitle/relatedListColumns (app-shell RecordDetailView + deriveRelatedLists/deriveMasterDetail).\n\nPruning these (as the dead-surface plan proposed) would have broken detail-page/master-detail rendering. Reclassified dead→live with objectui evidence; gate green (field 43 live / 8 dead).\n\nAlready-merged prune batches #1945 (display configs) + #1946 (governance) were re-verified against objectui and confirmed renderer-dead — safe, no breakage shipped. Further pruning paused until the remaining ledgers + disposition plan are re-verified against objectui.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 1942,
+  "kind": "pull_request",
+  "title": "feat(spec): add `element:metadata_viewer` component (ADR-0051 P1)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T05:53:43Z",
+  "updated_at": "2026-06-16T08:01:00Z",
+  "closed_at": "2026-06-16T08:00:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T08:00:57Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1942",
+  "body": "Implements the **P1 spec slice** of [ADR-0051](https://github.com/objectstack-ai/framework/pull/1940) — the read-only SDUI component that a ` ```metadata ` doc fence compiles to.\n\n## Change\n\n- New `ElementMetadataViewerPropsSchema` in `component.zod.ts`, placed in **Content Elements** (read-only), *not* Interactive — reinforcing the content-embeddable vs interactive-not boundary.\n- Registered as `'element:metadata_viewer'` in `ComponentPropsMap`.\n\n```ts\n{ type: 'state_machine' | 'flow' | 'permission',\n  name: string,            // package-scoped resolution (ADR-0048)\n  object?: string,         // required for object-scoped kinds (state_machine, permission)\n  mode?: 'diagram' | 'matrix' | 'summary',\n  detail?: 'business' | 'technical' }  // authored altitude — NOT access, NOT permission projection\n```\n\n## Why this is the safe shape\n\nThe props are a **declarative reference** — no expressions, no action bindings. The view is drawn by the platform's *own* viewer over the package's *own* already-governed metadata, so the embed stays on the **data side of the ADR-0046 §3.4 / ADR-0025 trust boundary** that banned MDX. (A general component embed could carry CEL/actions = code; that's deferred to a future `objectui` fence — see ADR-0051 §4.)\n\n`detail` is the *authored* altitude (`business` collapses technical flow nodes to business steps + approvals). Permission projection — stripping what a reader may not see — is **automatic and render-time**, never authored here, and deliberately not named `audience` to avoid colliding with `book.audience` (access tier).\n\n## Scope\n\nSpec-only. `object` embeds are deferred (ADR-0051 §5). The fence parser, the live-transclusion resolver, publish lint (parse + validate + reference-liveness), and the console render all land in follow-ups.\n\n## Verification\n\n- `vitest run src/ui/component.test.ts` → 91/91 pass\n- `tsc --noEmit` → clean\n- `dist/` is gitignored; no committed generated artifacts to regenerate.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

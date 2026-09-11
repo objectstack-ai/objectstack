@@ -1,0 +1,35 @@
+{
+  "number": 1667,
+  "kind": "pull_request",
+  "title": "fix(cli): add @ai-sdk/openai, anthropic, google as direct dependencies",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-09T02:00:02Z",
+  "updated_at": "2026-06-09T03:10:12Z",
+  "closed_at": "2026-06-09T03:10:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-09T03:10:09Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1667",
+  "body": "## 问题\n\n全局安装的 CLI（`npm install -g @objectstack/cli`）不会自动安装 `peerDependencies`，导致用户配置 DeepSeek 等 provider 后报错：\n\n```\nCould not build adapter for provider=deepseek. Check API key (or the corresponding env var) and that the provider SDK package is installed.\n```\n\n```\nFailed to load @ai-sdk/openai for provider=openai\n{\"error\":\"Cannot find package '@ai-sdk/openai' imported from ...@objectstack/cli/node_modules/index.js\"}\n```\n\n## 根本原因\n\n`service-ai` 将 `@ai-sdk/openai` 等声明为 optional peerDependencies，设计意图是让消费方按需安装。但 CLI 作为消费方一直缺少这三个包的显式声明，而 `normalisePresetProvider()` 会将 deepseek / siliconflow / dashscope / openrouter / cloudflare 等 5 个预设 provider 全部重写为 `provider=openai`，再去动态 `import('@ai-sdk/openai')`，包不存在就报错。\n\n## 修复\n\n在 `packages/cli/package.json` 里将三个 provider SDK 加为直接依赖，与 `@ai-sdk/gateway` 保持一致。\n\n## Test plan\n\n- [ ] 全局安装 CLI 后配置 DeepSeek provider，验证不再报 `Cannot find package '@ai-sdk/openai'`\n- [ ] 配置 Anthropic / Google provider 同样正常工作"
+}

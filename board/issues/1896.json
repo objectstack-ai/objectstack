@@ -1,0 +1,35 @@
+{
+  "number": 1896,
+  "kind": "pull_request",
+  "title": "fix(formula): catch unknown functions in CEL conditions at build (#1877)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T07:07:50Z",
+  "updated_at": "2026-06-15T07:27:02Z",
+  "closed_at": "2026-06-15T07:27:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T07:27:00Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1896",
+  "body": "Closes #1877.\n\n## Problem\nA flow whose trigger/edge condition calls an **unknown function** — `PRIOR(status)`, a typo'd `isBlnk(...)` — was silently accepted: build + typecheck pass, then the broken condition no-op'd the flow at runtime with no log line. The reporter hit this on `@objectstack` 9.5.1 while runtime-testing the `objectstack-ai/templates` set (`signal_to_topic_promotion`, `cta_creation_default`).\n\n## Root cause\nIn `packages/formula/src/cel-engine.ts`, `compile()` discarded the type-check verdict:\n\n```js\nconst checkErrors = compiled.check?.();\nif (checkErrors && Array.isArray(checkErrors) && checkErrors.length > 0) { ... }\n```\n\ncel-js's `check()` returns a `TypeCheckResult` **object** (`{ valid, type?, error? }`), never an array — so `Array.isArray(...)` was always false and the verdict was dropped. An unknown function type-checks as `found no matching overload for 'PRIOR(dyn)'`, but that result never surfaced. Every author surface (`objectstack compile` via `validate-expressions.ts`, `registerFlow`'s `validateFlowExpressions`, and the agent `validate_expression` tool) routes through this one `compile()`, so all of them accepted the predicate.\n\n## Fix\nRead the documented `{ valid, error }` shape. One change closes the gap for flow conditions, validation rules, and field formulas at once.\n\nThe **runtime** half of the issue is already loud on current `main` (post-ADR-0032): the unknown-function fault message `found no matching overload` doesn't match the `no such overload` numeric-retry guard, so it propagates as an attributed flow failure rather than `return false`. The reporter's silent skip was on 9.5.1, which predates that work — but build validation stayed broken until this change.\n\n## Verification\n- Confirmed empirically (against the real registered stdlib) that cel-js's `check()` cleanly separates valid predicates (`record.rating >= 4`, `!isBlank(...)`, `previous.status != null`, every existing example flow condition) from unknown-function ones — no false positives.\n- New regression tests in `cel-engine.test.ts` and `validate.test.ts` (`PRIOR()`, short-circuit-guarded unknown call, typo'd `isBlnk`, plus assertions that registered stdlib `isBlank` still passes).\n- `@objectstack/formula` 95 passed · `@objectstack/service-automation` 187 passed · `tsc --noEmit` clean.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1328,
+  "kind": "issue",
+  "title": "[P3] audit: platform audit log has no UI surface / no template-facing API doc",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:27:56Z",
+  "updated_at": "2026-06-14T14:41:14Z",
+  "closed_at": "2026-06-14T14:41:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1328",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 25 条（**P3**）。\n\n## 现象\n\n平台已内置 `AuditPlugin`（dev 启动日志可见），但：\n- 模板 / 业务用户**找不到「审计日志」UI 入口**\n- 没有标准 view 让管理员浏览谁在何时改了什么\n- 模板想引用「最近 N 条审计」也不知道走什么 API\n- 没有文档说明审计颗粒度、保留策略、查询性能\n\n合规模板（compliance）想引用平台审计能力，没办法对外宣称「合规审计开箱即用」。\n\n## 建议范围\n\n**M1：系统对象 + view 暴露**\n- audit log 暴露为系统对象 `system.audit_entry`，readonly\n- 默认 list view + filter（按对象 / 字段 / 用户 / 时间）\n\n**M2：详情页内嵌**\n- 任意详情页 Discussion 区可挂「Audit Trail」tab\n- 模板可声明哪些字段进入审计\n\n**M3：策略与保留**\n- 保留期 / 分区 / 归档 配置\n- 法务导出（依赖 #9 PDF）\n\n**M4：文档**\n- 「如何在你的模板中引用平台审计」专章\n- 哪些事件被审计、字段层级 vs 操作层级\n\n## 验收\n\n- [ ] 审计有标准 UI 入口\n- [ ] `compliance` 模板正式引用平台审计（不再自造）\n- [ ] 缺陷库 gap #25 标记为已解决\n"
+}

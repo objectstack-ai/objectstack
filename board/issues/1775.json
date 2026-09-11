@@ -1,0 +1,35 @@
+{
+  "number": 1775,
+  "kind": "pull_request",
+  "title": "fix(objectql): artifact lock envelope survives overlay hydration and reset (ADR-0010 §3.3)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T09:02:54Z",
+  "updated_at": "2026-06-12T09:07:49Z",
+  "closed_at": "2026-06-12T09:07:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T09:07:47Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1775",
+  "body": "## Problem\n\n在无 `environmentId` 的本地栈（control-plane kernel）复现的元数据状态污染：\n\n1. 对带 `_lock: full` 的 artifact-backed app 执行 `PUT /api/v1/meta/app/setup`（锁门禁在 control-plane 被设计性跳过，写入成功）；\n2. overlay 行存在期间的任意 `GET /api/v1/meta/app` 会把 overlay body 以**无 packageId** 的 `registerItem` 水合进 SchemaRegistry 的 plain key，shadow 掉 composite key（`<packageId>:<name>`）下的 artifact；\n3. `lookupArtifactItem` / `getEffectiveLock` / `isArtifactBacked` 都经 `registry.getItem`（plain key 优先命中）拿到被剥光 envelope 的 overlay body → GET 返回 `_lock: undefined`，违反 ADR-0010 §3.3（overlay 不得放松 packaged lock）；\n4. `DELETE`（reset）只删 DB 行，恢复块查 `metadataService.get` 落空 → 污染的 shadow 残留到服务重启。\n\n## Fix（三层）\n\n- **`SchemaRegistry.getArtifactItem()`** — 穿透 shadow 的 artifact 专用查找：优先扫 composite key、要求真实 `_packageId`（排除 `'sys_metadata'` 哨兵）。protocol 的全部 envelope 读取点（`lookupArtifactItem` / `getEffectiveLock` / `isArtifactBacked` / `getMetaItemLayered` code 层）改用，锁解析从此对 shadow 免疫。\n- **水合保留 envelope** — `getMetaItems` / `loadMetaFromDb` 注册 shadow 前先 `mergeArtifactProtection` 把 artifact 的 `_lock`/`_packageId`/`_provenance` 嫁接到 overlay body：内容字段 overlay win，保护信封 artifact win。\n- **`SchemaRegistry.removeRuntimeShadow()` + `restoreArtifactRegistryView()`** — reset 删除 plain-key shadow，artifact 视图立即恢复（无需重启）；no-op 二次 DELETE 可自愈历史污染；draft 丢弃不清 shadow（active overlay 可能仍在）。\n\n## Verification\n\n- 新增 `protocol-registry-shadow.test.ts`（8 用例）：PUT→GET→DELETE 全链路 envelope 保持、reset 自愈、scoped kernel 在 registry 已被污染时 `403 item_locked` 仍生效、两个新 registry 方法的单元行为。\n- objectql 全套 569 测试通过，`tsc --noEmit` 干净。\n- showcase 实机端到端（OS_PORT=3700）：PUT → GET（overlay 存在）→ DELETE → GET，`_lock: full` / `_packageId` / `_provenance` 全程保持；单条 GET 信封 `editable/deletable: false` 正确。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 1744,
+  "kind": "issue",
+  "title": "feat(automation+approvals): flow-level send-back-for-revision — revise branch + back-edge re-entry",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T01:42:34Z",
+  "updated_at": "2026-06-12T06:56:40Z",
+  "closed_at": "2026-06-12T06:56:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1744",
+  "body": "## Context\n\n`requestInfo()` (#1740) is a **conversation**, not a flow movement: the request stays pending, the record stays locked, the same approver keeps the slot, and the submitter can only reply text on the thread. Good enough for \"clarify something\", not for \"the material is wrong — fix it and resubmit\", which mainstream approval centers model as 退回修改 / send back for revision.\n\n## Target semantics\n\n```\napproval node (suspended)\n  └─ revise → flow follows a \"revise\" out-edge to a wait point\n                ├─ record unlocks; submitter edits the data\n                └─ submitter resubmits → flow re-enters the approval node\n                                          └─ a NEW approval request opens (round 2)\n```\n\n## What this needs (engine-level, hence not bundled into UI iterations)\n\n1. **A third resume branch on the approval node** — decisions today resume down `approve`/`reject` out-edges (`APPROVAL_BRANCH_LABELS`); the edge router must learn `revise`.\n2. **Back-edge re-entry** — the flow graph gets a cycle (approval → wait → back to approval). The engine is DAG traversal + suspend/resume; re-entering a node a second time needs defined semantics for the suspended-run snapshot, variable overwrites, and round-numbered audit (round 1 sent back, round 2 approved). Note the flow spec docs already anticipate this: *\"back-to-previous rejection → a back-edge to an earlier node\"* — the model allows it, the executor doesn't implement it yet.\n3. **Loop guards** — a max-revision count (e.g. auto-reject after N send-backs) so instances cannot orbit forever.\n4. **Lock lifecycle** — the record-lock hook is keyed on a pending request; the revise window must unlock for the submitter, then re-lock on resubmit.\n\nTest matrix is the real cost: multi-round revision × `unanimous` behavior × lock states × recall crossing a revise window.\n\n## Suggested pairing\n\nPlan together with Studio flow-designer support for authoring the `revise` edge, so the capability is reachable without hand-editing flow JSON.\n\n## References\n\n- Thread-level groundwork: `requestInfo` in #1740\n- Branch constants: `APPROVAL_BRANCH_LABELS` (`packages/spec/src/automation/approval.zod.ts`)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

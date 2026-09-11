@@ -1,0 +1,33 @@
+{
+  "number": 1332,
+  "kind": "issue",
+  "title": "[portal] 缺少匿名 lookup（凭证校验 + OTP）协议（GAP-2 of #1294）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T06:46:16Z",
+  "updated_at": "2026-06-14T14:43:55Z",
+  "closed_at": "2026-06-14T14:43:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1332",
+  "body": "## 现象\nZendesk / Intercom / Freshdesk 标配：未注册客户输入 **工单号 + 邮箱** → OTP 验证 → 查看工单。\n当前 #1294 spec 的 `anonymousEntry.routes` 只能表达两种：\n- 全公开 view（任何人可看，如 KB）\n- 全匿名 mutation action（如提交工单）\n\n**缺少第三种「凭证校验后的私有 view」**。\n\n## 复现\n1. 客户用一次性邮件提了工单，没留账号\n2. 想查进度，记不住 magic-link 邮件\n3. 期望：访问 `/portal/helpdesk/lookup` → 输 `ticket_number + email` → 收 OTP → 看工单\n4. spec 表达不出来\n\n## Workaround\n用 action（mutation）模拟读取，违反语义；或者要求用户必须注册。\n\n## 分阶段建议\n**M2**：`PortalAnonymousRouteSchema` 新增 discriminator `kind: 'lookup'`：\n\n```ts\n{\n  kind: 'lookup',\n  path: '/lookup',\n  viewRef: 'helpdesk_ticket.detail',\n  keyFields: ['ticket_number', 'customer_email'],\n  challenge: { method: 'email_otp', ttl: '10min' } | { method: 'magic_link' },\n  rateLimit: { rule: '3/hour/ip' },\n  captcha: true,\n}\n```\n\n运行时：匹配 keyFields → 用 record 上的 email 字段发 OTP → 验证通过颁发短期 token → 渲染 viewRef。\n\n## 验收\n- helpdesk portal 声明 lookup route，三次错误尝试后被 rate-limit 拦截\n- OTP 验证通过后，**只能看到匹配的那一条记录**，不能枚举其它工单（即使 viewRef 是 list）\n\n## 关联\n- #1294\n- GAP-1（#1331，共享 ephemeral token 机制）\n"
+}

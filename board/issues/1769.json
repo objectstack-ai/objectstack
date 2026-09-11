@@ -1,0 +1,35 @@
+{
+  "number": 1769,
+  "kind": "pull_request",
+  "title": "feat(approvals+automation): flow-level send-back-for-revision — revise branch + typed back-edge re-entry (ADR-0044)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T06:56:28Z",
+  "updated_at": "2026-06-12T07:00:46Z",
+  "closed_at": "2026-06-12T06:56:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T06:56:39Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1769",
+  "body": "Closes #1744. Implements ADR-0044 (docs/adr/0044-approval-send-back-for-revision.md).\n\n## What\n\n`requestInfo()` (#1740) is a thread conversation; this lands the real flow movement mainstream approval centers call 退回修改 / *send back for revision*:\n\n```\napproval (round N) ──revise──▶ wait (record unlocked, submitter edits)\n        ▲                            │\n        └────────[back-edge]── resubmit (round N+1, fresh slate, re-lock)\n```\n\n## Decisions (ADR-0044)\n\n- **`returned`** — third terminal `ApprovalStatus` (approver-initiated rework ≠ submitter-initiated `recalled`); lock + pending-dedupe key on `pending`, so unlock/round-N+1 need no lock-machinery change\n- **`revise` branch + `maxRevisions`** (default 3) on the node config — overflow **auto-rejects** (resumes down `reject`, `output.autoRejected: true`); send-back validated against the flow graph before any mutation (no revise edge ⇒ `VALIDATION_FAILED`)\n- **wait node + REST resubmit** — `POST …/revise`, `POST …/resubmit`; revise window is visible flow state\n- **`__round` config-snapshot numbering** — `row.round`, no migration (precedent: `__flowLabel`)\n- **Engine: typed back-edges** — `FlowEdgeSchema.type: 'back'`; cycle validation = DAG on the graph *minus* back-edges (unmarked cycles still rejected); re-entry overwrites node outputs / appends steps; 100-re-entry runaway guard; **`cancelRun()`** lands as the first run-cancel primitive (recall crossing a revise window cancels the parked run — the wait node has no reject edge)\n- **Collision guard** — resubmit refuses `DUPLICATE_REQUEST` while another pending request holds the record (refuses *before* the suspension is consumed, so the run stays resumable)\n\nAlso fixes a latent orderBy bug (`direction:` is not a SortNode key — silently sorted asc) in `remind()`'s cool-down and the new latest-row guard, with regression tests.\n\n## Tests\n\n- Engine suite: back-edge registration, unmarked-cycle rejection, re-entry output overwrite + step append, runaway guard, cancelRun (185 ✓)\n- ADR-0039-style matrix (`approval-revise.test.ts`): multi-round 1→3 · unanimous slate reset · lock locked→unlocked→re-locked · recall crossing the window · superseded rows · overflow auto-reject · no-revise-edge rejection · resubmit collision guard (83 ✓)\n- spec 6529 ✓ · rest 103 ✓\n\n## Browser-verified (showcase stack, 3700/5790)\n\nSend back from the inbox (violet `returned` badge, timeline `revise` entry) → record unlocks (PATCH 200 while returned, 409 while pending) → resubmit from the submitter view → **round 2** opens (Round-2 chip, fresh trail, re-lock, survives server restart via the durable store) → round-2 approve completes the flow. Third send-back on `maxRevisions: 2` auto-rejects with the audit trail `revise → reject (\"Auto-rejected: revision limit (2) exceeded\")`.\n\nConsole UI counterpart: objectui PR (send-back button/dialog, resubmit entry, timeline, ten-locale i18n). Studio designer authoring for the revise edge is a follow-up issue.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

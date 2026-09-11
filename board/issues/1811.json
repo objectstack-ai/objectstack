@@ -1,0 +1,35 @@
+{
+  "number": 1811,
+  "kind": "pull_request",
+  "title": "feat(ADR-0046): add optional `description` to package docs",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-13T06:26:31Z",
+  "updated_at": "2026-06-13T06:37:33Z",
+  "closed_at": "2026-06-13T06:37:31Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-13T06:37:31Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1811",
+  "body": "## What\n\nA doc can now carry a one-line **`description`** (frontmatter `description:`) — the natural minimal model: **title / summary / body**.\n\n- **spec**: `DocSchema` gains optional `description`.\n- **cli**: `collect-docs` reads `description:` from frontmatter (generalized the scalar extractor; `title` + `description` share it). Regression test added.\n- It rides in the `GET /meta/doc` **list** response (which omits `content`), so a docs portal shows summaries without fetching each body. **Verified live**: showcase `/meta/doc` returns `description`, `hasContent:false`.\n- Example docs (`app-showcase`, `app-todo`) carry descriptions.\n\n## Tags — decided + recorded, not built\n\nPer the discussion, ADR-0046 now has a **P3 design note for doc tags** (deferred): tags are **keys** resolved through the platform's label-key → i18n mechanism (never display strings), with a small **protocol core vocabulary** plus **namespace-prefixed package tags**. Pure closed enum is too rigid, pure free-form fragments + has no i18n owner; the layered key model resolves both. Not a field to bolt on before there's doc volume to justify a discovery surface. `description` deliberately stops short of taxonomy (no i18n-keying burden).\n\n## Companion\n\nThe portal-side display (render the summary, drop the machine id from the reader-facing list) ships as a separate objectui PR.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

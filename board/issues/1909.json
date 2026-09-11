@@ -1,0 +1,36 @@
+{
+  "number": 1909,
+  "kind": "pull_request",
+  "title": "test(trigger-record-change): end-to-end regression coverage for record-change flows (#1491)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T12:47:14Z",
+  "updated_at": "2026-06-15T13:30:00Z",
+  "closed_at": "2026-06-15T13:29:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T13:29:58Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1909",
+  "body": "Closes #1491.\n\n## TL;DR\n**#1491 no longer reproduces on current `main` (9.5.x).** It was real at 7.4.1–7.7.0 but was fixed by the intervening refactor (triggers promoted to first-class `packages/triggers/` + the flow-engine alignment work). This PR adds the **end-to-end regression test the reporter explicitly asked for**, closing the coverage gap that let the bug exist and could let it return.\n\n## How I verified\nA real kernel — `ObjectQLPlugin` + `AutomationServicePlugin` + `RecordChangeTriggerPlugin` + a small inline in-memory driver — with a `record-after-create` flow whose `update_record` stamps a field. Insert a row, assert the field is stamped. It works in **both** registration orderings:\n\n1. **Flow registered after the trigger** (`engine.registerFlow`) — binds immediately.\n2. **Flow pulled from the registry at `automation.start()`** (the production sequence), trigger registering later on `kernel:ready`, engine **re-activating** the already-pulled flow.\n\nLogs confirmed the bind both ways (`[record-change] bound flow … → afterInsert on …`) and the write landed — disproving the reporter's hypotheses A (binding) and B (write rejected under trigger context) on current `main`.\n\n## Why it regressed silently before\nThe existing unit tests only exercised a **fake** data engine (`registerHook` calls recorded, never dispatched). The real path — ObjectQL hook dispatch on an actual insert → flow execution → write-back through the live engine — had **zero coverage**. This test fills that gap.\n\n## What's in the PR\n- `record-change-integration.test.ts` — the full-kernel test, both orderings.\n- `@objectstack/objectql` + `@objectstack/service-automation` as devDependencies (the test boots them). The in-memory driver is **inlined** in the test (mirrors objectql's own real-engine test helper) so no driver *package* dependency is added.\n- Empty changeset (test-only; nothing shipped changes — tests aren't in the package's published `files`).\n\n> Note: the `Validate Package Dependencies` check fails on a **pre-existing, unrelated** `pnpm audit` advisory for `esbuild` (via `tsup`/`tsx`, repo-wide build tooling). It surfaces only because this PR touches the lockfile; it is not introduced here and `main` carries the same advisory. Branch protection does not require this check.\n\n## Adjacent issues the reporter raised (NOT fixed here — flagging for follow-up)\nBoth are real and on the \"silent failure\" theme:\n1. **CLI `serve` forces `level: 'silent'`**, so trigger bind/exec logs are invisible — they asked for `OS_LOG_LEVEL` / `--log-level`. This is *why* they couldn't self-diagnose.\n2. **The trigger handler swallows flow-execution failures** ([record-change-trigger.ts](packages/triggers/trigger-record-change/src/record-change-trigger.ts) `catch → logger.warn`). Combined with the silent logger and the engine's own `execute()` catch, a *triggered-but-failing* flow is indistinguishable from *never-triggered*. Routing flow failures to the automation run log / observability would make any future recurrence diagnosable.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 1927,
+  "kind": "pull_request",
+  "title": "fix(example-crm): make formula fields compute + allow historical closed deals; bump objectui",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T17:30:00Z",
+  "updated_at": "2026-06-15T17:59:27Z",
+  "closed_at": "2026-06-15T17:59:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T17:59:24Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1927",
+  "body": "## Why\n\nRelease-prep browser test of `example-crm` (9.5.x) surfaced three **\"passes build, silently wrong at runtime\"** defects — the failure class this project's AI-authoring guardrails target. All three are in the flagship demo app.\n\n## Fixes\n\n| # | Defect | Root cause | Fix |\n|---|--------|-----------|-----|\n| 1 | `full_name`, `is_closed`, `expected_revenue` all rendered empty | Formulas used **bare identifiers** (`amount`, `status`, `first_name`). Formula scope is `{record, previous, input, os}` with **no field flattening**, so bare names resolve to nothing → `null` | rewrite to `record.<field>` |\n| 2 | `expected_revenue` still `null` after #1 | `… / 100` — **cel-js has no `double × int` arithmetic overload**, so `<number field> / 100` faults and the formula returns `null` | float literal `/ 100.0` (both operands `double`) |\n| 3 | Opportunity list showed only **4** rows; dashboard \"Won This Quarter\" empty | `opp_close_date_not_past` validation fired on **every** insert, rejecting `closed_won`/`closed_lost` seed rows that legitimately carry **historical** close dates (5 of 9 wins dropped) | scope the rule to open stages only |\n\nAlso bumps `.objectui-sha` `26da1a2a3731 → ac2de168d487` and rebuilds the bundled `@objectstack/console` dist for the release.\n\n## Verification (live dev server + API)\n\n- Opportunities seed **4 → 12** (all `closed_won`/`closed_lost` now persist)\n- `expected_revenue` computes: 84000, 180000, 16000, 21000, … (= `amount × probability / 100`)\n- `full_name` → \"Ada Lovelace\", `is_closed` → correct boolean\n- `pnpm build` → 75/75 tasks pass; `example-crm` builds clean (ADR-0032 expression validation green)\n\n## Follow-up (deferred)\n\nThe cel-js `double × int` arithmetic gap is **systemic** — any AI-authored formula like `price * 2`, `total - fee`, `amount / 100` silently returns `null`; only float literals work, and cel-js rejects registering operator overloads. `validate-expressions.ts` (ADR-0032) catches neither this nor the bare-identifier case. Tracking issue to follow for a build-time lint and/or engine-level int→double promotion.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

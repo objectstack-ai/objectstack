@@ -1,0 +1,33 @@
+{
+  "number": 1768,
+  "kind": "pull_request",
+  "title": "feat(adr-0045): hidden-app visibility gate + publish unhides materialized builds",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T06:41:36Z",
+  "updated_at": "2026-06-12T06:43:46Z",
+  "closed_at": "2026-06-12T06:41:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T06:41:49Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1768",
+  "body": "## What\n\nv1 framework slice of [ADR-0045](https://github.com/objectstack-ai/framework/pull/1767) (additive materialization with a visibility gate):\n\n1. **`filterAppForUser` hidden-app gate** (rest-server): apps with `hidden: true` are dropped from metadata responses for users without `studio.access`/`setup.access`. The launcher's client-side hidden filter is a listing courtesy — this is the enforced gate that makes an unpublished app externally unobservable.\n2. **`publish-drafts` flips visibility** (http-dispatcher): after promoting the package's drafts (and applying seeds), any `hidden: true` app bound to the package is re-saved with `hidden: false`. One publish verb serves both regimes — the caller (chat auto-publish, banner button, Home pending-drafts) never needs to know whether the package was draft-staged or materialized. Best-effort: flip failures surface as `unhideError` without failing the publish.\n\n## Tests\n\n- 4 new `filterAppForUser` cases (drop for non-builders, allow for studio/setup, visible apps untouched, requiredPermissions still compose) — `rest.test.ts` 101/101 ✅\n- 2 new `publish-drafts` cases (unhides exactly the hidden app with body intact + reports flip failure non-fatally) — `http-dispatcher.test.ts` 121/121 ✅\n\n## Next (separate PRs)\n\ncloud: `apply_blueprint` lint-then-materialize cutover (stage → publishPackageDrafts in-turn, app body `hidden:true`). objectui: canvas → real app URL + unpublished banner.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

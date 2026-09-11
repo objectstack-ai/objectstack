@@ -1,0 +1,35 @@
+{
+  "number": 1961,
+  "kind": "pull_request",
+  "title": "feat: record clone — wire object.enable.clone to a real runtime",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T10:01:34Z",
+  "updated_at": "2026-06-16T10:31:56Z",
+  "closed_at": "2026-06-16T10:31:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T10:31:54Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1961",
+  "body": "## What\n\n`object.enable.clone` was a **parsed-but-dead** capability flag (no runtime reader, classified `dead` in the spec-liveness ledger). This wires it to an actual record-clone path and flips it `dead → live`.\n\nThis is the productization half of the spec-liveness cleanup: where a flag is worth keeping, *build the feature* rather than prune the flag. (The companion PR [#1960](https://github.com/objectstack-ai/framework/pull/1960) prunes the genuinely orphaned `recordTypes`/`cdc` stubs.)\n\n### objectql — `protocol.cloneData({ object, id, overrides?, context? })`\nReads the source record, drops engine-owned columns so the insert path re-derives them, applies caller `overrides` last, inserts the copy:\n\n| Dropped (re-derived on insert) | Kept (copied) |\n|---|---|\n| `id` + audit `created_at`/`created_by`/`updated_at`/`updated_by` | all scalar/business field values |\n| `system`-flagged columns (e.g. injected `organization_id`) | |\n| `autonumber` fields (re-issued) | |\n| `formula` / `summary` fields (recomputed) | |\n\n- **Shallow by design** — duplicates the record's own fields, not its child records.\n- **Gated** on `schema.enable.clone`: default-on; explicit `enable.clone === false` → `403 CLONE_DISABLED`.\n\n### rest — `POST /api/v1/data/:object/:id/clone`\n- `201 → { object, id, sourceId, record }`.\n- Optional body `{ overrides }` (or a bare field map) overrides copied values — the place to set a new `name` or clear a unique field before insert.\n- Honors the existing auth + `enable.apiEnabled`/`apiMethods` gates; lives in the always-on data-action group alongside `lead/:id/convert`.\n\n## Verification\n\n- **8** protocol unit tests (mock engine): field stripping, autonumber/formula/summary/system drop, overrides-win, context forwarding, `CLONE_DISABLED`, default-on, `RECORD_NOT_FOUND`, `OBJECT_NOT_FOUND`.\n- **5** REST route tests: registration, nested + bare overrides, `403` mapping, `501` fallback when a protocol lacks `cloneData`.\n- **4** real-engine integration tests (genuine `ObjectQL` + in-memory driver) — proves the cloned row gets a **regenerated autonumber** (`ACC-0001` → `ACC-0002`), overrides apply, `enable.clone:false` → 403, missing source → 404.\n- Liveness gate green (`object.enable.clone` now `live` with evidence); `@objectstack/objectql` **633** passed, `@objectstack/rest` **121** passed.\n\n## Follow-ups (not in scope)\n- SDK client sugar (`client.data.clone()`) + an objectui \"Clone\" record action — `cloneData` follows the same untyped-extra-method pattern as `convertLead`, so neither is wired to a typed client method yet.\n- Deep clone (cascade to child records) if a use case appears; today's behavior is intentionally shallow.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

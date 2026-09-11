@@ -1,0 +1,33 @@
+{
+  "number": 1834,
+  "kind": "pull_request",
+  "title": "fix(objectql): promoteDraft preserves the draft's package binding (AI-built apps stay hidden)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-14T05:52:07Z",
+  "updated_at": "2026-06-14T05:52:21Z",
+  "closed_at": "2026-06-14T05:52:19Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-14T05:52:19Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1834",
+  "body": "## Problem\n\nAI-built apps (whole-app blueprint builds via the metadata assistant) never appear in the console's app switcher or home **全部应用** grid after publishing — the user builds an app, publishes it, the objects/views/data all materialize and work, but the **app itself is unreachable** from the UI (only by direct URL, rendered inside another app's shell).\n\nVerified locally on the `objectos-ee` rig: `GET /api/v1/meta/app` returned only the bundled `crm_enterprise`, while 16 AI-built apps sat in `sys_metadata` as `state=active` but `hidden=true` and `package_id=NULL`.\n\n## Root cause\n\nADR-0045: a materialized (additive) build leaves its app `hidden:true` (unlisted) until **Publish** flips it. The visibility flip lives in `POST /packages/:id/publish-drafts` and unhides hidden apps **scoped to the published package**:\n\n```ts\nconst apps = await protocol.getMetaItems({ type: 'app', packageId: id });\n// unhide apps where app.hidden === true\n```\n\nBut `SysMetadataRepository.promoteDraft()` called `put()` **without** a `packageId`. The draft was staged bound to the workspace package (e.g. `com.workspace`), yet the promoted **active** row landed with `package_id = NULL`. The package-scoped unhide query then never matched it, so `hidden` was never flipped — the app stayed invisible forever.\n\n(Objects/views were unaffected because they're also surfaced via the SchemaRegistry; the `app` list relies on the package-bound overlay row.)\n\n## Fix\n\n`promoteDraft()` now reads the raw draft row, carries its `package_id` onto the promoted active row, and reads the current active row through the same package scope so the optimistic-lock `parentVersion` still matches. Package-less drafts (`packageId` null) behave exactly as before.\n\n## Verification\n\n- New regression test: the promoted active row keeps the draft's package binding.\n- Full `objectql` suite green (607 tests).\n- End-to-end on `objectos-ee`: with the app carrying its `com.workspace` binding, `publish-drafts` returns `unhiddenApps: [\"ticket_service_app\"]` and the app then appears in `GET /api/v1/meta/app` and the home **全部应用** grid.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 1931,
+  "kind": "pull_request",
+  "title": "feat(validate): flag bare field refs in record-scoped CEL sites (#1928)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T18:30:38Z",
+  "updated_at": "2026-06-16T02:35:25Z",
+  "closed_at": "2026-06-16T02:35:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T02:35:22Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1931",
+  "body": "Part 2 of 2 for #1928 (build-time check). Part 1 is the runtime fix #1930.\n\n## Problem\n\nA `Field.formula` and an object validation predicate evaluate against the `record` namespace **only** — no field flattening — so a bare top-level identifier like `amount` or `status` resolves to nothing and the expression **silently evaluates to `null` / never fires**. This is the silent-at-runtime class behind #1927's broken `expected_revenue`/`full_name`/`is_closed`, and exactly the mistake an AI author makes.\n\nThe build validator already walked every expression site but only checked CEL syntax + `record.<field>` existence — bare refs slipped through.\n\n## Fix\n\n`validateExpression` gains an evaluation **`scope`**:\n\n- **`scope: 'record'`** (field formulas, validation predicates) → a bare reference is reported with the corrective form: *write `record.<field>`*.\n- **`scope: 'flattened'`** (flow / automation conditions, the default) → the record's fields ARE spread to top-level **alongside flow variables**, so bare `status`/`budget` are correct and are **not** flagged.\n\nThe detector (`detectBareReference`) runs cel-js `check()` in a `record`-scoped environment (namespace roots declared, real stdlib registered) and acts **only** on the `Unknown variable` fault — so it cannot false-positive on arithmetic/comparison/null-guard type overloads (verified: `record.lead_score != null && record.lead_score > 100` passes).\n\n### Why not flag bare refs in flow conditions too?\n\nFlow conditions flatten the record's fields *and* flow-defined variables (e.g. `expiring_deals.length > 0`, `new_opportunity.stage`) into one namespace. Flow variables aren't schema-knowable, so a bare identifier there **can't be soundly told apart from a typo** — flagging it would false-positive and break valid builds. The design law for this subsystem: *the build check may only reject what the runtime would also fail.* So flow-condition bare refs stay out of the hard gate (candidate for a future advisory warning — see #1928).\n\n## Also fixes 3 latent bugs the new check surfaced\n\n- `crm_lead` validation `lead_score_range` — bare `lead_score` → rule silently never fired\n- showcase `field_zoo.f_formula`, showcase `project.budget_remaining` — bare refs → null\n\n## Verification\n\n- Negative test: reintroducing a bare ref fails `objectstack build` with the corrective message.\n- All three example apps build clean (they contain many *correct* bare-ref flow conditions → zero false positives).\n- New unit tests: 7 in `@objectstack/formula` (`validate.test.ts`), 4 in `@objectstack/cli` (`validate-expressions.test.ts`). Full suites green (formula 101, cli 410).\n\nRefs #1928, #1927. Sibling: #1930 (runtime overloads).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

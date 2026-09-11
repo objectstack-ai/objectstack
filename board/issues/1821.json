@@ -1,0 +1,32 @@
+{
+  "number": 1821,
+  "kind": "pull_request",
+  "title": "feat(service-ai): steer the agent to visualize_data for chart requests",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-13T21:14:29Z",
+  "updated_at": "2026-06-13T21:18:30Z",
+  "closed_at": "2026-06-13T21:18:28Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-13T21:18:28Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1821",
+  "body": "## Why\n\nFollow-up to [#1820](https://github.com/objectstack-ai/framework/pull/1820). In live testing, a small model (claude-haiku) sometimes answered a \"draw a bar chart\" request with a markdown **table** — running `query_data`/`aggregate_data` and formatting the numbers — instead of calling `visualize_data`. The chart still worked when explicitly told \"use visualize_data\", so this is a **tool-selection** problem, not a capability gap: the chart preference was buried as guideline #7 and competed with guideline #4 (\"format with markdown tables\").\n\n## What\n\n- **`data-explorer-skill.ts`** — adds a prominent **\"Choosing the right tool\"** section *above* the guidelines: chart intent (incl. Chinese terms 图表/柱状图/折线图/饼图/画图/可视化) → MUST call `visualize_data`, never substitute a table, and render even if the numbers were already fetched. Reconciles the table-formatting guideline and fixes the duplicate guideline numbering.\n- **`visualize-data.tool.ts`** — strengthens the tool description to be imperative (\"the ONLY tool that draws a chart… you MUST call this, not a table\").\n\nPrompt-only tuning — **no behavior/contract change**, no new deps. Raises the likelihood the model reaches for `visualize_data` on a plain chart request without an explicit nudge. Inherently probabilistic (LLM tool selection), so this improves reliability rather than guaranteeing it.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

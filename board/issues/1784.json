@@ -1,0 +1,35 @@
+{
+  "number": 1784,
+  "kind": "pull_request",
+  "title": "feat(cloud-connection): device context on the approval URL",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T11:55:49Z",
+  "updated_at": "2026-06-12T11:56:22Z",
+  "closed_at": "2026-06-12T11:56:20Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T11:56:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1784",
+  "body": "Follow-up to #1783 (ADR runtime-identity-binding §2.3): `bind/start` appends `runtime_name` (hostname) + `runtime_version` to the device-flow verification URLs, so the cloud console approval page can show **what** is being authorized — the \"new device wants to sign in\" moment. Display-only informed-consent context; the page pairs it with an \"only approve if you started this\" warning (objectui PR follows).\n\nZero storage / zero new endpoints — the context rides the URL the runtime already returns to the panel.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

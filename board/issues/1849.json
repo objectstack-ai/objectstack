@@ -1,0 +1,32 @@
+{
+  "number": 1849,
+  "kind": "pull_request",
+  "title": "docs(setup): slim the Setup overview to the genuinely-invisible rules",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-14T13:09:44Z",
+  "updated_at": "2026-06-14T13:18:30Z",
+  "closed_at": "2026-06-14T13:18:28Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-14T13:18:28Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1849",
+  "body": "## Why\n\nFollow-up to [#1848](https://github.com/objectstack-ai/framework/pull/1848). On review, the seeded `setup_overview` mixed two things: a few genuinely-invisible rules (worth documenting) and generic concept-restatement (permission-set vs role definitions) that duplicates what the Setup UI's own Users/Roles/Permission-set screens already show — then deferred to the external site per section. The ADR-0046 principle is \"document the invisible, not what the UI shows,\" so the generic half doesn't earn its place.\n\n## What\n\nTrim `setup_overview` (EN + zh) to three short bullets the screens *don't* reveal:\n- a user is **identity, not access** (and deactivate ≠ delete);\n- permissions are **additive** (effective access = union of permission sets);\n- **\"can't see a record\" is almost always sharing**, not object permissions.\n\n`studio_overview` is left as-is — its overlay/precedence rule is exactly the kind of invisible gotcha this format is for.\n\nContent only, no behaviour change.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

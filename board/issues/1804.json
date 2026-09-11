@@ -1,0 +1,35 @@
+{
+  "number": 1804,
+  "kind": "pull_request",
+  "title": "feat(cli): ADR-0048 follow-up — namespace-prefix lint warning",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-13T02:48:43Z",
+  "updated_at": "2026-06-13T02:52:27Z",
+  "closed_at": "2026-06-13T02:52:26Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-13T02:52:26Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1804",
+  "body": "## Summary\n\nImplements the deferred **§4 follow-up** of [ADR-0048](https://github.com/objectstack-ai/framework/blob/main/docs/adr/0048-cross-package-metadata-collision.md) (cross-package metadata collision, merged in [#1796](https://github.com/objectstack-ai/framework/pull/1796)).\n\nADR-0048 added a **runtime** guard: a cross-package clash on a bare-named item's registry key (`org/type/name`) now fails loudly at registration with `MetadataCollisionError`. This PR **shifts that detection left to authoring time** — `os lint` now nudges authors to prefix bare-named metadata with the package namespace, so the clash is unlikely to ever reach install.\n\n## What it does\n\nNew `naming/namespace-prefix` **warning** in `lintConfig`:\n- Fires when a bare-named UI/automation item — `app` / `page` / `dashboard` / `flow` / `action` / `report` / `dataset` — has a `name` not prefixed with `manifest.namespace`.\n- **Exemptions** (no false positives): an app named exactly after the namespace (ADR-0019 single-app convention, e.g. `crm`), and `sys_`-reserved names.\n- **Untouched**: objects (already prefix-*enforced* as an error in `defineStack`), object-derived views, and `doc` (its own strict build-time lint).\n- **Warning-only / never fatal**: `os lint` exits non-zero only on errors, and `os build` does not run `lintConfig` — so no example build or CI run breaks from this.\n\nAlso marks the ADR-0048 §4 lint follow-up as implemented.\n\n## Test plan\n- [x] New `packages/cli/test/lint-namespace-prefix.test.ts` — 7 cases: warns on bare name, accepts prefixed, exempts app-named-after-namespace, exempts `sys_`, covers all 7 types, silent without a namespace, leaves objects/views alone.\n- [x] Lint suite green locally (data-model-rules + score + metadata-eval + new): 38 passed.\n- [x] cli typecheck clean.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

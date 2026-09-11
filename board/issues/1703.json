@@ -1,0 +1,32 @@
+{
+  "number": 1703,
+  "kind": "pull_request",
+  "title": "fix(driver-memory): accept the engine QueryAST in aggregate() (analytics fallback)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T02:02:39Z",
+  "updated_at": "2026-06-11T02:04:56Z",
+  "closed_at": "2026-06-11T02:03:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T02:03:11Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1703",
+  "body": "Completes the staging \"No rows\" fix chain ([framework#1701](https://github.com/objectstack-ai/framework/pull/1701) was layer 1).\n\nAfter #1701, dataset queries on in-memory environments correctly fall back from NativeSQL to the aggregate strategy — which then crashed with `this[#pipeline].map is not a function`: `ObjectQL.aggregate` hands drivers the **QueryAST** (`{where, groupBy, aggregations}`), but `InMemoryDriver.aggregate()` only understood **MongoDB pipeline arrays** (Mingo).\n\n`aggregate()` now detects the AST shape and serves it through the same where-filter + `performAggregation` path `find()` already uses (the shapes match exactly — `{function, field, alias}`); real pipeline arrays keep the Mingo passthrough unchanged.\n\n**Test**: driver-memory 68 green — new: grouped sums via AST; `where` + no-groupBy single-row totals; pipeline-array passthrough.\n\nStaging validation: bump cloud `.framework-sha` after merge → the expense Spending Dashboard should finally render real numbers.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

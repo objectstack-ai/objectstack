@@ -1,0 +1,33 @@
+{
+  "number": 1809,
+  "kind": "pull_request",
+  "title": "docs(adr): revise ADR-0048 — package-scoped identity over per-item collision detection",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-13T05:07:45Z",
+  "updated_at": "2026-06-13T05:11:05Z",
+  "closed_at": "2026-06-13T05:11:03Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-13T05:11:03Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1809",
+  "body": "## What\n\nRevises **ADR-0048** to re-frame cross-package metadata collisions for the **app-marketplace** era. Docs-only.\n\n## Why\n\nThe original ADR chose *per-item collision detection* at registration time — turn a silent shadow into a loud error. That guard shipped and stays. But for a marketplace it's the wrong terminal design: two independent vendors that both ship a bare-named `page/home` would be **unable to coexist** (the second install fails). A marketplace whose packages can't be installed together on common names isn't a marketplace.\n\n## Revised direction\n\n1. **package id** (reverse-domain `com.acme.crm`) is the global identity + routing/container key — vendor baked in, so two vendors' \"crm\" never collide; URL-safe; already the dependency-resolution identity.\n2. **namespace** stays the object prefix, enforced **unique per-install at install time** (refuse-on-conflict) — making explicit the constraint the table layer already enforces implicitly (duplicate `CREATE TABLE crm_account` fails loudly).\n3. **Resolution is container-scoped** (prefer-local, qualify-to-cross) → a cross-package clash is *structurally impossible* rather than detected after the fact.\n4. The shipped runtime guard is **retained as a same-package authoring backstop**.\n5. **namespace rename-on-install is an explicit non-goal for v1** (deep rewrite of every object name / cross-ref / formula).\n\nNet: one `O(1)`-per-package namespace install gate replaces the `O(every page/dashboard/flow)` per-item scan; object and UI metadata share one scope model with **zero artifact renames**.\n\n## Accuracy\n\n- `[done]` — runtime guard (`MetadataCollisionError`, `collisionPolicy`, `registry.ts`) + `naming/namespace-prefix` os-lint rule (already shipped) are labelled as such.\n- `[proposed]` — install-time namespace gate + container-scoped resolution + qualified cross-package references.\n- `[deferred]` — namespace rename-on-install.\n\nNo code changes — ADR document only.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

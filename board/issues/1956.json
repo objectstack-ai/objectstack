@@ -1,0 +1,34 @@
+{
+  "number": 1956,
+  "kind": "pull_request",
+  "title": "fix(spec): cross-repo liveness re-audit — 16 props dead→live (objectui authoring UI)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T08:43:56Z",
+  "updated_at": "2026-06-16T09:15:31Z",
+  "closed_at": "2026-06-16T09:15:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T09:15:29Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1956",
+  "body": "Corrects the liveness ledgers + the dead-surface plan after finding the 2026-06 audits **missed objectui's metadata-admin authoring UI** (they only checked framework runtime + end-user renderers).\n\n## What\nA cross-repo re-audit — **reading the actual consumer code in both `framework` and `../objectui`** (not grep-guessing) — found 16 props the ledgers called `dead` are actually **objectui-live**, reclassified dead→live with verified evidence:\n\n| Type | props | objectui consumer (read) |\n|---|---|---|\n| tool | category, requiresConfirmation, active, builtIn | `ToolPreview.tsx:99-103` |\n| action | execute, shortcut, bulkEnabled, disabled | `ActionPreview.tsx:154-169` |\n| skill | triggerPhrases, permissions | `SkillPreview.tsx:44,48` |\n| flow | status, active, nodes.boundaryConfig | `FlowPreview.tsx:105`, `flow-node-config.ts:480` |\n| agent | knowledge | `AgentPreview.tsx:69` |\n| role | parent | `RolePreview.tsx:30` |\n| permission | isProfile | `PermissionPreview.tsx:92` |\n\n(Plus the 9 field props already fixed in #1947.) Each verified by opening the file and seeing the read.\n\n## Why it matters\nPruning these would have **broken the authoring UI / detail rendering**. The dead-surface plan (#1939) recommended pruning several — it's now flagged **invalidated** at the top; only **~42 props are confirmed dead in BOTH repos** (the real prune candidates, dominated by 24 object-level props with `NoExcessObjectKeys` cross-package coupling).\n\n## Method note\nThe first attempt used a multi-agent workflow that went **runaway (~633 agents vs 10 launched)** — stopped and discarded. Automated grep proved unreliable here (false +/−). So this was done by **directly reading the per-type metadata-admin preview/inspector files**. The monthly re-audit cron was already updated to include `../objectui`.\n\nGate green. Builds on #1947 (field). The merged prunes #1945/#1946 were re-verified against objectui — safe.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

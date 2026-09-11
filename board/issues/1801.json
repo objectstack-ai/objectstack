@@ -1,0 +1,32 @@
+{
+  "number": 1801,
+  "kind": "pull_request",
+  "title": "feat(spec): ADR-0047 — Interface section in the page authoring form",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-13T01:26:22Z",
+  "updated_at": "2026-06-13T01:34:46Z",
+  "closed_at": "2026-06-13T01:34:44Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-13T01:34:44Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1801",
+  "body": "## Summary\n\nAdds an **Interface (list pages)** section to the Studio page authoring form (`page.form.ts`), visible when `type == 'list'`. The `interfaceConfig` composite renders the schema-driven equivalent of Airtable's Interfaces right panel:\n\n- **Source / Source View** with the ADR-0047 iron-rule help text (columns/filter/sort inherited, page adds presentation policy only)\n- **Levels**, **Filter By** row editor\n- **Appearance**: Show Description toggle + Allowed Visualizations tag input (one entry = locked)\n- **User Filters**: Element style select (dropdown / tabs / toggle) + Fields row editor (field/label/type/options/showCount/defaultValues) + Tabs presets\n- **User Actions** toggles\n\nCompletes the phase-5 authoring surface: views got their End-user controls section in #1792; pages now have parity for interface mode.\n\n## Testing\n\n- `@objectstack/spec` 6542/6542\n- Browser-verified in Studio against the showcase Task Workbench page (section renders, visibleOn gates on type, existing metadata round-trips into the editors)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 1916,
+  "kind": "pull_request",
+  "title": "fix(objectql): validate declared required organization_id/tenant_id (provenance, not name) (#1592)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T14:40:30Z",
+  "updated_at": "2026-06-15T14:44:40Z",
+  "closed_at": "2026-06-15T14:44:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T14:44:37Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1916",
+  "body": "Closes #1592.\n\n## Problem (confirmed)\n`validateRecord` skipped required-checks for any field **literally named** `organization_id` / `tenant_id`. `POST /api/v1/data/sys_team` with `{ \"name\": \"x\" }` (omitting the required `organization_id`) reached the driver as NULL → `SQLITE NOT NULL constraint failed` instead of a clean `400 { field: organization_id, code: required }`.\n\n## Root cause\n`sys_team.organization_id` is a genuine `required` lookup, and because `sys_team` is `managedBy: 'better-auth'` the registry **does not inject** a tenant column for it. So the required org is neither client-validated (skipped by name) nor engine-injected → silent NULL.\n\nThe provenance mechanism to do this correctly **already exists**: the engine-injected tenant column is marked `system: true`, and [record-validator.ts](packages/objectql/src/validation/record-validator.ts) already skips `def.system || def.readonly`. The hardcoded `SKIP_FIELDS` by-name entry for `organization_id`/`tenant_id` was redundant for injected columns and **harmful** for declared ones.\n\n## Fix\nDrop `organization_id` / `tenant_id` from the by-name `SKIP_FIELDS` set. Injected system columns remain skipped via `def.system` / `def.readonly`; a declared required `organization_id`/`tenant_id` now gets a normal required-check. (The universal lifecycle columns `id`/`created_at`/`created_by`/`updated_at`/`updated_by` stay in `SKIP_FIELDS` — they are never author-declared business fields.)\n\n## Tests\n- New regression: declared required `organization_id` (and `tenant_id`) now throws `ValidationError { required }`; an injected `system: true` `organization_id` is still skipped.\n- `@objectstack/objectql` full suite **616 pass** — no test relied on the by-name skip.\n\n> Part of the data-API-honors-metadata set (#1590 unknown-field rejection, #1591 managedBy enforcement). This PR fixes the silent-NULL cause for #1592 specifically.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

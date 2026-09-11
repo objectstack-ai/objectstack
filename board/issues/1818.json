@@ -1,0 +1,33 @@
+{
+  "number": 1818,
+  "kind": "pull_request",
+  "title": "fix(driver-sql): an unknown $select column must not zero the result set",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-13T15:08:22Z",
+  "updated_at": "2026-06-13T17:19:31Z",
+  "closed_at": "2026-06-13T17:19:29Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-13T17:19:29Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1818",
+  "body": "## Problem\n\n`SqlDriver.find()` swallowed any `\"no such column\"` error into an empty array. So a projected `$select` naming a column the table lacks (e.g. a generic list view auto-requesting `status`/`due_date`/`image` on an object without them) made the **whole query return zero rows** — reading to the UI as \"no records exist\" while the data was actually present. Silent data loss.\n\nThere is an engine-level filter (`engine.ts`, \"drop unknown select fields\") that's meant to prevent this, but it only fires when the object's schema is populated in the registry — which is not the case in the cloud multi-tenant runtime, so the bad projection reached the driver and got swallowed.\n\n## Fix\n\nWhen the failure came from a `$select` projection, retry once with `SELECT *` so the real rows still come back (the phantom field is simply absent from each row — it never existed). Non-projection errors (unknown table, etc.) still surface as before, and a query with no explicit fields keeps the old fallback.\n\n## Tests\n\n- New: `find` with `fields: ['id','name','status','due_date','image']` on a table that only has `id/name/age` returns all rows (the phantom columns absent), instead of `[]`.\n- New: an unknown *table* still throws (not swallowed to empty).\n- Full sql-driver suite: 11 pass.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1726,
+  "kind": "pull_request",
+  "title": "feat(analytics): ADR-0037 P3 — draft data preview (seed-overlay dataset queries)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T12:26:10Z",
+  "updated_at": "2026-06-11T12:29:36Z",
+  "closed_at": "2026-06-11T12:26:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T12:26:30Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1726",
+  "body": "Implements [ADR-0037](https://github.com/objectstack-ai/framework/blob/main/docs/adr/0037-live-canvas-draft-preview.md) **Phase 3 (option B-min)** — the only genuinely new mechanism of the Live Canvas: draft **data** preview.\n\n## What\n`queryDataset(dataset, selection, context, { previewDrafts })`: when the flag is set and the dataset's base object has a **pending `seed` draft**, the selection is evaluated over the seed's resolved rows **in memory** — a query-evaluating proxy feeds the unchanged `DatasetExecutor`, so measure-scoped filters, `compareTo` and derived measures all behave identically to the engine path.\n\n- `preview-evaluator.ts` — `AnalyticsQuery` over rows: Mongo-style `where` subset ($eq/$ne/$gt/$gte/$lt/$lte/$in/$nin/$contains/$and/$or/$not), `timeDimensions` dateRange filtering + granularity bucketing (day/week/month/quarter/year), count/countDistinct/sum/avg/min/max, order/limit/offset.\n- `draftRowsResolver` config hook; the analytics **plugin** wires it to the kernel protocol with **`state:'draft'` reads only** — a published seed's rows are already in the real table and must not overlay. No pending seed → clean fall-through to live data (published objects keep charting real data inside a preview; numbers are continuous across Publish because publish materializes the same seed).\n- REST `/analytics/dataset/query`: `body.previewDrafts` / `?preview=draft` thread through to both the saved-dataset lookup (draft-overlaid definitions) and execution.\n- spec: additive optional `options` param on `IAnalyticsService.queryDataset`.\n\n## Security\nReads only, same `ExecutionContext` principal as any other read; the flag changes the **source**, never the principal (ADR-0037 §Phase 3). Physical tables untouched.\n\n## Tests\n9 new cases: seed-overlay aggregation (group/sum/count), month bucketing, **fall-through proof** (no pending seed → engine path), flag ignored without resolver, evaluator units (filters, dateRange, order/limit, zero-row count, helpers). Suites green: service-analytics 118/118, rest 100/100.\n\n## Follow-up (objectui, next PR)\n`DatasetWidget`/list reads pass the flag under `PreviewModeContext` so the canvas iframe actually sends it; `/data/:object` list-read overlay per ADR remains open.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

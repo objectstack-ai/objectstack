@@ -1,0 +1,34 @@
+{
+  "number": 1792,
+  "kind": "pull_request",
+  "title": "feat: ADR-0047 implementation (framework) — userFilters spec, reference diagnostics, showcase examples, authoring form",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T15:56:24Z",
+  "updated_at": "2026-06-12T16:19:20Z",
+  "closed_at": "2026-06-12T16:19:18Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T16:19:18Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1792",
+  "body": "Implements the framework side of [ADR-0047](https://github.com/objectstack-ai/framework/pull/1785) (phases 1, 3, 5).\n\n## Phase 1 — spec + diagnostics\n- `UserFilterFieldSchema` / `UserFiltersSchema` in `ui/view.zod.ts`, attached as `ListViewSchema.userFilters` — formalizes the shape the objectui client already renders\n- `'chart'` added to `VisualizationTypeSchema` (8-type parity); `appearance.allowedVisualizations` confirmed as the runtime visualization whitelist\n- `InterfacePageConfig`: `userFilters` now uses the real `UserFiltersSchema` (replaces the misplaced `elements` visualization enum — zero prior usage); new `sourceView` for the iron rule (pages reference views, never restate them)\n- `computeViewReferenceDiagnostics` (objectql): cross-document checks Zod cannot express — userFilters/tabs fields must exist on the source object, kanban groupBy must be select-like — merged into `_diagnostics` on view `getMetaItem`. Unit-tested + verified live (bad field → `reference_not_found`, date groupBy → `invalid_binding`)\n\n## Phase 3 — examples + AI authoring rules\n- showcase `showcase_task` default view: filter `tabs`, `userFilters` dropdowns, `allowedVisualizations` whitelist (the few-shot corpus was empty)\n- new **Task Workbench** interface page (`interfaceConfig`) + nav entry — the canonical interface-mode example\n- `objectstack-ui` skill: two-run-modes decision table, default-to-data-mode rule, the iron rule\n\n## Phase 5 — authoring form\n- `viewForm` gains an **End-user controls** section; the spec-form-driven Studio inspector renders the full userFilters/tabs/appearance authoring UI with zero client code\n\n## Verification\nAll behavior verified live in the browser against `examples/app-showcase` + the objectui console (companion PR in objectui): data-mode tabs/dropdowns/visualization switcher, interface-mode curated page, reference diagnostics, Studio authoring panel.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1957,
+  "kind": "pull_request",
+  "title": "feat(audit): sys_activity source pointer — ActivityPointer model (ADR-0052 §5)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T08:54:49Z",
+  "updated_at": "2026-06-16T08:55:11Z",
+  "closed_at": "2026-06-16T08:55:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T08:55:09Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1957",
+  "body": "## What\n\nADR-0052 §5 — add `source_object` / `source_id` to `sys_activity`, completing it as a proper **ActivityPointer** base.\n\n- `object_name` / `record_id` = WHICH record the activity is *about* (the \"regarding\" record, e.g. a contact).\n- `source_object` / `source_id` (new) = the **rich entity** the activity was *derived from* — the email row in `sys_email`, a call/meeting task, a `sys_comment`.\n\nSo the timeline drills from a one-line summary to the full record, and apps can query *\"all activities sourced from `sys_email`\"*. This is the structured, queryable replacement for an id buried in `metadata`.\n\n## Why (design review with @jack)\n\nMainstream platforms all split **rich communication entities (their own tables)** from the **timeline (a pointer/aggregation)** — never cram an email into a generic activity blob:\n\n| | Rich entity | Timeline |\n|---|---|---|\n| Dataverse | `Email`/`PhoneCall`/`Appointment` | `ActivityPointer` base (+ `regardingobjectid`) |\n| Salesforce | `EmailMessage`/`Task`/`Event` | ActivityTimeline view |\n| ServiceNow | `sys_email`/`Interaction` | activity formatter |\n\n`sys_activity` is ObjectStack's `ActivityPointer`; it was missing the drill-to-source pointer. This adds it.\n\n**Deliberately NOT done:** extending the `type` enum with `email`/`call`/`meeting`. That couples a shared platform primitive to one vertical's vocabulary (every domain has its own — `interview`, `site_visit`, `inspection`…), an endless treadmill. `type` stays neutral; domain kind rides in `metadata.kind`; the rich entity lives in its own table.\n\n## Verification (showcase, browser)\n\nA source-pointed `sys_activity` row (regarding a project, sourced from a task) inserted → 201, and querying `sys_activity` filtered by `source_object='showcase_task'` returned it with the pointer populated. `plugin-audit` 18/18 tests pass; builds clean. (Demo row cleaned up.)\n\n> Note: the CLI build remains red on `main` from the pre-existing CEL drift in `validate-expressions.ts` (#1933 area, another worktree) — untouched here.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

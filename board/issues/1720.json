@@ -1,0 +1,33 @@
+{
+  "number": 1720,
+  "kind": "pull_request",
+  "title": "feat(cli): build-time warning for count-only table/pivot dashboard widgets (table-count-only)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T09:57:21Z",
+  "updated_at": "2026-06-11T10:05:11Z",
+  "closed_at": "2026-06-11T10:05:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T10:05:08Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1720",
+  "body": "Closes #1719.\n\n## What\n\nAfter the ADR-0021 single-form cutover, a `table`/`pivot` `DashboardWidget` whose selected `values` resolve to **only `count` measures** and which declares **no `dimensions`** asks the analytics service for a single summary row. That's exactly what a `metric` widget wants — but for a table it almost always means the author wanted a per-record listing, which is not an analytics dataset at all (ADR-0017 ListView territory). `objectstack build` was silently green on this shape; downstream it collapsed **19 record-listing tables across 11 dashboards** ([templates#27](https://github.com/objectstack-ai/templates/pull/27)).\n\n`objectstack build` now emits a **non-fatal** `table-count-only` warning per offending widget:\n\n```\n⚠ dashboard \"expenses_overview_dashboard\" › widget \"pending_reports_table\": a 'table' widget\n  bound to dataset \"expense_report_metrics\" selects only count measure(s) (report_count) and\n  no dimensions, so it renders a single summary row — not a per-record list.\n    A flat record listing is not an analytics dataset. Model it as an object-bound ListView\n    (ADR-0017) surfaced through app navigation, and use a 'metric' widget here if you only\n    need the count. If a single-row table is intentional, add an explicit dimension or\n    suppress with: suppressWarnings: ['table-count-only']\n    rule: table-count-only  at dashboards[0].widgets[0]\n```\n\n## How\n\n- **`packages/cli/src/utils/validate-widget-bindings.ts`** — new semantic-phase check mirroring the ADR-0032 `validateStackExpressions` pattern. It runs after Zod parse, when each widget's `dataset` name is linked to its `defineDataset` and every `values` entry resolves to a measure with a known `aggregate`. Per the issue, the heuristic is keyed on the **widget's binding**, not the dataset — the repro dataset also carries a `sum` measure and a dimension, and still warns because the widget selects neither.\n- **`compile.ts` (= `build`)** — prints warnings in human output; `--json` gains a `warnings[]` array. The build never fails on these.\n- **`lint.ts`** — the same rule surfaces through `objectstack lint` with rule id `table-count-only`, consistent with the existing rule registry.\n- **`spec/ui/dashboard.zod.ts`** — new optional widget field `suppressWarnings: string[]` as the opt-out for deliberate single-row tables.\n\n## Deviations from the issue\n\nThe proposed `// objectstack-disable-next-line table-count-only` comment can't work here: the config is evaluated through bundle-require, so source comments never reach the metadata the check runs on. The suppression is metadata-level instead (`suppressWarnings: ['table-count-only']` on the widget), schema-validated and mentioned verbatim in the warning text.\n\nDeliberately **not** warned (each is a different diagnostic or a legitimate shape): dangling dataset references, unresolvable measure names, mixed count+non-count selections, `count_distinct`, derived measures, any widget with ≥1 dimension, and `metric` widgets.\n\n## Testing\n\n- 14 new unit tests covering the issue's repro, the widget-binding-vs-dataset distinction, pivot, suppression, and all the skip cases (`validate-widget-bindings.test.ts`)\n- Full `@objectstack/cli` suite: 28 files / 240 tests green; `@objectstack/spec` dashboard+stack tests green; both packages compile\n- End-to-end: ran `objectstack build` on the issue's minimal repro — warning fires, build stays green, `--json` carries the warning, `suppressWarnings` silences it; `objectstack lint` reports the same rule\n- The platform's own `system_overview` table widget declares `dimensions: ['action']` and does not trip the rule\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

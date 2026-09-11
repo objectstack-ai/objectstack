@@ -1,0 +1,33 @@
+{
+  "number": 1704,
+  "kind": "pull_request",
+  "title": "docs(releases): complete v9.0.0 coverage (non-changeset features + Cloud) and make the collector 3-repo aware",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T03:06:54Z",
+  "updated_at": "2026-06-11T03:07:07Z",
+  "closed_at": "2026-06-11T03:06:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T03:06:58Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1704",
+  "body": "## Why\n\nFollow-up to #1702. The v9.0.0 page was curated from the 8 consumed changesets, but the `@objectstack/spec@8.0.1..9.0.0` range contains **41 commits** — several developer-visible features shipped without a changeset, and the ADR-0007 private package publish/install wave lives in the **cloud** repo, which the page (and the collector script) didn't cover at all.\n\n## Page additions\n\n**New in the framework**\n- Automation: nested durable pause — a pausing node inside a subflow suspends the whole chain as linked runs; wait timers re-arm after a cold boot instead of stranding suspended runs\n- Publishing: seed rows materialize on **every** publish path, reported under `seedApplied`\n- AI service: tools stream progress mid-execution (`data-*` parts) — what powers Console's live build tree\n\n**New section: ObjectStack Cloud**\n- In-environment package install via reconciliation (ADR-0007 ①) — Console's Installed view reads the control-plane list when cloud-bound\n- Environment API authorization hardening (org-scoped reads, owner/admin for destructive ops)\n- Explicitly defers ADR-0007 ② (org-default `os package publish`) to the next release — it landed after the 9.0.0 tag\n\n**Notable fixes**: `create-objectstack` projects start cleanly under pnpm; Setup → System Settings i18n.\n\n## Collector script\n\n`scripts/collect-release-notes.sh` now emits four sections: (1) **all** framework commits in the range — the completeness check, since changeset discipline is partial; (2) consumed changesets (curated prose); (3) objectui pin range; (4) cloud commits in the release time window (cloud tracks the framework via `link:` deps with no pin and versions independently, so the tag-date window is the best available scope).\n\n## Verification\n\n- Rendered locally: all new H2/H3 sections appear, page 200, no console errors\n- `scripts/collect-release-notes.sh \"@objectstack/spec@8.0.1\" \"@objectstack/spec@9.0.0\"` reproduces all four sections; cloud section matches a manual window scan (19 commits, no branch duplicates)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

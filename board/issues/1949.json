@@ -1,0 +1,35 @@
+{
+  "number": 1949,
+  "kind": "pull_request",
+  "title": "feat(formula): align CEL stdlib catalog with runtime (#1928)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T07:10:03Z",
+  "updated_at": "2026-06-16T07:31:46Z",
+  "closed_at": "2026-06-16T07:31:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T07:31:23Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1949",
+  "body": "Platform fix #1 of #1928. Catalog advertised 25 CEL funcs, only 8 registered; 14 faulted at runtime (daysBetween/abs/round/min/max/upper/lower/len/isEmpty/contains/startsWith/endsWith/matches/date/datetime). Registered the useful set in registerStdLib (dyn-lenient sigs + coercion) and reconciled CEL_STDLIB_FUNCTIONS so every advertised entry resolves; drift-guard test evaluates every entry. 119/119 tests, tsc clean. Pure additions.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

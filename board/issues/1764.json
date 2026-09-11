@@ -1,0 +1,35 @@
+{
+  "number": 1764,
+  "kind": "pull_request",
+  "title": "feat(approvals): server-side pagination + search pushdown for listRequests",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T05:25:33Z",
+  "updated_at": "2026-06-12T05:25:47Z",
+  "closed_at": "2026-06-12T05:25:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T05:25:36Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1764",
+  "body": "## Summary\n\nCloses the dangerous half of #1745 — beyond the 500-row scan cap the inbox silently lost rows. Console companion: objectstack-ai/objectui#1658 (merged).\n\n- **`q` pushdown**: free-text search becomes an `$or` of `$contains` (escaped-LIKE) terms over `process_name` / `object_name` / `record_id` / `submitter_id` / **`payload_json`** — the payload snapshot carries record titles, so business names match with no join.\n- **Page window pushdown**: `limit`/`offset` push into the engine (`orderBy created_at desc`) whenever the filter is fully pushable. `approverId` / status-array filters still post-filter their bounded scan and window in memory — correct for personal queues; the org-wide approver case is the documented residual until the approver join-table follow-up (#1745 stays open for that).\n- **`countRequests`**: unwindowed total via engine `count()` when pushable, bounded scan otherwise.\n- **REST**: `GET /approvals/requests` accepts `q`/`limit`/`offset`, returns `{data, total}` when paging; unpaged callers keep the old shape (no extra count query).\n\n## Test plan\n\n- plugin-approvals: **64 tests** (4 new: window newest-first/no-overlap, q matches payload titles, count totals, approver in-memory windowing after exact-match filter) ✅ — fake engine extended with `$or`/`$contains`/`offset`\n- **Live e2e on showcase**: `limit=10&offset=0/10` pages with zero overlap and `total=31`; `q=Compliance` → 5/5 matches; `status=recalled` → 2/2. Console: 56 rows → first page 50 + 「加载更多」 → 56/56 with the button gone; a debounced UI search for a title on an **unloaded** page returned the row (server search, not page filtering) ✅\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

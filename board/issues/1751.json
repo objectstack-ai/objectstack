@@ -1,0 +1,36 @@
+{
+  "number": 1751,
+  "kind": "pull_request",
+  "title": "fix: remove stale plugin-trigger-* directories left behind by the rename",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T02:49:14Z",
+  "updated_at": "2026-06-12T02:49:29Z",
+  "closed_at": "2026-06-12T02:49:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T02:49:17Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1751",
+  "body": "#1749's git mv only committed the add side — both directory pairs ended up on main while pnpm-lock.yaml only knows the trigger-* names, so every frozen-lockfile CI install fails (`ERR_PNPM_OUTDATED_LOCKFILE`). Removes the stale originals; `pnpm install --frozen-lockfile` now passes locally.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

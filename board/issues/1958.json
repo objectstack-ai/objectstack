@@ -1,0 +1,32 @@
+{
+  "number": 1958,
+  "kind": "pull_request",
+  "title": "fix(spec): object.tenancy.tenantField is live (sql-driver), not dead — deletion paused",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T09:10:24Z",
+  "updated_at": "2026-06-16T09:15:44Z",
+  "closed_at": "2026-06-16T09:15:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T09:15:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1958",
+  "body": "5th audit reversal: driver-sql resolves tenant scope from obj.tenancy.{enabled,tenantField} (plugin-org-scoping row-level path) — tenancy.tenantField is LIVE, not inert. agent.tenantId confirmed dead. Autonomous deletion of 'dead' props is NOT safe (5 reversals + a wrong DB-per-tenant assumption); deletion paused pending an exhaustive cross-repo+cross-plugin re-audit. Gate green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

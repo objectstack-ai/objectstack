@@ -1,0 +1,35 @@
+{
+  "number": 1926,
+  "kind": "pull_request",
+  "title": "feat(automation): script-node outputVariable + interpolated inputs (pure-function pattern, #1870)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T16:31:44Z",
+  "updated_at": "2026-06-15T16:37:18Z",
+  "closed_at": "2026-06-15T16:37:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T16:37:15Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1926",
+  "body": "The long-term design for flow functions, decided from the templates evaluation. A flow `function` (script node) is a **pure compute step** — and ALL data I/O stays declarative on the flow graph.\n\n## Why pure-function (not a data API on the function)\nThe AI templates wrote `invoke_function` expecting the function to *update the record directly*, but flow functions get `FlowFunctionContext` (`input`/`variables`/`automation`/`logger`) — **no data API, by design**. That boundary is correct for a metadata-first, AI-authored platform:\n- **Visible**: data effects stay on the flow graph (`update_record`), not hidden in code.\n- **Governed**: writes go through the engine's data path (RLS, tenancy, transactions, hooks) — a raw function data-API would bypass that (the #1591 class).\n- **Build-checkable**: declarative writes are validated at `objectstack build`; opaque function I/O is exactly the \"passes build / fails at runtime\" class this season fought.\n- **Two-tier already correct**: L2 **hooks** are the data-lifecycle layer (they get `ctx.api`); flow functions are orchestration compute.\n\nSo the fix makes the *pure-function pattern ergonomic*, not the imperative one work.\n\n## What's added\n- **`config.outputVariable`** — exposes the function's return value as a flow variable, so a later declarative node persists it.\n- **`config.inputs` are interpolated** against live flow variables (they were passed raw) — so a function can consume a prior node's output.\n\n```ts\n{ id: 'ai', type: 'script', config: { function: 'helpdesk.aiTriageStub', inputs: { ticketId: '{record.id}' }, outputVariable: 'ai' } },\n{ id: 'apply', type: 'update_record', config: { objectName: 'helpdesk_ticket', filter: { id: '{record.id}' },\n    fields: { ai_category: '{ai.ai_category}', ai_sentiment: '{ai.ai_sentiment}' } } },\n```\n\n## Also\n- **Skill**: automation pitfall #9 now teaches this pattern (function returns → outputVariable → update_record; hooks for data side effects).\n- **Tests**: +1 end-to-end (compute → outputVariable → downstream node interpolates `{ai.field}`); `@objectstack/service-automation` **202 pass**; `check:skill-docs` passes.\n\nThis is the framework foundation for the templates' #1870 remediation (restructure the 4 AI flows to function-returns + update_record).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1708,
+  "kind": "pull_request",
+  "title": "feat(showcase): parallel approval example + docs (ADR-0037 Track A)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T03:57:14Z",
+  "updated_at": "2026-06-11T04:02:59Z",
+  "closed_at": "2026-06-11T04:02:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T04:02:58Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1708",
+  "body": "## Summary\nFirst step of ADR-0037 **Track A**: prove and showcase that **parallel approvals** (\"finance AND legal sign off concurrently\") work today as a **single aggregating `approval` node** — no engine-core change, no token tree.\n\n`behavior: 'unanimous'` over two approver groups opens **one** `sys_approval_request` whose `pending_approvers` lists both groups (notified in parallel) and stays suspended until **both** approve. This is the Camunda multi-instance / Step Functions `Map` pattern: one program counter, one pause/resume.\n\n## Changes\n- `showcase_invoice_signoff` — on invoice send, one `approval` node aggregates finance + legal (`unanimous`); approve → notify, reject → flag held.\n- flow guide: \"Parallel approvals — one aggregating node\" section, with a pointer to ADR-0037 Track B for the larger pause-inside-region capability.\n\nNo engine/service code: the unanimous-over-N-groups aggregation already exists and is unit-tested (`approval-service.test.ts`).\n\n## Test plan\n- [x] Browser E2E (live showcase): sending an invoice opens **one** request with `[role:finance, role:legal]` pending → approving finance keeps it `paused` with legal still pending → approving legal resumes to `completed` (`start → dual_signoff → notify_cleared`).\n- [x] Reject path: one rejection resumes down `reject` → `flag_held` sets the invoice back to draft → completed.\n- [x] `pnpm --filter @objectstack/docs build` green; flow registers + validates at backend boot (the two pre-existing `pages/*.page.ts` tsc errors are unrelated to this change).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

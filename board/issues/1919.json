@@ -1,0 +1,36 @@
+{
+  "number": 1919,
+  "kind": "pull_request",
+  "title": "chore(spec): spec liveness gate — classify-or-fail for authorable properties",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T15:15:37Z",
+  "updated_at": "2026-06-15T15:39:56Z",
+  "closed_at": "2026-06-15T15:39:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T15:39:54Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1919",
+  "body": "First step of the long-term \"close the spec↔runtime gap\" direction. For a metadata-driven platform **the spec is the product surface** — a parsed-but-unenforced property is a silent no-op, and for a *security* property a silent no-op is **false compliance** (e.g. `forceMfa: true` accepted and ignored). The metadata-liveness audits found large DEAD swaths; this makes the classification **explicit and regression-proof**.\n\n## What it does\nEvery authorable property in a **governed** category must declare a runtime-liveness status with evidence in `packages/spec/liveness/<category>.json`, or CI fails — the ratchet: **no new undeclared surface**.\n\n| Status | Meaning |\n|---|---|\n| `live` | has a runtime consumer (cite `file:line`) |\n| `experimental` / `planned` | declared, intentionally not enforced (also read from `[EXPERIMENTAL — not enforced]` spec markers) |\n| `dead` | parsed, no consumer → enforce-or-remove worklist |\n| `internal` | runtime DTO/result, not authorable (exempt) |\n\nResolution: ledger entry → spec `.describe()` marker → UNCLASSIFIED.\n\n## Seeded: `security` (the P0 category)\n**93 authorable properties — 66 dead, 26 live, 1 experimental.** ~71% of the authorable security surface is parsed-but-unenforced. Seeded from `docs/audits/2026-06-security-identity-property-liveness.md` (file:line evidence) + greps for what the audit didn't cover. The `dead` set is the concrete worklist for the **security enforce-or-remove ADR** — most urgently the ungated destructive `ObjectPermission.allow{Transfer,Restore,Purge}` and the entirely-dead `Policy` tree (password/session/`forceMfa`/network/audit).\n\n## Pieces\n- `packages/spec/scripts/liveness/check-liveness.mjs` — the gate (`--dump`, `--json`).\n- `packages/spec/liveness/security.json` — the seeded ledger.\n- `.github/workflows/spec-liveness-check.yml` — runs on PRs touching `packages/spec/**`.\n- `pnpm --filter @objectstack/spec check:liveness` + `packages/spec/liveness/README.md`.\n\n## Verified\n- Gate green on `security` (0 unclassified, exit 0).\n- Ratchet fires: injecting a new `ObjectPermission` flag → unclassified → exit 1.\n- `json-schema/` is generated (gitignored); CI regenerates via `gen:schema` before checking.\n\n## Rollout\nGoverned today: **security only**. Other categories (`data`, `automation`, `ui`, …) are added one at a time, highest-risk-first, each seeded from its existing audit — see the README. Same \"drift → CI gate\" pattern as the docs-accuracy system (#1906).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

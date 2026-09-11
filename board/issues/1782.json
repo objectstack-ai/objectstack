@@ -1,0 +1,35 @@
+{
+  "number": 1782,
+  "kind": "pull_request",
+  "title": "feat(approvals): approver join table — exact pushdown for approver-filtered pagination",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T11:39:39Z",
+  "updated_at": "2026-06-12T11:44:26Z",
+  "closed_at": "2026-06-12T11:44:25Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T11:44:24Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1782",
+  "body": "## Summary\n\nThe follow-up half of #1745 (server-side pagination landed in #1764). `pending_approvers` stayed a CSV column, so approver-filtered queries (\"my pending\") were still a post-filter over a bounded 500-row scan — correct for personal queues, wrong for org-wide approver queries past the window.\n\n- **New `sys_approval_approver` object** — one row per (pending request, approver identity: user id / email / `role:*` literal). Indexed on `(approver, organization_id)` and `(request_id)`. The table only holds the live work queue: rows are cleared when a request leaves `pending`, so size tracks open approvals, not the append-only request history.\n- **Service-side maintenance** — every write path that touches `pending_approvers` (open / decide incl. unanimous partials / recall / send-back incl. auto-reject / reassign / SLA-escalate) mirrors the change into the index via a diff-based `syncApproverIndex`.\n- **Full pushdown** — `listRequests` / `countRequests` resolve approver filters to request ids through the index (`$in` on indexed equality replaces the per-row CSV scan), and status arrays now push down as `$in`. Every filter is engine-side, so `limit`/`offset` and totals are exact at any table size; the documented 500-row residual is gone.\n- **Backfill** — `rebuildApproverIndex()` rebuilds the index from the CSV source of truth (drops orphans/stale/duplicate rows, inserts missing ones) and runs idempotently on `kernel:ready`, so rows written before the index existed become queryable after one boot.\n- `pending_approvers` stays the human-readable source of truth; `sys_approval_request` index comment updated accordingly.\n\nNo API contract change — `IApprovalService.listRequests/countRequests` signatures and the REST surface are untouched.\n\n## Tests\n\n- Index maintenance across all 8 write paths (open / decide / recall / unanimous partial / reassign / SLA-reassign)\n- Approver-filtered pagination correctness past the old 500-row scan window (30 matches buried under 510 newer rows)\n- Status-array `$in` pushdown\n- `rebuildApproverIndex`: legacy backfill, orphan + stale-entry cleanup, idempotence\n\n90/90 package tests green, build green.\n\nCloses #1745\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 1950,
+  "kind": "pull_request",
+  "title": "feat(cli): two flow anti-pattern lints — date-equality filters (#1874) + phantom aggregation (#1870)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T07:15:31Z",
+  "updated_at": "2026-06-16T07:31:29Z",
+  "closed_at": "2026-06-16T07:31:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T07:31:27Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1950",
+  "body": "Platform fixes #2 & #3 of the #1928/#1874/#1870 follow-up. Two new advisory build-time lints (warnings, never fail the build):\n\n## 1. `flow-date-equality-filter` (#1874)\nA get_record/query **filter** that binds a field directly, or via `$eq`/`$in`, to a time-function value (`daysFromNow`/`today`/`now`/…). A `Field.date` stores a time component, so an exact match against a re-computed timestamp silently returns nothing — exactly what the templates discrete-tier alerts hit (renewal_alert / evidence_expiring / document_expiring_soon). Range ops (`$gte`/`$lt` day windows) are the correct shape and are exempt. (Complements the existing trigger-condition equality lint.)\n\n## 2. `flow-phantom-aggregation` (#1870)\nA node config key naming a capability the automation engine doesn't have (`aggregations`/`aggregate`/`groupBy`/`rollup`/`having`). There is no aggregate node, so the key is **silently ignored** and the node computes nothing (templates `publication_rollup`). Points the author to `Field.summary` (cross-object rollup) / `Field.formula` (per-record).\n\n## Tests\n36/36 lint tests incl. false-positive guards (one-day windows, `$or` multi-tier, plain `< today()` ranges, non-time equality, ordinary script/function nodes). tsc clean.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

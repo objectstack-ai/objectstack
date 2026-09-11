@@ -1,0 +1,33 @@
+{
+  "number": 1336,
+  "kind": "issue",
+  "title": "[portal] embed 拆分为 iframe vs widget 两种模式 + launcher 协议（GAP-6 of #1294）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T06:48:20Z",
+  "updated_at": "2026-06-14T14:38:24Z",
+  "closed_at": "2026-06-14T14:38:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1336",
+  "body": "## 现象\n#1294 spec 用 `embeddable: boolean + allowedEmbedOrigins: string[]` 表达嵌入，但实际嵌入有两种截然不同的模式：\n\n1. **整页 iframe** — 客户官网 `/help` 路径整页嵌入 portal（少见）\n2. **Widget（聊天泡泡）** — 右下角悬浮按钮，点击展开（**99% 的 helpdesk/客服真实用法**：Intercom、Zendesk Web Widget、Drift 全用这种）\n\n当前 spec 表达不出 widget 的具体形态。\n\n## 复现\n1. 客户希望在他官网右下角放一个紫色聊天按钮\n2. 点击展开后浮出 portal 内容（不占整页）\n3. spec 只能说 `embeddable: true`，没法声明 trigger、位置、launcher icon\n\n## 分阶段建议\n**M3**：把 `embeddable` 替换为 discriminated `embed`:\n\n```ts\nembed?: {\n  mode: 'iframe';\n  allowedOrigins: string[];\n} | {\n  mode: 'widget';\n  allowedOrigins: string[];\n  launcher: {\n    position: 'bottom-right'|'bottom-left'|'top-right'|'top-left';\n    offset?: { x: number; y: number };\n    iconUrl?: string;                  // 默认聊天泡泡\n    label?: I18nLabel;                 // 折叠时显示文本，如「需要帮助？」\n    backgroundColor?: string;          // 默认继承 portal.theme.primaryColor\n  };\n  panel: {\n    width: number;                     // px\n    height: number;                    // px\n    openOnInit?: boolean;\n    showHeader?: boolean;\n  };\n  // 嵌入脚本由 framework 生成：\n  //   <script src=\"/embed/<portal_id>.js\" async></script>\n}\n```\n\n运行时 framework 生成 `/embed/<portal_id>.js` 静态脚本，业务方一行 script 接入。\n\n## 验收\n- 模板声明 widget mode → 输出 `<script src=\"/embed/helpdesk_customer.js\">`\n- 嵌入页面右下角出现按钮，点击展开 portal\n- CSP `frame-ancestors` 正确限制 origins\n\n## 关联\n- #1294\n- GAP-4（#1334，widget 收到通知时的红点）\n"
+}

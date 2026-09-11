@@ -1,0 +1,33 @@
+{
+  "number": 1711,
+  "kind": "pull_request",
+  "title": "docs(references): regenerate flow reference for the map node type",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T04:54:24Z",
+  "updated_at": "2026-06-11T04:58:34Z",
+  "closed_at": "2026-06-11T04:58:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T04:58:32Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1711",
+  "body": "Follow-up to #1709 — `map` was added to the `FlowNodeAction` enum; this regenerates `content/docs/references/automation/flow.mdx` (generated from the Zod descriptions) so the published node-type list includes it.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

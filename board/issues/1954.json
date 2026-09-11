@@ -1,0 +1,34 @@
+{
+  "number": 1954,
+  "kind": "pull_request",
+  "title": "refactor(audit): move sys_attachment ownership audit → storage (ADR-0052 P0b)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T08:19:24Z",
+  "updated_at": "2026-06-16T08:27:10Z",
+  "closed_at": "2026-06-16T08:19:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T08:19:50Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1954",
+  "body": "## What\n\nADR-0052 **P0b** (partial) — move `sys_attachment` ownership out of the audit/compliance ledger.\n\n`plugin-audit` was a dumping ground registering 5 objects across 5 domains. This sheds one: a file↔record link (`sys_attachment`) belongs with the **storage** domain. `plugin-audit` stops registering it; `service-storage` now contributes it (the definition stays in `platform-objects`). Both plugins are always-on, so the object stays available — **no behavior change**.\n\n`sys_notification` is **intentionally not moved**: it is mid-migration to an event model (`migrate-sys-notification-to-event.ts`, ADR-0030); moving it now would collide with that in-flight work. Deferred and documented.\n\n## Changes\n\n- `plugin-audit`: drop `SysAttachment` from registered objects + import.\n- `service-storage`: depend on `@objectstack/platform-objects`, import + register `SysAttachment` (no dependency cycle — platform-objects doesn't depend on storage).\n- ADR-0052 §6 P0b updated.\n\n## Verification (showcase, browser)\n\n- `meta/object/sys_attachment` → 200 (still registered, now via storage); `data/sys_attachment` → 200; **no double-registration / collision** at boot.\n- `plugin-audit` 18/18 + `service-storage` 48/48 tests pass; both build clean.\n\n## Builds on\n\n#1948 (trackHistory §5b.1) + #1952 (milestones §5b.2). Remaining: `sys_notification` (after its event migration), P1 split-brain convergence, P2 event bus, objectui feed surfacing.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

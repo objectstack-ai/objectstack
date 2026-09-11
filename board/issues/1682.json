@@ -1,0 +1,35 @@
+{
+  "number": 1682,
+  "kind": "pull_request",
+  "title": "feat(service-analytics): bucket + format date dimensions (no more epoch millis)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-10T11:16:00Z",
+  "updated_at": "2026-06-10T11:20:21Z",
+  "closed_at": "2026-06-10T11:20:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-10T11:20:18Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1682",
+  "body": "## Problem\n\nDate dimensions on trend charts rendered the **raw stored timestamp** (`1777632968596`) instead of a readable date — a plain selected date dimension grouped by the raw field and the value was never formatted. (Reported alongside the lookup-id / select-value issue fixed in #1680.)\n\n## Fix\n\n- **DatasetExecutor** — a selected date dimension that declares an explicit `dateGranularity` (single-entry compiled `granularities`) is promoted to a **time dimension**, so it buckets (one row per month/day/…) instead of one per raw timestamp. Dimensions already carried by `selection.timeDimensions` (e.g. `compareTo`) are left untouched.\n- **dimension-labels** — grouped date values are formatted to a sort-stable label per granularity: `year` → `2026`, `quarter` → `2026-Q2`, `month` → `2026-04`, `day`/`week` → `2026-04-15`. Parses epoch-ms / epoch-s / ISO defensively; non-dates pass through unchanged.\n- **showcase** — `chart-gallery` dataset's `created_at` gains `dateGranularity: 'month'`.\n\n## Verification\n\nBrowser-tested on the showcase Chart Gallery: **\"Tasks Created (monthly)\"** x-axis now reads `2026-05` / `2026-06` (was epoch millis); status/priority bars still show resolved labels. New unit tests for `formatDateBucket` + date-dimension resolution. `turbo build` 72/72, `turbo test` 123/123 green.\n\nCompletes the analytics dimension-display follow-up (after #1680 labels + #1681 report rendering).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

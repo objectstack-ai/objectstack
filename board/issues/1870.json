@@ -1,0 +1,30 @@
+{
+  "number": 1870,
+  "kind": "issue",
+  "title": "[P1] Flow action/script nodes pointing to unregistered callables silently no-op; no template fn-registration path",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T06:02:44Z",
+  "updated_at": "2026-06-15T09:33:04Z",
+  "closed_at": "2026-06-15T09:33:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1870",
+  "body": "## Problem\n1. A flow `script`/action node that points to an **unregistered** callable (`invoke_function` → a function defined nowhere) builds fine and silently does nothing at runtime.\n2. There is **no template-level mechanism** to register such a function/tool — no shipped template successfully wires `invoke_function`.\n\n## Repro\n- helpdesk `ai_triage_on_create` → `helpdesk.aiTriageStub` (undefined); project `daily_ai_risk_assessment` → `pm.aiRiskAssessmentStub` (undefined); content `publication_rollup` aggregate node has `actionType: undefined`. All no-op at runtime, all pass build.\n\n## Expected\n- Build/runtime validates that action/script nodes resolve to a real registered callable (or a supported built-in).\n- Provide a first-class way for an authored package to register functions/tools for `invoke_function` (e.g. `*.tool.ts` wired via `defineStack`). The content actions file notes this \"stabilizes in spec 5.3\" — make it real.\n\n## Affected\n`@objectstack/spec` / `@objectstack/cli` (action binding) + `@objectstack/automation`.\n\n\n---\n_Found while runtime-testing `objectstack-ai/templates` (all 9 templates via `objectstack dev all`) on `@objectstack` 9.5.1. Build + typecheck pass; these only surface at runtime._\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 1844,
+  "kind": "pull_request",
+  "title": "ci(skills): gate PRs on skill-docs being generated from SKILL.md frontmatter",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-14T07:58:46Z",
+  "updated_at": "2026-06-14T08:07:43Z",
+  "closed_at": "2026-06-14T08:07:41Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-14T08:07:41Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1844",
+  "body": "## Why\n\nFollow-up to [#1842](https://github.com/objectstack-ai/framework/pull/1842), which made the skill catalog (README index + `guides/skills.mdx` tables/cards) **generated** from each `SKILL.md` frontmatter via `build-skill-docs.ts`. Without a CI gate, the generated files can still be hand-edited or left stale when a `SKILL.md` changes — the exact drift that caused the original fabricated-docs problem.\n\n## What\n\nAdds a **`Check Skill Docs`** job to `ci.yml`:\n- Gated by `paths-filter` — runs only when `skills/**`, `content/docs/guides/skills.mdx`, or `packages/spec/scripts/build-skill-docs.ts` change.\n- Runs `pnpm --filter @objectstack/spec check:skill-docs` (`build-skill-docs.ts --check`), which **fails (exit 1)** if the README/guide listings differ from what the frontmatter would generate, with a hint to run `gen:skill-docs`.\n- Lightweight: install + run, no build (the script only reads files via `tsx`).\n\n## Verification\n\n- `ci.yml` validated as YAML.\n- Ran the exact CI command against current `main` → **passes** (`Skill docs in sync`).\n- Negative test: introduced drift in the guide → check **exits 1** with the fix hint; reverted → passes again.\n- This PR edits `ci.yml`, so the new job runs on the PR itself (self-test).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

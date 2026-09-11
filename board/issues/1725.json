@@ -1,0 +1,32 @@
+{
+  "number": 1725,
+  "kind": "pull_request",
+  "title": "fix(app-todo): re-model count-only dashboard tables as ListViews (#1719)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T11:44:44Z",
+  "updated_at": "2026-06-11T11:44:59Z",
+  "closed_at": "2026-06-11T11:44:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T11:44:57Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1725",
+  "body": "## Summary\n\nThe `overdue_tasks_table` and `due_today` widgets in `examples/app-todo/src/dashboards/task.dashboard.ts` were `type: 'table'` widgets bound to the `task_metrics` dataset selecting only the `task_count` count measure with no dimensions — rendering a single summary row instead of the task listings they intended. `objectstack validate`/`build` emitted the `table-count-only` warning for both (#1719).\n\nPer ADR-0017 (object has-many view), record listings belong in object-bound ListViews surfaced through app navigation — the same fix class as objectstack-ai/templates#27 downstream:\n\n- **views/task.view.ts** — add a `due_today` grid ListView on `todo_task`, filtered to `due_date = {today}` (date macro) and `is_completed = false`, sorted by priority. The `overdue` ListView already existed from the ADR-0021 Phase 2 report conversion.\n- **apps/todo.app.ts** — the existing \"Overdue\" / \"Due Today\" nav items now carry `viewName: 'overdue'` / `viewName: 'due_today'` so they land directly on the filtered listings.\n- **dashboards/task.dashboard.ts** — remove the two count-only table widgets; counts remain covered by the existing `overdue_tasks` / `completed_today` metric widgets.\n\n## Verification\n\n`node packages/cli/bin/run.js validate` and `build` inside `examples/app-todo` pass with the `table-count-only` warnings gone (CLI rebuilt locally first — the stale local `dist` predated the widget-binding check). Remaining `tsc --noEmit` errors in the example are pre-existing on `main` (confirmed via stash) and untouched by this change.\n\nCloses #1719.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

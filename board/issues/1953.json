@@ -1,0 +1,30 @@
+{
+  "number": 1953,
+  "kind": "issue",
+  "title": "messaging: emit()/retention 无条件引用 sys_notification，但该表由 plugin-audit 建——精简配置(无 audit)下缺表报错",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T08:05:04Z",
+  "updated_at": "2026-06-16T09:34:37Z",
+  "closed_at": "2026-06-16T09:34:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1953",
+  "body": "> **更正(2026-06-16)**:本 issue 初版把根因写成「`sys_notification` 没有任何对象 schema」——**这是错的**。我当时只 grep 了 `service-messaging`,漏看了 `@objectstack/platform-objects/audit`。`sys_notification` 的 schema 是存在的,由 `plugin-audit` 注册建表。下面是更正后的准确分析。\n\n## 准确根因:messaging 无条件引用 `sys_notification`,但该表由 `plugin-audit` 建——精简配置未加载 audit 时表缺失\n\n`sys_notification`(ADR-0030 L2 事件对象)的 schema 确实存在:\n\n- 定义:`packages/platform-objects/src/audit/sys-notification.object.ts`(`SysNotification`,`name: 'sys_notification'`)\n- 注册建表:`packages/plugins/plugin-audit/src/audit-plugin.ts:40`\n  `objects: [SysAuditLog, SysActivity, SysComment, SysNotification]`\n  （注释亦云:`sys_notification` is contributed here but owned by platform-objects）\n\n也就是说,**`sys_notification` 表只有在加载 `@objectstack/plugin-audit` 时才会创建**。\n\n但 `service-messaging` 对它是**无条件依赖**:\n\n- `packages/services/service-messaging/src/messaging-service.ts:593` —— `emit()` 每次写一行 L2 事件:`data.insert(NOTIFICATION_EVENT_OBJECT /* 'sys_notification' */, row)`\n- `packages/services/service-messaging/src/retention.ts:48` —— 保留清理目标:`{ object: NOTIFICATION_EVENT_OBJECT, tsField: 'created_at', format: 'iso' }`\n\n当一个运行时**加载了 `MessagingServicePlugin` 但没加载 `plugin-audit`**(典型:精简/单租户 standalone 配置),`sys_notification` 表从不创建,于是:\n\n- 每个保留清理 tick 打一条 `ERROR`(`no such table: sys_notification`);\n- `emit()` 的 L2 写入也无表可写(待确认:是否吞异常、是否影响后续 inbox 投递)。\n\n> 注意:**Console 右上角的通知铃读的是 `sys_inbox_message`,不是 `sys_notification`**(见 `sys-notification.object.ts` 头注与 ADR-0030)。`sys_inbox_message` 由 messaging 自己注册建表,所以**界面通知功能在缺 audit 时仍可见/正常**——本问题只影响 L2 事件层与保留清理。\n\n## 复现\n\n- `@objectstack` 9.7.0,单租户 standalone(`createStandaloneStack`,driver-sql/better-sqlite3),插件集**含 messaging、不含 plugin-audit**。\n- 启动后实测 29 张表:`sys_notification_delivery/_receipt/_preference/_subscription/_template`、`sys_inbox_message` 均在,**唯独 `sys_notification` 缺失**。\n- 等保留清理 tick / 重启 → `no such table: sys_notification`。\n\n启动插件清单(无 `AuditPlugin`):\n`HonoServer, PlatformObjects, …, MessagingServicePlugin, …, ConsoleUI`\n\n## 影响\n\n- 非致命(服务正常就绪),但缺 audit 的配置下日志被 `ERROR` 刷屏;\n- L2 事件层在该配置下实际不可用。\n\n## 修复方向(任一/组合)\n\n1. **框架侧 - 解耦**:messaging 的 `emit()` L2 写入与 `DEFAULT_RETENTION_TARGETS` 对「`sys_notification` 未注册/无表」做容错降级(skip + debug 日志,而非 ERROR);或把 `sys_notification` 显式声明为 messaging 的依赖,使「装了 messaging 必然有该表」成立。\n2. **打包侧**:让默认/standalone 预设在加载 messaging 时一并加载 `plugin-audit`(或把 `SysNotification` 的注册从 audit 挪到一个 messaging 也会拉起的更底层位置)。\n\nObjectOS 侧可临时通过加载 `@objectstack/plugin-audit` 规避。但「装了 messaging 却因缺 audit 而在每个清理周期报错」这一耦合,值得在框架层处理。\n"
+}

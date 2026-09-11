@@ -1,0 +1,32 @@
+{
+  "number": 1832,
+  "kind": "pull_request",
+  "title": "fix(spec): page type is the page kind, not a visualization (ADR-0047)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-14T04:54:55Z",
+  "updated_at": "2026-06-14T05:48:25Z",
+  "closed_at": "2026-06-14T05:48:24Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-14T05:48:24Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1832",
+  "body": "## Why\n\nIn the page editor the `type` dropdown listed 16 values, but most were misleading or dead:\n\n- **grid / kanban / calendar / gallery / timeline** — these are **visualizations** of a `list` (interface) page, configured via `interfaceConfig.appearance.allowedVisualizations` and switched at runtime. The renderer never branched on them *as page types* (it always read the visualization from `interfaceConfig`), so selecting page type \"kanban\" did nothing — the exact confusion users hit.\n- **dashboard / form / record_detail / record_review / overview / blank** — declared for roadmap parity but have no dedicated renderer yet; they silently fall back to the list renderer. Offering them in the dropdown presents dead options.\n\nOnly `record / home / app / utility / list` actually render distinctly today.\n\n## What\n\n- **`page.zod.ts`** — remove grid/kanban/calendar/gallery/timeline from `PageTypeSchema`. `VisualizationTypeSchema` (the real home for those values) is unchanged. Roadmap kinds stay valid in the schema. Expanded the doc comment to state the page-kind-vs-visualization rule.\n- **`page.form.ts`** — give the `type` field explicit, labelled `options` for the 5 implemented kinds, so the authoring dropdown only offers what renders. Clearer helpText.\n- **`page.test.ts`** — update fixtures that asserted the old behavior; add a test asserting visualizations are rejected as page types.\n\n## Design note\n\nPage `type` answers **what kind of page** (platform page vs interface page, which interface kind). **How a list page looks** (grid / kanban / calendar / …) is a visualization on the list, not a page type. This matches ADR-0047's two run modes.\n\n## Verification\n\n- `PageTypeSchema` rejects grid/kanban/calendar/gallery/timeline; accepts list/record/home/app/utility + roadmap kinds (asserted in tests).\n- Built dist `pageForm` serves exactly the 5 labelled options to the dropdown (verified against `dist`).\n- objectui consumes a loose `pageType?: string` and only branches on home/app/utility/record — unaffected by the narrowed union. No other framework package imports `PageType`.\n- `pnpm --filter @objectstack/spec test` → **6543 passed**; `tsc --noEmit` clean.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

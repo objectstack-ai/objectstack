@@ -1,0 +1,33 @@
+{
+  "number": 1335,
+  "kind": "issue",
+  "title": "[portal] SSO 必须分层：元数据声明 vs 租户运行时 IdP 配置（GAP-5 of #1294）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T06:47:53Z",
+  "updated_at": "2026-06-14T14:38:58Z",
+  "closed_at": "2026-06-14T14:38:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1335",
+  "body": "## 现象\n#1294 spec 把 `authMode: 'sso:okta'` 直接写在 portal 元数据里。但 IdP 配置（issuer / client_id / client_secret / cert）是**租户级运行时数据**，模板作者根本不知道客户用哪家 IdP。\n\n## 复现\n1. 模板作者写 helpdesk 模板，要支持企业 SSO\n2. A 客户用 Okta，B 客户用 Azure AD，C 客户用 Auth0\n3. 当前 spec 要求模板里写死 `authMode: 'sso:okta'` — 模板就只能给 A 用\n4. B、C 客户要 fork 改元数据，违反「元数据驱动」的核心承诺\n\n## 分阶段建议\n**M3**：把元数据声明和运行时配置拆开。\n\n**元数据（模板可写）**：\n```ts\nauthMode: 'sso',                                          // 声明「需要 SSO」\nsupportedSsoProtocols?: ('saml'|'oidc'|'oauth2')[];       // 声明支持哪些协议\nallowFallbackLogin?: 'magic-link' | 'password' | false;   // SSO 失败时是否允许其它方式\n```\n\n**运行时（租户管理员配置）**：\n- 新对象 `sys_identity_provider`（已有？查 SOT）：tenant + protocol + issuer + clientId + clientSecret\n- 一个租户可绑定多个 IdP\n- portal 登录页枚举本租户绑定的 IdP，渲染「Sign in with Okta / Sign in with Azure AD」\n\n## 验收\n- 同一份 helpdesk 模板，A 客户绑 Okta、B 客户绑 Azure AD，都能登录\n- 模板代码 0 改动\n- 租户管理员在 console 里配置 IdP（CRUD UI 由 sys_identity_provider 对象元数据自动生成）\n\n## 关联\n- #1294\n- 现有 IdP 对象是否存在？查 framework `packages/spec/src/identity/`\n"
+}

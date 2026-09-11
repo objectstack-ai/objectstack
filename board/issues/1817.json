@@ -1,0 +1,32 @@
+{
+  "number": 1817,
+  "kind": "pull_request",
+  "title": "feat(spec): ADR-0047 — interface/list pages get a lean, relevant config form",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-13T14:30:11Z",
+  "updated_at": "2026-06-13T14:39:07Z",
+  "closed_at": "2026-06-13T14:39:05Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-13T14:39:05Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1817",
+  "body": "## Why\nOn an interface/list page, the page editor showed the full generic page form — page type/template, **Data Context** (object/variables), and the **region designer (Layout)** — none of which apply to a curated list surface. The interface config was buried at the bottom with raw inputs.\n\nThis reorganises `page.form.ts` (the form layout served via `/meta`) so a list page gets only the relevant, well-ordered controls. Pairs with the objectui renderer PR (collapsible sections + multi-select widget).\n\n## Changes (`packages/spec/src/ui/page.form.ts`)\n- **Data Context** and **Layout** sections gain `visibleOn: \"data.type != 'list'\"` — hidden for list/interface pages (the region designer and page-level object don't apply).\n- **Interface (list pages)** section: `collapsed: false` (primary content for a list page, still collapsible), `name` for i18n.\n- `interfaceConfig` sub-fields reordered — common authoring controls first (source, sourceView, appearance, userFilters, userActions, addRecord, showRecordCount), rarely-used last (filterBy, levels, allowPrinting); `source` gets the `ref:object` picker; added helpText throughout.\n- `type` field helpText notes that `list` = interface page.\n\nForm-definition only — no schema/runtime change. Requires `pnpm --filter @objectstack/spec build`.\n\n## Verification\nBuilt the spec dist and served it from a local showcase backend; confirmed via `/api/v1/meta` that the page form now carries the `visibleOn`/`collapsed`/ordering above. The objectui renderer (companion PR) honours these flags — covered by component tests there.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 1654,
+  "kind": "pull_request",
+  "title": "feat(example-showcase): row-scoped grid conditional rule on invoice line (B2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-07T14:12:39Z",
+  "updated_at": "2026-06-07T14:15:28Z",
+  "closed_at": "2026-06-07T14:15:25Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-07T14:15:25Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1654",
+  "body": "Demonstrates B2 field conditional rules in an inline line-item grid:\n\n```ts\ndescription: Field.text({ requiredWhen: 'record.quantity >= 100' }),\n```\n\nA bulk line (qty ≥ 100) must carry a description — **row-scoped** (references the line's own `record`), so the inline grid flags the Description cell required per row as the quantity crosses the threshold. Drives the objectui `grid-conditional-rules` live e2e. Example-only change.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

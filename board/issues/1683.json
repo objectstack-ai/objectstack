@@ -1,0 +1,35 @@
+{
+  "number": 1683,
+  "kind": "pull_request",
+  "title": "feat(analytics): carry measure label + format on dataset result fields",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-10T11:44:16Z",
+  "updated_at": "2026-06-10T11:52:46Z",
+  "closed_at": "2026-06-10T11:52:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-10T11:52:44Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1683",
+  "body": "## Why\n\nDashboard KPIs and chart legends showed the **raw measure name** (`task_count`, `spent_sum`) and **unformatted numbers** (`616000`) — the analytics result exposed only `{name, type}`, never the dataset measure's `label` / `format`. (From the Chart Gallery dashboard review.)\n\n## What\n\n- **spec**: `AnalyticsResult.fields[]` gains optional `label?` + `format?`.\n- **service-analytics**: `queryDataset` enriches each measure field with the dataset measure's `label` and `format` (matching `<name>` and `<name>__compare`).\n\nThe renderer applies the format at display time — it can't be baked into the numeric row value because charts need the raw number.\n\nPairs with the objectui `DatasetWidget` change (separate PR) that consumes these fields to render `Tasks` / `$616,000` and gives dataset-bound metric widgets a proper card.\n\n## Verification\n\n`turbo build` 72/72, `turbo test` 123/123. New test asserts `result.fields` carries `label` + `format`. Browser-verified on the showcase Chart Gallery (with the paired console build): KPIs show `Tasks` / `Total Spent` / `$616,000`; chart legends show `Tasks` / `Estimated Hours`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

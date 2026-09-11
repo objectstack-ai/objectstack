@@ -1,0 +1,33 @@
+{
+  "number": 1694,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0037 Live Canvas — draft-overlay live preview while you build",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-10T15:57:29Z",
+  "updated_at": "2026-06-11T04:56:19Z",
+  "closed_at": "2026-06-11T04:56:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T04:56:17Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1694",
+  "body": "Design proposal for the next big magic-moment iteration: a split-view **Live Canvas** — chat on the left, the user's app rendered from the **draft overlay** on the right, refreshing per-artifact while the agent builds/edits.\n\n**Design center**: Airtable-class \"say it, see it\" feedback latency **without giving up the ADR-0033 publish gate** — the canvas renders the staged truth, so what you see is exactly what Publish will make real.\n\nGrounded in verified primitives (file-level table in the ADR):\n- `?preview=draft` overlay reads exist at list + item level — the SPA uses them nowhere today (the gap);\n- the streaming build tree + `drafted` envelopes already name every changed `(type, name)` in real time;\n- the `assistantBus` already bridges chat ↔ host (incl. an editor-context primitive for the phase-4 back-channel).\n\nFour separately-shippable phases: ① static draft preview (~2–3 d, objectui) → ② event-driven live refresh (~3–4 d, objectui) → ③ draft **data** preview via in-memory seed overlay — the only new mechanism (~1–2 w, framework) → ④ canvas→chat \"change *this*\" back-channel (~3–4 d).\n\nStatus: **Proposed** — open for review; merging records the proposal, not an implementation commitment.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

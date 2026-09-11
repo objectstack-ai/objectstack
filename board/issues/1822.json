@@ -1,0 +1,35 @@
+{
+  "number": 1822,
+  "kind": "pull_request",
+  "title": "fix(metadata): keep each colliding item's own _packageId provenance (ADR-0048)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-13T21:30:37Z",
+  "updated_at": "2026-06-13T21:34:30Z",
+  "closed_at": "2026-06-13T21:34:28Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-13T21:34:28Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1822",
+  "body": "## The bug\n\nWhile verifying the ADR-0048 frontend audit, I found that **dashboard/report/page prefer-local was actually broken for collisions** — the ✅ in my audit was wrong.\n\nWhen two installed packages ship an item of the same `type`/`name`, `getMetaItem`/`getMetaItems` grafted the artifact protection envelope from a **first-match** artifact lookup (`lookupArtifactItem(type, name)` with no package). So the second package's item inherited the **first** package's `_packageId`. Since the frontend prefer-local (`preferLocal(list, name, app._packageId)`) filters the unscoped list by `_packageId`, the mislabel made it resolve a collision to the wrong package — or miss the local item entirely.\n\n(This is the list `_packageId` re-stamp anomaly I'd spotted during the docs verification but hadn't run down.)\n\n## Fix\n\n- `getMetaItem` scopes the artifact lookup to `request.packageId`.\n- `getMetaItems` scopes the per-item decorate to the requested package (scoped list) else to each item's own `_packageId`.\n- `getItem` ordering **unchanged** — a bare-key runtime/DB overlay still takes ADR-0005 precedence (clarifying comment only). An env-wide package-less overlay of a colliding name stays inherently ambiguous by schema (`sys_metadata` unique on `type+name+org`, not package); pure-artifact collisions (the marketplace default) now resolve correctly.\n\n## Verification\n\nLive, real `page` collision (showcase `showcase_task_workbench` + a Studio-package page of the same name):\n\n- single `?package=com.objectstack.studio` → Studio's page, `_packageId: com.objectstack.studio`; `?package=com.example.showcase` → showcase's.\n- unscoped `/meta/page` list → **both** rows, each with its **own** correct `_packageId`.\n- Browser: `/apps/com.objectstack.studio/page/showcase_task_workbench` renders Studio's (empty) page; `/apps/com.example.showcase/page/showcase_task_workbench` renders the **full** Task Workbench. No console errors.\n\n603 objectql tests green (added a list-collision provenance test; ADR-0005 overlay-precedence tests still pass).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

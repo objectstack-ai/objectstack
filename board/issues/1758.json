@@ -1,0 +1,36 @@
+{
+  "number": 1758,
+  "kind": "pull_request",
+  "title": "chore: promote triggers to a first-class packages/triggers/ directory",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xs",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T03:09:51Z",
+  "updated_at": "2026-06-12T03:17:53Z",
+  "closed_at": "2026-06-12T03:09:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T03:09:54Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1758",
+  "body": "Follow-up to ADR-0041's rename (#1749): the `trigger-*` family moves out of `packages/plugins/` into its own `packages/triggers/` directory, beside `packages/connectors/` and `packages/adapters/` — directory taxonomy now matches the package taxonomy. `trigger-api` (the Tier-1 gap) will be born here.\n\nPackage names unchanged — consumers, serve auto-wiring, and the changesets fixed group are unaffected. Verified: both packages build + 17/17 tests each, `pnpm install --frozen-lockfile` passes, fixed-group check passes.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

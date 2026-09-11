@@ -1,0 +1,35 @@
+{
+  "number": 1906,
+  "kind": "pull_request",
+  "title": "chore(docs): tooling to keep hand-written docs in sync with implementation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T09:27:45Z",
+  "updated_at": "2026-06-15T11:40:43Z",
+  "closed_at": "2026-06-15T11:40:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T11:40:40Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1906",
+  "body": "Follow-up to #1904. Stands up **recurring** implementation-accuracy verification for the 128 hand-written docs as the platform evolves, so drift gets caught continuously instead of in one-off audits. Layered cheapest-and-earliest-first:\n\n### 1. `scripts/docs-audit/affected-docs.mjs` — change → docs mapping\nMaps `packages/**` changes to the hand-written docs that reference the affected packages (by npm name / repo path), so an audit can be **scoped to what actually changed** instead of re-auditing all 128 docs. Supports `--all` and `--json`.\n\n### 2. `.github/workflows/docs-drift-check.yml` — advisory CI gate\nOn PRs touching `packages/**`, posts a sticky PR comment listing the docs that reference the changed code. Flags drift **at the source**, before it lands on `main`. **Never fails the build.**\n\n### 3. `.claude/workflows/docs-accuracy-audit.js` — reusable multi-agent audit\nThe same audit + **adversarial verifier** pipeline that produced #1866 and #1904, now parameterized by `args.docs` (defaults to all hand-written docs). Run scoped to the CI-flagged files, or full.\n\n### 4. Scheduled routine — periodic backstop\nA cron routine (monthly / per-release) computes the change-scoped doc list, runs the audit workflow, builds, and opens a PR when there are fixes. Set up separately via the schedule tooling; documented in the README.\n\nScope: **hand-written docs only** (`content/docs/**` minus `references/`). Generated references are produced from `packages/spec` and handled by a separate regenerate pass.\n\nTested: `affected-docs.mjs --all` → 128 docs; change-scoping against a 40-commit range → 44 packages → 109 docs; workflow body syntax-valid in the harness context.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

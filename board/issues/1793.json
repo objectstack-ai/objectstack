@@ -1,0 +1,33 @@
+{
+  "number": 1793,
+  "kind": "pull_request",
+  "title": "feat(showcase): ADR-0046 — package docs coverage (flat src/docs/*.md)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T16:14:50Z",
+  "updated_at": "2026-06-12T16:21:40Z",
+  "closed_at": "2026-06-12T16:21:37Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T16:21:37Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1793",
+  "body": "## Summary\n\nAdds the ADR-0046 dimension to the showcase: two cross-referencing docs under flat `examples/app-showcase/src/docs/` that demonstrate (and are gated by) every authoring rule `os build` enforces — flat directory, namespace-prefixed filename stems (`showcase_*`), frontmatter `title:` vs first-`#`-heading title derivation, relative cross-references with anchors (`./showcase_docs_guide.md#cross-references`), and code blocks keeping link syntax literal. A `COVERAGE.docs` entry tracks the dimension alongside field types, chart types, etc.\n\nFollow-up to framework [#1789](https://github.com/objectstack-ai/framework/pull/1789)/[#1790](https://github.com/objectstack-ai/framework/pull/1790) and objectui [#1677](https://github.com/objectstack-ai/objectui/pull/1677).\n\n## Test plan\n- [x] `pnpm build` in app-showcase: both docs compile into `dist/objectstack.json` (`showcase_index` with first-heading label, `showcase_docs_guide` with frontmatter label); ADR lint (flatness/prefix/links/MDX/image) passes\n- Note: `pnpm verify` (typecheck) is currently broken on main by pre-existing issues unrelated to this change (reports `drilldown`, pages `template`/`isDefault`, invoice formula — fields that gained `.default()` in recent spec PRs are required on the output types the example annotates with); tracked separately\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

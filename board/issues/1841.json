@@ -1,0 +1,33 @@
+{
+  "number": 1841,
+  "kind": "pull_request",
+  "title": "feat(service-cluster): split-brain startup guard for memory driver (ADR-0010 path A)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-14T07:10:47Z",
+  "updated_at": "2026-06-14T07:15:07Z",
+  "closed_at": "2026-06-14T07:15:05Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-14T07:15:05Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1841",
+  "body": "Implements **ADR-0010 (D6) path A** — the memory-driver split-brain startup guard.\n\n## Problem\n\nThe `memory` cluster driver keeps PubSub/Lock/KV/Counter state **per process**. Across multiple replicas each process holds its own state → `ILock` grants to every replica (no mutual exclusion), `ICounter`/`IKV` versions diverge, `IPubSub` doesn't fan out. It fails **silently**: single-node tests and dev pass; only production multi-replica corrupts.\n\n## Change\n\nA conservative, declaration-based guard (no active peer discovery — that's the optional path B, deferred):\n\n- `declaresMultiNode(env)` — true when `OS_EXPECT_MULTI_NODE=true` or `OS_CLUSTER_REPLICAS>1`.\n- `assertClusterDriverSafeForTopology(driver, env)` — throws when multi-node is declared **and** the resolved driver is in-process `memory`, unless `OS_ALLOW_MEMORY_CLUSTER_MULTINODE=true`.\n- `ClusterServicePlugin.init` calls it **before** registering the service, so a misconfig fails fast with an actionable message (points at `service-cluster-redis` / a DB-backed driver, and cites ADR-0010).\n\nBoth helpers are pure and exported for reuse.\n\n## Verification\n\n- `vitest run` — **40/40 pass** (10 new guard tests + 30 existing).\n- `tsup` build green (CJS + ESM + DTS).\n- `tsc --noEmit`: **zero errors in the changed files** (the one pre-existing error in `memory/memory.contract.test.ts` is untouched by this PR).\n\n## Scope\n\n4 files: `split-brain-guard.ts` (new), `split-brain-guard.test.ts` (new), `cluster-service-plugin.ts` (call guard), `index.ts` (export). No behavior change for single-node or remote-driver deployments.\n\nRefs: cloud ADR-0010.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

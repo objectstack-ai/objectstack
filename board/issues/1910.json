@@ -1,0 +1,35 @@
+{
+  "number": 1910,
+  "kind": "pull_request",
+  "title": "fix(deps): pin esbuild ≥0.28.1 via pnpm-workspace overrides (GHSA-gv7w-rqvm-qjhr)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T13:10:11Z",
+  "updated_at": "2026-06-15T13:19:18Z",
+  "closed_at": "2026-06-15T13:19:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T13:19:16Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1910",
+  "body": "## Problem\nThe `Validate Package Dependencies` CI job (`pnpm audit --audit-level=high`) fails on **every dependency-touching PR** with a high-severity **esbuild** advisory — [GHSA-gv7w-rqvm-qjhr](https://github.com/advisories/GHSA-gv7w-rqvm-qjhr), affecting esbuild `>=0.17.0 <0.28.1` via `tsup → esbuild`, `tsx → esbuild`, and `vite → esbuild`.\n\n## Root cause\n**pnpm v10 reads `overrides` from `pnpm-workspace.yaml`, not from package.json's `pnpm` field** — that's the recurring `[WARN] The \"pnpm\" field in package.json is no longer read by pnpm … pnpm.overrides … ignored` message in every install.\n\nConsequences on `main`:\n- The repo's existing `minimatch` / `tar` pins live in `package.json`'s `pnpm.overrides` → **silently ignored** (dead security pins).\n- Nothing pins **esbuild** at all → `tsup`/`tsx`/`vite` resolve **0.27.7** and **0.28.0** (both `< 0.28.1`, vulnerable). The lockfile carried three esbuild versions.\n\n## Fix\n- Add a real `overrides:` block to **`pnpm-workspace.yaml`**: `esbuild: '>=0.28.1'` + the migrated `minimatch` / `tar` pins.\n- Drop the now-redundant `pnpm.overrides` from `package.json`.\n\n## Result\n- esbuild collapses to a single **0.28.1** across the whole tree.\n- `pnpm audit --audit-level=high`: **2 high → 0** (now `2 low | 5 moderate`); total advisories 11 → 7 (the migrated minimatch/tar pins also re-applied).\n- Verified the forced bump doesn't break tooling: `@objectstack/formula` **tsup build succeeds** and **vitest 95/95 pass** on esbuild 0.28.1.\n\nTest-only tooling/lockfile change — no published-package code changes; empty changeset.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

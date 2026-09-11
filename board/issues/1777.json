@@ -1,0 +1,33 @@
+{
+  "number": 1777,
+  "kind": "pull_request",
+  "title": "ADR-0046: Package documentation as metadata",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T09:19:53Z",
+  "updated_at": "2026-06-12T09:20:07Z",
+  "closed_at": "2026-06-12T09:20:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T09:20:04Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1777",
+  "body": "## Summary\n\nNew ADR establishing documentation as a first-class metadata element:\n\n- **`src/docs/` compiles into the manifest** like objects/views — docs ship with the package, registry grants apply automatically (zero registry change for v1, rides `manifest_json`)\n- **Derived content is rendered, never written**: field dictionaries, permission matrices, validation lists, state machines are metadata views rendered by console/registry; the only legitimate generation is a frozen export (confirmation PDF) bound to a released version\n- **Four-lifecycle repo layout**: `src/` (ships) / `delivery/` (contract-bound, never ships) / `internal/` (engineering) / root `CHANGELOG.md` (collected at publish)\n- **Closed docSet enum + meta.json subset** (title/pages) for structure; pure Markdown, no MDX (trust boundary, ADR-0025), no images in v1 (asset service in v2 with content-addressed immutable URLs)\n- **Minimal set per package type**: App → index/user/admin/CHANGELOG; plugin/driver → index/CHANGELOG; enforced by publish lint\n- **Rendering surfaces**: registry package page → console help center → contextual help via `binds` → in-app AI assistant grounding\n- **i18n**: locale-suffix files, single canonical source language, translations as AI-derived-but-reviewed with source-hash staleness checks\n- **AI authorship quality gates**: binds coverage floor, derived-content ban + token budget ceiling, manifest fact-checking, docs-only Q&A evals (`os docs lint` / `os docs verify`)\n\nIncludes rejected-alternatives table (static sites, generated reference markdown, MDX, ordering schemes) and a five-phase rollout plan.\n\nPiloted on `os-tianshun-mtc` (steedos-labs): conventions validated there, including the empirical case for the derived-content rule (a generated 26-page dictionary was shipped and deleted within a day).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

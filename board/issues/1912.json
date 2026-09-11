@@ -1,0 +1,34 @@
+{
+  "number": 1912,
+  "kind": "pull_request",
+  "title": "fix(automation): create_record outputVariable exposes the record so {var.id} resolves (#1873)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T13:57:34Z",
+  "updated_at": "2026-06-15T14:02:26Z",
+  "closed_at": "2026-06-15T14:02:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T14:02:23Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1912",
+  "body": "Closes #1873.\n\n## Problem (confirmed)\nA `create_record` node stored only the inserted **id string** in its `outputVariable`. A later node referencing `{var.id}` — the documented pattern, e.g. content `signal_to_topic_promotion` setting `promoted_topic: '{topic.id}'` — traversed `.id` into a *string* and resolved to empty. The created record was unreferenceable downstream.\n\nVerified by code + an engine-level repro: `resolveToken('topic.id')` → `resolvePath(\"topic_1\", ['id'])` → the value is a string, so `typeof cur !== 'object'` → `undefined` → renders empty.\n\n## Fix\nStore the created **record object** as the `outputVariable` — consistent with `get_record`, which already does `variables.set(outputVariable, record)` (that's why `{rec.field}` works there). `create_record` was the inconsistency.\n\n- Array insert → first row; bare-id driver return → wrapped as `{ id }` so `{var.id}` still works.\n- The mock/no-data-engine path stores `{ id }` too.\n\n## Behavior change & back-compat\n`outputVariable` now holds the record (object), not the bare id. Reference the id as `{var.id}`. A bare `{var}` that previously yielded the id string now yields the record. I swept the repo for that pattern: the only case was the `app-todo` create-task flow's `/task/{newTaskId}`, updated to `/task/{newTaskId.id}`. (The `convert-lead` `lead_record` is a `get_record`, unaffected; it already used `{lead_record.name}` against the record.) Marked **minor**.\n\n## Tests\n- New engine-level regression: `create_record` (outputVariable `topic`) → `update_record` resolving `{topic.id}` **and** `{topic.title}` — both fail before the fix, pass after.\n- `@objectstack/service-automation` full suite **196 pass**; `app-todo` + `app-crm` builds green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

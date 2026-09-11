@@ -1,0 +1,32 @@
+{
+  "number": 1759,
+  "kind": "pull_request",
+  "title": "fix: workspace glob + lockfile importer keys for packages/triggers/",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T03:10:32Z",
+  "updated_at": "2026-06-12T03:22:31Z",
+  "closed_at": "2026-06-12T03:10:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T03:10:35Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1759",
+  "body": "Completes #1758 — the workspace glob (`packages/triggers/*`) and the re-keyed lockfile importers missed that commit, so the moved trigger packages weren't workspace members and frozen-lockfile installs fail. Verified locally: `pnpm install --frozen-lockfile` passes.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

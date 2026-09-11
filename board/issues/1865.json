@@ -1,0 +1,33 @@
+{
+  "number": 1865,
+  "kind": "pull_request",
+  "title": "docs(adr-0046): P3 — `book` navigation as a spine with derived membership",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T05:27:49Z",
+  "updated_at": "2026-06-15T05:32:46Z",
+  "closed_at": "2026-06-15T05:32:45Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T05:32:44Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1865",
+  "body": "## What\n\nAdds **§6** to ADR-0046, specifying the P3 documentation-navigation model.\n\nA **`book`** is a metadata element that stores only an ordered **spine** (groups + identity + access). Membership — which doc sits in which group — is **derived** from a rule on each group (`include` glob/tag) plus an optional per-doc `order`/`group`. There is no central `pages` array.\n\n## Why (the load-bearing decision, §6.2.1)\n\nStoring the whole tree in one array conflates three concerns with very different change profiles. Only the low-cardinality **group definitions** deserve central storage; the high-cardinality, AI-churned **membership** must not live in an array, because:\n\n- **AI safety** — ADR-0033 makes AI the primary author. A central array forces a read-modify-write on every doc the AI adds (stale/concurrent edits silently drop or reorder siblings, in navigation where it's least noticed). A derived spine removes the write: the AI creates a doc named to match a rule and it files itself — create-and-forget, the shape §1 already chose for flat docs.\n- **Overlay safety** — overlay is RFC 7396 JSON Merge Patch, which replaces arrays atomically; a runtime nav overlay on `pages` would shadow docs a later package version adds. With membership derived and only a small spine stored, the volatile part never enters an array; per-doc `order` is a scalar that 3-way-merges cleanly.\n\n## Also specified\n\n- **Implicit per-package book** — no `book` ⇒ a synthetic book keyed by `packageId`; the model has no \"flat vs book\" fork.\n- **`audience`** access (`org` default / `public` ≡ data-layer `guest` / `{ profile }` for role-gating) — the first metadata access concept, shaped as a reference into the existing permission model, **enforced at the `/meta/doc` read layer** (not just UI).\n- **Anonymous \"library\" portal** reuses `apps/docs` (Fumadocs + per-host ISR), tenant from host (`resolveByHostname`) — not greenfield SSR; honest about the cost and the §2 boundary.\n- **No `meta.json`** — `book` is metadata, authored as `*.book.ts` (`defineBook()`), consistent with every other element.\n\nReconciles with §4's prior rejection of directory taxonomy (§6.1): the rejection was about references encoding *paths*; `book` keeps content flat/name-addressed and puts structure in a separate explicit element that names stable things.\n\nDocs-only change. Implementation (P3a→P3c) follows in subsequent PRs.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

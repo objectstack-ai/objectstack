@@ -1,0 +1,32 @@
+{
+  "number": 1747,
+  "kind": "pull_request",
+  "title": "fix(service-ai): built-in agent/skill registration upserts on content change (unblocks ADR-0040 rollout)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T02:05:23Z",
+  "updated_at": "2026-06-12T02:15:03Z",
+  "closed_at": "2026-06-12T02:15:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T02:15:00Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1747",
+  "body": "Found during ADR-0040 staging verification: the unified assistant ([framework#1735](https://github.com/objectstack-ai/framework/pull/1735)) never appeared on jack-test — the chat still ran the old *Data Assistant* persona.\n\n**Root cause:** built-in agent/skill registration was exists-gated, and since sys_metadata became durable across deploys (ADR-0007 report-back), the gate freezes the FIRST shipped definition forever. Every persona/skill improvement silently strands on existing environments.\n\n**Fix:** `upsertBuiltin(type, name, def)` — fetch stored, deep-compare to shipped, register when different or absent (info log says *refreshed*), no-op when identical. Applied to `data_chat` + `data_explorer` + `actions_executor`.\n\n**Why overwrite is safe:** built-ins are platform-owned per ADR-0040 — the supported customization path is a CUSTOM agent bound via `app.defaultAgent`, not editing built-ins in place.\n\nservice-ai 334/335 — the 1 failure is the known env-only `embedder binding` test (fails identically on unmodified main in a fresh worktree; CI's full build passes it).\n\nCloud-side sibling (AI Studio's `registerMeta` for `metadata_assistant` + authoring skills) follows in a cloud PR.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

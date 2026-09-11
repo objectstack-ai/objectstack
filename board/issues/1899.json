@@ -1,0 +1,35 @@
+{
+  "number": 1899,
+  "kind": "pull_request",
+  "title": "P0 security: enforce-or-remove unenforced security props (ADR-0049)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T07:27:09Z",
+  "updated_at": "2026-06-15T08:12:48Z",
+  "closed_at": "2026-06-15T08:12:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T08:12:45Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1899",
+  "body": "## What\n\nAddresses the **P0 security cluster** of the metadata liveness audit umbrella #1878, under the new **ADR-0049** (`docs/adr/0049-no-unenforced-security-properties.md`): *a spec property naming a security boundary must be enforced, explicitly `experimental`, or absent — never parsed-but-silently-unenforced.*\n\nGiven the pre-MVP stage, the cluster is split by **whether the feature already exists** — we do not build enforcement for features that don't exist yet.\n\n### PR A — no-regret fixes (commit 1)\n- **Evaluator fails CLOSED for the destructive op class** (`transfer`/`restore`/`purge`). Previously any operation absent from `OPERATION_TO_PERMISSION` fell through to default-allow (`permission-evaluator.ts`), so a future destructive op added without a map entry would be silently ungated.\n- **`allowTransfer`/`allowRestore`/`allowPurge` marked `[EXPERIMENTAL — not enforced]`** (`permission.zod.ts`) — the operations they gate don't exist yet and nothing reads them (#1883). Re-introduced *with* the feature at M2.\n\n### PR B — enforce live-but-ungated gaps (commit 2)\n- **#1884 agent access** — chat route only enforced static route-level perms; each agent's `access`/`permissions` were a no-op. New pure `evaluateAgentAccess` (required-perms ALL · allow-list by userId/role · fail-closed) wired into the chat route. `visibility` is intentionally **not** enforced (request context has no tenant/owner) — documented, not half-done.\n- **#1889 object API exposure** — `apiEnabled`/`apiMethods` were ignored by the HTTP/MCP dispatch. New pure `checkApiExposure` gate in `callData`: `apiEnabled:false` → 404, non-whitelisted op → 405. System contexts bypass; unresolvable defs fall open to schema defaults (pure additive restriction, no regression).\n\n## Deferred (tracked, not in this PR)\n- #1882 PolicySchema, #1887 SharingRule, #1888 flow `runAs` → mark experimental / build with the feature at M2.\n- **#1885 action `disabled` CEL** → lives in the **objectui** renderer; fixed in objectstack-ai/objectui#1743.\n\n## Tests\n- `permission-evaluator` destructive fail-closed: green (plugin-security 87, spec 152).\n- `evaluateAgentAccess`: 9 unit tests. `checkApiExposure`: 8 unit tests.\n- One pre-existing unrelated failure in `http-dispatcher.test.ts` (`publish-drafts applies seed rows`) reproduces with this PR's changes stashed — not introduced here.\n\nRefs #1878 #1882 #1883 #1884 #1889\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

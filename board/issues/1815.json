@@ -1,0 +1,33 @@
+{
+  "number": 1815,
+  "kind": "pull_request",
+  "title": "fix(service-ai): resolve current object for AI chat across languages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-13T13:23:57Z",
+  "updated_at": "2026-06-13T13:41:10Z",
+  "closed_at": "2026-06-13T13:41:08Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-13T13:41:08Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1815",
+  "body": "## Problem\n\nOn a runtime object page (e.g. `…/showcase_app/showcase_task`), asking the console assistant to *analyse this object* returned **\"can't find the X object\"** — most visibly for non-English prompts. Three compounding gaps:\n\n1. **CJK dropped at tokenisation** — `SchemaRetriever.tokenise()` matched only `[a-z0-9]+`, so a Chinese request (`分析任务对象`) produced zero terms → `query_data` returned *\"No matching objects in metadata\"*.\n2. **No schema-discovery tool in the open edition** — `describe_object`/`list_objects` are cloud-only (`@objectstack/service-ai-studio`), leaving `query_data`'s keyword match as the only object-resolution path.\n3. **Current object never reached the agent** — nothing fed the open object's schema into the prompt, so \"this object\" couldn't resolve without a lucky keyword hit.\n\n## Changes\n\n- `schema-retriever.ts` — `tokenise()` now emits CJK single-char + bigram terms alongside Latin/digit runs.\n- `agent-runtime.ts` — new `buildContextSchemaMessages()` looks up `context.objectName` and injects its schema into the system prompt, so \"analyse this object\" works with **zero tool calls in any language**. Both chat routes call it.\n- `spec` `ToolExecutionContext` gains `currentObjectName`/`currentViewName`; `agent-routes.ts` + `assistant-routes.ts` thread them through, and `query_data` falls back to the current object when keyword retrieval is empty.\n\nPairs with objectui `fix/ai-current-object-context`, which sends `context.objectName` from the current console route.\n\n## Tests\n\nNew coverage: CJK retrieval, schema injection (4 cases), `query_data` current-object fallback (2 cases). **81 service-ai tests pass**; `spec` + `service-ai` build clean.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

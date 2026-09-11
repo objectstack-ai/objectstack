@@ -1,0 +1,35 @@
+{
+  "number": 1933,
+  "kind": "pull_request",
+  "title": "feat(validate): did-you-mean warnings for field typos in flow conditions (#1928)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T02:25:44Z",
+  "updated_at": "2026-06-16T02:46:59Z",
+  "closed_at": "2026-06-16T02:46:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T02:46:56Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1933",
+  "body": "Tier 3 of #1928 — stacked on #1931 (base will retarget to `main` once #1931 merges).\n\n## Problem\n\nFlow / automation conditions flatten the record's fields to top-level, so a bare `status` is correct. But a bare **non-field** identifier is either a flow variable or a **typo** — and a misspelled trigger-condition field (`stagee == \"closed_won\"`) makes the flow silently never fire (the #1877 family). #1931 deliberately left flow conditions out of its hard gate because flow variables aren't schema-knowable, so a bare ref there can't be soundly classified as an error.\n\n## Fix — a non-blocking warning channel\n\nWhen a bare non-field identifier in a flow condition is a **near-miss of a known field** (edit distance), emit a `did you mean \\`status\\`?` **warning** — never failing the build. A genuine flow variable (`expiring_deals`, `new_opportunity`) isn't edit-distance-close to a field name, so it stays quiet.\n\n- `ExprValidationResult` gains `warnings`; `ExprIssue` gains `severity`.\n- `firstUndeclaredReference(source, knownFields)` generalizes #1931's detector: record scope passes no fields (any bare ref is an error); flattened scope declares the trigger object's fields so only non-field refs surface for the did-you-mean check.\n- `objectstack compile` prints warnings and fails only on errors.\n\n## Verification\n\n- A typo'd flow condition emits `⚠ Expression warnings (1) … did you mean \\`stage\\`?` and **still builds** (`✓ Build complete`).\n- All three example apps build clean with **zero** warnings — flow variables stay quiet (no false positives).\n- New tests: 4 in `@objectstack/formula`, 4 in `@objectstack/cli`. Suites green (formula 105, cli 417).\n\nThis completes the #1928 tiers that can be done without runtime-fidelity risk: tier 1 (record-scope bare refs, hard error — #1931) + tier 3 (flow-condition typos, advisory warning — here). Tier 4 (full type-soundness) remains deferred.\n\nRefs #1928. Stacked on #1931; sibling runtime fix #1930.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

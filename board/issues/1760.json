@@ -1,0 +1,33 @@
+{
+  "number": 1760,
+  "kind": "pull_request",
+  "title": "feat(service-ai): optional per-turn daily chat quota (ADR-0040 §5) — default off",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T03:24:13Z",
+  "updated_at": "2026-06-12T03:27:44Z",
+  "closed_at": "2026-06-12T03:27:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T03:27:42Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1760",
+  "body": "## Why\n\nADR-0040 §5's perception rule: limits that can only manifest as **refusal** (quota exhausted) must be honest at the moment of impact — why, when it recovers, the way out — and must never degrade silently. This PR ships the *mechanism* for daily AI usage quotas; the *policy* (free/pro tier numbers) stays in deployment config and later plan entitlements. Companion to [cloud#242](https://github.com/objectstack-ai/cloud/pull/242) (blueprint scope cap) — together they are Phase 2a of the tiering plan.\n\n## What\n\n- **`AgentChatQuota` hook** on `buildAgentRoutes(…, {quota})`: `check()` before each user turn, `consume()` exactly once when admitted (per turn — not per tool call, not per token). No quota wired → byte-identical behavior.\n- **Honest refusal, both modes**: stream mode returns the copy as a normal assistant message through `encodeVercelDataStream` (zero client changes, chat never shows a raw error); JSON mode returns **429** with stable `code: 'ai_quota_exhausted'` + `resetAt`.\n- **`DailyMessageQuota`**: N user turns / user / environment / UTC day, persisted in the new `ai_usage_daily` platform object via `IDataEngine` (survives restarts, shared across instances). Fail-open on counter errors — a broken counter must never take chat down. Explicitly documented as an entitlement gate, not billing-grade metering.\n- **Opt-in wiring**: `AI_DAILY_USER_MESSAGES=<N>` env var; unset/invalid → quota disabled (logged).\n\n## Tests\n- 10 new tests: under/at limit, honest copy (why+when+way-out), insert-then-increment, fail-open, per-env/per-user scoping, route pass-through + consume-once, 429 envelope, streamed refusal framing, no-quota baseline, environmentId forwarding.\n- service-ai suite 344/345 in the worktree — the one failure (`embedder binding`) fails on the unmodified baseline in the same worktree (env-only, verified via git stash) and passes in the main checkout; CI is the arbiter.\n\n## Follow-ups\n- Plan-tier `AgentChatQuota` implementation (free/pro) once pricing tiers are decided — plugs into this gate unchanged.\n- Optional `remaining` surfacing in the chat UI (progressive disclosure only near the limit).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

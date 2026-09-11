@@ -1,0 +1,33 @@
+{
+  "number": 1729,
+  "kind": "pull_request",
+  "title": "fix(auth): expose roles[] on session user so admin promotion preserves business roles",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T13:36:59Z",
+  "updated_at": "2026-06-11T13:37:18Z",
+  "closed_at": "2026-06-11T13:37:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T13:37:11Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1729",
+  "body": "## Problem\n\nThe better-auth `customSession` plugin in `plugin-auth` returns `{ user: { ...user, role: 'admin' }, session }` when the user is a platform admin or active-org admin. This **replaces** the stored role string — which may be comma-separated multi-role, e.g. `'admin,manager'` — with the literal `'admin'`.\n\nConsequence: an admin's business roles (e.g. `manager`) never reach the frontend through the session, so the Console approvals inbox (objectui `ApprovalsInboxPage`), which matches `pending_approvers` by `role:<name>` literals, never shows admins their role-based todos.\n\n## Fix (additive — `user.role` semantics unchanged)\n\nThe customSession callback now always returns `user.roles: string[]`:\n\n- base = stored `user.role` split on commas, trimmed, empty values dropped (no role → `[]`)\n- on promotion (platform admin or active-org admin), `'admin'` is appended, deduplicated\n- `user.role` behavior is **exactly as before** (still replaced by `'admin'` on promotion, kept otherwise) — the codebase has many strict `user.role === 'admin'` checks\n\nobjectui consumers already prefer `user.roles` when present (`useIsWorkspaceAdmin`, `AuthGuard`, `buildApproverIdentities`), so no objectui change is needed.\n\n## Tests\n\nNew `customSession – derived role and roles array` suite in `auth-manager.test.ts` covering: no stored role → `roles=[]`; non-admin `'manager'` → `roles=['manager']` with `role` untouched; platform admin storing `'manager'` → `role='admin'`, `roles=['manager','admin']`; stored `'admin,manager'` → no duplicate append; user without id passes through untouched.\n\n- `pnpm vitest run` (plugin-auth): 114 passed\n- `pnpm --filter @objectstack/plugin-auth build`: ESM/CJS/DTS pass\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

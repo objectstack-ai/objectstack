@@ -1,0 +1,30 @@
+{
+  "number": 1881,
+  "kind": "issue",
+  "title": "a freshly-signed-up user's better-auth session has activeOrganizationId = null.",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T06:36:50Z",
+  "updated_at": "2026-06-15T07:12:17Z",
+  "closed_at": "2026-06-15T07:12:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1881",
+  "body": "n the cloud repo  fix a session-hygiene bug: a freshly-signed-up user's better-auth session has activeOrganizationId = null. Root cause: the personal org is created by the user.create.after hook (see packages/service-cloud/src/*personal-org* / cloud-signup-personal-org), which runs AFTER the session is created, so the active-org backfill in packages/service-cloud/src/active-org-session-hook.ts (session.create.before) finds no membership yet and leaves activeOrganizationId null.\n\nImpact: anything keyed on session.activeOrganizationId silently degrades for the user's first session — e.g. kernel-resolver reads the default environment by activeOrganizationId (packages/objectos-runtime/src/kernel-resolver.ts), and \"current org\" context is empty until the user manually sets/switches an active org.\n\nGoal: ensure activeOrganizationId is reliably populated to the user's (newly created) personal org for the first session. Options to evaluate: (a) set activeOrganizationId when the personal org is created in the user.create.after hook (update the session/most-recent session), or (b) add a session.update / get-session fallback that backfills activeOrganizationId from sys_member when it's null. Prefer the approach that better-auth supports cleanly.\n\nVerify on staging (cloud.objectos.app, email-verification off): sign up a fresh account, then GET /api/v1/auth/get-session and confirm activeOrganizationId is set to the personal org without a manual set-active call. Note: the control-plane data-API org-scoping (cloud#338) now derives scope from sys_member membership (not session.tenantId), so this is hygiene/UX, NOT a security blocker — scope correctness no longer depends on it. Branch per the repo's worktree-first rule (do NOT edit on main); open a PR."
+}

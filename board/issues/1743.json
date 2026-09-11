@@ -1,0 +1,30 @@
+{
+  "number": 1743,
+  "kind": "issue",
+  "title": "feat(approvals): actionable email/IM notifications — single-use approval tokens",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T01:42:08Z",
+  "updated_at": "2026-06-12T05:40:10Z",
+  "closed_at": "2026-06-12T05:40:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1743",
+  "body": "## Context\n\nThe biggest lever on approval latency: approvers act straight from an email or DingTalk/Feishu card without signing in. The notification pipeline already exists — thread interactions (#1740) emit through the `messaging` service, which has an email channel and outbox-backed webhook delivery (`sys_http_delivery`) with retry/dead-letter. What's missing is what sits behind the Approve/Reject buttons in the message.\n\n## Proposal\n\nA **single-use approval token**: a deliberately weakened, self-contained credential embedded in the notification's action links, plus a redemption endpoint.\n\n| Property | Requirement | Failure mode it prevents |\n|---|---|---|\n| Scope | exactly one action on exactly one request (`approve areq_x`) | leaked token ≠ account takeover |\n| Single-use | consumed `jti` recorded server-side | forwarded email replayed by someone else |\n| TTL | short (e.g. 72h, aligned with SLA) | months-old email approving today's request |\n| Identity-bound | token ↔ approver; audit records the real actor | anonymous decisions on the trail |\n| Invalidation | dead the moment the request is decided / reassigned / recalled | original approver acting from a stale email after handover |\n| Scanner-proof | **GET must not execute** — land on a confirm page whose button POSTs | mail-gateway link prefetchers (Outlook SafeLinks etc.) approving requests |\n\nThe last row is the classic real-world trap: enterprise mail security pre-fetches every link in a message. A GET-executes design gets requests approved by robots.\n\n## Scope\n\n- Token issue (on notification emit) + redemption endpoint + consumed-token store\n- Minimal session-less confirm page (request summary + confirm button)\n- Email/IM templates wiring the links; deep link fallback to the Console inbox\n- **Independent security review of the threat model before merge** — this is a deliberate bypass lane around the auth system\n\n## References\n\n- Notification fan-out: `ApprovalMessagingSurface` / `notify()` in plugin-approvals (#1740)\n- Channels: `@objectstack/service-messaging` (email-channel), `sys_http_delivery` outbox\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1900,
+  "kind": "pull_request",
+  "title": "feat(service-ai): turn idempotency (turnId) — safe Retry without re-planning (ADR-0013 D1)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T08:12:26Z",
+  "updated_at": "2026-06-15T09:10:45Z",
+  "closed_at": "2026-06-15T09:10:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T09:10:43Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1900",
+  "body": "## ADR-0013 D1 — turn idempotency\n\nPart of the cross-repo durable-turn work for [cloud#334](https://github.com/objectstack-ai/cloud/issues/334). Pairs with the objectui chat client (turnId in the request body) and a cloud SHA bump, coordinated via the ADR-0012 cross-repo recipe.\n\n### Problem\nThe agent chat endpoint has no turn identity. On `Retry`, the client re-POSTs `messages` with the same `conversationId`; the server unconditionally writes a **duplicate user row** and **re-runs the whole tool loop from scratch** → the LLM re-plans, can rename objects (`contact`→`contacts`), and leaves **orphan drafts**. The final assistant text is also persisted *before* it's yielded to SSE, so a turn that only failed on delivery already succeeded server-side — yet Retry re-executes everything.\n\n### Change\nA user turn becomes an idempotent unit. The client supplies a stable `turnId` (constant across Retry); the server:\n- **dedups** the inbound user message by `(conversationId, turnId)`;\n- **short-circuits** the stored reply when the turn already produced a completed assistant reply (no tool re-run, no re-plan).\n\nSpecifics:\n- `ai_messages`: new `turn_id` column + `(conversation_id, turn_id)` index. Auto-reconciled by the SQL driver (`alterTable` adds missing columns + materializes declared indexes) — no hand-written migration.\n- contract: `turnId` on `ToolExecutionContext`; `addMessage(…, turnId)` + new `getTurnState(conversationId, turnId)` on `IAIConversationService`.\n- conversation services (objectql + in-memory): persist `turn_id` on every message of a turn; `getTurnState` reports `userExists` + the final reply (an assistant message with no pending tool calls — intermediate tool-call/tool turns carry the same `turn_id` but are never mistaken for the reply).\n- `ai-service`: dedup + short-circuit in **both** `chatWithToolsImpl` and `streamChatWithTools`.\n- `agent-routes`: read `body.turnId` into `toolExecutionContext`.\n\n### Tests\n- +6 dedup/short-circuit cases (chat + stream): same `turnId` ⇒ one user row, tools run once, stored reply returned; incomplete turn re-runs without a duplicate user row; no `turnId` ⇒ legacy behaviour.\n- +4 `getTurnState` cases (objectql conversation service).\n- Full `service-ai` suite green (385).\n\n### Acceptance (cloud#334)\n- ✅ Re-sending the same `turnId` does NOT create a second user message and does NOT re-execute tools.\n- ✅ A completed turn re-requested returns the stored reply.\n- ⏳ Browser/EE-rig retry (no duplicate/orphan drafts) — verified at the cloud SHA-bump PR.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

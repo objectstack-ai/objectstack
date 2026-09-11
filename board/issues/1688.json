@@ -1,0 +1,33 @@
+{
+  "number": 1688,
+  "kind": "pull_request",
+  "title": "docs(cli): document the cloud publish & install flow",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-10T14:12:02Z",
+  "updated_at": "2026-06-10T14:13:58Z",
+  "closed_at": "2026-06-10T14:13:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-10T14:13:56Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1688",
+  "body": "The CLI README documented `os init/compile/serve/...` but had **no** coverage of the cloud publish→install flow (`os cloud login`, `os package publish`, `os environments create`), and the Plugin Management note still pointed at the legacy `os projects bind` as the distribution path.\n\nAdds a **Cloud — publish & install** section: login → publish → install-into-env with sample data, plus the key `os package publish` flags (`--env/--install/--seed-sample-data`, `--visibility`, `--submit/--auto-approve`, `OS_CLOUD_URL`). Updates the distribution note to point at `os package publish`.\n\nReflects the flow verified end-to-end against staging. Docs-only.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

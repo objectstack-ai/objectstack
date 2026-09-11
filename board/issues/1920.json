@@ -1,0 +1,35 @@
+{
+  "number": 1920,
+  "kind": "pull_request",
+  "title": "feat(cli): lint wrong flow-value interpolation syntax (double-brace / bare $ref) (#1315)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T15:18:36Z",
+  "updated_at": "2026-06-15T15:22:42Z",
+  "closed_at": "2026-06-15T15:22:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T15:22:39Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1920",
+  "body": "Second AI-authoring guardrail in `lintFlowPatterns` (after #1874/#1918), serving the project's core goal: **catch the mistakes AI authors keep making, at build time.**\n\n## What it catches\nFlow node **values** interpolate with **single** braces (`{var}` / `{record.id}` / `{$User.Id}`). Two wrong syntaxes authors carry over (straight from #1315's repro):\n\n| Author wrote | Reality | Lint |\n|---|---|---|\n| `body: '{{ai_reply}}'` | double-brace is the **formula/template-field** dialect, not flow values — verified no flow node executor uses `{{ }}` | ⚠ `flow-double-brace-interpolation` |\n| `ticket: '$source.id'` | a bare `$ref.field` is a **literal**, not interpolated | ⚠ `flow-bare-dollar-reference` |\n\nBoth warnings name the fix (`{var}` / `{source.id}`).\n\n## Precision (verified zero false-positives on real metadata)\n- **Not flagged**: correct single-brace `{record.title}`, braced `{$User.Id}`, currency literals (`$5.00` / `Total $5` — the `$`-rule requires a letter after `$` and a non-`{` lead char), and CEL `condition`/`expression` keys (skipped — they're predicates, not templates).\n- **Never fails the build** — advisory only.\n- `@objectstack/cli` suite **396 pass**; `example-crm` / `app-todo` / `showcase` build with **0 spurious warnings**.\n\n## Context\n#1315 is closed (the framework's flow-value semantics are already consistent — single-brace `interpolate()`); this is the **build-time safety net** that catches the wrong-syntax mistakes from its repro, instead of letting them silently produce `[object Object]` / literal `$source.id` at runtime.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

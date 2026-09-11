@@ -1,0 +1,35 @@
+{
+  "number": 1925,
+  "kind": "pull_request",
+  "title": "feat(automation): accept functionName alias + invoke_function marker on script nodes (#1870 DX)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T16:03:17Z",
+  "updated_at": "2026-06-15T16:17:04Z",
+  "closed_at": "2026-06-15T16:17:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T16:17:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1925",
+  "body": "**One fix, all future AI templates benefit.** Found while evaluating `objectstack-ai/templates` with the new authoring skills.\n\n## Problem\nAI-authored templates emit:\n```ts\nconfig: { actionType: 'invoke_function', functionName: 'helpdesk.aiTriageStub', inputs: {…} }\n```\n…but the runtime (post-#1870) only read `config.function`. So `functionName` was ignored and `actionType: 'invoke_function'` was treated as a function *name* → it tried to resolve a function literally called `invoke_function` → failed. The AI guessed a reasonable-but-unsupported shape, and nothing accepted or clearly rejected it.\n\n## Fix\n- **runtime** ([screen-nodes.ts](packages/services/service-automation/src/builtin/screen-nodes.ts)): function name = `function ?? functionName`; `actionType: 'invoke_function'` is a **marker** (\"call the named function\") — the name comes from `function`/`functionName`, not from actionType itself.\n- **build** ([validate-expressions.ts](packages/cli/src/utils/validate-expressions.ts)): recognize `functionName`; **error** on `actionType: 'invoke_function'` with no `function`/`functionName` (it names no callable) — caught at `objectstack build`, not at runtime.\n\n## Scope\nThe template still must **register** the function via `defineStack({ functions })` — the framework can't invent it. This change makes the key/marker the AI guessed actually work, and flags the genuinely-broken \"invoke_function with no name\" case loudly at build.\n\n> Deliberately did NOT add `functionName` to the authoring skill — the skill keeps teaching the single canonical `config.function`; the runtime is merely *tolerant* of the alias (skill = source of truth, framework = forgiving safety net).\n\n## Tests\n+2 runtime (alias resolves; `invoke_function` marker fails clearly when nameless), +2 build (functionName accepted; nameless invoke_function flagged). `@objectstack/service-automation` 201, `@objectstack/cli` 404; example-crm builds clean.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

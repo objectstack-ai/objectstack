@@ -1,0 +1,36 @@
+{
+  "number": 1936,
+  "kind": "pull_request",
+  "title": "chore(spec): re-root liveness gate on the metadata-type registry + onboard 10 core types",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T03:20:56Z",
+  "updated_at": "2026-06-16T03:24:21Z",
+  "closed_at": "2026-06-16T03:23:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T03:23:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1936",
+  "body": "Fixes a structural blind spot and expands the spec-liveness gate to the core authorable surface.\n\n## The blind spot\nThe previous gate read the generated `json-schema/` directory. But `z.toJSONSchema()` **throws** on `object` and `action`, and most top-level authorable types (object/field/flow/action/view/page/hook) aren't emitted there at all — so the gate was **structurally blind to the highest-frequency surface**. The 3 categories that worked (security/identity/ai) did so only because their schemas happened to emit.\n\n## The fix — root on the registry\nRead `BUILTIN_METADATA_TYPE_SCHEMAS` (`metadata-type-schemas.ts`) — the **same registry the runtime `/api/v1/meta/types/:type` endpoint and Studio metadata-admin forms use**, i.e. exactly the authorable types. The gate walks each Zod schema directly (version-tolerant unwrap of lazy/optional/default/pipe), so it never depends on the JSON-schema converter.\n\n- **Drill-down one level**: container props (object/record/array) expand via a ledger `children` block, so `permission.objects.allowCreate` (live) stays distinct from `allowTransfer` (experimental), `flow.errorHandling.fallbackNodeId` (dead) from the rest, etc.\n- Framework provenance/lock fields (ADR-0010) auto-classified `live`.\n- New gate is `tsx` (imports the registry); CI no longer needs `gen:schema`.\n\n## Onboards 10 types (~295 properties, all classified)\nLedgers re-keyed category → type, seeded from each type's liveness audit:\n\n| Type | live | exp | dead | headline |\n|---|---|---|---|---|\n| object | 31 | – | 17 | `enable`/capabilities + versioning/cdc tier dead; `apiEnabled` unenforced |\n| field | 34 | – | 39 | ~half dead; aspirational enhanced-type/governance config; naming drift |\n| flow | 29 | 1 | 7 | `runAs` unenforced; status/active gate nothing |\n| action | 26 | – | 5 | `disabled` CEL ignored (renderers read non-spec `enabled`) |\n| hook | 11 | – | 2 | model-healthy — near-total liveness |\n| permission | 23 | 3 | 2 | CRUD/FLS/RLS live; destructive ops experimental |\n| role | 3 | – | 1 | `parent` dead |\n| agent | 18 | 4 | 5 | access-control dead; autonomy experimental |\n| tool | 13 | 1 | 5 | write-only metadata |\n| skill | 15 | – | 2 | triggerPhrases dead |\n\nSupersedes the category-keyed `security`/`identity`/`ai` ledgers (#1919/#1924/#1932). Not yet governed (rollout): view/page/dashboard/app/report/dataset/job/datasource/translation/email_template/doc/book/validation/seed.\n\nGate green: all 10 types, 0 unclassified, no stale evidence.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

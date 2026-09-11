@@ -1,0 +1,30 @@
+{
+  "number": 1871,
+  "kind": "issue",
+  "title": "[P2] Script validation `field == null` does not match a field omitted on insert",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T06:02:46Z",
+  "updated_at": "2026-06-15T14:06:01Z",
+  "closed_at": "2026-06-15T14:06:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1871",
+  "body": "## Problem\nA script validation whose condition checks `record.<field> == null` does **not** fire on `insert` when that optional field is **omitted entirely** from the payload (the key is absent from the validation record context). It works on update and when the field is explicitly `null`.\n\n## Repro\n- `todo_task` rule `record.priority == \"urgent\" && record.due_date == null ...`: creating `{priority:'urgent'}` with no `due_date` key → **passes** (should fail). PATCHing an existing task to urgent+null due → correctly blocked.\n- Pre-existing `compliance_assessment.failed_requires_remediation` has the identical gap.\n- `expense_line` receipt rule fires on insert only because `receipt_attached` has a `defaultValue` (always present).\n\n## Expected\nOn insert, normalize the validation record context so omitted optional fields read as `null` (so `field == null` matches).\n\n## Affected\n`@objectstack/objectql` (validation context build).\n\n\n---\n_Found while runtime-testing `objectstack-ai/templates` (all 9 templates via `objectstack dev all`) on `@objectstack` 9.5.1. Build + typecheck pass; these only surface at runtime._\n"
+}

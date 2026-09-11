@@ -1,0 +1,33 @@
+{
+  "number": 1722,
+  "kind": "pull_request",
+  "title": "feat(cli): dashboard widget reference integrity check (dataset → dimensions/measures + chartConfig fields)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/l",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T10:26:34Z",
+  "updated_at": "2026-06-11T11:29:46Z",
+  "closed_at": "2026-06-11T11:29:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T11:29:44Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1722",
+  "body": "Closes #1721.\n\n## What\n\nExtends the #1719 semantic widget-binding pass (`validateWidgetBindings`) into the full **dashboard widget reference integrity** check the issue proposes, and surfaces it in all four build-time tools:\n\n| Rule | Severity | Issue item |\n|---|---|---|\n| `widget-dataset-unknown` | error | (a) `dataset` resolves to a declared `Dataset` |\n| `widget-dimension-unknown` | error | (b) every `dimensions[]` entry is a real dataset dimension |\n| `widget-measure-unknown` | error | (c) every `values[]` entry is a real dataset measure |\n| `chart-field-unknown` | error | (d) `chartConfig.xAxis.field` resolves to a dataset dimension; `yAxis[].field` / `series[].name` resolve to a measure selected in `values` |\n| `chart-config-missing` | warning | (d) chart-type widget with no `chartConfig` at all |\n| `table-count-only` | warning | (e) — already landed in #1719, unchanged |\n\n- **`validate`** — semantic pass after `safeParse` succeeds; errors fail with located, corrective messages (and in `--json`); warnings print non-blocking (`--strict` makes them fatal).\n- **`build`/`compile`** — same: errors fail the build where the cutover damage actually occurred (CI).\n- **`lint`** — findings pass their real severity through (was hardcoded `warning`).\n- **`doctor`** — new *\"Dashboard integrity — All widgets resolve datasets, dimensions, and measures\"* section mirroring the orphan-view pass.\n\nMessages list the declared names and carry a **did-you-mean** suggestion with containment checked before edit distance, so the cutover's canonical drift (`amount` → `sum_amount`) is suggested:\n\n```\n✗ Dashboard widget integrity failed (1 issue)\n• dashboard \"pipeline_dashboard\" › widget \"pipeline_trend_90d\": chartConfig.yAxis[0].field \"amount\"\n  does not resolve to a measure of dataset \"opportunity_metrics\" (declared measures: opp_count,\n  total_amount, avg_amount).\n    Post-cutover data is keyed by the dataset's measure NAME, not the base column.\n    rule: chart-field-unknown  at dashboards[0].widgets[3]\n```\n\n## Design notes\n\n- **Errors are not suppressible** — they describe a binding the analytics service cannot satisfy; `suppressWarnings: ['<rule-id>']` keeps working for the two advisory rules.\n- A `chartConfig` field that names an already-invalid `values`/`dimensions` entry is **not double-reported** — rules (b)/(c) own that error.\n- A widget whose `dataset` doesn't resolve reports once and skips the name checks (nothing to resolve against).\n- Per the issue, the check lives in the CLI (where multi-package config is assembled), not the spec schema — a widget in one package can resolve a dataset in another.\n- A measure that is declared on the dataset but **not selected** in the widget's `values` gets a targeted message (\"the query result will not contain it\") instead of the generic one.\n\n## Example apps\n\n`chart-config-missing` flagged 19 chart widgets across the three example apps — all authored without `chartConfig`. They now carry the explicit mapping (`xAxis.field` = dimension, `yAxis[].field` = measure name), the authoring shape templates#30 standardized on after browser-verifying it fixes the blank charts. Note the tension: **objectui HEAD's `DatasetWidget` (since `92449ef99`) derives series from `values` and ignores `chartConfig`**, so at HEAD the warning is advisory rather than a real breakage — but published renderers consume it, and the explicit form is compatible both ways. If values-derived rendering becomes the contract everywhere, `chart-config-missing` can be dropped without touching the error rules.\n\napp-todo's two count-only record-listing tables (`overdue_tasks_table`, `due_today`) still warn under `table-count-only` — re-modeling them as object-bound ListViews (ADR-0017) is #1719's failure class, left as a follow-up.\n\n## Verification\n\n- 28 unit tests on the validator (incl. both issue repros: the #1721 `sum_amount`/`amount` chart and the #1719 count-only table); full CLI suite 254 passed; `tsc` clean.\n- All three example apps: `validate` passes, dashboards typecheck (remaining showcase page-type errors are pre-existing drift in untouched files).\n- Negative path exercised end-to-end: a stale `yAxis.field` makes both `validate` and `build` exit 1 with the message above; `doctor` prints the new integrity section.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

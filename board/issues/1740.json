@@ -1,0 +1,33 @@
+{
+  "number": 1740,
+  "kind": "pull_request",
+  "title": "feat(approvals): thread interactions — reassign, remind, request-info, comment + SLA & step progress",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/l",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T17:05:37Z",
+  "updated_at": "2026-06-11T17:05:56Z",
+  "closed_at": "2026-06-11T17:05:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T17:05:46Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1740",
+  "body": "## Summary\n\nPhase 2 of the approvals roadmap (after #1728/#1737): the collaboration layer that mainstream approval centers (ServiceNow, SAP Fiori My Inbox, DingTalk/Feishu) treat as table stakes. None of these move the flow — they operate on approver slots or the audit thread.\n\n- **`reassign()`** — a pending approver hands their slot to someone else. Audit-first write ordering (mirrors `decideNode`) so a failed audit can never leave a moved slot without a trail; the new approver is notified via the optional `messaging` service.\n- **`remind()`** — submitter nudge to every pending approver, throttled to one per 4 h per request (`THROTTLED` → HTTP 429).\n- **`requestInfo()`** — approver sends the request back for more material; the request **stays pending**, submitter notified.\n- **`comment()`** — free-form thread reply (submitter or pending approver), notifying the other side.\n- `sys_approval_action.action` enum gains the four new kinds (synced with the new `ApprovalActionKind` contract type — the first e2e run caught the enum validation rejecting them).\n- Rows expose **`sla_due_at`** (`created_at + escalation.timeoutHours` from the node config; display-only — automatic escalation needs a scheduler pass, called out in the JSDoc) and single reads attach **`flow_steps`** (the owning flow's approval trunk with done/current/upcoming states) via the automation surface's `getFlow()`.\n- REST: `POST …/reassign|remind|request-info|comment` with the shared error mapping; messaging wired in the plugin when installed, degrading to audit-only without it.\n\n## Test plan\n\n- plugin-approvals: **55 tests** (12 new: reassign permissions/dup/notify, remind throttle/permission, request-info pending invariant, comment participants, sla_due_at, flow_steps graph walk) ✅\n- E2E against showcase: all four endpoints 200; repeat remind → 429; reassign 403 for non-holders; timeline returns the new kinds with `actor_name`; `flow_steps` = Manager Review (current) → Executive Review (upcoming); `sla_due_at` present only when the node declares an SLA ✅\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

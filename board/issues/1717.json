@@ -1,0 +1,32 @@
+{
+  "number": 1717,
+  "kind": "pull_request",
+  "title": "docs(adr-0006): Phase 1 — mark framework cloud-plugin duplicates @deprecated",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T09:08:05Z",
+  "updated_at": "2026-06-11T09:44:15Z",
+  "closed_at": "2026-06-11T09:44:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T09:44:13Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1717",
+  "body": "## ADR-0006 Phase 1 — 去重声明 (also ADR-0007 ⑤ \"宣告 canonical\")\n\nLow-risk, declaration-only step of the multi-tenant runtime boundary refactor (cloud ADR-0006). The cloud repo's `@objectstack/objectos-runtime` is the **canonical** source for these plugins — `apps/objectos` already uses it, and its `marketplace-install-local` copy is **ahead** of this one (ADR-0036 `seeds:` rename). This marks the framework's **duplicate** copies `@deprecated` and points consumers at the canonical cloud copies.\n\n### Scope (ADR D5 delete-set only)\n`@deprecated` on: `MarketplaceProxyPlugin`, `MarketplaceInstallLocalPlugin`, `RuntimeConfigPlugin`, `cloud-url` (`DEFAULT_CLOUD_URL` / `resolveCloudUrl`) — file-level (above each export) **and** on the `packages/runtime/src/index.ts` re-exports.\n\n**Deliberately NOT deprecated:** `EnvironmentDriverRegistry` / `KernelManager` — those are *retained* generic contracts (ADR D3), converged later in Phase 3/5.\n\n### These copies are STILL load-bearing — do not delete yet\nThe framework CLI `serve.ts` dynamically imports these for cloud-dev serve mode, and the cloud app itself boots via the framework CLI. Each banner says explicitly: **DO NOT DELETE until ADR-0006 Phase 4** decouples the CLI. Phase 1 is a declaration only; deletion is Phase 4.\n\n### Safety\nJSDoc tags only — **no behavior change, no API removed**. `pnpm --filter @objectstack/runtime build` (incl. DTS) succeeds; `@objectstack/runtime` tests **381 passed**.\n\n> Pairs with cloud-repo ADR-0006 **Phase 0** safety-net PR (objectstack-ai/cloud#206). Merge order is not constrained — this PR removes nothing.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

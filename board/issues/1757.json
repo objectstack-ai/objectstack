@@ -1,0 +1,33 @@
+{
+  "number": 1757,
+  "kind": "pull_request",
+  "title": "docs(adr-0040): §5 build-scope rule — oversized goals decompose into phased modules",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T03:05:27Z",
+  "updated_at": "2026-06-12T03:16:27Z",
+  "closed_at": "2026-06-12T03:16:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T03:16:25Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1757",
+  "body": "Docs-only. Adds §5 to ADR-0040 recording the scope-guard design implemented in [cloud#242](https://github.com/objectstack-ai/cloud/pull/242):\n\n- **Soft layer**: `propose_blueprint` SCALE rule — oversized goals (ERP, hospital system…) blueprint only the core module; remaining modules become a phased roadmap in `assumptions`.\n- **Hard layer**: `apply_blueprint` rejects over-cap blueprints before staging (`blueprint_too_large`), default 20, single per-context limit = the plan-entitlement read point.\n- **Perception rule**: limits that can manifest as advice stay invisible (professional phasing methodology, never \"system limitation\"); limits that can only manifest as refusal are stated honestly at the moment of impact with a recovery path.\n- Locked by the L5 `golden_erp_scope` case.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

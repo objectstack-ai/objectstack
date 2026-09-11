@@ -1,0 +1,32 @@
+{
+  "number": 1952,
+  "kind": "pull_request",
+  "title": "feat(audit): declarative activity milestones (ADR-0052 §5b.2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T08:02:05Z",
+  "updated_at": "2026-06-16T08:02:54Z",
+  "closed_at": "2026-06-16T08:02:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T08:02:52Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1952",
+  "body": "## What\n\nADR-0052 **§5b.2** — declarative semantic activity **milestones**, the second tier of \"the platform generates activity, apps don't code it\" (tier 1 = field-level `trackHistory`, shipped in #1948).\n\nObject-level `activityMilestones`: when a watched field transitions INTO a configured value, the platform emits a **templated, semantic** activity row on the record timeline — `\"✅ Task completed: {title}\"`, `\"Deal won: {name}\"` — with **zero hook/flow code**. Takes precedence over the raw `\"Field: old → new\"` summary for the same update.\n\n```ts\n// on the object\nactivityMilestones: [\n  { field: 'status', value: 'done', summary: '✅ Task completed: {title}', type: 'completed' },\n]\n```\n\n- **spec**: `activityMilestones` on `ObjectSchema` (top-level) + liveness classification (`live`, consumer cited).\n- **plugin-audit**: `matchMilestone()` + `getObjectDef()`; summary precedence `milestone → field-change (§5b.1) → generic`; a milestone may set the activity `type`.\n- **showcase**: `showcase_task` fires `\"✅ Task completed: {title}\"` on status→done (+ `trackHistory` on status/priority).\n\n## Prior art\n\nSame posture as Salesforce Flow / ServiceNow business rules for *semantic* events, layered on the declarative field-tracking (Salesforce Feed Tracking / ServiceNow audit / Dataverse column auditing) shipped in #1948.\n\n## Verification (in the showcase, via browser)\n\n- `@objectstack/spec` + `@objectstack/plugin-audit` build clean; **liveness gate green** (object 58 classified, field 52); **plugin-audit 18/18 tests** (+2 milestone: interpolated summary + precedence; no-fire without a transition).\n- **Browser-verified in `examples/app-showcase`**: walking a task to `done` rendered **\"✅ Task completed: Build homepage\"** on the timeline (above the `trackHistory` \"Status: In Progress → In Review\" rows) — screenshot in the session.\n\n## Builds on\n\n#1948 (trackHistory, §5b.1). Remaining ADR-0052 tiers (P0b object-ownership moves; P2 event-bus + email/call/meeting; objectui feed surfacing) are separate, larger efforts — not in this PR.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

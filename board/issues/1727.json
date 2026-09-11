@@ -1,0 +1,32 @@
+{
+  "number": 1727,
+  "kind": "pull_request",
+  "title": "chore: bump pins — ADR-0037 P3 draft data preview (framework#1726 + objectui#1642)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T12:34:33Z",
+  "updated_at": "2026-06-11T12:42:56Z",
+  "closed_at": "2026-06-11T12:34:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1727",
+  "body": "Activates ADR-0037 Phase 3 end-to-end: draft-preview pages and the Live Canvas chart **real numbers from drafted seed rows before publish** ([framework#1726](https://github.com/objectstack-ai/framework/pull/1726) seed-overlay dataset queries; [objectui#1642](https://github.com/objectstack-ai/objectui/pull/1642) client flag + P2.5 same-document live refresh).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

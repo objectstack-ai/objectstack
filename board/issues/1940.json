@@ -1,0 +1,33 @@
+{
+  "number": 1940,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0051 — inline metadata views in docs (`metadata` fenced block)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T05:49:55Z",
+  "updated_at": "2026-06-16T06:51:51Z",
+  "closed_at": "2026-06-16T06:51:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T06:51:49Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1940",
+  "body": "## What\n\nAdds **ADR-0051**, specifying how an author embeds a *live, read-only metadata view* inside a `doc` — the **` ```metadata ` fenced block**.\n\nThis concretizes a concept ADR-0046 already reserved but never gave a syntax:\n- §3.5 — *derived content (field dictionaries, validation conditions, **permission matrices**) is a metadata view the platform renders live, never authored prose*.\n- §6.7 — the anonymous guardrail already names \"inline metadata views / live metadata embed\".\n\n## Key decisions\n\n- **Syntax**: a ` ```metadata ` fenced block whose body is a declarative reference (`type`/`name`/`object`/`mode`/`detail`). Chosen over directives/MDX because a fenced block is **already-legal CommonMark per §3.4** — it does **not** reopen the MDX/directive ban.\n- **Data, not code**: the body is a reference resolved by the platform's *own* trusted component, so it stays on the **data side of the ADR-0025/§3.4 trust boundary** that banned MDX. (A general `objectui` body could carry CEL/actions = code → deferred.)\n- **One runtime**: compiles 1:1 to a new read-only `element:metadata_viewer` SDUI component (`ComponentPropsMap`, `embeddableInDoc`). One component model, one schema, one permission path — no parallel renderer.\n- **Live transclusion**: rendered from current metadata at read time — change the flow, the doc's diagram changes. Two projections kept separate: authored **`detail`** (altitude) vs automatic, render-time **permission** projection.\n- **Kernel unchanged**: `doc.content` stays inert (§3.1); resolution is render-time only. Inherits §6.7 anonymous degradation verbatim.\n- **Scope**: metadata-only, phased **`state_machine` → `flow` → `permission`**; `object` and a general ` ```objectui ` fence explicitly deferred.\n\n## Scope of this PR\n\nDocumentation only — one new file under `docs/adr/`. No code/spec changes; the `MetadataEmbedSchema` and `element:metadata_viewer` shapes shown are illustrative and settle in a follow-up spec PR (P1).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

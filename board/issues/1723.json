@@ -1,0 +1,33 @@
+{
+  "number": 1723,
+  "kind": "pull_request",
+  "title": "feat(adr-0006)!: Phase 4 — remove cloud plugins from framework runtime + CLI",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T10:57:46Z",
+  "updated_at": "2026-06-11T11:00:11Z",
+  "closed_at": "2026-06-11T10:57:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T10:57:49Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1723",
+  "body": "## ADR-0006 Phase 4 — 框架 CLI 解耦 + 删云插件 (breaking; = cloud ADR-0007 ⑤完成)\n\nDeletes the framework's **deprecated duplicate** cloud plugins (marked `@deprecated` in #1717) and the CLI serve auto-inject that load-beared them. Cloud apps stopped booting through CLI cloud-serve in cloud#214/#215 (Phase 3), so nothing in the cloud product depends on these anymore.\n\n### Removed (public API — breaking)\n`MarketplaceProxyPlugin`, `MarketplaceInstallLocalPlugin`, `RuntimeConfigPlugin` (+ their `*Config` types), `DEFAULT_CLOUD_URL`, `resolveCloudUrl`; the `runtime/src/cloud/` implementation files + tests; CLI serve's 5b/5b-ii auto-inject blocks.\n\n### Kept (deliberately)\n- `cloud/environment-registry.ts` — `EnvironmentDriverRegistry` / `KernelManager` contracts (D3) + the `KernelResolver` seam (Phase 2). Both converge in **Phase 5**.\n- CLI `utils/console.ts` (Console static-serve — generic UI hosting, used by the cloud node bootstrap per D-CONSOLE Option 1) and `utils/cloud-config.ts` (its own unrelated `DEFAULT_CLOUD_URL` for `plugin publish` / `cloud login`).\n\n### Behavior change for vanilla OSS users (per ADR-0004 boundary)\n`objectstack dev` no longer mounts marketplace browse/install-local or `/api/v1/runtime/config`. Hosts that want them wire the canonical cloud copies explicitly (see cloud `apps/objectos-ee`'s config). Console SPA degrades gracefully (defaults on 404).\n\n### Validation\n- framework: runtime build + **370 tests** green; CLI tsc build + **240 tests** green; no dangling references.\n- cloud repo against this branch: **boot-smoke ALL GREEN**; typecheck clean on objectos-runtime / objectos / objectos-ee / cloud.\n- cloud `.framework-sha` bump lands as the paired cloud PR immediately after this merges (deploy_flow).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

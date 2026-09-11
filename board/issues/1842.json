@@ -1,0 +1,35 @@
+{
+  "number": 1842,
+  "kind": "pull_request",
+  "title": "docs(skills): document install command + generate skill catalog from frontmatter",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-14T07:45:44Z",
+  "updated_at": "2026-06-14T07:54:21Z",
+  "closed_at": "2026-06-14T07:54:20Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-14T07:54:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1842",
+  "body": "## Why\n\nA user couldn't find how to install the AI skills — because the install command (`npx skills add objectstack-ai/framework --all`) was **undocumented anywhere** in the site; it only ran inside `create-objectstack`. Investigating, the skills docs had also drifted badly:\n\n- `guides/skills.mdx` and `concepts/skills.mdx` described skills that **don't exist** (`objectstack-quickstart` / `objectstack-schema` / `objectstack-plugin` / `objectstack-hooks`) and omitted the real ones (`objectstack-platform` / `objectstack-data` / `objectstack-formula`).\n- Both claimed **\"10 skills\"** — there are 9.\n\nRoot cause: the skill catalog was hand-maintained in multiple places with no single source.\n\n## What\n\n**1. Document installation** (concepts + quick-start)\n- `concepts/skills.mdx`: new \"Installing skills\" section.\n- `getting-started/quick-start.mdx`: new \"Add AI skills to your editor\" step.\n- Both: `npx skills add objectstack-ai/framework --all` (whole bundle, idempotent, single versioned unit) + the `create-objectstack` auto-install path.\n\n**2. Single source of truth** — `packages/spec/scripts/build-skill-docs.ts`\n- Generates the `skills/README.md` Index table and the guide's Quick Reference table + per-skill cards from each `SKILL.md` frontmatter (name / description / domain / tags), between `BEGIN/END GENERATED` markers.\n- Scripts: `gen:skill-docs` (write), `check:skill-docs` (`--check`, for CI drift detection).\n- Per-file comment style: `{/* */}` for MDX, `<!-- -->` for the README `.md` (MDX rejects HTML comments — caught during browser verification).\n\n**3. Fix stale references** in `concepts/skills.mdx` — skill-boundaries diagram, delegation table, usage examples, and the `SKILL.md` frontmatter sample — to the real 9-skill set.\n\nNet: **−437 / +216** lines (removed fabricated content).\n\n## Verification\n\nRan the docs portal locally (`pnpm dev`); all three pages return 200 and render correctly (Quick Reference table, per-skill cards, corrected ASCII boundary diagram, install steps). Screenshots checked for the guide, concepts, and quick-start pages.\n\n## Follow-up (not in this PR)\n\nWire `check:skill-docs` into CI so the docs can't drift from `SKILL.md` again.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

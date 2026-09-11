@@ -1,0 +1,33 @@
+{
+  "number": 1951,
+  "kind": "pull_request",
+  "title": "docs(showcase): \"Live Metadata Views\" example doc (ADR-0051 P1)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T07:24:57Z",
+  "updated_at": "2026-06-16T08:00:23Z",
+  "closed_at": "2026-06-16T08:00:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T08:00:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1951",
+  "body": "Adds a showcase `doc` that demonstrates **ADR-0051** inline metadata views, and serves as the browser-verification fixture for the feature.\n\n`examples/app-showcase/src/docs/showcase_metadata_views_guide.md` embeds four ` ```metadata ` fences against existing showcase metadata:\n\n- `task_status_flow` / `project_status_flow` — state-machine lifecycles\n- `showcase_reassign_wizard` — a flow at business altitude (`detail: business`)\n- `showcase_contributor` — a permission matrix\n\n## Part of the ADR-0051 set\n\n- [framework#1940](https://github.com/objectstack-ai/framework/pull/1940) — the ADR (merged)\n- [framework#1942](https://github.com/objectstack-ai/framework/pull/1942) — spec: `element:metadata_viewer`\n- [objectui#1774](https://github.com/objectstack-ai/objectui/pull/1774) — the renderer + ` ```metadata ` fence hook\n- **this PR** — the showcase example / fixture\n\n## Independence & verification\n\nThe doc compiles through the existing doc collector unchanged (a ` ```metadata ` fence is valid CommonMark, not MDX), so this PR is independently mergeable. It **renders live** once objectui#1774 is deployed.\n\nVerified end-to-end in the browser: ran this showcase backend + the objectui console dev server and confirmed all four embeds resolve live from the showcase metadata with no console errors.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

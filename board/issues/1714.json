@@ -1,0 +1,32 @@
+{
+  "number": 1714,
+  "kind": "pull_request",
+  "title": "chore: bump objectui to 4f56567b7d29 (map node designer)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T07:29:03Z",
+  "updated_at": "2026-06-11T07:39:44Z",
+  "closed_at": "2026-06-11T07:39:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T07:39:42Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1714",
+  "body": "Bumps the pinned objectui console bundle from `2df743b0` → `4f56567b`, bringing in the only objectui change since the last bump: **#1633 — render the `map` node in the flow designer** (list-checks icon, Logic category, inspector config form). The map node's runtime shipped in framework #1709; this delivers its designer rendering to the framework-served console.\n\nVerified: `pnpm build:console` builds clean from objectui `4f56567b`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

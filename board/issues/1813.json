@@ -1,0 +1,36 @@
+{
+  "number": 1813,
+  "kind": "pull_request",
+  "title": "feat(apps): split platform apps into one-app packages (ADR-0048)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-13T09:39:25Z",
+  "updated_at": "2026-06-13T10:59:46Z",
+  "closed_at": "2026-06-13T10:59:44Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-13T10:59:44Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1813",
+  "body": "**Draft — the final commit is boot-critical and needs a live `os dev` / `os serve` boot to verify before merge.**\n\nImplements ADR-0048 \"one app per package\" for the platform's bundled apps: `plugin-auth` shipped **three** apps (setup/studio/account) under one package id, which made `/apps/<packageId>` ambiguous (the blocker that browser-verification surfaced). This splits them into their own one-app packages so package-id routing (option A, PR objectstack-ai/objectui#1693) can resume.\n\n## Commits\n1. **scaffold `@objectstack/studio`** (`packages/apps/studio`, ns `studio`) — boot-neutral\n2. **scaffold `@objectstack/setup`** (`packages/apps/setup`, ns `setup`, carries `SETUP_NAV_CONTRIBUTIONS`) — boot-neutral\n3. **reclaim `@objectstack/account`** for the console Account app (`packages/apps/account`, ns `account`); **delete the deprecated standalone account-portal SPA** (`apps/account`) — boot-neutral\n4. **⚠️ boot-critical switch**: drop `apps`/`navigationContributions` from `plugin-auth`'s manifest; register the three new packages in `dev-plugin.ts` + `serve.ts` after AuthPlugin; declare workspace deps.\n\n## Conventions\n- New home: **`packages/apps/*`** (added to pnpm workspace globs). `apps/*` (top-level) is for standalone SPAs and isn't reused.\n- Each package = 1 npm = 1 ObjectStack manifest = 1 app, distinct id `com.objectstack.{studio,setup,account}` + namespace; depends on `plugin-auth` for the objects it navigates.\n- All three added to the changeset **fixed** group with changeset entries.\n- AppSchemas still live in `@objectstack/platform-objects/apps` (new packages import them); moving the definitions in is a later non-behavioral cleanup.\n\n## Verification\n- ✅ All packages build (tsup CJS/ESM/DTS); `plugin-dev` + `cli` typecheck clean; `plugin-auth` (114) + `platform-objects` (55) tests pass.\n- ❌ **NOT runtime-boot-verified** — needs `os dev` (and `os serve`) to confirm the platform boots and `/apps/setup`, `/apps/studio`, `/apps/account` each resolve. That's why this is a draft.\n\n## Follow-ups\n- After boot-verify + merge: resume objectui#1693 (package-id routing + docs `/apps/:packageId/docs/:name`).\n- Optional: move the `*.app.ts` definitions (+ studio/setup i18n) into the new packages and drop the transitional platform-objects dependency.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

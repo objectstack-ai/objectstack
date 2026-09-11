@@ -1,0 +1,33 @@
+{
+  "number": 1852,
+  "kind": "pull_request",
+  "title": "fix(objectql): listDrafts surfaces env-wide drafts under a non-null org (orphaned-draft fix)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-14T15:55:30Z",
+  "updated_at": "2026-06-14T15:55:49Z",
+  "closed_at": "2026-06-14T15:55:41Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-14T15:55:41Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1852",
+  "body": "## Problem\n\n`GET /meta/_drafts` — the pending-changes list that drives the **Publish CTA** — calls `SysMetadataRepository.listDrafts`, which queried:\n\n```ts\n{ organization_id: this.organizationId, state: 'draft' }\n```\n\nAI-authored metadata is written **env-wide** (`organization_id IS NULL`). Under a **non-null active org** (every multi-tenant / cloud request) the strict equality dropped those drafts. So an AI-added field/view:\n\n- ✅ showed in `?preview=draft` (getMetaItems overlays env-wide rows)\n- ✅ would be promoted by `publish-drafts`\n- ❌ but never appeared in the pending-changes list → **the Publish CTA never showed → the user couldn't publish their AI-made change** (\"orphaned draft\").\n\n(In single-env `org=null` the old query already matched env-wide rows, so this only bit the multi-tenant/cloud path.)\n\n## Fix\n\nSurface **both** org-scoped and env-wide drafts — when the active org is non-null, match `organization_id = org OR organization_id IS NULL`; when null, keep the env-wide query. Mirrors how `getMetaItems`/preview already overlays env-wide drafts.\n\n## Verification\n\n- 2 regression tests: a non-null-org repo surfaces env-wide drafts; mixed org-scoped + env-wide returned while *other* orgs' drafts stay excluded. `listDrafts` suite green (6); mock engine extended to evaluate `$or`.\n- On the objectos-ee rig (single-env, org=null — the no-op path) the full loop is clean: draft → `_drafts` lists it → `publish-drafts` materializes the field immediately.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

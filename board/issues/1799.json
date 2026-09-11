@@ -1,0 +1,35 @@
+{
+  "number": 1799,
+  "kind": "pull_request",
+  "title": "fix(cloud-connection): install-local accepts compiled stack bundles",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-13T00:45:26Z",
+  "updated_at": "2026-06-13T00:52:17Z",
+  "closed_at": "2026-06-13T00:52:15Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-13T00:52:15Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1799",
+  "body": "Found running the original-goal E2E (publish a private package to the control plane → install it on a bound self-hosted runtime): `install-local` rejected every **published compiled bundle** with `Invalid manifest payload`, because the version payload (`dist/objectstack.json`) nests its meta under `.manifest` (`{manifest:{id,…}, objects, views, …}`) while ObjectQL's `registerApp` expects the flat app shape (top-level `id` + sections). Only hand-written flat manifests could ever install.\n\nFlatten the bundle shape on detection — both the cloud-fetch and inline/file-import paths.\n\n+2 tests (compiled-bundle flattening; flat manifest untouched); 44/44 green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

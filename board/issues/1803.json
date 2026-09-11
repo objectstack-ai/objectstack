@@ -1,0 +1,33 @@
+{
+  "number": 1803,
+  "kind": "pull_request",
+  "title": "feat(service-ai): open framework AI is query-only, declines app-building",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-13T01:53:22Z",
+  "updated_at": "2026-06-13T01:53:40Z",
+  "closed_at": "2026-06-13T01:53:39Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-13T01:53:39Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1803",
+  "body": "## 问题\n\n用户单独运行**开源 framework**（单环境运行时）时，`_console/ai` 的助手会把自己当成「开发助手」——给它发「帮我开发一个进销存」，它会输出整套系统设计方案、模块表、对象清单，表现得像在「开发应用」。但开源 framework **并不包含** AI 应用搭建能力（那是云端 `service-ai-studio` 插件提供的 `metadata_authoring`/`solution_design` skills 及其工具）。所以它只是在「演」开发——实际一个对象都建不出来，对开源用户是误导。\n\n按产品边界：**开源 framework 的 AI 只应支持数据查询，不应支持开发**（开发是付费/云端能力）。\n\n## 根因\n\nADR-0040 把助手统一成单一 `data_chat` persona，其 instructions 宣称「You can both ANSWER QUESTIONS ... and BUILD or CHANGE the application itself」。authoring 工具走的是「云端 AI Studio 插件挂载时才注册」的优雅降级——但只降级了**工具**，没降级**人设**。开源部署里工具不存在，LLM 仍照着「我能搭建」的人设侃侃而谈。\n\n## 改动\n\n`buildSystemMessages`：当本次激活的 skills 里**没有** authoring（build-register）skill（`metadata_authoring` / `solution_design`）时，追加一段「本部署能力说明」——明确「应用搭建/开发不可用，你只能查询/聚合/搜索既有数据并执行应用已暴露的 action；用户要你搭建/开发应用时，不要设计、不要假装，简短说明本版本不提供 AI 应用搭建，转而帮其探索数据」。\n\n- 以**实际 skill 是否激活**为开关：云端/EE 加载了 AI Studio → build-register 存在 → 完整搭建体验**零改动**；开源 framework → 自动收敛为查询专用。\n- 复用既有「条件式注入 system 指令」的范式（同 `autoPublishAiBuilds`）。\n- 新增两条测试覆盖「缺 / 有」authoring skill 两种情况。\n\n## 测试\n\n`chatbot-features.test.ts` 全绿（64/64，含新增 2 条）。service-ai 套件 256 个断言通过；2 个测试**文件**因新建 worktree 里 `@objectstack/types`/`@objectstack/spec` 尚未构建而无法 import（与本改动无关的构建顺序问题，CI 构建全图后即通过）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

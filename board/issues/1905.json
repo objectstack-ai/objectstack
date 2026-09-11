@@ -1,0 +1,33 @@
+{
+  "number": 1905,
+  "kind": "pull_request",
+  "title": "docs(agents): communicate with maintainers in Chinese",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T09:13:51Z",
+  "updated_at": "2026-06-15T09:20:43Z",
+  "closed_at": "2026-06-15T09:20:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T09:20:41Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1905",
+  "body": "Add a `## Communication` section to AGENTS.md — agents reply to maintainers in Chinese; repo artifacts (code, identifiers, commit messages, ADR/doc bodies) keep their English-leaning convention.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

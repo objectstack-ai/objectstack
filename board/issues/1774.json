@@ -1,0 +1,33 @@
+{
+  "number": 1774,
+  "kind": "pull_request",
+  "title": "feat(platform-objects): lock studio & account apps with ADR-0010 full protection",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T08:43:02Z",
+  "updated_at": "2026-06-12T08:56:31Z",
+  "closed_at": "2026-06-12T08:56:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T08:56:29Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1774",
+  "body": "## Summary\n\n`setup` already ships `protection: { lock: 'full' }` (ADR-0010 §3.7), but `studio` and `account` had no protection block, so tenant overlay writes via `PUT /api/v1/meta/app/{studio,account}` succeeded. The objectui NavigationSyncEffect bug demonstrated the hazard by writing auto-navigation pages into these writable system apps.\n\nBoth are core platform UI in the same class as Setup:\n- **studio** — the metadata workbench; a broken tenant overlay locks implementers out of the very surface used to repair metadata\n- **account** — every authenticated user's only self-service security surface (sessions / API keys / linked accounts), so a broken overlay is a security-relevant outage\n\n## Changes\n- Add `protection: { lock: 'full', reason, docsUrl }` to `studio.app.ts` and `account.app.ts`, mirroring `setup.app.ts`\n- Regression test pinning `lock: 'full'` on all three platform apps (and AppSchema parse)\n\n## Notes\n- Setup-style navigation contributions are unaffected — they are a registration-time in-memory merge, not overlay writes, and nothing in the repo targets studio/account with contributions\n- objectui's `isNavigationSyncableApp` already filters on `_lock ∈ {full, no-overlay}`, so client behavior is automatically correct once the server serves the lock\n- Server-side L3 enforcement applies in tenant scope (`environmentId` set); standalone/control-plane stacks skip it by design (`protocol.ts` `assertLockAllowsWrite`)\n\n## Test plan\n- [x] `vitest run src/platform-objects.test.ts` — new protection tests pass (the one failing SETUP_NAV_CONTRIBUTIONS test also fails on clean main, pre-existing)\n- [x] `tsc --noEmit` clean\n- [x] End-to-end: rebuilt package, booted showcase, `GET /api/v1/meta/app` serves `_lock: \"full\"` + reason for setup/studio/account\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 1808,
+  "kind": "pull_request",
+  "title": "fix(ADR-0046): serve package docs at runtime, not just in the compiled artifact",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-13T04:14:54Z",
+  "updated_at": "2026-06-13T04:51:52Z",
+  "closed_at": "2026-06-13T04:51:50Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-13T04:51:50Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1808",
+  "body": "## Problem\n\nPackage docs (`src/docs/*.md`, ADR-0046) compiled into a bundle **never reached the runtime**. `GET /meta/doc` returned `{\"type\":\"doc\",\"items\":[]}` and docs were invisible in the console — even though `os build` produced them and a pure-artifact boot served them fine. This is the actual reason \"the showcase has no docs\": the data was never there to render.\n\n## Root cause — two gaps, one per load path\n\n1. **`os dev` / `os serve` (config-load path).** With an `objectstack.config.ts` present, serve re-derives metadata from `defineStack(...)`. The markdown docs are **not** part of `defineStack` — they're a compile-time augmentation (`compile.ts` step 3d, `collectAndLintDocs`). So the dev/serve path loaded zero docs. `serve.ts` now collects `src/docs/*.md` into the stack on the config-load path too — collection only (additive; never blocks boot).\n\n2. **MetadataPlugin artifact loader.** `ARTIFACT_FIELD_TO_TYPE` (`packages/metadata/src/plugin.ts`) omitted `docs → doc`, so the bundle's `docs` array was skipped on that load path. Added the mapping for parity with the ObjectQL engine's `metadataArrayKeys`, plus a `_parseAndRegisterArtifact` regression test.\n\n## Verification (live)\n\n| Boot | `/meta/doc` before | after |\n|---|---|---|\n| `os dev` / `serve` (config) | `items:[]` | ✅ `showcase_index`, `showcase_docs_guide` |\n| pure artifact | already worked | ✅ still works |\n\n`servicePayload` now carries `docs` into `registerApp`; list + single-item (`/meta/doc/showcase_index` with content) both resolve. `@objectstack/metadata` 9/9 tests pass (incl. new regression); CLI typecheck clean.\n\n## Scope\n\nBackend/runtime only. The console-side docs **portal + nav entry** is a separate objectui PR.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 1863,
+  "kind": "pull_request",
+  "title": "feat(showcase): fill missing designer examples — hooks + AI tools (+ hook designer coverage)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T04:38:43Z",
+  "updated_at": "2026-06-15T07:01:58Z",
+  "closed_at": "2026-06-15T07:01:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T07:01:56Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1863",
+  "body": "Found while testing the **showcase** package's metadata designers in Studio against an isolated showcase backend. Two designers had **zero** instances (nothing to render), plus a real designer coverage gap.\n\n## 1. `hook` examples (0 → 3)\n`examples/app-showcase/src/hooks/` wired via `defineStack({ hooks })`:\n- `showcase_normalize_task_title` — beforeInsert/beforeUpdate, L2 JS body trimming the title (multi-event, mutates `ctx.input`).\n- `showcase_audit_task_completion` — afterUpdate gated by a CEL `condition`, `async` with a `retryPolicy`, `onError: log`, `capabilities: [log]`.\n- `showcase_warn_over_budget` — afterUpdate on `showcase_project`.\n\nBodies use the real After-hook context (`ctx.result` / `ctx.input` — there is no `ctx.record`) and are guarded with `typeof ctx.log === 'function'` so both a fresh seed and a warm restart boot with **0 hook errors**.\n\n## 2. AI `tool` examples (0 → 2)\n`FindProjectTool` was defined via `defineTool` but never imported into the config or passed to `defineStack`, so the tool designer was empty and the ProjectOps skill's `tools: ['showcase_find_project']` reference dangled. Wired via `defineStack({ tools })` and added a second **object-bound** tool (`showcase_summarize_project_tasks` — `objectName` + `requiresConfirmation`) so the designer covers both shapes; the skill now references both.\n\n## 3. `fix(spec)` — complete hook designer coverage\nThe hook form's Execution section exposed `async` / `onError` / `condition` but omitted `retryPolicy` and the top-level `timeout` (both real `HookSchema` props). Added a `retryPolicy` composite + `timeout` field.\n\n## Verification (browser, isolated showcase backend)\n- Hook list `0 → 3`; tool list `0 → 2`.\n- Hook designer renders every property incl. the **composite body editor (real JS, not `[object Object]`)** and Execution: async / onError / **Timeout** / condition / **Retry Policy → Max Retries / Backoff Ms**.\n- Tool designer renders name/label/description/category/**objectName**/active/builtIn/**requiresConfirmation** + the **parameters JSON schema** as an input-params table + example LLM call.\n- Fresh DB seed + warm restart: **0 runtime errors**.\n- Also verified the **field-zoo** object designer renders ~28 distinct field-type widgets; showcase is banner-clean.\n\n## Note (out of scope, pre-existing)\nThe showcase's own `pnpm typecheck` is already red on `main` (not in the CI gate): the `Field.*` builders type predicate params with the **output** type (`z.infer`), so the documented **string shorthand** for `requiredWhen` / `visibleWhen` / `readonlyWhen` fails tsc even though it's valid at runtime. That's a spec type-ergonomics fix (use `z.input`), best done separately.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

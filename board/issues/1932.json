@@ -1,0 +1,34 @@
+{
+  "number": 1932,
+  "kind": "pull_request",
+  "title": "chore(spec): govern ai (Agent/Tool/Skill) + allowlist mode in the liveness gate",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T02:23:18Z",
+  "updated_at": "2026-06-16T02:42:50Z",
+  "closed_at": "2026-06-16T02:36:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T02:36:07Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1932",
+  "body": "Third category for the spec-liveness gate, plus the refactor needed to make noisy categories tractable.\n\n> **Stacked on #1924 (identity).** Diff includes that commit until it merges; review after #1924.\n\n## Why the refactor\nThe json-schema **categories don't map to \"authorable metadata types\"** — `ai` is mostly embedder/knowledge/model/runtime DTOs, with only Agent/Tool/Skill author-written. Blanket \"classify every object schema\" doesn't scale. Two additions:\n\n- **allowlist mode** — `\"mode\":\"allowlist\"` + `\"governed\":[\"Agent\",\"Tool\",\"Skill\"]`; only those are checked, the rest of the category is out of scope. A `governed` name that no longer resolves is reported (catches renames silently dropping coverage).\n- **framework-field auto-classification** — the ADR-0010 provenance/lock overlay fields (`_lock*`, `_provenance`, `_packageId/Version`, `protection`) appear on every type and are system-stamped; the gate auto-classifies them `live` so ledgers don't repeat them.\n\n## `ai` findings (seeded from the agent/tool/skill audits)\n**63 props: 46 live / 5 experimental / 12 dead, 0 unclassified.**\n\n- **Agent** — core (name/role/instructions/model/skills/tools/active/planning) live; **`access`/`permissions`/`visibility`/`tenantId` DEAD** — \"who can chat with this agent\" is a no-op (the chat route hardcodes `['ai:chat','ai:agents']`, `agent-routes.ts:109`; ADR-0049 #1884). `knowledge` dead (shape drift). `lifecycle`/`memory`/`guardrails`/`structuredOutput` experimental (aspirational autonomy). `model.provider`/`topP` dead within a live `model`.\n- **Tool** — **write-only metadata** (projected one-way for Studio; runtime uses a parallel `AIToolDefinition`). name/description/parameters/objectName live; category/requiresConfirmation/active/builtIn/permissions dead; outputSchema experimental.\n- **Skill** — name/label/description/instructions/tools/`triggerConditions`/active live; **`triggerPhrases` dead** (no intent matcher exists); `permissions` dead (+ `requiredPermissions` naming drift).\n\n## Gate result\n```\nsecurity: 93 (26 live / 1 exp / 66 dead)\nidentity:  4 (3 live / 1 dead)\nai:       63 (46 live / 5 exp / 12 dead)\nall 0 unclassified\n```\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

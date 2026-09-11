@@ -1,0 +1,33 @@
+{
+  "number": 1820,
+  "kind": "pull_request",
+  "title": "feat(service-ai): visualize_data tool — return charts from AI data queries",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/l",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-13T20:54:29Z",
+  "updated_at": "2026-06-13T21:05:21Z",
+  "closed_at": "2026-06-13T21:05:19Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-13T21:05:19Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1820",
+  "body": "## What\n\nLets the AI data-query assistant answer with a **chart** instead of only text. Adds a `visualize_data` tool that aggregates a data object via the existing analytics service and streams the result to the client as a `data-chart` part for inline rendering.\n\nThe frontend half (rendering the `data-chart` part in the chat bubble) is a companion PR in **objectui** (`plugin-chatbot`).\n\n## How\n\n- **`tools/visualize-data.tool.ts`** — `VISUALIZE_DATA_TOOL` + handler + `registerVisualizeDataTool`. Maps the tool args (`objectName`, `dimension`, `measures[{function,field}]`, `chartType`, `where`) into an `AnalyticsQuery` (auto-inferred cube; `function+field` → measure key `count`/`<field>_sum`/…), runs `IAnalyticsService.query`, shapes rows into the SDUI `<chart>` contract (`chartType`, `data`, `xAxisKey`, `series`), and emits `ctx.onProgress({ type: 'data-chart', id, data })`. Returns a compact JSON summary so the model narrates.\n- **`plugin.ts`** — registers the tool when an `analytics` service is present; persists it as `tool` metadata in lockstep (Studio visibility).\n- **`skills/data-explorer-skill.ts`** — exposes `visualize_data`, adds chart trigger phrases, and instructs the agent to prefer it for \"chart/plot/trend/breakdown\" asks.\n\nReuses the same `onProgress` → Vercel UI-message-stream `data-*` channel that `data-build-progress` already uses — **no protocol/contract changes**.\n\n## Testing\n\n- Unit: `visualize-data.tool.test.ts` (5 tests) — measure-key mapping, `where` pass-through, default chartType, `data-chart` payload shape, error path.\n- End-to-end (live, real LLM via Vercel AI Gateway): AI picks `visualize_data` → analytics auto-infers a cube for `showcase_task` by `status` → `data-chart` part → a 5-bar chart renders in the console chat bubble.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

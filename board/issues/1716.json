@@ -1,0 +1,33 @@
+{
+  "number": 1716,
+  "kind": "pull_request",
+  "title": "test(automation)+showcase: nested control-flow composition",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T07:50:05Z",
+  "updated_at": "2026-06-11T08:39:08Z",
+  "closed_at": "2026-06-11T08:39:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T08:39:05Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1716",
+  "body": "## Summary\nSingle-construct tests cover `loop` / `parallel` / `try_catch` in isolation; nothing exercised their **interactions** when nested. This adds both the deterministic proof and a worked composite showcase example (the recommendation from the \"should we add more complex flows?\" discussion — value is in *composition*, not more single-concept coverage).\n\n### Engine tests — `nested-composition.test.ts` (+3)\n- **parallel inside loop**: the loop iterator is visible to a node in a nested parallel branch (scope flows *in*); step folding tags each step with its **innermost** container (leaf → `parallel-branch`/`inner_par`; the parallel node → `loop-body`/`outer_loop`); the after-block continuation runs once.\n- **loop inside try_catch**: deepest step folds to the loop, the loop folds to the try region.\n- **scope propagation**: a mutation made deep inside nested regions is visible to the after-block (regions run in the enclosing scope; last iteration wins).\n\n### Showcase — `showcase_project_escalation`\nOn health → red: a `decision` branches on severity → the critical path runs a `parallel` alert block then a `try/catch` incident push (catch logs the failure); the normal path sends one notification; both converge. Combines decision + parallel + try_catch with converging edges in one realistic flow.\n\n## Test plan\n- [x] Full service-automation suite **180 green** (177 + 3).\n- [x] Browser-verified live: **critical path** ran `start → triage → alert(parallel ×2, tagged parallel-branch) → push_incident(http failed → catch tagged catch) → converge`, completed; **normal path** (budget ≤ 200k) took the single-notify branch and skipped parallel/try_catch; the **designer** renders the nested structure with correct construct icons (diamond/fork/shield) + conditional edges; the **Runs panel** shows the folded nesting.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

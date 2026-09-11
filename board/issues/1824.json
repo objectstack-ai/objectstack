@@ -1,0 +1,30 @@
+{
+  "number": 1824,
+  "kind": "issue",
+  "title": "ADR-0048 follow-up: package-scoped metadata overlays (env-wide overlay can't disambiguate same-name collisions)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-13T21:36:51Z",
+  "updated_at": "2026-06-13T22:12:23Z",
+  "closed_at": "2026-06-13T22:12:23Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1824",
+  "body": "## Context\n\nADR-0048 (package-id as route/identity key) landed across #1810, #1813, #1816, #1819, #1822 (+ objectui #1708, #1711). Single-item reads (`?package=`), the Studio editor, and the runtime render surface (dashboard/report/page/doc via prefer-local) now resolve same-name collisions to the correct package — **for pure-artifact items** (the marketplace default).\n\n## The remaining gap\n\nA package-less, **env-wide customization overlay** (a `sys_metadata` row with `package_id` NULL) for a name that collides across two installed packages is **inherently ambiguous** and cannot be disambiguated today.\n\nRoot cause is schema-level: `sys_metadata` has a UNIQUE index on `(type, name, organization_id)` (`idx_sys_metadata_overlay_active` / `…_draft`), **not** including `package_id`. So:\n\n- At most ONE active overlay row can exist per `(type, name, org)`.\n- `restoreMetadataFromDb` rehydrates that row under the **bare** registry key (no package), where it takes ADR-0005 overlay precedence over BOTH packages' composite artifacts.\n- A `getMetaItem(type, name, packageId)` whose overlay query misses the scoped `package_id` falls back to the package-less row and serves the same overlay for every package.\n\nConcretely: showcase ships `page/home`, studio ships `page/home`; an admin customizes one → the env overlay shadows both, and `?package=` can't tell them apart.\n\n## Proposed direction (needs an ADR / design decision)\n\nMake overlays package-aware:\n- Add `package_id` to the overlay uniqueness key: `UNIQUE(type, name, organization_id, package_id)` (migration + backfill).\n- `saveMetaItem` binds the overlay to the edited item's owning package (the Studio editor already threads `?package=` since #1711 — the write path needs to persist it).\n- `restoreMetadataFromDb` registers package-bound overlays under the composite key, not bare.\n- `protocol.getMetaItem` / `getMetaItemLayered` overlay queries already prefer `package_id`-scoped rows (ADR-0048); the package-less fallback should only apply to genuinely package-less (legacy/global) overlays.\n\n### Open questions\n- Migration story for existing package-less overlay rows (treat as global? attribute to first-match package? leave as-is with a lint?).\n- Should a package-less overlay still be allowed (an intentional \"apply to all same-named items\" escape hatch), or is every overlay now package-bound?\n- Interaction with org-scoped vs env-wide precedence (ADR-0005).\n\n## Acceptance\n- Two installed packages each shipping `page/home`, each with its own overlay, resolve independently via `?package=` and in the Studio layered/editor view.\n- ADR-0005 overlay precedence preserved for the single-package case.\n- Browser-verified with a real collision (as #1822 was).\n\nOut of scope: pure-artifact collisions (already fixed in #1822)."
+}

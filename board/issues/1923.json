@@ -1,0 +1,34 @@
+{
+  "number": 1923,
+  "kind": "pull_request",
+  "title": "chore(spec): mark PolicySchema properties experimental — kill false compliance (ADR-0049 #1882)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T15:46:24Z",
+  "updated_at": "2026-06-15T16:42:29Z",
+  "closed_at": "2026-06-15T16:42:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T16:42:26Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1923",
+  "body": "Operationalizes [ADR-0049](../blob/main/docs/adr/0049-no-unenforced-security-properties.md)'s \"mark `experimental` now\" disposition for `PolicySchema` (#1882), which was only half-applied.\n\n## The gap\n`policy.zod.ts` had a top-of-file JSDoc warning and a marked `name`, but the actual sub-properties — password complexity, session idle/absolute timeout, **`forceMfa`**, the IP allow-list, audit retention/redaction — still carried plain `.describe()` text. JSDoc doesn't reach generated artifacts, so the **published reference docs showed `forceMfa` as \"Require 2FA for all users\" with no caveat** — a false-compliance signal for a property that enforces nothing (`better-auth` runs hardcoded defaults; PolicySchema isn't even registered as a metadata type).\n\n## Change\nPropagate `[EXPERIMENTAL — not enforced]` to **every** PolicySchema property. Description-only — **no behaviour change**. The marker now reaches:\n- the generated reference doc (`content/docs/references/security/policy.mdx` — regenerated; `forceMfa` etc. now flagged), and\n- the spec-liveness gate (#1919), which classifies them `experimental` instead of `dead`.\n\n## Liveness gate (security) after this PR\n`26 live / 35 experimental / 32 dead`, 0 unclassified (was `26 / 1 / 66`). The PolicySchema tree + the already-marked `allow{Transfer,Restore,Purge}` move dead→experimental, driven by the spec markers (ledger reconciled so markers are the source of truth). The **remaining 32 dead** stay as the enforce-or-remove worklist: `isProfile`, `contextVariables`, the spec `SharingRule` runtime divergence, and the no-roadmap removal candidates (`Territory`/`TerritoryModel`/`RLSConfig`/`RLSAuditConfig`).\n\nPart of the long-term spec↔runtime alignment track. Builds on #1919 (the gate) and ADR-0049 (the umbrella decision).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

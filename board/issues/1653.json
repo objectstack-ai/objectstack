@@ -1,0 +1,32 @@
+{
+  "number": 1653,
+  "kind": "pull_request",
+  "title": "feat(example-showcase): demo field conditional rules on Invoice (B2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-07T13:13:44Z",
+  "updated_at": "2026-06-07T13:17:49Z",
+  "closed_at": "2026-06-07T13:17:47Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-07T13:17:47Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1653",
+  "body": "## What\n\nExercises the B2 dual-side **field conditional rules** end-to-end on the showcase Invoice header:\n\n```ts\nissued_on: Field.date({ requiredWhen: \"record.status in ['sent', 'paid']\" }),\ntax_rate:  Field.number({ readonlyWhen: \"record.status == 'paid'\" }),\npaid_on:   Field.date({\n  visibleWhen:  \"record.status == 'paid'\",   // UX-only — hidden until paid\n  requiredWhen: \"record.status == 'paid'\",   // enforced client AND server\n}),\n```\n\n- `requiredWhen` / `readonlyWhen` are enforced server-side by this repo's rule-validator + `stripReadonlyWhenFields` (shipped in #1649); the client honors all three reactively via `@objectstack/formula` (objectui PR #1578).\n- `visibleWhen` is a pure client UX affordance.\n\n## Verification\n\nDrives the objectui `field-conditional-rules` live e2e (Status → paid/sent/draft re-gates each dependent field). Example-only change; no published package affected.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

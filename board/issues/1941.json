@@ -1,0 +1,35 @@
+{
+  "number": 1941,
+  "kind": "pull_request",
+  "title": "feat(objectql): accept execution context via trailing options arg on read methods",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T05:50:15Z",
+  "updated_at": "2026-06-16T05:58:44Z",
+  "closed_at": "2026-06-16T05:58:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T05:58:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1941",
+  "body": "## Why (root cause of a recurring AI-written bug class)\n\nThe engine's **read** methods take execution context **inside the query** (`query.context`), while the **write** methods take it in a **trailing `options.context`**:\n\n| method | context location |\n|---|---|\n| `insert` / `update` | 3rd arg `options.context` |\n| `find` / `findOne` / `count` / `aggregate` | inside the query (2nd arg) |\n\nSo the *same* `{ context: { isSystem: true } }` object is **correct** as the 3rd arg to `insert` but **silently dropped** as the 3rd arg to `find`. This is a real, recurring footgun — an intended `isSystem` bypass just vanishes, and the read comes back empty/over-scoped the moment a scoping hook is added. It's the same shape as the staging \"all environments invisible\" P0, and an audit found it **live right now** in security-critical paths:\n\n- `plugin-security/{auto-org-admin-grant,bootstrap-platform-admin}`, `plugin-auth/auth-plugin`, `plugin-org-scoping/ensure-default-organization`\n- (cloud) `objectos-runtime/auth-proxy-plugin`, `service-cloud/routes/environment-crud`, plus a couple of cloud tests\n\nIt's also the **AI-error root cause**: the read API fights the near-universal convention (and an agent's instinct) that \"context/options goes in the trailing argument\", so people and AI keep putting it there and losing it.\n\n## What\n\nRead methods now **also** accept `options.context` (trailing 3rd arg), merged into the effective context (`options` wins when both are given). `query.context` stays fully supported — purely additive, backward compatible. One rule now spans reads and writes: **execution context goes in the trailing `options` argument.**\n\nThis **additively fixes** all the dropped-context call sites above with zero call-site edits — their intended context now takes effect.\n\n## Tests\n\n+5 engine cases (options.context honored on find/findOne/count; legacy query.context still works; options wins on conflict). Full suites green: objectql **621**, plugin-security **87**, plugin-auth **118**, plugin-org-scoping **15**.\n\nFollow-up (separate): cloud bumps `.framework-sha` to pick this up (its dropped-context sites then self-heal).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

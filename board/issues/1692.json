@@ -1,0 +1,32 @@
+{
+  "number": 1692,
+  "kind": "pull_request",
+  "title": "feat(spec)!: trim ChartTypeSchema to distinctly-renderable families",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-10T15:29:49Z",
+  "updated_at": "2026-06-10T15:37:59Z",
+  "closed_at": "2026-06-10T15:37:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-10T15:37:55Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1692",
+  "body": "## ⚠️ BREAKING (spec major)\n\n`ChartTypeSchema` drops **8 variant types** that only rendered as their base chart — so the taxonomy no longer advertises a type that renders as something else (the last item from the Chart Gallery review: spec ↔ renderer ↔ showcase now in lockstep).\n\n**Removed (→ what they actually drew):** `grouped-bar` / `stacked-bar` / `bi-polar-bar` (→ bar, no multi-series grouping/stacking), `stacked-area` (→ area), `step-line` / `spline` (→ line), `pyramid` (→ funnel), `bubble` (→ scatter, no size encoding).\n\n**Kept:** bar / horizontal-bar / column, line / area, pie / donut / funnel, scatter, treemap / sankey, radar, table / pivot, and the single-value performance group `metric` / `kpi` / `gauge` / `solid-gauge` / `bullet` (honest values today; a real dial when a gauge renderer lands — `gauge` is used downstream by hotcrm's SLA widget, so it stays).\n\n## Why safe\n**0 downstream usages** of the 8 removed types — the showcase gallery was already trimmed ([#1690](https://github.com/objectstack-ai/framework/pull/1690)), and hotcrm/templates use none of them (verified). Only spec tests + the regenerated reference doc needed updating.\n\n## Changes\n- `chart.zod.ts` — enum trimmed; taxonomy NOTE documents both exclusion groups (unmodellable families + fallback-only variants).\n- `chart.test.ts` — removed types moved to the reject list (dedicated case).\n- showcase `coverage.test.ts` — `FALLBACK_ONLY` simplified to the 4 metric-synonyms (the 8 variants are gone from the enum).\n- regenerated `references/ui/chart.mdx`.\n\n## Migration\nA widget/series using a removed type switches to its base: `stacked-bar`→`bar`, `spline`→`line`, `pyramid`→`funnel`, `bubble`→`scatter`, etc. They can return via an opt-in renderer once a real renderer + data model backs them.\n\n`@objectstack/spec` 6527/6527, `turbo build` 72/72, `test` 123/123.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

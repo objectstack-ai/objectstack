@@ -1,0 +1,35 @@
+{
+  "number": 1848,
+  "kind": "pull_request",
+  "title": "feat(ADR-0046): per-locale documentation content (doc i18n)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-14T12:43:56Z",
+  "updated_at": "2026-06-14T13:08:11Z",
+  "closed_at": "2026-06-14T13:08:09Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-14T13:08:09Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1848",
+  "body": "## Why\n\nThe console runs in many languages, but `doc` metadata (ADR-0046) shipped a single body — so a Chinese console rendered English docs. This adds per-locale documentation content, reusing the REST layer's existing `Accept-Language` negotiation, so docs localize on a language switch.\n\n## What\n\n**Authoring** — two paths, both flat (ADR-0046's no-subdirectory rule holds):\n- Flat-file packages: sibling variant files `src/docs/<name>.<locale>.md` (e.g. `crm_lead_guide.zh.md`, `..pt-BR.md`). Base `<name>.md` is the default + fallback.\n- TS-first code packages: inline `translations` on the `Doc` object.\n\n**Layers**\n- **spec** — `DocSchema.translations` (`locale → {label?,description?,content}`) + `resolveDocLocale(doc, locale)`: collapses to the best match (exact → primary subtag `zh-CN`→`zh` → base) with per-field fallback, and strips the `translations` map.\n- **cli/collect-docs** — variant files fold into the base doc's `translations`; lints orphan + duplicate variants and applies the v1 MDX/image bans to variant content too.\n- **rest** — `/meta/doc` (list + single) resolves the request locale from the existing `Accept-Language` / `?locale` path, returns one localized body, and never ships `translations`. Doc detail bypasses the response cache so a language switch can't return a stale-locale body.\n- **setup / studio** — built-in overview docs now ship `zh` translations (inline).\n- **showcase** — `showcase_index.zh.md` demonstrates the flat-file variant path.\n\nNo console change needed: it already sends the active UI language as `Accept-Language` (`createAuthenticatedFetch.ts`).\n\n## Verification\n\n- Unit: spec `resolveDocLocale` (exact/subtag-fallback/per-field-inherit/unknown) — 11/11; collect-docs variant fold + orphan + MDX-ban-on-variant — 16/16. All changed packages build/typecheck clean.\n- API (the exact header the console sends): `GET /meta/doc/setup_overview` with `Accept-Language: zh` → \"Setup 概览\" + Chinese body, `translations` stripped; default → English. Flat-file `showcase_index` variant → Chinese. \n- Browser: Chinese console (`<html lang=zh>`) renders the Setup doc fully in Chinese (用户与认证 / 角色与权限 / 记录可见性), inline `sys_user` highlighted. Screenshot captured.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

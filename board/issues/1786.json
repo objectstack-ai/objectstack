@@ -1,0 +1,35 @@
+{
+  "number": 1786,
+  "kind": "pull_request",
+  "title": "fix(cloud-connection): never present env_local/proj_local as cloud environment ids",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T12:46:13Z",
+  "updated_at": "2026-06-12T12:46:33Z",
+  "closed_at": "2026-06-12T12:46:20Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T12:46:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1786",
+  "body": "Found during the runtime-identity-binding E2E: `objectstack dev` exports `OS_ENVIRONMENT_ID=env_local` (a local-kernel identifier), which the cloud-connection plugin treated as a cloud environment id — the bind then 404s against a non-existent env, resurrecting exactly the phantom-environment confusion the ADR removes. Filter the two CLI sentinels in `resolveEnvironmentId`; such runtimes read as cleanly unbound and bind environment-less.\n\n+1 test; 41/41 green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

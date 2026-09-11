@@ -1,0 +1,34 @@
+{
+  "number": 1724,
+  "kind": "pull_request",
+  "title": "feat(adr-0006)!: Phase 5 — env resolution converges into the KernelResolver seam",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T11:26:12Z",
+  "updated_at": "2026-06-11T11:28:28Z",
+  "closed_at": "2026-06-11T11:26:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T11:26:16Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1724",
+  "body": "## ADR-0006 Phase 5 — 解析策略全归 cloud (final phase; breaking)\n\nThe dispatcher's entire multi-tenant environment resolution (URL → hostname → `x-environment-id` → session activeEnv → org default-env → single-env default, all registry-driven) **moves to the cloud distribution's resolver** behind the `KernelResolver` seam from Phase 2 (#1718). The framework dispatcher keeps only its own URL-parsing conventions, contributed as **hints** (`context.routePath`, unvalidated `context.urlEnvironmentId`), and serves `defaultKernel` when no resolver is registered.\n\n### Removed (breaking)\n- `HttpDispatcherOptions.kernelManager` + the dispatcher's `env-registry` wiring (positional ctor param kept-but-ignored so 3-arg callers compile)\n- `EnvironmentDriverRegistry` / `KernelManager` type exports + `runtime/src/cloud/environment-registry.ts` → **the `cloud/` directory is gone from the framework runtime**\n- `createHonoApp` `envRegistry`/`kernelManager` passthroughs (options deprecated-ignored)\n\n### Contract (documented on `KernelResolver`)\nResolver owns env resolution + kernel selection; SETS `context.environmentId`/`dataDriver`; downstream stages (membership enforcement, scope TTL touch, scoped services, the data-plane 428 guard) key off them unchanged. The 428 guard's multi-tenant signal is now \"a kernel-resolver is registered\" (was: env-registry service).\n\n### Tests moved with the behavior\nThe `resolveEnvironmentContext` suite is ported to cloud `kernel-resolver.test.ts` (URL-param precedence, `/cloud` skip, header fallthrough + new hostname/platform/default-project/unresolved cases).\n\n### Validation\nFull-repo build sweep clean · runtime **368** + cli **240** + rest **100** + hono **67** green · cloud against this checkout: **boot-smoke ALL GREEN**, objectos-runtime **85**, typecheck clean ×4, live file-mode HTTP identical (hostname→env now through the cloud resolver).\n\nPairs with the cloud PR (resolver impl + `.framework-sha` bump) — landing immediately after.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

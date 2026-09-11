@@ -1,0 +1,33 @@
+{
+  "number": 1826,
+  "kind": "pull_request",
+  "title": "feat(objectql): opt-in sys_metadata hydration for isolated project kernels",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-13T21:47:09Z",
+  "updated_at": "2026-06-13T21:48:36Z",
+  "closed_at": "2026-06-13T21:48:34Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-13T21:48:34Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1826",
+  "body": "## Problem\n\nBoot Phase-2 hydration (`restoreMetadataFromDb` → `loadMetaFromDb`, which registers objects **with their fields** into the `SchemaRegistry`) is gated on `environmentId === undefined` ([plugin.ts](packages/objectql/src/plugin.ts)). That gate assumes every project kernel sources metadata from a remote artifact / control-plane proxy and has **no** local `sys_metadata`.\n\nThat's untrue for an **isolated, proxy-free project kernel that persists its OWN `sys_metadata` locally** — the cloud single-env tenant runtime (Turso). There, objects **created at runtime** (e.g. via AI Studio) are **not** in the boot artifact manifest, so after a container restart they never re-enter the registry. `registry.getObject(name)` then returns nothing for them, and every registry consumer silently degrades — most visibly the `engine.find()` unknown-`$select` guard, which can no longer drop a phantom projected column and lets it zero the whole result set.\n\nConfirmed against a live env (cloud#290): `product` was created at runtime, its fields are stored **inline** in `sys_metadata`, yet the guard never fired because the object wasn't in the engine registry after redeploy.\n\n## Fix\n\nAdd an explicit `hydrateMetadataFromDb` plugin option (default `false`, so the control-plane/proxy path is **unchanged**). When set, Phase-2 hydration runs even with `environmentId` defined.\n\nSafe because:\n- Each engine owns its **own** `SchemaRegistry` instance — the historical process-wide singleton is gone (`engine.ts:274`), so there's no cross-kernel leakage.\n- `loadMetaFromDb` already tolerates a missing `sys_metadata` table (graceful no-op).\n\nThe cloud `artifact-kernel-factory` — documented as proxy-free with local `sys_metadata` and an isolated registry — opts in (separate cloud PR + SHA bump).\n\n## Tests\n\n`plugin.integration.test.ts` (+2):\n- a project kernel (`environmentId` set) **without** the opt-in does NOT read local `sys_metadata` and does NOT register the runtime object (current behavior preserved);\n- **with** `hydrateMetadataFromDb: true` it hydrates and `registry.getObject('product').fields` contains the inline field (fails without the gate change).\n\nFull `plugin.integration.test.ts`: 25 pass. Package builds + typechecks clean.\n\nTracks objectstack-ai/cloud#290.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

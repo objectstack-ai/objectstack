@@ -1,0 +1,30 @@
+{
+  "number": 1491,
+  "kind": "issue",
+  "title": "Record-change trigger plugin loads but flows never fire on data writes (7.4.1)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T20:56:50Z",
+  "updated_at": "2026-06-15T13:29:59Z",
+  "closed_at": "2026-06-15T13:29:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1491",
+  "body": "## Summary\n\nWith the `triggers` capability enabled, `@objectstack/plugin-trigger-record-change` **loads** (appears in the started-plugins list) but **record-change flows are never launched** when records are created/updated through the REST data API. Object-level L2 lifecycle hooks fire correctly on the same writes, so the ObjectQL hook pipeline itself works — the gap is specifically in the trigger-plugin → automation wiring.\n\nScheduled flows are likely affected by the same wiring (couldn't be confirmed — cron-bound).\n\n## Environment\n\n- `@objectstack/runtime` **7.4.1**\n- `@objectstack/cli` **7.4.1**\n- `@objectstack/service-automation` **7.4.1**\n- `@objectstack/plugin-trigger-record-change` **7.4.1**\n- `@objectstack/plugin-trigger-schedule` **7.4.1**\n- `@objectstack/objectql` **7.4.1**\n- Driver: `sqlite-wasm` · Node **v25.9.0** · launched via `objectstack start`\n- Repro app: https://github.com/objectstack-ai/hotcrm (flow `lead_assignment`)\n\n## Repro\n\n1. App `requires: [..., 'triggers', ...]` → `RecordChangeTriggerPlugin` + `ScheduleTriggerPlugin` appear in the **\"Plugins: N loaded\"** banner.\n2. Define a `record_change` flow whose `start` node config matches the documented contract resolved by `resolveTriggerBinding()`:\n   ```ts\n   { id: 'start', type: 'start',\n     config: { objectName: 'crm_lead', triggerType: 'record-after-create' } }\n   ```\n   Body: a `decision` + `update_record` that stamps a field (e.g. `next_followup_date`).\n3. `POST /api/v1/data/crm_lead` to create a record.\n4. Poll the record for up to 30s.\n\n## Expected\n\nThe flow binds to the ObjectQL `afterInsert` hook (`triggerTypeToHookEvent('record-after-create') === 'afterInsert'`) and runs, stamping the field.\n\n## Actual\n\nThe field is never written; `updated_at` is unchanged after 30s. The flow does not run. Same result for `record-after-update` flows (case escalation, opportunity approval, CSAT followup).\n\n## Evidence that the rest of the stack works\n\n- **L2 object hooks DO fire on REST writes**: a `beforeInsert` hook on `crm_lead` recomputed `rating` (sent `rating: \"5\"`, stored `rating: \"1\"`), proving ObjectQL lifecycle hooks run on the REST data path.\n- Build/registration is clean: 10 flows register; Studio reports **zero** metadata-validation issues.\n- `triggerType` values map correctly: `triggerTypeToHookEvent('record-after-create') → 'afterInsert'`, `'record-after-update' → 'afterUpdate'`.\n- The data engine exposes `registerHook` (confirmed at runtime: `objectql engine = OK registerHook? function`).\n\n## What I could trace (read-only, from dist)\n\n- `service-automation` `resolveTriggerBinding()` requires `start.config.triggerType` starting with `record-` (or `flow.type === 'schedule'`). ✅ satisfied.\n- `registerFlow()` → `activateFlowTrigger()`; and `registerTrigger()` re-binds already-registered flows, so plugin/flow registration **ordering** should be handled.\n- `RecordChangeTriggerPlugin.start()` registers the trigger on the `kernel:ready` hook via `automation.registerTrigger(...)`, then `start(binding, cb)` calls `engine.registerHook(hookEvent, handler, { object, packageId })`.\n\nSo the binding *should* occur, but empirically the handler never runs.\n\n## Blocker for diagnosis\n\n`packages/cli` `serve` forces the kernel logger to **`level: 'silent'`** (`const loggerConfig = { level: 'silent' }`). This suppresses every `logger.info`/`logger.warn` from the automation engine and trigger plugin — including:\n- `Trigger registered: record_change`\n- `[record-change] bound flow '<name>' → afterInsert`\n- `RecordChangeTriggerPlugin: ... record-change trigger NOT installed`\n\nso it's impossible to tell from `objectstack start` output whether the trigger registered, whether any flow bound, or whether it failed. **Please consider honoring an env var (e.g. `OS_LOG_LEVEL`) or a `--log-level` flag to override the silent default**, independent of this bug.\n\n## Hypotheses to check\n\n1. `kernel:ready` hook in `RecordChangeTriggerPlugin.start()` not firing, or `ctx.getService('automation')` returning a different instance than the one that registered the flows.\n2. `engine.registerHook('afterInsert', …, { object })` attaching to a hook channel that the REST/ObjectQL write path does **not** emit (event-name or per-object scoping mismatch between the trigger plugin and objectql 7.4.1).\n3. Flow runs but `update_record` is rejected under the system/anonymous context used by the trigger (RLS), failing silently.\n\n## Suggested next step\n\nAdd an integration test in `packages/plugins/plugin-trigger-record-change` that boots a LiteKernel with automation + record-change trigger + a trivial flow, inserts a row, and asserts the flow executed — with logger at `info` so the bind/exec path is visible."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 1839,
+  "kind": "pull_request",
+  "title": "chore(agents): enforce worktree-first discipline with a PreToolUse guard",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-14T06:35:46Z",
+  "updated_at": "2026-06-14T06:39:41Z",
+  "closed_at": "2026-06-14T06:39:40Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-14T06:39:40Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1839",
+  "body": "## Why\nMultiple agents work this repo in parallel. The shared `main` checkout gets its HEAD switched and the tree reset *under* an agent mid-task, silently clobbering uncommitted edits — a full session's work was reverted **twice** during #1837. AGENTS.md already recommended one-worktree-per-task, but it was a soft \"prefer\" buried below the Prime Directives, and **nothing enforced it**. The gap was adherence, not clarity — so this adds a guardrail.\n\n## What\n- **`.claude/hooks/guard-main-checkout.sh`** (new) — a PreToolUse hook wired in `.claude/settings.json` that blocks `Edit`/`Write`/`NotebookEdit` whenever the session's checkout HEAD is on `main`, with an actionable message telling the agent to create a worktree first. Exits 0 (allow) on any feature branch / non-git dir. `OS_ALLOW_MAIN_EDITS=1` overrides for a deliberate, non-task human fix.\n- **AGENTS.md** — promotes worktree-first to **Prime Directive #11** and hardens the \"Multi-agent working discipline\" section (\"prefer\" → mandatory; the shared `main` checkout is explicitly *not* a supported fallback).\n\n## Verification\nHook tested locally across all three paths:\n- feature branch → exit 0 (allow)\n- `main` checkout → exit 2 (block) with guidance\n- `main` + `OS_ALLOW_MAIN_EDITS=1` → exit 0 (allow)\n\nTooling/docs only — no package version impact (empty changeset).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

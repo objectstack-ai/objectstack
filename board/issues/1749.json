@@ -1,0 +1,36 @@
+{
+  "number": 1749,
+  "kind": "pull_request",
+  "title": "feat(approvals): ADR-0042 SLA auto-escalation + ADR-0041 trigger-* landing",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T02:44:27Z",
+  "updated_at": "2026-06-12T02:48:43Z",
+  "closed_at": "2026-06-12T02:44:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T02:44:30Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1749",
+  "body": "## Summary\n\nCloses #1742. Two ADRs land together with their implementations.\n\n**ADR-0042 — SLA auto-escalation** (`docs/adr/0042-approval-sla-escalation.md`)\n- plugin-approvals owns a jobs-backed scanner (per ADR-0041's boundary: a plugin clock is a *job*, not a trigger): interval job `approvals-sla-escalation` (5 min default) + a catch-up sweep at `kernel:ready` — the job service starts after this plugin, which the first live run caught.\n- **Single-shot idempotency**: the `escalate` audit row is the marker, written audit-first. Crash between audit and mutation degrades to \"logged but not executed\" — never a double machine decision; concurrent decisions are additionally guarded by `decide()`'s pending check.\n- Actions: `notify` (default), `reassign` → `escalateTo`, `auto_approve`/`auto_reject` as reserved actor **`system:sla`** — the timeline always shows `escalate` + the decision row, so policy decisions are visibly machine-made. Clock = `created_at + timeoutHours`, no `request_info` pause in v1 (future option recorded).\n\n**ADR-0041 mechanical landing**\n- `plugin-trigger-record-change` / `plugin-trigger-schedule` → **`@objectstack/trigger-record-change` / `@objectstack/trigger-schedule`** (serve's `nameMatch` already accepted both spellings).\n- `ActionDescriptor.maturity` (`'ga' | 'beta' | 'reserved'`, default `ga`) so Studio can grey out contract-ahead-of-runtime surfaces.\n\n## Test plan\n\n- plugin-approvals: **60 tests** (5 new: notify audience + single-shot, auto_approve resumes flow as system:sla, auto_reject, reassign replaces approver set, not-due/no-SLA skip) ✅\n- spec: 6528 ✅ · trigger-record-change 17 ✅ · trigger-schedule 17 ✅ · CLI builds ✅\n- **Live e2e on showcase** (boot catch-up sweep): three overdue requests escalated — auto_approve → status approved with timeline `submit → escalate(system:sla, \"auto_approve\") → approve(system:sla)`; reassign → approver set replaced by `ada@example.com`; notify → `escalate` audited, request stays pending. Renamed `trigger-record-change` verified live (budget PATCH still opens requests). Console renders \"SLA 升级 · 系统（SLA）\" with a red timeline dot (companion objectui PR).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 1656,
+  "kind": "pull_request",
+  "title": "chore: bump .objectui-sha → per-widget dataset binding in widget inspector",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-07T15:08:42Z",
+  "updated_at": "2026-06-07T15:08:58Z",
+  "closed_at": "2026-06-07T15:08:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-07T15:08:56Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1656",
+  "body": "Pins objectui to `ba2867b` (objectui [#1585](https://github.com/objectstack-ai/objectui/pull/1585), merged): the dashboard widget inspector now exposes a **Dataset binding** section (dataset / dimensions / values), so per-widget dataset binding (ADR-0021) is **authorable in the form** — symmetric to the report's dataset binding. Previously these were editable only via the raw *source* tab / API because the widget inspector is hand-built, not schema-derived.\n\nAdditive dual-form: the legacy inline object query stays available; when `dataset` is set, `DashboardRenderer` already branches to `<DatasetWidget>`.\n\n## Verification\n- Browser-verified against this rebuilt console: the **Revenue by Stage** widget in the `sales_overview` dashboard shows 数据集=`sales_preview` / 维度=`stage` / 值（度量）=`revenue`, all editable.\n- objectui: 6 new `DashboardWidgetInspector` tests + full inspector suite green (68).\n- `build-console.sh`: dist ready (32332 KB) from objectui@ba2867b.\n\nNote: `packages/console/dist` is gitignored — release rebuilds from `.objectui-sha`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

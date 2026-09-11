@@ -1,0 +1,35 @@
+{
+  "number": 1879,
+  "kind": "pull_request",
+  "title": "feat(book): documentation navigation spine + derived membership (ADR-0046 §6, P3a/P3b)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T06:19:17Z",
+  "updated_at": "2026-06-15T06:27:50Z",
+  "closed_at": "2026-06-15T06:27:49Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T06:27:49Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1879",
+  "body": "Implements the `book` navigation element specified in [ADR-0046 §6](https://github.com/objectstack-ai/framework/blob/main/docs/adr/0046-package-docs-as-metadata.md) (merged in #1865).\n\n## Core idea — a spine, not a container\n\nA `book` stores only an ordered **spine** (groups + `audience` + identity). Membership is **derived** from a rule on each group (`include` glob/tag) plus an optional scalar `doc.order`/`doc.group` — never a central `pages` array. This is the load-bearing choice (ADR §6.2.1):\n\n- **AI safety:** the AI creates a doc named to match a rule and it files itself — create-and-forget, no read-modify-write on a shared array.\n- **Overlay safety:** RFC 7396 merge-patch treats arrays atomically, so a central nav array would shadow package-added docs; a small derived spine + scalar `order` merges cleanly.\n\n## What's here\n\n**P3a — spec + resolver** (`@objectstack/spec`)\n- `BookSchema` (spine), `BookGroupSchema`, `BookNodeSchema`, `defineBook()`; additive `doc.order` / `doc.group`.\n- `resolveBookTree()` — pure resolver: `include` glob/tag + explicit `doc.group`; explicit `pages` override (verbatim order, `---`, `...` rest, missing-doc, object nodes); unmatched docs → synthetic *Uncategorized*; first-group-wins dedup; package-scoped includes. `deriveImplicitPackageBook()` for the implicit per-package book.\n- Register `book` (render-time type, `allowOrgOverride: true`, `loadOrder: 99`); `book → BookSchema` in the type-schema map; `stack.books`; artifact field `books → book`.\n- **15 resolver/schema unit tests**; spec `tsc` clean.\n\n**P3b — runtime + REST** (`@objectstack/objectql`, `@objectstack/rest`, `@objectstack/runtime`)\n- Wire `book`/`books` through the runtime type enumerations (PLURAL_TO_SINGULAR, engine `registerApp`, app-plugin category keys).\n- REST `GET /meta/book/:name/tree` resolves the tree; **read-layer `audience` gating** (anonymous gets a book only when `audience: 'public'`, else 401 — enforced in the read path, not just the UI).\n- Showcase ships a real `showcase_manual` book (audience `public`).\n\n## Verified live (artifact boot)\n\n```\nGET /api/v1/meta/book               → 1 item: showcase_manual\nGET /api/v1/meta/book/showcase_manual/tree (anonymous)\n  start         → showcase_index            (explicit pages)\n  guides        → showcase_docs_guide       (DERIVED via include: \"showcase_*_guide\")\n  uncategorized → setup_overview, studio_overview  (other-package docs, never dropped)\nGET .../book/<unknown>/tree (anonymous)     → 401 (implicit org book is gated)\n```\n\n## Known follow-up\n\n- The **config-boot (`os dev`) serving path** does not yet surface `book` items (artifact-boot `os start` does). The book registers into the boot engine but the env-scoped serving protocol reads a separate store whose enumeration still needs the type wired; tracked for a follow-up.\n- **Portal UI (P3c)** — the console docs sidebar + anonymous `apps/docs` ISR render live in the `objectui`/`apps-docs` surfaces (cross-repo); this PR delivers the backend the portal consumes.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

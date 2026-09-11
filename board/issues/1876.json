@@ -1,0 +1,30 @@
+{
+  "number": 1876,
+  "kind": "issue",
+  "title": "[P0] build-time vs runtime validation parity: `objectstack build` accepts metadata the runtime rejects",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T06:03:09Z",
+  "updated_at": "2026-06-15T14:09:15Z",
+  "closed_at": "2026-06-15T14:09:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1876",
+  "body": "## Problem\n`objectstack build` accepts metadata that the **runtime** then rejects, so \"CI green\" does not guarantee \"boots\".\n\n## Repro (observed on 9.5.1)\n1. Dashboard widgets in the legacy `object`/`aggregate` shape pass `objectstack build` but the runtime `com.objectstack.metadata` plugin rejects them (requires `dataset`/`values`), so the app fails to start.\n2. A hook handler referencing a module-scope helper passes build, then throws `ReferenceError` at runtime (handler ships body-only).\n\n## Expected\nBuild validates against the **same** schema/rules the runtime enforces. \"build clean\" ⇒ \"boot clean\".\n\n## Affected\n`@objectstack/cli` (build) ↔ `@objectstack/metadata` runtime schema.\n\n\n---\n_Found while runtime-testing `objectstack-ai/templates` (all 9 templates via `objectstack dev all`) on `@objectstack` 9.5.1. Build + typecheck pass; these only surface at runtime._\n"
+}

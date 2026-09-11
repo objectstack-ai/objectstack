@@ -1,0 +1,32 @@
+{
+  "number": 1753,
+  "kind": "issue",
+  "title": "Matrix reports: server-side totals row/column (subtotals + grand total)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T02:49:31Z",
+  "updated_at": "2026-06-12T15:42:47Z",
+  "closed_at": "2026-06-12T15:42:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1753",
+  "body": "## Context\n\nThe true matrix cross-tab shipped in [objectui#1649](https://github.com/objectstack-ai/objectui/pull/1649): a `type: 'matrix'` report renders `rows` (down) × `columns` (across) with measures in the cells, pivoted client-side from a single `queryDataset` over all dimensions.\n\nIt intentionally renders **no totals row/column**. Re-aggregating bucketed values on the client would drift from the semantic layer — e.g. an `avg` measure can't be averaged-of-averages, and a `count_distinct` can't be summed across buckets. ADR-0021's governance line is \"one place to reason about a metric,\" so the renderer refuses to invent subtotals it can't compute correctly.\n\n## Proposal\n\nCompute totals **server-side**, where the measure's true aggregate is known:\n- per-row subtotals (aggregate across the row's across-buckets),\n- per-column subtotals (aggregate down),\n- grand total.\n\nLikely a `queryDataset` option (e.g. `{ totals: true }` or `withGrandTotal`) that returns the marginal aggregates as extra rows/fields, so each total is computed with the measure's real aggregate function rather than re-derived. The matrix renderer then renders the supplied totals (it already has the slot for them — `DatasetMatrixTable`).\n\n## Affected\n- framework: `packages/services/service-analytics` — marginal/total aggregation in the dataset query\n- objectui (consumer): `packages/plugin-report/src/DatasetReportRenderer.tsx` `DatasetMatrixTable` — render server-supplied totals row/column\n\nFound during the ADR-0021 report epic; the no-totals tradeoff is documented in the DatasetReportRenderer header comment."
+}

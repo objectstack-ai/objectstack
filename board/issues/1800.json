@@ -1,0 +1,33 @@
+{
+  "number": 1800,
+  "kind": "pull_request",
+  "title": "feat(showcase): ADR-0047 — lookup quick-filter example (project)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-13T01:20:41Z",
+  "updated_at": "2026-06-13T01:27:24Z",
+  "closed_at": "2026-06-13T01:27:22Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-13T01:27:22Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1800",
+  "body": "Adds `{ field: 'project' }` (a master-detail lookup) to the showcase Task List view's quick filters — the record-picker dropdown (search box + multi-select record list) that CRM consumers depend on ([hotcrm#383](https://github.com/objectstack-ai/hotcrm/pull/383) filters accounts by `owner`, a user lookup).\n\nBrowser-verified against the live stack and locked by [objectui#1682](https://github.com/objectstack-ai/objectui/pull/1682) (`e2e/live/user-filters.spec.ts`: picker opens, record selection narrows the grid, persists as `uf_project`).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

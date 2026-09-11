@@ -1,0 +1,33 @@
+{
+  "number": 1715,
+  "kind": "pull_request",
+  "title": "feat(objectql): ADR-0038 L3 — post-publish runtime probes on publishPackageDrafts",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/l",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T07:42:06Z",
+  "updated_at": "2026-06-11T07:46:56Z",
+  "closed_at": "2026-06-11T07:46:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T07:46:53Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1715",
+  "body": "Phase 2 (first half) of the [ADR-0038 Build Verification Loop](https://github.com/objectstack-ai/framework/blob/main/docs/adr/0038-build-verification-loop.md): after a package publish, the pipeline exercises what it published — one real read per artifact — so **\"Published!\" can never again mean \"and silently broken\"**.\n\n## What\n\nNew `packages/objectql/src/build-probes.ts` (`runBuildProbes`), wired into `publishPackageDrafts` which now returns a `probes: { issues, checked }` report:\n\n| Probe | Code | Catches (live incident class) |\n|---|---|---|\n| per published **seed**: target object has rows | `seed_not_applied` (error) | seeds staged but rows never materialized (#3) |\n| per published **view**: limit-1 read doesn't throw | `view_read_failed` (error) | views that error for every user (#6 runtime half) |\n| per **dashboard widget**: its real dataset selection executes via the kernel's `analytics.queryDataset` (same path the renderer hits) | `widget_query_failed` (error) | broken dataset compilation |\n| widget query returns empty **on a populated object** | `empty_query` (error) | the 4-layer staging \"Total Spend: 0\" chain (#4) |\n| widgets exist but no analytics service mounted | `probes_unavailable` (warning) | silence reading as \"probed and passed\" |\n\nFindings are **BuildIssue-shaped with `layer:'runtime'`** — the same ADR-0038 contract the cloud L1 graph lint (cloud#200) emits, so agents/chat/eval harnesses consume one stream across verification planes.\n\nDesign constraints honored:\n- probes are **reads only** (limit-1 / single aggregate), run after `seedApplied`;\n- a probe crash degrades to a finding or a skip — **never fails the publish it verifies**;\n- analytics resolves from the kernel services registry; absent → one aggregate warning, not per-widget noise.\n\n## Tests\n`build-probes.test.ts`: every probe both ways (fail + pass), the never-throws contract, and integration — `publishPackageDrafts` reports `seed_not_applied` when the seed loader fails and omits `probes` for empty packages. objectql suite 556/556 green; DTS build clean.\n\n## Next (separate PRs)\n- objectui: build-health card in chat consuming `seedApplied` + `probes` (Phase 2 second half)\n- cloud: thread `probes.issues` into the agent's L4 self-correction loop after auto-publish\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

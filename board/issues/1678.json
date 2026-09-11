@@ -1,0 +1,32 @@
+{
+  "number": 1678,
+  "kind": "pull_request",
+  "title": "feat(service-ai): stream tool progress mid-execution (data-* parts)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-10T05:43:15Z",
+  "updated_at": "2026-06-10T06:45:09Z",
+  "closed_at": "2026-06-10T06:45:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-10T06:45:07Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1678",
+  "body": "Long-running tools can report progress WHILE they run, surfaced before the tool returns — the mechanism behind apply_blueprint's live build tree. Adds ToolExecutionContext.onProgress (emits Vercel data-* parts), drains them in streamChatWithTools (backward-compatible), and passes data-* through the encoder. service-ai 335 tests; verified live.\n\nGenerated with Claude Code"
+}

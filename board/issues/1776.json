@@ -1,0 +1,35 @@
+{
+  "number": 1776,
+  "kind": "pull_request",
+  "title": "feat(metadata): metadata-service registrations carry package provenance",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T09:17:56Z",
+  "updated_at": "2026-06-12T09:18:16Z",
+  "closed_at": "2026-06-12T09:18:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T09:18:15Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1776",
+  "body": "## Summary\n\nMetadata registered through the metadata-service path had no provenance flags: `loadMetadataFromService` ([objectql/src/plugin.ts](packages/objectql/src/plugin.ts)) and `MetadataFacade.register` called `registry.registerItem(type, item, keyField)` without the 4th `packageId` param, so `applyProtection` never stamped `_packageId`/`_provenance`. `GET /api/v1/meta/:type` consumers (objectui `NavigationSyncEffect`, objectui PR #1668) could not tell package-shipped code-defined metadata from user-authored rows and fell back to the `sys_` name-prefix heuristic — third-party plugin pages were misclassified as user-created.\n\n## Changes\n\n- **`packages/objectql/src/plugin.ts`** (`loadMetadataFromService`) and **`packages/objectql/src/metadata-facade.ts`** (`register`): pass through each item's own `_packageId` (stamped upstream by the metadata plugin's artifact loader). **Never a synthetic id** like `'metadata-service'` — `isArtifactBacked()` keys the two-tier write authorization (`allowOrgOverride` vs `allowRuntimeCreate`) off a truthy `_packageId`; a fake id would flip authorization for runtime-authored items. (The nearby `bindHooks` `packageId: 'metadata-service'` is an unbind-grouping label, not provenance.)\n- **`packages/metadata/src/plugin.ts`**: new `MetadataPluginOptions.packageId` — hosts running the filesystem scanner (eager mode, no `artifactSource`) can declare the owning package id (the project's `defineStack` manifest id); `_loadFromFileSystem` then stamps scanned items via the same `applyProtection` call the artifact path uses. Unset → behavior unchanged. Deliberately not auto-derived from `package.json` (npm name ≠ manifest id, and the value feeds write authorization).\n- Side benefit: synced artifact items now store under the same composite `pkg:name` registry key as the engine manifest path, deduplicating the previous bare+composite double entries.\n\n**Deliberately unchanged:** the `protocol.ts` DB-hydration `registerItem` calls (`loadMetaFromDb`, `getMetaItems` hydration, overlay-delete refill) stay bare-key — ADR-0005 overlay precedence relies on the bare runtime row shadowing the composite package artifact entry.\n\n## Testing\n\n- New `packages/objectql/src/metadata-facade.test.ts` (passthrough / no synthetic stamping).\n- `plugin.integration.test.ts`: metadata-service sync preserves the stamped/unstamped distinction.\n- `protocol-meta.test.ts`: `getMetaItems` serves `_packageId`/`_provenance` for package-registered items, leaves user items clean.\n- `packages/metadata/src/plugin.test.ts`: FS-scanner stamping with/without the option; pre-existing `_packageId` not overwritten.\n- Full suites green: objectql 42 files / 561 tests, metadata 11 files / 249 tests.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

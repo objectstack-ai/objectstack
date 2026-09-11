@@ -1,0 +1,32 @@
+{
+  "number": 1691,
+  "kind": "pull_request",
+  "title": "docs(cloud-deployment): separate publish from install (in-environment)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-10T15:09:55Z",
+  "updated_at": "2026-06-10T15:11:45Z",
+  "closed_at": "2026-06-10T15:11:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-10T15:11:42Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1691",
+  "body": "Follow-up to #1689. `os package publish` publishes to the org catalog (no env); install happens inside the target environment's Marketplace. `--env --install` demoted to a CI shortcut. Docs-only.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

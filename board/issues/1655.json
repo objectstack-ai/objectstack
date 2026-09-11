@@ -1,0 +1,32 @@
+{
+  "number": 1655,
+  "kind": "pull_request",
+  "title": "chore: bump .objectui-sha → curated forms graft server-only fields (skew root-cure, last piece)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-07T14:50:52Z",
+  "updated_at": "2026-06-07T14:51:06Z",
+  "closed_at": "2026-06-07T14:51:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-07T14:51:03Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1655",
+  "body": "Pins objectui to `3905d0e` (objectui [#1580](https://github.com/objectstack-ai/objectui/pull/1580), merged), completing the last piece of the cross-repo spec-skew root-cure.\n\n## What objectui #1580 does\nThe curated report/dashboard/view *home* inspectors derive their form from the **bundled** `@objectstack/spec`. When the server adds fields (e.g. a report's `dataset`/`rows`/`values`) before objectui bumps the bundled spec, those fields existed in the live server schema (`/meta/types` → `entry.schema`) but were only editable via the raw *source* tab. New `mergeServerFields()` grafts server-only top-level props onto the bundled-spec form (additive, lag-tolerant — no-op offline / once the bundle catches up).\n\n`clientValidation` already stopped the client from being *stricter* than the server; this is the symmetric half that makes the curated form a *superset*.\n\n## Verification\n- Browser-verified against this rebuilt console: the report editor's 属性 panel now shows a **更多字段** section with **Dataset** (= `sales_preview`) / **Rows** / **Values** / **runtimeFilter**, sourced from the live server schema.\n- objectui: 7 new `mergeServerFields` tests + 69 existing inspector/schema tests green.\n- `build-console.sh`: 32/32 tasks, dist ready (32324 KB) from objectui@3905d0e; bundle ships the `mergeServerFields` chunk.\n\nNote: `packages/console/dist` is gitignored — release rebuilds from `.objectui-sha`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

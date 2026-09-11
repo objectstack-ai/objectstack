@@ -1,0 +1,35 @@
+{
+  "number": 1680,
+  "kind": "pull_request",
+  "title": "feat(service-analytics): resolve dimension display labels (select options / lookup names)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-10T07:43:33Z",
+  "updated_at": "2026-06-10T09:10:06Z",
+  "closed_at": "2026-06-10T09:10:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-10T09:10:04Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1680",
+  "body": "## Problem\n\nOn the showcase **Chart Gallery** (and any dashboard/report), charts grouped by a dimension showed the **raw stored value**, never the human-readable text:\n\n- **lookup / master_detail** dimensions → the FK **id** (`8eqtuKI4G9IhUsPS`)\n- **select** dimensions → the stored **value** (`backlog`, `high`)\n\n## Fix (server-side, ADR-0021)\n\n`AnalyticsService.queryDataset` now post-processes the result rows to resolve dimension display labels:\n\n- **select** → the option `label` (via the field's `options`)\n- **lookup / master_detail** → the related record's display name (via an injected id→label fetch)\n\nThe console plots `row[dimension]` verbatim, so this **single server-side pass fixes every chart with zero frontend change**.\n\n### Implementation\n- New `dimension-labels.ts`: pure resolution logic + `pickDisplayField` (`name` > `title` > `label` > first text field). De-dupes lookup ids, leaves unresolved values untouched (no blanks), no-op for date/number/string dims.\n- `AnalyticsServiceConfig.labelResolver` injects two low-level capabilities; the **plugin** wires them from the `data` engine — field metadata via `getObject`, id→name pairs via the existing **`executeAggregate` bridge** (group by `id` + display field). **No new engine capability.**\n- 16 tests (unit + `queryDataset` integration), all green (service-analytics 100/100).\n\n### Browser verification\nRan the showcase Chart Gallery against this build:\n\n| Dimension | Before | After |\n|---|---|---|\n| `status` (select) | `backlog`, `done`, `todo` | **Backlog, Done, To Do** |\n| `priority` (select) | `high`, `urgent` | **High, Urgent** |\n| `account` (lookup) | `8eqtuKI4G9IhUsPS` | **Fabrikam** (account name) |\n\nProgrammatic axis scan after the fix: **zero id-like strings remain**.\n\n### Out of scope (follow-up)\nDate dimensions (`created_at`) still render raw epoch-millis on a couple of trend charts — a separate date-formatting concern, not part of this lookup/select bug.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

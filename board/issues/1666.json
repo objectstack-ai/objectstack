@@ -1,0 +1,32 @@
+{
+  "number": 1666,
+  "kind": "pull_request",
+  "title": "feat(showcase): lock invoice lines when the invoice is paid (#1581)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-08T13:52:55Z",
+  "updated_at": "2026-06-08T13:53:28Z",
+  "closed_at": "2026-06-08T13:53:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-08T13:53:25Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1666",
+  "body": "Backend counterpart of objectstack-ai/objectui#1607 — B2 follow-up: \"paid invoice → lock lines\".\n\n## What\n\nAdd parent-scoped `readonlyWhen` rules to `showcase_invoice_line`'s `product`, `quantity`, and `unit_price`:\n\n```\nreadonlyWhen: \"parent.status == 'paid'\"\n```\n\nThe inline line-item grid evaluates these per row against the live header invoice (bound as `parent` by `MasterDetailForm`), so a paid invoice renders its lines read-only. `description` keeps its existing row-scoped `requiredWhen` unchanged.\n\nVerified: the dev server serves the rules and the ObjectUI grid locks/unlocks as the header `status` toggles.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

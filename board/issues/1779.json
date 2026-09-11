@@ -1,0 +1,35 @@
+{
+  "number": 1779,
+  "kind": "pull_request",
+  "title": "feat(analytics): server-side totals for matrix reports (subtotals + grand total)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T10:49:32Z",
+  "updated_at": "2026-06-12T15:42:48Z",
+  "closed_at": "2026-06-12T15:42:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T15:42:45Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1779",
+  "body": "Closes #1753.\n\n## What\n\n`queryDataset` selections now accept a `totals` option:\n\n```ts\nselection.totals = { groupings: [rowDims, columnDims, []] }  // [] = grand total\n```\n\nEach grouping is a subset of `selection.dimensions`; the `DatasetExecutor` re-runs the full selection grouped only by those dimensions and returns the marginal aggregates on `AnalyticsResult.totals` (one entry per grouping, in request order, same measure columns as the primary rows).\n\n## Why explicit groupings\n\nThe server sees a flat `dimensions` array — it cannot infer the matrix's rows/columns split, so the caller names the marginals it wants. A matrix report asks for per-row subtotals (group by row dims), per-column subtotals (group by column dims), and the grand total (`[]`).\n\n## Design notes\n\n- **True aggregates, not re-aggregation.** Each totals query goes through the same executor pipeline as the primary grid, so an `avg` total is the average over all underlying rows (not an average of bucket averages) and `count_distinct` stays correct — the ADR-0021 governance line that made the client renderer refuse to invent totals.\n- Measure-scoped filters, derived measures, and `compareTo` all apply to totals identically (the pipeline is reused, not duplicated).\n- `order`/`limit`/`offset` are dropped for totals queries — totals cover the full selection, and an order key may reference a dimension the grouping drops.\n- Dimension display labels (select option labels, lookup record names, date buckets) resolve on totals rows the same way as primary rows.\n- A grouping that isn't a subset of the selected dimensions is rejected with a clear error.\n- Works unchanged through the ADR-0037 draft-preview path (`previewDrafts`) — the in-memory evaluator already handles dimensionless queries.\n- The REST `POST /analytics/dataset/query` endpoint passes the selection through verbatim, so no endpoint changes were needed.\n\n## Consumer follow-up\n\nobjectui's `DatasetMatrixTable` (packages/plugin-report/src/DatasetReportRenderer.tsx) can now request `totals: { groupings: [rows, columns, []] }` and render the supplied totals row/column — tracked as the consumer half of #1753.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

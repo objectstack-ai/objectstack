@@ -1,0 +1,34 @@
+{
+  "number": 1939,
+  "kind": "pull_request",
+  "title": "docs(audits): dead-surface disposition plan (spec liveness → executable decision)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T05:48:13Z",
+  "updated_at": "2026-06-16T05:50:23Z",
+  "closed_at": "2026-06-16T05:50:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T05:50:21Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1939",
+  "body": "Turns the spec-liveness gate's measurement into a decision. The gate now quantifies **89 `dead` properties** across 10 governed metadata types, but only *measures* — this plan decides what to *do* with each.\n\n## What it is\nFor every dead property: a recommendation — **prune / wire-rename / enforce-or-prune / objectui** — with rationale, cost, and risk, priority-ordered:\n- **P0** — false-compliance / security-relevant dead (encryptionConfig, maskingRule, contextVariables, isProfile, agent tenantId, skill permissions) → decide enforce-or-remove; don't leave.\n- **P1** — naming-drift / duplication *bugs* (referenceFilters, columnName, nested field configs, agent knowledge, action disabled) → wire or rename.\n- **P2** — aspirational / duplicate / display surface → **prune** (the bulk).\n\n## Headline\n**~64 of 89 are PRUNE candidates** — aspirational enterprise config (object `versioning`/`partitioning`/`cdc`/`recordTypes`...), duplicate flags, and enhanced-type display options (field `theme`/`marks`/`barcode*`/master-detail overrides...) with no roadmap and no consumer. For a platform whose value is a *trustworthy* metadata contract (open-Ontology positioning), shedding false surface is the highest-leverage hygiene move — narrow-and-true.\n\n## Why a doc, not code\nSpec removals and runtime enforcement are team-owned decisions. This is the decision input that unblocks the ADR-0049 spec-hygiene clusters (#3–#7). Pruning is low-risk/mechanical (spec prop + ledger removal; CI + the liveness gate catch fixtures); batchable ~2 PRs for the object+field bulk.\n\nLinked from `docs/audits/README.md`. Builds on ADR-0049.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

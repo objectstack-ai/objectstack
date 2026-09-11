@@ -1,0 +1,32 @@
+{
+  "number": 1787,
+  "kind": "pull_request",
+  "title": "feat(spec): ActionSchema — opensInNewTab + newTabUrl zero-roundtrip new-tab contract",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T13:21:35Z",
+  "updated_at": "2026-06-12T13:36:31Z",
+  "closed_at": "2026-06-12T13:36:29Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T13:36:29Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1787",
+  "body": "## Summary\n- Add `opensInNewTab` (documents the existing renderer convention: pre-open the tab synchronously on click, popup-blocker-safe, then drive it to the handler's `redirectUrl`) to `ActionSchema`\n- Add `newTabUrl`: a direct new-tab URL template (`{recordId}` placeholder). When set together with `opensInNewTab`, the renderer navigates the pre-opened tab to it **immediately on click — no action POST**. The target endpoint must perform all auth/authz itself.\n\n## Motivation\nThe cloud console's environment **Open** button felt laggy: the click paid a full POST round trip before the popup started navigating, even though `GET /sso-open` re-runs every check server-side (defense in depth). This contract lets metadata declare the zero-roundtrip path. Renderer support: objectui PR (app-shell fast path); first consumer: cloud `sys_environment.sso_as_owner`.\n\n## Test plan\n- `pnpm --filter @objectstack/spec build` ✓\n- `pnpm --filter @objectstack/spec test` — 240 files / 6529 tests ✓\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

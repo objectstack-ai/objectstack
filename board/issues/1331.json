@@ -1,0 +1,33 @@
+{
+  "number": 1331,
+  "kind": "issue",
+  "title": "[portal] 匿名提交后缺少 onSuccess 跳转 + 短期 token 协议（GAP-1 of #1294）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p0"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T06:45:53Z",
+  "updated_at": "2026-06-14T14:42:43Z",
+  "closed_at": "2026-06-14T14:42:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1331",
+  "body": "## 现象\n匿名访客通过 `/portal/<id>/submit` 提交工单后，没有\"提交成功 → 跳到工单状态页\"的协议字段。当前只有 `bindIdentityFromField` 把邮箱绑定到 magic-link，但 magic-link 是异步的（用户要先去查邮件）。\n\n## 复现（按 #1294 spec 走完整流程）\n1. 匿名访客填表 → action `helpdesk_ticket.create` 成功 → ticket #123 创建\n2. 用户期望：立刻在浏览器看到「工单 #123 已创建，状态：处理中」\n3. 实际：spec 没说跳哪。落到空白页/原表单？\n\n## Workaround\n模板作者在 action 的 success handler 里硬编码 redirect — 但这违反「零业务代码」原则。\n\n## 分阶段建议\n**M2**（生产可用前必须补）：\n- `PortalAnonymousRouteSchema` 新增 `onSuccess`:\n  ```ts\n  onSuccess?: {\n    showView?: string;                       // viewRef，detail 或 list\n    showRecordCreated?: boolean;             // 自动跳到新创建记录的 detail\n    ephemeralToken?: { ttl: string };        // 颁发短期 token 让匿名用户在 ttl 内回访\n    message?: I18nLabel;                     // 「已提交，请查收邮件」\n  }\n  ```\n- ephemeralToken 写入 cookie/URL，data API 校验时把它视为 `system.anonymous` 的临时 elevated 身份\n\n## 验收\n- helpdesk 模板里声明 `onSuccess.showRecordCreated: true` 后，匿名提单 → 自动跳 `/portal/helpdesk/ticket/<id>?t=<ephemeral_token>` → 看到工单详情，刷新 24h 内仍有效\n\n## 关联\n- #1294（portal spec 设计）\n- GAP-7（detail URL scheme，本 gap 跳转目标需要 detail route 约定）\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1734,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0040 Unified Assistant — the end user never picks an agent",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T15:34:34Z",
+  "updated_at": "2026-06-11T15:39:11Z",
+  "closed_at": "2026-06-11T15:39:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T15:39:08Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1734",
+  "body": "Design record for the agent/skill boundary question raised in today's staging incident (Data Assistant accepted a whole-app build without the authoring disciplines and narrated its debugging to the user).\n\nCore positions:\n- **One platform assistant for people** — default agent carries all platform skills (data + authoring) with an intent preamble; the skills system IS the per-intent behavior mechanism (no sibling-agent router).\n- **Picker leaves consumer UX**; explicit `?agent=`/API pins stay for builder/developer/programmatic surfaces.\n- **`agent` stays in the spec, redefined**: assembled runtime configuration + governance unit (model/guardrails/planning/memory/persona/skills), selected by *scenario* via the existing resolution chain, configured by *builders*. Agents : assistants :: views : lists.\n- **Custom agents = builder feature**, same ADR-0033/0038 pipeline, platform guardrails as a floor.\n- **Tool-scoping gap named honestly**: tools are registry-global today; skills carry discipline, not access control — capability boundaries are the specified follow-up.\n\nImplementation lands separately (service-ai default-agent composition + objectui picker removal), gated by the ADR-0038 L5 suite.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

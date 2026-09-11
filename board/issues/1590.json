@@ -1,0 +1,32 @@
+{
+  "number": 1590,
+  "kind": "issue",
+  "title": "Data API: reject unknown payload fields (validateRecord ignores keys not in schema)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-05T01:52:47Z",
+  "updated_at": "2026-06-15T15:11:33Z",
+  "closed_at": "2026-06-15T15:11:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1590",
+  "body": "## Summary\nThe generic data API silently accepts payload fields that are **not declared on the object**, passing them straight through to the driver. On SQLite this surfaces as a raw `table X has no column named <field>` error; the caller gets no field-level feedback. Mature low-code platforms (e.g. Salesforce `INVALID_FIELD`) reject unknown fields at the API layer — the schema is the contract.\n\n## Repro\n`POST /api/v1/data/sys_team` with body `{ \"name\": \"x\", \"label\": \"x\" }` (`label` is not a field on `sys_team`).\nBefore the error-mapping safety net (fix/rest-map-schema-errors) this returned `500 DATABASE_ERROR`; with it, a `400 INVALID_FIELD`. But that is a **last-resort string-match on the driver error** — the real fix is to reject the unknown field *before* building SQL.\n\n## Root cause\n`packages/objectql/src/validation/record-validator.ts` `validateRecord()` iterates over **declared schema fields**, never over **payload keys**:\n```ts\n// insert mode\nfor (const [name, def] of Object.entries(fields)) { ... }  // schema-driven only\n```\nKeys present in `data` but absent from `fields` are never examined → they survive into the driver `create()`/`update()` call.\n\n## Proposed change\nIn `validateRecord`, after the declared-field walk, iterate `Object.keys(data)` and push a `{ code: unknown_field }` error for any key that is not a schema field and not an allow-listed control key.\\n\\n### Open design points\\n- **Allow-list** for legitimate non-column keys: `$`-prefixed control keys, nested related-record writes, computed/formula display fields the UI may echo back, system-injected columns. Need to enumerate before enforcing.\\n- **Rollout**: hard-enforce now vs. log-then-enforce (one release warns, next rejects) to avoid 400-ing clients that currently send extras. Requires a quick audit of what `@object-ui/console` + the `os` CLI actually POST.\\n- Applies to both insert and update (PATCH).\\n\\n## Why this matters long-term\\nFixes the entire \"unknown field\" class at the correct layer, for **all** objects, and makes the API self-documenting — instead of relying on a dialect-specific driver-error regex in `rest-server.ts` `mapDataError()`.\\n\\n## Related\\n- Safety net already landed: branch `fix/rest-map-schema-errors` (PR pending) — `mapDataError` maps unknown-column/not-null → 4xx.\\n- Pairs with the `managedBy` enforcement + provenance issues (linked below).\\n\\n_Found running cloud `LOCAL-E2E-CHECKLIST` B7 (per-env data API CRUD)._"
+}

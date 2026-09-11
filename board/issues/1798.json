@@ -1,0 +1,33 @@
+{
+  "number": 1798,
+  "kind": "pull_request",
+  "title": "docs(showcase+skill): ADR-0047 UX round 2 — tabs XOR dropdowns, no auto-derive",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T21:26:16Z",
+  "updated_at": "2026-06-12T21:30:25Z",
+  "closed_at": "2026-06-12T21:30:23Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T21:30:23Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1798",
+  "body": "## Summary\n\nCompanion to [objectui#1680](https://github.com/objectstack-ai/objectui/pull/1680), which changed the renderer contract after a UX review against Airtable:\n\n- **showcase task views**: the default view demonstrates filter **tabs**; the dropdown `userFilters` demo moves to the **Task List** view. The toolbar renders one filter element style per view (tabs win when both are configured), so keeping both on one view was a misleading example.\n- **objectstack-ui skill**: decision rules updated for the new contract —\n  - filter elements render only when explicitly configured; **nothing is auto-derived** (omission = clean toolbar);\n  - tabs XOR dropdowns, never both on one view;\n  - `{ element: 'dropdown' }` shorthand fills fields from the object definition;\n  - the visualization switcher is a compact toolbar dropdown; authors only control the `allowedVisualizations` whitelist (single entry = locked, no switcher).\n\nMetadata + docs only; no runtime code.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

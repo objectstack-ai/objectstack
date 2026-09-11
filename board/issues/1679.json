@@ -1,0 +1,33 @@
+{
+  "number": 1679,
+  "kind": "pull_request",
+  "title": "docs(adr-0021): mark Phase 2 accepted & closed",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-10T06:19:32Z",
+  "updated_at": "2026-06-10T06:23:54Z",
+  "closed_at": "2026-06-10T06:23:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-10T06:23:52Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1679",
+  "body": "Marks ADR-0021 **Accepted & shipped — Phase 2 closed 2026-06-10**, now that the single-form cutover ([#1676](https://github.com/objectstack-ai/framework/pull/1676)) and the spec-major changeset ([#1677](https://github.com/objectstack-ai/framework/pull/1677)) are merged.\n\n### Changes\n- **Status line** → Accepted & shipped, referencing the cutover + 9.0.0.\n- New **\"Implementation status\"** close-out section:\n  - Documents the actual **dual-form → reconcile → single-form** delivery shape (the reconciliation gate proved `old == new` before the inline form was deleted) vs. the original one-shot big-bang posture.\n  - Per-workstream **WS0–WS5** status table.\n  - Downstream verification: in-repo green (build 72/72, test 123/123, spec 6526/6526); hotcrm + 10 templates packages **36/36 artifacts** valid against 9.0.0.\n  - **Deferred follow-ups** called out honestly: cross-object joins + D-C RLS hardening (no shipped dataset exercises a relationship join yet), conformed dimensions, and the 9.0.0 publish + sibling `^9.0.0` bump.\n\nDocs-only.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 1325,
+  "kind": "issue",
+  "title": "[P3] mobile: responsive layout / mobile experience unverified",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:27:33Z",
+  "updated_at": "2026-06-14T14:46:00Z",
+  "closed_at": "2026-06-14T14:46:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1325",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 22 条（**P3**）。\n\n## 现象\n\n模板均未在移动端验证。审批 / 工单回复 / 巡检 / 现场服务都常用手机进行。\n\n## 复现\n\n任意模板 + iPhone / Android Chrome：\n- 顶栏 / 侧栏 / 表单 / dashboard 是否可用？\n- 触屏交互（多选、滑动）？\n- 文件上传（相机 / 相册）？\n\n## 建议范围\n\n**M1：响应式布局回归**\n- 主要视图（list / detail / dashboard）端到端响应式测试\n- 触摸目标尺寸 / 安全区适配\n\n**M2：移动端专属路径**\n- 简化路由（去掉应用网格 chrome）\n- PWA / Add to Home Screen\n\n**M3：拍照上传 / 离线缓存**\n- 与 #28 storage 集成（相机直传）\n- IndexedDB 离线作业（巡检场景）\n\n## 验收\n\n- [ ] 主流视图移动端可用\n- [ ] `compliance` / 假想的 `field-service` 模板移动端体验通过\n- [ ] 缺陷库 gap #22 标记为已解决\n"
+}

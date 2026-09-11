@@ -1,0 +1,34 @@
+{
+  "number": 1676,
+  "kind": "pull_request",
+  "title": "feat(spec)!: ADR-0021 single-form cutover — dataset is the only analytics form (#1658)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-10T04:45:54Z",
+  "updated_at": "2026-06-10T05:32:20Z",
+  "closed_at": "2026-06-10T05:32:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-10T05:32:18Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1676",
+  "body": "## ⚠️ BREAKING / spec major — review before merge\n\nThis is the **convergence** step of ADR-0021 Phase 2 (#1658). The dual-form period is over: the inline analytics query form is **deleted**, and every dashboard widget / report / list-chart must now bind a semantic **`dataset`** and select dimensions/measures **by name**.\n\nThis PR is intentionally **not auto-merged** — it's a spec-major breaking change and wants a human review.\n\n### What's removed (author surface)\n| Surface | Removed | Now required |\n|---|---|---|\n| **DashboardWidget** | `object`, `categoryField`, `categoryGranularity`, `valueField`, `aggregate`, `measures` (+ `WidgetMeasure`) | `dataset` + `values`; `filter`→runtimeFilter; `dimensions`/`compareTo` kept |\n| **Report** | `objectName`, `columns`, `groupingsDown`, `groupingsAcross`, `filter` (top-level **and** joined blocks) | non-joined: `dataset` + `values`; `rows` = dimensions |\n| **ListChart** | `xAxisField`, `yAxisFields`, `aggregation`, `groupByField` | `dataset` + `values` |\n\n### Why this is safe\nThe dual-form rollout migrated **every in-repo consumer** to dataset-form first (#1673 / #1674 and prior), and the read-only analytics reconciliation harness verified **old == new** across all 52 framework + 49 hotcrm + ~72 templates analytics surfaces (0 mismatch). This cut is mechanical, not behavioural.\n\n### Migrated in this PR\n- **spec** ui schemas (dashboard/report/view) + rewritten focused dataset-form test suites.\n- **stack.test** strict-config Todo/CRM fixtures → dataset form (with `datasets:` arrays).\n- **objectql** metadata-write fixtures (`protocol-meta`, `metadata-validation-sweep`, `overlay-precedence`) → dataset form.\n- **examples** app-todo / app-crm / app-showcase dashboards, reports, views. The CRM YoY trend widget's monthly bucketing moves onto the dataset's `close_date` dimension (`dateGranularity: 'month'`). The showcase's former flat `tabular` report stays reclassified as a ListView (a flat list is a row lens, not analytics) — coverage/seed tests updated to match.\n- **platform-objects** `system_overview` dashboard.\n- regenerated **ui reference docs**.\n\n### Incidental\n`lite-kernel.test` now uses a unique per-process temp log path instead of a shared hardcoded `/tmp/test-kernel.log` — the shared file can be owned by another user, causing non-deterministic `EACCES` under concurrent `turbo` runs (this was masking the real signal).\n\n### Verification\n- `pnpm turbo build` → **72/72** ✅\n- `pnpm turbo test` → **123/123** ✅\n- `@objectstack/spec` → **6526/6526** ✅\n\nCloses the Phase 2 convergence track of #1658.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 1806,
+  "kind": "pull_request",
+  "title": "chore: bump objectui to 6164366619a1 (ADR-0047 interface-page column fix)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-13T03:06:44Z",
+  "updated_at": "2026-06-13T03:10:12Z",
+  "closed_at": "2026-06-13T03:10:09Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-13T03:10:09Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1806",
+  "body": "Bumps the pinned `@object-ui/console` SHA so the framework's prebuilt `/_console/` SPA picks up:\n\n- **objectui#1684** — the fix for the empty-grid bug: ADR-0047 interface pages rendered only the row-number column when the referenced default view was served hollow (columns live only in named views). Now falls back to object-derived columns, matching ObjectView.\n- #1680 / #1681 / #1682 — toolbar visualization dropdown, `uf_*` URL filter persistence, and the lookup quick-filter e2e, all merged after the previous pin (`76c38108544d`).\n\n`packages/console/dist` is gitignored and rebuilt at publish via `scripts/build-console.sh`; this PR only moves the tracked `.objectui-sha` pointer (the established `chore: bump objectui` cadence). I ran the build script locally at this SHA — clean, 33 MB dist, new bundle hash.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

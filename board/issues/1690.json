@@ -1,0 +1,35 @@
+{
+  "number": 1690,
+  "kind": "pull_request",
+  "title": "feat(showcase): chart gallery shows only distinctly-renderable chart types",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-10T15:05:20Z",
+  "updated_at": "2026-06-10T15:17:16Z",
+  "closed_at": "2026-06-10T15:17:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-10T15:17:14Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1690",
+  "body": "Pairs the objectui console build ([objectui#1624](https://github.com/objectstack-ai/objectui/pull/1624) — dataset widgets render their **true** chart type) with a trimmed, honest Chart Gallery.\n\n## Changes\n- **chart-gallery.dashboard.ts** → 27 → **17 widgets**, one per family the renderer draws distinctly: `metric ×3` (count / decimal / currency — to show the format feature), then bar / column / horizontal-bar / line / area / pie / donut / funnel / scatter / radar / treemap / sankey, and `table` / `pivot` with multiple measures. Removed the families that only fall back to a near-relative (grouped/stacked/bi-polar bars, stacked-area, step-line, spline, pyramid, bubble) and the dial-less performance variants (kpi/gauge/solid-gauge/bullet, identical to `metric`).\n- **coverage.test** → `covers every distinctly-renderable ChartType` (explicit allowlist of the fallback-only families, documented for the follow-up `ChartTypeSchema` trim).\n- **.objectui-sha** → `76094e0d` (vendors the true-chart-type routing).\n\n## Verification\nBrowser-tested on the showcase Chart Gallery with this console build:\n- **pie / donut / funnel** render distinctly; **line / area** as line/area (month buckets); **sankey** as a flow diagram.\n- **table / pivot** render real grouped tables with resolved lookup names (Contoso/Northwind), select labels, and currency format ($800,000).\n\n`turbo build` 72/72, `turbo test` 123/123.\n\n## Recommended follow-up\nTrim `ChartTypeSchema` (spec) to the renderable set so spec ↔ renderer ↔ showcase stay in lockstep — a breaking spec change best aligned with the next major.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

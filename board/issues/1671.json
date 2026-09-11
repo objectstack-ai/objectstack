@@ -1,0 +1,33 @@
+{
+  "number": 1671,
+  "kind": "pull_request",
+  "title": "ADR-0021 Phase 2: dataset dual-form migration + reconciliation harness (#1658)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-09T22:18:05Z",
+  "updated_at": "2026-06-09T22:18:30Z",
+  "closed_at": "2026-06-09T22:18:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-09T22:18:28Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1671",
+  "body": "## What\n\nADR-0021 Phase 2 (issue #1658): migrate inline analytics in **app-todo / app-crm / app-showcase** to the semantic `dataset` form (dual-form — kept side-by-side with the legacy inline query), and add a **read-only reconciliation harness** that asserts both forms return identical numbers. This is the hard gate before the legacy form is deleted.\n\n## Reconciliation harness — `scripts/analytics-reconcile/`\n\nBoots each app's real kernel and runs legacy `engine.aggregate()` vs dataset `queryDataset()`, diffing numbers group-by-group; exits non-zero on mismatch. **52 surfaces reconcile green · 0 mismatch.**\n\n## Two real runtime bugs the gate caught (both fixed + regression tests)\n\n1. `ObjectQLStrategy` overwrote same-field filter operators → a `$gte/$lte` range silently lost a bound.\n2. `ObjectQLStrategy` ignored `timeDimensions` → date dimensions never bucketed. Now lowers a granularity to a structured `{field, dateGranularity}` groupBy that `engine.aggregate` buckets.\n\n## Also\n\n- Record-list reports (`overdue_tasks`, `task_list`) → ListViews.\n- Joined report: added block-level dataset dual-form to `JoinedReportBlockSchema`; bound the analytics block (`task_overview/open_block`).\n- Fixed example bugs surfaced by reconciliation: `created_date`→`created_at`, invalid date macros, crm `sales_by_stage` flat-list → real grouped sum.\n\n## Tests\n\n- `@objectstack/spec`: 6666 pass\n- `@objectstack/service-analytics`: 89 pass (incl. 2 new regression tests)\n\n## Not in this PR (follow-ups toward delete-old-form)\n\nplatform-objects `system_overview`; single-form convergence (delete inline fields + `ListChartConfigSchema`, `blocks`→`sections`); `pnpm gen:schema`; WS5 docs/skills.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

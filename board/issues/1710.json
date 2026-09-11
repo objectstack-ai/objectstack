@@ -1,0 +1,33 @@
+{
+  "number": 1710,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0038 Build Verification Loop — the agent builds, verifies, and corrects itself",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T04:51:24Z",
+  "updated_at": "2026-06-11T04:56:22Z",
+  "closed_at": "2026-06-11T04:56:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T04:56:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1710",
+  "body": "**Design center: never make correctness depend on a human looking.** Humans won't review, and the magic moment auto-publishes before they could — the agent that builds an app must be the same loop that verifies and corrects it.\n\nGrounded in this week's live data: **six agent-authored defects shipped to staging in one day — every one passed schema validation, every one was found by a human manually browsing** (dangling dataset refs, measure-name mismatches, seeds not materializing, queries returning 0 on populated objects, silent seed failures, views rendering as \"Unknown component type\"). Schema-valid ≠ renders ≠ returns data ≠ matches intent — four separate verification planes, of which only the first exists today.\n\nFive layers, one `issues[]` contract consumed by the agent, the chat health-card, and the eval store:\n- **L1** draft-time cross-artifact graph lint (same-turn feedback into the tool envelope)\n- **L2** pre-publish renderability contract (translation + registry as data; dataset compilation)\n- **L3** post-publish runtime probes (row counts, one real query per widget — generalizing `seedApplied`)\n- **L4** bounded self-correction + **machine-conditional publish gate** (replaces the human approval gate for AI builds; HITL stays for destructive actions only) + an LLM intent-review pass\n- **L5** golden-prompt eval suite on the existing-but-unused `ai_eval_cases`/`ai_eval_runs` (every incident becomes a permanent regression case)\n\nPhase 1 (~1 week, cloud) alone converts this week's discovery latency from human-hours to same-turn.\n\nStatus: **Proposed** — open for review; merging records the proposal.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

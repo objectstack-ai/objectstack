@@ -1,0 +1,34 @@
+{
+  "number": 1922,
+  "kind": "pull_request",
+  "title": "docs(skill): verified anti-pattern deltas for formula + data authoring skills",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T15:46:07Z",
+  "updated_at": "2026-06-15T15:57:21Z",
+  "closed_at": "2026-06-15T15:55:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T15:55:13Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1922",
+  "body": "Continues the upstream \"teach the AI the right pattern at the source\" work (after #1921 for the automation skill) to the other two authoring skills.\n\n## Discipline: verified deltas only, no padding\nBoth skills are **already mature** — formula already documents the #1491 brace-in-CEL mistake + the dialect split + `isBlank`/null handling; data already warns that script validation is inverted. So this adds **only the verified gaps from this session**, not fabricated anti-patterns:\n\n**objectstack-formula** — only the stdlib + CEL built-ins are callable; an UNKNOWN function (`PRIOR()`, legacy `ISBLANK()`, a typo'd `isBlnk()`) now **fails `objectstack build`** with a \"no matching overload\" type error, not a silent runtime no-op. Use `previous.x` / `isBlank()`. (#1877)\n\n**objectstack-data**\n- A `multiple: true` lookup is an **array column**, not a junction object — reference positionally (`{record.tags.0}`); use a junction object only when the relationship carries attributes. (This is the exact confusion in #1872.)\n- On insert, an optional field omitted from the payload reads as `null` in a validation predicate, so `record.due_date == null` matches an omitted field the same as explicit `null`. (#1871)\n\n## Verification\nDocs-only. `pnpm check:skill-docs` passes (generated docs derive from SKILL.md *frontmatter*, unchanged). Empty changeset.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

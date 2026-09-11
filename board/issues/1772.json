@@ -1,0 +1,33 @@
+{
+  "number": 1772,
+  "kind": "pull_request",
+  "title": "fix(data): sweep non-canonical sort key direction: → SortNode's order: (desc silently sorted ascending)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T07:08:52Z",
+  "updated_at": "2026-06-12T07:09:10Z",
+  "closed_at": "2026-06-12T07:09:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T07:09:03Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1772",
+  "body": "## Summary\n\n`SortNode` (packages/spec/src/data/query.zod.ts) takes `order: 'asc'|'desc'` with default `asc`. Zod strips the unknown `direction:` key, so every engine query sorting with `direction: 'desc'` silently sorted **ascending**. Same bug class as the plugin-approvals fix that landed in #1769; this sweeps the remaining sites.\n\n### Behavior-changing (desc was silently asc)\n- **plugin-reports** `listReports` — now genuinely most-recently-updated first\n- **plugin-sharing** `listShares` — newest grant first\n- **service-job** `listExecutionsByStatus` — \"latest run\" was returning the **oldest** run\n- **service-queue** `listFailed` — newest DLQ message first\n\n### Cosmetic (asc default made behavior accidentally right, key still wrong)\nplugin-reports `listSchedules`, plugin-sharing `listRules` + share-link messages sort, service-queue `claimBatch` (×2).\n\n### Doc/template sites (schema-verified before changing)\n- `cli explain` query example — engine `FindOptions.sort` validates against `SortNode[]`\n- `cli generate` list-view template + spec benchmark — used a phantom `defaultSort:` key (`ListViewSchema` only has `sort: [{field, order}]`, view.zod.ts:422); benchmark `validQuery` used `sort:` which `QuerySchema` doesn't have → `orderBy`\n\n### Verified-correct, left alone\n- plugin-auth objectql-adapter — `sortBy.direction` is better-auth's own interface, already translated to canonical `{field, order}` at both sites\n- graphql.zod.ts `defaultSort` — separate schema that legitimately uses `direction: 'ASC'|'DESC'`\n\n## Tests\n\n- All four fake-engine mocks now honor **only** the canonical `order` key, with a comment explaining why (mocks honoring both keys is exactly how the approvals bug stayed hidden)\n- One descending-order regression test per package (newest row must come first)\n- Mutation-checked: reverting the service-job fix makes its new regression test fail\n- Suites green: plugin-reports 25, plugin-sharing 55, service-job 26, service-queue 20, cli 268; `tsc --noEmit` clean on spec\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

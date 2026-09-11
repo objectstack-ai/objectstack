@@ -1,0 +1,34 @@
+{
+  "number": 1833,
+  "kind": "pull_request",
+  "title": "docs(skills): sync objectstack-* skills with 9.0→9.4 changes",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-14T05:10:24Z",
+  "updated_at": "2026-06-14T05:25:17Z",
+  "closed_at": "2026-06-14T05:25:15Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-14T05:25:15Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1833",
+  "body": "## What\n\nAudited **all 119 commits** from `@objectstack/types@9.0.1` → `9.4.0` and updated the six `objectstack-*` skills whose documented contracts had drifted or gained capabilities. Each finding was verified against live source before editing.\n\n## Skills updated\n\n**objectstack-ui** (correctness)\n- Matrix report example was **wrong** — both dimensions in `rows`. Split into `rows` (down) × `columns` (across) per ADR-0021 D2 (#1732); documented `drilldown`.\n- Added `opensInNewTab`/`newTabUrl` Action contract (#1787), `App.hidden` (ADR-0045), `userFilters` `toggle` deprecation.\n\n**objectstack-platform** (correctness)\n- \"There is no automatic namespace prefixing\" was **no longer true** — rewrote to document `manifest.namespace` enforcement (`validateNamespacePrefix` / `NamespaceConflictError`, ADR-0048).\n- Split-app boot sequence (`@objectstack/setup`/`studio`/`account`), `os package install`/`publish`, `@objectstack/cloud-connection`, `sys_metadata` opt-in caveat.\n\n**objectstack-automation**\n- Inbound webhook (`api`) triggers + the **`queue` prerequisite** (without it every inbound POST 503s) — ADR-0041 Tier 1.\n- ADR-0044 send-back-for-revision: `revise` edge, `back` edge type, `maxRevisions`.\n\n**objectstack-api**\n- Documented the entire `/meta` REST surface, previously absent: `?preview=draft` (#1763), `?package=` (ADR-0048), `/meta/doc` content omission (ADR-0046).\n\n**objectstack-ai**\n- Built-in `data_chat` assistant, `data_explorer`/`visualize_data`, query-only edition gate (ADR-0040), `AI_DAILY_USER_MESSAGES`.\n- Fixed a **pre-existing** broken guardrails example (`maxTurns`/`requireApprovalFor` → `maxTokensPerInvocation`/`maxExecutionTimeSec`); corrected model-registry provider list.\n\n**objectstack-data**\n- Seed lookup id-fallback (#1814).\n\n## No change needed\n`objectstack-query`, `objectstack-formula`, `objectstack-i18n` — no contract drift in range (formula/i18n had zero source commits; query syntax already canonical).\n\n## Notes\n- Docs-only change; `skills/` is not a workspace package, so no changeset is required (matches prior `docs(...)` skill commits).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

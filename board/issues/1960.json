@@ -1,0 +1,34 @@
+{
+  "number": 1960,
+  "kind": "pull_request",
+  "title": "chore(spec): cut orphaned object.recordTypes and object.cdc stubs",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T09:31:44Z",
+  "updated_at": "2026-06-16T10:29:51Z",
+  "closed_at": "2026-06-16T10:29:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T10:29:50Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1960",
+  "body": "## What\n\nRemoves two spec-only properties from `ObjectSchema` that had elaborate docstrings but **zero consumers in either repo** (framework runtime + objectui authoring/rendering). Both were classified `dead` in the spec-liveness ledger.\n\n| Prop | Why it's gone | What to use instead |\n|---|---|---|\n| `object.recordTypes` | Salesforce-specific concept; never wired | Discriminator field + conditional layouts (`visibleWhen` / form variants) |\n| `object.cdc` (+ `CDCConfigSchema`, `CDCConfig` type) | Aspirational enterprise change-data-capture; no streaming runtime | Webhooks + triggers for change propagation |\n\nThis is part of the spec-liveness \"narrow-and-true\" hygiene: shedding false surface from the metadata contract. Verified orphaned in **both** `framework` and `../objectui` before removal (cross-repo grep + read).\n\n## Verification\n\n- `check:liveness` green — `object 56 classified`, all governed properties classified.\n- `gen:schema` regenerates clean (1686 schemas).\n- `@objectstack/spec` tests: **6562 passed (242 files)**.\n- No `recordTypes` / `CDCConfig` references remain anywhere under `packages/` (excluding `dist`/`node_modules`).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

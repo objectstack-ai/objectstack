@@ -1,0 +1,35 @@
+{
+  "number": 1797,
+  "kind": "pull_request",
+  "title": "feat(cloud-connection): unbind keeps an identity residual for re-bind continuity",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T21:11:22Z",
+  "updated_at": "2026-06-12T21:15:45Z",
+  "closed_at": "2026-06-12T21:15:44Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T21:15:44Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1797",
+  "body": "Phase 2 of the cloud [runtime-identity-binding ADR](https://github.com/objectstack-ai/cloud/blob/main/docs/design/runtime-identity-binding.md): **Disconnect clears the credential but keeps the identity.**\n\n- Unbind revokes cloud-side first, then writes a token-less residual `{runtimeId}` to the store instead of deleting it\n- A later re-bind to the same org presents the residual as its claim → the cloud revives the same (revoked) registration with a fresh bearer, instead of minting a new device row per disconnect cycle — an iCloud device record surviving sign-out\n- `ConnectionCredentialStore.read()` accepts token-less residuals; `credential()` already treats the empty token as \"no credential\", so status correctly reads as unbound while surfacing the runtimeId\n\nPairs with the cloud-side Connected Runtimes governance PR (rename / revoke / remove list actions).\n\n+2 tests; 42/42 green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

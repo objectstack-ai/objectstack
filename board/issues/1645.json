@@ -1,0 +1,32 @@
+{
+  "number": 1645,
+  "kind": "issue",
+  "title": "Multi-org analytics RLS: SecurityPlugin to expose getReadFilter (ADR-0021 D-C)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-07T10:14:44Z",
+  "updated_at": "2026-06-08T11:03:07Z",
+  "closed_at": "2026-06-08T11:03:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1645",
+  "body": "## Background (ADR-0021 D-C)\n\nThe analytics `dataset` semantic layer (PR #1643) hardens the cross-object analytics SQL path so the tenant/RLS read scope is injected per joined object. The mechanism is in place and unit/integration-tested:\n\n- `StrategyContext.getReadScope` (context-aware, returns a FilterCondition)\n- `NativeSQLStrategy` injects the scope on the base AND every joined table; rejects undeclared joins\n- `read-scope-sql` fail-closed FilterCondition→SQL compiler\n- `AnalyticsServicePlugin` auto-bridges `getReadScope` to a `security` service exposing `getReadFilter(object, context)`\n\n**What is missing:** plugin-security does not yet expose that `getReadFilter` service method, so in production the auto-bridge finds nothing and the raw-SQL analytics path runs **unscoped** for cross-object dataset queries. Single-org and single-object paths are unaffected (single-object goes through the RLS middleware; single-org has no cross-tenant surface).\n\n## Task\n\nExtract the existing middleware logic (permission-set resolution → `collectRLSPolicies` → field-existence filtering → `RLSCompiler.compileFilter`) into a reusable `getReadFilter(object, operation, context) => FilterCondition | null`, register it as the `security` service so `AnalyticsServicePlugin` auto-bridges to it. The live middleware behaviour must not change — factor out a shared helper that both the middleware and the new method call (single source of truth, no divergence).\n\n## Why it needs review\n\nTouches the security middleware **hot path** (highest-impact risk R1: a mistake leaks cross-tenant rows). Requires: unit tests that the extracted method matches middleware output; a multi-tenant end-to-end test with a real sqlite driver asserting a cross-object dataset query returns no other-tenant rows.\n\n## Scope\n\n- `packages/plugins/plugin-security` — expose `getReadFilter` + register `security` service\n- Multi-tenant e2e test (driver-sql)\n- No change to `service-analytics` (the bridge seam is already in place)\n\nFollow-up to #1643. See ADR-0021 §D-C."
+}

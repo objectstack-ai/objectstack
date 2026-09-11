@@ -1,0 +1,32 @@
+{
+  "number": 1592,
+  "kind": "issue",
+  "title": "validateRecord SKIP_FIELDS matches by name: required org_id on managed objects silently becomes NULL",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-05T01:53:26Z",
+  "updated_at": "2026-06-15T14:44:39Z",
+  "closed_at": "2026-06-15T14:44:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1592",
+  "body": "## Summary\n`validateRecord` skips required-checks for any field **literally named** `organization_id`/`tenant_id`, on the assumption it is the engine-injected tenant-scope column. When an object has a *genuine, user-supplied, required* field with that name, the required-check is silently bypassed → the value reaches the DB as `NULL` (a silent integrity failure, not a clean 400).\n\n## Repro\n`POST /api/v1/data/sys_team` with body `{ \"name\": \"x\" }` (omitting `organization_id`):\n```\nNOT NULL constraint failed: sys_team.organization_id   (SQLITE_CONSTRAINT_NOTNULL)\n```\nExpected: `400 VALIDATION_FAILED { field: organization_id, code: required }` from the validator — never reaching the driver.\n\n## Root cause\n`packages/objectql/src/validation/record-validator.ts`:\n```ts\nconst SKIP_FIELDS = new Set([\n  'id','created_at','created_by','updated_at','updated_by',\n  'organization_id','tenant_id',   // <- skipped BY NAME\n]);\n...\nif (SKIP_FIELDS.has(name)) continue;   // required-check never runs for org_id\n```\nThis is correct *only* when `organization_id` is engine-injected. But:\n- `sys_team.organization_id` is a real `required` lookup to the parent org (`Field.lookup('sys_organization', { required: true })`).\n- `registry.ts:~189` skips system-field **injection** for `managedBy: 'better-auth'` tables, so it is **not** injected either.\n\nNet: the required org is **neither validated by the client nor injected by the engine** → silent NULL → DB constraint. Any object with a legitimate `organization_id`/`tenant_id` field hits this.\n\n## Proposed change\nDistinguish **injected system columns** from **declared business fields** by *provenance*, not by name. Set a flag at registration (e.g. `field.system` / `field.injected: true`) on columns the registry injects, and have `validateRecord` skip only those — never skip by hardcoded name. A genuinely declared `organization_id` field then gets normal required/type validation.\n\n## Why this is the most insidious of the set\nUnlike the unknown-field case (loud error), this is a **silent integrity failure** — the row either errors at the DB by luck (NOT NULL present) or, worse, writes NULL where the column is nullable. It will recur on any object that legitimately names a field `organization_id`/`tenant_id`.\n\n## Related\n- Pairs with `managedBy` enforcement — same injection boundary (linked below).\n- Error-mapping safety net (branch `fix/rest-map-schema-errors`) currently maps this NOT NULL → 400, but that is the *symptom*; this issue is the *cause*.\n\n_Found running cloud `LOCAL-E2E-CHECKLIST` B7._"
+}

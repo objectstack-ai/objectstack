@@ -1,0 +1,35 @@
+{
+  "number": 1766,
+  "kind": "pull_request",
+  "title": "feat(cloud-connection): self-hosted credential loop + SDUI binding surface",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T06:16:12Z",
+  "updated_at": "2026-06-12T06:20:20Z",
+  "closed_at": "2026-06-12T06:16:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T06:16:15Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1766",
+  "body": "## 自托管闭环 B + 绑定 UI 的 SDUI 元数据(framework 侧)\n\n配套 cloud#253(bind mint oscc_ + 控制面受理)。\n\n**B — 凭据通道**\n- `ConnectionCredentialStore`(`.objectstack/cloud-connection.json`,0600):bind/poll 把一次性 `runtime_token` 存本地并**从浏览器响应剥离**(SPA 永不持凭据);环境 id 一并持久化(首绑后不再需要 OS_ENVIRONMENT_ID)\n- 全部控制面转发按请求懒解析凭据:服务键(云托管)→ 存储 bearer(自托管)——绑定完成即生效,无需重启\n- 新 `POST /cloud-connection/unbind`(控制面 revoke best-effort + 本地清除)\n- install-local 取 manifest 带凭据 → 绑定运行时可解析本组织 org/private 包\n- bind/start、bind/poll 支持单环境未绑时 body 传 environment_id(Setup UI 输入)\n\n**SDUI(渐进混合方案——绑定 UI 不硬写 React)**\n- 插件 `manifest.register` 自带 `cloud_connection_settings` page + Setup nav contribution(ADR-0029 K2)\n- 控制台只注册一个可复用 `cloud-connection:panel` widget(objectui 另 PR)\n\n## 验证\n- 包 36/36 测试;E2E 浏览器全链路随 objectui widget 落地后统一跑\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

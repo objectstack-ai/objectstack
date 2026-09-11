@@ -1,0 +1,34 @@
+{
+  "number": 1917,
+  "kind": "pull_request",
+  "title": "docs: tabbed sidebar nav + de-emphasize objectql/ui/os protocol branding",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T15:02:38Z",
+  "updated_at": "2026-06-15T15:39:52Z",
+  "closed_at": "2026-06-15T15:39:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T15:39:49Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1917",
+  "body": "Reworks the docs site **left navigation** for reader experience. The whole sidebar was one long rail mixing all 9 top-level groups + the 238 generated reference pages; this splits it into **six icon-labelled tabs** (fumadocs folder roots) so a reader sees one section at a time.\n\n### Changes (nav-only — no files moved, no doc URLs changed)\n- **Tabs + icons** — `root: true` + lucide `icon` on each top-level section's `meta.json`.\n- **De-emphasize ObjectQL/ObjectUI/ObjectOS** — per maintainer call, the protocol layer was early-emphasis branding; root nav reordered so **Protocol is the last tab**, and the **generated Reference gets its own tab** instead of crowding hand-written docs.\n- **Reference tab config is generated** — `references/meta.json` is emitted by `packages/spec/scripts/build-docs.ts`, so the title/icon/root were set there (title `Protocol Reference` → `Reference`), not by hand-editing the generated file.\n- **Guides regrouped** — added a `Foundations` label, moved Service Contracts into `Integration`, surfaced `Cheatsheets` under their own label (was buried after a bare divider).\n- **Fixed \"Protocol\" label collisions** — `Protocol Overview` → `Protocol`, `Contracts Protocol` → `Service Contracts`.\n- **Bug fix** — top-nav GitHub link pointed at the renamed `objectstack-ai/spec`; now `framework`.\n\n### Verification\n- `pnpm --filter @objectstack/docs build` → compiles **all 1113 pages clean**, no lucide \"unknown icon\" warnings.\n- Diff scoped to 8 `meta.json` + `layout.shared.tsx` + the generator. No reference content drift.\n\n> Tabs are a visible UX change — worth a quick `pnpm --filter @objectstack/docs dev` eyeball before merge. Fully reversible (config-only).\n\nDeferred (needs content decisions, not in this PR): three duplicate \"Architecture\" pages, glossary vs terminology overlap, and semantic renames of the 14 Reference categories.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1746,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0041 — flow trigger family: taxonomy, naming, open-source core set",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T02:03:30Z",
+  "updated_at": "2026-06-12T02:05:51Z",
+  "closed_at": "2026-06-12T02:04:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T02:04:19Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1746",
+  "body": "## Summary\n\nWrites down the trigger plan discussed during the approvals revamp follow-ups:\n\n- **What a trigger is** (event source → user-orchestratable flow, via the engine's `FlowTrigger` seam) and what it is **not** (screen launches, approval out-edges, plugin-internal clocks → `IJobService`, cf. #1742).\n- **Naming**: `plugin-trigger-*` → first-class `trigger-*` family, consistent with `driver-*`/`connector-*`/`embedder-*`/`knowledge-*`.\n- **Tier 1 (core, Apache-2.0, default preset)**: `trigger-record-change` ✅, `trigger-schedule` ✅, and **`trigger-api` as the single short-term build item** — the flow schema already reserves `type: 'api'` with no runtime behind it (a Studio trap today). Acceptance criteria include HMAC-verified per-flow endpoints and queue-backed ingestion from day one.\n- **Tier 2 (open source, on demand)**: email-inbound, queue, lifecycle — each with the driving scenario that promotes it.\n- **Tier 3 (marketplace/vertical)**: connector-event families, threshold, file, iot.\n- **Discoverability**: trigger descriptors carry `maturity: ga|beta|reserved` so Studio renders pickers from the live registry and greys out reserved types instead of letting users author flows that never run.\n\nCurrent state verified against code (engine seam, the two shipped triggers, `serve` auto-wiring, the reserved `api` enum) with file references throughout.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

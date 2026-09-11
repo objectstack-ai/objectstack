@@ -1,0 +1,33 @@
+{
+  "number": 1672,
+  "kind": "pull_request",
+  "title": "feat(service-ai): consistent agent narration when builds auto-publish",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-10T02:32:13Z",
+  "updated_at": "2026-06-10T02:32:35Z",
+  "closed_at": "2026-06-10T02:32:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-10T02:32:32Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1672",
+  "body": "## What\nThe metadata agent couldn't see whether an environment auto-publishes AI builds, so it hedged (\"staged for review / publish to make it live\") even after a build went live — contradicting the UI's **Published** state.\n\n`buildSystemMessages` now reads `context.autoPublishAiBuilds`: when on, the agent is told a finished whole-app build is **live immediately** and to say so. Absent/false keeps the conservative framing. The chat ([objectui](https://github.com/objectstack-ai/objectui)) passes the runtime flag in the chat context.\n\nThis is the optional polish on top of the auto-publish \"magic moment\" — the UI panel was already the source of truth; this makes the model's prose agree with it.\n\n## Changes\n- `AgentChatContext`: add `autoPublishAiBuilds?: boolean`\n- `buildSystemMessages`: append a \"Publishing in this environment\" note when on\n- tests: instruction present when on; silent when off/absent (service-ai suite 333 green)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

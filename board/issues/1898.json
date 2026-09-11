@@ -1,0 +1,33 @@
+{
+  "number": 1898,
+  "kind": "pull_request",
+  "title": "fix(dev-dx): wasm sqlite fallback, silence PORT warning, dev auth Origin (#1875)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T07:14:22Z",
+  "updated_at": "2026-06-15T07:14:42Z",
+  "closed_at": "2026-06-15T07:14:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T07:14:34Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1898",
+  "body": "## Summary\nThree dev-DX fixes from #1875, surfaced while runtime-testing templates on Node 25.\n\n1. **SQLite ABI mismatch → wasm fallback** — dev's driver chain is now native `better-sqlite3` → **wasm SQLite** → in-memory. When the native binary's ABI doesn't match the running Node (e.g. Node 25 `NODE_MODULE_VERSION` mismatch), dev keeps **real SQL + persistence** via `SqliteWasmDriver` instead of dropping to the non-persistent mingo in-memory driver. Same probe-by-`connect()` so load failures are caught at registration.\n2. **PORT deprecation warning** — added a `{ silent: true }` option to `readEnvWithDeprecation`, applied at the `OS_PORT`/`PORT` call sites. `PORT` is an industry-standard alias PaaS platforms inject automatically, so the warning nagged operators about env they never set. Other legacy vars still warn.\n3. **Auth Origin 403** — in dev (`NODE_ENV !== 'production'`), when a request has neither `Origin` nor `Referer`, `handleRequest` synthesizes a same-origin `Origin` from the request URL so better-auth's CSRF check passes for non-browser clients (curl/scripts). Production untouched.\n\n## Test\n- Full turbo build (53 tasks) passes — includes CLI's real `tsc` typecheck.\n- `@objectstack/types` 7/7, `@objectstack/plugin-auth` 118/118 (4 new Origin-injection cases), `@objectstack/cli` 322/322.\n\nCloses #1875\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

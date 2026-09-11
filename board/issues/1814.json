@@ -1,0 +1,32 @@
+{
+  "number": 1814,
+  "kind": "pull_request",
+  "title": "fix(objectql): seed reference resolution falls back to matching by id",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-13T12:42:23Z",
+  "updated_at": "2026-06-14T01:44:42Z",
+  "closed_at": "2026-06-14T01:44:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-14T01:44:40Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1814",
+  "body": "## Problem\n\n`SeedLoaderService.resolveFromDatabase` only matched a reference value against the target's **natural-key** field. A seed that wires a lookup to a **real existing record by its internal id** — e.g. a people field (`approver`/`applicant` → `user`) pointed at the current user — dangled to **null** when:\n- the id is not a UUID/ObjectId (so the caller's `looksLikeInternalId` guard didn't short-circuit and write it directly), and\n- the id isn't the target's natural key (so the name-based lookup found nothing).\n\nThis surfaced while wiring AI-built approval apps' sample rows to a real user (cloud apps#285): the approver field is a proper `user` lookup, the seed carries a valid user id, yet it resolved to null.\n\n## Fix\n\nWhen the natural-key lookup finds nothing, **try resolving the value as the target's `id`**. Safe: an id either exists or it doesn't, so there's no risk of a false natural-key match; tenant-scoped like the primary lookup.\n\n## Notes\n\nSmall, additive change in `resolveFromDatabase`; covers both pass-1 and the deferred pass-2 resolution (both route through this method). Verified by typecheck; cloud-side e2e is pending the next framework bump (the local rig is currently on an unrelated newer framework commit).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

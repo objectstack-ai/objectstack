@@ -1,0 +1,33 @@
+{
+  "number": 1702,
+  "kind": "pull_request",
+  "title": "docs(releases): Releases section on the docs site with curated v9.0.0 notes",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T01:56:47Z",
+  "updated_at": "2026-06-11T01:57:08Z",
+  "closed_at": "2026-06-11T01:57:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T01:57:06Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1702",
+  "body": "## Summary\n\n- Adds a **Releases** section to the docs site (`content/docs/releases/`) so third-party developers get one curated page per release-train version, covering both the framework packages and the Console UI delta.\n- **v9.0.0 page**: TL;DR for upgraders → 4 breaking changes with migration tables (ADR-0021 analytics single-form cutover, `ChartTypeSchema` trim, canonical `OS_*` settings env vars, `@object-ui/plugin-workflow` removal) → framework features (analytics display labels/date bucketing/measure format, Google sign-in, CLI AI SDKs) → Console features (true chart types, dataset reports, flow designer alignment, Build-with-AI, marketplace) → fixes → upgrade checklist.\n- **Overview page**: versioning policy and pointers to the fine-grained per-package changelogs and ADRs.\n- **`scripts/collect-release-notes.sh`**: repeatable aggregation for future releases — prints the changesets consumed between two tags plus the objectui commit range derived from the `.objectui-sha` pins at each ref (feat/fix listed first, `chore!:` breakage visible in the rest).\n\n## How the v9 scope was derived\n\nFramework: the 8 changesets consumed by release #1699 (`@objectstack/spec@8.0.1..@objectstack/spec@9.0.0`). Console: objectui `ba2867be..2df743b0` (36 commits), the pin delta between those two tags.\n\n## Verification\n\n- `fumadocs-mdx` compiles the new content map.\n- Rendered locally (`next dev`): sidebar/TOC/tables correct, no console errors, all internal links (analytics-datasets, environment-variables, auth-sso) resolve 200.\n- `scripts/collect-release-notes.sh \"@objectstack/spec@8.0.1\" \"@objectstack/spec@9.0.0\"` reproduces the v9 material.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

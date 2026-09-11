@@ -1,0 +1,33 @@
+{
+  "number": 1698,
+  "kind": "pull_request",
+  "title": "docs(flow): document durable pause & resume (ADR-0019) in the flow guide",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-10T16:45:29Z",
+  "updated_at": "2026-06-10T17:01:33Z",
+  "closed_at": "2026-06-10T17:01:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-10T17:01:31Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1698",
+  "body": "## Summary\nThe flow guide covered ADR-0031 structured control flow but had **nothing** on the suspend/resume runtime — `approval`/`screen`/`wait` pausing semantics, the resume endpoint, wait-timer auto-resume + cold-boot re-arm (#1687), nested pause through subflows (linked runs, #1693), and the runs observability API were all undocumented. This is the core of ROADMAP P1 (\"Document Flow-first automation\").\n\nAdds a **Durable pause & resume** section to `guides/metadata/flow.mdx`:\n- per-node pause/resume table — including the operational rule learned in live E2E: **decide through the approvals API**, never direct `resume` (a direct resume strands the pending `sys_approval_request` → record stays locked, later approvals hit `DUPLICATE_REQUEST`)\n- nested-pause chain model (bubble up / delegate down) with the showcase example pair (`showcase_project_closure` + `showcase_closure_signoff`)\n- runs observability endpoints + the in-memory-history caveat\n- node-type table rows for `screen`/`wait`/`subflow` now flag pause behavior\n\n## Test plan\n- [x] `pnpm --filter @objectstack/docs build` green\n- [x] Every documented behavior was browser-verified live against the showcase app earlier today\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

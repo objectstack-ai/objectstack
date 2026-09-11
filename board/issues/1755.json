@@ -1,0 +1,32 @@
+{
+  "number": 1755,
+  "kind": "pull_request",
+  "title": "feat(cli,showcase): ADR-0008 Phase 3 — os package install + marketplace in the open single-env example",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T02:56:56Z",
+  "updated_at": "2026-06-12T02:59:39Z",
+  "closed_at": "2026-06-12T02:57:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T02:57:08Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1755",
+  "body": "## ADR-0008 Phase 3(framework 侧)\n\n**1. `os package install`(新 CLI 命令)**\n- catalog 模式:`os package install com.acme.crm [--version]` —— 目标运行时从它配置的 catalog 解析并装进自己内核\n- **气隙模式**:`os package install ./dist/objectstack.json` —— 编译产物 inline 上送,零 catalog 依赖\n- 对目标运行时 better-auth 登录(--email/--password;带 Origin 头过 CSRF)\n\n**2. app-showcase 接市场(开源单环境参考 wiring)**\n- 显式 wire `@objectstack/cloud-connection`(proxy + install-local + cloud-connection + runtime-config);`OS_CLOUD_URL=off` 可关\n\n## E2E 验证(本地真栈)\n- ✅ CLI catalog 模式:从本地控制面装入 `com.local.sample@1.0.0`\n- ✅ CLI 气隙模式:inline artifact 装入 `local.airgap.demo@0.0.1`\n- ✅ 浏览器:showcase `/_console` 市场页 —— 目录渲染 + Installed v1.0.0 徽章 + Installed (2) 列表\n- ✅ runtime/config 开源默认(无 plan 政策钩子)印证开闭边界\n\n注:lockfile 的 showcase importer 已随 #1751/#1754 在 main(共享 checkout 时序),本 PR 不再改 lockfile。\n后续(cloud 侧另 PR):catalog manifest 端点按 manifest_id 解析 + 匿名限流。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 1915,
+  "kind": "pull_request",
+  "title": "fix(automation): record-change flows see multi-lookup fields + array-index interpolation (#1872)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T14:31:34Z",
+  "updated_at": "2026-06-15T14:35:47Z",
+  "closed_at": "2026-06-15T14:35:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T14:35:44Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1915",
+  "body": "Closes #1872.\n\n## Problem (confirmed via full-kernel repro)\nA `multiple: true` lookup is stored as an **array column** (not a junction table — objectql has no junction logic; the expand path at `engine.ts` already treats the value as `Array.isArray`). A data driver may not echo that column back on `create`, so it was **absent from the after-create record** the record-change flow sees:\n- `record.target_channels != null` evaluated false → the flow never ran;\n- `{piece.target_channels.0}` interpolation resolved empty.\n\n## Root cause (two distinct gaps, both confirmed by instrumented repro)\n1. The record-change trigger's `buildContext` read `ctx.input.**doc**`, but objectql lifecycle hooks carry the written row under `ctx.input.**data**` (insert/update). So the input fallback was *always* undefined — the flow only ever saw the driver's (incomplete) after-row.\n2. Interpolation's path regex required identifier segments, so a numeric `.0` segment (`{rec.channels.0}`) never matched the fast path.\n\n## Fix\n- **`@objectstack/trigger-record-change`** — `buildContext` reads `input.data` and overlays the after-row on it (`{ ...inputData, ...after }`): the after-row wins for every field the driver returns (id, DB-computed), and fields it omits (multi-lookup arrays) come from the input. Affects only record-change flows.\n- **`@objectstack/service-automation`** — `{var.path.N}` numeric segments now index into arrays ([template.ts](packages/services/service-automation/src/builtin/template.ts)), so `{record.channels.0}` resolves.\n\n## Tests\n- Full-kernel repro: a driver that deliberately doesn't echo the array column → a `record-after-create` flow gated on `record.target_channels != null` fires AND its `update_record` stamps `{record.target_channels.0}` (= `ch_1`). Fails on each gap before the fix; passes after.\n- Array-index interpolation unit tests (single / embedded / out-of-range).\n- `@objectstack/service-automation` **199 pass**, `@objectstack/trigger-record-change` **20 pass** (incl. the #1491 integration test — confirms the `input.data` change doesn't regress the record path).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

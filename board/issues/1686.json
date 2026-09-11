@@ -1,0 +1,33 @@
+{
+  "number": 1686,
+  "kind": "pull_request",
+  "title": "feat(objectql): materialize seed rows on EVERY publish path (seedApplied)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-10T13:46:10Z",
+  "updated_at": "2026-06-10T13:52:43Z",
+  "closed_at": "2026-06-10T13:46:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-10T13:46:34Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1686",
+  "body": "## Problem\n\nPublishing a `seed` draft only promoted its **metadata** — whether the **rows** actually landed depended on which route you published through:\n\n- `/packages/:id/publish-drafts` applied seeds at the dispatcher level, **swallowing failures silently** (the chat says \"Published!\", the app's tables are empty — exactly what we hit live on staging with an AI-built recruiting app).\n- `/meta/:type/:name/publish` (per-ref — what the home Publish banner uses since objectui#1621) **never applied seeds at all**.\n\n## Fix\n\nMove `SeedLoaderService` into `@objectstack/objectql` (runtime keeps a re-export shim — `rest` can't depend on `runtime`, and objectql owns both the engine and the publish primitive), then apply seeds where **every** path converges — the protocol itself:\n\n- **`publishMetaItem`**: publishing a single `seed` materializes its rows from the just-promoted body (no read-back → no org-scope resolution pitfalls) and reports under **`seedApplied`**. Best-effort: a seed problem never fails the publish, but it's now **loud in the response** instead of invisible.\n- **`publishPackageDrafts`**: structure first, seeds **last** (their objects' tables must exist), all seed bodies **batch-applied in one loader pass** so cross-seed references resolve regardless of draft order. Per-item self-apply suppressed (`_skipSeedApply`) so nothing double-inserts.\n- **dispatcher publish-drafts route**: route-level apply only as a fallback when the protocol didn't self-apply (custom-protocol back-compat) — never both.\n\nThe per-ref REST route passes the protocol result through unchanged, so the banner path gets `seedApplied` with **zero rest-server changes**.\n\n## Test\n\n- objectql **546** + runtime **381** green.\n- New coverage: seeds publish last; one batch pass with all bodies; `_skipSeedApply`; non-seed publishes untouched; per-ref self-apply; loud failure for unreadable bodies; **real-loader smoke test** (rows actually inserted via the engine).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

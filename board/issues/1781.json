@@ -1,0 +1,33 @@
+{
+  "number": 1781,
+  "kind": "pull_request",
+  "title": "docs(agents): require own temp server for testing; never kill others' servers",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T11:27:12Z",
+  "updated_at": "2026-06-12T15:43:16Z",
+  "closed_at": "2026-06-12T15:43:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T15:43:14Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1781",
+  "body": "## Summary\n\nThis repo is developed by multiple agents in parallel. This adds an explicit rule to `AGENTS.md` so agents don't break each other's in-flight work:\n\n- **Multi-agent working discipline §8**: if testing needs a server, start your **own temporary instance** on a random high port (`pnpm dev -- --fresh -p <random>`) — never stop a server you didn't start. Shut your own server down when the task is done; don't leave orphans.\n- Cross-referenced the rule from the dev-server **Rules** line in *Build & Test*.\n\nDocs-only change — no code, no changeset needed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

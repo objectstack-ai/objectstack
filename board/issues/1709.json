@@ -1,0 +1,34 @@
+{
+  "number": 1709,
+  "kind": "pull_request",
+  "title": "feat(automation): map node — sequential batch approval (ADR-0037 A2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T04:39:58Z",
+  "updated_at": "2026-06-11T04:50:05Z",
+  "closed_at": "2026-06-11T04:50:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T04:50:03Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1709",
+  "body": "## Summary\nADR-0037 **Track A2**: a `map` node for **sequential batch approval** — \"sign off every item in a list, one at a time.\" Unlike `loop` (synchronous body, cannot pause), each item is a full child run, so the per-item subflow may **durably pause** on its own `approval`; the map waits for that item, then moves to the next. The run holds **one program counter** throughout — no token tree.\n\nAs flagged in the revised ADR, A2 is *not* engine-free (unlike A1). It needs a **bounded change in the resume path only** — no scheduler, no `traverseNext` rewrite:\n- `resumeInternal`: a run paused at a `map` node (correlation `map:<childRunId>`) **re-enters** the node on resume (re-runs `executeNode`) instead of continuing past it, so the executor records the just-completed item and starts the next. Default path unchanged.\n- `bubbleToParent`: a map child (`$parentMapNode` in context) hands its output to the map node + flags completion, vs the subflow 1:1 mapping. Reuses the ADR-0019 linked-runs (#1693); the `map:` correlation prefix carries re-entry, so **no new persisted field**.\n- new `map` builtin executor: collection → per-item subflow, item-as-`$record` when the item is a record, results collected in order, **fail-fast** in v1. Concurrent fan-out stays Track B.\n\n## Test plan\n- [x] +5 engine unit tests: synchronous map, empty collection, **sequential per-item pause with re-entry**, fail-fast, **cold-boot restart mid-map** (two engines, shared store). Full service-automation suite **177 green**; tsup build clean; docs build green.\n- [x] Browser E2E (live showcase): `showcase_release_signoff` triggered with 2 tasks → task 1's approval opens, run paused → approve task 1 → **only** task 2's approval opens (sequential, one at a time) → approve task 2 → run `completed` (`start → signoffs×3 → notify_done`). Distinct record per item, no dedup collision.\n- Showcase: `showcase_release_signoff` → `showcase_one_task_signoff`. Docs: \"Batch approval — a map node\" section.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

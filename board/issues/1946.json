@@ -1,0 +1,35 @@
+{
+  "number": 1946,
+  "kind": "pull_request",
+  "title": "chore(spec): prune 7 dead field governance/compliance props (dead-surface plan)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T06:33:14Z",
+  "updated_at": "2026-06-16T06:34:43Z",
+  "closed_at": "2026-06-16T06:34:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T06:34:40Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1946",
+  "body": "Second batch of the dead-surface disposition plan. Removes 7 FieldSchema props that implied data-protection/governance behavior but had **zero runtime consumer** — false promises (encryption/masking imply at-rest protection that never happened; the real channel is `type: 'secret'`):\n\n`encryptionConfig` · `maskingRule` · `auditTrail` · `cached` · `dataQuality` · `writeRequiresMasterRead` · `trackFeedHistory`\n\nCleanup: schema + now-unused `EncryptionConfigSchema`/`MaskingRuleSchema` imports + `field.form.ts` (5 form fields) + `field.test.ts` + ledger; references regenerated. **Kept `caseSensitive` + `dependencies`** (potentially functional — conservative). Field *types* unchanged.\n\n## Verification\n- Liveness gate green (field 34 live / 17 dead). Full `@objectstack/spec` suite green (242 files, **6562 tests**). Grep-confirmed no object def / seed constructs them.\n- **Ran the real `objectstack dev` showcase** (37 plugins, 75 objects): boots clean, Console 200, `showcase_field_zoo` parses + serves (its code field no longer carries `auditTrail`), no field errors in the server log.\n\nFollows #1945 (field display configs). Remaining field prunes (redundant flags searchable/index/externalId/columnName — heavier test coupling; master-detail overrides) and object-level prunes proceed as further per-cluster verified PRs.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

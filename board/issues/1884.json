@@ -1,0 +1,33 @@
+{
+  "number": 1884,
+  "kind": "issue",
+  "title": "[P0][security] Agent access control is a no-op (permissions/visibility/access)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "priority:p0",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T06:54:22Z",
+  "updated_at": "2026-06-15T08:15:23Z",
+  "closed_at": "2026-06-15T08:15:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1884",
+  "body": "Part of the metadata liveness audit umbrella #1878 (P0 security cluster).\n\n## Problem\nAgent access control is a **no-op**. `agent.permissions` / `agent.visibility` / `agent.access` are never enforced — the chat route hardcodes the permission set `['ai:chat','ai:agents']` (`agent-routes.ts:109`). \"Who can chat with this agent\" therefore enforces nothing; any user with the hardcoded perms reaches every agent regardless of its declared access policy.\n\n## Decision required (enforce or remove)\n- **Enforce**: have the chat route resolve the target agent's `permissions`/`visibility`/`access` and check the caller against them before opening a session.\n- **Remove**: drop `permissions`/`visibility`/`access` from `AgentSchema` if agent-level gating is out of scope, so authors don't assume protection that isn't there.\n\n## Evidence\n- `docs/audits/2026-06-agentschema-property-liveness.md`\n- `agent-routes.ts:109` (hardcoded `['ai:chat','ai:agents']`)\n"
+}

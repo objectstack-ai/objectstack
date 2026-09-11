@@ -1,0 +1,33 @@
+{
+  "number": 1706,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0037 concurrent durable pause — multi-instance now, token tree later",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T03:23:44Z",
+  "updated_at": "2026-06-11T04:58:36Z",
+  "closed_at": "2026-06-11T04:58:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T04:58:34Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1706",
+  "body": "## Summary (revised after self-review)\n\nADR-0037 records the decision for **concurrent durable pause** — pausing in more than one place in a run at once (parallel approvals, batch approvals), which the engine forbids today (`SuspendedRun.nodeId` is a single position; suspend is a thrown stack-unwind; `runRegion` bans region pause).\n\nA code + industry self-review (Camunda / Zeebe / Flowable / Step Functions vs. the actual engine) changed the recommendation. The tempting \"adopt a token/scope tree\" answer is the right *long-term* model but is a **full engine-core rewrite**, because the tree only works paired with three things the engine doesn't have:\n\n1. recursion + throw-to-suspend → an explicit **token scheduler** (a thrown exception can't pause branch A while branch B keeps running);\n2. the flat shared variable `Map` → **hierarchical scope variables** (read up the tree) — *not* the copy-on-write/merge scheme the first draft invented, which no major engine uses;\n3. sibling resumes → **per-run serialization** (Camunda's per-instance locking) — so the concurrency is logical, not parallel execution.\n\n### Decision: two tracks\n- **Track A (now, no engine-core change):** multi-instance / aggregating nodes — parallel approvals as one `approval` node aggregating N decisions (`unanimous`/`first_response`/threshold), batch approvals as a `map` node. Camunda multi-instance / Step Functions `Map` shape. The run keeps one program counter; the node owns fan-out + aggregation. Covers the demand that motivated the ADR.\n- **Track B (deferred, recorded):** the general token/scope tree + scheduler + hierarchical scoping, started only when a flow needs arbitrary-position concurrent pause that multi-instance can't express.\n\nKept correct from the first draft: reject Temporal replay (ADR-0018 open node registry breaks determinism); authoring model + DAG invariant preserved (tokens runtime-only); single-token = back-compat anchor.\n\n## Status\n**Proposed** — decision doc for review before any engine work. No code changes.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

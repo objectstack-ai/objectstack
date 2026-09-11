@@ -1,0 +1,36 @@
+{
+  "number": 1664,
+  "kind": "pull_request",
+  "title": "Add auth settings and canonical env overrides",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-08T07:06:25Z",
+  "updated_at": "2026-06-08T07:14:28Z",
+  "closed_at": "2026-06-08T07:14:26Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-08T07:14:26Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1664",
+  "body": "## Summary\n- switch settings env overrides to canonical `OS_<NAMESPACE>_<KEY>` names and document AI/auth environment variables\n- add Auth settings for email/password policy and Google sign-in credentials, including encrypted Google secret storage\n- wire Auth settings into the better-auth runtime config, keep admin operations always enabled, and hide incomplete 2FA UI until the full flow ships\n\n## Verification\n- `pnpm --filter @objectstack/plugin-auth test`\n- `pnpm --filter @objectstack/service-settings test`\n- `pnpm --filter @objectstack/platform-objects test`\n- `pnpm --filter @objectstack/docs types:check`\n- `pnpm test`\n- Browser/API checked Auth settings fields, Google credential behavior, and login page Google button rendering\n"
+}

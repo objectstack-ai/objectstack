@@ -1,0 +1,35 @@
+{
+  "number": 1840,
+  "kind": "pull_request",
+  "title": "chore(services): remove BullMQ vaporware, reframe cluster packages as Redis-free-first",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-14T06:36:42Z",
+  "updated_at": "2026-06-14T06:42:19Z",
+  "closed_at": "2026-06-14T06:42:18Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-14T06:42:18Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1840",
+  "body": "## What\n\nThe queue/cluster packages presented Redis/BullMQ as the production path, which contradicts the platform's actual direction (DB-first, single-node affinity, Redis-free Cloud/EE). This cleans up the misleading surface — no behavior change to working code paths.\n\n### service-queue\n- Delete the `BullMQQueueAdapter` skeleton (every method threw `\"not yet implemented (M10.43)\"`); remove the `'bullmq'` adapter option, the dead throw branch, the reserved `redisUrl` field, and the index exports. **No external consumers** (grep-verified).\n- `DbQueueAdapter` (`sys_job_queue`, lease-based claim) is the durable, multi-node, **broker-free** path.\n- Rewrite the README: it documented a fictional `add`/`process`/REST API and framed BullMQ/Redis as \"production\". Replaced with the real `publish`/`subscribe` + DLQ surface and the `db`/`memory`/`auto` adapters.\n\n### service-cluster\n- Downgrade the header doc: only the `redis` remote driver exists (postgres/nats are **not** built). Call out the **memory-driver split-brain footgun** for multi-replica deployments.\n\n### service-cluster-redis\n- Add a README positioning it as a **community-optional reference driver** that proves the `registerClusterDriver()` SPI — explicitly **not** on the Redis-free Cloud/EE deployment path. Fix the wiring example to the real `defineCluster({ driver: 'redis' })` / `ClusterServicePlugin({ config })` API.\n\n## Why\n\nOpen-core boundary: cluster primitives are open *mechanisms* (one-app-across-N-processes), not multi-tenancy. The platform's multi-node story is Redis-free (DB-backed queue + per-env affinity routing). The packages' docs/stubs implied a Redis-first production path that doesn't exist and isn't the direction.\n\n## Verification\n\n- `turbo run build` green (CJS + ESM + DTS) for all three packages.\n- service-queue tests: **20/20 pass**.\n\n## Follow-up (not in this PR)\n\n- Memory-driver split-brain **runtime guard** (detect multi-replica + memory driver → warn/refuse) is documented here but not yet implemented.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

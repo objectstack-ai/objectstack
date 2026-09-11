@@ -1,0 +1,32 @@
+{
+  "number": 1712,
+  "kind": "pull_request",
+  "title": "docs(adr): renumber the token/scope-tree ADR 0037 → 0039 (resolve collision)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T05:01:28Z",
+  "updated_at": "2026-06-11T05:12:43Z",
+  "closed_at": "2026-06-11T05:12:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T05:12:41Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1712",
+  "body": "Resolves a duplicate ADR-0037 on main: #1694 \"Live Canvas\" (created 2026-06-10) and #1706 \"token tree\" (this work, 2026-06-11) both merged as 0037. Live Canvas has precedence; the token-tree ADR yields to the next free number (0038 = Build Verification Loop), so it becomes **0039**. Updates only this work's own references (ADR-0019/0031 forward-refs, flow guide Track A/B links, showcase comments). Live Canvas stays 0037, untouched. Docs build green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

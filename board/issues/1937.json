@@ -1,0 +1,35 @@
+{
+  "number": 1937,
+  "kind": "pull_request",
+  "title": "feat(rest): enforce object enable.apiEnabled / apiMethods (ADR-0049 #1889)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T05:22:31Z",
+  "updated_at": "2026-06-16T05:39:54Z",
+  "closed_at": "2026-06-16T05:39:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-16T05:39:52Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1937",
+  "body": "First **enforce-or-remove** fix from the metadata-liveness work (ADR-0049 #1889) — closing a real **false-compliance** security gap, not adding measurement.\n\n## The gap\nThe object liveness audit found `enable.apiEnabled` / `enable.apiMethods` **parsed but never enforced by REST** — an object could not be hidden from the automatic API despite the flag. Authoring `apiEnabled: false` was a silent no-op (false sense of security).\n\n## The fix\nNew `RestServer.enforceApiAccess()` loads the object's metadata and, per request:\n- `enable.apiEnabled === false` → **404** `OBJECT_API_DISABLED` (404 so existence isn't revealed)\n- `enable.apiMethods` (non-empty whitelist) → operation outside it → **405** `OBJECT_API_METHOD_NOT_ALLOWED`\n\nWired across **all 12 data entry points**: list / get / create / query / update / delete / import / export / batch / createMany / updateMany / deleteMany.\n\n**Scope:** the *external* REST API boundary only — internal callers (hooks, flows, raw objectql) are unaffected, which is correct: `apiEnabled` governs automatic API exposure, not data access.\n\n**No regression:** default-allow — objects with no `enable` block (or `apiEnabled` unset/true and no `apiMethods` whitelist) behave exactly as before. Unknown objects fall through to the normal 404. A metadata-read failure does not block (the data call needs the same metadata anyway).\n\n## Tests\n8 new tests: `apiEnabled:false` → 404 on read **and** write (engine never called), `apiMethods` 405 + allow-through, no-regression default, explicit `apiEnabled:true`, unknown-object pass-through, and the bulk path. Full `@objectstack/rest` suite green (110).\n\n## Liveness closure\nThe gate now classifies `object.enable.apiEnabled`/`apiMethods` **live** (evidence: `rest-server.ts`) instead of dead — the loop closes. Remaining `enable.*` flags (trackHistory/searchable/files/feeds/activities/trash/mru/clone) stay dead (separate enforce-or-remove items).\n\n> Security-behavior change — please review rather than fast-merge. Verified at the route-handler level via unit tests; happy to add a live showcase check (`apiEnabled:false` object → curl returns 404) if you'd like before merge.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

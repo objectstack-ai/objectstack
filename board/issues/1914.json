@@ -1,0 +1,32 @@
+{
+  "number": 1914,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0050 — split FormView.type into layout vs presentation (#1890)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T14:23:26Z",
+  "updated_at": "2026-06-15T14:39:04Z",
+  "closed_at": "2026-06-15T14:39:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T14:39:02Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1914",
+  "body": "## What\n\nProposes **ADR-0050** — the modelling fix behind the form-variant work in #1890 / objectstack-ai/objectui#1762.\n\n`FormView.type` overloads **two orthogonal dimensions** in one enum:\n- **layout**: `simple` / `tabbed` / `wizard` / `split`\n- **presentation container**: `drawer` / `modal`\n\nSo \"a modal containing a tabbed form\" is inexpressible — `type` is one value. That's exactly why the real modal create/edit entry points (`AppContent`, `useActionModal`) hard-set `formType:'modal'` and the form inside can only be `simple`.\n\n## Key findings (in the ADR)\n\n- `ObjectForm` **already implements every variant** — the gap was entry wiring (full-page route fixed in objectui#1762).\n- Presentation is **already modelled** independently: `NavigationMode` (detail open), list `addRecord.mode`, action `type:'modal'`.\n- `drawer`/`modal`/`split` as `FormView.type` values have **zero real usage** — only 5 showcase/template *demo* named views.\n\n## Decision\n\n`FormView.type` → **layout only** (`simple`/`tabbed`/`wizard`). Drop `drawer`/`modal` (caller-supplied containers via the existing open-mode fields) and `split` (covered by `subforms` + the list's split-detail mode). `ObjectForm` drops the retired branches.\n\n## Sequencing\n\nThis PR is **the design (ADR doc only)**. Implementation is a spec-major change (breaking enum narrowing, like ADR-0021's cutover) — it should land after architect sign-off, ideally bundled with modal/drawer layout-forwarding so the \"modal + tabbed\" capability ships demonstrably. Migration cost is low (near-zero real usage).\n\nRefs #1890\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

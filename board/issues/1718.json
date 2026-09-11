@@ -1,0 +1,33 @@
+{
+  "number": 1718,
+  "kind": "pull_request",
+  "title": "feat(adr-0006): Phase 2 — generic resolveKernel seam on HttpDispatcher",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T09:34:33Z",
+  "updated_at": "2026-06-11T09:44:40Z",
+  "closed_at": "2026-06-11T09:44:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T09:44:38Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1718",
+  "body": "## ADR-0006 Phase 2 — 引入通用接缝 (additive, behavior-equivalent)\n\nAdds an optional, host-injected **`KernelResolver`** seam to the framework `HttpDispatcher` so per-request kernel selection can move out of the open-source framework into the cloud distribution (the eventual Phase 5). Pure addition — coexists with the existing `kernelManager` path.\n\n### What changes\n- `HttpDispatcherOptions.kernelResolver?: KernelResolver` — also auto-picked from the `kernel-resolver` service, mirroring how `kernelManager` resolves from `kernel-manager`.\n- In `dispatch()` the resolver **takes precedence** over `kernelManager` for primary routing; the two **coexist** — `kernelManager` still serves the action-route service-resolution path until Phase 5 retires the in-dispatcher resolution.\n- Returning `undefined` routes to the single `defaultKernel` (single-environment / control-plane / unscoped requests).\n- `KernelResolver` is exported as a **retained generic contract** (ADR D3) — the framework ships no multi-tenant implementation; all hostname→env strategy + the per-env kernel cache live in cloud `@objectstack/objectos-runtime`.\n\n### Behavior-equivalence & back-compat (both directions)\n- Host injects **neither** → unchanged (single-env / legacy).\n- Host injects only `kernelManager` → unchanged legacy path.\n- Host injects `kernelResolver` (cloud) → delegates to the same `KernelManager`, so routing is identical.\n- An **older framework** that receives a `kernel-resolver` service simply ignores it → the cloud Phase 2 PR is safe to merge in any order relative to this one.\n\n### Tests\nNew focused `http-dispatcher.kernel-resolver.test.ts`: resolver precedence over `kernelManager`, `undefined`→`defaultKernel` fallback, and legacy back-compat. `pnpm --filter @objectstack/runtime build` (incl. DTS) succeeds; runtime tests **384 passed** (was 381).\n\n> Part of the ADR-0006 series: Phase 1 = #1717 (deprecate framework cloud dupes). The cloud-side adoption (register `kernel-resolver`) is a separate cloud-repo PR. Phase 3/4 (startup-path / CLI decouple) are gated on human sign-off.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

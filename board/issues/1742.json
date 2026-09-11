@@ -1,0 +1,30 @@
+{
+  "number": 1742,
+  "kind": "issue",
+  "title": "feat(approvals): SLA auto-escalation — scheduler pass executing escalation.action",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T01:41:45Z",
+  "updated_at": "2026-06-12T02:44:31Z",
+  "closed_at": "2026-06-12T02:44:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1742",
+  "body": "## Context\n\n#1740 shipped SLA **display**: `sla_due_at` (= `created_at + escalation.timeoutHours`) renders as countdown/overdue chips in the Console inbox. The contract side of escalation has been fully specified for a while — `ApprovalEscalationSchema` (`packages/spec/src/automation/approval.zod.ts`) carries `timeoutHours`, `action: reassign | auto_approve | auto_reject | notify`, `escalateTo`, `notifySubmitter` — but **nothing executes it**. Every approval action today is request-driven; there is no clock that wakes up when a pending request breaches its SLA.\n\n## Proposal\n\nA periodic scan (via `plugin-trigger-schedule` integration or a dedicated interval job owned by plugin-approvals):\n\n```\nevery N minutes:\n  find sys_approval_request where status='pending'\n  parse node_config_json.escalation; skip rows without one\n  overdue? execute action:\n    notify       → messaging.emit to pending approvers + escalateTo\n    reassign     → ApprovalService.reassign() with escalateTo as the new approver\n    auto_approve → decide('approve', system actor)\n    auto_reject  → decide('reject', system actor)\n  audit an 'escalate' action (enum value already exists)\n```\n\nThe execution primitives (`reassign()`, `decide()`, `notify()`, the `escalate` audit kind) all exist after #1740 — this issue is the scheduler pass plus the policy decisions below.\n\n## Decisions an ADR must settle first\n\n1. **Idempotency / multi-instance safety** — a crashed-and-restarted scanner or two concurrently running schedulers must not escalate the same request twice (double reassign; auto_approve racing auto_reject). Likely needs an `escalated_at` watermark on the request row (schema migration) or an idempotency lock keyed on the audit table.\n2. **Semantics of a system decision** — `auto_approve` means *no human* approved. Decide the audit actor convention (`system:sla`?), notification copy, and whether compliance-sensitive deployments should be able to forbid auto_approve/auto_reject globally.\n3. **Clock ownership** — does the SLA run from `created_at`, or re-arm after a `request_info` round-trip? Should the clock pause while waiting on the submitter (ServiceNow-style SLA pause)? This decides the schema.\n\nMis-deciding any of these is a \"the machine approved 200 requests over the weekend\" incident — hence ADR-level review before implementation.\n\n## References\n\n- Display groundwork: #1740 (`sla_due_at`), Console chips: objectstack-ai/objectui#1653\n- Schema: `ApprovalEscalationSchema` in `packages/spec/src/automation/approval.zod.ts`\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

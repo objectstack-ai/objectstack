@@ -1,0 +1,35 @@
+{
+  "number": 1903,
+  "kind": "pull_request",
+  "title": "feat(automation): resolve & validate script-node callables; function registration (#1870)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T09:02:40Z",
+  "updated_at": "2026-06-15T09:33:05Z",
+  "closed_at": "2026-06-15T09:33:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T09:33:03Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1903",
+  "body": "Closes #1870.\n\n## Problem\nA flow `script`/action node pointing at an **unregistered callable** (`invoke_function` → a function defined nowhere), or declaring **no `actionType`/`function` at all** (`actionType: undefined`), built + typechecked fine and then **silently did nothing at runtime**. There was also **no first-class way** for an authored package to register a function a `script` node could call. Found while runtime-testing `objectstack-ai/templates` on 9.5.1 (helpdesk `ai_triage_on_create` → `helpdesk.aiTriageStub`; project `daily_ai_risk_assessment` → `pm.aiRiskAssessmentStub`; content `publication_rollup` with `actionType: undefined`).\n\n## Fix\nThree surfaces, mirroring the loud-validation approach from #1877:\n\n**1. Loud runtime resolution** — [screen-nodes.ts](packages/services/service-automation/src/builtin/screen-nodes.ts)\nThe built-in `script` executor resolves its target in order:\n- built-in side-effect (`email`/`slack`, logger-backed, preserved) →\n- a **registered function** (`config.function`, or a bare `config.actionType` that matches no built-in, so a node pointed straight at `helpdesk.aiTriageStub` resolves) →\n- otherwise **fail the step loudly**.\n\nThe old `[Script:…] (no-op handler) → { success: true }` path is gone.\n\n**2. First-class registration path** — [engine.ts](packages/services/service-automation/src/engine.ts) + [plugin.ts](packages/services/service-automation/src/plugin.ts)\nNew `AutomationEngine.setFunctionResolver()` / `resolveFunction()`. The plugin's `start()` bridges it to ObjectQL's `resolveFunction`, populated from `bundle.functions` / `defineStack({ functions })` — the same registry hooks/actions already use. So an authored package registers a function and calls it from a flow:\n```ts\n// defineStack({ functions: { 'helpdesk.aiTriageStub': (ctx) => ({ priority: 'high' }) } })\n{ type: 'script', config: { function: 'helpdesk.aiTriageStub', inputs: { ticket: '{record.id}' } } }\n```\nThe function receives `{ input, variables, automation, logger }` and its return value becomes the node output. Reuses the existing `script` node (no enum/Studio churn) per the chosen authoring contract.\n\n**3. Build-time structural check** — [validate-expressions.ts](packages/cli/src/utils/validate-expressions.ts)\n`objectstack build` now flags a `script` node that declares neither `actionType` nor `function` (the `actionType: undefined` repro). Function *existence* is not checkable at build — functions are code, not serialized into the artifact — so existence is enforced at runtime.\n\n### Design note\nRegistration-time (`registerFlow`) does **not** hard-fail on a target-less `script` node: a `script` node can be claimed by a plugin-registered custom executor (existing engine tests rely on this), and the engine can't distinguish built-in vs custom at registration. The guard lives where it's unambiguous — the built-in executor (runtime) and `objectstack build` (authored metadata).\n\n## Tests\n- New `screen-nodes.test.ts`: built-in side-effect, function resolution + output capture, bare-`actionType` shorthand, **loud failure** for unregistered function, loud failure for no target, thrown-function surfacing.\n- `validate-expressions.test.ts`: build flags target-less `script` node; accepts `actionType`/`function`.\n- `@objectstack/service-automation` 193 passed · `@objectstack/cli` 260 passed · production build + DTS clean (the package's pre-existing `tsc --noEmit` test-fixture errors are unrelated and present on `main`).\n\n## Scope\nSlice A (loud validation) + Slice B (registration path) per the issue. `connector_action` already failed loud and is unchanged.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

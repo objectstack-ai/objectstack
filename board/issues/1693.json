@@ -1,0 +1,34 @@
+{
+  "number": 1693,
+  "kind": "pull_request",
+  "title": "feat(automation): nested durable pause — subflow chains (linked runs)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-10T15:39:10Z",
+  "updated_at": "2026-06-10T15:52:51Z",
+  "closed_at": "2026-06-10T15:52:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-10T15:52:49Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1693",
+  "body": "## Summary\nCloses the last known engine capability gap from the flow-engine review: a pausing node (approval / screen / wait) inside a `subflow` previously failed the parent run and stranded the child's already-persisted continuation as an orphan.\n\nSubflow pauses now suspend the whole chain as **linked runs** (the inter-flow half of the long-term execution-state architecture — cf. Step Functions nested executions / Temporal child workflows; the intra-flow token-tree is a separate future ADR):\n\n- **subflow node**: child pauses → suspend the *parent* at the node with `correlation: 'subflow:<childRunId>'`, surfacing the child's screen. Linkage (`$parentRunId` / `$parentNodeId` / `$parentOutputVariable`) rides on the child's persisted context — **no `sys_automation_run` schema change**. Descriptor now publishes `supportsPause: true`.\n- **resume() boundary only** (no `traverseNext`/`executeNode` changes, per the ADR-0031 multi-agent discipline):\n  - **down-delegation** — resuming a run paused at a subflow forwards the signal to the suspended child; multi-screen child wizards keep the parent run id stable for the UI and refresh its surfaced screen (`getSuspendedScreen` stays refresh-safe)\n  - **up-bubble** — a completed run carrying `$parentRunId` auto-resumes its parent with the child output mapped exactly like the synchronous path (`${nodeId}.output` + bare `outputVariable`)\n  - **failure propagation** — a child failing terminally after the pause fails every waiting ancestor (bounded walk) instead of stranding them as resumable-forever\n- Both directions compose recursively (multi-level nesting), survive restarts via the durable store, and reuse the existing resume-once idempotency guards.\n- ADR-0019 addendum documents the model + deliberate v1 boundaries (fault edges do not catch post-pause child failures; `timeoutMs` does not span suspension; crash-between-bubble compensable via manual resume).\n\n## Test plan\n- [x] +7 tests: parent-suspend linking · direct-child bubble (approval/wait path) · parent delegation with screens (screen-flow path) · multi-screen wizard · two-level nesting · cold-boot restart (two engines, shared store) · post-pause failure propagation\n- [x] Full service-automation suite: **172/172 green**; `tsup` build + DTS clean (the 2 pre-existing tsc test-file errors reproduce on main untouched)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

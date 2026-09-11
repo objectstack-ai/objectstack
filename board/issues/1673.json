@@ -1,0 +1,33 @@
+{
+  "number": 1673,
+  "kind": "pull_request",
+  "title": "docs(ws5): Analytics Datasets guide (ADR-0021 Phase 2 closeout)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-10T03:18:14Z",
+  "updated_at": "2026-06-10T03:20:26Z",
+  "closed_at": "2026-06-10T03:18:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-10T03:18:31Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1673",
+  "body": "WS5 of the ADR-0021 Phase 2 closeout: a hand-written **Analytics Datasets** guide for the dataset semantic layer (`content/docs/guides/analytics-datasets.mdx`), wired into the Guides nav, plus an `objectstack-ui` SKILL cross-link.\n\nCovers: why the semantic layer (no joins / metric drift / no source of truth), authoring (`defineDataset` — dimensions/measures/derived/certified/include), binding dashboards & reports, cross-object joins, the REST query surface, and the dual-form → single-form migration posture. Reference pages auto-generate from the zod schemas, so only the guide is hand-written.\n\n### Remaining closeout (NOT in this PR — see notes)\nThe **delete-old-form** step (#5) is intentionally deferred: its gate is unmet (2 list-chart views + platform-objects `system_overview` are still inline-only; needs a new ListView→dataset binding), the vendored console predates objectui#1612 (single-form would drop filters), and removing inline fields is a breaking `@objectstack/spec` major. Sequence: finish remaining migrations → re-bump console with #1612 → then delete inline as a focused major-version PR.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

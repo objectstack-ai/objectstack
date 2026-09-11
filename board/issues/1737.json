@@ -1,0 +1,32 @@
+{
+  "number": 1737,
+  "kind": "pull_request",
+  "title": "feat(approvals): display contract v2 — no raw identifiers anywhere",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T16:09:26Z",
+  "updated_at": "2026-06-11T16:09:45Z",
+  "closed_at": "2026-06-11T16:09:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T16:09:42Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1737",
+  "body": "## Summary\n\nFollow-up to #1728 after a business-UX pass on the revamped inbox: three surfaces still leaked raw identifiers. The enrichment pass now guarantees a client never has to render an id:\n\n- **`payload_display`** — lookup/master_detail foreign keys in the record snapshot resolve to the referenced record's display title (via the field's schema `reference`, batched one query per referenced object). `Account: dpOfPMy7cbeEL1jk` → `Account: Fabrikam`.\n- **`pending_approver_names`** — user-id entries in `pending_approvers` resolve via `sys_user` (id or email); `role:<r>` literals pass through, already readable.\n- **`object_label`** — the target object's schema label (e.g. \"Project\" for `showcase_project`).\n- **`actor_name`** on `listActions` rows — the audit timeline never shows an id.\n\n## Test plan\n\n- plugin-approvals: 46 tests (3 new: payload lookup resolution + object_label, approver name map, actor_name on actions) ✅\n- E2E against showcase: pending rows return `payload_display: {account: \"Contoso\"}`, `pending_approver_names`, `object_label: \"Project\"`; Console drawer renders Fabrikam/Northwind/Contoso instead of foreign keys ✅\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

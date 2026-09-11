@@ -1,0 +1,32 @@
+{
+  "number": 1897,
+  "kind": "pull_request",
+  "title": "fix(showcase): align fixtures with tightened spec schemas",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T07:13:01Z",
+  "updated_at": "2026-06-15T16:42:57Z",
+  "closed_at": "2026-06-15T16:42:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T16:42:55Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1897",
+  "body": "## What\n\nThe `app-showcase` example's `pnpm typecheck` had silently drifted out of sync with several spec schema tightenings. CI does not typecheck `examples/**`, so this went unnoticed on `main`. Fixes 14 type errors across 4 files; `pnpm verify` (typecheck + 20 tests) is now green.\n\n## Why each change\n\n- **`invoice.object.ts`** — conditional-rule fields (`requiredWhen`/`readonlyWhen`/`visibleWhen`) and the `amount` formula are now backed by `ExpressionInputSchema`, whose authored type is the post-transform `Expression` object. Bare strings no longer typecheck. Switched to the `P` (predicate) and `cel` tagged-template helpers — the same convention already used in `project.object.ts`.\n- **`project-detail.page.ts`** — `record`-type pages now require `template`; added `template: 'default'`.\n- **`project-workspace.page.ts`** — pages now require `isDefault`; added `isDefault: false`.\n- **`reports/index.ts`** — `Report.drilldown` is `z.boolean().default(true)`, so the inferred (output) type makes it required at author time; added `drilldown: true` to the three top-level reports.\n\n## Note\n\nThe underlying friction is that several `Field.*()`/`Report` author-time types are derived from `z.infer` (output) rather than `z.input`, so `.default()`/transform fields read as required even though the runtime accepts the looser input. This PR matches the existing in-repo convention rather than changing those shared spec types; a follow-up could widen the author types to `z.input` for nicer DX.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

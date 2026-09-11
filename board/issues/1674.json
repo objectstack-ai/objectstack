@@ -1,0 +1,32 @@
+{
+  "number": 1674,
+  "kind": "pull_request",
+  "title": "feat(analytics): list-chart + platform-objects dataset migration (ADR-0021)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-10T03:36:59Z",
+  "updated_at": "2026-06-10T03:37:18Z",
+  "closed_at": "2026-06-10T03:37:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-10T03:37:16Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1674",
+  "body": "The remaining inline-only analytics surfaces, converted to dataset **dual-form** — the prerequisites that unblock single-form convergence (#5).\n\n## 1. List-chart views\n`ListChartConfigSchema` never got a dataset binding in Phase 1 (unlike dashboard/report). This adds `dataset` + `dimensions` + `values` (+ a `superRefine` enforcing dataset-XOR-inline), mirroring dashboard widgets, and migrates the 2 showcase list-chart views (`task`/`project`) to dual-form.\n\n## 2. platform-objects `system_overview`\n9 aggregate widgets bound to 5 new single-object `sys_*_metrics` datasets, registered via `plugin-auth`'s manifest alongside the dashboard. The `recent_events` record-list table stays inline (a ListView concern). Audit / package-installation objects are cross-package (referenced by name) and runtime-gated via `requiresObject`.\n\n## Verification\n- Spec rebuilt; **6666 spec tests**, **52 platform-objects**, **109 plugin-auth** pass.\n- showcase + platform-objects + plugin-auth build clean.\n- (No seed data for `sys_*` objects → numeric reconciliation N/A, as noted in the closeout plan.)\n\n## Toward #5 (delete old form)\nWith this, all framework analytics surfaces are dataset-bound (dual-form). The remaining gate for the breaking deletion: re-bump the vendored console to include objectui#1612, confirm grep-zero-residue after stripping inline + full build/test, then remove inline fields + `ListChartConfigSchema` as a focused major-version PR.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1785,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0047 — two run modes for object UI (data views vs interface pages)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T12:12:59Z",
+  "updated_at": "2026-06-12T16:19:14Z",
+  "closed_at": "2026-06-12T16:19:13Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T16:19:13Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1785",
+  "body": "## Summary\n\nProposes **ADR-0047**: the architectural decision for Airtable-Interfaces-parity list UI.\n\n- **Two run modes, both first-class**: data mode (nav → object: all views as switcher tabs, user-created views allowed) vs interface mode (nav → page: author-curated, references one view, exposes only enabled controls).\n- **Iron rule**: pages *reference* views, never restate columns/filters — drift is made unrepresentable at the schema level.\n- **Formalizes `userFilters`** (element: tabs/dropdown/toggle + per-field config) in `ListViewSchema` and `InterfacePageConfig` — the objectui client already implements and renders this; today it works only via raw passthrough with no spec type.\n- **Runtime visualization choice** as an author-controlled whitelist (`userActions.visualizations`), capability-filtered by field bindings; asymmetric defaults (data mode open, interface mode locked).\n- **AI authoring rules** (inherits ADR-0033's design center): default output is objects+views+nav only; pages only on explicit persona/curation signals; reference-integrity `_diagnostics` become hard failures in the AI loop.\n\n## Grounding\n\nAll \"what exists\" claims verified live on 2026-06-12 against `examples/app-showcase` + objectui console, including a runtime overlay experiment proving `userFilters` round-trips and renders end-to-end while view-level `tabs` are dropped by a one-line orchestrator gap.\n\n## Prior art consulted\n\nAirtable (Data vs Interfaces), Salesforce (list views vs Lightning pages), Power Platform (model-driven vs canvas), Notion (linked views), Retool (counter-example).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

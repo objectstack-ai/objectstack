@@ -1,0 +1,35 @@
+{
+  "number": 1907,
+  "kind": "pull_request",
+  "title": "fix(cli): keep non-self-contained hook handlers out of body-only lowering (#1876)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T09:42:46Z",
+  "updated_at": "2026-06-15T11:23:53Z",
+  "closed_at": "2026-06-15T11:23:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T11:23:51Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1907",
+  "body": "Addresses the live half of #1876 (build↔runtime validation parity).\n\n## Discovery summary\n#1876 lists two repros. I verified both before writing any code:\n\n- **Repro #1 (legacy `object`/`aggregate` dashboard widgets pass build, runtime rejects) — already closed on `main`.** The ADR-0021 single-form cutover made `DashboardWidgetSchema.dataset`/`.values` **required** ([dashboard.zod.ts:156,160](packages/spec/src/ui/dashboard.zod.ts)); `objectstack build` (`ObjectStackDefinitionSchema.safeParse`) and the runtime metadata plugin parse with the **same** schema ([metadata/plugin.ts:505](packages/metadata/src/plugin.ts)), and there's already a regression test ([dashboard.test.ts:58](packages/spec/src/ui/dashboard.test.ts)). I confirmed empirically that a legacy widget is rejected at build. No code needed.\n- **Repro #2 (body-only hooks `ReferenceError`) — live; fixed here.**\n\nA parity sweep also confirmed schema-level parity holds end-to-end (both sides use `ObjectStackDefinitionSchema`), so the remaining divergence is semantic/callable-level — this PR.\n\n## The fix (repro #2)\nA hook/action handler referencing a **module-scope identifier** (helper, import, top-level const) was lowered by `objectstack build` to a metadata-only `body`. That body ships *without* the referenced definition → `ReferenceError` at runtime. Build green, app won't boot.\n\n[extract-hook-body.ts](packages/cli/src/utils/extract-hook-body.ts) now runs a conservative **free-identifier analysis** ([detect-free-identifiers.ts](packages/cli/src/utils/detect-free-identifiers.ts), TS AST via the already-present `ts-morph` — **no new dependency**):\n- free vars = identifiers referenced but bound neither by the function (params/locals, over-approximated) nor by the runtime (a generous global allow-list);\n- any hit **refuses extraction**, so `lowerCallables` falls back to **bundling** the real function (esbuild carries the closure) — no `ReferenceError`, no build break.\n\n### Why this is safe (the #1903 lesson, applied)\nThe failure mode of a build-time check is *false positives breaking real builds*. This analysis is biased so that can't happen:\n- **over-approximate bindings** (a name declared anywhere counts as bound) → only risks false *negatives*;\n- **generous globals** → only risks false *negatives*;\n- a false positive merely **bundles a self-contained handler instead of inlining it** — a size cost, never a correctness or build failure (and `--strict-body` is used nowhere in-repo).\n\n## Tests\n- 23-case analyzer battery: flagging (helper/const/method-shorthand/implicit-return/multi) + false-positive guards (member access, locals, globals, destructuring, loop/catch bindings, shorthand props, param defaults, named-fn recursion, rest params, …).\n- Extractor integration: throws on a module-scope helper, extracts a self-contained handler.\n- End-to-end `lowerCallables`: free-var handler stays registered (bundled) with `body` undefined + a warning naming the identifier; self-contained handler still body-lowers.\n- Full CLI suite **376 pass**; `tsc` clean; **example-crm / app-showcase / app-todo all build green** (crm's self-contained callable stays body-only — no false positive).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

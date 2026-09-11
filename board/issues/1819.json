@@ -1,0 +1,35 @@
+{
+  "number": 1819,
+  "kind": "pull_request",
+  "title": "fix(metadata): package-scope the Studio editor read via ?package= (ADR-0048)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-13T17:19:57Z",
+  "updated_at": "2026-06-13T17:24:09Z",
+  "closed_at": "2026-06-13T17:24:07Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-13T17:24:07Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1819",
+  "body": "## What\n\nCloses the last gap in the ADR-0048 per-route package-scoped resolution audit: the **Studio metadata editor** (`/apps/:appName/metadata/:type/:name`).\n\nThe `?layers=true` single-item read (the editor's 3-state code/overlay/effective view) ignored `packageId`, so editing one of two same-named items from different packages resolved ambiguously (first match). Note `:appName` there is the **studio** package, not the edited item's owner — so the scope must come from the item's owning package, carried as `?package=`.\n\n## Changes\n\n- `protocol.getMetaItemLayered` threads `packageId` into the code layer (`metadataService.get` + `lookupArtifactItem` + `registry.getItem`) and the `sys_metadata` overlay query (`package_id` prefer-local).\n- `registry.getArtifactItem(type, name, currentPackageId?)` + `lookupArtifactItem` gained the optional package-scope hint (prefer-local).\n- `rest-server` threads `?package=` into the layered branch.\n\n## Frontend counterpart\n\n[objectui PR](https://github.com/objectstack-ai/objectui) — `MetadataClient.layered/getDraft` accept `{ packageId }`; the metadata list links emit `?package=<row._packageId>`; `ResourceEditPage` reads it and scopes the layered/draft read.\n\n## Verification\n\n- Unit: `getMetaItemLayered` package-scoping (code + overlay). objectql 602 / rest 108 green.\n- Live: the Studio editor at `/apps/com.objectstack.studio/metadata/doc/showcase_index` loads **each package's own** item per `?package=`:\n  - `?package=com.example.showcase` → Label \"Showcase\", content \"# Showcase…\"\n  - `?package=com.objectstack.studio` → Label \"Studio Intro\", content \"# STUDIO VERSION\"\n  - layered REST endpoint (`?layers=true&package=`) disambiguates `code`/`effective`. No console errors.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

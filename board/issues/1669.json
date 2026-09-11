@@ -1,0 +1,33 @@
+{
+  "number": 1669,
+  "kind": "pull_request",
+  "title": "fix(cli): make scaffolded projects start cleanly under pnpm",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-09T05:55:37Z",
+  "updated_at": "2026-06-09T15:03:25Z",
+  "closed_at": "2026-06-09T15:03:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-09T15:03:23Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1669",
+  "body": "## Problem\n\n`npx @objectstack/cli init` → `pnpm install` → `pnpm start` failed for a freshly scaffolded `app` project, in two independent ways:\n\n1. **`better-sqlite3` native binding missing.** It's pulled in transitively by the default standalone SQLite store (via knex). pnpm 10+ blocks dependency build scripts by default, so the native module shipped uncompiled and `objectstack serve` crashed at runtime with:\n   ```\n   Could not locate the bindings file ... better_sqlite3.node\n   ```\n\n2. **`pnpm start` failed before any build.** The scaffold's `start` script was `objectstack serve` (production mode), which boots from the compiled `dist/objectstack.json`. That artifact doesn't exist right after `pnpm install`, so `serve` errored out (surfacing as a cryptic `Service 'manifest' is async`).\n\n## Fix\n\nBoth changes are in the `init` `app` template only.\n\n1. **Generate `pnpm-workspace.yaml`** allowlisting the native build deps:\n   ```yaml\n   onlyBuiltDependencies:\n     - better-sqlite3\n     - esbuild\n   ```\n   The allowlist must live in `pnpm-workspace.yaml` — current pnpm (10.33) **ignores the `pnpm` field in `package.json`** and emits a deprecation warning. This mirrors how this repo configures itself. npm/yarn/bun ignore the file and build native modules by default, so it's harmless for them.\n\n2. **`start` now runs `objectstack compile && objectstack serve`**, so it works straight after `pnpm install` without a separate build step.\n\n## Verification (pnpm v10.33.0)\n\n- A/B: without `pnpm-workspace.yaml` → binding missing (bug reproduced); with it → binding compiled automatically.\n- Real `init --package-manager pnpm`: generates `pnpm-workspace.yaml`, no `pnpm` field in `package.json`, `better_sqlite3.node` built.\n- `init → install → pnpm start` (no manual build): auto-compiles, reaches `✓ Server is ready` (HTTP 302).\n- `pnpm dev` works out of the box (`SqlDriver(better-sqlite3)`).\n- `init.test.ts`: 28/28 passing (added coverage for the rendered `pnpm-workspace.yaml` and that the allowlist is *not* in `package.json`).\n\n## Note (out of scope)\n\nDiscovered a separate, deeper bug: `objectstack serve` booting directly from config (no prebuilt artifact) throws `Service 'manifest' is async` (`packages/core/src/kernel.ts:106`). This PR sidesteps it via compile-before-serve rather than changing the kernel/serve boot ordering. Worth a follow-up."
+}

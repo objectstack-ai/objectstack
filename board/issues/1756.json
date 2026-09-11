@@ -1,0 +1,32 @@
+{
+  "number": 1756,
+  "kind": "pull_request",
+  "title": "fix: lockfile entry for showcase's @objectstack/cloud-connection dep",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T03:03:14Z",
+  "updated_at": "2026-06-12T03:10:56Z",
+  "closed_at": "2026-06-12T03:03:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-12T03:03:18Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1756",
+  "body": "#1755 added `@objectstack/cloud-connection` to the showcase's package.json without the lockfile update — main CI fails with `ERR_PNPM_OUTDATED_LOCKFILE`. `pnpm install --frozen-lockfile` passes locally with this entry.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

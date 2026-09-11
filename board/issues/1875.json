@@ -1,0 +1,30 @@
+{
+  "number": 1875,
+  "kind": "issue",
+  "title": "[P3] Dev DX: native sqlite driver ABI mismatch on newer Node; PORT→OS_PORT; auth Origin requirement",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T06:02:55Z",
+  "updated_at": "2026-06-15T07:14:35Z",
+  "closed_at": "2026-06-15T07:14:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1875",
+  "body": "## Problem (dev DX)\n1. The dev server defaults to the native `better-sqlite3` driver; its prebuilt binary's ABI doesn't match newer Node (e.g. Node 25 → `NODE_MODULE_VERSION` mismatch), so `objectstack dev` fails to persist until you manually rebuild from source. Consider defaulting dev to the wasm driver, or shipping prebuilds for current Node.\n2. Minor: `PORT` env var is deprecated in favor of `OS_PORT` (warns on every boot). `better-auth` email sign-in returns 403 without an `Origin` header (trips simple API clients).\n\n## Affected\ndriver packaging / CLI dev defaults / auth + env DX.\n\n\n---\n_Found while runtime-testing `objectstack-ai/templates` (all 9 templates via `objectstack dev all`) on `@objectstack` 9.5.1. Build + typecheck pass; these only surface at runtime._\n"
+}

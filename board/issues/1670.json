@@ -1,0 +1,33 @@
+{
+  "number": 1670,
+  "kind": "pull_request",
+  "title": "fix(i18n): translate Setup System Settings menu labels and pages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-09T06:36:58Z",
+  "updated_at": "2026-06-09T15:04:33Z",
+  "closed_at": "2026-06-09T15:04:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-09T15:04:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1670",
+  "body": "## Problem\n\n> **i18n Finding** — System Settings has untranslated menu labels/pages.\n\nThe Setup app (\"System Settings\") rendered most of its left-nav menu in\nEnglish even for `zh-CN` / `ja-JP` / `es-ES` users. Investigation found\n**two independent causes** — a missing-data gap *and* a structural bug at\nthe REST translation boundary.\n\n### 1. Root cause — `getMetaItem` envelope was never unwrapped before translation\n\n`GET /meta/app/setup` for the single-item app route **bypasses the HTTP\ncache by design** (per-user RBAC filtering via `filterAppForUser`), so it\nreceived the raw `getMetaItem` envelope `{ type, name, item, lock, … }`\nand passed *the whole envelope* to `translateMetadataDocument`. But the\ntranslatable document — and its `navigation` tree — lives nested at\n`.item`. The resolver found no `navigation` on the envelope's top level,\nso it walked nothing and **left every menu label in English**; only the\nenvelope's own top-level `label` got translated, which consumers reading\n`.item` never see.\n\nThe cached read path passes the already-unwrapped document, so it was\nnever affected — which is exactly why the bug only showed on the\ncache-bypassing app route.\n\nA parallel bug: list endpoints (`{ items: [...] }` shape) were dropped\nuntranslated by a bare `Array.isArray(items)` guard.\n\n### 2. Missing translation keys\n\nSeveral Setup nav entries had **no bundle key in any locale**, so they\nfell back to English regardless of the above:\n- Configuration settings pages: `nav_settings_auth/storage/ai/knowledge/feature_flags`\n- `group_integrations` (the Setup app's own empty integrations anchor)\n- `nav_notification_{preferences,subscriptions,templates}` (contributed to\n  `group_configuration` by `@objectstack/service-messaging`, which ships\n  no translation bundle)\n- Per-manifest settings **page** content (`auth`/`ai`/`knowledge`) missing\n  for some locales.\n\n## Changes\n\n**`packages/rest/src/rest-server.ts`** — the structural fix\n- Add `isMetaEnvelope()` and unwrap the inner document before calling\n  `translateMetadataDocument` in both `translateMetaItem` and\n  `translateMetaItems`.\n- `translateMetaItems` now also handles the `{ items: [...] }` list-envelope\n  shape (previously dropped untranslated).\n\n**`packages/rest/src/rest.test.ts`** — 4 regression tests covering envelope\nunwrap, the bare-document path, and both list shapes (`{items}` + raw array).\n\n**`packages/platform-objects/src/apps/translations/{en,zh-CN,ja-JP,es-ES}.ts`**\n— Setup nav menu labels: `nav_settings_auth/storage/ai/knowledge/feature_flags`,\n`group_integrations`, and `nav_notification_{preferences,subscriptions,templates}`.\n\n**`packages/services/service-settings/src/translations/{zh-CN,ja-JP,es-ES}.ts`**\n— settings **page** content for `auth` (+ `ai`/`knowledge` for `ja-JP`).\n\n`en` stays the source of truth; all keys mirror the manifest/nav-node names\nso the locale → fallback → literal resolver chain stays intact.\n\n## Verification\n\nEnd-to-end against a running dev server (`zh-CN`):\n\n- **API** — `GET /api/v1/meta/app/setup` with `Accept-Language: zh-CN`:\n  `item.label` → **系统设置**, and **0 remaining English nav labels** across\n  the whole tree (every group + leaf, including the `type:'url'` settings\n  items and the notification entries).\n- **UI** — the Console's System Settings sidebar renders fully localized:\n  全部设置 · 品牌 · 认证 · 邮件 · 文件存储 · AI 与 Embedder · 知识库 ·\n  功能开关 · 通知偏好 · 通知订阅 · 通知模板.\n- **Tests** — `@objectstack/rest` 100/100 pass (96 existing + 4 new\n  regression cases). `@objectstack/platform-objects` builds clean.\n\n## Scope / follow-ups\n\n- Covers the four shipped locales (`en`, `zh-CN`, `ja-JP`, `es-ES`).\n- The notification nav labels currently live in the central\n  `SetupAppTranslations` (alongside `nav_notifications`) since they merge\n  into the Setup app by stable id. If `@objectstack/service-messaging`\n  later grows its own translation bundle, they could move there.\n"
+}

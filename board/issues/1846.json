@@ -1,0 +1,34 @@
+{
+  "number": 1846,
+  "kind": "pull_request",
+  "title": "fix(i18n): correct stale page-type help text in metadata-form bundles",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-14T08:55:34Z",
+  "updated_at": "2026-06-14T09:00:01Z",
+  "closed_at": "2026-06-14T09:00:00Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-14T09:00:00Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1846",
+  "body": "The last of the panel-audit follow-ups. The page `type` field's help text in the metadata-form translation bundles still read **\"page type (record, home, app, dashboard, etc.)\"** — listing `dashboard` (and implying grid/kanban/calendar) as page types. That's wrong after the ADR-0047 page-type cleanup: those are **visualizations** configured under Interface, not page kinds.\n\n## Changes\n`packages/platform-objects/src/apps/translations/*.metadata-forms.generated.ts` (hand-edited; the generator's `--merge` preserves these):\n- `page.type.helpText` in **en / zh-CN / ja-JP / es-ES** → \"page kind — list / record / home / app / utility; how a list page looks (grid / kanban / calendar) is a visualization set under Interface, not a page type\".\n- Stale **zh-CN `page.kind.helpText`** (\"页面种类分组（如 record / list / detail）\") → matches the English (\"record-page override mode: full or slotted\").\n\nThese bundles **override** the spec's inline `helpText` at runtime, so editing `page.form.ts` alone would not have fixed the displayed Chinese/Japanese/Spanish text.\n\n## Verification\n- `pnpm --filter @objectstack/spec build` (with dts) then `tsc --noEmit` on `@objectstack/platform-objects` → **0 errors from these files** (only an unrelated cached-dep dts artifact).\n- Edited strings contain no embedded quotes/escapes; verified single-match replacement per locale.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

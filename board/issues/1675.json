@@ -1,0 +1,32 @@
+{
+  "number": 1675,
+  "kind": "pull_request",
+  "title": "chore(console): bump pinned objectui (DatasetWidget filter/compareTo fix)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-10T04:02:13Z",
+  "updated_at": "2026-06-10T04:04:42Z",
+  "closed_at": "2026-06-10T04:02:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-10T04:02:32Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1675",
+  "body": "Re-pin the vendored Console to objectui main (`f7a4400`), which includes **objectui#1612** — DatasetWidget now forwards the widget `filter` as the dataset `runtimeFilter` and drops the legacy string `compareTo`. This makes the merged dual-form dashboards/reports render correct filtered numbers in the console, and is the prerequisite for single-form convergence (#5).\n\n`scripts/build-console.sh` builds clean at the new sha (`packages/console/dist` is gitignored — built from `.objectui-sha`).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 1827,
+  "kind": "pull_request",
+  "title": "feat(metadata): package-scoped customization overlays (ADR-0048 #1824)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-13T22:07:05Z",
+  "updated_at": "2026-06-13T22:12:24Z",
+  "closed_at": "2026-06-13T22:12:22Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-13T22:12:22Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1827",
+  "body": "Closes #1824.\n\n## Problem\n\nA `sys_metadata` customization overlay was keyed by `(type, name, organization_id)` — a UNIQUE index allowing **one physical row** per name per org. So when two installed packages ship an item of the same `type`/`name`, customizing one shadowed both, and a package-scoped read fell back to whichever row existed. (This is the env-overlay limitation called out at the end of #1822.)\n\n## Fix\n\nMake overlays package-aware end-to-end:\n\n- **Index** — `idx_sys_metadata_overlay_active` / `…_draft` now include `package_id`. The runtime migration (`ensureOverlayIndex`) uses `COALESCE(package_id, '')` so package-less (global) overlays stay unique among themselves (a plain unique index treats NULLs as distinct). DROP-then-CREATE, idempotent; existing rows migrate safely.\n- **Write** — `SysMetadataRepository.whereFor`/`put`/`get` scope the upsert to the requested package, so a save bound to package B no longer finds and overwrites package A's same-name overlay. A package-less save targets the global row.\n- **Read** — `getMetaItem` / `getMetaItemLayered` overlay lookups already prefer the package-scoped row (#1816/#1819); the fallback now resolves only the **global** (`package_id IS NULL`) overlay, never a *different* package's row. Package-less readers unchanged (match-any, back-compat).\n\nFrontend counterpart (objectui): the Studio editor's post-save refresh scopes its layered/draft re-read to the same package (the save already binds `?package=`).\n\n## Verification\n\nLive, real collision (two packages each shipping `page/showcase_task_workbench`), against the migrated DB:\n\n- `PUT …?package=com.objectstack.studio` and `PUT …?package=com.example.showcase` → **two rows coexist** in `sys_metadata` (the old index would have rejected/overwritten the second).\n- `GET …?package=com.objectstack.studio` → \"STUDIO OVERLAY EDIT\"; `?package=com.example.showcase` → \"SHOWCASE OVERLAY EDIT\".\n- `GET …?layers=true&package=com.objectstack.studio` (Studio editor view) → `overlay`/`effective` = \"STUDIO OVERLAY EDIT\".\n- Index migrated in place: `… (type, name, organization_id, COALESCE(package_id, '')) WHERE state = 'active'`.\n\n606 objectql tests green (added a per-package write-scoping test; existing ADR-0005 overlay tests updated for the `package_id` discriminator).\n\n## Known follow-up (not this PR)\n\nThe **unscoped** list (`GET /meta/:type` with no `?package=`) still dedupes by bare name, so when two packages *both* carry an overlay on the same name the list collapses them — the per-package single-item and Studio editor paths are unaffected. This is the same byName-dedup limitation noted in #1822; tracked for the list-dedup-by-name work.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

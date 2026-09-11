@@ -1,0 +1,32 @@
+{
+  "number": 1326,
+  "kind": "issue",
+  "title": "[P3] enterprise: no external auditor / read-only guest portal",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:27:33Z",
+  "updated_at": "2026-06-14T14:45:22Z",
+  "closed_at": "2026-06-14T14:45:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1326",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 21 条（**P3**，与 #27 portal 一并推进）。\n\n## 现象\n\n合规模板 / 合同模板 / 招采模板都需要让**外部审计员 / 外部供应商 / 外部律师**只读访问部分数据，且不能让他们看到内部协作 / 评论 / 价格 / 其他 vendor 的数据。\n\n平台今天没有「外部访客 / 只读 portal」原语，给外审一个 admin 账号风险大。\n\n## 复现\n\n`compliance` 模板：希望年度审计期开放给外审看 evidence + control 状态，**仅这部分**，不能看到内部 finding / 评分 / 其他事业部数据。\n\n## 建议范围\n\n**M1：访客 role + 只读 profile**\n- 系统级 `guest` role 默认只读\n- 模板可加紧约束（按对象 / 字段 / 行级 sharing）\n\n**M2：临时访问令牌**\n- 主理人能为外审签发限时访问链接 / 临时账号\n- 自动过期、行为审计（#25）\n\n**M3：与 portal 集成**\n- 给 guest 一个专属 portal（依赖 #27）\n- 默认极简布局、仅暴露指定 view\n\n## 验收\n\n- [ ] guest portal + 临时令牌\n- [ ] `compliance` 模板：外审 portal 演示\n- [ ] 缺陷库 gap #21 标记为已解决\n\n## 关联\n\n- 依赖 #27（外部 portal 机制）\n"
+}

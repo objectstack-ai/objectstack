@@ -1,0 +1,34 @@
+{
+  "number": 1855,
+  "kind": "pull_request",
+  "title": "fix(spec): render action body editor as composite (language + source), not [object Object]",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-14T23:31:03Z",
+  "updated_at": "2026-06-15T02:23:23Z",
+  "closed_at": "2026-06-15T02:23:21Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T02:23:21Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1855",
+  "body": "Found during a browser sweep of the Studio metadata designers.\n\nA script action's inspector showed the **正文 (body)** field as a JavaScript code editor containing literally `[object Object]`. The action `body` is a discriminated union (`HookBodySchema`: `{ language, source, capabilities?, timeoutMs? }`) — the exact shape hooks use — but `action.form.ts` flattened it to `{ field: 'body', widget: 'code' }`, so the inspector fed the union *object* to a single string editor.\n\nThis mirrors the **already-shipped, working** `hook.form.ts` layout: a `type: 'composite'` with a `language` select, a `source` code editor (javascript), and the L2-only `capabilities` / `timeoutMs` knobs. `visibleOn: \"data.type == 'script'\"` is preserved.\n\n### Verification\nThe action `body` data itself is fine — the design-canvas preview already renders the script correctly; only the inspector widget mapping was wrong. The fix is structurally identical to the hook `body` layout the SchemaForm already renders correctly. Live HotCRM verification was intentionally skipped to avoid rebuilding `@objectstack/spec` and restarting the shared dev backend that other agents depend on; CI type-check + the equivalence to `hook.form.ts` cover it.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

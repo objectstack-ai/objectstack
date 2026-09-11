@@ -1,0 +1,30 @@
+{
+  "number": 1745,
+  "kind": "issue",
+  "title": "perf(approvals): server-side pagination + pushdown filtering for listRequests",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T01:42:57Z",
+  "updated_at": "2026-06-12T11:44:26Z",
+  "closed_at": "2026-06-12T11:44:26Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1745",
+  "body": "## Context\n\n`ApprovalService.listRequests` hard-caps at `limit: 500` and returns everything in one shot; the Console inbox (objectstack-ai/objectui, `ApprovalsInboxPage`) sorts/filters/searches client-side. The request table is append-only (every flow trigger adds a row), so a real tenant crosses 500 within weeks — at which point the \"All\" tab slows down **and rows beyond 500 silently disappear** (the dangerous half).\n\n## Scope\n\n**Server (this repo)**\n- `limit`/`offset` (or cursor) on `listRequests` + REST query params; return `total`\n- Push the filters the client currently applies in memory down into engine queries: status, object, free-text (record title / requester / process label)\n- The known obstacle: `pending_approvers` is a CSV string and \"my pending\" matching is a **post-filter in memory** (acknowledged in the code comments). Pagination makes that incorrect — either push it down as a LIKE-composite, or (recommended) split approvers into a join table. The migration also fixes the long-standing indexing note on `sys_approval_request` (\"the engine does a post-filter substring match per row\").\n\n**Console (objectstack-ai/objectui)**\n- Load-more / pager on the inbox tables; debounced server-side search\n- Keep the enriched display contract (`record_title`, `payload_display`, …) — enrichment is already batched per page server-side, so cost scales with page size\n\n## Trigger\n\nDo this before any real tenant's request table reaches a few hundred rows, or as soon as the \"All\" tab is perceptibly slow. Recommend bundling the approver join-table migration into the same change — one migration solves both matching performance and pagination correctness.\n\n## References\n\n- Current implementation: `listRequests` in `packages/plugins/plugin-approvals/src/approval-service.ts` (limit 500, post-filters)\n- Index caveat: `sys_approval_request.object.ts` indexes comment\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

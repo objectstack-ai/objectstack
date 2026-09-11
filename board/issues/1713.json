@@ -1,0 +1,33 @@
+{
+  "number": 1713,
+  "kind": "pull_request",
+  "title": "docs(flow): list map in node-type table; mark ROADMAP flow-docs P1 done",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-11T06:16:47Z",
+  "updated_at": "2026-06-11T06:22:38Z",
+  "closed_at": "2026-06-11T06:22:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-11T06:22:36Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1713",
+  "body": "Documentation audit follow-up after the map node (#1709) and the durable-pause / parallel / batch-approval guide sections:\n- flow guide node-type table now lists `map` (it had loop/parallel/try_catch/subflow but not map).\n- ROADMAP P1 \"Document Flow-first automation and workflow state-machine semantics\" marked done — flow automation is covered by the flow guide + ADR-0019/0031/0039; state-machine semantics in the workflow + validation guides.\n\nDocs build green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

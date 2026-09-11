@@ -1,0 +1,32 @@
+{
+  "number": 1695,
+  "kind": "pull_request",
+  "title": "fix(showcase): flow example fixes + nested-pause (approval-in-subflow) example",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-10T16:11:39Z",
+  "updated_at": "2026-06-10T16:34:55Z",
+  "closed_at": "2026-06-10T16:34:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-10T16:34:53Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1695",
+  "body": "## Summary\nThree showcase flow improvements found/driven by step-by-step browser E2E of every flow:\n\n1. **`showcase_task` missing `sync_status`/`sync_error`** — the resilient-sync try/catch demo writes these from its catch region but the object never declared them, so the catch failed with \"no such column\" and the run failed instead of demonstrating structured error handling. Verified after the fix: retries exhaust → catch flags the task → run completed with the catch step in the run log.\n2. **New worked example for nested durable pause (#1693)** — `showcase_closure_signoff` (reusable approval subflow) + `showcase_project_closure` (on project completion, requests sign-off through the subflow, then notifies the owner with the bubbled decision).\n3. **`showcase_budget_approval` now gates on the budget actually changing** (`budget != previous.budget`) — it previously fired on every update of a large-budget project, colliding with any other approval flow on the same record (approvals dedupe pending requests per record).\n\n## Test plan\n- [x] Browser E2E against the live showcase: complete a project → parent run paused at `signoff` (`correlation: subflow:<child>`) + child paused at `ask_signoff` → approve via `/api/v1/approvals` → child completes down the approve edge and **bubbles**: parent resumes, `notify_owner` runs, both runs completed\n- [x] Studio Runs panel shows the same run paused → completed (1m wall-clock across the human approval)\n- [x] resilient-sync re-verified green after the schema fix; budget-approval two-step chain re-verified unaffected\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

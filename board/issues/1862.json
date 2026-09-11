@@ -1,0 +1,33 @@
+{
+  "number": 1862,
+  "kind": "pull_request",
+  "title": "docs(nav): group Protocol Reference modules and clarify top-level nav",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T04:07:15Z",
+  "updated_at": "2026-06-15T04:11:08Z",
+  "closed_at": "2026-06-15T04:11:06Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T04:11:06Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1862",
+  "body": "## Why\n\nThe docs site renders fine but the **information architecture** is hard to navigate. Of 366 doc pages, **238 live under Protocol Reference**, and each module was a single flat alphabetical list (system: 40, api: 38, kernel: 32, data: 24, ui: 22 …). The top-level **\"Protocol\" (5 pages) vs \"Protocol Reference\" (238 pages)** split was also ambiguous.\n\n## What (navigation-only — no content edits, no file moves)\n\n- **Second-level `---section---` groups** added to the 8 largest reference modules — `system`, `api`, `kernel`, `data`, `ui`, `cloud`, `automation`, `ai` — turning each flat list into labeled logical groups (e.g. System → *Runtime & Services / Observability / Metadata & Migration / Security & Compliance / Tenancy & Provisioning / Deployment & Operations / Communication & Localization*). Modules with ≤9 pages stay flat to avoid over-fragmenting short lists.\n- **Renamed top-level `Protocol` → `Protocol Overview`** to distinguish the conceptual intro from the per-module `Protocol Reference`.\n- **Removed empty orphaned `references/contracts/`** folder (`pages: []`, not referenced by the root meta).\n\n## Verification\n\n- Every regrouped `meta.json`: valid JSON, every existing `.mdx` covered, no dangling/misspelled entries.\n- Ran the docs dev server and confirmed in the browser that grouped section headers render correctly with no build errors.\n\nBecause no files were moved, all URLs are unchanged. Truly collapsible folder sub-trees (vs. section-header separators) would require moving `.mdx` into subfolders + URL redirects — left as a possible follow-up.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

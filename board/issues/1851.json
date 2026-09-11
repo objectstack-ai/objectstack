@@ -1,0 +1,33 @@
+{
+  "number": 1851,
+  "kind": "pull_request",
+  "title": "fix(analytics): dataset widgets degrade to empty when backing object/table is absent",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-14T14:58:40Z",
+  "updated_at": "2026-06-14T15:02:33Z",
+  "closed_at": "2026-06-14T15:02:31Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-14T15:02:31Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1851",
+  "body": "## Problem\nA dashboard/report dataset whose backing object/table isn't present in the kernel **hard-failed the widget with a 500**. Concretely: the platform **System Overview** dashboard (shipped by `plugin-auth`) charts `sys_audit_log` via the `sys_audit_log_metrics` dataset. Opened in an environment that never mounted the audit object (e.g. a cloud tenant runtime, or any host without the audit plugin), every audit widget 500'd with `no such table: sys_audit_log` — the Setup app's System Overview rendered with three broken widgets.\n\n## Fix\nWrap the dataset execution in `AnalyticsService.queryDataset`: on a **missing-source** error (table/object/relation absent), log a warning and return an empty result (`{rows:[], fields:[], totals:[]}`) so the widget renders \"no data\" instead of crashing. The match (`isMissingSourceError`) covers the missing-relation signatures across sqlite/libsql, postgres, mysql, plus the framework's unknown-object signal. Column/syntax errors still throw, so real query bugs surface.\n\nThis mirrors how the list grid and detail surfaces already tolerate absent data — datasets were the one read surface that hard-failed.\n\n## Tests\n`__tests__/query-dataset.test.ts`:\n- missing table → empty result `{rows:[],fields:[],totals:[]}`.\n- non-missing-source error (syntax error) → still throws.\n\nFull `@objectstack/service-analytics` suite: **124 tests pass**.\n\n## Context\nFound during a cloud customer-journey audit. Pairs with the Setup/Studio-in-every-env work (cloud#312 for the multi-tenant runtime; serve.ts already wires the apps for single-env via #1813). Ships to cloud via `bump-framework` once merged."
+}

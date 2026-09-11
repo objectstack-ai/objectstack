@@ -1,0 +1,35 @@
+{
+  "number": 1918,
+  "kind": "pull_request",
+  "title": "feat(cli): lint the record-change date-equality time anti-pattern at build (#1874)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T15:09:39Z",
+  "updated_at": "2026-06-15T15:14:04Z",
+  "closed_at": "2026-06-15T15:14:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-15T15:14:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1918",
+  "body": "Refs #1874.\n\n## Framing: this targets the *core* problem, not the literal feature\nThe templates are AI-authored, and **preventing AI authoring mistakes is the project's core goal**. The robust capability for time-relative rules already exists (daily SCHEDULE trigger + range query), so the high-leverage fix for \"renewal_alert never fires\" is **not** a new trigger primitive — it's a **build-time guardrail that catches the exact mistake the author (AI or human) keeps making**, in the same \"make silently-wrong metadata loud at build\" vein as #1877 / #1870 / #1876.\n\n## What it does\n`objectstack build` now emits an advisory **WARNING** when a `record-*` flow's start condition compares a date field for **EQUALITY** against a time function:\n```\nend_date == daysFromNow(60)      // ⚠ only fires if the record is written on that exact day\ntoday() != record.start_date\n```\n…and points the author at the robust shape: a daily **schedule** trigger + a **range** query (`get_record` where `end_date` BETWEEN `{TODAY()}` and `{TODAY()+N}`).\n\n## Precision (low false-positive by design)\n- **Flags**: equality (`==`/`!=`) adjacent to `daysFromNow`/`daysAgo`/`today`/`now`/`date`/`datetime`, either side, on `record-*` triggers; string or Expression-envelope conditions.\n- **Does NOT flag**: range comparisons (`>=`/`<=` — the *correct* building block), non-time-field equality, or schedule-trigger conditions.\n- **Never fails the build** — advisory only (mirrors the dashboard widget-binding warnings). Guides without breaking technically-legal metadata.\n\n## Tests\nNew `lint-flow-patterns.ts` + 7 unit tests (both equality forms, envelope condition; range/non-time/schedule false-positive guards). `@objectstack/cli` suite **383 pass**; example builds clean (no spurious warnings).\n\n## Scope note\nThis does **not** implement #1874's declarative time-relative trigger (a future DX feature needing real API design — multi-threshold windows, per-record fan-out, indexed queries for scale, Studio authoring), nor the cross-repo template fixes. It's the AI-authoring guardrail, which is the part that pays off now.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}
