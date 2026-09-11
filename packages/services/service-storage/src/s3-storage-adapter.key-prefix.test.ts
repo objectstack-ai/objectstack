@@ -52,11 +52,16 @@ const fakeS3 = vi.hoisted(() => {
   const multipart = new Map<string, { key: string; parts: Buffer[] }>();
   let uploadSeq = 0;
 
-  function notFound(): never {
+  /**
+   * Built and RETURNED rather than thrown, so the call sites read
+   * `throw notFound()` — a `throw` narrows the surrounding block for tsc, which
+   * a call to a never-returning property does not.
+   */
+  function notFound(): Error {
     const err = new Error('NotFound') as Error & { name: string; $metadata: { httpStatusCode: number } };
     err.name = 'NotFound';
     err.$metadata = { httpStatusCode: 404 };
-    throw err;
+    return err;
   }
 
   function reset(): void {
@@ -99,7 +104,7 @@ vi.mock('@aws-sdk/client-s3', () => {
       }
       if (command instanceof GetObjectCommand) {
         const found = fakeS3.objects.get(command.input.Key);
-        if (!found) fakeS3.notFound();
+        if (!found) throw fakeS3.notFound();
         return { Body: found.body };
       }
       if (command instanceof DeleteObjectCommand) {
@@ -108,7 +113,7 @@ vi.mock('@aws-sdk/client-s3', () => {
       }
       if (command instanceof HeadObjectCommand) {
         const found = fakeS3.objects.get(command.input.Key);
-        if (!found) fakeS3.notFound();
+        if (!found) throw fakeS3.notFound();
         return { ContentLength: found.size, LastModified: new Date('2026-01-01T00:00:00.000Z') };
       }
       if (command instanceof ListObjectsV2Command) {
