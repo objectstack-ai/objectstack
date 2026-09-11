@@ -304,8 +304,14 @@ describe('#15685 the /references door answers its two refusals in ONE envelope',
     describe('④ [#17584] the remedy survives the bound at the longest admitted name', () => {
         /** `sys_metadata.name` maxLength — the enforced identifier ceiling. */
         const STORED_NAME_MAX = 255;
-        /** The smallest symmetric pair that overflows the bound (36/36 = 499). */
-        const FIRST_OVERFLOWING = 37;
+        /**
+         * A real-shaped name length: `crm_opportunity_line_item_snapshot_v2` is
+         * 37 characters, and 37/37 is the pair at which the PRE-REPAIR sentence
+         * first overflowed the bound (502 characters). ⛔ Deliberately not
+         * "the first overflowing pair" of whatever sentence is current — that
+         * number moves with the wording, and this file pins the invariant.
+         */
+        const REACHABLE_NAME_LEN = 37;
 
         const key = (objLen: number, fieldLen: number) =>
             `${'o'.repeat(objLen)}.${'f'.repeat(fieldLen)}`;
@@ -340,17 +346,22 @@ describe('#15685 the /references door answers its two refusals in ONE envelope',
             ).toEqual(expect.stringContaining(remedyFor(STORED_NAME_MAX)));
         });
 
-        it('THE PIN: and at the smallest name pair the bound cuts at all', async () => {
-            const message = await deliveredAt(FIRST_OVERFLOWING, FIRST_OVERFLOWING);
+        it('THE PIN: and at a real-shaped name pair that the bound also cuts', async () => {
+            const message = await deliveredAt(REACHABLE_NAME_LEN, REACHABLE_NAME_LEN);
             expect(message.length).toBe(500);
-            expect(message).toEqual(expect.stringContaining(remedyFor(FIRST_OVERFLOWING)));
+            expect(message).toEqual(expect.stringContaining(remedyFor(REACHABLE_NAME_LEN)));
         });
 
-        it('control — one below that pair is delivered WHOLE, so 37 is the real edge', async () => {
-            const message = await deliveredAt(FIRST_OVERFLOWING - 1, FIRST_OVERFLOWING - 1);
+        it('control — the ORDINARY name is not truncated at all, so the pins above are about the BOUND', async () => {
+            // Anti-vacuity from the other side. ① drives `account.owner`, which
+            // composes well under 500 and is delivered whole — so ① cannot tell
+            // a surviving remedy from a message that was never cut. That is
+            // precisely why ① stayed green through the defect, and why this
+            // block reads lengths the bound actually reaches.
+            const refused = await refusalA();
+            const message = refused.body?.error?.message as string;
             expect(message.length).toBeLessThan(500);
             expect(message.endsWith('…')).toBe(false);
-            expect(message).toEqual(expect.stringContaining(remedyFor(FIRST_OVERFLOWING - 1)));
         });
     });
 });

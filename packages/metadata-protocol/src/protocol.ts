@@ -22066,6 +22066,36 @@ export class ObjectStackProtocolImplementation implements
         // object that owns it, which is where a field is authored and where the
         // reference graph has real edges.
         //
+        // [#17584] ⛔ And the prescription comes FIRST, before the explanation
+        // of why the question is unanswerable. That order is load-bearing, not
+        // style. Since #16146 this refusal crosses the REST boundary through
+        // `boundedDeclaredRefusalMessage`, which applies #5423's shared
+        // `CLIENT_MESSAGE_MAX` (500) by TRUNCATING THE TAIL — and that helper's
+        // own docblock declares the assumption it rests on: "These messages
+        // front-load the main clause … and back-load attribution and issue
+        // numbers, which belong in the log rather than the response."
+        //
+        // This sentence interpolates the object name twice (inside `targetName`
+        // and again as `owner`) and the field name once, so it grows ~3
+        // characters per character of name. Back-loaded, it broke that
+        // assumption at reachable lengths: measured through the real route, a
+        // 37/37 object/field pair composed 502 characters and was delivered as
+        // `…/api/v1/meta/object/<obj>/referenc…` — the opener still readable and
+        // the URL cut mid-path, which is an instruction that 404s if the
+        // operator follows it. `crm_opportunity_line_item_snapshot_v2` is 37
+        // characters, and nothing in `packages/spec` caps a metadata name at
+        // all (#12144: the ceiling is the storing column's `maxLength`, and the
+        // widest is `sys_metadata.name` at 255).
+        //
+        // Front-loaded, truncation costs the EXPLANATION instead — the half an
+        // operator can still act without. ⛔ Do not reorder this back, and ⛔ do
+        // not repair a future overflow by raising the bound or exempting this
+        // door: the bound is the security floor under the refusal channel
+        // (#5423) and the #16146 ruling put this door explicitly under it. The
+        // invariant is pinned at the WIRE, where the bound actually applies, by
+        // `rest-server-meta-references-refusal-envelope.test.ts` — and the
+        // producer-side ORDER by `protocol.reference-target-unanswerable.test.ts`.
+        //
         // ⛔ And it opens with NO bracketed tag. The `[item_locked]`-style tags
         // this file writes elsewhere are lowercase restatements of the throw's OWN
         // declared `code`, so the wire carries the same token on the `code` axis;
@@ -22079,12 +22109,12 @@ export class ObjectStackProtocolImplementation implements
         if (REFERENCE_SITES.unanswerableTargetTypes.includes(singularTarget)) {
             const owner = targetName.includes('.') ? targetName.slice(0, targetName.indexOf('.')) : '<object>';
             const err = new Error(
-                `References to a '${singularTarget}' item cannot be computed. `
-                + `A '${singularTarget}' is addressed by the composite key '<object>.<field>' `
+                `Ask the owning object instead: GET /api/v1/meta/object/${owner}/references. `
+                + `References to a '${singularTarget}' item cannot be computed, because `
+                + `a '${singularTarget}' is addressed by the composite key '<object>.<field>' `
                 + `(here '${targetName}'), while every metadata property that names a field holds the `
                 + `BARE field name — so no reference site can ever match this key and an empty answer `
-                + `would mean "not computable", not "nothing depends on it". `
-                + `Ask the owning object instead: GET /api/v1/meta/object/${owner}/references.`,
+                + `would mean "not computable", not "nothing depends on it".`,
             );
             (err as any).code = 'NOT_IMPLEMENTED';
             (err as any).status = 501;
