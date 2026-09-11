@@ -42,7 +42,10 @@
  *    `cast(?? as int)`. A `multiple: true` boolean is a JSON column on every
  *    dialect ({@link SqlDriver.isJsonField}), and `cast(json as int)` is not a
  *    defined cast on Postgres — so the registry entry bought this reader a
- *    cast it must not emit. ⇒ does NOT need the column.
+ *    cast it must not emit. ⇒ does NOT need the column. ⭐ MEASURED on live
+ *    PostgreSQL 16.13 by reading the statements the server received: with the
+ *    guard the door emits `max("flags")`, without it `max(cast("flags" as
+ *    int))` — see the reader-1 row in the live-postgres block below.
  * 2. **`readPresentationKind`** (the `aggregate()` / `distinct()` doors) —
  *    gated `(isSqlite || isMysql) && booleanFields[table].includes(field)`,
  *    returns `'boolean'`, whose presenter is the same `Boolean(v)`. On those
@@ -348,6 +351,42 @@ function declareReadSweep(cell: DialectCell): void {
       it('the SCALAR boolean answers normally at the same door — the refusal is per storage shape', async () => {
         const values = await driver.distinct(READ_OBJECT, 'scalar_flag', undefined, BYPASS);
         expect([...values].sort()).toEqual([false, true]);
+      });
+
+      /**
+       * Reader 1, executed — the #11635 Postgres aggregate cast, on the one
+       * dialect it exists for.
+       *
+       * ⭐ What this narrowing does to that reader was measured on live
+       * PostgreSQL 16.13 by reading the statements the server actually
+       * received, two legs, `sql-driver.ts` blob verified on disk each time:
+       *
+       * | leg | statement PostgreSQL received | its refusal |
+       * |:--|:--|:--|
+       * | guard present (`f7fe22f8`) | `select max("flags") as "m"` | `function max(json) does not exist` |
+       * | guard reverted (`a2b37dc6`) | `select max(cast("flags" as int)) as "m"` | `cannot cast type json to integer` |
+       *
+       * ⇒ the registry entry really was buying this reader a `cast(?? as int)`
+       * over a `json` column, exactly as the enumeration predicted, and the
+       * guard stops it being emitted. Both shapes are refused by the backend —
+       * a multi-valued aggregand has no answer here either way — so what moves
+       * is only WHICH refusal, not a correct answer becoming an error.
+       *
+       * ⛔ The assertion below is the SCALAR half, deliberately, because that
+       * is the half a regression could silently take away: #11635 exists so a
+       * declared boolean can be aggregated on Postgres at all, and narrowing
+       * the registry must not cost it. Pinning the multi-valued half would mean
+       * asserting one dialect error string against another — brittle, and it
+       * would go red the day #17590's family is ruled.
+       */
+      it('reader 1 — the #11635 cast still answers for a SCALAR boolean after the narrowing', async () => {
+        const rows = await driver.aggregate(
+          READ_OBJECT,
+          { aggregations: [{ function: 'max', field: 'scalar_flag', alias: 'm' }] } as never,
+          BYPASS,
+        );
+        // `min`/`max` are pinned as the 0/1 the cast computes (#11152).
+        expect(Number(rows[0].m), 'max over a scalar boolean must still compute').toBe(1);
       });
     }
   });
