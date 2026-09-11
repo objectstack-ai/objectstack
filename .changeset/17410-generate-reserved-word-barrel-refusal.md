@@ -2,7 +2,7 @@
 "@objectstack/cli": minor
 ---
 
-feat(cli)!: `os generate` refuses a name whose barrel alias no consumer could import (#17410)
+feat(cli)!: `os generate` refuses a name whose barrel alias no consumer could import by name (#17410)
 
 `os generate view class` exited **0** and wrote `export { default as class } from './class.view';`. That line parses — an ES module export clause admits a reserved word as a `ModuleExportName` — so both landed layers admitted it, each correctly by its own terms: the #16726 charset gate because every character of `class` is a lowercase letter, and the #16541 parse check because the bytes really are parseable TypeScript. The import side is not: `import { class } from './views'` needs an `ImportedBinding`, and a reserved word is not one. So the command reported success and produced a barrel entry nothing can name, with the failure deferred into the author's own file where it reads as their mistake.
 
