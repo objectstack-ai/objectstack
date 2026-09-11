@@ -148,9 +148,11 @@ import { SEMCONV, OBSERVABILITY_METRICS_SERVICE, type MetricsRegistry } from '@o
 //
 // Env knobs — the SAME names are also read by the cloud host
 // (`apps/cloud/server/observability.ts`, cloud repo), so keep the two in sync
-// if you tweak NAMES. That duty is live, not stale prose: the cloud file still
-// reads all five of these as `process.env` lookups (measured against that
-// repository and recorded on #15295).
+// if you tweak NAMES. That duty is live, not stale prose: the cloud file reads
+// these as `process.env` lookups — measured on #15295 for every knob listed
+// below EXCEPT `OS_OTLP_FLUSH_MS`, which was added on this side afterwards and
+// has never been measured against that repository: treat that one as
+// unverified rather than mirrored.
 //
 // ⛔ NAMES only — the DEFAULTS differ on purpose, and unifying them is a
 // telemetry regression rather than a tidy-up: `OS_OBS_SERVICE_NAME` defaults

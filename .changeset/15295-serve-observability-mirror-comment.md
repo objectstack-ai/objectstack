@@ -13,11 +13,15 @@ being sent to a file they cannot open, with no hint that it lives in another
 repository.
 
 **The duty is live, so it stays.** The cloud file still exists and still reads
-all five names as `process.env` lookups (measured on `objectstack-ai/cloud` and
+these names as `process.env` lookups (measured on `objectstack-ai/cloud` and
 recorded on #15295, with that file's own `process.env` hit count as the firing
-control). Deleting the clause would have dropped a real obligation whose failure
-mode is quiet: the two exporters drift and the cloud host stops reading the
-variables an operator set.
+control) — for every knob in the block except `OS_OTLP_FLUSH_MS`, which was
+added on this side after that measurement and is therefore unverified rather
+than mirrored. The comment states that boundary rather than a bare count, so a
+reader counting six entries under a claim about five cannot be misled about
+which of them the reading covers. Deleting the clause would have dropped a real
+obligation whose failure mode is quiet: the two exporters drift and the cloud
+host stops reading the variables an operator set.
 
 Three things change, all inside one comment block:
 
