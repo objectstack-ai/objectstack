@@ -1,0 +1,68 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+import type { SemanticMigration } from '../../types.js';
+
+export const entry: SemanticMigration = {
+  id: 'dashboard-widget-stage-order-non-funnel-refused',
+  surface: 'dashboard widget stage order — `dashboard.widgets[].options.stageOrder` '
+    + '(`DashboardWidgetOptionsSchema.stageOrder`) on a widget whose `type` is anything '
+    + 'other than `funnel`, INCLUDING a widget that declares no `type` at all and so '
+    + 'resolves to the `metric` default',
+  replacement: 'either `type: \'funnel\'` on the widget that meant to declare a stage '
+    + 'order, or — for every other widget type — DELETE `stageOrder` and order the widget '
+    + 'with `options.sortBy` + `options.sortOrder`, which lower into the dataset query as '
+    + '`order: { <name>: \'asc\' | \'desc\' }` instead of re-sorting what it returned. '
+    + 'There is no third spelling: no other widget type has ever read the key, so nothing '
+    + 'is lost by removing it that was not already absent from what rendered. The refusal '
+    + 'lands at `options.stageOrder` and names the type the widget carries, the one type '
+    + 'that reads the key, and the two keys to reach for instead.',
+  reason:
+    '#17344 finding 1, ADR-0049 enforce-or-remove, and the enforce arm of a defect whose '
+    + 'whole content was SILENCE. `options` is the open renderer-extras bag, so '
+    + '`stageOrder` was an ungated member of it: a `horizontal-bar` (or `line`, `pie`, '
+    + '`table`, `metric`) widget carrying an authored lifecycle order PARSED, booted, and '
+    + 'forwarded the array to the renderer, which never consulted it. Measured at this '
+    + 'repo\'s `.objectui-sha` pin 53ded82bf7a494f54e344e19099dbf00854b8694: the forwarded '
+    + '`categoryOrder` prop has exactly one read in the charts plugin '
+    + '(`buildCategoryRank(categoryOrder)`, `AdvancedChartImpl.tsx:1514`) and it sits '
+    + 'inside the `chartType === \'funnel\'` guard opened at line 1473; the prop\'s other '
+    + 'two occurrences in that file are its declaration and its destructure. The producer '
+    + 'side has no gate either — `DatasetWidget.tsx:1468` builds the explicit order for '
+    + 'ANY widget and forwards it whenever non-empty. So the authored order was accepted '
+    + 'by the metadata layer, carried all the way to the chart, and dropped there, with '
+    + 'nothing anywhere to say so: the widget rendered in whatever order the analytics '
+    + 'query returned and looked deliberate. The reporter measured exactly that in a live '
+    + 'app — a `horizontal-bar` carrying a seven-stage contract lifecycle rendered '
+    + 'alphabetically by display label. The four SIBLING members of the same bag are not '
+    + 'in this narrowing and were measured not to share the defect: `dateGranularity`, '
+    + '`sortBy`, `sortOrder` and `limit` are read unconditionally at the top of '
+    + '`DatasetWidget` (lines 443-455, outside every type branch) and lower into the '
+    + '`DatasetSelection` the server compiles, so they act on every widget type. '
+    + '`stageOrder` was the only member whose effect was confined to one branch. ⛔ NOT '
+    + 'the other arm of the card ("or ordered marks honour it"): teaching `bar` / `line` / '
+    + '`area` to sort by a category order is a renderer change in the objectui repo, and '
+    + 'widening the set of types that read the key can be done later WITHOUT a second '
+    + 'migration — a narrowing that is later relaxed costs an author nothing, while '
+    + 'leaving the key accepted-and-inert costs them a chart that silently lies. Ships at '
+    + 'once, no deprecation window: there is no window in which an inert key does '
+    + 'anything.',
+  acceptanceCriteria:
+    'Every stored dashboard whose widgets carry `options.stageOrder` on a non-`funnel` '
+    + 'type is refused on its next authoring-path save, with one `custom` issue at '
+    + '`widgets[N].options.stageOrder` naming the authored type. Fix each by writing '
+    + '`type: \'funnel\'` where a funnel was meant, and by deleting the key elsewhere — '
+    + 'check the rendered order afterwards, because a widget that was silently ignoring '
+    + 'the key renders EXACTLY as it did before once the key is gone, and `sortBy` / '
+    + '`sortOrder` is what changes it. A `funnel` widget carrying `stageOrder` parses '
+    + 'byte-identically to before, a non-`funnel` widget carrying the other four '
+    + '`options` members is untouched, and a widget with no `options` at all is '
+    + 'untouched. ⚠️ Two shapes this does NOT reach, so do not read it as complete: a '
+    + 'widget whose `type` is outside `ChartTypeSchema` reports the TYPE refusal alone '
+    + '(zod treats that as aborting and skips object-level checks), so the stage-order '
+    + 'refusal arrives only on the next parse; and the array\'s CONTENTS are still '
+    + 'unconstrained, so a `funnel` carrying a stage value the dimension never declares '
+    + 'still parses and still renders that stage in the sentinel position. Repo census at '
+    + 'the time of the change: zero authored widgets carry the key anywhere in the '
+    + 'monorepo — 59 occurrences outside changelogs, all of them schema, tests, generated '
+    + 'reference pages, the sdui-parser census and the gate that derives it.',
+};
