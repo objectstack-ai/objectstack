@@ -343,8 +343,9 @@ describe('a deferred reference still unresolved after pass 2 is logged too (fram
     expect(message).toContain("record 'Platform'");
     expect(message).toContain('drop_person.name');
     expect(message).toContain('Nobody');
-    // CONSEQUENCE + REMEDY.
-    expect(message).toContain('stays NULL');
+    // CONSEQUENCE + REMEDY — the consequence now carries the moment it is
+    // true of (#17177: a later boot step can write this column).
+    expect(message).toContain('is NULL at the end of pass 2');
     expect(message).toContain('counter looks healthy');
     expect(message).toMatch(/re-run the seed/);
     expect(meta).toMatchObject({ object: 'drop_team', field: 'lead_id', recordIndex: 0 });

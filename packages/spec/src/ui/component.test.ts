@@ -23,7 +23,7 @@ import {
   ObjectMetricPropsSchema,
   ObjectKanbanPropsSchema,
 } from './component.zod';
-import { PageComponentSchema, PageSchema, PageComponentType, ElementDataSourceSchema } from './page.zod';
+import { PageComponentSchema, PageSchema, PageComponentType, ElementDataSourceSchema, RETIRED_PAGE_COMPONENT_TYPES } from './page.zod';
 
 describe('PageHeaderProps', () => {
   it('should accept minimal header', () => {
@@ -1552,14 +1552,27 @@ describe('Interactive Elements — element:button', () => {
 // Interactive Elements — element:filter (RETIRED at element grain, #9220)
 // ---------------------------------------------------------------------------
 describe('Interactive Elements — element:filter (retired, #9220)', () => {
-  // The node-level parse never judged `properties` (that is the #5068 props
-  // gate's job), and `type` is an open union — so a stored, not-yet-migrated
-  // node still parses at THIS level. Pinned so the element retirement is not
-  // misread as a node-level refusal.
-  it('still parses at the node level — the refusal lives at the props dispatch', () => {
+  // FLIPPED (#15110). This pin used to read "still parses at the node level —
+  // the refusal lives at the props dispatch", and the docblock above
+  // `ElementFilterPropsSchema` recorded why: "A bare node with empty
+  // `properties` parses clean (the open `type` union accepts any string, so a
+  // node-level refusal is not expressible here)". #14159 built the door that
+  // expresses it; `element:filter` is a member of
+  // `RETIRED_PAGE_COMPONENT_TYPES`, so the node is refused BY NAME wherever it
+  // is written, populated or bare. The located refusal is pinned in the
+  // describe below; this one holds the flip itself.
+  it('no longer parses at the node level — the name is refused, populated or bare', () => {
     expect(() => PageComponentSchema.parse({
       type: 'element:filter',
       properties: { object: 'order', fields: ['status'] },
+    })).toThrow(/`element:filter` element is retired/);
+    expect(() => PageComponentSchema.parse({
+      type: 'element:filter',
+      properties: {},
+    })).toThrow(/`element:filter` element is retired/);
+    // Lit control: a LIVE element in the same namespace is untouched.
+    expect(() => PageComponentSchema.parse({
+      type: 'element:text', properties: { text: 'hi' },
     })).not.toThrow();
   });
 
@@ -1603,12 +1616,21 @@ describe('Interactive Elements — element:filter (retired, #9220)', () => {
 // Interactive Elements — element:form
 // ---------------------------------------------------------------------------
 describe('Interactive Elements — element:form (retired, #9249)', () => {
-  // The node itself stays parseable: the open `type` union accepts any string,
-  // and the migration leaves a bare inert node behind.
-  it('accepts a bare element:form node (the migrated shape)', () => {
+  // FLIPPED (#15110). This pin used to read "accepts a bare element:form node
+  // (the migrated shape)", on the reading the docblock recorded as structural:
+  // "the open `type` union accepts any string, so a node-level refusal is not
+  // expressible here". `element:form` is now a member of
+  // `RETIRED_PAGE_COMPONENT_TYPES`, so the node is refused by name — the bare
+  // migrated shape included, which is the whole point: that is the shape an
+  // author is left holding.
+  it('no longer accepts a bare element:form node — the migrated shape is refused by name', () => {
     expect(() => PageComponentSchema.parse({
       type: 'element:form',
       properties: {},
+    })).toThrow(/`element:form` element is retired/);
+    // Lit control: a LIVE element in the same namespace is untouched.
+    expect(() => PageComponentSchema.parse({
+      type: 'element:button', properties: { label: 'Save' },
     })).not.toThrow();
   });
 
@@ -1641,6 +1663,132 @@ describe('Interactive Elements — element:form (retired, #9249)', () => {
     for (const key of ['object', 'fields', 'mode', 'submitLabel', 'onSubmit', 'aria']) {
       expect(props).not.toHaveProperty(key);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The two element-grain retirements are refused BY NAME at the node (#15110)
+// ---------------------------------------------------------------------------
+
+/**
+ * #15110 — the node-level half of #9220 / #9249, expressed through the door
+ * #14159 built for `user:profile`. Each element's own docblock recorded the
+ * surviving bare node as structural, not intended: "A bare node with empty
+ * `properties` parses clean (the open `type` union accepts any string, so a
+ * node-level refusal is not expressible here)". It is expressible one level up.
+ *
+ * The shape mirrors the `user:profile` describe above deliberately: `code` +
+ * `path` + `params` + the prescription's text are the pin, never a bare
+ * `toThrow()`, which greens on any error.
+ */
+describe('element:filter / element:form are refused by name at the node (#15110)', () => {
+  // `check:doc-authoring` (maintainer ruling 2026-08-12): a prescription
+  // printed at the customer carries no citation-shaped issue id.
+  const ISSUE_ID = /#\d{3,}/;
+  const cases = [
+    { type: 'element:filter', props: ElementFilterPropsSchema, key: 'object',
+      marker: 'list surfaces own their filtering' },
+    { type: 'element:form', props: ElementFormPropsSchema, key: 'object',
+      marker: 'use the object-bound `object-form` block instead' },
+  ] as const;
+
+  it.each(cases)('$type is a member with a prescription that names no issue id', ({ type, marker }) => {
+    const guidance = RETIRED_PAGE_COMPONENT_TYPES.get(type);
+    expect(guidance).toBeTypeOf('string');
+    expect(guidance!).toMatch(new RegExp('^`' + type + '` was removed in @objectstack/spec 17 '));
+    expect(guidance!).toContain('ADR-0049');
+    expect(guidance!).toContain(marker);
+    expect(guidance!).not.toMatch(ISSUE_ID);
+  });
+
+  /**
+   * The anti-drift pin. The node prescription is not new prose: it is the
+   * element-grain TAIL of this element's own `retiredKey` tombstones, with the
+   * per-key head dropped. Holding the two equal BY BYTES is what keeps the
+   * node door and the props door telling one story — the `user:profile` shape
+   * ("one prescription, three doors") reached at a type whose row could not be
+   * `z.never`, because it has six tombstoned keys with more to say.
+   */
+  it.each(cases)('$type: the node prescription is the tombstones\' own tail, byte for byte', ({ type, props, key }) => {
+    const node = RETIRED_PAGE_COMPONENT_TYPES.get(type)!;
+    const tail = node.slice(node.indexOf('\u2014 ') + 2);
+    expect(tail.length).toBeGreaterThan(200);
+    const r = props.safeParse({ [key]: 'x' });
+    expect(r.success).toBe(false);
+    if (r.success) return;
+    expect(r.error.issues[0]!.message).toContain(tail);
+    // ...and the head is the only difference: the key message names the key.
+    expect(r.error.issues[0]!.message).toContain('property `' + key + '`');
+    expect(node).not.toContain('property `' + key + '`');
+  });
+
+  it.each(cases)('$type: PageComponentSchema refuses the node at `type`, bare or populated', ({ type }) => {
+    for (const properties of [undefined, {}, { object: 'order' }]) {
+      const r = PageComponentSchema.safeParse(
+        properties === undefined ? { type } : { type, properties },
+      );
+      expect(r.success, `properties=${JSON.stringify(properties)}`).toBe(false);
+      if (r.success) continue;
+      const located = r.error.issues.filter((i) => i.code === 'custom');
+      expect(located).toHaveLength(1);
+      expect(located[0]!.path).toEqual(['type']);
+      expect(located[0]!.message).toBe(RETIRED_PAGE_COMPONENT_TYPES.get(type));
+      expect((located[0]! as { params?: Record<string, unknown> }).params)
+        .toEqual({ retiredComponentType: type });
+    }
+  });
+
+  it.each(cases)('$type: PageSchema locates it at the element path — the door `os validate` parses', ({ type }) => {
+    const r = PageSchema.safeParse({
+      name: 'board',
+      label: 'Board',
+      regions: [{
+        name: 'main',
+        components: [
+          { type: 'page:header', properties: { title: 'Board' } },
+          { type },
+        ],
+      }],
+    });
+    expect(r.success).toBe(false);
+    if (r.success) return;
+    const located = r.error.issues.filter((i) => i.code === 'custom');
+    expect(located).toHaveLength(1);
+    expect(located[0]!.path).toEqual(['regions', 0, 'components', 1, 'type']);
+    expect(located[0]!.message).toBe(RETIRED_PAGE_COMPONENT_TYPES.get(type));
+  });
+
+  it.each(cases)('$type: the enum error map carries the same prescription', ({ type }) => {
+    expect(PageComponentType.options).not.toContain(type);
+    const r = PageComponentType.safeParse(type);
+    expect(r.success).toBe(false);
+    if (r.success) return;
+    expect(r.error.issues[0]!.code).toBe('invalid_value');
+    expect(r.error.issues[0]!.message).toBe(RETIRED_PAGE_COMPONENT_TYPES.get(type));
+  });
+
+  /**
+   * The kept row is the reason these two are NOT `retiredComponentProps`: six
+   * tombstoned keys each, and a per-key prescription says more than one
+   * whole-bag refusal could. The empty bag still parses AT THE ROW — that door
+   * is simply no longer reachable through `PageComponentSchema`, which is
+   * pinned above. Both halves are load-bearing, so both are pinned.
+   */
+  it.each(cases)('$type: the row keeps dispatching per key, and still accepts the empty bag', ({ type, props, key }) => {
+    expect(Object.keys(ComponentPropsMap)).toContain(type);
+    expect(props.safeParse({}).success).toBe(true);
+    expect(props.safeParse({ [key]: 'x' }).success).toBe(false);
+  });
+
+  it('a LIVE element in the same namespace is untouched — the lit control', () => {
+    for (const type of ['element:text', 'element:number', 'element:image', 'element:divider',
+      'element:button', 'element:record_picker', 'element:text_input']) {
+      expect(RETIRED_PAGE_COMPONENT_TYPES.has(type), type).toBe(false);
+      expect(PageComponentSchema.safeParse({ type }).success, type).toBe(true);
+    }
+    // ...as is the open arm outside the reserved namespaces.
+    expect(PageComponentSchema.safeParse({ type: 'object-grid' }).success).toBe(true);
+    expect(PageComponentSchema.safeParse({ type: 'mcp:connect-agent' }).success).toBe(true);
   });
 });
 
