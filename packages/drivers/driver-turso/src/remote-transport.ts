@@ -46,9 +46,17 @@ import type { DriverQuery } from '@objectstack/spec/contracts';
 // face creates are byte-identical to the ones `SqlDriver` creates locally and
 // the ones the drift differ looks for, so the two faces cannot fork on what the
 // declaration meant (#6203, which this driver has already paid for twice).
+//
+// [#17609] …and what an object's declared `indexes: [...]` become, through the
+// same normalizer `SqlDriver.syncDeclaredIndexes` and the drift differ read
+// (`normalizeDeclaredIndex`). Until then only the field-level half above was
+// imported, so every object-level index — unique or not — had no consumer on
+// this face and never reached a remote database at all.
 import {
   uniqueIndexesFromFields,
+  normalizeDeclaredIndex,
   organizationKeyPartSql,
+  type DeclaredIndexInput,
   type ExpectedIndex,
 } from '@objectstack/driver-sql';
 import { nanoid } from 'nanoid';
@@ -62,6 +70,23 @@ const DEFAULT_ID_LENGTH = 16;
  * Columns created unconditionally by syncSchema — skip when iterating fields.
  */
 const BUILTIN_COLUMNS = new Set(['id', 'created_at', 'updated_at']);
+
+/**
+ * [#17609] Every index name the database already carries — ONE statement for a
+ * whole schema sync, read beside the column probe. SQLite index names are
+ * unique per database, so a name hit is the same "already exists" answer
+ * `SqlDriver.syncDeclaredIndexes` reads from its own per-table introspection;
+ * `IF NOT EXISTS` on the DDL still absorbs a concurrent creator.
+ */
+const EXISTING_INDEX_NAMES_SQL = `SELECT name FROM sqlite_master WHERE type='index'`;
+
+/** [#17609] One declared index, resolved to the DDL that materializes it. */
+interface PlannedIndex {
+  name: string;
+  table: string;
+  unique: boolean;
+  sql: string;
+}
 
 /**
  * Pattern for valid SQL identifiers (table and column names).
@@ -1142,16 +1167,21 @@ export class RemoteTransport {
    * `error` class, and routing it through the `warn` sink would file it under
    * exactly the level the rule exists to keep readable.
    *
-   * Absent, the degradation is not lost: {@link syncUniqueIndexes} still skips
-   * the index and the condition resurfaces as the enveloped refusal in
-   * {@link upsert}. `TursoDriver` wires this to `logger.error` at construction,
+   * [#17609] A declared NON-unique index that could not be created is the same
+   * class for the same reason: every query keeps answering, correctly, while
+   * each one scans the table — nothing is visibly wrong, and the cost arrives
+   * as read volume.
+   *
+   * Absent, the degradation is not lost: {@link retrofitDeclaredIndexes} still
+   * skips the index, and a missing UNIQUE resurfaces as the enveloped refusal
+   * in {@link upsert}. `TursoDriver` wires this to `logger.error` at construction,
    * the same way it wires the connect factory and the temporal column rule.
    */
   private durabilitySink: ((message: string) => void) | null = null;
 
   /**
-   * Register where this transport reports a declared constraint it could not
-   * materialize (#8413). See {@link durabilitySink} for why it is not the
+   * Register where this transport reports a declared index it could not
+   * materialize (#8413, #17609). See {@link durabilitySink} for why it is not the
    * diagnostic sink.
    */
   setDurabilitySink(sink: (message: string) => void): void {
@@ -1822,7 +1852,7 @@ export class RemoteTransport {
   async syncSchema(object: string, schema: any): Promise<void> {
     await this.ensureConnected();
 
-    const objectDef = schema as { name: string; fields?: Record<string, any> };
+    const objectDef = schema as { name: string; fields?: Record<string, any>; indexes?: unknown };
     const tableName = object;
     this.assertSafeIdentifier(tableName);
 
@@ -1835,11 +1865,11 @@ export class RemoteTransport {
 
     if (!exists) {
       await this.client!.execute(this.buildCreateTableSQL(tableName, objectDef));
-      // [#8413] The table was created empty microseconds ago, so its unique
-      // indexes cannot fail on existing data — no isolation needed, and any
-      // error here is a real DDL fault that should surface.
-      for (const sql of this.buildUniqueIndexDDL(tableName, objectDef, this.materializedColumns(objectDef))) {
-        await this.client!.execute(sql);
+      // [#8413 · #17609] The table was created empty microseconds ago, so its
+      // declared indexes cannot fail on existing data — no isolation needed,
+      // and any error here is a real DDL fault that should surface.
+      for (const index of this.buildDeclaredIndexDDL(tableName, objectDef, this.materializedColumns(objectDef))) {
+        await this.client!.execute(index.sql);
       }
     } else {
       // ALTER TABLE — add missing columns
@@ -1862,10 +1892,15 @@ export class RemoteTransport {
           materialized.add(name);
         }
       }
-      // [#8413] The retrofit leg — this table may already hold the duplicates
-      // the missing constraint admitted, so it is isolated and reported, never
-      // forced. See {@link syncUniqueIndexes}.
-      await this.syncUniqueIndexes(this.buildUniqueIndexDDL(tableName, objectDef, materialized));
+      // [#8413 · #17609] The retrofit leg — this table may already hold the
+      // duplicates a missing UNIQUE admitted, so it is isolated and reported,
+      // never forced, and an index the database already carries is not
+      // re-issued. See {@link retrofitDeclaredIndexes}.
+      const planned = this.buildDeclaredIndexDDL(tableName, objectDef, materialized);
+      if (planned.length > 0) {
+        const existing = await this.client!.execute(EXISTING_INDEX_NAMES_SQL);
+        await this.retrofitDeclaredIndexes(this.missingIndexes(planned, existing.rows));
+      }
     }
   }
 
@@ -1888,11 +1923,15 @@ export class RemoteTransport {
   /**
    * Batch-synchronize multiple object schemas using batched libsql calls.
    *
-   * Collects all DDL statements (CREATE TABLE / ALTER TABLE ADD COLUMN)
-   * for every schema and uses `client.batch()` to minimize network
-   * round-trips. The process may perform up to three batch calls:
-   * one to introspect existing tables, one to introspect columns for
-   * existing tables, and one to apply DDL statements.
+   * Collects all DDL statements (CREATE TABLE / ALTER TABLE ADD COLUMN /
+   * CREATE INDEX) for every schema and uses `client.batch()` to minimize
+   * network round-trips. The process may perform up to four batch calls: one
+   * to introspect existing tables, one to introspect the existing tables'
+   * columns together with the index names the database already carries, one to
+   * apply DDL statements, and — only when an existing table is missing a
+   * declared index — one to retrofit those indexes. Once every declared index
+   * exists (the steady state of every boot after the first) the fourth call is
+   * not made and no index DDL is sent (#17609).
    *
    * This method does not implement an internal fallback to sequential
    * `syncSchema()`. Any fallback behavior is expected to be handled
@@ -1930,45 +1969,52 @@ export class RemoteTransport {
     const ddlStatements: InStatement[] = [];
 
     for (const { object, schema } of newSchemas) {
-      const objectDef = schema as { name: string; fields?: Record<string, any> };
+      const objectDef = schema as { name: string; fields?: Record<string, any>; indexes?: unknown };
       ddlStatements.push(this.buildCreateTableSQL(object, objectDef));
-      // [#8413] Rides the SAME batch, immediately behind its own CREATE TABLE
-      // (order matters — the index cannot precede the table). A brand-new table
-      // is empty, so these cannot fail on existing data and need none of the
-      // isolation the retrofit leg below gets: they belong in the batch, and
-      // cost this path zero extra round trips.
-      ddlStatements.push(
-        ...this.buildUniqueIndexDDL(object, objectDef, this.materializedColumns(objectDef)),
-      );
+      // [#8413 · #17609] Every declared index — field-level `unique` and the
+      // object's own `indexes`, unique or not — rides the SAME batch,
+      // immediately behind its own CREATE TABLE (order matters — the index
+      // cannot precede the table). A brand-new table is empty, so these cannot
+      // fail on existing data and need none of the isolation the retrofit leg
+      // below gets: they belong in the batch, and cost this path zero extra
+      // round trips.
+      for (const index of this.buildDeclaredIndexDDL(object, objectDef, this.materializedColumns(objectDef))) {
+        ddlStatements.push(index.sql);
+      }
     }
 
-    // [#8413] Existing tables' unique indexes are collected here and applied
-    // AFTER the main batch — they must follow their table's `ALTER TABLE ADD
-    // COLUMN` (the column may be brand new), and they must not share a
-    // transaction with it: on a libsql `write` batch one statement's failure
-    // rolls back every other statement in the batch, so a single table holding
-    // duplicates would silently undo the schema sync of every OTHER object in
-    // the boot. That is the blast radius the separation exists to prevent.
-    const retrofitStatements: string[] = [];
+    // [#8413 · #17609] Existing tables' missing declared indexes are collected
+    // here and applied AFTER the main batch — they must follow their table's
+    // `ALTER TABLE ADD COLUMN` (the column may be brand new), and they must not
+    // share a transaction with it: on a libsql `write` batch one statement's
+    // failure rolls back every other statement in the batch, so a single table
+    // holding duplicates would silently undo the schema sync of every OTHER
+    // object in the boot. That is the blast radius the separation exists to
+    // prevent.
+    let retrofit: PlannedIndex[] = [];
 
-    // Phase 2b: for existing tables, introspect columns in one batch
+    // Phase 2b: for existing tables, introspect columns — and, as the LAST
+    // statement of the same read batch, every index name the database already
+    // carries (#17609), so the retrofit re-issues only what is missing. That
+    // one statement is the whole steady-state cost of index sync: it adds no
+    // round trip, and it does not grow with the number of declared indexes.
     if (existingSchemas.length > 0) {
       const pragmaStmts: InStatement[] = existingSchemas.map((s) => ({
         sql: `PRAGMA table_info("${s.object}")`,
         args: [],
       }));
-      const pragmaResults = await this.client!.batch(pragmaStmts, 'read');
+      const introspection = await this.client!.batch([...pragmaStmts, EXISTING_INDEX_NAMES_SQL], 'read');
+      const planned: PlannedIndex[] = [];
 
       for (let i = 0; i < existingSchemas.length; i++) {
         const { object, schema } = existingSchemas[i];
-        const objectDef = schema as { name: string; fields?: Record<string, any> };
-        if (!objectDef.fields) continue;
+        const objectDef = schema as { name: string; fields?: Record<string, any>; indexes?: unknown };
 
-        const existingColumns = new Set(pragmaResults[i].rows.map((r: any) => r.name));
+        const existingColumns = new Set(introspection[i].rows.map((r: any) => r.name));
         const materialized = new Set<string>(BUILTIN_COLUMNS);
         for (const c of existingColumns) materialized.add(String(c));
 
-        for (const [name, field] of Object.entries(objectDef.fields)) {
+        for (const [name, field] of Object.entries(objectDef.fields ?? {})) {
           if (existingColumns.has(name)) continue;
           const type = (field as any).type || 'string';
           if (type === 'formula') continue;
@@ -1978,8 +2024,9 @@ export class RemoteTransport {
           materialized.add(name);
         }
 
-        retrofitStatements.push(...this.buildUniqueIndexDDL(object, objectDef, materialized));
+        planned.push(...this.buildDeclaredIndexDDL(object, objectDef, materialized));
       }
+      retrofit = this.missingIndexes(planned, introspection[existingSchemas.length].rows);
     }
 
     // Phase 3: execute all DDL in a single batch
@@ -1987,10 +2034,11 @@ export class RemoteTransport {
       await this.client!.batch(ddlStatements, 'write');
     }
 
-    // Phase 4 [#8413]: retrofit the existing tables' declared unique indexes,
-    // outside the batch above for the blast-radius reason stated at its
-    // declaration. Failures here are reported, never forced and never repaired.
-    await this.syncUniqueIndexes(retrofitStatements);
+    // Phase 4 [#8413 · #17609]: retrofit the existing tables' missing declared
+    // indexes, outside the batch above for the blast-radius reason stated at
+    // its declaration. Failures here are reported, never forced and never
+    // repaired.
+    await this.retrofitDeclaredIndexes(retrofit);
   }
 
   async dropTable(object: string): Promise<void> {
@@ -2043,7 +2091,7 @@ export class RemoteTransport {
    * identifier — `object`, `field` and the `groupBy` `outKey` in
    * {@link RemoteTransport.aggregate}, the table and column names in
    * `syncSchema` / `syncSchemasBatch` / `buildCreateTableSQL`, and the index
-   * name and columns in `syncUniqueIndexes` — so the envelope is decided once
+   * name and columns in `buildDeclaredIndexDDL` — so the envelope is decided once
    * for all of them. See {@link unsafeIdentifierError} for which envelope and
    * why. The predicate and the message are unchanged.
    */
@@ -2122,8 +2170,23 @@ export class RemoteTransport {
   }
 
   /**
-   * [#8413] The UNIQUE indexes a schema's field-level `unique` declarations ask
-   * for, as executable DDL.
+   * [#8413 · #17609] Every index an object's metadata declares, as executable
+   * DDL: field-level `unique` (tenancy-aware) PLUS the object's own
+   * `indexes: [...]`, unique or not.
+   *
+   * # One answer, three readers
+   *
+   * The set is composed from the two shared normalizers that
+   * `SqlDriver.syncDeclaredIndexes` and the drift differ's `expectedIndexes`
+   * compose — `uniqueIndexesFromFields` for field-level `unique`,
+   * `normalizeDeclaredIndex` for each declared entry — so the index NAME
+   * (`buildIndexName`, or the author's own `name`) and the KEY this face
+   * creates are the ones the local face creates and the differ looks for.
+   * Nothing about naming, scope or key order is decided here. Until #17609 only
+   * the first normalizer was read, so every object-level index had no consumer
+   * on this face and no remote database carried one — `sqlite_master` on a
+   * production tenant held the primary-key autoindexes and nothing else, and
+   * the hot polling tables answered every claim query with a full scan.
    *
    * # Why a companion index and not an inline `UNIQUE` column constraint
    *
@@ -2134,51 +2197,57 @@ export class RemoteTransport {
    *  1. **Retrofit.** SQLite cannot add a column constraint to an existing
    *     table — `ALTER TABLE` has no `ADD CONSTRAINT`, so an inline `UNIQUE`
    *     reaches an already-created table only through a full table rebuild
-   *     (create-copy-drop-rename). A `CREATE UNIQUE INDEX` is a single
-   *     statement that touches no row. Since the tables this defect has been
-   *     filling with duplicates all already exist, the inline form would have
-   *     made the fix unreachable exactly where it is needed.
-   *  2. **Parity.** `SqlDriver` materializes field-level `unique` as a UNIQUE
-   *     INDEX (`syncDeclaredIndexes`), never inline. Matching it means the two
-   *     faces converge on the same index NAME (`buildIndexName`) and the same
-   *     key, so `sqlite_master` on a remote database and on a local one read
-   *     alike — and the drift differ, which looks for those names, does not
-   *     report a remote database as drifted from its own declaration.
+   *     (create-copy-drop-rename). A `CREATE [UNIQUE] INDEX` is a single
+   *     statement that touches no row. Since the tables these indexes were
+   *     missing from all already exist, the inline form would have made the
+   *     fix unreachable exactly where it is needed.
+   *  2. **Parity.** `SqlDriver` materializes every declared index as an INDEX,
+   *     never inline, so `sqlite_master` on a remote database and on a local
+   *     one read alike — and the drift differ, which looks for those names,
+   *     does not report a remote database as drifted from its own declaration.
    *
    * # NULL semantics are inherited, not chosen here
    *
    * SQL UNIQUE is NULL-distinct, so rows with a NULL in the key stay mutually
-   * unconstrained; the tenant-scoped arm gets the NULL-SAFE key part
+   * unconstrained; an organization-scoped unique gets the NULL-SAFE key part
    * (`COALESCE(<tenant>, '__global__')`) from the shared helper for the reason
    * ADR-0120 D3 records. Neither rule is re-decided here.
    *
    * Columns that were never materialized (a virtual `formula` field) are
    * skipped rather than emitted — the same choice `SqlDriver.syncDeclaredIndexes`
    * makes, and for the same reason: DDL naming a column that does not exist
-   * fails the whole sync over an index nothing could have used.
+   * fails the whole sync over an index nothing could have used. A name declared
+   * twice is emitted once, as the local face creates it once.
    */
-  private buildUniqueIndexDDL(
+  private buildDeclaredIndexDDL(
     tableName: string,
-    objectDef: { fields?: Record<string, any>; tenancy?: any },
+    objectDef: { fields?: Record<string, any>; tenancy?: any; indexes?: unknown },
     materializedColumns: Set<string>,
-  ): string[] {
+  ): PlannedIndex[] {
     const tenantField = this.tenantFieldResolver ? this.tenantFieldResolver(objectDef) : null;
     const expected: ExpectedIndex[] = uniqueIndexesFromFields(
       tableName,
       objectDef.fields ?? {},
       tenantField,
     );
+    const declared = Array.isArray(objectDef.indexes) ? (objectDef.indexes as DeclaredIndexInput[]) : [];
+    for (const entry of declared) {
+      const normalized = normalizeDeclaredIndex(tableName, entry, tenantField);
+      if (normalized) expected.push(normalized);
+    }
 
-    const statements: string[] = [];
+    const planned: PlannedIndex[] = [];
+    const emitted = new Set<string>();
     for (const index of expected) {
       const missing = index.columns.filter((c) => !materializedColumns.has(c));
       if (missing.length > 0) {
         this.diagnosticSink?.(
-          `[RemoteTransport] skipping declared unique index on "${tableName}" — ` +
+          `[RemoteTransport] skipping declared index "${index.name}" on "${tableName}" — ` +
             `column(s) not materialized: ${missing.join(', ')}`,
         );
         continue;
       }
+      if (emitted.has(index.name)) continue;
       this.assertSafeIdentifier(index.name);
       for (const column of index.columns) this.assertSafeIdentifier(column);
 
@@ -2186,69 +2255,98 @@ export class RemoteTransport {
       const parts = index.columns.map((c) =>
         nullSafe.has(c) ? organizationKeyPartSql(`"${c}"`) : `"${c}"`,
       );
-      // `IF NOT EXISTS` is what makes every sync after the first a no-op
-      // server-side, so re-syncing an object costs a statement rather than an
-      // error — and it is also what makes the per-statement retry in
-      // {@link syncUniqueIndexes} safe under EITHER libsql batch semantic
+      // `IF NOT EXISTS` is what makes a concurrent creator (two instances
+      // booting against one database) a no-op rather than an error — and it is
+      // also what makes the per-statement retry in
+      // {@link retrofitDeclaredIndexes} safe under EITHER libsql batch semantic
       // (transactional: nothing was applied; non-transactional: re-applying is
       // a no-op).
-      statements.push(
-        `CREATE UNIQUE INDEX IF NOT EXISTS "${index.name}" ON "${tableName}" (${parts.join(', ')})`,
-      );
+      planned.push({
+        name: index.name,
+        table: tableName,
+        unique: index.unique,
+        sql:
+          `CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX IF NOT EXISTS "${index.name}" ` +
+          `ON "${tableName}" (${parts.join(', ')})`,
+      });
+      emitted.add(index.name);
     }
-    return statements;
+    return planned;
   }
 
   /**
-   * [#8413] Materialize unique indexes against a table that ALREADY EXISTS —
-   * the retrofit path, and the one that can legitimately fail.
+   * [#17609] The planned indexes the database does not already carry, by name —
+   * the remote twin of the `existing.has(name)` skip in
+   * `SqlDriver.syncDeclaredIndexes`. `rows` is the answer to
+   * {@link EXISTING_INDEX_NAMES_SQL}.
+   */
+  private missingIndexes(planned: PlannedIndex[], rows: ReadonlyArray<unknown>): PlannedIndex[] {
+    const existing = new Set(rows.map((row) => String((row as { name?: unknown }).name)));
+    return planned.filter((index) => !existing.has(index.name));
+  }
+
+  /**
+   * [#8413 · #17609] Materialize declared indexes against tables that ALREADY
+   * EXIST — the retrofit path, and the one that can legitimately fail.
    *
    * ⛔ **This must never repair data, and never gives up quietly.** Creating a
    * UNIQUE index over a table that already holds duplicates fails, and those
-   * duplicates are precisely what this defect has been producing. Deleting,
+   * duplicates are precisely what a missing constraint admits. Deleting,
    * merging or rewriting any of those rows is a destructive migration and an
-   * operator's decision — never a side effect of a driver booting. So the only
-   * two outcomes here are *the index now exists* and *the index does not exist
-   * and somebody was told at `error`*, which is the level AGENTS.md's
-   * degradation rule requires for a declared constraint that is not enforced:
-   * from the outside nothing looks wrong, and the loss surfaces a release later.
+   * operator's decision — never a side effect of a driver booting. A plain
+   * index cannot fail on data, but it can still fail (a server-side limit, a
+   * timeout on a large table). So the only two outcomes here are *the index
+   * now exists* and *the index does not exist and somebody was told at
+   * `error`*, which is the level AGENTS.md's degradation rule requires: DDL the
+   * metadata declares did not run, and from the outside nothing looks wrong —
+   * a missing UNIQUE keeps admitting duplicates, a missing access path keeps
+   * answering every query by scanning the table. Both surface a release later,
+   * the second one as read volume.
    *
-   * Reporting it is not the whole remedy, and is not meant to be — the operator
-   * with duplicates also gets {@link refuseUnbackedConflictTarget} on any
-   * `conflictKeys` upsert against the same table, which is a refusal at the
-   * moment of use rather than a log line at boot.
+   * Reporting a missing UNIQUE is not the whole remedy, and is not meant to be
+   * — the operator with duplicates also gets {@link refuseUnbackedConflictTarget}
+   * on any `conflictKeys` upsert against the same table, which is a refusal at
+   * the moment of use rather than a log line at boot.
    *
-   * **Round-trip cost, stated rather than hidden** (#7099 asked which trips are
-   * already paid): the happy path is ONE extra batch per sync that touches an
-   * existing table, and only when that table declares a unique field at all.
-   * The per-statement fallback runs only after a batch has already failed, i.e.
-   * only on a database that really does have a violated constraint — so the
-   * cost of precision is paid by the deployment that needs the diagnosis, not
-   * by every boot.
+   * **Round-trip cost, stated rather than hidden:** `planned` holds only the
+   * indexes the database does not already carry — both callers filter by name
+   * first — so the steady state issues NO statement here and no round trip. A
+   * boot that does have indexes to add pays ONE batch for all of them. The
+   * per-statement fallback runs only after that batch has failed, i.e. only on
+   * a database where some index really is unbuildable, so the cost of naming
+   * the culprit is paid by the deployment that needs the diagnosis, not by
+   * every boot. On a transactional libsql `write` batch one failure rolls back
+   * its siblings as well; the fallback is also what lands those.
    */
-  private async syncUniqueIndexes(statements: string[]): Promise<void> {
-    if (statements.length === 0) return;
+  private async retrofitDeclaredIndexes(planned: PlannedIndex[]): Promise<void> {
+    if (planned.length === 0) return;
     try {
-      await this.client!.batch(statements, 'write');
+      await this.client!.batch(planned.map((index) => index.sql), 'write');
       return;
     } catch {
       // The batch told us SOMETHING failed, not which. Re-issue one at a time
       // so the report names the index an operator has to act on — `IF NOT
       // EXISTS` makes the ones that already succeeded no-ops either way.
     }
-    for (const sql of statements) {
+    for (const index of planned) {
       try {
-        await this.client!.execute(sql);
+        await this.client!.execute(index.sql);
       } catch (e) {
+        const cause = e instanceof Error ? e.message : String(e);
         this.durabilitySink?.(
-          `[RemoteTransport] could not create the declared unique index — ` +
-            `${sql}. The constraint is NOT enforced on this table: existing rows already ` +
-            `violate it (the duplicates this face accepted while it emitted no UNIQUE at all), ` +
-            `or the index is otherwise unbuildable. Nothing looks broken from the outside and ` +
-            `duplicates will keep accumulating. Fix by de-duplicating the column's existing ` +
-            `values and re-running schema sync — this driver deliberately does NOT rewrite ` +
-            `stored rows to force the index through. Until then a conflictKeys upsert on this ` +
-            `table is refused rather than crashing. Cause: ${e instanceof Error ? e.message : String(e)}`,
+          index.unique
+            ? `[RemoteTransport] could not create the declared unique index "${index.name}" on ` +
+                `"${index.table}" — ${index.sql}. The constraint is NOT enforced on this table: existing rows ` +
+                `already violate it (duplicates this face accepted while the index was absent), or the index is ` +
+                `otherwise unbuildable. Nothing looks broken from the outside and duplicates will keep ` +
+                `accumulating. Fix by de-duplicating the key's existing values and re-running schema sync — this ` +
+                `driver deliberately does NOT rewrite stored rows to force the index through. Until then a ` +
+                `conflictKeys upsert on this table is refused rather than crashing. Cause: ${cause}`
+            : `[RemoteTransport] could not create the declared index "${index.name}" on "${index.table}" — ` +
+                `${index.sql}. Every query this index exists to serve is answered by scanning the whole table ` +
+                `instead: nothing looks broken from the outside and results stay correct, but each such read ` +
+                `costs a full scan that grows with the table. Fix the cause below and re-run schema sync — the ` +
+                `next schema sync retries it, and no row is touched either way. Cause: ${cause}`,
         );
       }
     }

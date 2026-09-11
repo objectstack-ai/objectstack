@@ -10,7 +10,7 @@
  * where an identifier is INLINED into SQL (SQLite cannot bind one): `object`,
  * `field` and the `groupBy` field / output key in `aggregate`, the table and
  * column names in `syncSchema` / `syncSchemasBatch` / `buildCreateTableSQL`,
- * and the index name and columns in `syncUniqueIndexes`. It threw a bare
+ * and the index name and columns in `buildDeclaredIndexDDL`. It threw a bare
  * `Error` — no `code`, no `status` — so `mapDataError`
  * (`packages/rest/src/error-response.ts`) reached none of its classifying
  * branches, fell through to its sanitised terminal and served a **500**. A

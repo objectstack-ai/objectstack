@@ -292,7 +292,7 @@ function countingClient(inner: Client): { client: Client; calls: Array<{ via: 'e
 }
 
 const INDEX_DDL = /^\s*CREATE\s+(UNIQUE\s+)?INDEX\b/i;
-const INDEX_NAME_READ = /sqlite_master/i;
+const INDEX_NAME_READ = /FROM\s+sqlite_master\s+WHERE\s+type\s*=\s*'index'/i;
 
 /** The durability channel (`logger.error`) and the diagnostic one (`logger.warn`), captured. */
 function captureLogs(driver: TursoDriver) {

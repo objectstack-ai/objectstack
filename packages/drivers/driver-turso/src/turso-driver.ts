@@ -689,7 +689,9 @@ export class TursoDriver extends SqlDriver {
       // DURABILITY degradation, not a functional one: writes keep succeeding,
       // reads keep returning rows, and the only thing that changed is that a
       // constraint the metadata declares is not enforced — the "looks normal
-      // from the outside" shape AGENTS.md grades at `error`. It is a SEPARATE
+      // from the outside" shape AGENTS.md grades at `error`. [#17609] A declared
+      // PLAIN index it could not create lands here too, for the same reason:
+      // every query still answers, by scanning the table. It is a SEPARATE
       // sink from the `warn` one above precisely so this class does not have to
       // share a level with the diagnostics that are merely informative.
       this.remoteTransport.setDurabilitySink((message) =>
