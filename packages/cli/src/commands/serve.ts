@@ -146,8 +146,24 @@ import { SEMCONV, OBSERVABILITY_METRICS_SERVICE, type MetricsRegistry } from '@o
 // to hand off to `createDispatcherPlugin`. Default is fully noop so the
 // CLI imposes no runtime cost when observability isn't configured.
 //
-// Env knobs (also documented in apps/cloud/server/observability.ts — keep
-// the two in sync if you tweak names):
+// Env knobs — the SAME names are also read by the cloud host
+// (`apps/cloud/server/observability.ts`, cloud repo), so keep the two in sync
+// if you tweak NAMES. That duty is live, not stale prose: the cloud file still
+// reads all five of these as `process.env` lookups (measured against that
+// repository and recorded on #15295).
+//
+// ⛔ NAMES only — the DEFAULTS differ on purpose, and unifying them is a
+// telemetry regression rather than a tidy-up: `OS_OBS_SERVICE_NAME` defaults
+// to `objectstack` here and to `objectstack-cloud` there because two
+// deployments are two services; collapsing them merges both into one series.
+//
+// The canonical home for this list is `@objectstack/observability` — the
+// package BOTH sides already import (statically, a few lines above; the cloud
+// file imports it too) — not these two comments pointing at each other, which
+// is how the duty decayed to begin with: it is one-sided today, the cloud file
+// carries no reciprocal sentence, so nobody renaming a name over there is
+// prompted to come back here. Until the list lives in that package, this block
+// is it, and moving the cloud half is a change in the cloud repo (#15295).
 //   OS_OBS_EXPORTER       noop (default) | console | json | otlp
 //   OS_OTLP_ENDPOINT      OTLP/HTTP root, e.g. https://otlp.grafana.net/otlp
 //   OS_OTLP_HEADERS       comma-separated Key=Value; values may be URL-encoded
