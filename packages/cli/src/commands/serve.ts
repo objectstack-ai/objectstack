@@ -62,6 +62,20 @@ import {
   MAX_PORT,
   type PortInputSource,
 } from '../utils/port-contract.js';
+// The ONE dev-TLS contract, shared with `dev` (which spawns this command) so the
+// protocol the parent derives and the protocol this process actually binds come
+// from a single reader (#16804). ⛔ Nothing about certificates is declared in
+// this file, and ⛔ nothing anywhere generates one — see that module's header.
+import {
+  devTlsCertFlag,
+  devTlsKeyFlag,
+  resolveDevTlsIntent,
+  readDevTlsMaterial,
+  listenerProtocol,
+  colorizeDevTlsNotice,
+  type DevTlsMaterial,
+  type ListenerProtocol,
+} from '../utils/dev-tls-contract.js';
 import { BootLogCapture, isVerboseBootLevel } from '../utils/boot-log-capture.js';
 import { graftAuthoredRuntimeMembers, isAppPluginLike } from '../utils/graft-runtime-hooks.js';
 // [ADR-0130 D4 / option B, #15006] Every read below that keys off a
@@ -542,8 +556,21 @@ export interface BoundPortChannels {
  * it can only lose the race often enough for someone to notice — which is
  * precisely the year-of-flakes this replaces.
  */
-export function publishBoundPort(boundPort: number, channels: BoundPortChannels): void {
-  const url = `http://localhost:${boundPort}`;
+export function publishBoundPort(
+  boundPort: number,
+  channels: BoundPortChannels,
+  boundProtocol: ListenerProtocol = 'http',
+): void {
+  // ⭐ The SOCKET's own address, so the scheme has to be the one the socket
+  // actually speaks (#16804). Both consumers of this `url` open it: the runtime
+  // state file is what an external supervisor or health check dials, and the
+  // IPC message is what the `os dev` parent learns the server from. Under
+  // `--cert`/`--key` a hardcoded `http://` here would hand both of them an
+  // address that answers a TLS handshake error — a machine-readable surface
+  // saying something untrue about the process that wrote it. ⛔ Unlike the
+  // canonical origin, this is NOT overridable by `OS_AUTH_URL`: that variable
+  // names where a deployment is REACHED, and this line names what was BOUND.
+  const url = `${boundProtocol}://localhost:${boundPort}`;
   // 1 ─ THE FILE FIRST. Both announcements below send a consumer to it.
   channels.writeRuntimeState({ port: boundPort, url });
   // 2 ─ IPC: the `os dev` parent learns the real port without polling.
@@ -947,6 +974,11 @@ export default class Serve extends Command {
       options: [...LOG_LEVELS],
     }),
     verbose: Flags.boolean({ char: 'v', description: 'Verbose output — shortcut for --log-level debug.' }),
+    // #16804 — developer-supplied TLS, declared through the shared contract so
+    // `dev` (which spawns this command) and `serve` cannot drift on the flag
+    // names, the prose, or what half a pair means.
+    cert: devTlsCertFlag(),
+    key: devTlsKeyFlag(),
   };
 
   /**
@@ -1878,6 +1910,38 @@ export default class Serve extends Command {
       this.exit(1);
     }
     const requestedPort = parsedPort;
+
+    // ── The TLS pair, refused here for the same reason the port is (#16804) ──
+    // Ahead of every socket and every import that branches on the protocol, and
+    // BEFORE `resolveAuthBaseUrl` is consulted anywhere: the canonical origin's
+    // fallback tail is derived from this answer, so a pair that will not be
+    // honoured must never reach the resolver as if it would be.
+    const tlsIntent = resolveDevTlsIntent(flags);
+    if (tlsIntent.kind === 'incomplete') {
+      printDiagnostic(colorizeDevTlsNotice(tlsIntent.notice));
+      this.exit(1);
+    }
+    /**
+     * The scheme this process will actually speak — `https` only when a
+     * certificate and a key were BOTH given. Every origin this boot advertises
+     * is built from it, and there is no other way to set it.
+     */
+    const boundProtocol: ListenerProtocol = listenerProtocol(tlsIntent);
+    /**
+     * PEM bytes for the listener, read HERE so an unreadable certificate is
+     * refused by the process that would have bound the socket, naming the flag
+     * and the path — ⛔ never degraded to a plain-http listener (see
+     * `formatUnreadableDevTlsFileNotice`).
+     */
+    let tlsMaterial: DevTlsMaterial | undefined;
+    if (tlsIntent.kind === 'requested') {
+      try {
+        tlsMaterial = readDevTlsMaterial(tlsIntent);
+      } catch (e: any) {
+        printDiagnostic(colorizeDevTlsNotice(String(e?.message ?? e)));
+        this.exit(1);
+      }
+    }
 
     // ── …and it has to BE the port the text SAYS, or say otherwise (#12674) ──
     // `parseInt` is kept as the reader (#12662's ruling: nothing that boots
@@ -3242,7 +3306,13 @@ export default class Serve extends Command {
       if (flags.server && !configHasHonoServer) {
         try {
           const { HonoServerPlugin } = await import('@objectstack/plugin-hono-server');
-          const serverPlugin = new HonoServerPlugin({ port });
+          // `tls` is `undefined` unless --cert/--key were both given and both
+          // files read (#16804) — the adapter then binds a TLS listener with
+          // the same fetch handler. ⛔ Nothing here generates a certificate.
+          const serverPlugin = new HonoServerPlugin({
+            port,
+            tls: tlsMaterial ? { cert: tlsMaterial.cert, key: tlsMaterial.key } : undefined,
+          });
           await kernel.use(serverPlugin);
           trackPlugin('HonoServer');
         } catch (e: any) {
@@ -3567,7 +3637,7 @@ export default class Serve extends Command {
             // additionally reports where the value came from and whether it
             // parses, so an unusable one can be said out loud instead of
             // vanishing into an empty catch (#10202).
-            const baseUrlResolution = resolveAuthBaseUrl(port);
+            const baseUrlResolution = resolveAuthBaseUrl(port, boundProtocol);
             const baseUrl = baseUrlResolution.value;
 
             const socialProviders: Record<string, { clientId: string; clientSecret: string }> = {};
@@ -4851,7 +4921,7 @@ export default class Serve extends Command {
         // the bound one. `baseOrigin` is `null` when the chain produced
         // something unparseable; the banner then prints paths with no origin
         // rather than a confident wrong URL.
-        externalBaseOrigin: resolveAuthBaseUrl(boundPort).baseOrigin,
+        externalBaseOrigin: resolveAuthBaseUrl(boundPort, boundProtocol).baseOrigin,
         ...resolveBannerConfigRow({ relativeConfig, useArtifactFallback, pinnedArtifact }),
         isDev,
         pluginCount: loadedPlugins.length,
@@ -4914,7 +4984,7 @@ export default class Serve extends Command {
       // the file is written BEFORE either channel announces the address that
       // sends a consumer to it. {@link publishBoundPort} carries the race the
       // old order lost, and the reason the repair is not reader-side polling.
-      publishBoundPort(boundPort, runtimeBoundPortChannels(printBanner));
+      publishBoundPort(boundPort, runtimeBoundPortChannels(printBanner), boundProtocol);
 
       // ── Watch the served database file's identity ──────────────────
       // Deleting the data directory under a running server (`rm -rf
@@ -5630,11 +5700,35 @@ export interface AuthBaseUrlResolution {
  * `baseOrigin` is spelled `${protocol}//${host}` rather than `URL.origin`
  * because that is what the inline code computed, and the two disagree for
  * non-special schemes (`URL.origin` answers the string `"null"`).
+ *
+ * ## The tail follows the LISTENER, and only the tail (#16804)
+ *
+ * `boundProtocol` names the scheme this process actually bound — `https`
+ * exactly when `--cert`/`--key` were both given, derived in `dev-tls-contract`
+ * from that material and settable nowhere else. It reaches only the built-in
+ * default at the end of the chain, because that default is the one link nobody
+ * configured: it is this process describing its own socket, and once TLS
+ * terminates in-process `http://localhost:<port>` is an address no client can
+ * reach.
+ *
+ * ⛔ Every CONFIGURED link is untouched. `OS_AUTH_URL`, its legacy name and
+ * `OS_BASE_URL` answer a different question — where this deployment is
+ * REACHED, which behind a proxy or a tunnel has no relation to what this
+ * process bound — so they keep winning, https listener or not, and an
+ * `http://` value under a TLS listener is an operator's deliberate statement
+ * rather than a default to override.
+ *
+ * The parameter DEFAULTS to `'http'`, which is what every caller that never
+ * passes it resolved to before this existed: on a tree with no TLS flags in
+ * play the value, the source and the origin are byte-for-byte what they were.
  */
-export function resolveAuthBaseUrl(port: number | string): AuthBaseUrlResolution {
+export function resolveAuthBaseUrl(
+  port: number | string,
+  boundProtocol: ListenerProtocol = 'http',
+): AuthBaseUrlResolution {
   const value = readEnvWithDeprecation('OS_AUTH_URL', 'BETTER_AUTH_URL', { silent: true })
     ?? process.env.OS_BASE_URL
-    ?? `http://localhost:${port}`;
+    ?? `${boundProtocol}://localhost:${port}`;
 
   // Mirrors readEnvWithDeprecation's own precedence (preferred, then legacy),
   // for REPORTING only — the value above is what actually takes effect.
