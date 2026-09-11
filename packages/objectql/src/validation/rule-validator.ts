@@ -1652,9 +1652,19 @@ export function staticReadonlyInsertSubject(
  * "the exemption you requested does not exist on this path". This says the
  * second one, by name. It fires ONLY when `preserveAudit` was requested AND
  * something was actually removed — a request that loses nothing has nothing to
- * report — and one line per CALL, not per row: the strip is schema-uniform, so
- * the union of what the batch lost is the faithful signal (the same aggregation
- * `onFieldsDropped` already applies).
+ * report — and one line per CALL, not per row, because a log line has no
+ * per-row slot: the union of what the batch lost is the only view one line can
+ * represent (the same aggregation `onFieldsDropped` already applies, and reads
+ * the same way).
+ *
+ * ⚠️ So read a name in this line as "AT LEAST ONE row lost this field", never
+ * "every row lost the same set". The strip is NOT uniform across a batch:
+ * `engine.insert` hands {@link stripReadonlyFields} the option
+ * `hookWrittenKeys: rowHookWrittenKeys[i]` (maintainer ruling C, #14147) — one
+ * recording armed per ROW, whose only power is to turn a STRIP into a KEEP — so
+ * a hook that stamps a protected key on some rows and not others makes those
+ * rows lose DIFFERENT sets. That is the granularity both `hookWrittenKeys`
+ * option docs above already state.
  */
 export function preserveAuditIgnoredOnInsertWarning(object: string, fields: readonly string[]): string {
   return (
