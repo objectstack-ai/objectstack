@@ -821,6 +821,23 @@ describe('#16458 — DashboardHeaderAction fields carry an item-level `title`', 
  * `.objectui-sha` pin and reported on the issue, not something `packages/spec`
  * can assert.
  */
+/** A minimal dataset-bound widget — everything `stageOrder` is not. */
+const WIDGET_BASE = {
+  id: 'stage_widget',
+  dataset: 'contracts',
+  dimensions: ['status'],
+  values: ['count'],
+  layout: { x: 0, y: 0, w: 6, h: 4 },
+} as const;
+
+/** The card's own fixture: an ordered mark that does NOT read the key. */
+const nonFunnelWithStageOrder = {
+  ...WIDGET_BASE,
+  id: 'stage_bars',
+  type: 'horizontal-bar',
+  options: { stageOrder: ['draft', 'submitted', 'approved'] },
+};
+
 describe('DashboardWidgetOptions.stageOrder — the shipped doc string', () => {
   const description = () => {
     const d = (DashboardWidgetOptionsSchema as unknown as {
@@ -864,15 +881,140 @@ describe('DashboardWidgetOptions.stageOrder — the shipped doc string', () => {
     expect(w.options?.stageOrder).toEqual(['draft', 'submitted', 'approved']);
   });
 
-  it('CONTROL — the key is still UNGATED: a non-funnel widget carrying it parses too', () => {
-    // This is finding 1 of the card, recorded as a fact rather than fixed:
-    // gating the key is a published-surface narrowing and is not this PR.
+  it('the key is GATED: a non-funnel widget carrying it is refused', () => {
+    // The behaviour this pin replaces: until the ADR-0049 gate landed, this
+    // very fixture PARSED and round-tripped the array, which is finding 1 of
+    // the card — accepted, forwarded, and consulted by no renderer branch.
+    const r = DashboardWidgetSchema.safeParse(nonFunnelWithStageOrder);
+    expect(r.success).toBe(false);
+  });
+});
+
+
+/**
+ * `options.stageOrder` is gated to the one widget `type` that reads it
+ * (ADR-0049 enforce-or-remove).
+ *
+ * The key is declared inside `DashboardWidgetOptionsSchema` — an OPEN bag —
+ * while the `type` that decides whether it means anything is that object's
+ * sibling one level up on `DashboardWidgetSchema`. So the rule cannot be a
+ * per-field refinement on `stageOrder`, and these pin it where it has to live:
+ * an object-level check on the widget, refusing at the key's own path.
+ *
+ * Every leg here is BEHAVIOURAL — `safeParse` on an authored widget — never a
+ * reading of the schema's source or of its `.describe()` prose. The doc-string
+ * pins above are a separate claim about a separate surface; a gate proven by
+ * reading the sentence that documents it proves nothing.
+ *
+ * The refusal message carries three things because the defect was SILENCE, and
+ * a bare "unrecognized key" would answer silence with a shrug: the key, the
+ * type this widget carries, and the one type that honours it — plus where the
+ * other types' ordering actually lives.
+ */
+describe('DashboardWidgetOptions.stageOrder — the ADR-0049 type gate', () => {
+  const refusal = (widget: unknown) => {
+    const r = DashboardWidgetSchema.safeParse(widget);
+    expect(r.success).toBe(false);
+    const issues = r.success ? [] : r.error.issues;
+    const custom = issues.filter((i) => i.code === 'custom');
+    expect(custom).toHaveLength(1);
+    return custom[0];
+  };
+
+  it('refuses at the key\'s own path, not at the widget or the options bag', () => {
+    expect(refusal(nonFunnelWithStageOrder).path.join('.')).toBe('options.stageOrder');
+  });
+
+  it('names the key, the type authored, and the one type that reads it', () => {
+    const message = refusal(nonFunnelWithStageOrder).message;
+    expect(message).toContain('`options.stageOrder`');
+    // the type the author actually wrote, verbatim — not a generic "this type"
+    expect(message).toContain("`type: 'horizontal-bar'`");
+    expect(message).toContain("`type: 'funnel'`");
+    // and where ordering lives for every other type
+    expect(message).toContain('sortBy');
+    expect(message).toContain('sortOrder');
+  });
+
+  it('names whichever type was authored — the message is not a fixed string', () => {
+    // Two different authored types produce two different messages, so the
+    // assertion above cannot be satisfied by a message that hard-codes one.
+    const pie = refusal({ ...WIDGET_BASE, type: 'pie', options: { stageOrder: ['a', 'b'] } }).message;
+    expect(pie).toContain("`type: 'pie'`");
+    expect(pie).not.toContain("`type: 'horizontal-bar'`");
+  });
+
+  it('CONTROL — a `funnel` widget carrying `stageOrder` still parses, value intact', () => {
     const w = DashboardWidgetSchema.parse({
-      id: 'stage_bars', type: 'horizontal-bar', dataset: 'contracts',
-      dimensions: ['status'], values: ['count'],
-      layout: { x: 0, y: 0, w: 6, h: 4 },
+      ...WIDGET_BASE, type: 'funnel',
       options: { stageOrder: ['draft', 'submitted', 'approved'] },
     });
     expect(w.options?.stageOrder).toEqual(['draft', 'submitted', 'approved']);
+  });
+
+  it('CONTROL — a `horizontal-bar` widget WITHOUT `stageOrder` still parses', () => {
+    // The accept set moved for exactly one shape. A non-funnel widget carrying
+    // the other `options` members — which every widget type genuinely reads,
+    // because they lower into the dataset query rather than into a chart
+    // branch — is untouched.
+    const w = DashboardWidgetSchema.parse({
+      ...WIDGET_BASE, type: 'horizontal-bar',
+      options: { sortBy: 'count', sortOrder: 'desc', limit: 10 },
+    });
+    expect(w.options?.sortBy).toBe('count');
+    expect('stageOrder' in (w.options ?? {})).toBe(false);
+  });
+
+  it('CONTROL — a `horizontal-bar` widget with no `options` at all still parses', () => {
+    expect(DashboardWidgetSchema.safeParse({ ...WIDGET_BASE, type: 'horizontal-bar' }).success).toBe(true);
+  });
+
+  it('a widget that declares NO type is refused, and the message says the type is missing', () => {
+    // `type` carries `.default('metric')` and zod applies defaults BEFORE
+    // object-level checks, so an omitted `type` is indistinguishable here from
+    // an authored `metric`. The verdict is right either way — `metric` reads
+    // the key no more than `horizontal-bar` does — and the message carries the
+    // extra sentence for exactly this case.
+    const message = refusal({ ...WIDGET_BASE, options: { stageOrder: ['a', 'b'] } }).message;
+    expect(message).toContain("`type: 'metric'`");
+    expect(message).toContain('declares no `type` at all');
+  });
+
+  it('an authored `metric` gets the same message — the gate cannot tell them apart', () => {
+    const message = refusal({ ...WIDGET_BASE, type: 'metric', options: { stageOrder: ['a', 'b'] } }).message;
+    expect(message).toContain('declares no `type` at all');
+  });
+
+  it('a `type` outside the enum reports the TYPE refusal alone, not both', () => {
+    // Measured, and pinned so a later zod upgrade cannot change it silently:
+    // `ChartTypeSchema`'s `invalid_value` aborts, so object-level checks are
+    // skipped for that input. The author fixes the type first and meets the
+    // stage-order refusal on the next parse — the two are never seen together.
+    const r = DashboardWidgetSchema.safeParse({
+      ...WIDGET_BASE, type: 'ziggurat', options: { stageOrder: ['a', 'b'] },
+    });
+    expect(r.success).toBe(false);
+    const issues = r.success ? [] : r.error.issues;
+    expect(issues.map((i) => i.code)).toEqual(['invalid_value']);
+    expect(issues[0]?.path.join('.')).toBe('type');
+  });
+
+  it('the gate does NOT reach the array\'s contents — a misspelled stage still parses', () => {
+    // Stated as a pin rather than left implied: whether a stored value exists
+    // is a fact about the dataset's dimension, not about the widget, and is
+    // not reachable from this schema. A funnel with a stage nobody declared
+    // renders that stage in the sentinel position and nothing here refuses it.
+    expect(DashboardWidgetSchema.safeParse({
+      ...WIDGET_BASE, type: 'funnel', options: { stageOrder: ['drafft', 42, true] },
+    }).success).toBe(true);
+  });
+
+  it('the gate travels with the widget through `DashboardSchema.widgets[]`', () => {
+    const r = DashboardSchema.safeParse({
+      name: 'legal_dashboard', label: 'Legal', widgets: [nonFunnelWithStageOrder],
+    });
+    expect(r.success).toBe(false);
+    const paths = (r.success ? [] : r.error.issues).map((i) => i.path.join('.'));
+    expect(paths).toContain('widgets.0.options.stageOrder');
   });
 });

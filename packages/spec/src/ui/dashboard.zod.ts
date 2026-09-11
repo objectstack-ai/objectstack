@@ -261,13 +261,15 @@ export const DashboardWidgetOptionsSchema = lazySchema(() => z.object({
    * to the dimension field's own picklist option order, which is the pipeline
    * order an author already declared on the object.
    *
-   * `funnel` is the ONLY widget `type` that reads this key. On every other
-   * type — `bar` / `horizontal-bar` / `column`, `line`, `area`, `pie`,
-   * `donut`, `treemap`, `sankey`, `radar`, `scatter`, `combo`, the tabular and
-   * single-value families — the key parses, is forwarded to the renderer, and
-   * no branch consults it: the rendered order stays whatever the analytics
-   * query returned. Order those with `sortBy` / `sortOrder`, which lower into
-   * the dataset query itself.
+   * `funnel` is the ONLY widget `type` that reads this key, and since the
+   * ADR-0049 gate the schema enforces that rather than documenting it: on
+   * every other type — `bar` / `horizontal-bar` / `column`, `line`, `area`,
+   * `pie`, `donut`, `treemap`, `sankey`, `radar`, `scatter`, `combo`, the
+   * tabular and single-value families — the key is REFUSED at parse
+   * ({@link checkDashboardWidgetStageOrder}), because it used to be accepted,
+   * forwarded to the renderer, consulted by no branch, and the authored order
+   * simply absent from what rendered. Order those types with `sortBy` /
+   * `sortOrder`, which lower into the dataset query itself.
    *
    * There is no `pyramid` widget type. It was removed from `ChartTypeSchema`
    * as a variant that only ever rendered as `funnel` (see the taxonomy NOTE at
@@ -277,8 +279,9 @@ export const DashboardWidgetOptionsSchema = lazySchema(() => z.object({
   stageOrder: z.array(z.union([z.string(), z.number(), z.boolean()])).optional()
     .describe(
       'Explicit stage order for a funnel widget, as the dimension\'s stored values. '
-      + '`funnel` is the only widget type that reads it: on any other type the key '
-      + 'parses and is never consulted, so order those with sortBy/sortOrder instead. '
+      + '`funnel` is the only widget type that reads it, and the schema refuses it on '
+      + 'any other type rather than accepting an order nothing consults — order those '
+      + 'with sortBy/sortOrder instead. '
       + 'There is no `pyramid` widget type — write `funnel`.',
     ),
 }).passthrough().describe('Widget configuration — declared query keys + open renderer extras'));
@@ -351,6 +354,126 @@ const WIDGET_ACTION_RETIRED = (key: 'actionUrl' | 'actionType' | 'actionIcon') =
   + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
 
 /**
+ * The one widget `type` that reads `options.stageOrder`.
+ *
+ * Not a list, and it is the point of {@link checkDashboardWidgetStageOrder}
+ * that it is not: the renderer consults the forwarded order inside a single
+ * `chartType === 'funnel'` guard, so every other member of `ChartTypeSchema`
+ * accepts the key and never looks at it.
+ */
+const STAGE_ORDER_HONOURING_TYPE = 'funnel';
+
+/**
+ * What `DashboardWidgetSchema.type` resolves to when a widget declares none —
+ * held beside the check that has to talk about it, so the two cannot drift.
+ */
+const WIDGET_TYPE_DEFAULT = 'metric';
+
+/**
+ * ADR-0049 enforce-or-remove on `dashboard.widgets[].options.stageOrder` — the
+ * key is gated to the one widget `type` whose renderer branch reads it.
+ *
+ * ## Why this is an OBJECT-level check and cannot be a field-level one
+ *
+ * `stageOrder` is declared inside {@link DashboardWidgetOptionsSchema}, and the
+ * `type` that decides whether it means anything is that object's SIBLING one
+ * level up on {@link DashboardWidgetSchema}. A refinement attached to
+ * `stageOrder` sees the array and nothing else, so the rule has to run where
+ * both keys are in scope. This file already has exactly that idiom — a named,
+ * exported `(value, ctx)` check chained on with `.superRefine(…)`, the way
+ * {@link checkGlobalFilterDateDefaultValue} is attached to
+ * {@link GlobalFilterSchema} — and this follows it rather than inventing a
+ * second shape.
+ *
+ * ## What was wrong
+ *
+ * `options` is an open bag and `stageOrder` was an ungated member of it, so a
+ * `horizontal-bar` (or `line`, or `pie`, or `table`) widget carrying an
+ * authored lifecycle order parsed, booted, forwarded the array to the renderer
+ * — and rendered in whatever order the analytics query happened to return.
+ * Nothing warned and nothing refused; the authored order was simply not there.
+ * That is the silent shape ADR-0049 exists to end, and a doc sentence saying so
+ * is not enforcement: the only thing standing between an author and a key that
+ * does nothing was prose they had to read first.
+ *
+ * ## What the refusal says, and why it says that much
+ *
+ * A bare "unrecognized key" would be a poor repair for a defect whose whole
+ * content was silence, so the message names all three things the author needs:
+ * the key, the widget `type` this widget carries, and the one `type` that
+ * honours it — plus the keys that DO order every other type (`sortBy` /
+ * `sortOrder`, which lower into the dataset query itself rather than being
+ * re-sorted after the fact).
+ *
+ * ## What this check deliberately does NOT reach
+ *
+ * Three shapes, named so the gate is not read as complete:
+ *
+ *  1. **A widget that declares no `type`.** `type` carries
+ *     `.default(WIDGET_TYPE_DEFAULT)` and zod applies defaults BEFORE
+ *     object-level checks, so an omitted `type` arrives here as `metric` and
+ *     is indistinguishable from one an author wrote. The verdict is right
+ *     either way — `metric` does not read the key — but the message cannot
+ *     claim the author wrote it, so that one case carries an extra sentence
+ *     instead.
+ *  2. **A widget whose `type` is not a declared member at all.** Measured:
+ *     zod treats `ChartTypeSchema`'s `invalid_value` as aborting and skips
+ *     every object-level check for that input, so `type: 'ziggurat'` plus a
+ *     `stageOrder` reports the type refusal alone. That is the useful order —
+ *     fix the type, re-parse, then learn about the key — but it does mean the
+ *     two refusals are never seen together.
+ *  3. **The array's CONTENTS.** Still unconstrained `string | number |
+ *     boolean` members, unmatched against the dimension's picklist values. A
+ *     `funnel` carrying a misspelled stage still parses and still renders that
+ *     stage in the sentinel position; whether a stored value exists is a fact
+ *     about the dataset, not about the widget, and is not reachable from this
+ *     schema.
+ */
+export function checkDashboardWidgetStageOrder(
+  widget: { type?: unknown; options?: { stageOrder?: unknown } | null },
+  ctx: z.RefinementCtx,
+): void {
+  const stageOrder = widget.options?.stageOrder;
+  if (stageOrder === undefined) return;
+
+  const type = widget.type;
+  if (type === STAGE_ORDER_HONOURING_TYPE) return;
+  // A `type` that is not a declared member never reaches here — measured: zod
+  // treats `ChartTypeSchema`'s `invalid_value` as aborting, so the object-level
+  // checks are skipped for that input and the author reads ONE refusal, about
+  // the key they must fix. This guard covers the remaining non-string shapes
+  // and keeps the interpolation below honest rather than printing `[object
+  // Object]` at an author.
+  if (typeof type !== 'string') return;
+
+  // `type` carries `.default('metric')` and zod applies defaults before
+  // object-level checks, so a widget that declared NO type arrives here as
+  // `metric` and cannot be told apart from one that wrote `metric`. The
+  // refusal is right either way — `metric` does not read the key — and the
+  // extra sentence is added only in that one ambiguous case rather than on
+  // every message.
+  const defaultedTypeNote = type === WIDGET_TYPE_DEFAULT
+    ? ' (`' + WIDGET_TYPE_DEFAULT + '` is also what a widget that declares no `type` at all '
+      + 'resolves to — if you meant a funnel, the `type` key is missing rather than wrong.)'
+    : '';
+
+  ctx.addIssue({
+    code: 'custom',
+    path: ['options', 'stageOrder'],
+    message:
+      '`options.stageOrder` is authored on a widget of `type: '
+      + `'${type}'`
+      + "`, and `type: '" + STAGE_ORDER_HONOURING_TYPE + "'` is the only widget type that "
+      + 'reads it — on every other type the key parses, is forwarded to the renderer, and no '
+      + 'branch consults it, so the order you wrote is silently absent from what renders. '
+      + "Either write `type: '" + STAGE_ORDER_HONOURING_TYPE + "'`, or delete `stageOrder` "
+      + 'and order this widget with `options.sortBy` + `options.sortOrder`, which lower into '
+      + 'the dataset query itself instead of re-sorting what it returned.'
+      + defaultedTypeNote,
+  });
+}
+
+/**
  * Dashboard Widget Schema
  * A single component on the dashboard grid.
  *
@@ -376,7 +499,7 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
   description: I18nLabelSchema.optional().describe('Widget description text below the header'),
   
   /** Visualization Type */
-  type: ChartTypeSchema.default('metric').describe('Visualization type'),
+  type: ChartTypeSchema.default(WIDGET_TYPE_DEFAULT).describe('Visualization type'),
   
   /** Chart Configuration */
   chartConfig: ChartConfigSchema.optional().describe('Chart visualization configuration'),
@@ -676,8 +799,15 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
   // rejects undeclared top-level keys instead of silently stripping them. A
   // hallucinated or legacy key is a deterministic author-time error (CI) rather
   // than a silent no-op a human reviewer would miss. `options` stays the
-  // free-form escape hatch for renderer-specific extras.
-}));
+  // free-form escape hatch for renderer-specific extras — which is exactly why
+  // the one member of it that only ONE widget type reads needs the check below:
+  // an open bag cannot refuse a key by being strict, so the key is gated
+  // against its sibling `type` instead.
+})
+  // ADR-0049 enforce-or-remove on `options.stageOrder`. Attached by identifier
+  // rather than inlined, the way `GlobalFilterSchema` attaches its own check:
+  // the exported function IS the rule this door runs.
+  .superRefine(checkDashboardWidgetStageOrder));
 
 /**
  * Dashboard date-range presets — the named windows a dashboard date filter may
