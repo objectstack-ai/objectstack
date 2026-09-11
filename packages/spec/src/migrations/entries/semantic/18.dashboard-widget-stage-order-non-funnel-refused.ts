@@ -22,7 +22,7 @@ export const entry: SemanticMigration = {
     + '`stageOrder` was an ungated member of it: a `horizontal-bar` (or `line`, `pie`, '
     + '`table`, `metric`) widget carrying an authored lifecycle order PARSED, booted, and '
     + 'forwarded the array to the renderer, which never consulted it. Measured at this '
-    + 'repo\'s `.objectui-sha` pin 53ded82bf7a494f54e344e19099dbf00854b8694: the forwarded '
+    + 'repo\'s `.objectui-sha` pin `53ded82bf7a494f54e344e19099dbf00854b8694`: the forwarded '
     + '`categoryOrder` prop has exactly one read in the charts plugin '
     + '(`buildCategoryRank(categoryOrder)`, `AdvancedChartImpl.tsx:1514`) and it sits '
     + 'inside the `chartType === \'funnel\'` guard opened at line 1473; the prop\'s other '

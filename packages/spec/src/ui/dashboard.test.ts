@@ -15,7 +15,10 @@ import {
   DATE_RANGE_PRESETS,
   DATE_RANGE_DEFAULT_RANGES,
   DashboardWidgetOptionsSchema,
+  checkDashboardWidgetStageOrder,
 } from './dashboard.zod';
+import * as ui from './index';
+import { readFileSync } from 'node:fs';
 import { ChartTypeSchema } from './chart.zod';
 import { dashboardForm } from './dashboard.form';
 
@@ -1007,6 +1010,26 @@ describe('DashboardWidgetOptions.stageOrder — the ADR-0049 type gate', () => {
     expect(DashboardWidgetSchema.safeParse({
       ...WIDGET_BASE, type: 'funnel', options: { stageOrder: ['drafft', 42, true] },
     }).success).toBe(true);
+  });
+
+  it('the rule the door runs is the EXPORT, attached by identifier — no inline copy', () => {
+    // The reason this check is exported at all (the lesson of the `.shape`
+    // mirrors): a consumer that spreads `DashboardWidgetSchema.shape` gets the
+    // FIELDS and drops every object-level check, so it needs the rule as a
+    // function it can re-attach. That is only true if the door runs the
+    // exported function rather than a copy that can drift away from it.
+    const src = readFileSync(new URL('./dashboard.zod.ts', import.meta.url), 'utf8');
+    expect(src).toContain('export function checkDashboardWidgetStageOrder(');
+    // exactly one declaration, so the count below keys on an unambiguous name
+    expect(src.match(/^\s*(export )?function checkDashboardWidgetStageOrder\b/gm)).toHaveLength(1);
+    // …and exactly one attachment, on its own line
+    expect(src.match(/^[ \t]*\.superRefine\(checkDashboardWidgetStageOrder\)/gm)).toHaveLength(1);
+  });
+
+  it('`@objectstack/spec/ui` ships the same function object', () => {
+    expect((ui as Record<string, unknown>).checkDashboardWidgetStageOrder)
+      .toBe(checkDashboardWidgetStageOrder);
+    expect(checkDashboardWidgetStageOrder.length).toBe(2);
   });
 
   it('the gate travels with the widget through `DashboardSchema.widgets[]`', () => {
