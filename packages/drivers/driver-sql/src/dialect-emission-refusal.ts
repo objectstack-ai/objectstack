@@ -58,14 +58,16 @@
  * ADR-0112 D3 extension code, registered by `@objectstack/driver-sql` in
  * `ERROR_CODE_LEDGER`.
  *
- * Registered rather than parked as a driver-local string because this refusal
- * IS wire-reachable: publishing a drafted object calls `engine.syncObjectSchema`
- * → `SqlDriver.syncSchema` → the DDL gate, on a server that is already serving
- * HTTP. That is the test the ledger applies (the class `MONGODB_MULTI_TENANT_UNSUPPORTED`
- * was UNregistered for failing — a boot refusal the CLI rethrows pre-HTTP, which
- * no response envelope could ever carry). This one can be carried, so it is
- * registered and the door serves it under its own name instead of demoting it
- * to `declaredCode` behind a 500.
+ * Registered from the start rather than parked as a driver-local string, and
+ * this refusal IS wire-reachable: publishing a drafted object calls
+ * `engine.syncObjectSchema` → `SqlDriver.syncSchema` → the DDL gate, on a
+ * server that is already serving HTTP. That was the exact test #8035 applied
+ * when it UNregistered `MONGODB_MULTI_TENANT_UNSUPPORTED` for failing it — a
+ * removal #16649 reversed under the #16404 door-or-no-door rule, which takes
+ * registration out of that test's reach entirely: every `code` that ships in
+ * `dist` carries a ledger row, and wire-reachability now decides only what a
+ * door ANSWERS with. This one can be carried, so the door serves it under its
+ * own name instead of demoting it to `declaredCode` behind a 500.
  *
  * No standard-catalog member covers the condition: `NOT_IMPLEMENTED` says "not
  * yet", and the whole content of the ruling is that this is a decided, stated
