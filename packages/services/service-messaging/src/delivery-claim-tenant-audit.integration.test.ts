@@ -219,4 +219,30 @@ describe('sys_notification_delivery — the dispatcher claim path is a classifie
 
         await controlUnscopedUpdateMany(DELIVERY_OBJECT);
     });
+
+    it("reap() recovers a crashed node's claims in every organization, without a finding", async () => {
+        const outbox = new SqlNotificationOutbox(engine as any, { partitionCount: 1 });
+        const idA = await outbox.enqueue({
+            notificationId: 'n_a', recipientId: 'u_a', channel: 'inbox', organizationId: 'org_a', payload: {},
+        } as any);
+        const idB = await outbox.enqueue({
+            notificationId: 'n_b', recipientId: 'u_b', channel: 'inbox', organizationId: 'org_b', payload: {},
+        } as any);
+        // A node claims both rows and dies: its claim is stamped ten minutes ago.
+        await outbox.claim({ nodeId: 'dead_node', limit: 10, claimTtlMs: 60_000, now: Date.now() - 10 * 60_000 });
+
+        // [#17610] The dispatcher's once-per-tick reap, on its own — a third
+        // predicate write on the claim path, classified by the same warrant.
+        await outbox.reap({ claimTtlMs: 60_000 });
+
+        expect(auditedUpdateMany(DELIVERY_OBJECT)).toBe(false);
+        // Both organizations' abandoned rows are back in the queue with the claim
+        // credential cleared — a per-organization reap would have stranded one.
+        const rows = await outbox.list();
+        expect(rows.map((r) => `${r.id}:${r.organizationId}:${r.status}:${r.claimedBy ?? '-'}`).sort()).toEqual(
+            [`${idA}:org_a:pending:-`, `${idB}:org_b:pending:-`].sort(),
+        );
+
+        await controlUnscopedUpdateMany(DELIVERY_OBJECT);
+    });
 });
