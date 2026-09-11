@@ -154,11 +154,21 @@ checked against. (The contract's own docblock asks for `ActionHandler`; that is 
 function type, so it fits an arrow-function handler assigned to a `const`, while
 a function *declaration* like the one above annotates its parameter instead.)
 
-Write only the fields the action owns. `completed_date` is **readonly** on
-`todo_task` — server-owned, stamped by the object's `beforeUpdate` hook on the
-transition — so a caller's write to it is stripped from the payload before the
-record is validated, and sending it here made this action refuse itself against
-that object's `completed_date_required` rule.
+Write only the fields the action owns — and read that literally, because a
+handler's `ctx.engine` runs **elevated** (`isSystem`). The read-only strip that
+protects a server-owned column from an ordinary caller is gated on *not* being
+a system write, so it does not run on a handler's write at all. **What a
+handler names, lands.** A server-owned field is therefore more dangerous here
+than in a form PUT, not less.
+
+`completed_date` is the example. It is `readonly` on `todo_task` — the server
+owns it, and the object's `beforeUpdate` hook stamps it on the completion
+**transition**. Adding `completed_date: new Date().toISOString()` to the write
+above looks harmless, and on that transition it is: the hook overwrites it. But
+a completion write that is *not* a transition — re-completing a task that is
+already `completed` — is not stamped, so nothing overwrites the handler's value
+and nothing strips it either, and the action silently replaces the real
+completion timestamp with "now". That is why the snippet sends `status` alone.
 
 <Callout type="warn">
 **`ctx.engine.find(object, filter)` takes a filter, not a query.** The second
