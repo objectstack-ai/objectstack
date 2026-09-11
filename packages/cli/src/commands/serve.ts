@@ -165,7 +165,7 @@ import { SEMCONV, OBSERVABILITY_METRICS_SERVICE, type MetricsRegistry } from '@o
 // is how the duty decayed to begin with: it is one-sided today, the cloud file
 // carries no reciprocal sentence, so nobody renaming a name over there is
 // prompted to come back here. Until the list lives in that package, this block
-// is it, and moving the cloud half is a change in the cloud repo (#15295).
+// is it, and moving the cloud half is a change in the cloud repo (#17693).
 //   OS_OBS_EXPORTER       noop (default) | console | json | otlp
 //   OS_OTLP_ENDPOINT      OTLP/HTTP root, e.g. https://otlp.grafana.net/otlp
 //   OS_OTLP_HEADERS       comma-separated Key=Value; values may be URL-encoded
