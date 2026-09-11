@@ -51,8 +51,8 @@
 红窗守候规则住 `platform-readings.md` 配额段。
 
 1. draft 转 ready 翻转:GraphQL-only mutation;出口代理只放钉住的 PR-review GraphQL 集。
-   判据 = REST update-a-pull-request 只收 `title`/`body`/`state`/`base`/`maintainer_can_modify`,无 `draft`
-   (与第 5 条同批核对官方文档,未逐个实调)。断粮出路:等 MCP 恢复,或人工点一下。
+   判据 = 2026-09-11 实调:REST `PATCH /pulls/{n}` 带 `{"draft": false}` 回 200 且什么都没改,读回仍 draft
+   ⇒ 状态码不作数,读回才作数。通道 = MCP `update_pull_request`;断粮:等它恢复或人工点一下。
 2. auto-merge 与入队挂载:GraphQL mutation,即 MCP `enable_pr_auto_merge`。
    走合并队列的仓落地必经它 ⇒ 配额红窗无退路;直合仓有退路 `PUT .../pulls/{n}/merge`。
 3. 语义搜索:`/search/*` 被出口代理按设计拒绝。退路 = REST 列表端点加本地 grep。
