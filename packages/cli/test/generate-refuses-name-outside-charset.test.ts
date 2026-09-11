@@ -262,6 +262,19 @@ describe('[#16726] the gate and #16541`s parse check are DISTINCT layers', () =>
     // rule, and the ruling's other half is ⛔ no third charset. Reported on
     // #16726 for the maintainer; this assertion exists so that whichever way
     // that is answered, the answer is a deliberate edit here.
+    //
+    // ⭐ ANSWERED (#17410) — and this is that deliberate edit. A third layer
+    // now refuses `os g view class`, so the ruling's sentence holds. The two
+    // assertions below are UNCHANGED and still true, because the third layer
+    // added no fourth verdict on these emissions: both still parse, and
+    // `class` is still inside the charset. It asks the one question neither of
+    // these does — whether a CONSUMER can import the barrel alias by name — so
+    // this row keeps measuring exactly what it always measured, which is why
+    // nothing here had to be weakened to make room for it. ⛔ Still no third
+    // charset: no character is judged. The command-level verdict is pinned in
+    // `generate-refuses-unimportable-alias.test.ts`, which also holds the
+    // three layers apart so neither of the two asserted here loses its own
+    // wording.
     expect(specVerdict('class').accepted).toBe(true);
     return findEmissionParseFailures(emissionsFor('view', 'class')).then((failures) => {
       expect(failures).toEqual([]);
