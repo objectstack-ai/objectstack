@@ -4,6 +4,7 @@ import type { MessagingChannel, MessagingChannelContext, Notification, SendResul
 import type { AckResult, ClaimedDeliveryRecord, INotificationOutbox, NotificationDeliveryRecord } from './outbox.js';
 import { classifyDeliveryAttempt } from './backoff.js';
 import { renderDigest } from './digest-render.js';
+import { DispatchLoop } from './dispatch-loop.js';
 
 /** Minimal channel-registry surface the dispatcher needs (MessagingService satisfies it). */
 export interface ChannelRegistry {
@@ -45,9 +46,10 @@ export interface NotificationDispatcherLogger {
 
 /**
  * [#17610] Default ceiling of the idle backoff, in ms — see
- * {@link NotificationDispatcherOptions.maxIdleIntervalMs}.
+ * {@link NotificationDispatcherOptions.maxIdleIntervalMs}. It lives with the
+ * loop both dispatchers run (#17623) and stays exported from here.
  */
-export const DEFAULT_MAX_IDLE_INTERVAL_MS = 30_000;
+export { DEFAULT_MAX_IDLE_INTERVAL_MS } from './dispatch-loop.js';
 
 export interface NotificationDispatcherOptions {
     nodeId: string;
@@ -112,16 +114,11 @@ export interface NotificationDispatcherOptions {
  */
 export class NotificationDispatcher {
     private readonly opts: Required<
-        Omit<NotificationDispatcherOptions, 'rng' | 'logger' | 'onAttempt' | 'cluster' | 'now'>
+        Omit<NotificationDispatcherOptions, 'rng' | 'logger' | 'onAttempt' | 'cluster' | 'now' | 'maxIdleIntervalMs'>
     > &
         Pick<NotificationDispatcherOptions, 'rng' | 'logger' | 'onAttempt' | 'now'> & { cluster: DispatchCluster };
-    private timer: ReturnType<typeof setTimeout> | undefined;
-    private running = false;
-    private inflightTick: Promise<void> | undefined;
-    /** [#17610] Consecutive loop ticks that claimed nothing — the idle backoff's exponent. */
-    private idleTicks = 0;
-    /** [#17610] A tick was asked for while one was running: run one more the moment it settles. */
-    private tickRequested = false;
+    /** [#17610, #17623] The timer loop — idle backoff, wake, stop — shared with `HttpDispatcher`. */
+    private readonly loop: DispatchLoop;
 
     constructor(options: NotificationDispatcherOptions) {
         const intervalMs = options.intervalMs ?? 500;
@@ -135,8 +132,6 @@ export class NotificationDispatcher {
             partitionCount: options.partitionCount ?? 8,
             batchSize: options.batchSize ?? 32,
             intervalMs,
-            // A ceiling below the base interval just means "no backoff".
-            maxIdleIntervalMs: Math.max(intervalMs, options.maxIdleIntervalMs ?? DEFAULT_MAX_IDLE_INTERVAL_MS),
             lockTtlMs,
             claimTtlMs: options.claimTtlMs ?? lockTtlMs * 2,
             rng: options.rng,
@@ -144,25 +139,27 @@ export class NotificationDispatcher {
             logger: options.logger,
             onAttempt: options.onAttempt,
         };
+        this.loop = new DispatchLoop({
+            intervalMs,
+            maxIdleIntervalMs: options.maxIdleIntervalMs,
+            runTick: () => this.runTick(),
+            onTickError: (err) => {
+                this.opts.logger?.warn?.('notification-dispatcher: tick failed', {
+                    nodeId: this.opts.nodeId,
+                    error: (err as Error)?.message ?? String(err),
+                });
+            },
+        });
     }
 
     /** Begin the loop; the first tick runs immediately. Idempotent. */
     start(): void {
-        if (this.running) return;
-        this.running = true;
-        this.idleTicks = 0;
-        this.loopTick();
+        this.loop.start();
     }
 
     /** Stop the loop and drain the in-flight tick. */
     async stop(): Promise<void> {
-        if (!this.running) return;
-        this.running = false;
-        this.tickRequested = false;
-        this.clearTimer();
-        if (this.inflightTick) {
-            try { await this.inflightTick; } catch { /* already logged */ }
-        }
+        await this.loop.stop();
     }
 
     /**
@@ -176,79 +173,12 @@ export class NotificationDispatcher {
      * collapses into that one. No-op while stopped.
      */
     wake(): void {
-        if (!this.running) return;
-        this.idleTicks = 0;
-        this.loopTick();
+        this.loop.wake();
     }
 
     /** Run one full tick (the reap, then all partitions). Exposed for deterministic tests. */
     async tick(): Promise<void> {
         await this.runTick();
-    }
-
-    /**
-     * One tick of the loop, then the timer for the next. Never two at once: a
-     * call that finds a tick in flight becomes a follow-up request instead.
-     */
-    private loopTick(): void {
-        if (!this.running) return;
-        this.clearTimer();
-        if (this.inflightTick) {
-            this.tickRequested = true;
-            return;
-        }
-        const startedAt = Date.now();
-        this.inflightTick = this.runTick()
-            .then((claimed) => {
-                this.idleTicks = claimed > 0 ? 0 : this.idleTicks + 1;
-            })
-            .catch((err) => {
-                // A failing store is not work: back off rather than hammer it.
-                this.idleTicks += 1;
-                this.opts.logger?.warn?.('notification-dispatcher: tick failed', {
-                    nodeId: this.opts.nodeId,
-                    error: (err as Error)?.message ?? String(err),
-                });
-            })
-            .finally(() => {
-                this.inflightTick = undefined;
-                if (!this.running) return;
-                if (this.tickRequested) {
-                    this.tickRequested = false;
-                    this.idleTicks = 0;
-                    this.loopTick();
-                    return;
-                }
-                this.schedule(Math.max(0, this.nextIntervalMs() - (Date.now() - startedAt)));
-            });
-    }
-
-    /**
-     * [#17610] Delay before the next loop tick, measured from the START of the
-     * last one: `intervalMs` while ticks claim work, doubled for every
-     * consecutive empty tick after that, capped at `maxIdleIntervalMs`.
-     */
-    private nextIntervalMs(): number {
-        const { intervalMs, maxIdleIntervalMs } = this.opts;
-        if (this.idleTicks === 0) return intervalMs;
-        // Exponent clamped so the product stays finite long after the cap wins.
-        return Math.min(maxIdleIntervalMs, intervalMs * 2 ** Math.min(this.idleTicks, 30));
-    }
-
-    private schedule(delayMs: number): void {
-        this.clearTimer();
-        this.timer = setTimeout(() => {
-            this.timer = undefined;
-            this.loopTick();
-        }, delayMs);
-        // Don't keep the event loop alive solely for the dispatcher.
-        (this.timer as { unref?: () => void })?.unref?.();
-    }
-
-    private clearTimer(): void {
-        if (this.timer === undefined) return;
-        clearTimeout(this.timer);
-        this.timer = undefined;
     }
 
     /** One full pass: the reap, then every partition. Resolves to the rows claimed. */
