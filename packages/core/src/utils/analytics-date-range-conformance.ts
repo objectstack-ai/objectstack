@@ -281,10 +281,16 @@ export async function analyticsDateRangeConformanceFindings(
   for (const bad of ANALYTICS_DATE_RANGE_NOT_A_WINDOW) {
     const got = await attempt(face, bad);
     if ('window' in got) {
+      // ⛔ Name WHICH half of the contract the shape breaks: two bounds is
+      // necessary, not sufficient, and a finding that calls `[null, null]` an
+      // arity problem sends the next reader to the wrong line.
+      const why = bad.length === 2
+        ? 'its two bounds are not date strings'
+        : `a ${bad.length}-element array is not a window`;
       say(
-        `ANSWERED the ${bad.length}-element array ${JSON.stringify(bad)} with `
-        + `[${got.window.start}, ${got.window.end}] instead of refusing — an explicit window is `
-        + 'the TWO-element array [start, end], so every other arity is a window this face INVENTED',
+        `ANSWERED ${JSON.stringify(bad)} with [${got.window.start}, ${got.window.end}] instead `
+        + `of refusing — an explicit window is the TWO-element array [start, end] of date `
+        + `strings, and ${why}, so this is a window the face INVENTED`,
       );
       continue;
     }
