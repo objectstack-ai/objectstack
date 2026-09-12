@@ -40,6 +40,7 @@ import {
   PersistenceAdapterSchema,
   RangeOperatorSchema,
 } from '../src/data';
+import { FlowFunctionEntrySchema } from '../src/automation';
 
 const TARGET = { target: 'draft-2020-12' } as const;
 
@@ -156,6 +157,65 @@ describe('projectByPruningUnionBranches — the contract build-schemas.ts relies
 
   it('refuses a union whose every branch is unprojectable', () => {
     expect(projectByPruningUnionBranches(z.union([z.date(), z.function()]), TARGET)).toBeNull();
+  });
+
+  it('refuses a marked node NESTED inside a SURVIVING union branch', () => {
+    // The discriminating case, and the one the suite was missing. Every other
+    // "refuses outside a union" pin here returns null through the
+    // `pruned.length === 0` early-out instead of through the surviving-mark
+    // guard — measured: `z.object({ handler })`, `z.record`, `z.array(z.date())`
+    // and `PersistenceAdapterSchema` all prune ZERO branches, because none of
+    // them contains a union at all. So a guard weakened to refuse only at the
+    // ROOT (`findSurvivingMark(schema) === '#'`) keeps all of them green, and
+    // `refuses a union whose every branch is unprojectable` above keeps passing
+    // too because its mark IS at the root. This shape is the one that tells the
+    // strong guard from the weak one: a branch really is dropped, and the mark
+    // that survives sits BELOW the root.
+    const nested = z.union([
+      z.function(),
+      z.object({ handler: z.function(), name: z.string() }),
+      z.string(),
+    ]);
+
+    // Non-vacuity, asserted rather than asserted about. Both halves are what
+    // make the refusal below attributable to the guard and to nothing else:
+    // pruning happened (so the early-out cannot fire), and the surviving mark
+    // is not `'#'` (so a root-only guard would tolerate it).
+    for (const io of ['output', 'input'] as const) {
+      const marked = markedProjection(nested, io);
+      const pruned: PrunedBranch[] = [];
+      pruneMarkedUnionBranches(marked, '#', pruned);
+      expect(pruned).toEqual([{ at: '#/anyOf/0', type: 'function' }]);
+      expect(findSurvivingMark(marked)).toBe('#/anyOf/0/properties/handler');
+    }
+
+    expect(projectByPruningUnionBranches(nested, TARGET)).toBeNull();
+  });
+
+  it('leaves Automation.FlowFunctionEntrySchema skipped, marker and all', () => {
+    // The shape above is not hypothetical: `FlowFunctionEntrySchema` is
+    // `z.union([z.function(), FlowFunctionDeclarationSchema, z.string().min(1),
+    // FlowFunctionLoweredDeclarationSchema])`, and the declaration's required
+    // `handler` is itself a live callable. Its `unemitted-schemas.baseline.json`
+    // entry states exactly that: "1 branch pruned … the union still does not
+    // publish, because the member behind it is FlowFunctionDeclarationSchema,
+    // whose required `handler` is itself a live callable".
+    //
+    // What the guard is holding back is therefore a real artifact, not a
+    // category: the pruned-but-unrefused projection still CARRIES the marker,
+    // so emitting it would publish `x-os-unprojectable` into json-schema/ —
+    // beside a `required: ["handler", …]` naming a property that annotates and
+    // constrains nothing.
+    for (const io of ['output', 'input'] as const) {
+      const marked = markedProjection(FlowFunctionEntrySchema as z.ZodType, io);
+      const pruned: PrunedBranch[] = [];
+      pruneMarkedUnionBranches(marked, '#', pruned);
+      expect(pruned).toHaveLength(1);
+      expect(findSurvivingMark(marked)).toBe('#/anyOf/0/properties/handler');
+      expect(JSON.stringify(marked)).toContain(UNPROJECTABLE_MARK);
+    }
+
+    expect(projectByPruningUnionBranches(FlowFunctionEntrySchema as z.ZodType, TARGET)).toBeNull();
   });
 
   it('returns null when there was nothing to drop', () => {
