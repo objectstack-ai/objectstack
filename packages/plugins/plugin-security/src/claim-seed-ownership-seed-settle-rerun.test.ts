@@ -40,7 +40,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { SEED_SETTLEMENT_SERVICE } from '@objectstack/spec/contracts';
 import type { SeedSettlementSnapshot } from '@objectstack/spec/contracts';
 import { SecurityPlugin } from './security-plugin.js';
@@ -111,6 +111,10 @@ function makeEngine(tables: Record<string, any[]>, schemas: any[]) {
       return hits.map((r) => ({ ...r }));
     },
     async findOne(object: string, query: any = {}) {
+      // The producer's own predicate, imported rather than re-derived
+      // (`check:engine-double-contract`): a double looser than `ObjectQL.findOne`
+      // is how a dead code path ships with its suite green.
+      assertEngineFindOnePredicate(object, query);
       const rows = await engine.find(object, { ...query, limit: 1 });
       return rows[0] ?? null;
     },
