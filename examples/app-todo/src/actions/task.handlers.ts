@@ -42,12 +42,29 @@ import type { ActionHandlerContext } from '@objectstack/spec/ui';
 /**
  * Mark a single task as complete.
  *
- * [#7036] `status` only. `completed_date` is `readonly` — server-owned — so a
- * caller's write to it is stripped from the payload before the record is
- * validated, and sending it here made this action refuse itself against
- * `todo_task`'s `completed_date_required` rule. The stamp belongs to the
- * `beforeUpdate` leg of `src/objects/task.hook.ts`, which runs on the
- * transition and whose write the strip lets through.
+ * [#7036] `status` only — and the reason is the opposite of the intuitive one,
+ * so read it before copying this handler.
+ *
+ * `completed_date` is `readonly` on `todo_task` — server-owned — but a
+ * handler's `ctx.engine` runs **elevated**: `buildActionExecutionContext`
+ * forces `isSystem: true` on every call it makes (#3914), and the engine's
+ * read-only strip is gated on *not* being a system write. So on a handler's
+ * write the strip never runs at all: **what a handler names, lands**. A
+ * server-owned field is therefore MORE dangerous here than in a form PUT, not
+ * less — the protection an ordinary caller gets is the one thing a handler
+ * does not have.
+ *
+ * Adding `completed_date: new Date().toISOString()` to the write below looks
+ * harmless, and on the transition into `completed` it is: the `beforeUpdate`
+ * leg of `src/objects/task.hook.ts` stamps the column and overwrites it. But a
+ * completion write that is NOT a transition — re-completing a task that is
+ * already `completed`, which is exactly what {@link massCompleteTasks} does to
+ * an already-finished row in a bulk selection — is not stamped, and nothing
+ * strips the handler's value either. It does not fail: there is no refusal and
+ * no dropped-field report, the write simply lands, and the real completion
+ * timestamp is silently replaced with "now".
+ *
+ * Hence `status` alone: let the hook own the column it owns.
  */
 export async function completeTask(ctx: ActionHandlerContext): Promise<void> {
   const { record, engine } = ctx;
