@@ -171,7 +171,13 @@ describe('#17416 GET /packages/:id — ?version= scopes the read', () => {
             // ⛔ The id 404 is NOT re-worded by the version scope: a package that
             // is not here cannot be "at the wrong version".
             expect(r.response?.body?.error?.message).toBe(`Package 'com.absent.pkg' not found`);
-            // [#17672] The second genuine not-found, pinned on its code too.
+            // [#17672] The second genuine not-found, pinned on its code too —
+            // and this pair is a PUBLISHED sentence, not only an internal one:
+            // `content/docs/kernel/contracts/metadata-service.mdx`'s route table
+            // says of `GET /api/v1/packages/:id` that «a missing id answers
+            // `404 RESOURCE_NOT_FOUND`, message `Package 'ID' not found`». Both
+            // halves are asserted here, so moving either turns this red instead
+            // of silently falsifying that page.
             expect(r.response?.body?.error?.code).toBe('RESOURCE_NOT_FOUND');
         });
 
@@ -235,7 +241,12 @@ describe('#17416 GET /packages/:id — ?version= scopes the read', () => {
             expect(r.status).toBe(400);
             // ADR-0112 NESTED body, and the standard catalog's member for 400 —
             // derived by `buildApiError` from the status, so nothing in
-            // `packages/spec` moved for it.
+            // `packages/spec` moved for it. It is also the answer a PUBLISHED
+            // page already documented for this exact condition:
+            // `content/docs/api/client-sdk.mdx`'s error table gives
+            // `VALIDATION_ERROR` / 400 for «The request was refused before any
+            // record was validated — a repeated query parameter, …». This door
+            // contradicted that page for as long as it answered `404`.
             expect(r.body?.error?.code).toBe('VALIDATION_ERROR');
             expect(r.body?.error?.httpStatus).toBe(400);
             expect(r.body?.success).toBe(false);
