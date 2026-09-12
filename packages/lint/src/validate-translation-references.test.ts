@@ -18,6 +18,33 @@ import { ContactViews } from '../../../examples/app-showcase/src/ui/views/contac
 // a section that has no name.
 import { SnapshotContact, SnapshotContactViews } from './showcase-shape.fixtures.js';
 
+/**
+ * ⭐ Severity, re-judged in place (#16310) — ⛔ not deleted.
+ *
+ * Eight assertions in this file pinned `severity: 'warning'` on
+ * `translation-target-unknown`, and that silence was deliberate: the rule's own
+ * Severity note argued an orphan key is inert — a few bytes and one untranslated
+ * string, nothing crashes — so gating on it would be the over-statement
+ * ADR-0072 D1 forbids.
+ *
+ * The reading was measured wrong in the one direction that matters. An orphan
+ * key is not inert; it is a confident-looking grep hit, in every locale, for a
+ * surface that was deleted — which reads as "this exists and is translated" to
+ * the next author, human or AI. Reported-but-unfailable meant a PR that deletes
+ * a navigation entry, a form section or a view and leaves its locale keys behind
+ * was green on every pipeline on the platform (measured: eight planted orphans
+ * moved `os lint --json` from 12/10 to 20/18 findings, `passed: true`, exit 0).
+ *
+ * So every one of those eight now pins `error`. They are the SAME assertions
+ * making the same statement one severity later, and they stay because the
+ * severity is exactly what is worth pinning here.
+ *
+ * ⚠️ The neighbours are untouched on purpose: `translation-option-key-unknown`
+ * still pins `warning` (see the "option keys" and "severity is narrow" blocks) —
+ * a mis-keyed option names something real and its remedy is a rename, not a
+ * deletion.
+ */
+
 /** A stack shaped like the HotCRM lead surface: fields, options, a view, an action. */
 const leadStack = (translations: unknown[]) => ({
   objects: [
@@ -67,7 +94,7 @@ describe('validateTranslationReferences — orphan keys', () => {
       ]),
     );
     expect(findings).toHaveLength(1);
-    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].severity).toBe('error');
     expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
     expect(findings[0].path).toBe('translations[0]["zh-CN"].objects.crm_lead.fields.assigned_to');
     expect(findings[0].hint).toContain('Declared fields: name, source, status.');
@@ -128,7 +155,7 @@ describe('validateTranslationReferences — orphan keys', () => {
       'translations[0].en.objects.crm_lead._sections.deal_info',
       'translations[0].en.objects.crm_lead._actions.mass_update',
     ]);
-    expect(findings.every((f) => f.severity === 'warning')).toBe(true);
+    expect(findings.every((f) => f.severity === 'error')).toBe(true);
   });
 
   it('flags an action parameter the action does not declare', () => {
@@ -266,6 +293,71 @@ describe('validateTranslationReferences — nested conditional validation branch
   });
 });
 
+describe('validateTranslationReferences — the severity split is narrow (#16310)', () => {
+  /**
+   * The gating claim, pinned from the consumer's side rather than from the
+   * rule's: a consumer selects this rule by its EXACT id, because the id is the
+   * bare string the registry publishes — no namespace, and none added here (the
+   * id shape was ruled out of scope: a namespace for this one rule would make it
+   * the sixth prefixed id among 200 exported rule-id constants, or a migration
+   * across two producers). So the two things a gate needs are the id string and
+   * the severity, and both are asserted here together.
+   */
+  it('raises `translation-target-unknown` at `error`, selectable by its exact id', () => {
+    const findings = validateTranslationReferences(
+      leadStack([
+        { 'zh-CN': { objects: { crm_lead: { fields: { assigned_to: { label: '负责人' } } } } } },
+      ]),
+    );
+    const selected = findings.filter((f) => f.rule === 'translation-target-unknown');
+    expect(selected).toHaveLength(1);
+    expect(selected[0].severity).toBe('error');
+    // The id is the literal a consumer's filter can be written against — the
+    // constant and the wire string are the same value, asserted both ways so a
+    // rename cannot pass this test by moving the constant alone.
+    expect(TRANSLATION_TARGET_UNKNOWN).toBe('translation-target-unknown');
+  });
+
+  /**
+   * ⛔ The promotion is ONE rule's, not "every warning becomes an error". The
+   * sibling raised by the very same function keeps `warning`, so a tree whose
+   * only translation defect is a mis-keyed option is unchanged — same finding,
+   * same severity, same exit code as before.
+   */
+  it('leaves `translation-option-key-unknown` at `warning`', () => {
+    const findings = validateTranslationReferences(
+      leadStack([
+        {
+          'zh-CN': {
+            objects: {
+              crm_lead: { fields: { source: { label: '来源', options: { 'direct-mail': '直邮' } } } },
+            },
+          },
+        },
+      ]),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(TRANSLATION_OPTION_KEY_UNKNOWN);
+    expect(findings[0].severity).toBe('warning');
+  });
+
+  /** The negative control: a clean bundle still reports nothing, of any severity. */
+  it('reports nothing on a bundle whose every key resolves', () => {
+    const findings = validateTranslationReferences(
+      leadStack([
+        {
+          'zh-CN': {
+            objects: {
+              crm_lead: { label: '线索', fields: { name: { label: '名称' } } },
+            },
+          },
+        },
+      ]),
+    );
+    expect(findings).toEqual([]);
+  });
+});
+
 describe('validateTranslationReferences — option keys', () => {
   it('flags an option key that is a near-miss of the stored value', () => {
     // The HotCRM instance: `direct-mail` for the value `direct_mail`.
@@ -398,7 +490,7 @@ describe('validateTranslationReferences — cross-package objects (§4 ladder)',
       translations: bundleFor('sys_approval_process'),
     });
     expect(findings).toHaveLength(1);
-    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].severity).toBe('error');
     expect(findings[0].message).toContain('platform namespace');
     // The object key is reported once; its subtree is not half-checked.
     expect(findings[0].path).toBe('translations[0]["zh-CN"].objects.sys_approval_process');
@@ -585,7 +677,7 @@ describe('validateTranslationReferences — flows (#7646 / #11287)', () => {
       bundle({ lead_conversions: { label: 'x', screens: { details: { title: 'y' } } } }),
     );
     expect(findings).toHaveLength(1);
-    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].severity).toBe('error');
     expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
     expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.lead_conversions');
     expect(findings[0].message).toContain('Did you mean "lead_conversion"?');
@@ -598,7 +690,7 @@ describe('validateTranslationReferences — flows (#7646 / #11287)', () => {
       bundle({ lead_conversion: { label: '线索转换', screens: { detail: { title: 'y' } } } }),
     );
     expect(findings).toHaveLength(1);
-    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].severity).toBe('error');
     expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.lead_conversion.screens.detail');
     expect(findings[0].message).toContain('Did you mean "details"?');
     expect(findings[0].hint).toContain('ScreenSpec.nodeId');
@@ -614,7 +706,7 @@ describe('validateTranslationReferences — flows (#7646 / #11287)', () => {
       }),
     );
     expect(findings).toHaveLength(1);
-    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].severity).toBe('error');
     expect(findings[0].path).toBe(
       'translations[0]["zh-CN"].flows.lead_conversion.screens.details.fields.opportunity',
     );
@@ -703,7 +795,7 @@ describe('validateTranslationReferences — flows (#7646 / #11287)', () => {
       ],
     });
     expect(findings).toHaveLength(1);
-    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].severity).toBe('error');
     expect(findings[0].message).toContain('OBJECT-FORM screen');
     expect(findings[0].hint).toContain('objects.crm_lead.fields.owner');
   });
@@ -1295,7 +1387,7 @@ describe('validateTranslationReferences — filter-preset tabs (#13835)', () => 
       ]),
     );
     expect(findings).toHaveLength(1);
-    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].severity).toBe('error');
     expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
     expect(findings[0].path).toBe('translations[0]["zh-CN"].objects.crm_lead._tabs.overdue');
     expect(findings[0].hint).toContain('Declared tabs: mine, urgent.');

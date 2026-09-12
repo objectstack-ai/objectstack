@@ -9350,7 +9350,61 @@ export class SqlDriver implements IDataDriver {
     }
 
     builder.distinct(field);
-    const results = await builder;
+    // [#17639] The THIRD read door joins the other two. `find()` and `count()`
+    // have carried the terminal envelope since #8931 and `aggregate()` since
+    // #11455; this one still executed BARE, so any dialect refusal the
+    // statement raised left the driver as the backend's own object — a raw
+    // SQLSTATE in `code`, `status` UNDEFINED, and the compiled statement as the
+    // message. Measured on live PostgreSQL 16.13: this driver stores every
+    // `multiple: true` column as `json`, and `json` defines no equality
+    // operator, so `SELECT DISTINCT` over one is refused by the backend:
+    //
+    //   distinct(t, 'toggles') => THREW code=42883 status=undefined
+    //                             msg=select distinct "toggles" from "…" -
+    //                                 could not identify an equality operator
+    //                                 for type json
+    //
+    // Class-wide across every JSON column — `toggle`/`boolean`/`number` with
+    // `multiple: true` and `tags` all measured, with a scalar `boolean` column
+    // in the same table answering normally as the lit control. A raw `42883` is
+    // on no list `@objectstack/rest` reads, so `mapDataError` had nothing
+    // declared to forward and an ordinary caller shape — list the distinct
+    // values of this column — was logged as an UNHANDLED server fault.
+    //
+    // ⛔ NOT a decision about whether a JSON column should ANSWER a distinct
+    // read; that question is #17590's, on the same columns. Whatever this door
+    // ends up doing, it must not leak the backend's own object — so the
+    // envelope is the half that lands here, exactly as #11455 landed it for
+    // `aggregate()` while its own answer question was still open.
+    //
+    // ⛔ And no `42883` recognizer: the envelope comes from the EXIT, not from
+    // matching a SQLSTATE or the words `equality operator` — the #8926 lesson,
+    // applied in advance. The all-dialect sweep in
+    // `sql-driver-17639-distinct-fault-envelope.test.ts` asserts that on a
+    // route (a table that was never provisioned) that has no JSON column in it.
+    //
+    // ⛔ No BLANKET `isUnresolvableColumnError` arm either — the same gap
+    // #11455 left FILED rather than guessed at, for the same reason one door
+    // over: that refusal's words are "Filter on 'x' names a column that object
+    // 'o' has no column for", and this door names columns in TWO clauses, the
+    // `field` being listed and the WHERE compiled from `filters`. A blanket arm
+    // would tell the author of `distinct(o, 'nosuchcol')` — who passed no
+    // filter at all — that their FILTER was wrong, which is the unsupportable
+    // attribution the #8931 ruling refuses to make. #11541 closed that gap for
+    // `aggregate()` with a clause-attributing classifier; the `distinct()` half
+    // is filed as its own card.
+    //
+    // Only the EXECUTION is guarded. Every refusal this method composes upstream
+    // — `applyFilters`' `INVALID_FILTER` out of {@link assertCompilableComparand}
+    // among them — is raised while the statement is BUILT, so the catch-all
+    // cannot bury a precise refusal under a generic 500.
+    let results: unknown[];
+    try {
+      results = await builder;
+    } catch (error) {
+      // [#8931] The terminal catch-all — see {@link SqlDriver.backendStatementFault}.
+      throw this.backendStatementFault(object, error);
+    }
     const values = results.map((row: any) => row[field]);
 
     // Same presentation `find()` gives the column (#3797, #3849) — a caller
