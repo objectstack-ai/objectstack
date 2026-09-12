@@ -1460,24 +1460,26 @@ const DEFAULT_META_PREFIX = '/meta';
 const SET_AUTH_TOKEN_HEADER = 'set-auth-token';
 
 /**
- * Lift better-auth's bare `/get-session` answer into the `SessionResponse`
- * envelope the two methods that call that route declare (#16760).
+ * Lift better-auth's bare answer into the `SessionResponse` envelope the four
+ * `auth.*` methods that read these routes declare (#16760, #17234).
  *
  * `/api/v1/auth/*` is better-auth's own byte stream — plugin-auth mounts one
  * catch-all straight onto its handler — and better-auth does not use
  * ObjectStack's REST envelope. Measured against a real `AuthManager`
- * (better-auth 1.7.2, organization plugin) over a real driver:
+ * (better-auth 1.7.3, organization plugin) over a real `ObjectQL` on a real
+ * `SqliteWasmDriver`, these are the three bodies this helper is handed:
  *
  * ```
- * GET /api/v1/auth/get-session  (signed in) -> 200 {"user":{…},"session":{…,"token":"…"}}
- * GET /api/v1/auth/get-session  (anonymous) -> 200 null
+ * GET  /api/v1/auth/get-session   (signed in) -> 200 {"user":{…},"session":{…,"token":"…"}}
+ * GET  /api/v1/auth/get-session   (anonymous) -> 200 null
+ * POST /api/v1/auth/sign-up/email             -> 200 {"token":"…","user":{…}}
+ * POST /api/v1/auth/sign-in/email             -> 200 {"redirect":false,"token":"…","user":{…}}
  * ```
  *
- * `auth.login` has carried the same lift for `/sign-in/email`'s own bare
- * `{ token, user }` since long before this card; `auth.me` and
- * `auth.refreshToken` never got it, so every caller writing to the declared
- * `data.user` read `undefined` while the real payload sat on `.user` — which
- * did not type-check.
+ * The two families carry DISJOINT payload members — `/get-session` has the
+ * session and no top-level token, the two credential routes have the token and
+ * no session — so the lift copies the members a body actually has instead of
+ * writing a fixed triple.
  *
  * Three properties this deliberately has:
  *
@@ -1486,36 +1488,59 @@ const SET_AUTH_TOKEN_HEADER = 'set-auth-token';
  *   REQUIRED boolean, so a body carrying `data` alone still does not parse as
  *   the type the method advertises. A producer that sent its own `success`
  *   keeps it — the spread below runs after the default.
- * - **The raw keys are kept, not replaced.** `{ …body, data }`, exactly as
- *   `login` does. `.user` is the read the field has been using all along while
- *   the declared `.data.user` was `undefined`, and dropping it would break
- *   those callers in order to fix a type they were already working around.
- * - **`data.token` is NOT synthesized from `session.token`.** The declared key
- *   is optional, and the two spellings are not one string: `session.token` is
- *   the UNSIGNED session token, while the `token` `login` puts there is the
- *   SIGNED `token.signature` form `bearer()` hands out. Both authenticate, so
- *   populating it would file two different credentials under one key depending
- *   on which method produced the body.
+ * - **The raw keys are kept, not replaced.** `{ …body, data }`. `.user` is the
+ *   read callers have been using all along while the declared `.data.user` was
+ *   `undefined`, and dropping it would break those callers in order to fix a
+ *   type they were already working around.
+ * - **`data.token` is carried from the body's OWN top-level `token`, and is
+ *   never synthesized from `session.token`.** `login` / `register` are handed a
+ *   credential in the body and put it here, which is where `login` reads it
+ *   back from to arm `this.token`; `/get-session` is handed none and gets no
+ *   `data.token` at all. The two spellings a session has are the UNSIGNED
+ *   token and the SIGNED `token.signature` form, and the split is by CARRIER,
+ *   not by method: measured on one sign-in, the response BODY's `token` and the
+ *   `session.token` a following `/get-session` serves are the same unsigned
+ *   string, while the SIGNED form is the one `bearer()` publishes in the
+ *   `set-auth-token` RESPONSE HEADER. So synthesizing `data.token` from a
+ *   session would not change which credential lands here — it would invent a
+ *   `token` on a route that served none, which is a different lie.
  *
- * The `body &&` guard is what carries the anonymous answer: `null` is falsy and
+ * ⚠️ **Known residue — `data.session` on `/sign-in|sign-up/email` (#17234).**
+ * Those two routes serve no session object and no session id or expiry
+ * anywhere, body or header, so `login` and `register` return a `data` with no
+ * `session` and still do not parse as the full declared `SessionResponse`. The
+ * only place a session is obtainable is a SECOND call to `/get-session`
+ * (`auth.me`), and manufacturing one here would put a fabricated id and expiry
+ * under a declared type — the card stays open for that shape decision rather
+ * than being closed by an invention.
+ *
+ * The `!body` guard is what carries the anonymous answer: `null` is falsy and
  * is returned untouched rather than wrapped into a signed-in-looking envelope
- * that no session backs. That answer stays outside `SessionResponse`; closing
- * it needs the published return annotation to widen, which is a different card.
+ * that no session backs. That answer stays outside `SessionResponse`, and
+ * closing it needs the published return annotation to widen, which is a
+ * different card.
  */
 const normalizeSessionResponse = (raw: unknown): SessionResponse => {
-  const body = raw as { user?: unknown; session?: unknown; data?: unknown } | null;
+  const body = raw as
+    | { user?: unknown; session?: unknown; token?: unknown; data?: unknown }
+    | null;
   // Already enveloped, or nothing recognisable to lift: hand it back untouched
   // rather than inventing a `data` this response never carried.
   if (!body || typeof body !== 'object') return body as unknown as SessionResponse;
   if (body.data !== undefined) return body as unknown as SessionResponse;
-  if (body.user === undefined && body.session === undefined) {
+  if (body.user === undefined && body.session === undefined && body.token === undefined) {
     return body as unknown as SessionResponse;
   }
-  return {
-    success: true,
-    ...body,
-    data: { user: body.user, session: body.session },
-  } as unknown as SessionResponse;
+  // Only the members this body really carries. The two route families answer
+  // disjoint sets (`{ user, session }` vs `{ token, user }`), so writing all
+  // three unconditionally would file an `undefined` under a key the route never
+  // served — and for `token` that is the difference between "this body carries
+  // no credential" and "this SDK dropped the credential it was handed".
+  const data: { user?: unknown; session?: unknown; token?: unknown } = {};
+  if (body.user !== undefined) data.user = body.user;
+  if (body.session !== undefined) data.session = body.session;
+  if (body.token !== undefined) data.token = body.token;
+  return { success: true, ...body, data } as unknown as SessionResponse;
 };
 
 export class ObjectStackClient {
@@ -4268,6 +4293,19 @@ export class ObjectStackClient {
     /**
      * Login with email and password
      * Uses better-auth endpoint: POST /sign-in/email
+     *
+     * The route answers bare (`{ redirect, token, user }`), so the answer is
+     * lifted into the declared `SessionResponse` envelope by
+     * {@link normalizeSessionResponse} — one lift shared with `auth.me` /
+     * `auth.refreshToken`, so the family cannot deliver two envelopes again
+     * (#17234). The credential the route hands back stays at `data.token`
+     * byte-identical and is what arms `this.token` below.
+     *
+     * ⚠️ `data.session` is the one member of the declared type this route
+     * cannot deliver: `/sign-in/email` serves no session object, and no session
+     * id or expiry reaches the client on this call at all. Read the session
+     * from a following `auth.me()` (`GET /get-session`); nothing is fabricated
+     * here. #17234 stays open for that shape decision.
      */
     login: async (request: LoginRequest): Promise<SessionResponse> => {
         const route = this.getRoute('auth');
@@ -4288,10 +4326,12 @@ export class ObjectStackClient {
             err.status = res.status;
             throw err;
         }
-        // Normalize: better-auth returns `{ token, user }` at top level,
-        // but our SessionResponse shape wraps them in `data`.
-        const data = raw && (raw.data ?? (raw.token || raw.user ? { token: raw.token, user: raw.user } : undefined));
-        const normalized = data ? { ...raw, data } : raw;
+        // Normalize: better-auth returns `{ redirect, token, user }` at top
+        // level, but the declared `SessionResponse` wraps the payload in `data`
+        // AND requires `success` — which the inline lift this replaced never
+        // wrote, so neither method delivered the type it advertises (#17234).
+        // One lift for both route families, so the two cannot drift again.
+        const normalized = normalizeSessionResponse(raw);
         // Auto-set token if present in response
         if (normalized.data?.token) {
             this.token = normalized.data.token;
@@ -4319,8 +4359,8 @@ export class ObjectStackClient {
      *
      * The route answers bare (`{ user, session }`), so the answer is lifted
      * into the declared `SessionResponse` envelope by
-     * {@link normalizeSessionResponse} — the same lift `login` has always
-     * carried. Read the payload off `data.user` / `data.session`; the raw
+     * {@link normalizeSessionResponse} — since #17234 the same lift `login`
+     * and `register` run. Read the payload off `data.user` / `data.session`; the raw
      * `.user` / `.session` keys are kept alongside for callers written against
      * the wire while the declared shape was unreachable.
      *
@@ -4339,6 +4379,14 @@ export class ObjectStackClient {
     /**
      * Register a new user account
      * Uses better-auth endpoint: POST /sign-up/email
+     *
+     * The route answers bare (`{ token, user }`) and is lifted into the
+     * declared `SessionResponse` envelope by the same
+     * {@link normalizeSessionResponse} `login` runs (#17234); the credential
+     * stays at `data.token` and arms `this.token`.
+     *
+     * ⚠️ `data.session` is undelivered here for the same measured reason as on
+     * `login`: `/sign-up/email` serves no session object. See that method.
      */
     register: async (request: RegisterRequest): Promise<SessionResponse> => {
       const route = this.getRoute('auth');
@@ -4347,9 +4395,10 @@ export class ObjectStackClient {
         headers: { Origin: this.baseUrl },
         body: JSON.stringify(request)
       });
-      const raw = await res.json();
-      const data = raw && (raw.data ?? (raw.token || raw.user ? { token: raw.token, user: raw.user } : undefined));
-      const normalized = data ? { ...raw, data } : raw;
+      // Same lift as `login`, for the same reason (#17234): `/sign-up/email`
+      // answers the bare `{ token, user }` and the declared `SessionResponse`
+      // requires `success` as well as `data`.
+      const normalized = normalizeSessionResponse(await res.json());
       if (normalized.data?.token) {
         this.token = normalized.data.token;
       }
