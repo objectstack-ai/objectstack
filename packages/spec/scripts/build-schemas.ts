@@ -46,6 +46,10 @@ import {
   FOREIGN_JSON_SCHEMA_ARTIFACTS,
   clearOwnedOutputs,
 } from './lib/json-schema-out-dir';
+// The ONE write point for `json-schema/`'s freshness stamp (#16175). Imported
+// from the module that also READS it, because a digest written by one function
+// and compared by another is a comparison that means nothing the day they drift.
+import { recordSchemaStamp } from '../../../scripts/check-regen-pending.mjs';
 import {
   AUTHORABLE_SURFACE_DIR_NAME,
   SCHEMA_MANIFEST_DIR_NAME,
@@ -2874,4 +2878,42 @@ writeFileWithRetry(bundledPath, JSON.stringify(bundledSchema, null, 2));
 console.log(`\n✅ Generated bundled schema: objectstack.json (${Object.keys(defs).length} definitions)`);
 
 console.log(`\n✅ Successfully generated ${count} schemas.`);
+
+// ─── The generation stamp (#16175) ───────────────────────────────────────────
+//
+// The LAST thing this script does, and that position is the whole argument.
+// `schemaTreeIsStale` in scripts/check-regen-pending.mjs asks whether
+// `json-schema/` may be believed, and answered it from mtimes alone: a `git
+// merge`, `git checkout` or `git worktree add` re-checks-out a source file with
+// IDENTICAL bytes, bumps its mtime, and the build that follows correctly does
+// not run (turbo's cache hashes content) — so the rule refused a tree that was
+// exactly current, and `check:docs` cost a full regeneration for nothing.
+//
+// Nothing recorded which sources this tree came from, so the rule had no
+// evidence of any kind to answer with. This is that evidence, and it is written
+// HERE rather than by the build for two reasons this file is the proof of:
+//
+//   - this script rebuilds the WHOLE tree unconditionally, before the `--check`
+//     / `--update-base` fork, so one write point covers `gen:schema`,
+//     `check:authorable-surface` and `gen:authorable-surface-base` alike;
+//   - every ratchet above exits 1 on refusal, and the clean at the top removes
+//     the previous stamp with the rest of this generator's outputs. So a stamp
+//     exists only for a run that emitted the tree beside it AND reached this
+//     line — a generation that died halfway leaves none, which is no evidence,
+//     which leaves the refusal standing.
+//
+// ⛔ It may only ever ACQUIT a tree the mtime rule has already accused. A failure
+// to write it is therefore reported and never thrown: no stamp is the
+// conservative state, and killing a successful generation over a missing
+// performance stamp would trade a slow gate for a broken build.
+const schemaStampDigest = recordSchemaStamp(PKG_DIR);
+if (schemaStampDigest) {
+  console.log(`✓ json-schema/.build-input-hash-schema ← ${schemaStampDigest.slice(0, 16)}…`);
+} else {
+  console.warn(
+    `⚠ json-schema/.build-input-hash-schema could not be written — the tree is generated and correct,\n` +
+      `  but nothing records which sources from, so the mtime freshness rule will keep refusing it\n` +
+      `  until the next build. Gates stay conservative; nothing here is wrong, only slower.`,
+  );
+}
 

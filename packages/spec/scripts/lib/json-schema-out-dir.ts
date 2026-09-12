@@ -5,9 +5,15 @@
  * generators write into — and the clearing rule that stops them deleting each
  * other's work (#5371).
  *
- * `gen:schema` (`scripts/build-schemas.ts`) emits `<category>/<Name>.json` plus
- * the bundled `objectstack.json`. `gen:openapi` (`scripts/build-openapi.ts`)
- * emits exactly one file into the same directory: `openapi.json`. Neither
+ * `gen:schema` (`scripts/build-schemas.ts`) emits `<category>/<Name>.json`, the
+ * bundled `objectstack.json`, and — since #16175 — `.build-input-hash-schema`,
+ * the digest of the inputs that generation consumed. That last one is the
+ * generator's own output like the others and is CLEARED like the others: it must
+ * die with the tree it vouches for, so ⛔ it may never be given a
+ * FOREIGN_JSON_SCHEMA_ARTIFACTS entry — exempting it from the sweep would leave
+ * a stamp acquitting a tree nobody emitted. `gen:openapi`
+ * (`scripts/build-openapi.ts`) emits exactly one file into the same directory:
+ * `openapi.json`. Neither
  * generator has a gate — `check:generated` prints `Generated but ungated (2):
  * gen:openapi, gen:sbom` on every run — and the whole tree is gitignored, so
  * nothing in this repo notices when one of these files goes missing.

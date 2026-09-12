@@ -1,6 +1,8 @@
 [
+  "scripts/build-schemas-check-mode.test.ts",
   "scripts/category-title.test.ts",
   "scripts/check-generated-ledger.test.ts",
+  "scripts/def-key-collisions.test.ts",
   "scripts/dist-freshness-adoption.test.ts",
   "scripts/dist-freshness.test.ts",
   "scripts/escape-mdx.test.ts",

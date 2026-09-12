@@ -54,6 +54,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { schemaStamp } from '../../../scripts/check-regen-pending.mjs';
 import { RENAMED_DEFS } from './lib/renamed-defs';
 import { CONVERSIONS_BY_MAJOR } from '../src/conversions/registry';
 import {
@@ -83,6 +84,9 @@ import {
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG = path.resolve(HERE, '..');
+/** The repo root — the fixture root mirrors it, so the generator's own
+ *  `../../../scripts` import resolves inside the sandbox (#16175). */
+const REPO_ROOT = path.resolve(PKG, '..', '..');
 const TSX = path.join(PKG, 'node_modules', '.bin', 'tsx');
 
 /**
@@ -377,6 +381,35 @@ function mountUnemittedLedger(dir: string): void {
 }
 
 /**
+ * A fixture package directory at the repo's own DEPTH: `<tmp-root>/packages/spec`,
+ * with `<tmp-root>/scripts` symlinked to this repo's root scripts.
+ *
+ * Every fixture in this file runs the real `build-schemas.ts` out of a copied
+ * `scripts/`, which works because that script resolves everything from its own
+ * `__dirname`. Since #16175 it resolves ONE thing from above the package — the
+ * repo-root freshness module that writes the generation stamp
+ * (`../../../scripts/check-regen-pending.mjs`) — and from a flat `/tmp/x/scripts`
+ * that path walks off the top of the filesystem: the spawn dies with
+ * MODULE_NOT_FOUND before any assertion runs, which is a fixture reporting on
+ * its own shape rather than on the generator.
+ *
+ * Depth rather than a stub, because the header's rule holds: no test-only seam.
+ * The root scripts are SYMLINKED rather than copied — they are read-only here,
+ * and a copy would be a second definition of the digest whose single definition
+ * is the entire point of that module.
+ */
+function fixtureTree(prefix: string): string {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const dir = path.join(root, 'packages', 'spec');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.symlinkSync(path.join(REPO_ROOT, 'scripts'), path.join(root, 'scripts'));
+  return dir;
+}
+
+/** The fixture ROOT a package dir sits under — what teardown removes. */
+const sandboxRoot = (pkgDir: string): string => path.resolve(pkgDir, '..', '..');
+
+/**
  * Build a sandbox — a temp tree that COPIES `scripts/` (so `__dirname` lands
  * there) and symlinks the read-only inputs — mount it, and seed it to the state
  * every block starts from: canonical ratchets, a real git repo, and an
@@ -391,7 +424,17 @@ function mountUnemittedLedger(dir: string): void {
  * costs a `cpSync` and a `git init` each.
  */
 function createSandbox(prefix: string): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  // The package sits TWO levels under a fixture root, mirroring the real
+  // `<repo>/packages/spec` (#16175). A flat sandbox was faithful enough while
+  // the generator resolved everything from its own `__dirname`; it now also
+  // imports the repo-root freshness module (`../../../scripts/
+  // check-regen-pending.mjs`, the writer of the generation stamp), and from a
+  // flat `/tmp/x/scripts` that path walks off the top of the filesystem — the
+  // spawn dies with MODULE_NOT_FOUND before a single assertion runs. Keeping
+  // the depth is what lets these fixtures run the production import graph
+  // instead of a reduced one, which is the property the header's "no test-only
+  // seam" paragraph is about.
+  const dir = fixtureTree(prefix);
   fs.cpSync(path.join(PKG, 'scripts'), path.join(dir, 'scripts'), { recursive: true });
   for (const entry of ['src', 'node_modules', 'package.json']) {
     fs.symlinkSync(path.join(PKG, entry), path.join(dir, entry));
@@ -424,7 +467,7 @@ function createSandbox(prefix: string): string {
 /** Take a block's own sandbox down and hand the handles back to the shared one. */
 function releaseSandbox(dir: string): void {
   mountSandbox(sharedSandbox);
-  fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(sandboxRoot(dir), { recursive: true, force: true });
 }
 
 beforeAll(() => {
@@ -450,7 +493,7 @@ beforeAll(() => {
 });
 
 afterAll(() => {
-  if (sharedSandbox) fs.rmSync(sharedSandbox, { recursive: true, force: true });
+  if (sharedSandbox) fs.rmSync(sandboxRoot(sharedSandbox), { recursive: true, force: true });
 });
 
 function run(args: string[] = []): { status: number; output: string } {
@@ -572,6 +615,67 @@ describe('build-schemas.ts --check — a check reports, it does not write (#4711
       expect(output).not.toContain('📒');
       expect(readManifest()).toBe(current);
       expect(status).toBe(0);
+    },
+  );
+
+  // ── #16175: the ONE write point, pinned where it can actually go missing ───
+  //
+  // `schema-tree-freshness.test.ts` pins what the freshness rule does with a
+  // stamp. Nothing there can notice if the generator stops WRITING one — and
+  // that failure is invisible by construction: the rule degrades to `unstamped`,
+  // which is the conservative verdict, so every gate stays green and the only
+  // symptom is that the mtime false refusal quietly comes back. These two cases
+  // are the half that goes red when the write point is removed.
+  it(
+    'writes the generation stamp as its last step, in --check mode too',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      const stampPath = path.join(sandbox, 'json-schema', '.build-input-hash-schema');
+      seedManifest((s) => s);
+
+      // A plain generation: `gen:schema`, the entry point `check:docs`'s own
+      // remedy line names.
+      fs.rmSync(stampPath, { force: true });
+      expect(run([]).status).toBe(0);
+      expect(fs.existsSync(stampPath), 'gen:schema wrote no freshness stamp').toBe(true);
+      const written = fs.readFileSync(stampPath, 'utf8').trim();
+      expect(written).toMatch(/^[0-9a-f]{64}$/);
+      // The digest the READER computes for this tree, not a literal: writer and
+      // reader disagreeing is the one failure that cannot be seen from either
+      // side alone, and it fails in the acquitting direction only by accident.
+      expect(schemaStamp(sandbox).state).toBe('match');
+
+      // …and `--check` too. It runs the same unconditional regeneration before
+      // its fork, so a tree it leaves behind is as current as `gen:schema`'s and
+      // must be as believable. This is also the case that proves the stamp is
+      // not the #4711 defect returning: `json-schema/` is this generator's own
+      // gitignored output, cleared by it and rewritten by it, never a tracked
+      // file a check repairs — the manifest assertion above still holds.
+      const current = readManifest();
+      fs.rmSync(stampPath, { force: true });
+      expect(run(['--check']).status).toBe(0);
+      expect(fs.existsSync(stampPath), '--check wrote no freshness stamp').toBe(true);
+      expect(schemaStamp(sandbox).state).toBe('match');
+      expect(readManifest()).toBe(current);
+    },
+  );
+
+  it(
+    'never leaves a stamp behind for a generation that was REFUSED',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The soundness argument for the write point's POSITION, asserted. The
+      // stamp is the last line of the script, after every ratchet that can exit
+      // 1 — so a run that refused vouches for nothing, and the next reader sees
+      // `unstamped`, which is no evidence, which leaves the mtime rule standing.
+      const stampPath = path.join(sandbox, 'json-schema', '.build-input-hash-schema');
+      const stale = seedManifest((s) => s.filter((k) => k !== KNOWN_KEY));
+      fs.rmSync(stampPath, { force: true });
+
+      expect(run(['--check']).status).toBe(1);
+
+      expect(fs.existsSync(stampPath), 'a refused run stamped the tree anyway').toBe(false);
+      expect(readManifest()).toBe(stale);
     },
   );
 });
@@ -2693,7 +2797,7 @@ describe('build-schemas.ts — check (b) matches the exact retired key, not its 
     expect(baselineKeys, `${STILL_LIVE_KEY} is no longer a live authorable key`).toContain(STILL_LIVE_KEY);
     expect(baselineKeys.some((k) => k.startsWith(AGED_OUT_KEY))).toBe(false);
 
-    box = fs.mkdtempSync(path.join(os.tmpdir(), 'build-schemas-retired-keys-'));
+    box = fixtureTree('build-schemas-retired-keys-');
     fs.cpSync(path.join(PKG, 'scripts'), path.join(box, 'scripts'), { recursive: true });
     fs.cpSync(path.join(PKG, 'src'), path.join(box, 'src'), { recursive: true });
     for (const entry of ['node_modules', 'package.json']) {
@@ -2732,7 +2836,7 @@ describe('build-schemas.ts — check (b) matches the exact retired key, not its 
   });
 
   afterAll(() => {
-    if (box) fs.rmSync(box, { recursive: true, force: true });
+    if (box) fs.rmSync(sandboxRoot(box), { recursive: true, force: true });
   });
 
   it(
@@ -2992,7 +3096,7 @@ describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)'
       expect(declared, `${def} is now registered for real — pick an unregistered fixture`).not.toContain(def);
     }
 
-    box = fs.mkdtempSync(path.join(os.tmpdir(), 'build-schemas-manifest-removal-'));
+    box = fixtureTree('build-schemas-manifest-removal-');
     fs.cpSync(path.join(PKG, 'scripts'), path.join(box, 'scripts'), { recursive: true });
     fs.cpSync(path.join(PKG, 'src'), path.join(box, 'src'), { recursive: true });
     for (const entry of ['node_modules', 'package.json']) {
@@ -3048,7 +3152,7 @@ describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)'
   });
 
   afterAll(() => {
-    if (box) fs.rmSync(box, { recursive: true, force: true });
+    if (box) fs.rmSync(sandboxRoot(box), { recursive: true, force: true });
   });
 
   it(
@@ -3358,7 +3462,7 @@ describe('build-schemas.ts — check (c) dates a tombstone by its exact key (#58
     }
     expect(CURRENT_MAJOR - AGED_DECLARED_MAJOR).toBeGreaterThanOrEqual(2);
 
-    box = fs.mkdtempSync(path.join(os.tmpdir(), 'build-schemas-tombstone-age-'));
+    box = fixtureTree('build-schemas-tombstone-age-');
     fs.cpSync(path.join(PKG, 'scripts'), path.join(box, 'scripts'), { recursive: true });
     fs.cpSync(path.join(PKG, 'src'), path.join(box, 'src'), { recursive: true });
     for (const entry of ['node_modules', 'package.json']) {
@@ -3393,7 +3497,7 @@ describe('build-schemas.ts — check (c) dates a tombstone by its exact key (#58
   });
 
   afterAll(() => {
-    if (box) fs.rmSync(box, { recursive: true, force: true });
+    if (box) fs.rmSync(sandboxRoot(box), { recursive: true, force: true });
   });
 
   it(

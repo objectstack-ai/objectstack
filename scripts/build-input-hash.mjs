@@ -30,15 +30,18 @@
  * of its own: every path it touches arrives as an argument, so following it
  * subtracts nothing from anybody.
  *
- * ## The two stamps, and why there are two
+ * ## The three stamps, and why there are three
  *
- * Both hold the SAME digest over the SAME inputs. The difference is which build
- * writes them, and that difference is the whole reason the second one exists —
- * see each constant's docblock, and the two `inspect*Stamp` readers at the
- * bottom for what each stamp may and may not be believed about.
+ * All three hold the SAME digest over the SAME inputs. The difference is WHICH
+ * RUN writes each one and WHICH ARTIFACT it therefore speaks for — two `dist/`
+ * stamps written by the build (one of them only when the declaration pass
+ * actually ran) and one written into `json-schema/` by the generator that
+ * emitted it. That difference is the whole reason there is more than one: see
+ * each constant's docblock, and the three `inspect*Stamp` readers at the bottom
+ * for what each stamp may and may not be believed about.
  */
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 /**
@@ -85,6 +88,56 @@ export const STAMP_BASENAME = '.build-input-hash';
  * accused, never accuse one the mtime rule cleared.
  */
 export const DTS_STAMP_BASENAME = '.build-input-hash-dts';
+
+/**
+ * Where a GENERATION records that it produced `<pkg>/json-schema/`, and over
+ * which inputs.
+ *
+ * Same digest, same three verdicts and the same one-way meaning as the two
+ * stamps above. What differs is WHO writes it and WHERE it lives, and both
+ * differences are the soundness argument rather than an implementation detail:
+ * the two `dist/` stamps are written by the BUILD, as its last step; this one is
+ * written by the GENERATOR itself, at the end of
+ * `packages/spec/scripts/build-schemas.ts`, into the very tree that run emitted.
+ *
+ * Written because a third consumer had NOTHING to read. `schemaTreeIsStale` in
+ * scripts/check-regen-pending.mjs answers "may a gate render from
+ * `<pkg>/json-schema/` and believe it" from mtimes, and shares the blind spot
+ * its two siblings document: a `git merge`, `git checkout` or `git worktree add`
+ * re-checks-out an UNCHANGED source and bumps its mtime, the build correctly
+ * does not run (turbo's cache hashes content), and the rule then refuses a tree
+ * that is exactly current. Measured on this axis, on a tree whose `git status`
+ * was empty: `pnpm --filter @objectstack/spec check:docs` exits 1 with
+ * `packages/spec/json-schema is older than packages/spec/src` after a bare
+ * `touch` of one `.zod.ts`.
+ *
+ * ⛔ Neither `dist/` stamp can answer that accusation, and reaching for one
+ * would be #7122's mistake relocated. Both are written at the END of the build,
+ * long after its first step `gen:schema` ran — and `gen:schema` is also run
+ * STANDALONE (`check:docs`'s own remedy line says so) and again by
+ * `check:authorable-surface`. So a `dist/` stamp is evidence about `dist/`, says
+ * nothing about which sources the json-schema tree on disk came from, and in the
+ * standalone case there would be no `dist/` stamp to read at all.
+ *
+ * What makes THIS file believable is co-location with its subject.
+ * `json-schema/` is a turbo build output, gitignored, and `build-schemas.ts`
+ * clears it by deny-list at the start of every run — so the stamp is destroyed
+ * together with the tree it speaks for and rewritten only by a run that reached
+ * the END of generation. A generation that crashed halfway leaves no stamp,
+ * which is `unstamped`, which is no evidence, which leaves the refusal standing.
+ * That is the same argument `--stamp` makes for writing inside `dist/`.
+ *
+ * ⛔ And the same one-way property governs: it may only ever ACQUIT a tree the
+ * mtime rule has already accused, never accuse one the mtime rule cleared.
+ */
+export const SCHEMA_STAMP_BASENAME = '.build-input-hash-schema';
+
+/**
+ * The generated tree this third stamp lives in and vouches for — named once, so
+ * the writer at the end of `build-schemas.ts` and the reader in
+ * `schemaTreeIsStale` cannot come to mean different directories.
+ */
+export const SCHEMA_TREE_DIR_NAME = 'json-schema';
 
 /** Per-package build configuration that changes the output without being under src/. */
 export const PACKAGE_BUILD_CONFIG = ['package.json', 'tsconfig.json', 'tsconfig.build.json', 'tsup.config.ts', 'tsdown.config.ts'];
@@ -152,6 +205,28 @@ export function buildInputHash(root, pkgDir) {
     throw new CoverageError(`${posixRel(root, pkgDir)}/src does not exist, so there is nothing to hash — this gate cannot vouch for its dist.`);
   }
   const inputs = [...filesUnder(src)];
+  // The package's own GENERATOR sources, when it has any (#16175). They are
+  // build inputs by every measure that matters here and were in none of the sets
+  // above: `packages/spec/json-schema/` is emitted by `scripts/build-schemas.ts`
+  // and its `dist/` by a build whose first two steps are `gen:schema &&
+  // gen:openapi` — all of them files under `<pkg>/scripts/`, none under `src/`,
+  // none named in PACKAGE_BUILD_CONFIG. Leaving them out let an EDITED generator
+  // keep a digest that had not moved, so a stamp written by the old generator
+  // would ACQUIT a tree the new one emits differently. That is an acquittal the
+  // evidence does not support, and the one direction #4690 forbids.
+  //
+  // Widening can only ever WITHHOLD an acquittal, never grant one: a strict
+  // superset of inputs turns `match` into `mismatch` and never the reverse, and
+  // `mismatch` leaves the mtime verdict standing. So no gate that passes today
+  // can start failing for a reason other than a real content change.
+  //
+  // The whole directory is taken rather than a curated subset, on the same
+  // reasoning that makes `filesUnder(src)` take `.test.ts`: a rule that has to
+  // decide which files under `scripts/` are "really" generator inputs decides
+  // wrong the day someone extracts a helper, and it decides wrong in the
+  // acquitting direction.
+  const generatorDir = path.join(pkgDir, 'scripts');
+  if (existsSync(generatorDir)) inputs.push(...filesUnder(generatorDir));
   for (const name of PACKAGE_BUILD_CONFIG) inputs.push(path.join(pkgDir, name));
   inputs.push(...globalBuildInputs(root));
 
@@ -182,7 +257,7 @@ export function buildInputHash(root, pkgDir) {
 }
 
 /**
- * Read ONE of the two stamps and say what it vouches for. Shared by both
+ * Read ONE of the three stamps and say what it vouches for. Shared by all three
  * readers below, because "the stamp and the reader must compute the same
  * digest" is exactly as load-bearing between the two stamps as it is between a
  * stamp and its reader: two copies of this comparison would drift, and the
@@ -213,9 +288,9 @@ export function buildInputHash(root, pkgDir) {
  * `actual` is computed only when there is a valid digest to compare it against,
  * so the ~30ms hash stays off the path where no amplifier stamp exists at all.
  */
-function inspectStamp(root, pkgDir, basename) {
+function inspectStamp(root, pkgDir, artifactDir, basename) {
   const none = { state: 'unstamped', recorded: null, actual: null };
-  const stampFile = path.join(pkgDir, 'dist', basename);
+  const stampFile = path.join(pkgDir, artifactDir, basename);
   let recorded;
   try {
     if (!existsSync(stampFile)) return none;
@@ -242,7 +317,7 @@ function inspectStamp(root, pkgDir, basename) {
  * that keeps `--stamp` in this file rather than in a script of its own).
  */
 export function inspectDeclarationStamp(root, pkgDir) {
-  return inspectStamp(root, pkgDir, DTS_STAMP_BASENAME);
+  return inspectStamp(root, pkgDir, 'dist', DTS_STAMP_BASENAME);
 }
 
 /**
@@ -276,5 +351,74 @@ export function inspectDeclarationStamp(root, pkgDir) {
  * mtime rule remains the only thing that convicts.
  */
 export function inspectBuildStamp(root, pkgDir) {
-  return inspectStamp(root, pkgDir, STAMP_BASENAME);
+  return inspectStamp(root, pkgDir, 'dist', STAMP_BASENAME);
+}
+
+/**
+ * Did a GENERATION produce THIS `json-schema/` tree from THESE sources?
+ *
+ * The reader for SCHEMA_STAMP_BASENAME, exported for `schemaTreeIsStale` in
+ * scripts/check-regen-pending.mjs — a THIRD artifact, produced by neither of the
+ * two `dist/` passes, and until #16175 the one freshness rule in this repo with
+ * no evidence of any kind to read.
+ *
+ * ## Why the generator's own stamp is the only file that can answer here
+ *
+ * `gen:schema` is the build's first step, so a matching `dist/` stamp does imply
+ * the tree was regenerated from these inputs — but `gen:schema` is also run
+ * STANDALONE, and `check:authorable-surface` runs the same generator in place.
+ * Answering from a `dist/` stamp would therefore be right in the case the build
+ * just ran and silent in the common case, which is the shape that makes a
+ * freshness feature vacuous rather than wrong. A stamp written by the generator,
+ * into the tree the generator emitted, is true in every one of those entry
+ * points and false in none.
+ *
+ * ## Why a `match` is sound
+ *
+ * `build-schemas.ts` rebuilds the WHOLE tree unconditionally, before its
+ * `--check` / `--update-base` fork and before every ratchet that can refuse, and
+ * the stamp is written at the very END — so a stamp exists only for a run that
+ * emitted the tree beside it and then survived every check. The digest's input
+ * set is a strict SUPERSET of the source set `schemaTreeIsStale` measures (it
+ * counts `.test.ts`, `<pkg>/scripts/**`, PACKAGE_BUILD_CONFIG and turbo's
+ * `globalDependencies` as well), so a `match` implies every input that rule
+ * counts is byte-identical to the one the tree was generated from. A superset
+ * can only ever withhold an acquittal, never grant one it should not.
+ *
+ * The same one-way property governs as next door: `unstamped` — absent,
+ * unreadable, not 64 hex characters, or a package whose generator does not stamp
+ * — leaves the mtime verdict standing (#4690).
+ */
+export function inspectSchemaStamp(root, pkgDir) {
+  return inspectStamp(root, pkgDir, SCHEMA_TREE_DIR_NAME, SCHEMA_STAMP_BASENAME);
+}
+
+/**
+ * Record, at the END of a generation, the digest of the inputs it consumed.
+ *
+ * The writer for SCHEMA_STAMP_BASENAME, and deliberately in this module rather
+ * than in the generator that calls it: the writer and the reader must compute
+ * the SAME digest or the comparison means nothing — the argument that already
+ * keeps `--stamp`'s hash here instead of beside its own CLI.
+ *
+ * Refuses to stamp a tree that is not there. A stamp without its subject is the
+ * one file shape this scheme cannot survive: it would outlive a clean, a failed
+ * generation or a cache eviction and go on acquitting a tree nobody emitted.
+ * Absent is handled everywhere else in this module as "no evidence", which is
+ * safe; a stamp for nothing is not.
+ *
+ * Returns the digest written, so the caller can print evidence a reader can
+ * recompute rather than an assertion they must take on trust.
+ */
+export function writeSchemaStamp(root, pkgDir) {
+  const treeDir = path.join(pkgDir, SCHEMA_TREE_DIR_NAME);
+  if (!existsSync(treeDir)) {
+    throw new CoverageError(
+      `${posixRel(root, treeDir)} does not exist, so there is no generated tree to stamp — ` +
+        `this runs at the END of generation, not before it.`,
+    );
+  }
+  const hash = buildInputHash(root, pkgDir);
+  writeFileSync(path.join(treeDir, SCHEMA_STAMP_BASENAME), `${hash}\n`);
+  return hash;
 }
