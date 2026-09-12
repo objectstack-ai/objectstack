@@ -28,7 +28,7 @@ export default defineConfig({
           // #13517: quiet the registry's per-item registration chatter — the
           // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
           // default. Enforced by scripts/check-registry-log-declared.mjs.
-          env: { OS_REGISTRY_LOG: 'warn' },
+          env: { OS_REGISTRY_LOG: 'warn', OS_REST_LOG: 'silent' },
           // A late console.* must not redden a green suite (#10374); see the root
           // block. A ROOT-level value is inert for a project run, so it is
           // declared here as well (scripts/check-console-intercept-disarm.mjs).
@@ -44,7 +44,7 @@ export default defineConfig({
           // #13517: quiet the registry's per-item registration chatter — the
           // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
           // default. Enforced by scripts/check-registry-log-declared.mjs.
-          env: { OS_REGISTRY_LOG: 'warn' },
+          env: { OS_REGISTRY_LOG: 'warn', OS_REST_LOG: 'silent' },
           // A late console.* must not redden a green suite (#10374); see the root
           // block. A ROOT-level value is inert for a project run, so it is
           // declared here as well (scripts/check-console-intercept-disarm.mjs).
@@ -71,7 +71,7 @@ export default defineConfig({
     // The ADR-0005 `[Registry] Collision` diagnostics go through a bare
     // `console.warn` the level never gates, so a real shadowing still speaks.
     // Enforced by scripts/check-registry-log-declared.mjs.
-    env: { OS_REGISTRY_LOG: 'warn' },
+    env: { OS_REGISTRY_LOG: 'warn', OS_REST_LOG: 'silent' },
     globals: true,
     environment: 'node',
   },
