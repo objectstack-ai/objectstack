@@ -14,6 +14,19 @@
 // asserted through the enforcer's OWN readback (`getPluginPermissions`), never
 // through the binding record alone — the binding record is what this module
 // says it did, the enforcer is what actually happened.
+//
+// ⛔ VERB DISCIPLINE (#17147). Every case here reads a permission BAG and
+// asserts what it ANSWERS. None of them asserts that anything was refused, and
+// none of them could: nothing on this tree queries the registry these entries
+// land in — `SecurePluginContext` has no production construction site, and the
+// fs/network gates have no caller at all. Two case titles here used to say
+// `enforces` and `denies`, and a case title is read as evidence (ADR-0033: an
+// AI author reading this file concludes the platform confines plugins and
+// writes a manifest expecting it). So: `answers`, `registered`, `bound` — ⛔
+// never `enforces`, `denies`, `gates`, `refuses` or `blocks` until the seam
+// exists. The measurement that decides when it does is pinned in
+// `@objectstack/core`'s `granted-permissions-not-enforced.pin.test.ts`, whose
+// negative assertion is repo-wide and covers this file too.
 
 import { describe, it, expect, vi } from 'vitest';
 import { createPluginPermissionEnforcer } from '@objectstack/core';
@@ -87,7 +100,7 @@ describe('#13457 — absent, `{}`, and consented are THREE states, never two', (
         expect(binding.unregistered).toEqual(['com.acme.crm', 'com.acme.reports']);
     });
 
-    it('a `{}` ENTRY is a consent record that consented to nothing — registered, and denies', () => {
+    it('a `{}` ENTRY is a consent record that consented to nothing — registered, and its bag answers NO to everything', () => {
         const e = enforcer();
         const binding = registerArtifactGrantedPermissions(
             artifact({ grantedPermissions: { 'com.acme.crm': {} } }),
@@ -106,7 +119,7 @@ describe('#13457 — absent, `{}`, and consented are THREE states, never two', (
         expect(perms!.canReadFile('/tmp/x')).toBe(false);
     });
 
-    it('a CONSENTED entry enforces exactly the consented surface and nothing beside it', () => {
+    it("a CONSENTED entry's bag ANSWERS yes to exactly the consented surface and nothing beside it", () => {
         const e = enforcer();
         registerArtifactGrantedPermissions(
             artifact({ grantedPermissions: { 'com.acme.crm': CONSENTED } }),
