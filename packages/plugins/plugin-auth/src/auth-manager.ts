@@ -58,6 +58,7 @@ import {
 } from './auth-session-audit.js';
 import { SESSION_ERASURE_PATHS } from './session-tombstone.js';
 import { envelopeVendorAdminRefusal } from './vendor-admin-refusal-envelope.js';
+import { refuseAnonymousSession } from './anonymous-session-refusal.js';
 import {
   buildBetterAuthRouteOwnership,
   type BetterAuthRouteOwnership,
@@ -5631,7 +5632,22 @@ export class AuthManager {
     //
     // Status and admission are untouched; see the module header for the three
     // narrowings and the measurement behind each.
-    const response = await envelopeVendorAdminRefusal(endpointPath, vendorResponse);
+    const enveloped = await envelopeVendorAdminRefusal(endpointPath, vendorResponse);
+
+    // [#17238] And the anonymous `/get-session` answer becomes the same
+    // declared refusal. better-auth serves `200` + the literal JSON `null`
+    // when no session backs the request, which is a value no
+    // `SessionResponse` can express — so `ObjectStackClient.auth.me()`, which
+    // declares `Promise<SessionResponse>`, resolved OUTSIDE its own type on
+    // the most ordinary call a logged-out caller makes. Ruled by the director
+    // seat (batch #117 item 4): the code moves, the published schema does not.
+    //
+    // Same seam and same reason as the `/admin/` normalization above — this is
+    // the ONE place every vendor route passes through — but ⚠️ NOT the same
+    // kind of change: that one is forbidden to move admission and this one IS
+    // the admission move (`200` -> `401`). `anonymous-session-refusal.ts`
+    // carries the three narrowings that keep every other answer identical.
+    const response = await refuseAnonymousSession(endpointPath, enveloped);
 
     if (response.status >= 500) {
       try {
