@@ -2697,8 +2697,10 @@ const warnedEmailTemplateFloors = new Set<string>();
  * resolver's ladder is fenced by a standing ruling and is NOT touched here: the
  * remedy this points at is the bundle.
  *
- * Runs post-parse on purpose — `locale` defaults to `en-US`, so a row that
- * omits the key entirely already has the floor and must not be reported.
+ * Runs post-parse, on the value the schema produced. `locale` defaults to
+ * `en-US`, so a row that omits the key entirely already has the floor and must
+ * not be reported — the reader below mirrors that default rather than relying
+ * on the call site for it, so the two agree wherever this is called from.
  * Warn-once per bundle, keyed by name plus the tags it actually carries.
  */
 function warnEmailTemplateLocaleFloor(data: ObjectStackDefinition): void {

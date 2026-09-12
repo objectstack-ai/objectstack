@@ -120,8 +120,10 @@ describe('#17614 — and stays silent where the bundle HAS a floor (the controls
   });
 
   it('silent when the row omits `locale` entirely — the schema default already IS the floor', () => {
-    // This is the post-parse seam. Run pre-parse, the key is not there yet and
-    // this stack would be reported for a floor it actually has.
+    // Measured, by ablation: moving the call pre-parse does NOT break this —
+    // the reader mirrors the schema default for a missing key, so the two
+    // agree and the case is silent either way. The pin is the behaviour (an
+    // omitted `locale` is never reported), not the call site.
     const { warns, value } = warningsOf(stack([tpl(undefined)], THE_TRAP));
     expect(floorWarns(warns)).toEqual([]);
     expect(value.emailTemplates?.[0]?.locale).toBe(EMAIL_TEMPLATE_FLOOR_LOCALE);
