@@ -2025,9 +2025,11 @@ const MEMBER_PATH_RE = new RegExp(`^${IDENT}(?:\\.${IDENT})*$`);
  * than that refusal — writable but wrong — so `dotted` references are resolved
  * STRUCTURALLY (`resolveMemberPath`) and refused, never guessed, when the walk
  * finds zero or more than one candidate. A leading segment names an object
- * literal or a CLASS (#17279): reading only the first left `engine.ts#ObjectRepository.findOne`
- * unwritable while the bare `engine.ts#findOne` answered about `ObjectQL.findOne`,
- * which is #15627's defect surviving its own fix on the other container kind. ⛔ A line number is never the
+ * literal or a CLASS (#17279): reading only the first left the dotted spelling on
+ * `packages/objectql/src/engine.ts#ObjectRepository` unwritable, while the bare
+ * `packages/objectql/src/engine.ts#delete` answered about `ObjectQL.delete` — a
+ * member the diff never touched, which is #15627's own defect surviving its fix on
+ * the container kind that fix did not cover. ⛔ A line number is never the
  * disambiguator: this file's line numbers were measured to rot within one day.
  *
  * @returns {{ path: string, symbol: string, segments: string[], dotted: boolean }|null}
@@ -5157,9 +5159,9 @@ function selfTest() {
   //
   // Measured on `packages/objectql/src/engine.ts` (PR #17255, two members narrowed
   // on the exported class `ObjectRepository`):
-  //   bare   `engine.ts#delete`                   -> `ObjectQL.delete`, a member the
+  //   bare   `…/engine.ts#delete`                  -> `ObjectQL.delete`, a member the
   //                                                  diff never touched
-  //   dotted `engine.ts#ObjectRepository.delete`  -> "no `ObjectRepository` object
+  //   dotted `…/engine.ts#ObjectRepository.delete` -> "no `ObjectRepository` object
   //                                                  literal is declared"
   // Neither spelling could address the member, so the category the PR belonged to
   // was unclaimable BY the PR -- the #16571 failure class, one container kind over.
