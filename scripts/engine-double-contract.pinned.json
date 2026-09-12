@@ -2717,6 +2717,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/claim-seed-ownership-seed-settle-rerun.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/claim-seed-ownership-seed-settle-rerun.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/claim-seed-ownership.test.ts",
       "verb": "update",
       "pinned": 5
