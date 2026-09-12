@@ -3189,7 +3189,7 @@ describe('ObjectKanbanPropsSchema limit — the row cap four objectui faces alre
 // on the React-host `kanban-ui` block). Unlike `limit` above — a key four
 // objectui faces already implemented, so the spec was the half that was wrong
 // — `quickAdd` was FORWARDED and never read: at the pin this repo builds
-// against (`.objectui-sha` = `53ded82bf`) `ObjectKanban.tsx:930` spreads the
+// against (`.objectui-sha` = `53ded82bf`) `ObjectKanban.tsx:931` spreads the
 // authored bag into `KanbanRenderer` and `KanbanImpl` gates the affordance on
 // `quickAdd && onQuickAdd` (`:355`, `:368`), while `onQuickAdd` is a
 // host-supplied FUNCTION no producer puts on an `object-kanban` node

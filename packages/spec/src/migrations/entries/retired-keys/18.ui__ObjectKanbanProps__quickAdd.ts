@@ -6,7 +6,7 @@
 // the `object-kanban` board and stays only on the `kanban-ui` block, where a
 // React host can supply the runtime function the control needs.
 // The board FORWARDED the key but never honoured it: measured at the
-// `.objectui-sha` pin `53ded82bf`, `ObjectKanban.tsx:930` spreads the authored
+// `.objectui-sha` pin `53ded82bf`, `ObjectKanban.tsx:931` spreads the authored
 // bag into `KanbanRenderer` (`plugin-kanban/src/index.tsx:196` passes both
 // `quickAdd` and `onQuickAdd`), and `KanbanImpl` gates the affordance on BOTH
 // (`:355`, `:368`) — while `onQuickAdd` is a host-supplied FUNCTION that JSON

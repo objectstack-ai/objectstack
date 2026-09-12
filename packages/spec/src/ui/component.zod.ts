@@ -2739,7 +2739,7 @@ export type ObjectMetricPropsParsed = z.infer<typeof ObjectMetricPropsSchema>;
  * `$filter` handoff), `data` (:217-224), `cardTitle`/`titleField` (:233),
  * `cardFields` (:322), `swimlaneField`/`grouping` (:518-519), and via the
  * forwarded schema `coverImageField`/`conditionalFormatting` (`KanbanRenderer`,
- * index.tsx — `ObjectKanban.tsx:930` spreads the authored bag into it).
+ * index.tsx — `ObjectKanban.tsx:931` spreads the authored bag into it).
  * `quickAdd` sat on that forwarded list and is RETIRED (#17260, tombstoned
  * below): the sentence was true about the FORWARD and false about the READ,
  * which is how the key kept re-authorizing itself. `groupField` is the
@@ -2827,9 +2827,10 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * option B, `quickAdd` leaves `object-kanban` and stays only on the
    * React-host `kanban-ui` block).
    *
-   * Measured at the `.objectui-sha` pin this repo builds against
-   * (`53ded82bf`): the board forwards the key — `ObjectKanban.tsx:930`
-   * spreads the authored bag into `KanbanRenderer`, which passes
+   * Measured at the objectui pin this repo builds against
+   * (`.objectui-sha` = `53ded82bf`): the board forwards the key —
+   * `ObjectKanban.tsx:931` spreads the authored bag into `KanbanRenderer`,
+   * which passes
    * `quickAdd={schema.quickAdd}` and `onQuickAdd={schema.onQuickAdd}`
    * (`plugin-kanban/src/index.tsx:196`) — but the affordance is gated on
    * BOTH (`KanbanImpl.tsx:355` and `:368`), and `onQuickAdd` is a

@@ -17,7 +17,7 @@ block, where a React host can supply the runtime function the control needs.
 | `kanban-ui` (objectui block) | the control works when the host passes `onQuickAdd` | **unchanged** |
 
 **What was actually wrong.** Measured at the `.objectui-sha` pin this repo builds against
-(`53ded82bf`): the board FORWARDS the key — `ObjectKanban.tsx:930` spreads the authored bag
+(`53ded82bf`): the board FORWARDS the key — `ObjectKanban.tsx:931` spreads the authored bag
 into `KanbanRenderer`, which passes `quickAdd={schema.quickAdd}` alongside
 `onQuickAdd={schema.onQuickAdd}` (`plugin-kanban/src/index.tsx:196`) — but `KanbanImpl`
 gates the affordance on **both** (`:355`, `:368`), and `onQuickAdd` is a host-supplied

@@ -8020,7 +8020,7 @@ const objectGridDefaultSortRemoved: MetadataConversion = {
  *
  * **A pure lossless delete.** The key never had an effect to preserve.
  * Measured at the `.objectui-sha` pin (`53ded82bf`): the board FORWARDS it —
- * `ObjectKanban.tsx:930` spreads the authored bag into `KanbanRenderer`,
+ * `ObjectKanban.tsx:931` spreads the authored bag into `KanbanRenderer`,
  * which passes `quickAdd={schema.quickAdd}` alongside
  * `onQuickAdd={schema.onQuickAdd}` (`plugin-kanban/src/index.tsx:196`) — but
  * `KanbanImpl` gates the affordance on BOTH (`:355`, `:368`), and
