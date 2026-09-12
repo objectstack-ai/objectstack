@@ -44,7 +44,7 @@ import { BUCKET_GRANULARITIES } from '@objectstack/core';
 // [#16178] and the DECLARED interval vocabulary, quoted the same way, so the
 // refusal can tell a value the contract never declared apart from one it
 // declares and this backend cannot label.
-import { TimeUpdateInterval } from '@objectstack/spec/data';
+import { RETIRED_SUB_DAY_INTERVALS, TimeUpdateInterval } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
 
 /**
@@ -133,6 +133,17 @@ export function refusePerAggregationFilter(alias: string): never {
  * interval this backend cannot label reaches the 501 arm. Same separation the
  * `dateRange` half of this face already draws (#16322 / #16041).
  *
+ * ⚠️ **[#17296] The 501 arm's population is EMPTY as of protocol 18, and the arm
+ * stays anyway.** That card retired the three sub-day names from
+ * `TimeUpdateInterval`, so the declared set and {@link BUCKET_GRANULARITIES} are
+ * now the same five and no value can be declared-but-unbucketable here. The arm
+ * is not dead code being kept for sentiment: it is the guard that catches the
+ * two vocabularies diverging AGAIN, which is the state this whole card
+ * documents. Deleting it would mean the next widening of `TimeUpdateInterval`
+ * alone answers a 400 calling a freshly declared value undeclared — the same
+ * lie in the other direction. `memory-analytics-time-granularity.test.ts` pins
+ * the emptiness so the claim is measured rather than asserted.
+ *
  * ⚠️ The 400 arm answers the GENERAL `StandardErrorCode.INVALID_QUERY` rather
  * than a dedicated `ANALYTICS_GRANULARITY_UNRECOGNIZED` — the shape its
  * `dateRange` sibling uses — because a dedicated code has to be registered in
@@ -143,10 +154,25 @@ export function refusePerAggregationFilter(alias: string): never {
 export function unsupportedTimeGranularityError(dimension: string, granularity: string): Error {
   const declaredIntervals = TimeUpdateInterval.options as readonly string[];
   if (!declaredIntervals.includes(granularity)) {
+    // [#17296] A RETIRED name is not the same mistake as a name that never
+    // existed, and it reaches this arm for a different reason: the author wrote
+    // a spelling the spec declared until protocol 18, so the sentence they need
+    // is the retirement, not the vocabulary. Without this branch an author
+    // upgrading from 17 is told `hour` "is not declared", which is true today
+    // and useless — it reads as a typo and hides the fact that there is no
+    // sub-day bucket to migrate to at any granularity.
+    const retired = (RETIRED_SUB_DAY_INTERVALS as readonly string[]).includes(granularity);
     const outOfVocabulary = new Error(
       `Time dimension "${dimension}" asks for granularity "${granularity}", which @objectstack/spec's ` +
         `TimeUpdateInterval does not declare — the declared intervals are ` +
-        `${declaredIntervals.join(', ')}. This is a mistake in the query rather than a gap in this ` +
+        `${declaredIntervals.join(', ')}. ` +
+        (retired
+          ? `It was declared until protocol 18 and was retired there (ADR-0049 enforce-or-remove): no ` +
+            `backend ever bucketed a sub-day interval and none could advertise one, so there is no ` +
+            `finer bucket to migrate to. Ask for the coarsest interval that still answers your ` +
+            `question, or drop the key and group on the raw timestamp deliberately. `
+          : ``) +
+        `This is a mistake in the query rather than a gap in this ` +
         `backend (driver-memory), so it answers a 400 rather than the 501 a declared-but-unbucketable ` +
         `interval gets. Ask for one of ${BUCKET_GRANULARITIES.join(', ')}, which this backend buckets.`,
     ) as Error & { code?: string; status?: number };

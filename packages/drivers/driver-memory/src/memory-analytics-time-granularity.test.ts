@@ -21,7 +21,8 @@
 import { describe, it, expect } from 'vitest';
 import { InMemoryDriver } from './memory-driver.js';
 import { MemoryAnalyticsService } from './memory-analytics.js';
-import { AnalyticsQuerySchema } from '@objectstack/spec/data';
+import { AnalyticsQuerySchema, TimeUpdateInterval } from '@objectstack/spec/data';
+import { BUCKET_GRANULARITIES } from '@objectstack/core';
 import type { AnalyticsQuery, Cube } from '@objectstack/spec/data';
 
 /** Every query goes through the schema, the route a real request body takes. */
@@ -281,20 +282,41 @@ describe('[#16178] bucketing and the reference timezone', () => {
 });
 
 describe('[#16178] a sub-day granularity is refused, not dropped', () => {
+  // [#17296] These three were refused as NOT_IMPLEMENTED/501 when this file was
+  // written, because `TimeUpdateInterval` still DECLARED them and this backend
+  // could not bucket them — a capability gap, stated honestly. #17296 measured
+  // that no backend could bucket them and none could even advertise them
+  // (`supports.queryDateGranularity` is a record over the five-member
+  // `DateGranularity`), and retired the three from the spec. The refusal did
+  // not get quieter: its CLASS moved, from "this backend cannot" to "the
+  // contract does not declare it", which is the honest sentence once the
+  // declaration is gone. Both halves are pinned below.
   it.each(['second', 'minute', 'hour'])(
-    'refuses %s with the NOT_IMPLEMENTED/501 envelope',
+    'refuses %s — now as the 400 the retirement makes correct, carrying the retirement prescription',
     async (granularity) => {
-      // Asserted on `code` and `status` — the ADR-0112 envelope — never on the
-      // message text. A bare `toThrow()` would pass against a driver that threw
-      // for any unrelated reason.
-      await expect(
-        query({
-          ...BASE,
-          timeDimensions: [{ dimension: 'events.createdAt', granularity: granularity as 'hour' }],
-        }),
-      ).rejects.toMatchObject({ code: 'NOT_IMPLEMENTED', status: 501 });
+      // Asserted on `code` and `status` — the ADR-0112 envelope — plus the one
+      // sentence an upgrading author needs, because "is not declared" alone
+      // reads to them as a typo. A bare `toThrow()` would pass against a driver
+      // that threw for any unrelated reason.
+      const thrown = await query({
+        ...BASE,
+        timeDimensions: [{ dimension: 'events.createdAt', granularity: granularity as 'day' }],
+      }).catch((e: Error & { code?: string; status?: number }) => e);
+      expect(thrown).toMatchObject({ code: 'INVALID_QUERY', status: 400 });
+      expect((thrown as Error).message).toContain('retired');
+      expect((thrown as Error).message).toContain('protocol 18');
     },
   );
+
+  it('the 501 arm still EXISTS and its population is empty — measured, not asserted', async () => {
+    // The claim `filter-refusal.ts` makes in prose, as a reading. 501 answers
+    // "declared here, unbucketable here", so its population is exactly
+    // TimeUpdateInterval minus BUCKET_GRANULARITIES. The two sets are equal as
+    // of protocol 18, which is WHY every cell above is a 400 — and the day a
+    // widening of one alone breaks that equality, this goes red before any
+    // caller meets a 400 calling a declared value undeclared.
+    expect([...TimeUpdateInterval.options]).toEqual([...BUCKET_GRANULARITIES]);
+  });
 
   it('refuses on an EMPTY table too, so the refusal is the compile and not the data', async () => {
     // An unbucketed query over no rows answers `{rows: []}`; this one still
@@ -303,14 +325,14 @@ describe('[#16178] a sub-day granularity is refused, not dropped', () => {
       query(
         {
           ...BASE,
-          timeDimensions: [{ dimension: 'events.createdAt', granularity: 'hour' }],
+          timeDimensions: [{ dimension: 'events.createdAt', granularity: 'hour' as 'day' }],
         },
         [],
       ),
-    ).rejects.toMatchObject({ code: 'NOT_IMPLEMENTED', status: 501 });
+    ).rejects.toMatchObject({ code: 'INVALID_QUERY', status: 400 });
   });
 
-  it('answers 400, not 501, for a granularity the CONTRACT never declared', async () => {
+  it('answers 400 for a granularity the CONTRACT never declared, WITHOUT the retirement sentence', () => {
     // 501 is a claim about this BACKEND, and it is only honest about a value the
     // contract actually declares. `'fortnight'` is a mistake in the query, and
     // the 501 sentence asserting "the spec declares the value" would have been
@@ -318,20 +340,24 @@ describe('[#16178] a sub-day granularity is refused, not dropped', () => {
     // schema door, which is where `POST /analytics/dataset/query` types
     // `selection.timeDimensions` without Zod-parsing them — so this query
     // deliberately does NOT go through `asQuery`.
-    await expect(unparsed('fortnight')).rejects.toMatchObject({
+    return expect(unparsed('fortnight')).rejects.toMatchObject({
       code: 'INVALID_QUERY',
       status: 400,
     });
   });
 
-  it('CONTROL — the same unparsed door still answers 501 for a DECLARED interval', async () => {
-    // Without this the cell above proves only "the unparsed door throws". The
-    // two answers differ on exactly one thing: whether `TimeUpdateInterval`
-    // declares the value.
-    await expect(unparsed('hour')).rejects.toMatchObject({
-      code: 'NOT_IMPLEMENTED',
-      status: 501,
-    });
+  it('CONTROL — the same door separates a RETIRED spelling from one that never existed', async () => {
+    // [#17296] Without this the cells above read as "every rejection says
+    // retired". Both are 400 now, so `code`/`status` no longer tell the two
+    // populations apart — the PRESCRIPTION does, and that is the whole reason
+    // the 400 arm branches at all. `fortnight` was never declared and has no
+    // migration; `hour` was, and does not have one either, which is itself the
+    // thing the author has to be told.
+    const neverDeclared = await unparsed('fortnight').catch((e: Error) => e);
+    const retired = await unparsed('hour').catch((e: Error) => e);
+    expect((neverDeclared as Error).message).not.toContain('retired');
+    expect((retired as Error).message).toContain('retired there');
+    expect((retired as Error).message).toContain('protocol 18');
   });
 });
 

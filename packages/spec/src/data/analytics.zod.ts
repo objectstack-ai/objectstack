@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { FilterConditionSchema } from './filter.zod';
 import { DATE_RANGE_PRESETS } from './date-range-presets';
+import { DateGranularity } from './query.zod';
 
 /**
  * Analytics/Semantic Layer Protocol
@@ -48,11 +49,92 @@ export const DimensionType = z.enum([
 export type DimensionType = z.input<typeof DimensionType>;
 
 /**
- * Time Interval for Time Dimensions
+ * The three sub-day names this enum declared until protocol 18 (#17296).
+ *
+ * They were never a capability any backend could offer, and not because the
+ * backends lag the contract — the rest of the contract never declared them:
+ *
+ * - `DateGranularity` (`data/query.zod.ts`), the vocabulary a `groupBy` entry
+ *   and every driver's bucket expression are typed by, declares five;
+ * - `@objectstack/core`'s `BUCKET_GRANULARITIES` — the canonical bucket-KEY
+ *   vocabulary, an OUTPUT contract a drill-down crosses — labels the same five
+ *   and has no key shape for a sub-day bucket;
+ * - `DriverCapabilitiesSchema.supports.queryDateGranularity`, the mechanism a
+ *   backend uses to say which granularities it buckets NATIVELY, is a
+ *   `z.record(DateGranularity, boolean)`: `{ day, week, month, quarter, year }`
+ *   parses and the same record plus `hour` raises `unrecognized_keys`. So a
+ *   driver could not have advertised sub-day support even if it had one.
+ *
+ * That last point is what decides this as a RETIREMENT rather than a capability
+ * gap. A declared value one backend cannot serve is a gap, and the contract
+ * already has a place to say so. A declared value NO backend can even claim is
+ * a declaration with no counterpart anywhere in the contract that carries it.
+ *
+ * Measured on the shipped faces before the narrowing: `driver-memory`'s
+ * analytics face answered `NOT_IMPLEMENTED` / 501, `driver-mongodb`'s bucket
+ * builder answered `NOT_IMPLEMENTED` / 501, and the engine's in-memory
+ * aggregation — the fallback every SQL/ObjectQL analytics query with a
+ * granularity lands on, since `NativeSQLStrategy` declines on a granularity —
+ * answered 200 with one group per distinct timestamp, the raw instant echoed
+ * back as its own bucket label. Two honest refusals and one silently wrong
+ * answer, and no third behaviour.
+ *
+ * ⚠️ Retiring them does NOT retire sub-day analytics as an idea. Offering it
+ * means widening `DateGranularity`, the `queryDateGranularity` record, the
+ * canonical key vocabulary and every driver's bucket expression together —
+ * new capability, decided as such, rather than a name that parses here and
+ * resolves nowhere.
  */
-export const TimeUpdateInterval = z.enum([
-  'second', 'minute', 'hour', 'day', 'week', 'month', 'quarter', 'year'
-]);
+export const RETIRED_SUB_DAY_INTERVALS = ['second', 'minute', 'hour'] as const;
+
+/**
+ * The refusal a value outside {@link TimeUpdateInterval} is answered with.
+ *
+ * Two populations, one function, because they are not the same mistake and the
+ * author's next action differs — the separation `driver-memory`'s own
+ * `unsupportedTimeGranularityError` draws at its own door, and the one
+ * {@link analyticsDateRangeRefusalMessage} draws for this entry's sibling key:
+ *
+ * - a RETIRED sub-day name is a value this enum used to declare, so the
+ *   prescription is the retirement — what replaced it and the migrate line;
+ * - anything else was never declared, so the prescription is the vocabulary.
+ */
+export function timeUpdateIntervalRefusalMessage(input: unknown): string {
+  const received = typeof input === 'string' ? `'${input}'` : JSON.stringify(input) ?? String(input);
+  const declared = DateGranularity.options.join(', ');
+  if (typeof input === 'string' && (RETIRED_SUB_DAY_INTERVALS as readonly string[]).includes(input)) {
+    return (
+      `Time interval ${received} was retired in protocol 18 (#17296, ADR-0049 enforce-or-remove). `
+      + 'No backend ever bucketed it and none could advertise it: the canonical bucket-key '
+      + 'vocabulary and `supports.queryDateGranularity` both stop at '
+      + `${declared}, so the name resolved to a refusal or to one group per distinct timestamp. `
+      + `Ask for the coarsest interval that still answers your question (${declared}), or drop `
+      + 'the key and group on the raw timestamp deliberately. '
+      + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.'
+    );
+  }
+  return (
+    `Time interval ${received} is not declared — the declared intervals are ${declared}. `
+    + 'They are `DateGranularity`, the one vocabulary the drivers, the engine and the canonical '
+    + 'bucket keys all share; this enum no longer carries a second, wider copy of it.'
+  );
+}
+
+/**
+ * Time Interval for Time Dimensions.
+ *
+ * **Derived from `DateGranularity`, never restated.** The two were separate
+ * literal lists until #17296, and they disagreed by three members for as long
+ * as both existed — the drift this file's own `granularity`/`granularities`
+ * alias note warns about, one layer up. The members now come from the single
+ * source; what this enum adds is the refusal text, because the value arrives
+ * here from an analytics request body and an author needs the analytics
+ * prescription rather than a bare enum error.
+ */
+export const TimeUpdateInterval = z.enum(
+  DateGranularity.options,
+  { error: (issue) => timeUpdateIntervalRefusalMessage(issue.input) },
+);
 export type TimeUpdateInterval = z.input<typeof TimeUpdateInterval>;
 
 /**
