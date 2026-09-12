@@ -167,6 +167,7 @@
     "ui/BulkActionParam:placeholder",
     "ui/BulkActionParam:required",
     "ui/BulkActionParam:type",
+    "ui/CalendarConfig:allDayField",
     "ui/CalendarConfig:colorField",
     "ui/CalendarConfig:endDateField",
     "ui/CalendarConfig:startDateField",
