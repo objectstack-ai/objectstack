@@ -237,53 +237,8 @@ Replaces both the `member_default` builtin-set fallback and ADR-0056 D7's defaul
   install-time prompt ("CRM suggests adding `crm_readonly` to Everyone — accept?"). It is **never**
   auto-bound: installing a package must not silently widen every tenant user's access.
 - **Lint (D7) hard-blocks high-privilege bits on `everyone` bindings**: `viewAllRecords`,
-  `modifyAllRecords`, `allowDelete`, `allowPurge`, `allowTransfer`, and a `systemPermissions`
-  entry naming a **platform** system permission are rejected (or force a break-glass
-  confirmation) on any set bound to `everyone`. An **app-declared capability token** — one a
-  package declared for itself under ADR-0066 D1, entering `sys_capability` with
-  `managed_by: 'package'` + `package_id` provenance — is **not** an offending bit: it gates
-  only what that same package's own resources require of it, so conferring it on the
-  authenticated audience widens nothing the package did not itself define. See the revision
-  note below.
-
-> **Revision (2026-09-12, #17189) — the offending bit is a `systemPermissions` entry naming a
-> PLATFORM permission, not `systemPermissions` at all.** [ruled]
->
-> As first written, the bullet above made **any** non-empty `systemPermissions` an offending bit,
-> and `describeHighPrivilegeBits` (`@objectstack/spec/security`) implemented it literally.
-> `systemPermissions` carries two unlike kinds of token, though: the platform's own powers
-> (`manage_users` and friends), and a capability a package **declared for itself** (ADR-0066 D1).
-> An app whose navigation gates on its own token therefore could not ship the set every employee
-> holds — the set's own gate made it unbindable to `everyone` — so the app was pushed toward
-> declaring no gates at all, the opposite of what ADR-0066 D1 exists to encourage. Reported by a
-> named downstream consumer that had to fall back to binding its baseline set to each position by
-> hand, plus one manual grant per new hire, indefinitely.
->
-> **What changed**: an offending `systemPermissions` bit is one naming a platform system
-> permission. A token this stack declared as a package capability is not counted. Three boundaries
-> hold the narrowing, and each fails closed:
->
-> 1. **The platform floor is absolute.** A platform capability name stays high-privilege however it
->    is declared, so a package cannot launder `manage_users` past the anchor gate by declaring a
->    capability of that name.
-> 2. **The discriminator is provenance, never spelling.** The predicate is *told* which names this
->    stack declared; it never infers "app token" from the shape of a name. ⛔ A naming-syntax rule
->    (dotted ⇒ app token) was considered and rejected: it misjudges in silence the first dotted
->    platform permission — `setup.access` is one today — and the first undotted app token.
-> 3. **Omission refuses.** A caller that cannot enumerate the stack's declarations gets the
->    pre-revision verdict, so a missing input narrows nothing.
->
-> **`guest` is untouched.** D9's strictest tier keeps refusing any non-empty `systemPermissions`:
-> D5 speaks for authenticated members, and conferring an app's own gate on anonymous visitors is a
-> different act, not decided here.
->
-> Ruling: director seat, batch #110, 2026-09-10 — option (i), the predicate takes the declared
-> capability list as an input. The landing order is the maintainer's, verbatim:
-> 「我们的项目以objectstack 协议为准，文档应该以实际实现为准。协议不正确的应该先修改协议。」
-> ⇒ this revision and the `packages/spec` predicate land first; the `plugin-security` boot refusal
-> and the `@objectstack/lint` `security-anchor-high-privilege` rule follow. Until those callers
-> supply the declared list they keep the pre-revision behaviour — the predicate's default — so the
-> narrowing reaches a binding only where a caller can name what this stack declared.
+  `modifyAllRecords`, `allowDelete`, `allowPurge`, `allowTransfer`, and `systemPermissions` are
+  rejected (or force a break-glass confirmation) on any set bound to `everyone`.
 
 ### D6 — Explain engine is P0; access-matrix snapshots gate publishes
 

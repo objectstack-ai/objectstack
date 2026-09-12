@@ -49,9 +49,10 @@ so this release widens the API, not any live anchor binding. The
 `security-anchor-high-privilege` rule pass the declared list in a follow-up, in
 the ruled order (protocol first).
 
-ADR-0090 D5's offending-bit list is revised to match, in the same PR: the
-offending bit is a `systemPermissions` entry naming a **platform** system
-permission.
+ADR-0090 D5's offending-bit list is revised to match in its own governed PR
+(objectstack#17814), per the ruling's 「ADR-0090 修订单独受管 PR」: the offending
+bit is a `systemPermissions` entry naming a **platform** system permission.
+Both halves are phase ①; ⛔ neither lands without the other following.
 
 **This is shipped, which is why it carries a changeset rather than
 `skip-changeset`.** `@objectstack/spec`'s published `files[]` ships `dist`, and
