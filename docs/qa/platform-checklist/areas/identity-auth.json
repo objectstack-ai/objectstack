@@ -747,7 +747,7 @@
       "title": "Setup Organization page resolves the active org and drives member/invitation/team management through the better-auth org endpoints — non-admins refused server-side",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["tenant admin / org owner", "a target org member", "a non-admin org member (forger)"],
@@ -822,6 +822,7 @@
       "traps": ["wrong-persona", "dispatcher-vs-hono-route", "hydration-race"],
       "source": [
         "packages/platform-objects/src/apps/setup-nav.contributions.ts#nav_organization (nav_organization recordId {current_org_id}, cloud ADR-0081 D3; Teams/Invitations always mounted per cloud ADR-0081 D1)",
+        "packages/platform-objects/src/pages/sys-organization.page.ts#SysOrganizationDetailPage (WHERE THE THREE TABS COME FROM: a kind: 'slotted' record page whose slots.tabs override replaces the synthesized tab strip outright, giving exactly Members / Invitations / Teams with Members at index 0. Handed to the runtime by plugin-auth's pages: [...]. NOT the Field.relatedList: 'primary' prominence key — no identity object declares that key, and it would not move this page while the tabs slot is present. A grader who finds a Details + stacked Related strip instead is looking at the synthesized default, i.e. this page failed to load)",
         "packages/plugins/plugin-auth/src/auth-route-ledger.ts (organization family: update-member-role, remove-member, update, create-team, add-team-member, list-members/teams/invitations, get-active-member, get-full-organization)",
         "packages/spec/src/identity/membership-role.ts#BUILTIN_MEMBERSHIP_ROLES (BUILTIN_MEMBERSHIP_ROLES / BUILTIN_MEMBERSHIP_ROLE_OPTIONS — THE role vocabulary: owner/admin/delegated_admin/member, ADR-0108; 'nothing widens these at boot any more')",
         "docs/adr/0108-membership-grade-is-not-a-capability-channel.md (why the list is closed: a grade decides what you can REACH, never a bundle of what you may do)",
@@ -831,7 +832,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "new item: Setup Organization page {current_org_id} resolution (ADR-0081) with Members/Invitations/Teams tabs, update-member-role (4-name vocab)/remove-member/rename, create-team + add-team-member → sys_team_member rows, non-admin refused server-side (PENDING-GAPS §B). Teams membership deep-tested in identity-auth.teams-bu-membership; org-member management stays here", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-11", "change": "CORRECTION from run #7663: the role vocabulary named here was wrong. The enforced builtin set is {owner, admin, delegated_admin, member} (ADR-0108 BUILTIN_MEMBERSHIP_ROLE_OPTIONS), NOT {owner, admin, member, guest} — 'guest' is rejected 400 ROLE_NOT_FOUND and delegated_admin is legitimate. Corrected the step, the acceptance clause and the negative; added a closed-vocabulary clause (guest / a stack position / a PermissionSet name each refused, no row left behind); re-pointed source at membership-role.ts + ADR-0108 + the vocabulary dogfood pin instead of the stale organization.zod.ts doc-comment the wrong text came from (that doc-comment is fixed in the same PR)", "ref": "#7740" }
+        { "revision": 2, "date": "2026-08-11", "change": "CORRECTION from run #7663: the role vocabulary named here was wrong. The enforced builtin set is {owner, admin, delegated_admin, member} (ADR-0108 BUILTIN_MEMBERSHIP_ROLE_OPTIONS), NOT {owner, admin, member, guest} — 'guest' is rejected 400 ROLE_NOT_FOUND and delegated_admin is legitimate. Corrected the step, the acceptance clause and the negative; added a closed-vocabulary clause (guest / a stack position / a PermissionSet name each refused, no row left behind); re-pointed source at membership-role.ts + ADR-0108 + the vocabulary dogfood pin instead of the stale organization.zod.ts doc-comment the wrong text came from (that doc-comment is fixed in the same PR)", "ref": "#7740" },
+        { "revision": 3, "date": "2026-09-12", "change": "PROVENANCE, no clause change: #16270 measured that no object under packages/platform-objects/src/identity/ declares Field.relatedList and read the Members/Invitations/Teams claim here as possibly stale. It is not stale — the strip is declared by SysOrganizationDetailPage (packages/platform-objects/src/pages/sys-organization.page.ts), a slotted page whose slots.tabs override replaces the synthesized strip. Added that file as a source entry so the next reader does not have to re-derive it. Steps, acceptance clauses, oracles and negatives are unchanged", "ref": "#16270" }
     ]
     },
     {
