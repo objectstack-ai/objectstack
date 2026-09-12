@@ -697,10 +697,10 @@ export function selfTest() {
   battery('the direction check: a stamp no act can have read');
   const CARD_REPRO = 'Verdict {{NOW}} — on the board read {{WAS:2099-01-01T00:00Z}}.';
   t('⭐ the filed repro: a 2099 quoted stamp is REFUSED, not rendered verbatim', kinds(CARD_REPRO, NOW_MS).includes('quoted-in-the-future'));
-  t('…and the refusal names the clock it was judged against', stampRefusals(CARD_REPRO, NOW_MS)[0].detail.includes('2026-09-10T06:37Z'));
-  t('…and says a time that has not happened is not a reading of anything', stampRefusals(CARD_REPRO, NOW_MS)[0].detail.includes('provably not a reading of anything'));
+  t('…and the refusal names the clock it was judged against', stampRefusals(CARD_REPRO, NOW_MS)[0]?.detail?.includes('2026-09-10T06:37Z') === true);
+  t('…and says a time that has not happened is not a reading of anything', stampRefusals(CARD_REPRO, NOW_MS)[0]?.detail?.includes('provably not a reading of anything') === true);
   t('⭐ …so the whole body is refused and NOTHING is rendered', renderBody(CARD_REPRO, NOW_MS).ok === false && renderBody(CARD_REPRO, NOW_MS).body === undefined);
-  t('⛔ a PAST quoted stamp is untouched — the route this closes is one direction only', renderBody('Verdict {{NOW}} — on the board read {{WAS:2026-09-08T14:00Z}}.', NOW_MS).body.includes('board read 2026-09-08T14:00Z.'));
+  t('⛔ a PAST quoted stamp is untouched — the route this closes is one direction only', renderBody('Verdict {{NOW}} — on the board read {{WAS:2026-09-08T14:00Z}}.', NOW_MS).body?.includes('board read 2026-09-08T14:00Z.') === true);
   t('⭐ BOUNDARY: a stamp equal to the act\'s OWN minute is ACCEPTED — a reading taken inside 06:37 is spelled 06:37Z', stampRefusals('read {{WAS:2026-09-10T06:37Z}}', NOW_MS).length === 0);
   t('⭐ …and the first minute the clock has NOT reached is refused', kinds('read {{WAS:2026-09-10T06:38Z}}', NOW_MS).includes('quoted-in-the-future'));
   t('…the acceptance opens ON the tick: a clock standing exactly at 06:37:00 accepts 06:37Z', stampRefusals('read {{WAS:2026-09-10T06:37Z}}', Date.parse('2026-09-10T06:37:00Z')).length === 0);
@@ -713,12 +713,12 @@ export function selfTest() {
   t('an unreadable value is nobody\'s idea of the future', stampIsFuture('yesterday', NOW_MS) === false);
   t('⭐ the `{{NOW}}` route is untouched: a token-only body still renders on this act\'s clock', renderBody('Claim: {{NOW}} — dispatched.', NOW_MS).body === 'Claim: 2026-09-10T06:37Z — dispatched.');
   const POSITIONAL_FUTURE = 'Claim: skills seat, 2099-01-01T00:00Z — dispatched.';
-  t('⭐ the POSITIONAL refusal stops handing a future estimate back through the quoted route', !stampRefusals(POSITIONAL_FUTURE, NOW_MS)[0].detail.includes('{{WAS:2099-01-01T00:00Z}}'));
-  t('…and says instead that the stamp is later than the clock this act holds', stampRefusals(POSITIONAL_FUTURE, NOW_MS)[0].detail.includes('later than the clock this act holds'));
-  t('…while a PAST typed stamp is still offered the quoted route, which is the whole control', stampRefusals(OPENING, NOW_MS)[0].detail.includes('{{WAS:2026-09-10T06:37Z}}'));
+  t('⭐ the POSITIONAL refusal stops handing a future estimate back through the quoted route', stampRefusals(POSITIONAL_FUTURE, NOW_MS)[0]?.detail?.includes('{{WAS:2099-01-01T00:00Z}}') === false);
+  t('…and says instead that the stamp is later than the clock this act holds', stampRefusals(POSITIONAL_FUTURE, NOW_MS)[0]?.detail?.includes('later than the clock this act holds') === true);
+  t('…while a PAST typed stamp is still offered the quoted route, which is the whole control', stampRefusals(OPENING, NOW_MS)[0]?.detail?.includes('{{WAS:2026-09-10T06:37Z}}') === true);
   const MIXED_FUTURE = 'Claim: {{NOW}}\n\nThe board was read at 2099-01-01T00:00Z.';
-  t('the MIXED refusal likewise stops offering a route that would refuse it', !stampRefusals(MIXED_FUTURE, NOW_MS).find((r) => r.kind === 'mixed').detail.includes('{{WAS:2099-01-01T00:00Z}}'));
-  t('…and a past bare stamp keeps the declaration on offer', stampRefusals('Claim: {{NOW}}\n\nread 2026-09-08T14:00Z', NOW_MS).find((r) => r.kind === 'mixed').detail.includes('{{WAS:2026-09-08T14:00Z}}'));
+  t('the MIXED refusal likewise stops offering a route that would refuse it', stampRefusals(MIXED_FUTURE, NOW_MS).find((r) => r.kind === 'mixed')?.detail?.includes('{{WAS:2099-01-01T00:00Z}}') === false);
+  t('…and a past bare stamp keeps the declaration on offer', stampRefusals('Claim: {{NOW}}\n\nread 2026-09-08T14:00Z', NOW_MS).find((r) => r.kind === 'mixed')?.detail?.includes('{{WAS:2026-09-08T14:00Z}}') === true);
   t('⛔ the clock defaults to Date.now() rather than to "no judgement" when a caller omits it', stampRefusals('read {{WAS:2099-01-01T00:00Z}}').map((r) => r.kind).includes('quoted-in-the-future'));
 
   battery('the substitution: one clock, read once, written everywhere');
