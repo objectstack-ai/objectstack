@@ -365,6 +365,17 @@ function objectExists(sha, cwd) {
 }
 
 /**
+ * The record separator `git log -z` writes between commits.
+ *
+ * Built rather than typed: this repository refuses a raw control byte in any
+ * tracked file (`pnpm check:nul-bytes`), and an editor asked to write the
+ * escape can materialise it as the byte itself — which is how this line got
+ * the gate's attention once already. `String.fromCharCode` cannot be
+ * materialised into anything.
+ */
+const NUL = String.fromCharCode(0);
+
+/**
  * The commits a rev-list range names, as `{ sha, message }` rows.
  *
  * NUL-terminated records: a commit message is multi-line by nature, so no
@@ -377,7 +388,7 @@ export function readCommits(args, { cwd = ROOT, run = execFileSync } = {}) {
     maxBuffer: 64 * 1024 * 1024,
   });
   const rows = [];
-  for (const record of String(out).split(' ')) {
+  for (const record of String(out).split(NUL)) {
     if (record.trim() === '') continue;
     const nl = record.indexOf('\n');
     if (nl < 0) {
@@ -714,7 +725,7 @@ function selfTest() {
   );
   t(
     'the walk reads NUL-terminated records, so a multi-line message stays one commit',
-    readCommits([], { run: () => 'abc\nfix(x): s\n\nbody\n def\nfix(y): t\n' }).map((c) => c.sha).join(','),
+    readCommits([], { run: () => ['abc\nfix(x): s\n\nbody\n', 'def\nfix(y): t\n'].join(NUL) }).map((c) => c.sha).join(','),
     'abc,def',
   );
 
