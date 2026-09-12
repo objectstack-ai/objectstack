@@ -914,7 +914,7 @@ View filter rule
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **mode** | `Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>` | optional (default: `"page"`) |  |
-| **view** | `string` | optional | Name of the form view to use for details (e.g. "summary_view", "edit_form") |
+| **view** | `string` | optional | [EXPERIMENTAL — not enforced] Intended as the name of a form view to open for details (e.g. "summary_view", "edit_form"), but no reader resolves an authored view name: the one read forwards this string into the renderer's navigation-ACTION argument (the slot that otherwise carries the mode token), where a consumer with a closed action vocabulary matches no branch and the row click does nothing. Authoring it selects no view — leave it unset until enforce-or-remove (ADR-0049) is decided for this key. |
 | **preventNavigation** | `boolean` | optional (default: `false`) | Disable standard navigation entirely |
 | **openNewTab** | `boolean` | optional (default: `false`) | Force open in new tab (applies to page mode) |
 | **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
@@ -1159,7 +1159,7 @@ Tab configuration for multi-tab view interface
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **mode** | `Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>` | optional (default: `"page"`) |  |
-| **view** | `string` | optional | Name of the form view to use for details (e.g. "summary_view", "edit_form") |
+| **view** | `string` | optional | [EXPERIMENTAL — not enforced] Intended as the name of a form view to open for details (e.g. "summary_view", "edit_form"), but no reader resolves an authored view name: the one read forwards this string into the renderer's navigation-ACTION argument (the slot that otherwise carries the mode token), where a consumer with a closed action vocabulary matches no branch and the row click does nothing. Authoring it selects no view — leave it unset until enforce-or-remove (ADR-0049) is decided for this key. |
 | **preventNavigation** | `boolean` | optional (default: `false`) | Disable standard navigation entirely |
 | **openNewTab** | `boolean` | optional (default: `false`) | Force open in new tab (applies to page mode) |
 | **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
@@ -1310,7 +1310,7 @@ View filter rule
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **mode** | `Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>` | optional (default: `"page"`) |  |
-| **view** | `string` | optional | Name of the form view to use for details (e.g. "summary_view", "edit_form") |
+| **view** | `string` | optional | [EXPERIMENTAL — not enforced] Intended as the name of a form view to open for details (e.g. "summary_view", "edit_form"), but no reader resolves an authored view name: the one read forwards this string into the renderer's navigation-ACTION argument (the slot that otherwise carries the mode token), where a consumer with a closed action vocabulary matches no branch and the row click does nothing. Authoring it selects no view — leave it unset until enforce-or-remove (ADR-0049) is decided for this key. |
 | **preventNavigation** | `boolean` | optional (default: `false`) | Disable standard navigation entirely |
 | **openNewTab** | `boolean` | optional (default: `false`) | Force open in new tab (applies to page mode) |
 | **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for drawer/modal detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |

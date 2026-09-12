@@ -1595,8 +1595,24 @@ export const NavigationConfigSchema = lazySchema(() => strictObject({
 }, {
   mode: NavigationModeSchema.default('page'),
   
-  /** Target View Config */
-  view: z.string().optional().describe('Name of the form view to use for details (e.g. "summary_view", "edit_form")'),
+  /**
+   * [#16885] Target view config — DECLARED, NOT RESOLVED. The name promises
+   * view selection; nothing in the stack performs it. Measured at
+   * `.objectui-sha`: the single read is `useNavigationOverlay`
+   * (`packages/react/src/hooks/useNavigationOverlay.ts`), which passes the
+   * string as the SECOND argument of `onNavigate` — the slot whose other
+   * producers are mode tokens (`'new_window'`, `'view'`) — and re-exports it
+   * on `NavigationOverlayState.view`, which no consumer reads. Every
+   * `formViews` read in that tree is `formViews?.default`; none is keyed by
+   * an authored view name, so there is no path by which this could resolve.
+   * One shipped consumer types that argument `'view' | 'edit'` with no
+   * fallback branch, so an authored name there is a dead row click.
+   *
+   * Enforce-or-remove (ADR-0049) is undecided — #16885 carries the
+   * measurement. This description is corrected, not the accept set: the key
+   * still parses exactly as before.
+   */
+  view: z.string().optional().describe('[EXPERIMENTAL — not enforced] Intended as the name of a form view to open for details (e.g. "summary_view", "edit_form"), but no reader resolves an authored view name: the one read forwards this string into the renderer\'s navigation-ACTION argument (the slot that otherwise carries the mode token), where a consumer with a closed action vocabulary matches no branch and the row click does nothing. Authoring it selects no view — leave it unset until enforce-or-remove (ADR-0049) is decided for this key.'),
   
   /** Interaction Triggers */
   preventNavigation: z.boolean().default(false).describe('Disable standard navigation entirely'),
