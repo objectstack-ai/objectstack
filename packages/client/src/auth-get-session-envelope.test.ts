@@ -29,9 +29,13 @@
 // - `② the raw keys survive` — `.user` is what the field reads today, while
 //   the declared `.data.user` was `undefined`. The fix must not buy the
 //   declared shape by breaking the workaround callers were pushed onto.
-// - `③ anonymous stays anonymous` — the route serves the literal `null` at
-//   200. Pinned as the KNOWN residue: it is still outside `SessionResponse`,
-//   and this case exists so that stays a measured fact rather than a surprise.
+// - `③ anonymous is REFUSED` — REVERSED by #17238. This block used to pin the
+//   route serving the literal `null` at 200, as the known residue #16760 could
+//   not close. The residue is now closed at the producer: `/get-session`
+//   answers an anonymous caller the declared ADR-0112 envelope at 401, so
+//   `me()` REJECTS and every value it resolves with is inside
+//   `SessionResponse`. The case is kept, not deleted, because a reversed pin is
+//   the record that the gap was closed deliberately rather than drifting shut.
 // - `④ refreshToken captures a credential that actually works` — the card's
 //   second consequence, and the one that was NOT a consequence of the envelope
 //   at all. The firing control is the credential's SPELLING: the client starts
@@ -240,16 +244,43 @@ describe('[#16760] /get-session is lifted into the SessionResponse envelope it d
     });
   });
 
-  describe('③ anonymous stays anonymous — the known residue', () => {
-    it('answers the literal null rather than a signed-in-looking envelope', async () => {
+  describe('③ anonymous is REFUSED — the residue #16760 measured, now closed', () => {
+    // ⚠️ THE REVERSAL, named. Until #17238 this block asserted `res` was the
+    // literal `null` — and its own comment said it pinned the RESIDUE, not a
+    // fix: it was green with the lift and without it, so it could never redden
+    // on the lift's ablation.
+    //
+    // What changed is the PRODUCER, not the lift. There is still no
+    // `SessionResponse` value meaning "nobody is signed in"; the server stopped
+    // needing one by refusing instead of answering. Ruled by the director seat
+    // (batch #117 item 4) under 「spec 与代码不一致默认改代码」.
+    //
+    // ⛔ What the SDK must still never do is manufacture `{ success: true,
+    // data: {} }` here — an empty session that reads as a real one. A rejection
+    // is the opposite of that, and this case is what says so.
+    it('rejects with the declared refusal instead of resolving outside its type', async () => {
       const { client } = await anonymous();
-      const res = await client.auth.me();
-      // ⚠️ Still outside `SessionResponse`, deliberately: there is no value of
-      // that type meaning "nobody is signed in", and widening the published
-      // return annotation is a contract-review change, not this card's. What
-      // the lift must never do is manufacture `{ success: true, data: {} }`
-      // here — an empty session that reads as a real one.
-      expect(res).toBeNull();
+
+      // BOTH halves: the status is what stops a caller reading the answer as a
+      // session, the code is what it may branch on.
+      await expect(client.auth.me()).rejects.toMatchObject({
+        code: 'UNAUTHENTICATED',
+        httpStatus: 401,
+      });
+    });
+
+    it('and the refusal is the only way out — nothing resolves to a falsy session', async () => {
+      // The control for the reversal: a `me()` that silently started resolving
+      // `null`/`undefined` again would satisfy no assertion above, and this is
+      // what turns that into a failure rather than a gap.
+      const { client } = await anonymous();
+
+      const settled = await client.auth
+        .me()
+        .then((value) => ({ outcome: 'resolved' as const, value }))
+        .catch((error) => ({ outcome: 'rejected' as const, value: error }));
+
+      expect(settled.outcome).toBe('rejected');
     });
   });
 
@@ -264,8 +295,8 @@ describe('[#16760] /get-session is lifted into the SessionResponse envelope it d
       // that captures nothing leaves it exactly where it started.
       //
       // ⛔ Not "seed a deliberately wrong token": that unauthenticates the
-      // client, `/get-session` then answers `null` for the anonymous reason,
-      // and the case would fail against a CORRECT implementation.
+      // client, `/get-session` then REFUSES for the anonymous reason (401 since
+      // #17238), and the case would fail against a CORRECT implementation.
       expect(signed, 'the two spellings coincide — this control cannot fire').not.toBe(unsigned);
       const before = storedToken(client);
       expect(before).toBe(signed);
