@@ -43,6 +43,11 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ObjectQL, HOOK_EVENT_DISPATCH_VOCABULARY } from './engine';
+import type {
+  EngineAggregateOptions,
+  EngineCountOptions,
+  EngineQueryOptions,
+} from '@objectstack/spec/data';
 import { SchemaRegistry } from './registry';
 
 vi.mock('./registry', async () => {
@@ -187,7 +192,8 @@ describe('[#17713] the registerHook accept set vs the engine dispatch set', () =
 
       // And the reason the throw is the repair rather than a nuisance: had the
       // registration stood, `count()` would never have reached the handler.
-      await expect(ql.count('note', {})).resolves.toBe(7);
+      const countQuery: EngineCountOptions = {};
+      await expect(ql.count('note', countQuery)).resolves.toBe(7);
       expect(calls).toEqual([]);
     });
 
@@ -200,7 +206,11 @@ describe('[#17713] the registerHook accept set vs the engine dispatch set', () =
         }, { object: 'note' }),
       ).toThrow(/never dispatches/);
 
-      await ql.aggregate('note', { groupBy: ['owner'], aggregations: [{ function: 'count' }] } as any);
+      const aggregateQuery: EngineAggregateOptions = {
+        groupBy: ['owner'],
+        aggregations: [{ function: 'count', alias: 'c' }],
+      };
+      await ql.aggregate('note', aggregateQuery);
       expect(calls).toEqual([]);
     });
 
@@ -211,7 +221,8 @@ describe('[#17713] the registerHook accept set vs the engine dispatch set', () =
         seen.push(ctx.event ?? 'beforeFind');
       }, { object: 'note' });
 
-      await ql.findOne('note', { where: { id: 'n1' } } as any);
+      const findOneQuery: EngineQueryOptions = { where: { id: 'n1' } };
+      await ql.findOne('note', findOneQuery);
       expect(seen).toHaveLength(1);
     });
   });
