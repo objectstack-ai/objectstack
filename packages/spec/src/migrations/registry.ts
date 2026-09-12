@@ -5436,7 +5436,19 @@ const step18: MigrationStep = {
     'both keys rather than rewriting `type` to `\'grid\'`: `type` defaults to `grid` in the ' +
     'schema, so deleting it lands the row on exactly what it already rendered without this ' +
     'registry guessing a view type. The surviving page mount is the app navigation item ' +
-    '(`PageNavItem.pageName`), untouched.',
+    '(`PageNavItem.pageName`), untouched. ' +
+    'It also retires `object-kanban`\'s `quickAdd` (#17260, ADR-0049 enforce-or-remove; the spec ' +
+    'half of the objectui#8285 director-seat ruling, decision batch #91, 2026-09-08 — ruled ' +
+    'option B). The board FORWARDED the key into the shared renderer but the affordance is gated ' +
+    'on both `quickAdd` and `onQuickAdd`, and `onQuickAdd` is a host-supplied FUNCTION JSON ' +
+    'cannot carry and no producer puts on an `object-kanban` node — so the gate was permanently ' +
+    'false. The drop was NOT silent, and that is what made it worse than silence: objectui\'s ' +
+    'html tier reported the published key as `unknown-prop`, the same diagnostic a typo gets, so ' +
+    'an author following the contract met a tool contradicting it with no way to tell which side ' +
+    'was wrong. A retiredKey tombstone on `ObjectKanbanPropsSchema` with one D2 conversion that ' +
+    'is a pure lossless DELETE (the key never had an effect to preserve) scoped by component ' +
+    '`type`: `quickAdd` stays LIVE on the `kanban-ui` block, where a React host supplies the ' +
+    'runtime slot, and the ruling keeps it there deliberately.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5450,6 +5462,7 @@ const step18: MigrationStep = {
     'translation-component-submit-label-removed',
     'page-component-responsive-removed',
     'object-grid-default-sort-removed',
+    'object-kanban-quick-add-removed',
     'permission-allow-restore-purge-removed',
     'form-view-option-default-removed',
     'field-reference-to-alias',

@@ -2738,8 +2738,12 @@ export type ObjectMetricPropsParsed = z.infer<typeof ObjectMetricPropsSchema>;
  * value or bare strings, NOT a field projection), `filter` (:198, the
  * `$filter` handoff), `data` (:217-224), `cardTitle`/`titleField` (:233),
  * `cardFields` (:322), `swimlaneField`/`grouping` (:518-519), and via the
- * forwarded schema `quickAdd`/`coverImageField`/`conditionalFormatting`
- * (`KanbanRenderer`, index.tsx). `groupField` is the DESIGNER's spelling with
+ * forwarded schema `coverImageField`/`conditionalFormatting` (`KanbanRenderer`,
+ * index.tsx — `ObjectKanban.tsx:930` spreads the authored bag into it).
+ * `quickAdd` sat on that forwarded list and is RETIRED (#17260, tombstoned
+ * below): the sentence was true about the FORWARD and false about the READ,
+ * which is how the key kept re-authorizing itself. `groupField` is the
+ * DESIGNER's spelling with
  * zero read points (#7973 class) — aliased to the `groupBy` the board reads.
  * `limit` (#16503) was measured later, at the pin this repo builds against
  * (`.objectui-sha` = `53ded82bf`; re-READ there 2026-09-08, file
@@ -2817,7 +2821,47 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
   cardFields: z.array(z.string()).optional().describe('Fields rendered on each card'),
   swimlaneField: z.string().optional().describe('Field for horizontal swimlanes (in addition to columns)'),
   grouping: z.unknown().optional().describe('View grouping config; its first field is the swimlane fallback'),
-  quickAdd: z.boolean().optional().describe('Show the per-column quick-add affordance'),
+  /**
+   * RETIRED (#17260, ADR-0049 enforce-or-remove — the spec half of the
+   * objectui#8285 director-seat ruling, decision batch #91, 2026-09-08:
+   * option B, `quickAdd` leaves `object-kanban` and stays only on the
+   * React-host `kanban-ui` block).
+   *
+   * Measured at the `.objectui-sha` pin this repo builds against
+   * (`53ded82bf`): the board forwards the key — `ObjectKanban.tsx:930`
+   * spreads the authored bag into `KanbanRenderer`, which passes
+   * `quickAdd={schema.quickAdd}` and `onQuickAdd={schema.onQuickAdd}`
+   * (`plugin-kanban/src/index.tsx:196`) — but the affordance is gated on
+   * BOTH (`KanbanImpl.tsx:355` and `:368`), and `onQuickAdd` is a
+   * host-supplied FUNCTION that JSON cannot carry and no producer puts on an
+   * `object-kanban` node. `ObjectKanban.tsx` names neither half of the pair
+   * (0 occurrences each, against 6 for the sibling `onCardClick` in the same
+   * file). So the gate was permanently false and authoring the key was a
+   * parse-clean no-op — the accepted-and-dropped class.
+   *
+   * ⛔ Not a silent one, which is why the retirement is worth more than a
+   * tidy-up: objectui's registry↔spec ledger records the key verbatim as
+   * `ESCALATED (object-kanban.quickAdd — measured NOT honoured)` and its html
+   * tier reported it as `unknown-prop` — the SAME diagnostic a typo gets. An
+   * author following this published contract met a tool that contradicted it
+   * and could not tell which side was wrong. The tombstone collapses both
+   * halves onto one answer.
+   *
+   * The control itself is NOT withdrawn from the platform: it stays on
+   * `kanban-ui`, the block a React host renders directly and can hand the
+   * runtime function to. Sources are stripped by the D2 conversion
+   * `object-kanban-quick-add-removed` (a pure lossless delete — the key never
+   * had an effect to preserve).
+   */
+  quickAdd: retiredKey(
+    '`object-kanban` property `quickAdd` was removed in @objectstack/spec 17 (ADR-0049) — '
+    + 'the board forwarded it, but the per-column affordance is gated on both `quickAdd` and '
+    + '`onQuickAdd`, and `onQuickAdd` is a host-supplied function JSON cannot carry and no '
+    + 'producer ever put on an `object-kanban` node, so authoring it was a parse-clean no-op. '
+    + 'Delete the key. The quick-add control is unchanged on the `kanban-ui` block, where a React '
+    + 'host supplies the `onQuickAdd` slot the control needs. '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+  ),
   coverImageField: z.string().optional().describe('Image field rendered as the card cover'),
   conditionalFormatting: z.unknown().optional().describe('Card conditional formatting rules'),
 }));
