@@ -89,10 +89,12 @@ describe('SqliteWasmDriver Advanced Operations (SQLite)', () => {
       expect(result).toHaveLength(3);
 
       const alice = result.find((r: any) => r.customer === 'Alice');
+      assert(alice !== undefined, 'aggregate() answered no row for the seeded group');
       expect(alice.total_spent).toBe(1275.0);
       expect(alice.order_count).toBe(2);
 
       const bob = result.find((r: any) => r.customer === 'Bob');
+      assert(bob !== undefined, 'aggregate() answered no row for the seeded group');
       expect(bob.total_spent).toBe(1225.5);
       expect(bob.order_count).toBe(2);
     });
@@ -106,7 +108,7 @@ describe('SqliteWasmDriver Advanced Operations (SQLite)', () => {
       expect(result.length).toBeGreaterThan(0);
 
       const aliceCompleted = result.find((r: any) => r.customer === 'Alice' && r.status === 'completed');
-      expect(aliceCompleted).toBeDefined();
+      assert(aliceCompleted !== undefined, 'aggregate() answered no row for the seeded group');
       expect(aliceCompleted.total_qty).toBe(1);
     });
 
@@ -118,6 +120,7 @@ describe('SqliteWasmDriver Advanced Operations (SQLite)', () => {
       });
 
       const laptop = result.find((r: any) => r.product === 'Laptop');
+      assert(laptop !== undefined, 'aggregate() answered no row for the seeded group');
       expect(laptop.total_quantity).toBe(1);
     });
   });

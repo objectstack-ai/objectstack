@@ -46,10 +46,26 @@
 // `SqliteWasmDriver` overrides none and reaches its consumers through this
 // package's `.d.ts`.
 //
+// #17277 adds the SIXTH door, `aggregate()`, to this file. It belongs to the
+// same family and was left out of #15267 for a reason that has to be recorded
+// here, because the reason is a trap and not an oversight: #15267's census
+// asked "is `aggregate` on the contract?" and answered from `SqlDriver`'s OWN
+// CODE COMMENT, which asserted it was not. The comment was false —
+// `IDataDriver` declares
+// `aggregate?(object, query, options?): Promise<Record<string, unknown>[]>` —
+// so a reading was carried as a measurement through a census, a card and a
+// dispatch order before anyone compared it against the contract. The comment
+// is corrected at the source site in the same change; this paragraph is the
+// second copy, where the next person extending this family will read it.
+//
+// `aggregate()` is OPTIONAL on the contract (`aggregate?`), unlike the five
+// above. That changes only how the contract half is spelled — the function
+// type is read through `NonNullable`, exactly as `explain` already is — and
+// not whether the door owes its declared type: optionality governs whether the
+// member EXISTS, not what it returns once it does.
+//
 // Out of scope, deliberately: `analyzeQuery()` (the helper behind `explain()`)
-// and `aggregate()` are not pinned here. The first is not on `IDataDriver` at
-// all; the second is, but the card that authorised this change ruled both out
-// of its diff by name, so neither annotation moved and neither is asserted.
+// is not pinned here — it is not on `IDataDriver` at all.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { Knex } from 'knex';
@@ -70,12 +86,15 @@ type ContractCreate = Resolved<IDataDriver['create']>;
 type ContractBulkCreate = Resolved<IDataDriver['bulkCreate']>;
 type ContractExecute = Resolved<IDataDriver['execute']>;
 type ContractExplain = Resolved<NonNullable<IDataDriver['explain']>>;
+// `aggregate` is optional too (`aggregate?(...)`), read the same way (#17277).
+type ContractAggregate = Resolved<NonNullable<IDataDriver['aggregate']>>;
 
 type SqlFindOne = Resolved<SqlDriver['findOne']>;
 type SqlCreate = Resolved<SqlDriver['create']>;
 type SqlBulkCreate = Resolved<SqlDriver['bulkCreate']>;
 type SqlExecute = Resolved<SqlDriver['execute']>;
 type SqlExplain = Resolved<SqlDriver['explain']>;
+type SqlAggregate = Resolved<SqlDriver['aggregate']>;
 
 // 1. The contract half — what `IDataDriver` already declared before this change.
 const contractFindOne: Equals<ContractFindOne, Record<string, unknown> | null> = true;
@@ -83,6 +102,7 @@ const contractCreate: Equals<ContractCreate, Record<string, unknown>> = true;
 const contractBulkCreate: Equals<ContractBulkCreate, Record<string, unknown>[]> = true;
 const contractExecute: Equals<ContractExecute, unknown> = true;
 const contractExplain: Equals<ContractExplain, unknown> = true;
+const contractAggregate: Equals<ContractAggregate, Record<string, unknown>[]> = true;
 
 // 2. The driver half — un-masked, and reading exactly as the contract reads.
 //    `unknown` needs the `IsAny` leg most of all: `Equals<any, unknown>` is
@@ -98,6 +118,8 @@ const sqlExecuteIsAny: IsAny<SqlExecute> = false;
 const sqlExecuteIsContract: Equals<SqlExecute, unknown> = true;
 const sqlExplainIsAny: IsAny<SqlExplain> = false;
 const sqlExplainIsContract: Equals<SqlExplain, unknown> = true;
+const sqlAggregateIsAny: IsAny<SqlAggregate> = false;
+const sqlAggregateIsContract: Equals<SqlAggregate, Record<string, unknown>[]> = true;
 
 describe('SqlDriver declared return types on the five remaining IDataDriver doors (#15267)', () => {
   let driver: SqlDriver;
@@ -171,6 +193,31 @@ describe('SqlDriver declared return types on the five remaining IDataDriver door
       bypassTenantAudit: true,
     });
     expect(result).toBeNull();
+  });
+
+  // [#17277] The sixth door of the same family. Both halves, same two legs:
+  // put the annotation back to `Promise<any>` and `sqlAggregateIsAny` flips to
+  // `true` while `sqlAggregateIsContract` flips to `false`, reding this file
+  // twice at `tsc` time.
+  it('pins both halves of the sixth door, aggregate(): declared on the contract, published by the class', () => {
+    expect(contractAggregate).toBe(true);
+    expect(sqlAggregateIsAny).toBe(false);
+    expect(sqlAggregateIsContract).toBe(true);
+  });
+
+  it('aggregate() resolves to rows the declared record type describes, and the caller narrows to read one', async () => {
+    const rows = await driver.aggregate(
+      't',
+      { aggregations: [{ function: 'count', alias: 'n' }] },
+      { bypassTenantAudit: true },
+    );
+    expect(rows).toHaveLength(1);
+
+    // The narrowing the declared type now demands of every caller: an
+    // aggregate cell arrives as `unknown`, so the count is typed before it is
+    // compared. Through the old `Promise<any>` this read compiled unchecked.
+    const cell: unknown = rows[0].n;
+    expect(Number(cell)).toBe(1);
   });
 
   it('create() and bulkCreate() resolve to record shapes the declared types describe', async () => {

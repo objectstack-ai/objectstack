@@ -53,7 +53,13 @@ describe('the derived context-collection set (#13977)', () => {
     // The whole set, in order — including `datasets`, which the name-keyed pin
     // filters out and therefore cannot hold in position. A reordering of the
     // record `CONTEXT_STACK_KEYS` derives from lands here first.
-    expect(carriedStackKeys()).toEqual(['objects', 'permissions', 'books', 'datasets', 'pages']);
+    //
+    // [#17063] `pages` left this set with `validateViewPageRefs` and the
+    // `type: 'page'` view mount it resolved. The expectation MOVES rather than
+    // being relaxed to a subset check: naming the whole set in order is the
+    // only thing this pin does, so a removal has to be written here the same
+    // way #13216's addition was.
+    expect(carriedStackKeys()).toEqual(['objects', 'permissions', 'books', 'datasets']);
   });
 
   it('derives the same set whatever the write is, since the write does not choose it', () => {

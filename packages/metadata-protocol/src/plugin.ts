@@ -37,7 +37,7 @@ import {
 } from './migrations/view-definition-active-index.js';
 import {
     ensureSysSettingIdentityIndex,
-    resolveSysSettingIndexExec,
+    resolveSysSettingIndexSeam,
 } from './migrations/sys-setting-identity-index.js';
 import {
     backfillSeedTenancy,
@@ -318,7 +318,16 @@ export function assembleMetadataProtocol(
                         );
                     }
                     try {
-                        await ensureSysSettingIdentityIndex(resolveSysSettingIndexExec(ql), ctx.logger);
+                        // [#17175] The SEAM, not the bare exec: the presence
+                        // probe compiles a catalog statement for the connected
+                        // dialect, and a dialect nobody resolved is a dialect
+                        // guessed. Without it the probe falls back to the
+                        // `WHERE 1 = 0` statement whose refusal this card is
+                        // about.
+                        const seam = resolveSysSettingIndexSeam(ql);
+                        await ensureSysSettingIdentityIndex(seam?.exec, ctx.logger, {
+                            client: seam?.client,
+                        });
                     } catch (e: unknown) {
                         ctx.logger.warn(
                             '[metadata-protocol] sys_setting row-identity index migration skipped (#8629)',

@@ -1026,10 +1026,12 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     run: (stack) => validateSemanticRoles(stack),
   },
   // #2578 / #4449 — a form section's field reference that resolves to nothing
-  // (silently not rendered) and an absolute `colSpan` under a per-surface
-  // derived column count. Advisory: the renderer skips the unknown field and
-  // clamps the span, so nothing is broken — but each is almost certainly an
-  // authoring mistake, and until #4449 this rule ran on no command at all.
+  // (silently not rendered), and a `section.group` naming a field group the
+  // object does not declare. Advisory: the renderer skips the unknown field, so
+  // nothing is broken — but each is almost certainly an authoring mistake, and
+  // until #4449 this rule ran on no command at all. [#17328] It used to carry a
+  // third finding, `absolute-colspan-discouraged`; that one was withdrawn —
+  // `validate-form-layout.ts`'s module note carries the measurement.
   // Pure structured-metadata walk (no lazy dependency), so wiring it to all
   // three costs nothing measurable.
   {

@@ -11,13 +11,34 @@
  * (`(environmentId?) => Promise<unknown>`), so a provider that resolves the
  * wrong slot name is assignable everywhere and invisible to the compiler.
  *
- * Why a RUNTIME pin and not a type-level one. `packages/rest/tsconfig.json`
- * excludes its `.test.ts` files and the package declares no `typecheck` script
- * (it is a DEBT/TEST_DEBT ledger entry), so NO tsc program compiles this file. A
- * `@ts-expect-error` or an `Assert< Equal< … > >` written here would evaluate
- * never and stay green if it were deleted — the phantom-check shape AGENTS.md
- * bans and #5286 / #5449 paid for. What IS checkable here is the wiring, so
- * that is what this pins:
+ * Why a RUNTIME pin and not a type-level one. ⚠️ NOT because nothing compiles
+ * this file. `packages/rest/tsconfig.json` does exclude its `.test.ts` files,
+ * but that is the BUILD config alone: the sibling `tsconfig.test.json` puts
+ * this layer back in front of tsc (`include: ["src/**\/*"]`) and the package's
+ * own `typecheck` NAMES it — `tsc --noEmit && pnpm check:test-typecheck`, whose
+ * second half runs `--project tsconfig.test.json`. This header used to say the
+ * package "declares no `typecheck` script (it is a DEBT/TEST_DEBT ledger
+ * entry), so NO tsc program compiles this file"; all three halves are false on
+ * this tree — the script exists, neither the `DEBT` nor the `TEST_DEBT` object
+ * literal in `scripts/check-type-check-coverage.mjs` names `@objectstack/rest`,
+ * and `tsc --listFiles -p tsconfig.test.json` lists this file. A
+ * `@ts-expect-error` written here is LIVE and reports TS2578 the moment it
+ * suppresses nothing — not the phantom-check shape AGENTS.md bans and
+ * #5286 / #5449 paid for.
+ *
+ * It is a runtime pin for a reason that outlives any script list: the property
+ * is not expressible as a type. `RestServer` receives the providers as
+ * POSITIONAL parameters declared with one identical type,
+ * `(environmentId?: string) => Promise<any | undefined>`, so every permutation
+ * of them is assignable and no assertion over that signature can go red when
+ * the wiring is wrong. And the slot name a provider resolves is a string
+ * literal handed to `PluginContext.getService<T>(name: string): T` — a bare
+ * `string` parameter whose `T` the CALLER supplies, so neither the argument type
+ * nor the result type carries evidence of which slot was read. "This argument
+ * resolves that slot" is a value-level identity between a position and a literal
+ * inside a closure body: only invoking the closure observes it, and the same
+ * holds for the SET of slot names, which exists only as the `getService` calls
+ * `init`/`start` actually make. So that is what this pins:
  *
  *   1. every provider resolves the slot it is NAMED for (the mapping the B4
  *      types assert, verified against the registry), and

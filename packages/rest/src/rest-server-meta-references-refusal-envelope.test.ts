@@ -269,4 +269,99 @@ describe('#15685 the /references door answers its two refusals in ONE envelope',
             expect(refused.body?.error).toBe(INTERNAL_ERROR_MESSAGE);
         });
     });
+
+    // ── ④ the ADR-0110 D3 REMEDY survives the #5423 bound ─────────────────
+    //
+    // [#17584] #16146 routed this door through `boundedDeclaredRefusalMessage`,
+    // so the shared 500-character bound applies HERE now and it cuts the TAIL.
+    // A refusal whose remedy is back-loaded therefore loses the remedy first,
+    // and this file's ① pin could not see it: `account.owner` composes 410
+    // characters, well under the bound, so ① is green at every name length
+    // while the delivered message stops being actionable at 37.
+    //
+    // Measured on the pre-repair sentence, through this same harness: an
+    // object/field pair of 37 characters each composed 502 characters and was
+    // delivered as `…/api/v1/meta/object/<obj>/referenc…` — the prescription's
+    // opener still readable, its URL cut mid-path, i.e. an instruction that
+    // 404s if the operator follows it. `crm_opportunity_line_item_snapshot_v2`
+    // is 37 characters.
+    //
+    // ⭐ What is pinned below is the INVARIANT, not the wording. A later
+    // re-wording may move every other clause; what it may not do is push the
+    // answerable question past the bound. So the assertions read the REMEDY —
+    // the question plus its complete URL — and never the sentence.
+    //
+    // POPULATION, because "survives the bound" is meaningless without one. The
+    // enforced ceiling on a metadata item name is the `maxLength` of the column
+    // that stores it, not a `.max()` in `packages/spec`: the identifier schemas
+    // declare a floor and a grammar and deliberately no ceiling (#12144), and
+    // the widest storing column is `sys_metadata.name` at 255
+    // (`packages/metadata-core/src/objects/sys-metadata.object.ts`; the
+    // length-ceiling note on `SystemIdentifierSchema` is the authority). Both
+    // halves of the composite key are separately-stored names, so 255/255 is
+    // the ceiling case — and its composite key is 511 characters, already twice
+    // what any single stored name can be.
+    describe('④ [#17584] the remedy survives the bound at the longest admitted name', () => {
+        /** `sys_metadata.name` maxLength — the enforced identifier ceiling. */
+        const STORED_NAME_MAX = 255;
+        /**
+         * A real-shaped name length: `crm_opportunity_line_item_snapshot_v2` is
+         * 37 characters, and 37/37 is the pair at which the PRE-REPAIR sentence
+         * first overflowed the bound (502 characters). ⛔ Deliberately not
+         * "the first overflowing pair" of whatever sentence is current — that
+         * number moves with the wording, and this file pins the invariant.
+         */
+        const REACHABLE_NAME_LEN = 37;
+
+        const key = (objLen: number, fieldLen: number) =>
+            `${'o'.repeat(objLen)}.${'f'.repeat(fieldLen)}`;
+
+        /** The remedy an operator can ACT on: the question and its whole URL. */
+        const remedyFor = (objLen: number) =>
+            `GET /api/v1/meta/object/${'o'.repeat(objLen)}/references`;
+
+        async function deliveredAt(objLen: number, fieldLen: number): Promise<string> {
+            const refused = await boot()(UNANSWERABLE_TARGET, key(objLen, fieldLen));
+            expect(refused.thrown, `the door threw: ${refused.thrown?.message}`).toBeUndefined();
+            expect(refused.status).toBe(501);
+            const message = refused.body?.error?.message;
+            expect(message, 'no nested message reached the caller at all').toEqual(expect.any(String));
+            return message as string;
+        }
+
+        it('control — the bound really FIRES here, or every pin below is vacuous', async () => {
+            // Without this the two pins could be green because nothing was ever
+            // truncated, which is exactly the state ① measured and ① alone
+            // cannot distinguish from the repair.
+            const message = await deliveredAt(STORED_NAME_MAX, STORED_NAME_MAX);
+            expect(message.length).toBe(500);
+            expect(message.endsWith('…')).toBe(true);
+        });
+
+        it('THE PIN: at the ceiling, the answerable question arrives with its URL INTACT', async () => {
+            const message = await deliveredAt(STORED_NAME_MAX, STORED_NAME_MAX);
+            expect(
+                message,
+                'the ADR-0110 D3 remedy did not survive the bound — the operator is left with no next step',
+            ).toEqual(expect.stringContaining(remedyFor(STORED_NAME_MAX)));
+        });
+
+        it('THE PIN: and at a real-shaped name pair that the bound also cuts', async () => {
+            const message = await deliveredAt(REACHABLE_NAME_LEN, REACHABLE_NAME_LEN);
+            expect(message.length).toBe(500);
+            expect(message).toEqual(expect.stringContaining(remedyFor(REACHABLE_NAME_LEN)));
+        });
+
+        it('control — the ORDINARY name is not truncated at all, so the pins above are about the BOUND', async () => {
+            // Anti-vacuity from the other side. ① drives `account.owner`, which
+            // composes well under 500 and is delivered whole — so ① cannot tell
+            // a surviving remedy from a message that was never cut. That is
+            // precisely why ① stayed green through the defect, and why this
+            // block reads lengths the bound actually reaches.
+            const refused = await refusalA();
+            const message = refused.body?.error?.message as string;
+            expect(message.length).toBeLessThan(500);
+            expect(message.endsWith('…')).toBe(false);
+        });
+    });
 });

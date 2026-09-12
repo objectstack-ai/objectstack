@@ -29,17 +29,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 222 |
-| Object name statically decidable | 148 |
+| Write call sites | 223 |
+| Object name statically decidable | 149 |
 | Object name chosen at run time | 74 |
-| Against a tenancy-enabled object | 148 |
+| Against a tenancy-enabled object | 149 |
 | Against an object declaring tenancy off | 0 |
-| Threading a tenant context | 138 |
+| Threading a tenant context | 139 |
 | Provably carrying none | 17 |
 | …and decidably tenancy-enabled | 9 |
 | Options argument unreadable | 67 |
 | …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 104 |
+| Threading a decidably elevated context | 105 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 101 |
 
@@ -52,11 +52,11 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-09-11 at `48d6526c7`.
+Measured on 2026-09-11 at `06215b074`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 562 |
+| tracked non-test sources scanned | 564 |
 | engine-shaped types recognised | 59 |
 | declared objects in the registry | 300 |
 | same-named calls subtracted as non-engine | 137 |
@@ -89,6 +89,7 @@ Measured on 2026-09-11 at `48d6526c7`.
 | `packages/plugins/plugin-auth/src/auth-plugin.ts` | `update` | `sys_oauth_application` | enabled | PROVABLY NONE | 1 |
 | `packages/plugins/plugin-auth/src/auth-plugin.ts` | `update` | `sys_user` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/auth-plugin.ts` | `update` | `SystemObjectName.USER` | undecidable | elevated | 1 |
+| `packages/plugins/plugin-auth/src/backfill-account-issuer.ts` | `update` | `sys_account` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/ensure-default-organization.ts` | `insert` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/member-role-canonical.ts` | `update` | `MEMBER_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/membership-ended-session.ts` | `update` | `SystemObjectName.SESSION` | undecidable | elevated | 2 |
@@ -178,9 +179,9 @@ Measured on 2026-09-11 at `48d6526c7`.
 | `packages/services/service-messaging/src/messaging-service.ts` | `update` | `RECEIPT_OBJECT` | undecidable | options unreadable | 1 |
 | `packages/services/service-messaging/src/messaging-service.ts` | `insert` | `sys_notification` | enabled | options unreadable | 1 |
 | `packages/services/service-messaging/src/sql-http-outbox.ts` | `insert` | `this.objectName` | undecidable | options unreadable | 1 |
-| `packages/services/service-messaging/src/sql-http-outbox.ts` | `update` | `this.objectName` | undecidable | options unreadable | 4 |
+| `packages/services/service-messaging/src/sql-http-outbox.ts` | `update` | `this.objectName` | undecidable | options unreadable | 5 |
 | `packages/services/service-messaging/src/sql-outbox.ts` | `insert` | `this.objectName` | undecidable | options unreadable | 1 |
-| `packages/services/service-messaging/src/sql-outbox.ts` | `update` | `this.objectName` | undecidable | options unreadable | 5 |
+| `packages/services/service-messaging/src/sql-outbox.ts` | `update` | `this.objectName` | undecidable | options unreadable | 4 |
 | `packages/services/service-queue/src/db-queue-adapter.ts` | `delete` | `sys_job_queue` | enabled | context, elevation undecidable | 2 |
 | `packages/services/service-queue/src/db-queue-adapter.ts` | `insert` | `sys_job_queue` | enabled | context, elevation undecidable | 1 |
 | `packages/services/service-queue/src/db-queue-adapter.ts` | `update` | `sys_job_queue` | enabled | context, elevation undecidable | 6 |

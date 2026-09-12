@@ -531,6 +531,102 @@ function withWritableVerdict<T extends { manifest?: { id?: unknown }; id?: unkno
     return { ...row, writable: isWritablePackage(engine, id) };
 }
 
+/**
+ * What `?version=` on `GET /packages/:id` asked for (#17416).
+ *
+ * ## The defect this exists to close
+ *
+ * The route ACCEPTED `?version=` and no surface serving it ever read the
+ * parameter. `ScopedEnvironmentClient.packages.get(id, version)`
+ * (`packages/client/src/index.ts`) declares `version?: string` and appends it,
+ * so the caller was answered `200` with the INSTALLED row and nothing in the
+ * status, headers or body told it apart from a version-scoped read that
+ * actually happened. The handler that honoured it — the REST registrar's twin
+ * of this route — went with the duplicate response shape in #14503 / #16628,
+ * and this dispatcher domain never had that read to inherit.
+ *
+ * Maintainer ruling on #17416: honour the parameter, or refuse it so the caller
+ * knows. ⛔ Silently ignoring is not a third option. This is the honouring
+ * half, and it is a request-side change only: the response shape is untouched
+ * (that surface is #12034's, bound separately), so one route still answers with
+ * exactly one body shape.
+ *
+ * ## `latest` and "absent" are the SAME request, deliberately
+ *
+ * The deleted handler read `requested.value || 'latest'` and its store treated
+ * `latest` as `ORDER BY created_at DESC LIMIT 1` — so "no version" and
+ * "`?version=latest`" named one request there. They name one request here too:
+ * the registry holds exactly one row per package id and it is the installed,
+ * newest one. ⛔ Not a new sentinel invented at this door — continuity with the
+ * contract the deleted door published.
+ *
+ * ## Why a repeated parameter is NOT resolved here
+ *
+ * `IHttpRequest.query` is `Record<string, string | string[]>` and the array arm
+ * is live on every adapter this repo ships, so `?version=a&version=b` reaches
+ * this door as `['a','b']` — a well-formed request carrying two conflicting
+ * intents. Picking one silently is a wrong answer delivered as a success, which
+ * is the defect class this card is about, so it is not done. The repo's ONE
+ * rule for this condition answers `400 VALIDATION_ERROR`
+ * (`refuseRepeatedQueryParams` / `repeatedQueryParamMessage` in
+ * `packages/rest/src/query-multiplicity.ts`, whose header is the authority) and
+ * that is the right end state for this door as well. ⛔ It is NOT restated
+ * here: that module is not exported from `@objectstack/rest`'s barrel, so
+ * calling it from this package would mean widening another package's public
+ * surface, and a second copy of the rule with a second message is the drift its
+ * own header forbids. Until the rule is reachable, this door says what it saw
+ * and names no version — it does not answer `200` with the installed row.
+ *
+ * A one-element array is one occurrence encoded differently by an adapter and
+ * is unwrapped, per that same rule's stated semantics.
+ */
+type RequestedVersion =
+    | { readonly kind: 'unscoped' }
+    | { readonly kind: 'exact'; readonly value: string }
+    | { readonly kind: 'repeated'; readonly count: number };
+
+function readRequestedVersion(raw: unknown): RequestedVersion {
+    if (Array.isArray(raw)) {
+        if (raw.length > 1) return { kind: 'repeated', count: raw.length };
+        return readRequestedVersion(raw[0]);
+    }
+    if (typeof raw !== 'string') return { kind: 'unscoped' };
+    // `latest` is the installed row — see this type's header.
+    if (raw === 'latest') return { kind: 'unscoped' };
+    return { kind: 'exact', value: raw };
+}
+
+/** The one sentence this door answers a repeated `?version=` with. */
+function repeatedVersionMessage(id: string, count: number): string {
+    return `Package '${id}' — the "version" query parameter was supplied ${count} times, `
+        + 'so this read names no single version. Supply it at most once.';
+}
+
+/**
+ * The version the registry's row for a package IS (#17416).
+ *
+ * `manifest.version` is read FIRST because it is the field the producer
+ * actually writes: `SchemaRegistry.installPackage` stores a projection of the
+ * manifest, and nothing in the registry populates `installedVersion` — which
+ * `packages/spec/src/kernel/package-registry.zod.ts` declares `.optional()` and
+ * documents as a mirror («Mirrors manifest.version for quick access»). So the
+ * mirror is a fallback for a row some other producer filled in, ⛔ never a
+ * tolerated alias for an off-spec spelling: both keys are declared, and a row
+ * where they disagree is a producer defect this door cannot repair.
+ *
+ * Comparison is exact string equality — the same predicate the durable store
+ * uses (`AND version = ?` in `@objectstack/service-package`), so the two
+ * answers about "is this package at version v" cannot drift into semver range
+ * semantics at one of them.
+ */
+function installedVersionOf(pkg: unknown): string | undefined {
+    const src = pkg as { manifest?: { version?: unknown }; installedVersion?: unknown } | null;
+    const fromManifest = src?.manifest?.version;
+    if (typeof fromManifest === 'string' && fromManifest !== '') return fromManifest;
+    const mirror = src?.installedVersion;
+    return typeof mirror === 'string' && mirror !== '' ? mirror : undefined;
+}
+
 export async function handlePackagesRequest(deps: DomainHandlerDeps, path: string, method: string, body: any, query: any, _context: HttpProtocolContext): Promise<HttpDispatcherResult> {
     const m = method.toUpperCase();
 
@@ -1207,12 +1303,38 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             }
         }
 
-        // GET /packages/:id → get package
+        // GET /packages/:id[?version=] → get package, scoped to a version when
+        // one is asked for (#17416 — see `readRequestedVersion`).
         if (parts.length === 1 && m === 'GET') {
             const denied = requireReadCapability(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
             const pkg = registry.getPackage(id);
             if (!pkg) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
+            // [#17416] The version scope is applied AFTER the id lookup, so an
+            // id this registry does not hold keeps answering the wording
+            // `packages-single-door.test.ts` pins — `Package '<id>' not found`,
+            // whether or not `?version=` rode along. Only a package that IS
+            // here can be at the wrong version.
+            const requested = readRequestedVersion(query?.version);
+            if (requested.kind === 'repeated') {
+                return {
+                    handled: true,
+                    response: deps.error(repeatedVersionMessage(id, requested.count), 404),
+                };
+            }
+            if (requested.kind === 'exact') {
+                const present = installedVersionOf(pkg);
+                if (present !== requested.value) {
+                    return {
+                        handled: true,
+                        response: deps.error(
+                            `Package '${id}' version '${requested.value}' not found`
+                            + (present ? ` — installed version is '${present}'` : ''),
+                            404,
+                        ),
+                    };
+                }
+            }
             // [#14375] Same verdict, same predicate as the list door — and
             // [#14309] the same project-then-stamp order, for the same reason.
             return {

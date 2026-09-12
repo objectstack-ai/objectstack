@@ -64,8 +64,19 @@ export interface StorageServicePluginOptions {
   adapter?: 'local' | 's3';
   /** Options for the local storage adapter */
   local?: LocalStorageAdapterOptions;
-  /** S3 configuration (used when adapter is 's3') */
-  s3?: { bucket: string; region: string; endpoint?: string };
+  /**
+   * S3 configuration (used when adapter is 's3').
+   *
+   * `keyPrefix` is REQUIRED and carries the same meaning it has on
+   * {@link S3StorageAdapterOptions}: the key namespace this deployment is
+   * confined to, or `null` for bucket-root keys. It is declared HERE, by the
+   * host that constructs the plugin, and deliberately has **no** counterpart in
+   * the `storage` settings namespace — a prefix an admin inside the deployment
+   * could set or clear is not an isolation boundary, it is a preference. See
+   * `buildAdapterFromValues`, which carries this decision onto every adapter a
+   * settings re-read rebuilds.
+   */
+  s3?: { bucket: string; region: string; endpoint?: string; keyPrefix: string | null };
   /**
    * Whether to register REST routes with the HTTP server.
    * @default true
@@ -212,6 +223,18 @@ export class StorageServicePlugin implements Plugin {
       const opts: S3StorageAdapterOptions = {
         bucket,
         region,
+        // The key namespace comes from the HOST's constructor options and from
+        // nowhere else. Reading it out of `values` here would put the isolation
+        // boundary inside the thing it is meant to contain: the `storage`
+        // namespace is writable from inside the deployment, so an admin (or
+        // anything authoring on their behalf) could widen their own adapter
+        // back to the bucket root, and the store would answer every request
+        // because what it sees is a well-formed key. Carrying the constructor's
+        // decision instead is what keeps a settings re-read from silently
+        // dropping the prefix — the whole point of applying it at the adapter.
+        // A host that declared no S3 options at all has expressed no namespace,
+        // and settings-configured S3 stays bucket-root as it has always been.
+        keyPrefix: this.options.s3?.keyPrefix ?? null,
         endpoint: (values.s3_endpoint as string | undefined) || undefined,
         accessKeyId: (values.s3_access_key_id as string | undefined) || undefined,
         secretAccessKey: (values.s3_secret_access_key as string | undefined) || undefined,
@@ -259,6 +282,7 @@ export class StorageServicePlugin implements Plugin {
       bucket: this.options.s3?.bucket,
       region: this.options.s3?.region,
       endpoint: this.options.s3?.endpoint,
+      keyPrefix: this.options.s3?.keyPrefix ?? null,
     });
 
     this.storage = new SwappableStorageService(initial, (prev, next) => {
@@ -530,6 +554,12 @@ export class StorageServicePlugin implements Plugin {
               forcePathStyle: !!values.s3_force_path_style,
               accessKeyId: values.s3_access_key_id,
               secretAccessKey: values.s3_secret_access_key,
+              // Not read from `values` — see `buildAdapterFromValues`. The
+              // namespace is the host's, so the target a settings re-read
+              // resolves must carry the host's, or `needsStorageSwap` would
+              // compare a prefixed adapter against an unprefixed target and
+              // swap on every save.
+              keyPrefix: this.options.s3?.keyPrefix ?? null,
             });
             if (!needsStorageSwap(this.target, nextTarget)) return;
 

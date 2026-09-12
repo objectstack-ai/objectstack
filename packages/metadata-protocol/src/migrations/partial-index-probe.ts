@@ -49,7 +49,7 @@
 
 import { isUniqueViolationError, operatorFacingErrorText } from '@objectstack/types';
 
-import { driverCanRunSql, resolveDriverExec } from './driver-exec.js';
+import { driverCanRunSql, resolveDriverClientName, resolveDriverExec } from './driver-exec.js';
 
 /**
  * Raw-SQL seam. The surface is resolved by `./driver-exec.ts`: `execute()`
@@ -85,6 +85,26 @@ export type IndexExec = (sql: string) => Promise<unknown>;
  * `getDriverForObject` is here to prevent.
  */
 export function resolveIndexExecForTable(engine: unknown, table: string): IndexExec | undefined {
+    return resolveIndexSeamForTable(engine, table)?.exec;
+}
+
+/**
+ * The raw-SQL seam for ONE table, PLUS the dialect the driver behind it speaks.
+ *
+ * [#17175] The pair, for the same structural reason `seed-tenancy-backfill.ts`
+ * takes a seam rather than a bare exec (#9381): a statement compiled for a
+ * dialect nobody resolved is a statement compiled for a guess. The presence
+ * probe in `read-probe.ts` needs the dialect to pick a catalog arm, and
+ * {@link resolveIndexExecForTable} — the pre-existing entry point, unchanged in
+ * signature and behaviour — now reads its `exec` off this.
+ *
+ * `client` is `undefined` on a host that does not say, which is a real answer
+ * and ⛔ never defaulted; the probe falls back to the caller's own statement.
+ */
+export function resolveIndexSeamForTable(
+    engine: unknown,
+    table: string,
+): { exec: IndexExec; client?: string } | undefined {
     const engineAny = engine as any;
     const attempt = (fn: () => unknown): any => {
         try {
@@ -108,7 +128,11 @@ export function resolveIndexExecForTable(engine: unknown, table: string): IndexE
         }
     }
     if (!canRunSql(driver)) return undefined;
-    return resolveDriverExec(driver);
+    const exec = resolveDriverExec(driver);
+    // `canRunSql` above is defined AS this resolution succeeding, so `exec` is
+    // present here; the guard is for the type, not for a reachable state.
+    if (!exec) return undefined;
+    return { exec, client: resolveDriverClientName(driver) };
 }
 
 /**

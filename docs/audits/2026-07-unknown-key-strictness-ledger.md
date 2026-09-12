@@ -138,8 +138,13 @@ schema needs:
 lazySchema(() => strictObject({ surface, history, aliases?, guidance? }, { ...shape }))
 ```
 
-- `aliases` — semantic near-misses edit distance cannot reach (`visibleWhen` →
-  `visible`, `from` → `source`, `read` → `allowRead`).
+- `aliases` — curated near-miss answers, consulted before the distance fallback
+  and preferred over it, so the table carries both the near-misses distance
+  **cannot reach** (`visibleWhen` → `visible`, `from` → `source`, `read` →
+  `allowRead`) and the ones it **reaches and answers wrongly** (`hosts` →
+  `network`, 2 edits from the declared `hooks` against a budget of 2 — #16859).
+  Measured 2026-09-11 (#17361): of 1910 entries, 1658 unreachable, 211
+  reachable-and-agreeing, 41 overruling a wrong hit.
 - `guidance` — exact-key prescriptions: **tombstones for retired keys** (the
   rejection carries the upgrade — AGENTS.md Post-Task Checklist #3) and
   wrong-layer pointers (`apiOperations` is response-side; `objectName` belongs

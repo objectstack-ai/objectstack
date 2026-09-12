@@ -227,10 +227,17 @@ export {
 } from './validate-semantic-roles.js';
 export type { SemanticRoleFinding, SemanticRoleSeverity } from './validate-semantic-roles.js';
 
+// [#17328] `FORM_COLSPAN_ABSOLUTE` / `absolute-colspan-discouraged` was
+// WITHDRAWN, not renamed: browser measurement at all three surface widths
+// falsified the misalignment it asserted, and its recommended alternative
+// measured worse than the thing it warned about. The argument is in
+// `validate-form-layout.ts`'s module note. Removing the constant rather than
+// leaving it exported is deliberate: a rule id on the public surface reads as a
+// check the platform performs (Prime Directive #10), and the compiler is the
+// precise channel for telling a consumer that suppresses it.
 export {
   validateFormLayout,
   FORM_FIELD_UNKNOWN,
-  FORM_COLSPAN_ABSOLUTE,
   FORM_SECTION_GROUP_UNKNOWN,
 } from './validate-form-layout.js';
 export type { FormLayoutFinding, FormLayoutSeverity } from './validate-form-layout.js';
@@ -415,8 +422,6 @@ export type { NavTargetRefFinding, NavTargetRefSeverity } from './validate-nav-t
 
 // [#13216] The same page reference on the OTHER surface that can carry one: a
 // `type: 'page'` list view's `pageName`. Advisory, for its nav twin's reason.
-export { validateViewPageRefs, VIEW_PAGE_UNRESOLVED } from './validate-view-page-refs.js';
-export type { ViewPageRefFinding, ViewPageRefSeverity } from './validate-view-page-refs.js';
 
 // [#7912] The servability question about an `object` nav target: not "does the
 // name resolve?" but "can the destination answer a list at all?". Gates, and

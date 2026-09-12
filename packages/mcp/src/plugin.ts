@@ -5,13 +5,16 @@ import {
   assembleExecutionContext,
   resolveAuthzContext,
   resolveLocalizationContext,
-  // [#15348] The three symbols this door's tenancy-posture read is built from:
-  // the posture reader itself, plus the two halves of the classification
-  // decision 1 option A requires (#13906) — the registry's "never registered"
-  // brand, and the loud outage every other rejection has to become.
+  // [#15348 / #16013 / #17114] The two symbols this door's tenancy-posture
+  // read is built from. `classifyAdmissionTenancyPosture` is the ONE shared
+  // classification decision 1 option A requires (#13906) — branded "never
+  // registered" ⇒ quiet `undefined`, every other rejection ⇒ the loud
+  // `AuthzStoreUnavailableError('tenancy', err)` — and it is reachable only
+  // from the ASYNC accessor, which is the only leg that raises the brand.
+  // `effectiveTenancyPosture` stays because the SYNC leg below is a
+  // deliberately different shape, not a copy of that classification.
+  classifyAdmissionTenancyPosture,
   effectiveTenancyPosture,
-  isServiceNotRegisteredError,
-  AuthzStoreUnavailableError,
   type EntryLocalization,
   type TenancyPostureSource,
 } from '@objectstack/core';
@@ -61,14 +64,24 @@ import { CONNECT_AGENT_UI_BUNDLE } from './connect-ui.js';
  *    admitting on it is exactly the permissive-on-failure defect #13906 exists
  *    to repair, and the reason this seam is not a one-liner.
  *
+ * [#17114] That classification is no longer hand-written here — it is
+ * `classifyAdmissionTenancyPosture` (`@objectstack/core`), the shared function
+ * #16013 extracted and which this seam was one of the two left outside. ⛔ The
+ * RESOLUTION is NOT shared: which of this door's two accessors may be asked is
+ * this file's own fact (the `getServiceAsync` presence test below), so the
+ * accessor expression is handed in as a thunk and the helper never learns it.
+ *
  * Only the ASYNC accessor carries that discriminator — the branded rejection is
  * raised by `PluginLoader.getService`, which the sync accessor never reaches.
- * The sync leg below is taken only on a host whose `getKernel()` yields no
- * `getServiceAsync` (a `KernelBase`-shaped host, and the duck-typed contexts
- * this package's own tests build). Such a host instantiates no service
- * factories at all, so "nothing is registered under that name" is the only
- * fault its accessor can report, and absorbing it is the SAME classification
- * rather than a second collapse of it.
+ * ⛔ **So only the async leg is the shared classification.** The sync leg below
+ * is taken only on a host whose `getKernel()` yields no `getServiceAsync` (a
+ * `KernelBase`-shaped host, and the duck-typed contexts this package's own
+ * tests build). Such a host instantiates no service factories at all, so
+ * "nothing is registered under that name" is the only fault its accessor can
+ * report, and absorbing it is the SAME classification rather than a second
+ * collapse of it — which is why its bare `catch` is this seam's recorded
+ * decision and ⛔ must NOT be folded onto the helper. Routing it there would
+ * mint a 503 outage out of the one fault that host shape can report.
  *
  * ## ⚠️ Read PER CALL — deliberately not hoisted into `start()`
  *
@@ -90,13 +103,12 @@ import { CONNECT_AGENT_UI_BUNDLE } from './connect-ui.js';
 async function resolveStdioTenancyPosture(ctx: PluginContext): Promise<TenancyPosture | undefined> {
   const kernel = typeof ctx.getKernel === 'function' ? ctx.getKernel() : undefined;
   if (kernel && typeof kernel.getServiceAsync === 'function') {
-    try {
-      return effectiveTenancyPosture(await kernel.getServiceAsync<TenancyPostureSource>('tenancy'));
-    } catch (err) {
-      if (!isServiceNotRegisteredError(err)) throw new AuthzStoreUnavailableError('tenancy', err);
-      return undefined;
-    }
+    return classifyAdmissionTenancyPosture(
+      () => kernel.getServiceAsync<TenancyPostureSource>('tenancy'),
+    );
   }
+  // ⛔ NOT the classification above — see the "only the async leg" paragraph in
+  // this function's doc comment. This leg's bare `catch` is its decision.
   try {
     return effectiveTenancyPosture(ctx.getService<TenancyPostureSource>('tenancy'));
   } catch {

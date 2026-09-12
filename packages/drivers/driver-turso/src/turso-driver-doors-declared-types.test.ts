@@ -45,9 +45,21 @@
 // `explain()` is deliberately absent from the driver half: `TursoDriver` does
 // NOT override it, so this package has no second declaration of that door to
 // pin — it reaches these consumers through `@objectstack/driver-sql`'s `.d.ts`,
-// where `sql-driver-doors-declared-types.test.ts` pins it. `upsert()`,
-// `aggregate()` and `beginTransaction()` are out of this card's scope by
-// ruling and are not asserted here; their annotations did not move.
+// where `sql-driver-doors-declared-types.test.ts` pins it.
+//
+// [#17277] `aggregate()` is now the FIFTH overridden door pinned here. It was
+// out of #15267's scope by ruling, and the ruling rested on `SqlDriver`'s own
+// code comment asserting `aggregate` was not on `IDataDriver`. The comment was
+// false: the contract declares
+// `aggregate?(object, query, options?): Promise<Record<string, unknown>[]>`.
+// The `?` governs whether the member exists, not what it returns once it does.
+// This override needs its own pin for the same reason the other four do —
+// `TursoDriver` re-declares the door in this package's `.d.ts`, so the
+// `@objectstack/driver-sql` narrowing does not reach a consumer holding a
+// `TursoDriver`.
+//
+// `upsert()` and `beginTransaction()` remain unasserted here; their
+// annotations did not move on this card either.
 //
 // The runtime cases below drive the LOCAL face (`:memory:`); the remote face's
 // shapes are pinned by the `RemoteTransport` suites.
@@ -67,17 +79,22 @@ type ContractFindOne = Resolved<IDataDriver['findOne']>;
 type ContractCreate = Resolved<IDataDriver['create']>;
 type ContractBulkCreate = Resolved<IDataDriver['bulkCreate']>;
 type ContractExecute = Resolved<IDataDriver['execute']>;
+// `aggregate` is OPTIONAL on the contract (`aggregate?`), so its function type
+// is read through `NonNullable` — the door is the member, not its presence.
+type ContractAggregate = Resolved<NonNullable<IDataDriver['aggregate']>>;
 
 type TursoFindOne = Resolved<TursoDriver['findOne']>;
 type TursoCreate = Resolved<TursoDriver['create']>;
 type TursoBulkCreate = Resolved<TursoDriver['bulkCreate']>;
 type TursoExecute = Resolved<TursoDriver['execute']>;
+type TursoAggregate = Resolved<TursoDriver['aggregate']>;
 
 // 1. The contract half — what `IDataDriver` already declared before this change.
 const contractFindOne: Equals<ContractFindOne, Record<string, unknown> | null> = true;
 const contractCreate: Equals<ContractCreate, Record<string, unknown>> = true;
 const contractBulkCreate: Equals<ContractBulkCreate, Record<string, unknown>[]> = true;
 const contractExecute: Equals<ContractExecute, unknown> = true;
+const contractAggregate: Equals<ContractAggregate, Record<string, unknown>[]> = true;
 
 // 2. The driver half — each override un-masked, reading exactly as the
 //    contract reads. `execute` needs the `IsAny` leg most of all:
@@ -91,6 +108,8 @@ const tursoBulkCreateIsAny: IsAny<TursoBulkCreate> = false;
 const tursoBulkCreateIsContract: Equals<TursoBulkCreate, Record<string, unknown>[]> = true;
 const tursoExecuteIsAny: IsAny<TursoExecute> = false;
 const tursoExecuteIsContract: Equals<TursoExecute, unknown> = true;
+const tursoAggregateIsAny: IsAny<TursoAggregate> = false;
+const tursoAggregateIsContract: Equals<TursoAggregate, Record<string, unknown>[]> = true;
 
 /**
  * The slice of the inherited (protected) Knex instance this fixture touches.
@@ -137,6 +156,29 @@ describe('TursoDriver declared return types on the doors it overrides (#15267)',
       tursoBulkCreateIsContract,
       tursoExecuteIsContract,
     ]).toEqual([true, true, true, true]);
+  });
+
+  // [#17277] The fifth overridden door, both halves. Put the annotation back
+  // to `Promise<any>` and `tursoAggregateIsAny` flips to `true` while
+  // `tursoAggregateIsContract` flips to `false`.
+  it('pins both halves of the fifth overridden door, aggregate()', () => {
+    expect(contractAggregate).toBe(true);
+    expect(tursoAggregateIsAny).toBe(false);
+    expect(tursoAggregateIsContract).toBe(true);
+  });
+
+  it('aggregate() on the local face resolves to rows the declared record type describes', async () => {
+    const rows = await driver.aggregate(
+      't',
+      { aggregations: [{ function: 'count', alias: 'n' }] },
+      { bypassTenantAudit: true },
+    );
+    expect(rows).toHaveLength(1);
+
+    // An aggregate cell now arrives as `unknown`, so the caller types it before
+    // comparing. Through the old `Promise<any>` this read compiled unchecked.
+    const cell: unknown = rows[0].n;
+    expect(Number(cell)).toBe(1);
   });
 
   it('findOne() on a query that matches nothing resolves to null on the local face, and the declared type makes the caller narrow', async () => {

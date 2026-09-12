@@ -2359,17 +2359,171 @@ export function h8MergedPrStillDispatched(issue, mergedPrs, openPrs) {
 // unreachable `closed …#N` target would make it fire on an input it ignores
 // today, and that is a behaviour change nobody has ruled on — deliberately NOT
 // made here.
+//
+// ## What #17377 DID change: the value is CLASSIFIED, and two classes report
+//
+// Everything above answers a SPELLING question — 「does some value not begin
+// with `manual`」 — so every shape that is not that one word read as fireable.
+// Two more were measured live in one lane on one day: a value naming TRACKED
+// REPO PATHS (a file trigger, which is `Restart-touch:`'s key — the unlock
+// sweep fires only `closed <owner/repo>#N`), and a value that is prose naming
+// no issue, no tracked path and no runnable command (a `manual` in disguise,
+// waiting on an actor nothing schedules). `classifyRestartWhen` sorts every
+// value into six classes, and fireability is now membership in three of them.
+//
+// ⛔ Report-only, and the boundary is exact: the two new classes produce H9
+// ROWS carrying their own remedy sentence. No refusal, no new exit code, no
+// band change, no state change — a completed sweep still exits 0 whatever it
+// finds, exactly as before.
+//
+// ⛔ The reserved class above is STILL reserved. `closed <owner/repo>#N`
+// classifies on its SPELLING alone, whatever #N's reachability; the paragraph
+// above says why that ruling is not this card's to make.
+//
+// The ruling spelling stays fireable: a value carrying an issue reference
+// (`#N` or `owner/repo#N`) is `issue-ref`, tested BEFORE the two unfireable
+// classes, so `Restart-when: #N rules on X` reads exactly as it did. That
+// order has a measured price — on the 2026-09-11 census of the 104 open holds,
+// four values name a tracked repo path and read clean on an unrelated issue
+// mention (#8753, #8607, #8589, #6009). Recorded here, not worked around: the
+// alternative is to rank `tracked-path` above `issue-ref`, which would make
+// the advertised ruling spelling fire, and that is the question above.
+//
+// ## H9's path test is WIDER than H17's, deliberately
+//
+// H17 harvests trigger paths from BACKTICKED SPANS ONLY, and `backtickedSpans`
+// says why: a wrong row there sends a seat to intersect its dispatch against a
+// file nobody nominated. H9 tokenises the whole value on whitespace and commas
+// and validates every token against the SAME `isTracked` oracle, because the
+// two error COSTS are not the same shape. Here the token choice cannot flip a
+// verdict in either direction — `tracked-path` and `prose` are both unfireable
+// and both fire the row — so a token read too eagerly changes WHICH REMEDY
+// SENTENCE prints, never whether the card is reported at all. That is the
+// entire licence for the wider read, and it expires the moment any class of
+// this classifier is allowed to CLEAR a card.
+//
+// `isTracked` defaults to `() => false`, so a caller that injects no oracle
+// sees every tracked-path value collapse into `prose` — same verdict, same
+// row, the generic remedy. The live sweep injects the ONE `git ls-files`
+// reading H17's own index consumes, so the two cannot disagree about what a
+// tracked file is.
 // ---------------------------------------------------------------------------
+
+/**
+ * The command heads a BARE (unbackticked) `Restart-when:` value may open with
+ * and still be the one-line executable predicate H9's row sentence advertises.
+ *
+ * DERIVED, never invented — every head here was read off a measured corpus and
+ * nothing else is admitted:
+ *
+ *   `git`   the open `pm:on-hold` census of 2026-09-11 (#7443 bare; #17446,
+ *           #17348, #17301, #17286 and #11331 backticked)
+ *   `pnpm`  the same census (#12799)
+ *   `npx`   the same census (#9613)
+ *   `npm`   this file's own pinned specimen, transcribed from a live card
+ *           (`npm view create-objectstack dist-tags reports >= 17.0.0`)
+ *
+ * A value opening with a BACKTICKED span needs no head at all — the span is
+ * the canonical spelling of an executable predicate — so this list only has to
+ * cover the un-backticked residue, which the census puts at one value. It
+ * grows by MEASUREMENT: a head is added when a census finds one, ⛔ never
+ * because it seemed likely.
+ */
+export const RESTART_WHEN_COMMAND_HEADS = ['git', 'npm', 'npx', 'pnpm'];
+
+/**
+ * Which classes of `Restart-when:` value some mechanism can actually fire.
+ *
+ * `closed-ref` is the only one the UNLOCK SWEEP itself fires; `issue-ref` is
+ * the ruling spelling H9's header admitted, and `command` the executable
+ * predicate its row sentence names. The other three — `manual`,
+ * `tracked-path`, `prose` — are what H9 reports.
+ */
+export const FIREABLE_RESTART_WHEN_CLASSES = ['closed-ref', 'issue-ref', 'command'];
+
+/**
+ * The tracked repo paths a `Restart-when:` value names.
+ *
+ * Whitespace- and comma-delimited tokens, stripped of the decoration prose
+ * puts around a path (backticks, brackets, quotes, a trailing sentence comma
+ * or period), each validated against the injected oracle. `isTracked` is
+ * injected for `h17TriggerFiles`'s reason — the extraction stays pure and the
+ * self-test drives it with a fixture set instead of a checkout.
+ *
+ * A token the oracle does not recognise is dropped in silence, so a LINE
+ * SUFFIX (`packages/x/y.ts:1186-1206`) correctly fails and a glob
+ * (`packages/adapters/**`) contributes nothing — the same two decoy shapes
+ * H17's stage 2 records.
+ *
+ * @param {string} value one `Restart-when:` value, decoration already removed
+ * @param {(path: string) => boolean} isTracked
+ * @returns {string[]} tracked paths in document order, deduped
+ */
+export function restartWhenTrackedPaths(value, isTracked = () => false) {
+  const out = [];
+  for (const raw of String(value ?? '').split(/[\s,;]+/)) {
+    const token = raw.replace(/^[`*_("'[{<]+/, '').replace(/[`*_)"'\]}>.:]+$/, '');
+    if (token && isTracked(token) && !out.includes(token)) out.push(token);
+  }
+  return out;
+}
+
+/**
+ * Which of the six shapes is this `Restart-when:` value? (#17377)
+ *
+ * The ORDER is the contract, and each step is here because a later one would
+ * otherwise swallow it:
+ *
+ *   1. `manual`       the opt-out, unchanged — the existing regex, first, so
+ *                      the one-word spelling can never be rescued by anything
+ *                      that follows it
+ *   2. `closed-ref`   the unlock sweep's own literal form
+ *   3. `issue-ref`    any issue reference the value CARRIES — the ruling
+ *                      spelling H9's header admitted (`#N rules on X`), which
+ *                      is why it is tested before the two unfireable classes
+ *   4. `command`      a backticked opening span, or one of the measured bare
+ *                      heads — a one-line executable predicate
+ *   5. `tracked-path` some token is a tracked repo file: a misfiled
+ *                      `Restart-touch:`, which the unlock sweep cannot fire
+ *   6. `prose`        none of the above: a `manual` in disguise
+ *
+ * ⛔ A pure function over ONE value. It reports a shape and never a verdict —
+ * `hasFireableRestartWhen` is what turns a shape into one.
+ *
+ * @param {string} value
+ * @param {(path: string) => boolean} [isTracked]
+ * @returns {'manual'|'closed-ref'|'issue-ref'|'command'|'tracked-path'|'prose'}
+ */
+export function classifyRestartWhen(value, isTracked = () => false) {
+  const v = String(value ?? '').trim();
+  if (!v) return 'prose';
+  if (/^manual\b/i.test(v)) return 'manual';
+  if (/^closed\b[^\n]*?#\d+\b/i.test(v)) return 'closed-ref';
+  if (/#\d+\b/.test(v)) return 'issue-ref';
+  if (/^`[^`\n]+`/.test(v)) return 'command';
+  if (RESTART_WHEN_COMMAND_HEADS.includes(v.split(/\s+/)[0].toLowerCase())) return 'command';
+  if (restartWhenTrackedPaths(v, isTracked).length > 0) return 'tracked-path';
+  return 'prose';
+}
 
 /**
  * Does this text carry a `Restart-when:` value some mechanism could fire?
  *
  * The one fireability test H9 and its comment-fetch gate share, so "the body
- * already answers this card" means the same thing in both places. `manual…`
- * counts as NOT fireable, deliberately — see H9's header note.
+ * already answers this card" means the same thing in both places. Since
+ * #17377 it asks the CLASSIFIER rather than testing a spelling: `manual…` is
+ * still NOT fireable, and so are the two unfireable shapes that word never
+ * covered — see H9's header note.
+ *
+ * @param {string} text
+ * @param {(path: string) => boolean} [isTracked] the tracked-file oracle; the
+ *   default recognises nothing, which collapses `tracked-path` into `prose` —
+ *   the same verdict, a less specific row
  */
-export function hasFireableRestartWhen(text) {
-  return directiveValues(text, 'Restart-when').some((v) => !/^manual\b/i.test(v));
+export function hasFireableRestartWhen(text, isTracked = () => false) {
+  return directiveValues(text, 'Restart-when').some((v) =>
+    FIREABLE_RESTART_WHEN_CLASSES.includes(classifyRestartWhen(v, isTracked)),
+  );
 }
 
 /**
@@ -2378,9 +2532,14 @@ export function hasFireableRestartWhen(text) {
  * is: a policy that decides what gets READ AT ALL is where a silent hole
  * would live. Gated on the body NOT already answering (a fireable body line
  * clears H9 without the network), then on the one label H9 judges.
+ *
+ * `isTracked` is forwarded rather than defaulted separately, or the gate and
+ * the row would answer 「does the body already answer this card」 differently
+ * and a tracked-path card would fire a row whose second channel was never
+ * fetched.
  */
-export function needsRestartWhenComments(issue) {
-  if (hasFireableRestartWhen(issue?.body)) return false;
+export function needsRestartWhenComments(issue, isTracked = () => false) {
+  if (hasFireableRestartWhen(issue?.body, isTracked)) return false;
   return labelNames(issue ?? {}).includes('pm:on-hold');
 }
 
@@ -2388,7 +2547,9 @@ export function needsRestartWhenComments(issue) {
  * H9 — null when clean, else the finding sentence.
  *
  * Legal iff SOME `Restart-when:` line in EITHER channel carries a value that
- * is not `manual…`. The line may be decorated (see the shared directive
+ * `classifyRestartWhen` puts in a FIREABLE class — `closed-ref`, `issue-ref`
+ * or `command` (#17377; it read 「not `manual…`」 before, which admitted two
+ * shapes nothing can fire). The line may be decorated (see the shared directive
  * reader) in either channel; the KEY may not. The spelling is case-sensitive
  * and byte-stable like `Blocked-by:` (H4): the scan that fires these lines
  * greps the literal, so a lowercase variant is a line the machinery cannot
@@ -2417,22 +2578,45 @@ export function needsRestartWhenComments(issue) {
  * the remedies: verify, unwrap, add — and only then, for a card that really
  * has no fireable exit, close.
  */
-export function h9OnHoldNoRestartWhen(issue, commentBodies) {
+export function h9OnHoldNoRestartWhen(issue, commentBodies, isTracked = () => false) {
   if (!labelNames(issue).includes('pm:on-hold')) return null;
-  if (hasFireableRestartWhen(issue.body)) return null;
+  if (hasFireableRestartWhen(issue.body, isTracked)) return null;
   const commentsRead = Array.isArray(commentBodies);
-  if (commentsRead && commentBodies.some((b) => hasFireableRestartWhen(b))) return null;
+  if (commentsRead && commentBodies.some((b) => hasFireableRestartWhen(b, isTracked))) return null;
   const values = [
     ...directiveValues(issue.body, 'Restart-when'),
     ...(commentsRead ? commentBodies : []).flatMap((b) => directiveValues(b, 'Restart-when')),
   ];
+  // Which unfireable shape to NAME when several coexist (#17377): the most
+  // specific remedy wins, because it is the one a seat can execute without
+  // re-reading the card. A tracked path names the exact rewrite; prose names
+  // the missing event; `manual` is last, being the shape whose author already
+  // said there is no event. Every one of them is a row either way — the order
+  // chooses a SENTENCE, never a verdict.
+  const classes = values.map((v) => classifyRestartWhen(v, isTracked));
+  const paths = [
+    ...new Set(
+      values.flatMap((v, i) =>
+        classes[i] === 'tracked-path' ? restartWhenTrackedPaths(v, isTracked) : [],
+      ),
+    ),
+  ];
   const shape =
-    values.length > 0
-      ? 'its only `Restart-when:` is `manual`, which no mechanism can fire'
-      : commentsRead
-        ? 'no `Restart-when:` line in EITHER channel — not in the body, and not in any comment ' +
-          'on the thread (both were read)'
-        : 'no `Restart-when:` body line this scan could read';
+    paths.length > 0
+      ? `its \`Restart-when:\` names tracked repo path(s) ${paths.map((p) => `\`${p}\``).join(', ')} — ` +
+        'a file trigger, which is `Restart-touch:`\'s key; the unlock sweep fires only ' +
+        '`closed <owner/repo>#N`. Rewrite the line as `Restart-touch: <path>` (one path per line) ' +
+        'and give `Restart-when:` a real exit or `manual`'
+      : classes.includes('prose')
+        ? 'its `Restart-when:` is prose naming no issue, no tracked path and no runnable ' +
+          'command — a `manual` in disguise; nothing schedules the actor it waits on. Mark it ' +
+          '`manual` or name the event'
+        : values.length > 0
+          ? 'its only `Restart-when:` is `manual`, which no mechanism can fire'
+          : commentsRead
+            ? 'no `Restart-when:` line in EITHER channel — not in the body, and not in any comment ' +
+              'on the thread (both were read)'
+            : 'no `Restart-when:` body line this scan could read';
   const unreadable =
     commentBodies === null
       ? ' And this card\'s comment thread could NOT be read this sweep — the second channel (a ' +
@@ -3106,8 +3290,10 @@ export function h14BlockingCacheIncoherent(issue, index, options = {}) {
  * `created_at`, the same quantity the selection order's own within-rank
  * tie-break reads (同级按卡龄). The label's age would be the sharper number
  * and is not available: it lives in a per-card timeline fetch this sweep
- * deliberately never makes (the H2 comment fetch is the one exception, and it
- * is confined to candidates). Reporting card age and NAMING it as card age
+ * deliberately never makes for THIS population (the H2 comment fetch is one
+ * exception and is confined to candidates; H59 buys a timeline page, and is
+ * confined to the handful of cards a merged PR's body names without a keyword).
+ * Reporting card age and NAMING it as card age
  * beats reporting a number whose meaning the reader has to guess.
  *
  * An unreadable `created_at` sorts as maximally old rather than being skipped
@@ -3149,7 +3335,8 @@ export function h15OldestUnclaimedBlocking(issues, nowMs = Date.now()) {
       '`priority:p0`, so an unclaimed one aging while fresher cards are picked is selection-order ' +
       'drift — visible here by name instead of only in a seat\'s memory. Age is the CARD\'s ' +
       '(`created_at`, the same quantity the order\'s within-rank tie-break reads), not the label\'s: ' +
-      'that would need a per-card timeline fetch this sweep never makes. Visibility row — no ' +
+      'that would need a per-card timeline fetch this sweep never makes for this population. ' +
+      'Visibility row — no ' +
       'threshold, it reports unconditionally, and like everything here it is patrol input, not a verdict.',
   };
 }
@@ -10939,9 +11126,11 @@ export function h54DecisionTitledQueueCard(issue) {
 // ON/AFTER it is judged and can be a row.
 //
 // ⚠️ The split reads `updated_at`, not the `labeled` event. This sweep makes no
-// per-card timeline fetch (H35's header carries the reasoning; the repo-wide
-// event stream it reads instead keeps only gate-semantic labels), so the entry
-// instant is in no payload this loop already holds. `updated_at` is the
+// per-card timeline fetch for THIS population (H35's header carries the
+// reasoning; the repo-wide event stream it reads instead keeps only
+// gate-semantic labels, and H59's one timeline page is bought for a handful of
+// merged-PR mentions, never for a label page), so the entry instant is in no
+// payload this loop already holds. `updated_at` is the
 // cheapest HONEST proxy and its error runs one way: `updated_at` is never
 // earlier than the labelling, so a card last touched before the pin certainly
 // entered before it — the census can never hide a post-pin entry — while a
@@ -11088,7 +11277,7 @@ export function h55AwaitingWithoutMaintainerAction(issue, commentBodies) {
     "machine exit: the state still has none by construction (the ager's note stands) — this row judges the ENTRY " +
     'only and never fires on the act being done. Report-only: it writes no label and relabels nothing. ' +
     `Population: entries judged by \`updated_at\` on/after ${MAINTAINER_ACTION_LINE_SINCE} — the sweep makes ` +
-    'no per-card timeline fetch, so a legacy entry touched after that instant lands here too, and costs one ' +
+    'no per-card timeline fetch for this population, so a legacy entry touched after that instant lands here too, and costs one ' +
     'idempotent act, never a missed post-pin entry; earlier entries are COUNTED in the summary census and filed ' +
     'as no row, pending the separate reclassification worklist.'
   );
@@ -12261,6 +12450,356 @@ export function h58QueuedRulingRow(issue, commentBodies) {
 }
 
 // ---------------------------------------------------------------------------
+// H59 — a MERGED PR whose closing linkage mis-states the state of a card its
+// body names (#17466). Two directions, both report-only, and the FIRST is the
+// one that matters.
+//
+// ## The defect, in the filing card's measurement
+//
+// GitHub's PR→issue closing linkage is unreliable in BOTH directions, and it
+// was measured twice in one hour on a sibling board: one merged PR CLOSED a
+// live follow-up card while its body bound no closing keyword to that number
+// anywhere (the grep was run with live controls, so the absence is a reading
+// and not a failed search), and a second merged PR LEFT its declared target
+// open. So no seat can reason about closure from a PR's text, in either
+// direction — which is exactly what makes this mechanical rather than a
+// discipline item.
+//
+//   FALSE CLOSE  the expensive half. Work disappears from the board while
+//                reading as done, and it is the one failure no sweep catches,
+//                because a CLOSED card is not swept. Every other row in this
+//                file reads open cards.
+//   FALSE OPEN   the cheap half. It shows up as queue noise and somebody
+//                eventually re-reads the card.
+//
+// ⛔ This row claims NOTHING about which repo the defect was measured in: the
+// filing evidence is a sibling's, the mechanism is GitHub's, and the live
+// sweep reports whatever THIS board has. A silent row is a reading about this
+// board, never a claim about the mechanism.
+//
+// ## The transport, and the narrowing that makes it affordable
+//
+// The population starts as H8's merged window — the same bounded listing, not
+// a second one — and the mention set is `referencedNumbers`, this file's one
+// reference grammar, so a `#N` and an `owner/repo#N` are read exactly as H40
+// reads them. Measured over the live board (8-day window, 2026-09-11): 1,185
+// merged PRs, 5,830 `#N` mentions, 1,106 of them bound by a closing keyword.
+// A per-card read for each of the 3,282 unbound mention pairs is not a budget
+// any sweep has, so the row narrows BEFORE it buys anything, and every
+// narrowing is counted rather than absorbed:
+//
+//   direction (b)  costs ZERO requests. A declared target that is still OPEN
+//                  is answered by the open listing this sweep already holds;
+//                  membership is positive evidence, so a TRUNCATED listing can
+//                  only lose a row, never invent one.
+//   direction (a)  needs `closed_at`, which H22's closed-card window already
+//                  carries. A mentioned-but-unbound card that is neither in
+//                  the open listing nor in that window is UNJUDGED and counted
+//                  (`linkageOutOfWindow`) — ⛔ never clean. That window is
+//                  `CLOSED_ISSUE_WINDOW_DAYS` and H8's is `MERGED_WINDOW_DAYS`,
+//                  so this row's real reach is the SHORTER of the two, and the
+//                  clause says so rather than letting a reader assume eight.
+//
+// Only what survives both — a mentioned, unbound card whose closure sits
+// inside the attribution band below — costs ONE page of that card's timeline,
+// capped per sweep at `H59_CARD_READ_CEILING` with the shortfall printed. On
+// the live board that survivor set was ONE card. ⛔ No retry loop on any
+// status (#17374): a failed read is UNJUDGED and counted.
+//
+// ⚠️ This is the FIRST per-card timeline fetch in this file, and the rows that
+// decline one by name (H11/H15's label age, H18/H13's `updated_at` proxy,
+// H35's repo-wide event stream, H55's entry instant) still decline it — their
+// notes are narrowed to say so rather than deleted. The fetch is bought here
+// for a population that is at most a handful of cards a sweep, never for the
+// board.
+//
+// ## ⭐ The measured shape of a close-by-merge — and the assumption it KILLED
+//
+// The obvious evidence is the `closed` event naming the merge commit. Measured
+// on this board, it is not available at all:
+//
+//   card #17417  closed 2026-09-10T23:44:35Z, `commit_id` null, actor
+//                `os-litant` — PR #17558 (`Fixes #17417`) merged 23:44:33Z
+//   cards #16274 · #17081 · #17533 · #15141 · #17058 — same shape, five for
+//                five: a keyword-bound close, `commit_id` null every time
+//   the repo-wide event stream, one page, 2026-09-10T23:32Z→2026-09-11T00:10Z
+//                — 7 `closed` events, 0 carrying a `commit_id`
+//
+// So the commit leg is written and kept (it is exact wherever GitHub does
+// stamp it — a keyword in a PUSHED COMMIT message is H23's surface and does),
+// but it fires on nothing here, and a row resting on it alone would be a
+// predicate that can never speak. The second leg is what carries this board,
+// and the filing ruling names it: the close sits inside the merge's own
+// moment, with no other actor to explain it.
+//
+// ## The band is MEASURED, and the ruling's «merge minute» was too wide
+//
+// Over the same window, every (merged PR, card) pair where the body BINDS a
+// closing keyword and the card closed inside H22's window — 332 pairs, 321 of
+// them within ±5 minutes of the merge:
+//
+//   0–2s  313      3–5s  7      31–60s  1      (p50 1s, p95 2s, p99 4s)
+//
+// GitHub's own act lands in seconds. A full minute admits a different actor
+// entirely, and the live board has the specimen: card #16638 closed 53s after
+// PR #16950 merged, by `os-project-manager`, with no window PR binding a
+// keyword to it — a SEAT closing a card because the delivery landed, which is
+// the protocol working, not a false close. A 60-second band reports it; the
+// measured band does not. ⇒ `H59_MERGE_CLOSE_BAND_MS` is 5s, which is the
+// operational reading of the ruling's own 「with no other actor」, and the one
+// 31–60s keyword pair is named here rather than rounded away.
+//
+// ## The sibling guard — without it, two of three candidates are wrong
+//
+// PRs land in batches: #17558 and #17559 merged in the SAME second. So a card
+// closed inside the band may have been closed by a SIBLING PR that declared it
+// properly, and attributing that to the PR that merely mentioned it is a false
+// row about a correct landing. Measured at a 60s band, three candidates:
+// #16937 (explained by PR #17190's `Fixes`), #16625 (explained by PR #16698's
+// `Fixes`), #16638 (the seat close above). At the measured band and with this
+// guard the live board produces ZERO rows — and the clause prints the
+// population so that silence is legible as a reading.
+//
+// ## What this row is NOT
+//
+// ⛔ Not a gate: report-only, exit codes untouched, no label written, nothing
+// reopened. The remedy names the OWNING SEAT's act — reopen the card, restore
+// its state labels — and this file performs neither. ⛔ Not a verdict either:
+// the band leg is circumstantial by construction, so the row says CANDIDATE,
+// prints the actor it read, and names the alternative reading.
+// ---------------------------------------------------------------------------
+
+/**
+ * How far after a merge GitHub's own keyword closure lands.
+ *
+ * Measured, not chosen: 321 keyword-bound (merged PR, closed card) pairs over
+ * the 8-day window on 2026-09-11 sit at p50 1s / p95 2s / p99 4s, 313 of them
+ * inside two seconds. The banner carries the histogram and the one 31–60s
+ * outlier. Widening this is not a tuning knob — it is the difference between
+ * reporting GitHub's act and reporting a seat's, and the measured specimen for
+ * the wide reading is named up there.
+ */
+export const H59_MERGE_CLOSE_BAND_MS = 5_000;
+
+/**
+ * The per-sweep cap on timeline pages this row buys, and the page it buys.
+ *
+ * The page is ONE, deliberately. The timeline is oldest-first, so a card whose
+ * history exceeds a page has its `closed` event beyond it — that card is
+ * UNJUDGED and counted, ⛔ never clean. Measured on six live cards the page
+ * held 16–40 events, so the shape a normal card takes fits; the cap on CARDS
+ * is what bounds the run, and it is generous against the measured survivor set
+ * of one.
+ */
+export const H59_TIMELINE_PAGE_SIZE = 100;
+export const H59_CARD_READ_CEILING = 40;
+
+/**
+ * The `#N` a merged PR's body points at, as numbers into the swept repo.
+ *
+ * `referencedNumbers` rather than a new scanner: one reference grammar in this
+ * file, shared with H40, which means fenced blocks are stripped and inline
+ * spans are KEPT. That asymmetry is right here for H40's reason rather than
+ * H7's — a mention is a POINTER A READER FOLLOWS, not an instruction to
+ * GitHub — and it is load-bearing for direction (a): an author who backticks
+ * `` `Fixes #N` `` has correctly made the keyword inert, so the number is a
+ * mention with NO keyword bound to it, and a card that closes anyway is
+ * precisely this row's subject.
+ */
+export function h59MentionedCards(body, repo) {
+  return referencedNumbers(body, repo);
+}
+
+/**
+ * The `#N` a merged PR's body BINDS with a closing keyword, as numbers.
+ *
+ * `closingKeywordTargets` — the file's one closing-keyword grammar, ⛔ never a
+ * second spelling. Its reach is what makes direction (b) honest, and the
+ * negation trap is the reason: measured, `Merging this must not close #N`
+ * BINDS `#N` (keyword `close`), because GitHub's parser reads the keyword and
+ * not the surrounding prose. So a number this returns is DECLARED whatever the
+ * sentence around it says, and H7 is the row that tells an author so.
+ */
+export function h59DeclaredCloses(body) {
+  const out = new Map();
+  for (const [digits, keyword] of closingKeywordTargets(body)) out.set(Number(digits), keyword);
+  return out;
+}
+
+/**
+ * The NEWEST `closed` event on one page of a card's timeline, projected to the
+ * three fields this row reads.
+ *
+ * `complete` is the page's own honesty: a FULL page may hide a later `closed`,
+ * so the caller treats it as UNJUDGED rather than reading the absence of an
+ * event as the absence of a closure (#4690, at page granularity).
+ *
+ * @param {object[]|null|undefined} rows — one timeline page, oldest-first.
+ * @param {number} [pageSize]
+ */
+export function h59ClosedEvent(rows, pageSize = H59_TIMELINE_PAGE_SIZE) {
+  if (!Array.isArray(rows)) return { event: null, complete: false, read: false };
+  const complete = rows.length < pageSize;
+  let event = null;
+  for (const row of rows) {
+    if (row?.event !== 'closed') continue;
+    const at = Date.parse(row?.created_at ?? '');
+    event = {
+      actor: String(row?.actor?.login ?? '') || null,
+      commitId: String(row?.commit_id ?? '') || null,
+      atMs: Number.isFinite(at) ? at : null,
+    };
+  }
+  return { event, complete, read: true };
+}
+
+/**
+ * Is this PR's merge the readable explanation for that closure?
+ *
+ * Two legs, in a deliberate precedence rather than a disjunction of equals:
+ *
+ *   `commit`  the `closed` event NAMES this PR's merge commit. Exact, and the
+ *             only leg that is evidence rather than coincidence. Measured to
+ *             fire on nothing on this board (banner) and kept because it is
+ *             what a commit-message closure produces, which H23 already reads.
+ *   `band`    the closure sits inside `H59_MERGE_CLOSE_BAND_MS` after the
+ *             merge. Circumstantial, measured, and never widened to a minute.
+ *
+ * A closure BEFORE the merge is not attributable in either leg, and the test is
+ * one-sided for that reason: GitHub closes after merging, never before.
+ *
+ * @returns {{ attributed: boolean, leg: 'commit'|'band'|null, lagMs: number|null }}
+ */
+export function h59CloseAttribution(pr, closedAtMs, closedEvent, bandMs = H59_MERGE_CLOSE_BAND_MS) {
+  const mergedAt = Date.parse(pr?.merged_at ?? '');
+  if (!Number.isFinite(mergedAt)) return { attributed: false, leg: null, lagMs: null };
+  const sha = String(pr?.merge_commit_sha ?? '').toLowerCase();
+  const stamped = String(closedEvent?.commitId ?? '').toLowerCase();
+  const at = Number.isFinite(closedAtMs) ? closedAtMs : (closedEvent?.atMs ?? NaN);
+  const lagMs = Number.isFinite(at) ? at - mergedAt : null;
+  if (sha.length >= 7 && stamped.length >= 7 && (sha.startsWith(stamped) || stamped.startsWith(sha))) {
+    return { attributed: true, leg: 'commit', lagMs };
+  }
+  if (lagMs === null || lagMs < 0 || lagMs > bandMs) return { attributed: false, leg: null, lagMs };
+  return { attributed: true, leg: 'band', lagMs };
+}
+
+/**
+ * Which merged PRs in the window DECLARED that closure — the sibling guard.
+ *
+ * A card closed inside one PR's band may have been closed by a neighbour that
+ * asked for it properly, and PRs land in batches (two merged in the same second
+ * on this board). Attributing a correct landing to the PR that merely mentioned
+ * the card is a false row about work that went right, so any declaring sibling
+ * inside the band EXPLAINS the closure and this row goes quiet.
+ *
+ * @returns {number[]} the declaring PR numbers, ascending.
+ */
+export function h59ExplainingPullRequests(cardNumber, closedAtMs, mergedWindow, bandMs = H59_MERGE_CLOSE_BAND_MS) {
+  const at = Number.isFinite(closedAtMs) ? closedAtMs : NaN;
+  if (!Number.isFinite(at)) return [];
+  const out = [];
+  for (const pr of Array.isArray(mergedWindow) ? mergedWindow : []) {
+    if (!h59DeclaredCloses(pr?.body ?? '').has(Number(cardNumber))) continue;
+    const mergedAt = Date.parse(pr?.merged_at ?? '');
+    if (!Number.isFinite(mergedAt)) continue;
+    if (Math.abs(at - mergedAt) > bandMs) continue;
+    out.push(Number(pr.number));
+  }
+  return out.sort((a, b) => a - b);
+}
+
+/**
+ * Direction (a) — FALSE CLOSE. The expensive half.
+ *
+ * ⛔ The remedy is the OWNING SEAT's act and is named as one: reopen the card
+ * and restore the state its labels claimed. This file reopens nothing, writes
+ * no label, and says so in the sentence rather than only in its banner.
+ */
+export function h59FalseCloseRow({ pr, card, attribution, closedEvent, closedAtMs }) {
+  const lag = attribution?.lagMs === null || attribution?.lagMs === undefined
+    ? 'an unreadable interval'
+    : `${Math.round(attribution.lagMs / 1000)}s`;
+  const evidence =
+    attribution?.leg === 'commit'
+      ? `the \`closed\` event NAMES this PR's merge commit \`${String(closedEvent?.commitId ?? '').slice(0, 10)}\``
+      : `the \`closed\` event carries NO \`commit_id\` (the measured shape on this board) and landed ${lag} ` +
+        `after the merge, inside the measured ${H59_MERGE_CLOSE_BAND_MS / 1000}s band`;
+  const actor = closedEvent?.actor ? `\`${closedEvent.actor}\`` : 'an unreadable actor';
+  return (
+    `FALSE CLOSE (candidate): merged PR #${pr?.number} MENTIONS #${card?.number} and binds NO closing ` +
+    `keyword to that number anywhere in its body, yet the card closed with the merge — ${evidence}, ` +
+    `actor ${actor}, and no other PR in the merged window declared that closure. ` +
+    'This is the expensive direction: work disappears from the board while reading as done, and it is ' +
+    'the one failure no other row here can catch, because a CLOSED card is swept by nothing. ' +
+    'GitHub\'s closing linkage is unreliable in both directions and ⛔ cannot be reasoned about from a ' +
+    'PR\'s text — the absence of a keyword is not the absence of a closure. ' +
+    'Remedy, and it belongs to the SEAT THAT OWNS the card: re-read the card against what actually ' +
+    'landed, REOPEN it if its work is not done, and restore the state labels the close dropped. ' +
+    '⛔ This row reopens nothing, writes no label and relabels nothing — it reads, and hands the act ' +
+    'to the seat that can judge it. ' +
+    '⚠️ CANDIDATE, never a verdict: the band leg is circumstantial by construction, so a seat closing ' +
+    'this card by hand in the same seconds reads the same way here. The actor above is printed for ' +
+    'exactly that judgement, and a closure outside this row\'s two windows is invisible to it.'
+  );
+}
+
+/**
+ * Direction (b) — FALSE OPEN. The cheap half, and it costs no request at all.
+ *
+ * The card's presence in the open listing IS the reading, so a truncated
+ * listing can only lose a row and never invent one.
+ */
+export function h59FalseOpenRow({ pr, card, keyword }) {
+  return (
+    `FALSE OPEN: merged PR #${pr?.number} binds \`${keyword} #${card?.number}\` in its body, and the card ` +
+    'is STILL OPEN after that merge — GitHub did not perform the closure the PR declared. ' +
+    'This is the cheaper direction of the same unreliable linkage: it surfaces as queue noise and ' +
+    'somebody eventually re-reads the card, where the opposite direction disappears silently. ' +
+    '⚠️ The keyword is read by the same grammar GitHub uses, which BINDS a number regardless of the ' +
+    'prose around it — 「Merging this must not close #N」 declares a closure — so a bound number is ' +
+    'DECLARED here whatever the sentence meant. That is what makes this direction honest rather than ' +
+    'a guess about intent, and H7 is the row that warns an author before the merge. ' +
+    'Remedy, and it belongs to the SEAT THAT OWNS the card: close it if the work landed, or drop the ' +
+    'keyword to `Part of` / `Refs` if it did not. ⛔ This row closes nothing and writes no label. ' +
+    '⚠️ A card whose closure this sweep could not place is UNJUDGED and counted, never clean.'
+  );
+}
+
+/**
+ * H59's population reading, as the summary line prints it.
+ *
+ * UNCONDITIONAL, and every number is a bound on what the row could have said.
+ * The two directions cost very different things and the clause keeps them
+ * apart: direction (b) is answered by listings already in hand, direction (a)
+ * buys at most `H59_CARD_READ_CEILING` timeline pages and declares every way a
+ * mention left it unjudged.
+ */
+export function h59LinkageClause(counts = {}) {
+  const judged = counts.linkageJudged ?? 0;
+  const declared = counts.linkageDeclared ?? 0;
+  const outOfWindow = counts.linkageOutOfWindow ?? 0;
+  const read = counts.linkageCardsRead ?? 0;
+  const unread = counts.linkageUnread ?? 0;
+  const short = counts.linkageShort ?? 0;
+  return (
+    `${declared} declared closure(s) and ${judged} keyword-LESS mention(s) from the bodies in H8's ` +
+    'merged window were judged against the open listing this sweep already holds; a declared target ' +
+    'still on that listing is a FALSE OPEN row and costs no request. ' +
+    `${outOfWindow} further mention(s) named a card that is neither open nor inside H22's ` +
+    `${CLOSED_ISSUE_WINDOW_DAYS}-day closed window, so their closure could not be PLACED and they are ` +
+    'UNJUDGED rather than clean — this row\'s real reach is the SHORTER of the two windows, ⛔ never ' +
+    `H8's ${MERGED_WINDOW_DAYS} days. Of the mentions that could be placed, only a closure inside the ` +
+    `measured ${H59_MERGE_CLOSE_BAND_MS / 1000}s band buys evidence: ${read} card(s) had ONE timeline ` +
+    `page read (cap ${H59_CARD_READ_CEILING} card(s) per sweep, ⛔ no retry on any status), ` +
+    `${unread} could not be read and ${short} were past that cap — all UNJUDGED, never clean. ` +
+    'A declaring SIBLING PR inside the same band EXPLAINS a closure and this row stays quiet, because ' +
+    'batched landings put two merges in one second. ⚠️ The `closed` event carries no `commit_id` on ' +
+    'this board (measured), so the commit leg is exact where it fires and fires on nothing here; the ' +
+    'band leg is circumstantial and every row says so. Rows are a LOWER BOUND.'
+  );
+}
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -12564,6 +13103,21 @@ export const SWEEP_COUNT_KEYS = [
   'rulingMarkerJudged',
   'rulingMarkerThreadRead',
   'rulingMarkerUnread',
+  // H59's coverage set (#17466). The row spans TWO windows and the pair that
+  // matters most is `linkageJudged`/`linkageOutOfWindow`: a mention whose card
+  // is neither open nor inside H22's closed window cannot have its closure
+  // PLACED at all, and a pass that printed only what it could place would read
+  // as a sweep of the whole merged window — the #4690 inversion in this row's
+  // own uniform. `linkageDeclared` is direction (b)'s judged population, which
+  // costs nothing; `linkageCardsRead` is what the one purchase actually bought,
+  // and `linkageUnread`/`linkageShort` are the two ways a card inside the
+  // attribution band still leaves this row UNJUDGED rather than clean.
+  'linkageDeclared',
+  'linkageJudged',
+  'linkageOutOfWindow',
+  'linkageCardsRead',
+  'linkageUnread',
+  'linkageShort',
   'refBeyond',
 ];
 
@@ -12639,8 +13193,9 @@ export function summaryLine(counts, findingCount) {
   const crossRepoProbed = counts.crossRepoProbed ?? 0;
   const crossRepoUnreadable = counts.crossRepoUnreadable ?? 0;
   // H35's event window (#11881). Reported as a pair for the same reason every
-  // pair above is: this is the file's ONLY reader of event history, so if the
-  // window came up short there is no second reader to notice. `truncated` means
+  // pair above is: this is the file's only REPO-WIDE reader of event history
+  // (H59's one timeline page is per-card and answers a different question), so
+  // if the window came up short there is no second reader to notice. `truncated` means
   // the page cap bound before the horizon was reached — the run saw less than
   // its stated 12h and must not read as a board with no gate removals in it.
   // The `unjudgeable` count is carried into the summary deliberately: it is the
@@ -13029,6 +13584,12 @@ export function summaryLine(counts, findingCount) {
     'whose thread no other row bought has an UNREAD second channel rather than a clean one, and the ' +
     'rows are a LOWER BOUND. It matches ATX HEADINGS outside fenced code only: a marker quoted in ' +
     'prose, in a table, in a code span or in a blockquote is invisible here by design. ' +
+    // H59's coverage reading (#17466). UNCONDITIONAL like every other window's,
+    // and it is the only place a reader can see that this row spans TWO windows
+    // and reaches only as far as the shorter one. It also carries the one
+    // purchase in this file that is a per-card timeline page, its cap, and the
+    // measured fact that the commit leg fires on nothing here.
+    `Merged-PR closing linkage (H59): ${h59LinkageClause(counts)} ` +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -13090,6 +13651,7 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h53Carrier', 'Carriers without increment (H53): '],
   ['h57Scheduled', 'Scheduled non-blocking workflows (H57): '],
   ['h58RulingMarkers', 'Queued ruling markers (H58): '],
+  ['h59Linkage', 'Merged-PR closing linkage (H59): '],
   ['reportOnly', 'Report-only: '],
 ];
 
@@ -13586,6 +14148,35 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // being one disposition into a state that already exists. And it is H54's
   // band, the row this one is the body-and-thread half of.
   H58: 'state',
+
+  // H59 is a `state` (#17466), and the three refusals are each taken on the
+  // refused band's OWN criterion rather than on this subject's vocabulary.
+  //
+  // ⛔ NOT `gate`, and this is the close one, because the FALSE CLOSE direction
+  // really is an absence reading as a green light: a card vanishes off the board
+  // and its silence reads as delivered. That band's criterion has two halves and
+  // this row satisfies only the second — 「the row's SUBJECT is a GATE that may
+  // have been stripped or split」 — and this row's subject is a CARD's state, not
+  // a required check. H31/H35 are about a gate that decides whether something may
+  // land; nothing here decides that. Reading `gate` off the second half alone
+  // would make the band mean 「anything protective」, which is H57's refusal taken
+  // for H57's reason: the band stays about the required set.
+  // ⛔ NOT `stall`: that criterion is forward motion STOPPED with nothing else to
+  // move it, and the FALSE CLOSE direction is the opposite failure — the card was
+  // moved, wrongly and all the way to done. Nothing is waiting on a scan; what is
+  // wrong is the state the board now shows. FALSE OPEN is not a stall either: the
+  // card is open, visible, and every queue read still reaches it.
+  // ⛔ NOT `inventory`: the row alarms about ONE card and one PR, not a
+  // population. The population reading — the two windows, the mentions that could
+  // not be placed, the cards read — is a summary clause and takes no band at all
+  // (H39's shape).
+  //
+  // What is left is `state`'s criterion exactly: the board contradicts the record
+  // of what merged, on ONE card, and the repair is on the board — a seat reopens
+  // it and restores its labels, or closes it. And it is H8's band, the row this
+  // one is the closed-card half of: H8 reads a merged PR against a card that is
+  // still open, this reads the same merged window against a card that is not.
+  H59: 'state',
 
   H5: 'inventory',
   H6: 'inventory',
@@ -14882,6 +15473,15 @@ async function sweep(options = {}) {
   const pre = await probeTransport();
   if (pre && pre.kind !== 'reachable') reportPrerequisiteNotMet(pre);
 
+  // The tracked-file oracle, read ONCE per sweep and BEFORE gathering (#17377).
+  // It is a local `git ls-files`, not a request. It moved ahead of the sweep
+  // because H9 now classifies a `Restart-when:` value against it too, and the
+  // placement is what keeps ONE reading answering for both readers: H9's row
+  // and H17's index cannot disagree about what a tracked file is, and no
+  // second tracker exists to drift from this one.
+  const tracked = readTrackedFiles();
+  const isTracked = (path) => (tracked ? tracked.has(path) : false);
+
   const findings = [];
   const seen = new Map();
   const seenPrs = new Map();
@@ -15011,7 +15611,7 @@ async function sweep(options = {}) {
   // on `findings` (#13634).
   const references = { report: null };
   try {
-    await sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seenClosed, stats, hold, references);
+    await sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seenClosed, stats, hold, references, isTracked);
   } catch (err) {
     err.sweptSoFar = seen.size + seenPrs.size + seenMerged.size + seenUnscoped.size + seenClosed.size;
     throw err;
@@ -15037,12 +15637,11 @@ async function sweep(options = {}) {
     // is no longer a thing this assembly can do.
     ...Object.fromEntries(SWEEP_COUNT_KEYS.map((key) => [key, stats[key]])),
   };
-  // The oracle is read ONCE per sweep, after gathering: it is a local
-  // `git ls-files`, not a request, and every candidate token is checked
-  // against the same reading so the index cannot be internally inconsistent.
-  const tracked = readTrackedFiles();
+  // The index consumes the SAME reading H9 was handed above — one `git
+  // ls-files` per sweep, so every candidate token in either reader is checked
+  // against identical bytes and neither index can be internally inconsistent.
   const triggerIndex = {
-    rows: h17IndexRows(hold.entries, (path) => (tracked ? tracked.has(path) : false)),
+    rows: h17IndexRows(hold.entries, isTracked),
     candidates: hold.candidates,
     probed: hold.probed,
     tracked: tracked ? tracked.size : null,
@@ -15872,18 +16471,40 @@ export const CLOSED_ISSUE_WINDOW_PAGE_CEILING = 40;
  * disagree with.
  *
  * ⛔ This is closed-issue UPDATE EVENTS per day, NOT closures per day. The two
- * differ by ~17x on this board and confusing them is precisely the defect this
+ * differ by ~13x on this board and confusing them is precisely the defect this
  * window carried (see the docblock above).
  *
- *   read    2026-09-06T21:59Z, `GET /repos/{repo}/issues?state=closed&sort=updated`
- *   window  400 rows spanning 0.964 days
- *   rate    400 / 0.964 = ~415 closed-issue update events/day
- *   (re-read at depth: 800 rows / 2.051d = ~390/day, 1200 rows / 3.092d = ~388/day)
+ * ⚠️ AND IT IS MEASURED OVER THE STREAM THE PATROL PAGES, which is NOT the one
+ * an agent container gets from the same URL. The scheduled runner's token
+ * declares `contents: read` + `issues: write` and no pull-request scope, and its
+ * `/issues` pages come back CARD-ONLY; the byte-identical request from a proxied
+ * container returns 49.6% pull requests. Measured, not inferred from the
+ * workflow file: the 2026-09-11T01:55Z run reports 5 pages, 428 in-window
+ * closures and ~141.3/day, and replaying THIS pager over a container read of the
+ * same hour gives 5 pages / 426 / ~139.4 on the CARD-ONLY slice against 9 pages /
+ * 426 / ~256.2 on the whole one — and 428 in-window closures cannot come out of 5
+ * PR-inclusive pages at all, since only ~250 of those 500 rows are cards.
+ *
+ * ⛔ So a re-pin read from a container rates a different population than the
+ * sweep it is checked against, and the 0.34 factor the DRIFTED clause has been
+ * printing is TWO things multiplied: a real ~0.64 slowdown of the stream since
+ * 2026-09-06, and a ~0.53 population difference that is not tempo at all.
+ *
+ *   read    2026-09-11T04:22Z, `GET /repos/{repo}/issues?state=closed&sort=updated`
+ *           — card-only rows, the population the runner pages
+ *   window  500 rows spanning 3.586 days — the 5 pages a 3-day horizon costs
+ *   rate    500 / 3.586 = ~139 closed-issue update events/day
+ *   (re-read at depth: 200 rows / 1.352d = ~148/day, 400 rows / 2.769d = ~144/day,
+ *    605 rows / 3.969d = ~152/day)
  */
-export const MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY = 415.1;
+export const MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY = 139.4;
 
-/** WHEN `MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY` was measured. */
-export const MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY_AT = '2026-09-06';
+/**
+ * WHEN `MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY` was measured — and therefore when
+ * it EXPIRES on the calendar whatever a sweep observes: `RATE_PREMISE_STALE_DAYS`
+ * past this date is 2026-10-11.
+ */
+export const MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY_AT = '2026-09-11';
 
 /**
  * H22's premise, in the shape `classifyRatePremise` judges (#16393).
@@ -16293,9 +16914,12 @@ async function listRecentDefaultBranchCommits(stats = {}, nowMs = Date.now()) {
 }
 
 /**
- * H35's repo-wide issue-event window — the ONLY reader of event history in this
- * file, and deliberately not a per-card timeline fetch (H35's header carries
- * the reasoning; H15 and H16 decline the per-card shape by name).
+ * H35's repo-wide issue-event window — the only REPO-WIDE reader of event
+ * history in this file, and deliberately not a per-card timeline fetch (H35's
+ * header carries the reasoning; H15 and H16 decline the per-card shape by name).
+ * ⚠️ H59 does buy a per-card timeline page since #17466, for a bounded set of
+ * cards a merged PR's body names; it reads a `closed` event and never a label
+ * one, so nothing here may be answered from it.
  *
  * TIME-bounded with a PAGE cap behind it, rather than pages alone. The stream
  * is strictly newest-first, so the horizon is reached by reading until a row
@@ -16539,7 +17163,7 @@ export async function sweepScheduledWorkflows(findings, stats = {}, options = {}
   stats.scheduledInactiveNames = inactive.length > 0 ? inactive.join(', ') : null;
 }
 
-async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seenClosed, stats = {}, hold = null, references = null) {
+async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seenClosed, stats = {}, hold = null, references = null, isTracked = () => false) {
   // H57 (#17132) — FIRST in the sweep, and the placement is mechanism rather
   // than preference. This is the only pass here whose subject is not a card or
   // a PR: it touches `seen`, the comment cache and the reference corpus not at
@@ -16815,8 +17439,11 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     // trade as H4: a hold whose body already carries a fireable line is
     // answered without the network; a body-clean one buys (at most) the one
     // comment fetch H17 is about to make anyway, off the shared cache.
-    if (needsRestartWhenComments(issue)) await gatherRestartWhenComments(issue);
-    const restartless = h9OnHoldNoRestartWhen(issue, restartFor(issue));
+    // `isTracked` reaches BOTH halves (#17377): the gate and the row must
+    // answer 「does the body already answer this card」 identically, or a
+    // tracked-path hold would fire a row whose second channel was never read.
+    if (needsRestartWhenComments(issue, isTracked)) await gatherRestartWhenComments(issue);
+    const restartless = h9OnHoldNoRestartWhen(issue, restartFor(issue), isTracked);
     if (restartless) findings.push([issue, 'H9', restartless]);
     const staleP0 = h10StaleUnclaimedP0(issue);
     if (staleP0) findings.push([issue, 'H10', staleP0]);
@@ -17990,6 +18617,105 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
       mergedWindow,
     );
     if (bare) findings.push([issue, 'H53', bare]);
+  }
+
+  // H59 (#17466) — the merged window read a second way: not "did the card's
+  // paired write land" (H8) but "did GitHub's closing linkage tell the truth
+  // about this card at all", in both directions.
+  //
+  // Placed HERE and not beside H8 because it needs three collections H8 does
+  // not: the unscoped OPEN listing (the free answer to direction (b)), the
+  // CLOSED window (the free `closed_at` that decides whether direction (a) is
+  // worth a request), and the open-PR listing — and all three exist only after
+  // the passes above. Like H53 it BUYS a fetch, so the foot is where its
+  // purchase is provably the smallest: everything free has already been read.
+  const openCardNumbers = new Set([...seenUnscoped.keys(), ...seen.keys()]);
+  const knownPrNumbers = new Set([...seenPrs.keys(), ...seenMerged.keys()]);
+  // Distinct cards that survived every free narrowing, each with the PR whose
+  // merge is the candidate explanation. A card reached by two PRs keeps the
+  // FIRST, so the cap eats a stable set rather than a set that moves with
+  // iteration order.
+  const linkageReads = new Map();
+  for (const pr of mergedWindow) {
+    const body = pr?.body ?? '';
+    const declared = h59DeclaredCloses(body);
+    for (const [number, keyword] of declared) {
+      if (number === Number(pr?.number)) continue;
+      stats.linkageDeclared = (stats.linkageDeclared ?? 0) + 1;
+      // Direction (b) — FALSE OPEN. Positive membership in the open listing IS
+      // the reading, so a truncated listing loses a row and never invents one.
+      const open = seenUnscoped.get(number) ?? seen.get(number);
+      if (open) findings.push([open, 'H59', h59FalseOpenRow({ pr, card: open, keyword })]);
+    }
+    for (const number of h59MentionedCards(body, OWNER_REPO)) {
+      if (number === Number(pr?.number)) continue;
+      if (declared.has(number)) continue;
+      if (knownPrNumbers.has(number)) continue;
+      if (openCardNumbers.has(number)) {
+        // Open and unbound is the healthy shape this row is silent about, and
+        // it is judged rather than skipped — the clause counts it.
+        stats.linkageJudged = (stats.linkageJudged ?? 0) + 1;
+        continue;
+      }
+      const closedCard = seenClosed.get(number);
+      if (!closedCard) {
+        // Neither open nor inside H22's window: the closure cannot be PLACED,
+        // so it is UNJUDGED and counted — ⛔ never clean.
+        stats.linkageOutOfWindow = (stats.linkageOutOfWindow ?? 0) + 1;
+        continue;
+      }
+      stats.linkageJudged = (stats.linkageJudged ?? 0) + 1;
+      const closedAtMs = Date.parse(closedCard?.closed_at ?? '');
+      if (!Number.isFinite(closedAtMs)) {
+        stats.linkageUnread = (stats.linkageUnread ?? 0) + 1;
+        continue;
+      }
+      // The free half of the attribution: a closure outside the measured band
+      // is not this merge's, and buys nothing.
+      if (!h59CloseAttribution(pr, closedAtMs, null).attributed) continue;
+      // A sibling PR that DECLARED the closure explains it — batched landings
+      // put two merges in one second, and a correct landing is not a row.
+      if (h59ExplainingPullRequests(number, closedAtMs, mergedWindow).length > 0) continue;
+      if (!linkageReads.has(number)) linkageReads.set(number, { pr, card: closedCard, closedAtMs });
+    }
+  }
+  for (const [number, candidate] of linkageReads) {
+    if ((stats.linkageCardsRead ?? 0) >= H59_CARD_READ_CEILING) {
+      stats.linkageShort = (stats.linkageShort ?? 0) + 1;
+      continue;
+    }
+    let page;
+    try {
+      page = await rest(
+        `/repos/${OWNER_REPO}/issues/${number}/timeline?per_page=${H59_TIMELINE_PAGE_SIZE}&page=1`,
+      );
+    } catch {
+      // ⛔ No retry loop on any status (#17374). A failed read leaves the card
+      // UNJUDGED and the coverage numbers are what say so.
+      stats.linkageUnread = (stats.linkageUnread ?? 0) + 1;
+      continue;
+    }
+    stats.linkageCardsRead = (stats.linkageCardsRead ?? 0) + 1;
+    const { event, complete } = h59ClosedEvent(page);
+    // A FULL page may hide a later `closed`, and an absent event on a card the
+    // closed listing says is closed is a page that did not reach it.
+    if (!complete || !event) {
+      stats.linkageUnread = (stats.linkageUnread ?? 0) + 1;
+      continue;
+    }
+    const attribution = h59CloseAttribution(candidate.pr, candidate.closedAtMs, event);
+    if (!attribution.attributed) continue;
+    findings.push([
+      candidate.card,
+      'H59',
+      h59FalseCloseRow({
+        pr: candidate.pr,
+        card: candidate.card,
+        attribution,
+        closedEvent: event,
+        closedAtMs: candidate.closedAtMs,
+      }),
+    ]);
   }
 
   // H45's second half — the `pm:epic` index, read as its own population.
@@ -19264,7 +19990,19 @@ async function selfTest() {
   // the old remedy text told the reading seat to close a maintainer-
   // commissioned card.
   const held9591 = '`Restart-when: the v18 major development cycle opens (first v18 changeset-major accepted on main), or a maintainer instruction pulls it forward`';
-  t('H9: the #9591 shape — a backticked line is a LEGAL hold', h9OnHoldNoRestartWhen(hold(held9591)), null);
+  // #17377 moved this case's EXPECTATION without moving its subject. The
+  // subject is decoration tolerance, and the #10102 incident it pins is that a
+  // backticked line read as ABSENT and the remedy text then told a seat to
+  // close a maintainer-commissioned card. Both halves of that are still pinned
+  // below — the line is READ, and the row it produces is a CLASS row carrying
+  // no 「maybe it is there」 hedge. What changed is the verdict on the VALUE:
+  // #9591's exit is prose naming no issue, no tracked path and no runnable
+  // command, so it is a row now, and the old `null` asserted the opposite.
+  // ⛔ Deleting the case would delete the decoration pin with it.
+  t('H9: the #9591 shape — a backticked line is still READ, not absent', directiveValues(held9591, 'Restart-when').length, 1);
+  t('H9: …so its row is the prose class, not the "no line" row', h9row(hold(held9591)).includes('is prose naming no issue'), true);
+  t('H9: …and carries no unparsed hedge (a line WAS read)', h9row(hold(held9591)).includes('cannot parse'), false);
+  t('H9: …and a decorated FIREABLE line is still a legal hold', h9OnHoldNoRestartWhen(hold('`Restart-when: closed acme/widgets#123`')), null);
   t('H9: bulleted line -> clean', h9OnHoldNoRestartWhen(hold('- Restart-when: closed acme/widgets#123')), null);
   t('H9: `*`-bulleted line -> clean', h9OnHoldNoRestartWhen(hold('* Restart-when: closed acme/widgets#123')), null);
   t('H9: bolded key -> clean', h9OnHoldNoRestartWhen(hold('**Restart-when:** closed acme/widgets#123')), null);
@@ -19341,6 +20079,84 @@ async function selfTest() {
   t('gate: a fireable body line buys no fetch', needsRestartWhenComments(hold('Restart-when: closed acme/widgets#123')), false);
   t('gate: a non-hold card buys no fetch from THIS item', needsRestartWhenComments(issue(['pm:blocked'], [], 'no line here')), false);
   t('gate: a missing issue does not crash', needsRestartWhenComments(undefined), false);
+
+  // -- H9: the `Restart-when:` value CLASSES (#17377) -------------------------
+  // H9 used to test the SPELLING of fireability — 「not `manual`」 — so every
+  // shape but that one word passed. `classifyRestartWhen` sorts a value into
+  // six classes and three of them are fireable. The three specimens below are
+  // VERBATIM live values, pinned as literal strings so a later reader can see
+  // what the classifier was built against rather than a paraphrase of it.
+  const v7898 =
+    'any PR touches packages/core/src/security/auth-gate.ts, packages/runtime/src/http-dispatcher.ts ' +
+    'or adds an adapter under packages/adapters/** (a second transport adapter is restart condition 1 by definition)';
+  const v3739 = 'the triage seat performs the contract-first split (parent + per-repo sub-issues)';
+  const v5499 = 'closed objectstack-ai/objectstack#5499';
+  // A stub oracle, for `h17TriggerFiles`'s reason: the classification stays
+  // testable without a checkout, and the fixture states exactly which paths
+  // are tracked instead of inheriting whatever this tree happens to hold.
+  const h9Tracked = (p) =>
+    ['packages/core/src/security/auth-gate.ts', 'packages/runtime/src/http-dispatcher.ts',
+      'scripts/check-type-check-coverage.mjs'].includes(p);
+
+  t('H9 class: `manual` still comes first', classifyRestartWhen('manual — first EE customer asking'), 'manual');
+  t('H9 class: …and only as a WHOLE word', classifyRestartWhen('manually re-check the npm tag'), 'prose');
+  t('H9 class: the unlock sweep\'s own form', classifyRestartWhen(v5499), 'closed-ref');
+  t('H9 class: …and `closed` without a reference is not it', classifyRestartWhen('closed the design question at last'), 'prose');
+  t('H9 class: the ruling spelling H9\'s header admitted', classifyRestartWhen('#13651 rules on the count an app cannot reach'), 'issue-ref');
+  t('H9 class: …in its cross-repo spelling too', classifyRestartWhen('objectstack-ai/cloud#861 (Phase 3 EE governance) is scheduled'), 'issue-ref');
+  t('H9 class: a backticked opening span is an executable predicate', classifyRestartWhen('`pnpm check:type-check-debt --re-measure` prints a non-empty surplus line'), 'command');
+  t('H9 class: …and a measured BARE head is too', classifyRestartWhen('git grep -n "AUTHORING_SURFACES" -- packages/lint/src shows a third value'), 'command');
+  t('H9 class: …including the head this file already pinned', classifyRestartWhen('npm view create-objectstack dist-tags reports >= 17.0.0'), 'command');
+  t('H9 class: …but the head list is CLOSED, not a guess at command-shaped words', classifyRestartWhen('gradle assemble reports a clean build'), 'prose');
+  t('H9 class: #7898 — a file trigger misfiled under Restart-when', classifyRestartWhen(v7898, h9Tracked), 'tracked-path');
+  t('H9 class: …which collapses into prose with NO oracle injected', classifyRestartWhen(v7898), 'prose');
+  t('H9 class: #3739 — prose waiting on a seat nothing schedules', classifyRestartWhen(v3739, h9Tracked), 'prose');
+  t('H9 class: an empty value is never fireable', classifyRestartWhen(''), 'prose');
+  // The oracle validates; it never guesses. Both decoys are shapes H17's own
+  // stage 2 records, and each would be a wrong row if the token were trusted.
+  t('H9 paths: #7898\'s two tracked paths extract, comma and all', restartWhenTrackedPaths(v7898, h9Tracked).join('|'), 'packages/core/src/security/auth-gate.ts|packages/runtime/src/http-dispatcher.ts');
+  t('H9 paths: a glob is not a tracked file', restartWhenTrackedPaths('packages/adapters/**', h9Tracked).length, 0);
+  t('H9 paths: a line suffix correctly fails', restartWhenTrackedPaths('scripts/check-type-check-coverage.mjs:1679', h9Tracked).length, 0);
+  t('H9 paths: a backticked path is accepted too', restartWhenTrackedPaths('touches `scripts/check-type-check-coverage.mjs` again', h9Tracked).join('|'), 'scripts/check-type-check-coverage.mjs');
+  t('H9 paths: …and one closing a parenthesis', restartWhenTrackedPaths('(see packages/runtime/src/http-dispatcher.ts).', h9Tracked).join('|'), 'packages/runtime/src/http-dispatcher.ts');
+  t('H9 paths: no oracle means no path, never a guess', restartWhenTrackedPaths(v7898).length, 0);
+  t('H9 class: the fireable set is exactly the three', FIREABLE_RESTART_WHEN_CLASSES.join('|'), 'closed-ref|issue-ref|command');
+  t('H9 class: the bare command heads are the measured four', RESTART_WHEN_COMMAND_HEADS.join('|'), 'git|npm|npx|pnpm');
+
+  // The rows the two new classes produce — report-only, each naming the remedy
+  // a seat can execute without re-reading the card.
+  const h7898 = hold(`Restart-when: ${v7898}`);
+  const h3739 = hold(`Restart-when: ${v3739}`);
+  t('H9: #7898\'s file trigger is a finding, not a legal hold', typeof h9OnHoldNoRestartWhen(h7898, undefined, h9Tracked), 'string');
+  t('H9: …and the row names both tracked paths', h9row(h7898, undefined, h9Tracked).includes('`packages/core/src/security/auth-gate.ts`, `packages/runtime/src/http-dispatcher.ts`'), true);
+  t('H9: …and prescribes the rewrite, not a close', h9row(h7898, undefined, h9Tracked).includes('Rewrite the line as `Restart-touch: <path>`'), true);
+  t('H9: …and says why the unlock sweep cannot fire it', h9row(h7898, undefined, h9Tracked).includes('the unlock sweep fires only'), true);
+  t('H9: …with no unparsed hedge — a line WAS read', h9row(h7898, undefined, h9Tracked).includes('cannot parse'), false);
+  t('H9: …and with no oracle it still fires, as prose', typeof h9OnHoldNoRestartWhen(h7898), 'string');
+  t('H9: #3739\'s prose is a finding', typeof h9OnHoldNoRestartWhen(h3739, undefined, h9Tracked), 'string');
+  t('H9: …and the row names the missing event', h9row(h3739, undefined, h9Tracked).includes('Mark it `manual` or name the event'), true);
+  t('H9: …calling it a `manual` in disguise', h9row(h3739, undefined, h9Tracked).includes('a `manual` in disguise'), true);
+  // ⛔ The reserved class (H9's header): an unreachable `closed …#N` target is
+  // NOT this card's ruling to make, so the well-formed spelling stays clean
+  // whatever #5499's reachability.
+  t('H9: the reserved unreachable-`closed #N` class stays CLEAN', h9OnHoldNoRestartWhen(hold(`Restart-when: ${v5499}`), undefined, h9Tracked), null);
+  t('H9: an executable predicate stays clean under the oracle', h9OnHoldNoRestartWhen(hold('Restart-when: `git grep -l foo` returns 0'), undefined, h9Tracked), null);
+  t('H9: the ruling spelling stays clean under the oracle', h9OnHoldNoRestartWhen(hold('Restart-when: #13651 rules on it'), undefined, h9Tracked), null);
+  // Class ordering when several unfireable values coexist: the most specific
+  // remedy wins, and it chooses a SENTENCE — every one of them is a row.
+  t('H9: a tracked path outranks a `manual` line in the sentence', h9row(hold(`Restart-when: manual — x\nRestart-when: ${v7898}`), undefined, h9Tracked).includes('Restart-touch'), true);
+  t('H9: prose outranks `manual` too', h9row(hold(`Restart-when: manual — x\nRestart-when: ${v3739}`), undefined, h9Tracked).includes('a `manual` in disguise'), true);
+  t('H9: a fireable line still clears a card carrying prose beside it', h9OnHoldNoRestartWhen(hold(`Restart-when: ${v3739}\nRestart-when: ${v5499}`), undefined, h9Tracked), null);
+  // Both channels classify the same way — the shared predicate, on both sides.
+  t('H9: a file trigger parked in a COMMENT is a finding too', typeof h9OnHoldNoRestartWhen(hold('parked'), [`Restart-when: ${v7898}`], h9Tracked), 'string');
+  t('H9: …and a fireable comment line still rescues a prose body', h9OnHoldNoRestartWhen(h3739, [`Restart-when: ${v5499}`], h9Tracked), null);
+  // The gathering policy moves with the verdict, or a card would fire a row
+  // whose second channel was never fetched.
+  t('gate: a tracked-path body now BUYS the comment fetch', needsRestartWhenComments(h7898, h9Tracked), true);
+  t('gate: a prose body buys it too', needsRestartWhenComments(h3739, h9Tracked), true);
+  t('gate: an executable-predicate body still buys nothing', needsRestartWhenComments(hold('Restart-when: `git grep -l foo` returns 0'), h9Tracked), false);
+  t('gate: the ruling spelling still buys nothing', needsRestartWhenComments(hold('Restart-when: #13651 rules on it'), h9Tracked), false);
+  t('gate: the reserved `closed …#N` class still buys nothing', needsRestartWhenComments(hold(`Restart-when: ${v5499}`), h9Tracked), false);
 
   // -- H10: stale unclaimed p0 (routing-gap backstop) -------------------------
   const NOW = Date.parse('2026-08-16T12:00:00Z');
@@ -21908,12 +22724,12 @@ async function selfTest() {
   t('windows: …and 2.73d at the rate measured 8 days later — same cap, 25% more window', Number(windowCoverageDays(300, MEASURED_COMMITS_PER_DAY).toFixed(2)), 2.73);
   t('windows: …which is why H23\'s cap became a TIME cap', COMMIT_WINDOW_DAYS, 3);
   // ⛔ H22's is the one whose DIVISOR was the surprise: its rows are consumed by
-  // closed-issue UPDATE activity, not by closures, and the two differ ~39x at
-  // the divisor re-pinned 2026-09-06, against the ~10.7 closures/day measured
+  // closed-issue UPDATE activity, not by closures, and the two differ ~13x at
+  // the divisor re-pinned 2026-09-11, against the ~10.7 closures/day measured
   // when the defect was found. The old 4-page cap read as a closure window and
   // was nothing of the kind.
-  t('windows: H22\'s old 4-page cap bought only 0.96d of UPDATE recency at the 2026-09-06 rate', Number(windowCoverageDays(400, MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY).toFixed(2)), 0.96);
-  t('windows: …and the honest divisor is ~39x the closure rate it read as', Number((MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY / 10.7).toFixed(1)), 38.8);
+  t('windows: H22\'s old 4-page cap bought 2.87d of UPDATE recency at the 2026-09-11 rate', Number(windowCoverageDays(400, MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY).toFixed(2)), 2.87);
+  t('windows: …and the honest divisor is ~13x the closure rate it read as', Number((MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY / 10.7).toFixed(1)), 13);
   t('windows: …which is why H22\'s cap became a CLOSURE-time cap', CLOSED_ISSUE_WINDOW_DAYS, 3);
   t('windows: …and its horizon is seen by 12 consecutive runs', sweepOverlap(CLOSED_ISSUE_WINDOW_DAYS), 12);
   // #13499 — H8's window is no longer a page cap at all, so the arithmetic that
@@ -22084,10 +22900,13 @@ async function selfTest() {
   t('H22 window: a 1-day-old closure is inside', issueClosedWithinWindow(closed13606(1, 1), CH), true);
   // Direction 2 — the row the OLD 4-page cap structurally could not reach. The
   // cap covered ~0.96d of UPDATE recency at the divisor pinned 2026-09-06
-  // (~2.12d at the one pinned when the repair landed), so a card closed 2.5
-  // days ago and untouched since fell out of it: not late, GONE. Measured cost
-  // at the time of the repair: 19 residue carriers closed within 3 days missed.
-  t('H22 window: the old 4-page cap reached only ~1.0 days of update-recency', windowCoverageDays(400, MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY) < 2.5, true);
+  // (~2.12d at the one pinned when the repair landed, ~2.87d at the one pinned
+  // 2026-09-11), so a card closed 2.5 days ago and untouched since fell out of
+  // it: not late, GONE. Measured cost at the time of the repair: 19 residue
+  // carriers closed within 3 days missed. ⚖️ The days this cap buys move with
+  // every re-pin — which is the whole argument against a page cap — so what is
+  // pinned below is its SHORTFALL against the horizon, not a fixed count of days.
+  t('H22 window: the old 4-page cap reached ~2.9 days of update-recency, still short of the 3-day horizon', windowCoverageDays(400, MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY) < 3, true);
   t('H22 window: …but the 3-day closure horizon admits that card', issueClosedWithinWindow(closed13606(2, 2.5), CH), true);
   // …and the window still HAS an edge; a boundary that admits everything is none.
   t('H22 window: a 4-day-old closure is outside', issueClosedWithinWindow(closed13606(3, 4), CH), false);
@@ -22309,28 +23128,29 @@ async function selfTest() {
   const rateStream16393 = (step) =>
     closedStream(Array.from({ length: 30 }, (_, i) => ratePage16393(step * (i + 1))));
 
-  // 2x the pin: 0.11-day steps, so the horizon falls on page 28 — 2800 rows
-  // read across a 2.97-day span is ~942.8/day against a pin of 415.1.
+  // Well past the band: 0.11-day steps, so the horizon falls on page 28 — 2800
+  // rows read across a 2.97-day span is ~942.8/day against a pin of 139.4.
   const driftedStats16393 = {};
   const driftedRows16393 = await listRecentlyClosedIssues(driftedStats16393, NOW13606, rateStream16393(0.11));
   t('#16393 stream: the pass stops on the first page past the horizon', driftedStats16393.closedPages, 28);
   t('#16393 stream: …and the rate is over the rows READ', Math.round(driftedStats16393.closedRateObserved * 100) / 100, 942.76);
   t('#16393 stream: ⛔ …not over the rows ADMITTED, which is a different number', Math.round(observedRatePerDay(driftedRows16393, 'updated_at') * 100) / 100 === Math.round(driftedStats16393.closedRateObserved * 100) / 100, false);
-  t('#16393 stream: …a board running 2x the pin FIRES the alarm', h22Premise(driftedStats16393.closedRateObserved).state, 'drifted');
-  t('#16393 stream: …and the factor is stated so it can be acted on', h22Premise(driftedStats16393.closedRateObserved).message.includes('a factor of 2.27'), true);
-  t('#16393 stream: …with both rates beside it', h22Premise(driftedStats16393.closedRateObserved).message.includes('observed ~942.8 closed-issue updates/day') && h22Premise(driftedStats16393.closedRateObserved).message.includes('= 415.1/day'), true);
+  t('#16393 stream: …a board running past the band FIRES the alarm', h22Premise(driftedStats16393.closedRateObserved).state, 'drifted');
+  t('#16393 stream: …and the factor is stated so it can be acted on', h22Premise(driftedStats16393.closedRateObserved).message.includes('a factor of 6.76'), true);
+  t('#16393 stream: …with both rates beside it', h22Premise(driftedStats16393.closedRateObserved).message.includes('observed ~942.8 closed-issue updates/day') && h22Premise(driftedStats16393.closedRateObserved).message.includes('= 139.4/day'), true);
   // ⛔ The rule that makes this an alarm rather than a self-healing constant.
-  t('#16393 stream: ⛔ a drifted sweep does NOT rewrite the pin', MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY, 415.1);
-  t('#16393 stream: …nor its date', MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY_AT, '2026-09-06');
+  t('#16393 stream: ⛔ a drifted sweep does NOT rewrite the pin', MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY, 139.4);
+  t('#16393 stream: …nor its date', MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY_AT, '2026-09-11');
 
-  // 1x the pin: 0.25-day steps, horizon on page 13 — 1300 rows over 3.0 days is
-  // ~433.3/day, a factor of 1.04, and the alarm stays silent. ⚖️ It is the very
-  // stream that ran 2x the pin until the 2026-09-06 re-measure: the board moved
-  // by that much in six days, and the fixture did not move at all.
+  // 1x the pin: 0.75-day steps, horizon on page 5 — 500 rows over 3.0 days is
+  // ~166.7/day, a factor of 1.20, and the alarm stays silent. ⚖️ The step is
+  // stated RELATIVE to the hand-pinned rate, so it moves when the pin does — it
+  // was 0.25 against the 415.1 pinned 2026-09-06 — because a fixture asserting
+  // "in band" against a rate nobody re-measured passes for a board nobody read.
   const okStats16393 = {};
-  await listRecentlyClosedIssues(okStats16393, NOW13606, rateStream16393(0.25));
-  t('#16393 stream: an in-band board reaches its horizon in thirteen pages', okStats16393.closedPages, 13);
-  t('#16393 stream: …and observes a rate at the pin', Math.round(okStats16393.closedRateObserved * 100) / 100, 433.33);
+  await listRecentlyClosedIssues(okStats16393, NOW13606, rateStream16393(0.75));
+  t('#16393 stream: an in-band board reaches its horizon in five pages', okStats16393.closedPages, 5);
+  t('#16393 stream: …and observes a rate at the pin', Math.round(okStats16393.closedRateObserved * 100) / 100, 166.67);
   t('#16393 stream: …which raises NO alarm', h22Premise(okStats16393.closedRateObserved).state, 'ok');
   t('#16393 stream: a board with nothing dateable observes no rate at all', (await (async () => { const s = {}; await listRecentlyClosedIssues(s, NOW13606, closedStream([[{ number: 1, updated_at: 'nope' }]])); return s.closedRateObserved; })()), null);
   t('#16393 stream: …and an empty board likewise', (await (async () => { const s = {}; await listRecentlyClosedIssues(s, NOW13606, closedStream([])); return s.closedRateObserved; })()), null);
@@ -22343,13 +23163,13 @@ async function selfTest() {
   const clause16393 = (observed, extra = {}) => h22RatePremiseClause(observed, { nowMs: NOW13606, ...extra });
   t('#16393 clause: a drifted divisor is marked loud', clause16393(942.76).startsWith('⚠️ RATE PREMISE DRIFTED'), true);
   t('#16393 clause: …and names the re-measure act', clause16393(942.76).includes('re-pinned by hand, from a fresh measurement'), true);
-  t('#16393 clause: an expired pin is marked loud too', clause16393(415.1, { nowMs: Date.parse('2026-11-01T00:00:00Z') }).startsWith('⚠️ RATE PREMISE EXPIRED'), true);
+  t('#16393 clause: an expired pin is marked loud too', clause16393(139.4, { nowMs: Date.parse('2026-11-01T00:00:00Z') }).startsWith('⚠️ RATE PREMISE EXPIRED'), true);
   t('#16393 clause: an unobserved rate is marked loud, never silent', clause16393(null).startsWith('⚠️ RATE PREMISE UNOBSERVED'), true);
-  t('#16393 clause: an in-band divisor is NOT marked loud', clause16393(433.33).includes('⚠️'), false);
+  t('#16393 clause: an in-band divisor is NOT marked loud', clause16393(166.67).includes('⚠️'), false);
   // ⛔ …but it still SPEAKS. A check that is only visible when it fires cannot
   // be told apart from a check somebody deleted — `renderRatePremise`'s rule.
-  t('#16393 clause: …and still speaks, so a deleted check cannot pass for a healthy board', clause16393(433.33).startsWith('rate premise OK'), true);
-  t('#16393 clause: …naming both rates even when it agrees', clause16393(433.33).includes('observed ~433.3/day') && clause16393(433.33).includes('= 415.1/day'), true);
+  t('#16393 clause: …and still speaks, so a deleted check cannot pass for a healthy board', clause16393(166.67).startsWith('rate premise OK'), true);
+  t('#16393 clause: …naming both rates even when it agrees', clause16393(166.67).includes('observed ~166.7/day') && clause16393(166.67).includes('= 139.4/day'), true);
 
   // ---- The clause on the summary line. Only time-INDEPENDENT properties are
   // asserted here, for the reason above; the verdict wording is pinned by the
@@ -25839,6 +26659,179 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   t('H58 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
   t('H58 band: a gate row still outranks it, so H31/H35 survive the trim longer', familyRank('H31') < familyRank('H58'), true);
   t('H58 band: …and it outranks an inventory row', familyRank('H58') < familyRank('H14'), true);
+
+  // -- H59 — the merged PR whose closing linkage mis-states a card (#17466) ---
+  // ⛔ The self-test never touches GitHub. The two fixtures carry the two
+  // MEASURED shapes from the filing card's sibling-board evidence — a merge
+  // that closed a card it never asked to close, and a merge that left its
+  // declared target open — spelled here with this board's own measured
+  // `closed`-event shape (no `commit_id`, a 1–2s lag).
+  const NOW59 = Date.parse('2026-09-10T23:44:35Z');
+  const MERGED59 = '2026-09-10T23:44:33Z';
+  // Direction (a): the PR mentions the card and binds NOTHING to it.
+  const pr59FalseClose = {
+    number: 1810,
+    merged_at: MERGED59,
+    merge_commit_sha: 'd8a833d3d3c0ffee0123456789abcdef01234567',
+    body: 'Part of #1807\n\nThe follow-up this leaves behind is tracked on #1808.\n',
+  };
+  // Direction (b): the PR binds a keyword and the card is still open.
+  const pr59FalseOpen = {
+    number: 1811,
+    merged_at: MERGED59,
+    merge_commit_sha: 'e66da5c919c0ffee0123456789abcdef01234567',
+    body: 'Fixes #1792\n\nThe whole card lands here.\n',
+  };
+  const card59Closed = {
+    number: 1808,
+    state: 'closed',
+    closed_at: '2026-09-10T23:44:35Z',
+    html_url: 'https://example.invalid/1808',
+  };
+  const card59Open = { number: 1792, state: 'open', html_url: 'https://example.invalid/1792' };
+  const closedEvent59 = (over = {}) => ({
+    event: 'closed',
+    actor: { login: 'os-sales' },
+    commit_id: null,
+    created_at: '2026-09-10T23:44:35Z',
+    ...over,
+  });
+  const page59 = (...rows) => [{ event: 'labeled', created_at: '2026-09-08T03:34:57Z' }, ...rows];
+  const REPO59 = 'objectstack-ai/objectstack';
+
+  // The two extractors — one reference grammar, one closing-keyword grammar.
+  t('H59 mentions: a bare `#N` in prose is a mention', h59MentionedCards('tracked on #1808.', REPO59).has(1808), true);
+  t('H59 mentions: …and so is a qualified one naming THIS repo', h59MentionedCards(`see ${REPO59}#1808`, REPO59).has(1808), true);
+  t('H59 mentions: ⛔ a SIBLING repo qualifier is not a mention here', h59MentionedCards('see objectstack-ai/objectui#1808', REPO59).has(1808), false);
+  t('H59 mentions: ⛔ a fenced number is not a mention', h59MentionedCards('```\nFixes #1808\n```\n', REPO59).has(1808), false);
+  t('H59 mentions: a BACKTICKED one still is — a pointer a reader follows', h59MentionedCards('the inert `Fixes #1808` above', REPO59).has(1808), true);
+  t('H59 declares: `Fixes #N` binds, and the keyword is carried', h59DeclaredCloses('Fixes #1792').get(1792), 'Fixes');
+  t('H59 declares: ⛔ `Part of #N` binds nothing', h59DeclaredCloses('Part of #1807').size, 0);
+  t('H59 declares: ⛔ nor does `Refs #N`', h59DeclaredCloses('Refs #1807').size, 0);
+  t('H59 declares: ⛔ nor a BACKTICKED keyword — GitHub does not fire in a span', h59DeclaredCloses('the inert `Fixes #1808`').size, 0);
+  // ⭐ The negation trap, measured: the grammar binds a number regardless of the
+  // prose around it, which is what makes direction (b) honest rather than a
+  // guess about intent.
+  t('H59 declares: ⭐ a NEGATED keyword still BINDS — the trap this card is about', h59DeclaredCloses('Merging this must not close #1792').get(1792), 'close');
+  t('H59 declares: the one grammar is shared, never re-spelled', h59DeclaredCloses('Fixes #1792').get(1792), closingKeywordTargets('Fixes #1792').get('1792'));
+
+  // The `closed` event reader, and the page honesty that bounds it.
+  t('H59 event: the newest `closed` on the page is the one read', h59ClosedEvent(page59(closedEvent59({ created_at: '2026-01-01T00:00:00Z' }), closedEvent59())).event.atMs, NOW59);
+  t('H59 event: the actor is carried, because the row prints it', h59ClosedEvent(page59(closedEvent59())).event.actor, 'os-sales');
+  t('H59 event: a null `commit_id` reads as absent, never as a string', h59ClosedEvent(page59(closedEvent59())).event.commitId, null);
+  t('H59 event: …and a stamped one is carried', h59ClosedEvent(page59(closedEvent59({ commit_id: 'd8a833d3d3c0ffee0123456789abcdef01234567' }))).event.commitId, 'd8a833d3d3c0ffee0123456789abcdef01234567');
+  t('H59 event: a SHORT page is complete — the whole timeline was read', h59ClosedEvent(page59(closedEvent59())).complete, true);
+  t('H59 event: ⛔ a FULL page is NOT complete, so an absent close is unread', h59ClosedEvent(Array.from({ length: H59_TIMELINE_PAGE_SIZE }, () => ({ event: 'labeled' }))).complete, false);
+  t('H59 event: an unreadable page is not a crash, and never a reading', h59ClosedEvent(null).read, false);
+  t('H59 event: a page with no close returns none', h59ClosedEvent(page59()).event, null);
+
+  // Attribution — two legs, in precedence, one-sided in time.
+  const attr59 = (closedAt, event) => h59CloseAttribution(pr59FalseClose, Date.parse(closedAt), event);
+  t('H59 attribution: the COMMIT leg is exact when GitHub stamps it', attr59('2026-09-12T00:00:00Z', { commitId: 'd8a833d3d3c0ffee0123456789abcdef01234567' }).leg, 'commit');
+  t('H59 attribution: …and an abbreviated stamp still matches its own sha', attr59('2026-09-12T00:00:00Z', { commitId: 'd8a833d3' }).leg, 'commit');
+  t('H59 attribution: ⛔ a DIFFERENT commit does not match', attr59('2026-09-12T00:00:00Z', { commitId: 'ffffffffff' }).attributed, false);
+  t('H59 attribution: ⛔ a stamp shorter than 7 hex is no evidence', attr59('2026-09-12T00:00:00Z', { commitId: 'd8a833' }).attributed, false);
+  t('H59 attribution: the BAND leg carries this board — no `commit_id` at all', attr59('2026-09-10T23:44:35Z', { commitId: null }).leg, 'band');
+  t('H59 attribution: …and reports the measured lag', attr59('2026-09-10T23:44:35Z', { commitId: null }).lagMs, 2000);
+  t('H59 attribution: a close ON the merge instant is inside the band', attr59(MERGED59, null).attributed, true);
+  t('H59 attribution: a close at the band edge is still inside', attr59('2026-09-10T23:44:38Z', null).attributed, true);
+  t('H59 attribution: ⛔ one second past it is NOT', attr59('2026-09-10T23:44:39Z', null).attributed, false);
+  // ⭐ The measured specimen that killed the ruling's «merge minute»: a seat
+  // closing a card 53s after the merge is the protocol working, not a defect.
+  t('H59 attribution: ⛔ the 53s SEAT close is refused — a minute admits another actor', attr59('2026-09-10T23:45:26Z', null).attributed, false);
+  t('H59 attribution: ⛔ a close BEFORE the merge is not this merge\'s', attr59('2026-09-10T23:44:30Z', null).attributed, false);
+  t('H59 attribution: an unreadable `merged_at` attributes nothing', h59CloseAttribution({ merged_at: 'not a date' }, NOW59, null).attributed, false);
+  t('H59 attribution: the band is the MEASURED 5s, not a minute', H59_MERGE_CLOSE_BAND_MS, 5_000);
+
+  // The sibling guard — batched landings put two merges in one second.
+  const window59 = [pr59FalseClose, { number: 1812, merged_at: MERGED59, body: 'Fixes #1808' }];
+  t('H59 sibling: a declaring PR inside the band EXPLAINS the closure', h59ExplainingPullRequests(1808, NOW59, window59).join(','), '1812');
+  t('H59 sibling: ⛔ a MENTIONING PR explains nothing', h59ExplainingPullRequests(1808, NOW59, [pr59FalseClose]).length, 0);
+  t('H59 sibling: a declaring PR OUTSIDE the band explains nothing either', h59ExplainingPullRequests(1808, NOW59, [{ number: 1812, merged_at: '2026-09-10T23:40:00Z', body: 'Fixes #1808' }]).length, 0);
+  t('H59 sibling: an unreadable closure instant is not explained away', h59ExplainingPullRequests(1808, NaN, window59).length, 0);
+  t('H59 sibling: an empty window is not a crash', h59ExplainingPullRequests(1808, NOW59, undefined).length, 0);
+
+  // ⭐ Direction (a) — FALSE CLOSE, the expensive half, on the filing shape.
+  const row59a = h59FalseCloseRow({
+    pr: pr59FalseClose,
+    card: card59Closed,
+    attribution: attr59('2026-09-10T23:44:35Z', { commitId: null }),
+    closedEvent: h59ClosedEvent(page59(closedEvent59())).event,
+    closedAtMs: NOW59,
+  });
+  t('H59 (a): the fixture PR binds NO keyword to the card it closed', h59DeclaredCloses(pr59FalseClose.body).has(1808), false);
+  t('H59 (a): …while still MENTIONING it', h59MentionedCards(pr59FalseClose.body, REPO59).has(1808), true);
+  t('H59 (a): the row names both sides', row59a.includes('merged PR #1810 MENTIONS #1808'), true);
+  t('H59 (a): it says the body bound NO keyword', row59a.includes('binds NO closing keyword'), true);
+  t('H59 (a): it prints the measured lag rather than asserting a mechanism', row59a.includes('landed 2s after the merge'), true);
+  t('H59 (a): it says the event carried no `commit_id` — this board\'s shape', row59a.includes('NO `commit_id`'), true);
+  t('H59 (a): it prints the ACTOR, because that is the reader\'s discriminator', row59a.includes('actor `os-sales`'), true);
+  t('H59 (a): it names why this is the expensive direction', row59a.includes('a CLOSED card is swept by nothing'), true);
+  t('H59 (a): the remedy is the OWNING SEAT\'s act, named as one', row59a.includes('belongs to the SEAT THAT OWNS the card'), true);
+  t('H59 (a): …and it is REOPEN plus the labels the close dropped', row59a.includes('REOPEN it') && row59a.includes('restore the state labels'), true);
+  t('H59 (a): ⛔ this row reopens nothing itself', row59a.includes('reopens nothing, writes no label and relabels nothing'), true);
+  t('H59 (a): ⚠️ it is a CANDIDATE and says so', row59a.includes('CANDIDATE, never a verdict'), true);
+  t('H59 (a): …naming the alternative reading a seat must rule out', row59a.includes('closing this card by hand in the same seconds'), true);
+  t('H59 (a): a COMMIT-leg row says the event named the merge commit instead', h59FalseCloseRow({ pr: pr59FalseClose, card: card59Closed, attribution: attr59('2026-09-12T00:00:00Z', { commitId: 'd8a833d3d3c0ffee0123456789abcdef01234567' }), closedEvent: { commitId: 'd8a833d3d3c0ffee0123456789abcdef01234567', actor: 'os-sales' } }).includes('NAMES this PR\'s merge commit `d8a833d3d3`'), true);
+  t('H59 (a): an unreadable actor is said to be unreadable, never omitted', h59FalseCloseRow({ pr: pr59FalseClose, card: card59Closed, attribution: attr59('2026-09-10T23:44:35Z', null), closedEvent: { actor: null, commitId: null } }).includes('an unreadable actor'), true);
+  t('H59 (a): ⛔ no angle-bracket placeholder reaches the row body', /[<>]/.test(row59a), false);
+  t('H59 (a): not a loud finding', isLoudFinding(row59a), false);
+
+  // Direction (b) — FALSE OPEN, the cheap half.
+  const row59b = h59FalseOpenRow({ pr: pr59FalseOpen, card: card59Open, keyword: h59DeclaredCloses(pr59FalseOpen.body).get(1792) });
+  t('H59 (b): the fixture PR really binds the keyword', h59DeclaredCloses(pr59FalseOpen.body).get(1792), 'Fixes');
+  t('H59 (b): the row quotes the binding as written', row59b.includes('binds `Fixes #1792`'), true);
+  t('H59 (b): it says the card is still open after the merge', row59b.includes('STILL OPEN after that merge'), true);
+  t('H59 (b): it states this is the CHEAPER direction', row59b.includes('cheaper direction'), true);
+  t('H59 (b): it warns that the grammar ignores the prose around the keyword', row59b.includes('BINDS a number regardless of the'), true);
+  t('H59 (b): …quoting the negation trap itself', row59b.includes('Merging this must not close #N'), true);
+  t('H59 (b): the remedy is the OWNING SEAT\'s act', row59b.includes('belongs to the SEAT THAT OWNS the card'), true);
+  t('H59 (b): ⛔ this row closes nothing', row59b.includes('closes nothing and writes no label'), true);
+  t('H59 (b): ⛔ no angle-bracket placeholder reaches the row body', /[<>]/.test(row59b), false);
+  t('H59 (b): not a loud finding', isLoudFinding(row59b), false);
+
+  // The two directions are DISTINCT sentences — neither restates the other.
+  t('H59 directions: the two rows do not share an opening', row59a.slice(0, 20) === row59b.slice(0, 20), false);
+
+  // The clean merged PR, both ways — the controls that keep the row falsifiable.
+  t('H59 clean: a keyword-bound card that is CLOSED is not a false open', h59DeclaredCloses('Fixes #1808').has(1792), false);
+  t('H59 clean: a mentioned card closed OUTSIDE the band is not attributed', attr59('2026-09-11T09:00:00Z', { commitId: null }).attributed, false);
+  t('H59 clean: …and a declaring sibling inside the band silences the row', h59ExplainingPullRequests(1808, NOW59, window59).length > 0, true);
+
+  // Census and forwarding.
+  t('H59: every count key rides the enumerated forwarding contract', ['linkageDeclared', 'linkageJudged', 'linkageOutOfWindow', 'linkageCardsRead', 'linkageUnread', 'linkageShort'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  const SUM59 = saidBy('h59Linkage', summaryLine({ linkageDeclared: 1106, linkageJudged: 479, linkageOutOfWindow: 2803, linkageCardsRead: 1, linkageUnread: 0, linkageShort: 0 }, 0));
+  t('H59 census: the declared population is reported', SUM59.includes('1106 declared closure(s)'), true);
+  t('H59 census: …the keyword-less mentions it could place', SUM59.includes('479 keyword-LESS mention(s)'), true);
+  t('H59 census: …and the ones it could NOT place, as UNJUDGED', SUM59.includes('2803 further mention(s)') && SUM59.includes('UNJUDGED rather than clean'), true);
+  t('H59 census: it names the SHORTER of the two windows as its reach', SUM59.includes('SHORTER of the two windows'), true);
+  t('H59 census: …and refuses to be read as H8\'s window', SUM59.includes(`⛔ never H8's ${MERGED_WINDOW_DAYS} days`), true);
+  t('H59 census: the purchase is stated with its cap', SUM59.includes(`1 card(s) had ONE timeline page read (cap ${H59_CARD_READ_CEILING} card(s) per sweep`), true);
+  t('H59 census: ⛔ no retry loop, said in the clause', SUM59.includes('no retry on any status'), true);
+  t('H59 census: the two unjudged ways are both reported', SUM59.includes('0 could not be read and 0 were past that cap'), true);
+  t('H59 census: the sibling guard is disclosed', SUM59.includes('declaring SIBLING PR inside the same band EXPLAINS'), true);
+  t('H59 census: …and so is the measured absence of `commit_id`', SUM59.includes('carries no `commit_id` on'), true);
+  t('H59 census: rows are declared a LOWER BOUND', SUM59.includes('Rows are a LOWER BOUND'), true);
+  t('H59 census: the clause renders on a zero run — silence is never absence', saidBy('h59Linkage', summaryLine({}, 0)).includes('0 declared closure(s) and 0 keyword-LESS mention(s)'), true);
+  t('H59 census: the band in the clause comes from the constant', saidBy('h59Linkage', summaryLine({}, 0)).includes(`measured ${H59_MERGE_CLOSE_BAND_MS / 1000}s band`), true);
+
+  // Band.
+  t('H59 band: registered as a STATE row — the repair is on the board', familyBand('H59'), 'state');
+  t('H59 band: ⛔ NOT `gate` — the subject is a card\'s state, not a required check', familyBand('H59') === 'gate', false);
+  t('H59 band: ⛔ NOT `stall` — the card was MOVED, wrongly, not halted', familyBand('H59') === 'stall', false);
+  t('H59 band: ⛔ NOT `inventory` — the row alarms per card; the census is a clause', familyBand('H59') === 'inventory', false);
+  t('H59 band: …and it is H8\'s band, the row this one is the closed-card half of', familyBand('H59'), familyBand('H8'));
+  t('H59 band: the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H59'), true);
+  t('H59 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  t('H59 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
+  t('H59 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
+  t('H59 band: a gate row still outranks it, so H31/H35 survive the trim longer', familyRank('H31') < familyRank('H59'), true);
+  t('H59 band: …and it outranks an inventory row', familyRank('H59') < familyRank('H14'), true);
+
+  // Adjacency — ⛔ this row restates no neighbour's verdict on its own specimen.
+  t('H59 adjacency: H7 is silent — the false-close body carries no `Part of`+keyword clash', h7PartOfWithClosingKeyword(pr59FalseClose), null);
+  t('H59 adjacency: …and silent on the false-OPEN body too — no `Part of` at all', h7PartOfWithClosingKeyword(pr59FalseOpen), null);
+  t('H59 adjacency: the one grammar is shared with H7/H8/H23 rather than re-spelled', closingKeywordTargets(pr59FalseOpen.body).has('1792'), true);
 
   // -- The `[::]` collapse (#12090): behaviour-preserving, asserted as such ---
   // The class held U+003A TWICE, never the fullwidth U+FF1A its shape implied.

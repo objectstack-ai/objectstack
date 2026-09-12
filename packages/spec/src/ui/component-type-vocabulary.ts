@@ -39,7 +39,7 @@
  * where the author who typed the string is still present to fix it.
  */
 
-import { PageComponentType } from './page.zod';
+import { PageComponentType, RETIRED_PAGE_COMPONENT_TYPES } from './page.zod';
 import { ComponentPropsMap } from './component.zod';
 
 /**
@@ -81,8 +81,17 @@ export const RESERVED_COMPONENT_TYPE_NAMESPACES: ReadonlySet<string> = new Set(
  * Every type string the spec answers for: the enum vocabulary, every
  * `ComponentPropsMap` row (which is a superset of the enum by exactly the
  * measured string-arm registrations that DID get a row — `element:metadata_viewer`,
- * the retired-with-tombstones `element:filter` / `element:form`, the plugin
- * console widgets, the `object-*` blocks), and the string-arm ledger above.
+ * the plugin console widgets, the `object-*` blocks — plus every type the
+ * vocabulary RETIRED by name, whose row is kept on purpose so the readers that
+ * dispatch on it keep recognising the name: `user:profile`, and the
+ * retired-with-tombstones `element:filter` / `element:form`), and the
+ * string-arm ledger above.
+ *
+ * KNOWN is not the same as WRITABLE. A retired type stays known here — that is
+ * what makes its refusal a located prescription instead of an
+ * unregistered-custom-string skip — and is refused at the parse by
+ * `PageComponentSchema.type`. The candidate list below is where the difference
+ * is spent.
  */
 export const KNOWN_COMPONENT_TYPES: ReadonlySet<string> = new Set([
   ...PageComponentType.options,
@@ -93,9 +102,18 @@ export const KNOWN_COMPONENT_TYPES: ReadonlySet<string> = new Set([
 /**
  * Stable candidate list for typo suggestions — only the types an author may
  * actually write inside a reserved namespace, sorted for deterministic output.
+ *
+ * "May actually write" is why the RETIRED types come OUT. They are KNOWN (their
+ * `ComponentPropsMap` rows are kept deliberately), but `PageComponentSchema`
+ * refuses them by name, so proposing one answers a typo with a rename the
+ * parser will reject — `element:fitler` was answered "Rename `element:fitler`
+ * → `element:filter`", renaming an author INTO a retired element. A suggester
+ * that can only ever be right is a suggester that draws from the writable set,
+ * so this list is derived from the retirement map rather than restated beside
+ * it: a type retired tomorrow leaves the candidates the day it lands.
  */
 export const KNOWN_COMPONENT_TYPE_CANDIDATES: readonly string[] =
-  [...KNOWN_COMPONENT_TYPES].sort();
+  [...KNOWN_COMPONENT_TYPES].filter((t) => !RETIRED_PAGE_COMPONENT_TYPES.has(t)).sort();
 
 /**
  * Is this type inside a namespace the spec's enum claims? (`record:detials` →

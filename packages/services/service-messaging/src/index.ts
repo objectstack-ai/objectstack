@@ -104,6 +104,8 @@ export type {
     DeliveryPayload,
     EnqueueDeliveryInput,
     ClaimOptions,
+    // [#17610] The dispatcher's once-per-tick visibility-timeout recovery.
+    ReapOptions,
     AckResult,
 } from './outbox.js';
 // [#11453] `ack()`'s status precondition refuses with this, so a caller that
@@ -132,15 +134,22 @@ export type {
     HttpDeliveryStatus,
     EnqueueHttpInput,
     HttpClaimOptions,
+    // [#17623] The dispatcher's once-per-tick visibility-timeout recovery.
+    HttpReapOptions,
     HttpAckResult,
     HttpAckSuccess,
     HttpAckFailure,
+    // [#17634] The (claimedBy, claimedAt) pair `claim()` stamps and `ack()`
+    // takes back — the credential its compare-and-set binds.
+    HttpClaimCredential,
     UndeliverableHttpInput,
     RedeliverGuard,
     RedeliverOptions,
 } from './http-outbox.js';
 export {
     HttpRedeliverError,
+    // [#17634] `ack()` refuses a claim it no longer holds with this.
+    HttpAckError,
     assertHttpRedeliverable,
     assertRedeliverAllowed,
     assertEnqueueDeliverable,

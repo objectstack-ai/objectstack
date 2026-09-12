@@ -112,11 +112,12 @@ import type { Plugin } from './types.js';
  * The FIRST issue only: a boot refusal is read by a human reading one log
  * line, and the first violated key is the one to fix.
  *
- * ⚠️ The code is spelled the ADR-0112 way and is deliberately NOT wire
- * vocabulary, exactly like `SERVICE_NOT_REGISTERED_CODE` one module over: it
- * is raised while the kernel is still assembling itself, before any HTTP
- * boundary exists, and `dispatcher-error-vocabulary.ts` classifies it
- * `door: 'none'` / `boot-refusal` for that reason.
+ * The code is spelled the ADR-0112 way and is REGISTERED in
+ * `ERROR_CODE_LEDGER` under `@objectstack/core` (#16649, under the #16404
+ * door-or-no-door rule), exactly like `SERVICE_NOT_REGISTERED_CODE` one module
+ * over. `door: 'none'` on this tree — it is raised while the kernel is still
+ * assembling itself, before any HTTP boundary exists. If a transport ever
+ * ANSWERS with it, `error.code` carries this spelling.
  *
  * ## `version`: the ninth key, and why admitting it refused nothing new
  *

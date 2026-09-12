@@ -93,6 +93,14 @@ import {
 // `validateExpression('value', …)`. Neither refusal string is spelled here.
 import { AssignmentValueSchema, ASSIGNMENT_VALUE_ENVELOPE_REFUSAL } from '@objectstack/spec/automation';
 import type { FlowNodeParsed } from '@objectstack/spec/automation';
+// [#17495] The blank-source half of the structural-condition refusal, imported
+// rather than restated: this is the EDGE door's own rule
+// (`FlowEdgeSchema.condition` composes it since #15807) and the very schema
+// `AutomationEngine.registerFlow` asks since #17322, so the author-time answer
+// and the registration answer are one rule with one sentence. ⛔ Never a second
+// hand-written notion of "blank" here — that drift is what #15662 built the
+// shared refusal to prevent.
+import { EvaluatedExpressionInputSchema, EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec/shared';
 
 import { collectFlowVariableNames, shadowedFieldReads, shadowedFieldMessage } from './flow-variable-scope.js';
 import { injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fields.js';
@@ -885,6 +893,34 @@ function isBareReferenceToAny(diagnostic: string, roots: readonly string[]): boo
 }
 
 /**
+ * [#17495] Why a structural condition whose SHAPE is fine is still not
+ * authorable: its source is blank. The author-time twin of the gate #17322 put
+ * in `AutomationEngine.registerFlow`, spelled the same way against the same
+ * imported schema, so `objectstack validate` and `registerFlow` refuse one set.
+ *
+ * Applied to the SOURCE rather than to the whole value on purpose — the same
+ * decision, for the same reason, as the engine's copy: the union would also
+ * refuse an envelope carrying no `dialect` or one outside its enum, and both
+ * are admitted at this slot (`structuralConditionRefusal`'s docblock, and
+ * #4336's ruling), so handing it the whole value would widen this narrowing
+ * past what was ruled.
+ *
+ * Reached only after `structuralConditionRefusal` has cleared the value, so
+ * `raw` is bare text or an envelope carrying a string `source`; the `typeof`
+ * guard is what makes that precondition local rather than assumed.
+ *
+ * @returns the refusal and the source to attribute it to, or `undefined` when
+ *   the source is non-blank and this rule has nothing to say.
+ */
+function evaluatedSourceRefusal(raw: unknown): { message: string; source: string } | undefined {
+  const source = typeof raw === 'string' ? raw : (raw as { source?: unknown }).source;
+  if (typeof source !== 'string') return undefined;
+  const verdict = EvaluatedExpressionInputSchema.safeParse(source);
+  if (verdict.success) return undefined;
+  return { message: verdict.error.issues[0]?.message ?? EVALUATED_EXPRESSION_SOURCE_REQUIRED, source };
+}
+
+/**
  * Validate every predicate in the stack. Returns the list of issues (empty =
  * clean). Caller decides how to surface / whether to fail the build.
  */
@@ -1203,6 +1239,23 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
      * the edge schema refuses one tier earlier and which this pass is the only
      * producer-side gate for on `config.condition`.
      *
+     * [#17495] SECOND gate, after the shape one and before the CEL one — the
+     * author-time half of the refusal #17322 landed in `registerFlow`. The
+     * source must be non-blank. `structuralConditionRefusal` admits every
+     * string by design, so a whitespace-only `config.condition` cleared the
+     * shape gate and then cleared `validateExpression` too (it trims, and reads
+     * a blank source as "not authored") — this pass reported NOTHING for
+     * exactly the value `registerFlow` now throws on. The author ran
+     * `objectstack validate`, got a clean bill, deployed, and the flow stopped
+     * registering behind one `warn` line; on a `start` node that key is the
+     * TRIGGER GATE, so the whole flow is gated shut.
+     *
+     * The rule is the edge door's own `EvaluatedExpressionInputSchema`,
+     * IMPORTED — not a second hand-written notion of "blank". That is the drift
+     * #15662 built one shared refusal to prevent, and the route `registerFlow`
+     * took for the same reason; the sentence comes from the schema too, so the
+     * two doors cannot answer differently.
+     *
      * @returns whether the slot was refused, so the caller can skip the
      *   value-reading passes that would otherwise re-report it as an empty one.
      */
@@ -1211,6 +1264,11 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       const shapeRefusal = structuralConditionRefusal(raw);
       if (shapeRefusal) {
         issues.push({ where, message: shapeRefusal.message, source: shapeRefusal.source, severity: 'error' });
+        return { refused: true };
+      }
+      const blankRefusal = evaluatedSourceRefusal(raw);
+      if (blankRefusal) {
+        issues.push({ where, message: blankRefusal.message, source: blankRefusal.source, severity: 'error' });
         return { refused: true };
       }
       return { refused: false };

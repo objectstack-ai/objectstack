@@ -578,3 +578,131 @@ describe('#8686 seed/API tenancy split — autonumber scope', () => {
     expect(await countUntenanted(driver)).toBe(0);
   });
 });
+
+/**
+ * [#17175] The boot-path presence probe stops making the driver shout — and the
+ * driver keeps shouting about everything else.
+ *
+ * ## Why this block is HERE and not in `metadata-protocol`
+ *
+ * The whole defect lives between two correct components. The migration is right
+ * to treat a missing counter table as "no"; the driver is right to write a
+ * refused raw statement to the operator's log, because it has no way to know the
+ * caller expected the refusal (the raw path carries no table identity — see
+ * `read-probe.ts`'s header). The visible failure is the PAIR, so only a real
+ * `SqlDriver` over a real database can show it: a fixture would have to encode
+ * the very log behaviour it is meant to measure.
+ *
+ * ## The two halves, and the second is the one that matters
+ *
+ * ⭐ A test proving the line is gone, without proving real errors survive, is a
+ * test for the wrong thing — it would pass just as well over a driver whose
+ * error channel had been muted wholesale, which is the repair the ruling on this
+ * card explicitly refused. So both are asserted against the SAME driver, the
+ * SAME log sink and the SAME raw path, in the same test run.
+ */
+describe('#17175 a normal boot stops printing DATABASE_ERROR for an expected miss', () => {
+  /** Every line the driver's default log channels emit, in order. */
+  function captureDriverLog(driver: any): { lines: string[]; restore: () => void } {
+    const lines: string[] = [];
+    const original = driver.logger;
+    driver.logger = {
+      warn: (msg: string) => lines.push(`warn: ${msg}`),
+      error: (msg: string) => lines.push(`error: ${msg}`),
+      info: (msg: string) => lines.push(`info: ${msg}`),
+    };
+    return { lines, restore: () => { driver.logger = original; } };
+  }
+
+  it('⭐ the expected miss is SILENT — and a real refusal on the same path is not', async () => {
+    const { driver, engine } = await bootInstall();
+
+    // The card's condition: a database with no counter table. ⚠️ Measured
+    // rather than assumed — `initObjects` on an object that DECLARES an
+    // autonumber provisions `_objectstack_sequences` up front on this driver,
+    // so it is dropped here instead of being expected never to have existed.
+    // The consumer's install reaches the same state by never declaring one.
+    await (driver as any).knex.schema.dropTableIfExists('_objectstack_sequences');
+    await expect(
+      (driver as any).knex('_objectstack_sequences').select('tenant_id'),
+    ).rejects.toThrow(/no such table/);
+
+    const seam = resolveSeedTenancySeam(engine);
+    const { lines, restore } = captureDriverLog(driver);
+    try {
+      const result = await backfillSeedTenancy(seam, createLogger() as any);
+
+      // The answer is unchanged: the table is not there, and the migration says
+      // so. ⛔ Not `unreadable` — an ANSWERED absence is still an answer.
+      expect(result.status).toBe('absent');
+      expect(result.detail).toBeUndefined();
+
+      // ⭐ THE CARD. Before this change the line below was present, once per
+      // boot, on stderr, naming `_objectstack_sequences` and `no such table`.
+      expect(lines.filter((l) => l.includes('DATABASE_ERROR'))).toEqual([]);
+      expect(lines.join('\n')).not.toContain('no such table');
+      expect(lines.join('\n')).not.toContain('_objectstack_sequences');
+
+      // ⭐ THE HALF THAT MATTERS. Same driver, same sink, same raw terminal: a
+      // statement the backend genuinely refuses is still written to the log in
+      // full. A repair that silenced this would have satisfied every assertion
+      // above and broken the thing the assertions exist to protect.
+      await expect(
+        driver.execute('SELECT 1 FROM os17175_really_absent WHERE 1 = 0'),
+      ).rejects.toThrow();
+
+      const loud = lines.filter((l) => l.includes('DATABASE_ERROR'));
+      expect(loud).toHaveLength(1);
+      expect(loud[0]).toContain('os17175_really_absent');
+      expect(loud[0]).toContain('no such table');
+      // The level is the driver's own, unchanged by this card: `warn`, which is
+      // what `console.warn` writes to stderr on a host that installs no logger.
+      expect(loud[0].startsWith('warn: ')).toBe(true);
+    } finally {
+      restore();
+    }
+  });
+
+  it('the probe the driver now runs never reads FROM the counter table', async () => {
+    // The mechanism, taken from the statement the seam is actually handed rather
+    // than from the builder: a probe that does not name the table in a FROM
+    // clause cannot be refused because the table is missing.
+    const { driver, engine } = await bootInstall();
+    await (driver as any).knex.schema.dropTableIfExists('_objectstack_sequences');
+    const seam = resolveSeedTenancySeam(engine);
+    const seen: string[] = [];
+    const watched = {
+      exec: async (sql: string, params?: unknown[]) => {
+        seen.push(sql);
+        return seam!.exec(sql, params);
+      },
+      client: seam!.client,
+      ledger: (seam as any).ledger,
+    };
+
+    await backfillSeedTenancy(watched as any, createLogger() as any);
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toContain('sqlite_master');
+    expect(seen[0]).not.toContain('WHERE 1 = 0');
+    expect(seen[0]).not.toContain('FROM "_objectstack_sequences"');
+    // Control: the statement it replaced IS refused by this very database, so
+    // "no line was logged" above is a reading about the new probe and not about
+    // a database that would have tolerated the old one.
+    await expect(driver.execute(buildSequencesPresenceSql(seam!.client))).rejects.toThrow();
+  });
+
+  it('an install that HAS the counter table still reaches the repair', async () => {
+    // The other direction of the same probe: a catalog arm that answered
+    // "absent" for a table that is there would make this migration a permanent
+    // no-op, which is the silent failure the ruling on this card fenced against.
+    const { engine } = await bootInstall();
+    await createOrganization(engine);
+    await apiCreate(engine, 'api 1');
+
+    const result = await backfillSeedTenancy(resolveSeedTenancySeam(engine), createLogger() as any);
+
+    expect(result.status).toBe('no-split');
+    expect(result.status).not.toBe('absent');
+  });
+});

@@ -1602,6 +1602,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/seed-loader-summary-scope.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-summary-scope.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-summary-scope.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/seed-loader-summary-stale.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2278,6 +2293,16 @@
     },
     {
       "file": "packages/plugins/plugin-approvals/src/run-status-liveness.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/stranded-resubmit-second-door.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/stranded-resubmit-second-door.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3279,6 +3304,11 @@
     {
       "file": "packages/rest/src/rest-batch-endpoint.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/rest-declared-refusal-relay.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {

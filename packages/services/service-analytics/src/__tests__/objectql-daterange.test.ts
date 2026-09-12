@@ -196,21 +196,41 @@ describe('ObjectQLStrategy — timeDimensions[].dateRange (#3650)', () => {
     expect(result.rows).toEqual([{ stage: 'lost', revenue: 200 }]);
   });
 
-  it('narrows rather than vanishes on a one-entry dateRange array', async () => {
+  // [#17124] SUCCEEDS 'narrows rather than vanishes on a one-entry dateRange
+  // array', which pinned the point degeneration this card retired. ⛔ Not a
+  // weakening of #3650: that card's complaint was 「no error, just every row
+  // ever recorded」, and the old pin chose the narrower of two WRONG answers
+  // because the alternative on the table was the native-SQL face's silent drop
+  // to all of history. A refusal satisfies the same intent strictly better — it
+  // is the error #3650 wanted — and the drop it was defending against is gone
+  // from the sibling face in the same change. The retirement itself is the one
+  // the test above declares deferred: 「Retiring this test, together with the
+  // strategy's degeneration, belongs to #16322」.
+  it('REFUSES a one-entry dateRange array, and still does not plot all of history', async () => {
     const seen: AggOpts[] = [];
-    await makeService(seen).query(
-      {
-        cube: 'sales',
-        dimensions: ['stage'],
-        measures: ['revenue'],
-        // The schema types `dateRange` as a plain `string[]`, so this parses.
-        // `NativeSQLStrategy` drops such a window — but "drop the window" means
-        // "plot all of history", the very failure #3650 is about.
-        timeDimensions: [{ dimension: 'close_date', dateRange: ['2026-01-20'] }],
-      },
-      ctx,
-    );
-    expect(seen[0].filter).toEqual({ close_date: { $gte: '2026-01-20', $lte: '2026-01-20' } });
+    let thrown: (Error & { code?: string; status?: number }) | undefined;
+    try {
+      await makeService(seen).query(
+        {
+          cube: 'sales',
+          dimensions: ['stage'],
+          measures: ['revenue'],
+          // The schema types `dateRange` as a plain `string[]`, so this parses
+          // and reaches the face past the door.
+          timeDimensions: [{ dimension: 'close_date', dateRange: ['2026-01-20'] }],
+        },
+        ctx,
+      );
+    } catch (e) {
+      thrown = e as Error & { code?: string; status?: number };
+    }
+    // ⛔ On the ENVELOPE, not on `toThrow()` — an unfixed face throwing a bare
+    // `Error` would satisfy that.
+    expect(thrown?.code).toBe('ANALYTICS_DATE_RANGE_UNRECOGNIZED');
+    expect(thrown?.status).toBe(400);
+    // #3650's own invariant, kept: the window did not VANISH into an unfiltered
+    // query. The refusal lands before the engine is asked anything at all.
+    expect(seen).toEqual([]);
   });
 
   it('ANDs the read scope around the window rather than replacing it', async () => {

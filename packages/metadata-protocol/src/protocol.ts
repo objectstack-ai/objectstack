@@ -1994,12 +1994,14 @@ const CLONE_STRIP_FIELDS: readonly string[] = [
  * [#3455] Collapse a batch's per-row `DroppedFieldsEvent`s into one event per
  * `(object, reason)` with the UNION of dropped field names.
  *
- * Used by the bulk-create surface (`createManyData`), whose `{ object, records,
- * count }` response has no per-row slot to hang a `droppedFields` on — a union
- * is the only view that response can represent, which is the whole reason this
- * collapse exists. (Since #14147 that strip is the ENGINE's, which reports one
- * event per CALL for it, so the aggregation is over the runtime-owned per-row
- * events.)
+ * Used by both bulk-create surfaces at BATCH level. `createManyData`'s
+ * `{ object, records, count }` response has no per-row slot to hang a
+ * `droppedFields` on — a union is the only view that response can represent,
+ * which is the whole reason this collapse exists. `insertManyData` has a
+ * per-row slot and reports here anyway: the slot is real, a per-row answer is
+ * not (its docblock states why), so it reports the union where the union is
+ * true. (Since #14147 that strip is the ENGINE's, which reports one event per
+ * CALL for it, so the aggregation is over the runtime-owned per-row events.)
  *
  * ⚠️ So read a name in a merged event as "AT LEAST ONE row dropped this field",
  * never "every row dropped the same set". Maintainer ruling C (#14147) put the
@@ -2014,8 +2016,9 @@ const CLONE_STRIP_FIELDS: readonly string[] = [
  *
  * Returns `[]` when nothing was dropped so callers can spread
  * `...(x.length ? { droppedFields: x } : {})` and keep the omit-when-empty shape.
- * The per-row `insertMany`/`batch` paths carry their own per-row `droppedFields`
- * instead — they have a per-row result to hang one on.
+ * The paths that DO keep row precision — `updateManyData` and `batchData` —
+ * earn it mechanically rather than by inference: each row is its own
+ * `engine.update` / `engine.insert` call, so that call's events are that row's.
  */
 function mergeDroppedFieldEvents(events: DroppedFieldsEvent[]): DroppedFieldsEvent[] {
     if (events.length === 0) return [];
@@ -3271,7 +3274,7 @@ function unusableFilterError(param: string, detail: string): Error {
  * | type | column | sortable |
  * |---|---|---|
  * | `formula` | none — `SqlDriver.createColumn` returns early; `driver-turso`'s transport skips it with the same `Virtual — no column` note | **no** |
- * | `summary` | `table.float`, maintained by the engine | yes (measured #6924: `orderBy <summary> desc` -> E D C B A over 5 4 3 2 1) |
+ * | `summary` | an engine-maintained numeric column — `table.decimal` on tables created since #16318, `table.float` on earlier ones | yes (measured #6924: `orderBy <summary> desc` -> E D C B A over 5 4 3 2 1) |
  * | `autonumber` | `table.string`, engine-assigned | yes |
  *
  * So the spec's own `COMPUTED_VALUE_TYPES` (`formula`/`summary`/`autonumber`)
@@ -4992,7 +4995,7 @@ export class ObjectStackProtocolImplementation implements
         // `sys_metadata` read and they do not depend on one another, so the
         // store leg costs one round trip of latency for the whole context
         // instead of five.
-        const [objects, permissions, books, datasets, pages] = await Promise.all([
+        const [objects, permissions, books, datasets] = await Promise.all([
             listCollection('object', 'objects'),
             listCollection('permission', 'permissions'),
             listCollection('book', 'books'),
@@ -5000,11 +5003,12 @@ export class ObjectStackProtocolImplementation implements
             // dashboard publish — without it every legitimate board reads as
             // dangling (see RuntimeStackContext.datasets).
             listCollection('dataset', 'datasets'),
-            // [#13216] The resolution universe validateViewPageRefs needs for a
-            // `type: 'page'` view publish — without it every legitimate page mount
-            // reads as dangling (see RuntimeStackContext.pages). Gathered on the
-            // same terms as the four above: per write, on an `active` publish only.
-            listCollection('page', 'pages'),
+            // [#17063] A fifth read, `listCollection('page', 'pages')`, stood
+            // here for `validateViewPageRefs`. Both it and the `type: 'page'`
+            // view mount it resolved were retired under ADR-0049
+            // enforce-or-remove, so no runtime-crossed rule reads `stack.pages`
+            // and this publish no longer pays a `sys_metadata` round trip for a
+            // collection nothing would consult.
         ]);
 
         // [#9612] The closure this write is judged against. Resolved from the
@@ -5021,8 +5025,7 @@ export class ObjectStackProtocolImplementation implements
             permissions,
             books,
             datasets,
-            pages,
-            // [#10377] The batch's own pending drafts join the five
+            // [#10377] The batch's own pending drafts join the
             // collections above. Absent on every non-batch door.
             ...(evt.pending !== undefined ? { pending: evt.pending } : {}),
             ...(packageScope !== undefined ? { packageScope } : {}),
@@ -9634,7 +9637,8 @@ export class ObjectStackProtocolImplementation implements
      * the defect they had just been refused for.
      *
      * `rollup`/`summary` was the other half of that wording and is NOT broken
-     * the same way — it does get a real, maintained column (`table.float`;
+     * the same way — it does get a real, maintained column (`table.decimal`
+     * on tables created since #16318, `table.float` on earlier ones;
      * measured: `orderBy <summary> desc` -> E D C B A over values 5 4 3 2 1).
      * It is dropped from the hint because it cannot do THIS job: a rollup
      * aggregates CHILD records (count/sum/min/max/avg), so it cannot carry a
@@ -12657,8 +12661,9 @@ export class ObjectStackProtocolImplementation implements
         // author-declared `readonly` — so ONE listener carries both, and this
         // seam no longer diffs payloads to recover a strip it performed itself.
         // AGGREGATED: the `{ records, count }` response has no per-row slot, so
-        // a union is the only representable view here. (`insertManyData`, which
-        // HAS a per-row slot, recovers row precision from the same union.)
+        // a union is the only representable view here. (`insertManyData` HAS a
+        // per-row slot and still reports at the top level — the union cannot be
+        // resolved to rows at either seam; see its own docblock.)
         const dropped: DroppedFieldsEvent[] = [];
         const opts: any = { onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); } };
         if (request.context !== undefined) opts.context = request.context;
@@ -12685,27 +12690,70 @@ export class ObjectStackProtocolImplementation implements
      * degradation re-run of the good rows' beforeInsert hooks. Requires an
      * engine with `insertMany` (ObjectQL has it); absent that, callers should
      * fall back to createManyData.
+     *
+     * ## `droppedFields` is BATCH-LEVEL here, and names no row
+     *
+     * This response HAS a per-row slot (`outcomes[i]`) and still reports the
+     * drop set at the top level, which is the one thing about this method worth
+     * writing down. The slot exists; what does not exist is a per-row ANSWER to
+     * put in it.
+     *
+     * Every create-side strip is the ENGINE's — runtime-owned `autonumber`
+     * (#5503) and static author-declared `readonly` (#14147) — and its
+     * `onFieldsDropped` event is the UNION over the batch, the listener
+     * signature carrying no row index. This seam used to reconstruct a row set
+     * from that union by asking which rows SUPPLIED each dropped name
+     * (`[...engineDropped].filter((f) => f in supplied)`). That is not the same
+     * question, and it named rows that are not at fault:
+     *
+     *  - Maintainer ruling C (#14147) put the static-`readonly` strip INSIDE
+     *    `engine.insert`, AFTER the `beforeInsert` hooks, where it exempts keys
+     *    a hook itself assigned — recorded PER ROW
+     *    (`hookWrittenKeys: rowHookWrittenKeys[i]`,
+     *    `packages/objectql/src/engine.ts`). A hook that stamps a protected key
+     *    on some rows and not others makes those rows drop DIFFERENT sets, so a
+     *    row that supplied the name and had it KEPT was reported as having lost
+     *    it — a dropped-field warning on an outcome whose `record` carries the
+     *    value that was written.
+     *  - A row the batch culled before the strip (a validation failure —
+     *    `ok: false`) dropped nothing at all, because the strip loop skips it;
+     *    supplying the name was still enough to have it named.
+     *
+     * ⛔ And the outcome's own `record` cannot repair the inference either, so
+     * a post-hoc "is the key still there?" check is not the cheaper route: a
+     * stripped `readonly` field is RE-DEFAULTED over exactly the keys the strip
+     * took (#3043's contract — a forged `approval_status` comes back `draft`),
+     * and a stripped `autonumber` is refilled by `applyAutonumbers` afterwards.
+     * On both the key is PRESENT on the row that really did drop it, so that
+     * check would delete TRUE attributions while leaving the hook-exempt false
+     * one standing. Comparing values fails for the case `hookWrittenKeys` was
+     * built for in the first place — the hook assigning the value the caller
+     * also sent.
+     *
+     * So the honest set — `{rows whose payload carried N}` minus `{rows whose
+     * beforeInsert hook assigned N}` — is computed per row upstream and is not
+     * reachable through this seam. Rather than name rows on a guess, the union
+     * is reported where it is true: on the response. ⚠️ Read a name here as
+     * "AT LEAST ONE row dropped this field", never "this row dropped it".
+     * Restoring row precision means giving the engine's drop report a per-row
+     * channel (an `onFieldsDropped` signature that carries the row), never a
+     * reconstruction at this call site.
      */
-    async insertManyData(request: { object: string, records: any[], context?: any }): Promise<{ object: string; outcomes: Array<{ ok: boolean; record?: any; error?: unknown; droppedFields?: DroppedFieldsEvent[] }> }> {
+    async insertManyData(request: { object: string, records: any[], context?: any }): Promise<{ object: string; outcomes: Array<{ ok: boolean; record?: any; error?: unknown }>; droppedFields?: DroppedFieldsEvent[] }> {
         this.assertObjectRegistered(request.object); // [#3770]
         const engineInsertMany = (this.engine as any)?.insertMany;
         if (typeof engineInsertMany !== 'function') {
             throw new Error('insertManyData requires an engine with insertMany (framework#3172)');
         }
-        // [#5503/#14147] Every create-side strip is the ENGINE's — runtime-owned
-        // `autonumber` (#5503) and static author-declared `readonly` (#14147) —
-        // and its `onFieldsDropped` event is the UNION over the batch, the
-        // listener signature carrying no row index. This partial-success path HAS
-        // a per-row slot (`outcomes[i]`), and row precision is recoverable
-        // without an index: the strip only removes keys the ROW ITSELF supplied,
-        // so a dropped name belongs to exactly the rows whose supplied payload
-        // carried it. Without this the import surface (which prefers this path
-        // over createManyData) would drop columns with nothing but a server log
-        // to show for it.
-        const engineDropped = new Set<string>();
-        const opts: any = { onFieldsDropped: (e: DroppedFieldsEvent) => { for (const f of e.fields) engineDropped.add(f); } };
+        // [#5503/#14147] The engine's events are collected WHOLE and merged —
+        // the same handling `createManyData` gives them, and for the reason
+        // spelled out on this method: the union is reportable, a row set is not.
+        // Keeping each event also keeps its own `reason`, which the old
+        // flatten-into-a-Set-and-relabel could not.
+        const dropped: DroppedFieldsEvent[] = [];
+        const opts: any = { onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); } };
         if (request.context !== undefined) opts.context = request.context;
-        const outcomes: Array<{ ok: boolean; record?: any; error?: unknown; droppedFields?: DroppedFieldsEvent[] }> = await engineInsertMany.call(
+        const outcomes: Array<{ ok: boolean; record?: any; error?: unknown }> = await engineInsertMany.call(
             this.engine,
             request.object,
             request.records,
@@ -12720,18 +12768,12 @@ export class ObjectStackProtocolImplementation implements
                 if (o?.record) omitInternalFieldsFromWriteResponse(outcomeSchema, o.record);
             }
         }
-        if (Array.isArray(outcomes)) {
-            for (let i = 0; i < outcomes.length; i++) {
-                if (!outcomes[i]) continue;
-                const supplied = (request.records?.[i] ?? {}) as Record<string, unknown>;
-                const mine = [...engineDropped].filter((f) => f in supplied);
-                const events: DroppedFieldsEvent[] = [];
-                if (mine.length > 0) events.push({ object: request.object, fields: mine, reason: 'readonly' });
-                const merged = mergeDroppedFieldEvents(events);
-                if (merged.length > 0) outcomes[i].droppedFields = merged;
-            }
-        }
-        return { object: request.object, outcomes };
+        const merged = mergeDroppedFieldEvents(dropped);
+        return {
+            object: request.object,
+            outcomes,
+            ...(merged.length > 0 ? { droppedFields: merged } : {}),
+        };
     }
     
     async updateManyData(request: UpdateManyDataRequest & { context?: any }): Promise<BatchUpdateResponse> {
@@ -17591,13 +17633,15 @@ export class ObjectStackProtocolImplementation implements
         // the third place the collection set is written down, and the only one
         // that could fall behind SILENTLY: a key added to `RuntimeStackContext`
         // and routed by `CLOSURE_CONTEXT_KEY_BY_TYPE` would simply never be
-        // accumulated here, so a package publishing a page beside the view that
-        // mounts it would keep being refused for the sibling in its own batch —
-        // the `shyx_customer_ds` shape #10377 was filed for. `-?` makes every
-        // key REQUIRED, so the next widening is a compile error at this line
-        // instead.
+        // accumulated here, so a package publishing a dataset beside the
+        // dashboard that binds it would keep being refused for the sibling in
+        // its own batch — the `shyx_customer_ds` shape #10377 was filed for.
+        // `-?` makes every key REQUIRED, so the next widening is a compile error
+        // at this line instead — and [#17063]'s NARROWING was one too, which is
+        // how `pages` left this literal in the same edit it left
+        // `RuntimeStackContext`.
         const pending: { [K in keyof RuntimePendingDeclarations]-?: unknown[] } = {
-            objects: [], permissions: [], books: [], datasets: [], pages: [],
+            objects: [], permissions: [], books: [], datasets: [],
         };
         let any = false;
         for (const d of drafts) {
@@ -22064,6 +22108,36 @@ export class ObjectStackProtocolImplementation implements
         // object that owns it, which is where a field is authored and where the
         // reference graph has real edges.
         //
+        // [#17584] ⛔ And the prescription comes FIRST, before the explanation
+        // of why the question is unanswerable. That order is load-bearing, not
+        // style. Since #16146 this refusal crosses the REST boundary through
+        // `boundedDeclaredRefusalMessage`, which applies #5423's shared
+        // `CLIENT_MESSAGE_MAX` (500) by TRUNCATING THE TAIL — and that helper's
+        // own docblock declares the assumption it rests on: "These messages
+        // front-load the main clause … and back-load attribution and issue
+        // numbers, which belong in the log rather than the response."
+        //
+        // This sentence interpolates the object name twice (inside `targetName`
+        // and again as `owner`) and the field name once, so it grows ~3
+        // characters per character of name. Back-loaded, it broke that
+        // assumption at reachable lengths: measured through the real route, a
+        // 37/37 object/field pair composed 502 characters and was delivered as
+        // `…/api/v1/meta/object/<obj>/referenc…` — the opener still readable and
+        // the URL cut mid-path, which is an instruction that 404s if the
+        // operator follows it. `crm_opportunity_line_item_snapshot_v2` is 37
+        // characters, and nothing in `packages/spec` caps a metadata name at
+        // all (#12144: the ceiling is the storing column's `maxLength`, and the
+        // widest is `sys_metadata.name` at 255).
+        //
+        // Front-loaded, truncation costs the EXPLANATION instead — the half an
+        // operator can still act without. ⛔ Do not reorder this back, and ⛔ do
+        // not repair a future overflow by raising the bound or exempting this
+        // door: the bound is the security floor under the refusal channel
+        // (#5423) and the #16146 ruling put this door explicitly under it. The
+        // invariant is pinned at the WIRE, where the bound actually applies, by
+        // `rest-server-meta-references-refusal-envelope.test.ts` — and the
+        // producer-side ORDER by `protocol.reference-target-unanswerable.test.ts`.
+        //
         // ⛔ And it opens with NO bracketed tag. The `[item_locked]`-style tags
         // this file writes elsewhere are lowercase restatements of the throw's OWN
         // declared `code`, so the wire carries the same token on the `code` axis;
@@ -22077,15 +22151,30 @@ export class ObjectStackProtocolImplementation implements
         if (REFERENCE_SITES.unanswerableTargetTypes.includes(singularTarget)) {
             const owner = targetName.includes('.') ? targetName.slice(0, targetName.indexOf('.')) : '<object>';
             const err = new Error(
-                `References to a '${singularTarget}' item cannot be computed. `
-                + `A '${singularTarget}' is addressed by the composite key '<object>.<field>' `
+                `Ask the owning object instead: GET /api/v1/meta/object/${owner}/references. `
+                + `References to a '${singularTarget}' item cannot be computed, because `
+                + `a '${singularTarget}' is addressed by the composite key '<object>.<field>' `
                 + `(here '${targetName}'), while every metadata property that names a field holds the `
                 + `BARE field name — so no reference site can ever match this key and an empty answer `
-                + `would mean "not computable", not "nothing depends on it". `
-                + `Ask the owning object instead: GET /api/v1/meta/object/${owner}/references.`,
+                + `would mean "not computable", not "nothing depends on it".`,
             );
             (err as any).code = 'NOT_IMPLEMENTED';
             (err as any).status = 501;
+            // [#16146] The producer-side declaration ruled by decision batch #58
+            // (2026-09-06, option C): `ApiErrorSchema.refusal` says "the 5xx I
+            // declared is a deliberate REFUSAL whose `message` is authored for
+            // the caller", so the boundary keeps that message instead of
+            // withholding it as a fault. THIS is the throw the ruling names —
+            // the sentence three lines up is prescriptive per ADR-0110 D3 and
+            // reached the wire as "Internal server error" until a route-local
+            // patch caught it one route down. Setting it here is what retires
+            // that patch's refusal/fault opinion: the transport now reads what
+            // the protocol DECLARED instead of matching this route's literals.
+            //
+            // ⛔ Platform and driver code never sets this on a fault, and no
+            // rewrap in this file carries it — a refusal crossing the
+            // overlay-delete rewraps is withheld as a fault, deliberately.
+            (err as any).refusal = true;
             throw err;
         }
 

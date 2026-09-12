@@ -20,5 +20,7 @@
 // narrowings ride minor releases) and the prescription lives at the major
 // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
 // Sources are rewritten by the D2 conversion `element-form-removed`, which
-// strips all six keys and leaves the bare node — inert as it always was.
+// strips all six keys and leaves the bare node — which the parse then refuses
+// by name (`RETIRED_PAGE_COMPONENT_TYPES`), with the prescription to delete the
+// component.
 export const entry = 'ui/ElementFormProps:submitLabel';

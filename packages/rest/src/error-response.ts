@@ -55,6 +55,7 @@ import {
     resolveThrownHttpError,
     demotedDeclaredCode,
     declaredUserMessage,
+    declaredRefusalMessage,
     INTERNAL_ERROR_MESSAGE,
 } from '@objectstack/types';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
@@ -576,16 +577,43 @@ function withoutDeclaredCodePrefix(message: string, error: any): string {
  * this body was lifted from. Gating on `declaresServerFault` instead would
  * silently keep collapsing that shape onto `500`, which is the very defect,
  * one case narrower.
+ *
+ * ## [#16146] …and the PROSE is withheld only from a FAULT
+ *
+ * The paragraph above is about the STATUS and is unchanged. What this arm
+ * could not see until #16335 landed is that a producer-declared 5xx may be a
+ * deliberate REFUSAL whose message is authored FOR the caller — the
+ * `/meta/:type/:name/references` door's ADR-0110 D3 `501` is the measured one,
+ * and it reached the wire as `"Internal server error"`. The director seat
+ * ruled that distinction a producer-side DECLARATION on the published ADR-0112
+ * envelope (decision batch #58, 2026-09-06, option C), ⛔ not a status
+ * heuristic and ⛔ not a second allow-list. So this arm asks
+ * {@link declaredRefusalMessage} — the ONE read all three withhold arms make
+ * (`@objectstack/types`) — and keeps that message under the same
+ * {@link truncateClientMessage} bound a 4xx message gets (#5423: truncate,
+ * never replace).
+ *
+ * ⛔ NOT "declared 5xx prose is relayed now". Absent the declaration this arm
+ * answers the bytes it always answered, which is what keeps the default
+ * fail-closed: a rewrap that drops the flag, a driver that never set it, and a
+ * producer that declared only `status` + `code` are all still withheld.
+ * `declaresServerFault` keeps the live call below and gains a second live
+ * reader inside that shared function.
  */
 export function declaredServerFaultAnswer(
     error: any,
 ): { status: number; body: Record<string, unknown> } | undefined {
     const declaredStatus = declaredHttpStatus(error);
     if (declaredStatus === undefined || declaredStatus < 500) return undefined;
+    // [#16146] The declaration is read HERE, INSIDE the shared arm, never in
+    // the `withDeclaredUserMessage` wrapper one frame up: the analytics dataset
+    // door (`rest-server.ts`, #11718) calls this function BARE, so a relay
+    // written into the wrapper would cover `/data` and miss that door.
+    const refusal = boundedDeclaredRefusalMessage(error);
     return {
         status: declaredStatus,
         body: {
-            error: INTERNAL_ERROR_MESSAGE,
+            error: refusal ?? INTERNAL_ERROR_MESSAGE,
             ...(declaresServerFault({ status: declaredStatus, code: error?.code })
                 ? thrownCodeFields(error, declaredStatus)
                 : {}),
@@ -716,6 +744,34 @@ function withDeclaredUserMessage(
 export function boundedDeclaredUserMessage(error: unknown): string | undefined {
     const userMessage = declaredUserMessage(error);
     return userMessage === undefined ? undefined : truncateClientMessage(userMessage);
+}
+
+/**
+ * [#16146] This package's wire VALUE for a producer-DECLARED 5xx refusal: the
+ * message the producer authored for its caller, with #5423's bound applied —
+ * or `undefined` when the throw declared a fault, which is the default.
+ *
+ * Same split as the pair above, for the same reason. `declaredRefusalMessage`
+ * (`@objectstack/types`) decides PRESENCE — that is the ONE definition all
+ * three withhold arms read, and the runtime dispatcher exit reads it directly
+ * — and {@link truncateClientMessage} decides the BOUND, which is a per-DOOR
+ * question: the ruling's own text says a kept refusal is "bounded exactly as a
+ * 4xx message is", and in this package a 4xx message is bounded at
+ * {@link CLIENT_MESSAGE_MAX} by truncation, never by replacement.
+ *
+ * ⛔ Nothing here re-derives the declaration. Both REST arms and the
+ * `/meta/:type/:name/references` door call THIS, so the bound is applied at
+ * every mark rather than at some of them — the drift
+ * {@link boundedDeclaredUserMessage}'s own docblock was written against.
+ *
+ * ⚠️ Truncation cuts the TAIL, and a refusal is the one message shape that
+ * routinely back-loads its remedy ("Ask the owning object instead: …"). The
+ * measured `/references` sentence is 410 characters, so it survives whole; a
+ * producer writing a longer one owes the caller a front-loaded remedy.
+ */
+export function boundedDeclaredRefusalMessage(error: unknown): string | undefined {
+    const refusal = declaredRefusalMessage(error);
+    return refusal === undefined ? undefined : truncateClientMessage(refusal);
 }
 
 /**
@@ -2177,11 +2233,24 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
         // see {@link withDeclaredUserMessage}. On the 5xx arm the PROSE is
         // still withheld (#5437); the marked channel is authored user text, not
         // the message being withheld, so carrying it is not a re-opening.
+        //
+        // [#16146] …unless the producer DECLARED the 5xx to be a refusal. This
+        // is the second of the three arms that withhold BECAUSE the status was
+        // declared, and it reads the same {@link declaredRefusalMessage} the
+        // first one does rather than re-deriving the condition — "one rule,
+        // every door inherits" (#12509). The accepted cost recorded eight
+        // paragraphs up — a self-authored 5xx sentence reaching the client as
+        // the generic one — is now paid off for exactly the producers that
+        // declare `refusal: true`, and unchanged for every producer that does
+        // not. Note the two facts are independent: `userMessage` still rides
+        // both branches, addressed to the END USER, while this releases the
+        // DIAGNOSTIC `message` to the caller who asked.
         if (error.status >= 500) {
+            const refusal = boundedDeclaredRefusalMessage(error);
             return withDeclaredUserMessage(error, {
                 status: error.status,
                 body: {
-                    error: INTERNAL_ERROR_MESSAGE,
+                    error: refusal ?? INTERNAL_ERROR_MESSAGE,
                     ...thrownCodeFields(error, error.status),
                 },
             });
@@ -2480,9 +2549,25 @@ export function isExpectedRouteError(status: number, body: Record<string, unknow
  * catch blocks that must emit their own response shape (the CRUD handlers that
  * respond straight from a `mapDataError` envelope, one of which rewrites 400 →
  * 404 on the wire) — they keep their responder and share only the verdict.
+ *
+ * [#16146] A producer-declared REFUSAL is not a fault, and the ruling
+ * (decision batch #58, 2026-09-06) says the log follows the same field the
+ * wire does: "a declared refusal is not logged as `[REST] Unhandled error`".
+ * Before this, the `/references` 501 printed a stack on every unanswerable
+ * target while the sibling refusal at the same door — hand-built into the
+ * nested envelope — printed nothing, so one door's two refusals differed in
+ * the log as well as on the wire. The read is the SAME
+ * {@link declaredRefusalMessage} the three withhold arms make, ⛔ not a second
+ * opinion about which statuses are "expected": a refusal that declared no
+ * relayable prose (empty message, or prose the leak heuristic caught) is
+ * withheld like a fault and is still logged like one.
+ *
+ * `logWithheldServerFault` below then no-ops by its own rule — the resolved
+ * body carries the error's own message — so a relayed refusal costs no line at
+ * all, and a TRUNCATED one still hands the operator the full text.
  */
 export function logUnexpectedRouteError(error: any, resolved: { status: number; body: Record<string, unknown> }): void {
-    if (!isExpectedRouteError(resolved.status, resolved.body)) {
+    if (!isExpectedRouteError(resolved.status, resolved.body) && declaredRefusalMessage(error) === undefined) {
         logError('[REST] Unhandled error:', error);
         return;
     }

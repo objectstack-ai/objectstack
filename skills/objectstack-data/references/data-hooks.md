@@ -620,14 +620,16 @@ when a hook must work regardless of whether a user resolved.
 > **Two isolation axes — don't conflate them.** `organization_id` is
 > **org row-scoping**: many organizations share one database and every row
 > carries its owning org (`current_user.organizationId` filters reads/writes;
-> multi-org needs cloud + `@objectstack/organizations`). That is different from
+> it needs a walled posture — `OS_TENANCY_POSTURE=group|isolated` — with
+> `@objectstack/organizations` declared by the app, open core since
+> ADR-0132). That is different from
 > **environment / database-per-tenant** isolation (`service-tenant`,
 > `driver-turso`), where "tenant" means an entire environment/database and the
 > generic driver-layer `tenantId` knob can carry that environment id. The
 > object-metadata `tenancy.*` knob configures the *mechanism* (isolation on/off
 > + which column); the *value* you read and write is your `organization_id`
-> column. Community edition never populates an org, so `organizationId` is
-> `undefined` there.
+> column. Under `single` the bootstrapped Default Organization is the only
+> one, so there is nothing to scope by (`rules/security.md` § Multi-tenancy).
 
 ### `input` — Operation Parameters
 

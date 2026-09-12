@@ -216,27 +216,32 @@ describe('#14147 — the create ingress DELEGATES the readonly strip to engine.i
     ]);
   });
 
-  it('insertManyData forwards every row whole and keeps ROW precision from the union', async () => {
+  it('insertManyData forwards every row whole and reports the union at BATCH level', async () => {
     const { p, inserts } = makeProtocol();
     const res: any = await p.insertManyData({
       object: 'approval_case',
       records: [{ title: 'A', approval_status: 'approved' }, { title: 'B' }],
     });
     expect(inserts[0].data).toEqual([{ title: 'A', approval_status: 'approved' }, { title: 'B' }]);
-    // The engine's event is the batch UNION (its listener carries no row
-    // index); row precision is recovered by asking which row SUPPLIED the key.
-    expect(res.outcomes[0].droppedFields).toEqual([
+    // The engine's event is the batch UNION and its listener carries no row
+    // index. It used to be resolved back to rows by asking which row SUPPLIED
+    // each name; ruling C (#14147) exempts keys a `beforeInsert` hook assigned,
+    // per row, so that is a different set. The union is reported where it is
+    // true — on the response — and no outcome is named.
+    expect(res.droppedFields).toEqual([
       { object: 'approval_case', fields: ['approval_status'], reason: 'readonly' },
     ]);
-    expect(res.outcomes[1].droppedFields, 'row B supplied none of the dropped names').toBeUndefined();
+    for (const o of res.outcomes) {
+      expect(o, 'the union names no row').not.toHaveProperty('droppedFields');
+    }
   });
 });
 
 describe('#14147 — engine listener wiring (the firing control for every assertion above)', () => {
   // The faces enumerated here are the ones whose RESPONSE carries
   // `droppedFields`: `CreateDataResponse`, `CloneDataResponse` (since #15703),
-  // `CreateManyDataResponse`, and the per-row results of `insertManyData` /
-  // `batchData`. That is every create face; the case after this one pins the
+  // `CreateManyDataResponse`, `insertManyData`'s batch-level key, and the
+  // per-row results of `batchData`. That is every create face; the case after this one pins the
   // clone by name so the enumeration cannot silently lose the face that was
   // the exclusion until its contract gained the member.
   it('every create face whose response carries droppedFields passes an onFieldsDropped listener to the engine', async () => {

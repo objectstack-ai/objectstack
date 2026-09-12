@@ -352,7 +352,7 @@ model: opus
 - 两种读法通向两种架构时同此;⛔ 不写投机代码。
 - 返回 `status: "needs_decision"`,把每个问题连同选项、成本与你的推荐写进 `open_questions`。
 - 升级分析的四轴决策框架由派发词携带,PM 从自己那份副本填入。
-- 已发布模板里它是 `rules/dev-template.md` 的 `{decision_frame}` 槽位。
+- 框架唯一副本在 pm-dispatch SKILL.md 〈升级与决策〉;派发词逐字粘贴,dev ⛔ 不留副本。
 - 每个方案逐轴分析,推荐也按那些轴给理由;派发词没带,停下向 PM 索取,⛔ 不自拟一套轴。
 - `main` 碎了、依赖未合并、CI 基础设施故障 ⇒ 报 `blocked` 附证据,重试到排除你的改动。
 

@@ -146,8 +146,35 @@ import { SEMCONV, OBSERVABILITY_METRICS_SERVICE, type MetricsRegistry } from '@o
 // to hand off to `createDispatcherPlugin`. Default is fully noop so the
 // CLI imposes no runtime cost when observability isn't configured.
 //
-// Env knobs (also documented in apps/cloud/server/observability.ts — keep
-// the two in sync if you tweak names):
+// Env knobs — the SAME names are also read by the cloud host
+// (`apps/cloud/server/observability.ts`, cloud repo), so keep the two in sync
+// if you tweak NAMES. That duty is live, not stale prose: the cloud file reads
+// these as `process.env` lookups — measured on #15295 for every knob listed
+// below EXCEPT `OS_OTLP_FLUSH_MS`, which was added on this side afterwards and
+// has never been measured against that repository: treat that one as
+// unverified rather than mirrored.
+//
+// ⛔ NAMES only — the DEFAULTS differ on purpose, and unifying them is a
+// telemetry regression rather than a tidy-up: `OS_OBS_SERVICE_NAME` defaults
+// to `objectstack` here and to `objectstack-cloud` there because two
+// deployments are two services; collapsing them merges both into one series.
+//
+// The canonical home for this list is `@objectstack/observability` — the
+// package BOTH sides already import (statically, a few lines above; the cloud
+// file imports it too) — not these comments pointing at each other, which
+// is how the duty decayed to begin with: it is one-sided today, the cloud file
+// carries no reciprocal sentence, so nobody renaming a name over there is
+// prompted to come back here. Until the list lives in that package, this block
+// is it, and moving the cloud half is a change in the cloud repo (#17693).
+//
+// ⚠️ And the carriers are not two but three:
+// `content/docs/deployment/environment-variables.mdx` (`## Observability`)
+// publishes this same list with types and defaults, and it is the one most
+// readers reach first. Its `OS_OBS_SERVICE_NAME` row states the framework
+// default with no note that the cloud host differs on purpose, so the
+// NAMES-only rule above has to be honoured there too. Fixing that page is out
+// of this block's scope; the caveat rides with the canonical-home decision
+// (#17693).
 //   OS_OBS_EXPORTER       noop (default) | console | json | otlp
 //   OS_OTLP_ENDPOINT      OTLP/HTTP root, e.g. https://otlp.grafana.net/otlp
 //   OS_OTLP_HEADERS       comma-separated Key=Value; values may be URL-encoded

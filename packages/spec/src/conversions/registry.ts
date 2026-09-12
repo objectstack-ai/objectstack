@@ -3120,6 +3120,16 @@ const jobIdRemoved: MetadataConversion = {
  * rewritten in the same change to say rule messages are authored on the rule
  * (`object.validations[].message`), not translated through a group.
  *
+ * Since 17.3.0 (#14381, #14253) there is a group again and that same guidance
+ * entry names it: `objects.<object_name>._validations.<rule_name>.message`,
+ * which the write path resolves. It is not `validationMessages` returning —
+ * that one was keyed by rule name at the TOP level, so it could not tell two
+ * objects' rules apart, and nothing read it; this one is object-scoped and the
+ * rule evaluator reads it through the existing `i18nService` channel. The
+ * sentence above is what 17.0.0 said and it stays true of the retired key; an
+ * author arriving at this conversion needs both halves, so the summary below
+ * carries the route too.
+ *
  * Removed from the shared `translationDataShape()`, so it retires at BOTH doors
  * at once — the bundle entry and the registered item. #3778's original guard
  * ran on the item door only, which is exactly how the key survived this long in
@@ -3130,7 +3140,7 @@ const translationValidationMessagesRemoved: MetadataConversion = {
   toMajor: 17,
   retiredFromLoadPath: true,
   surface: 'translation.validationMessages',
-  summary: "translation key 'validationMessages' removed (#4667 — no resolver read it, so a translated rule message was stored and never shown; #3778's migration table had been steering retired `errors:` authors into it). Author the message on the rule itself (`object.validations[].message`)",
+  summary: "translation key 'validationMessages' removed (#4667 — no resolver read it, so a translated rule message was stored and never shown; #3778's migration table had been steering retired `errors:` authors into it). Author the message on the rule itself (`object.validations[].message`), and translate it under the object-scoped group `objects.<object_name>._validations.<rule_name>.message`, which the write path resolves (17.3.0, #14381)",
   apply(stack, emit) {
     return mapCollection(stack, 'translations', (t, path) =>
       stripKeys(t, ['validationMessages'], emit, path));
@@ -6801,11 +6811,13 @@ const elementInputTargetVariableRemoved: MetadataConversion = {
  * them together.
  *
  * Pure lossless deletes — no key ever had an effect to lose. The component
- * node itself is NOT removed: the open `type` union tolerates a bare inert
- * node (nothing rendered it before either), and deleting authored page nodes
- * is a layout decision a mechanical conversion must not make. The
+ * node itself is NOT removed: deleting authored page nodes is a layout
+ * decision a mechanical conversion must not make. The bare node it leaves is
+ * not the end state — `element:filter` is a member of
+ * `RETIRED_PAGE_COMPONENT_TYPES`, so the parse refuses it by name and the
  * prescription tells the author to delete the component and use the list
- * surface's own filtering instead.
+ * surface's own filtering instead. Mechanical where it can be, located where
+ * it cannot.
  */
 const elementFilterRemoved: MetadataConversion = {
   id: 'element-filter-removed',
@@ -6819,7 +6831,8 @@ const elementFilterRemoved: MetadataConversion = {
     "the whole 'element:filter' element retired (#9220 — no renderer for it ever shipped in "
     + 'any repo, so every key was a capability claim nothing kept; list surfaces own their '
     + "filtering via a view's userFilters / the list filter builder). All six props are "
-    + 'stripped; the bare node stays, inert as it always was',
+    + 'stripped; the bare node the conversion leaves is refused by name at the parse, with '
+    + 'the prescription to delete the component',
   apply(stack, emit) {
     return mapPageComponents(stack, (component, path) => {
       if (component.type !== 'element:filter') return component;
@@ -6949,13 +6962,14 @@ const elementFilterRemoved: MetadataConversion = {
  * together and this conversion strips them together.
  *
  * Pure lossless deletes — no key ever had an effect to lose. The component
- * node itself is NOT removed: the open `type` union tolerates a bare inert
- * node (nothing rendered it before either), and deleting authored page nodes
- * is a layout decision a mechanical conversion must not make. The
+ * node itself is NOT removed: deleting authored page nodes is a layout
+ * decision a mechanical conversion must not make. The bare node it leaves is
+ * not the end state — `element:form` is a member of
+ * `RETIRED_PAGE_COMPONENT_TYPES`, so the parse refuses it by name and the
  * prescription tells the author to delete the component and use the
  * object-bound `object-form` block (#7751) instead — rendered,
  * designer-publishable, and carrying the same intent (`objectName`, `fields`,
- * `mode`, `submitText`).
+ * `mode`, `submitText`). Mechanical where it can be, located where it cannot.
  */
 const elementFormRemoved: MetadataConversion = {
   id: 'element-form-removed',
@@ -6969,7 +6983,8 @@ const elementFormRemoved: MetadataConversion = {
     "the whole 'element:form' element retired (#9249 — no renderer for it ever shipped in "
     + 'any repo, so every key was a capability claim nothing kept; use the object-bound '
     + "'object-form' block instead — rendered and designer-publishable). All six props are "
-    + 'stripped; the bare node stays, inert as it always was',
+    + 'stripped; the bare node the conversion leaves is refused by name at the parse, with '
+    + 'the prescription to delete the component',
   apply(stack, emit) {
     return mapPageComponents(stack, (component, path) => {
       if (component.type !== 'element:form') return component;
@@ -8968,6 +8983,109 @@ const tursoConfigTimeoutToTimeoutMs: MetadataConversion = {
   },
 };
 
+/**
+ * The `type: 'page'` list-view mount leaves the spec (protocol 18, #17063 —
+ * maintainer ruling 2026-09-09, decision batch #107 item 1, verbatim 「撤」).
+ *
+ * `page` was added to the list-view `type` enum with a `pageName` binding so a
+ * view could render nothing of its own and delegate to an already-published
+ * page (#13216 direction 1). Only the spec half landed (PR #13372). No renderer
+ * ever routed the member: objectui's `ListView` switch shares its `default:`
+ * arm with `case 'grid'`, and `isListViewVisualization('page')` is false — so a
+ * `page` view has always drawn an empty grid where the page was supposed to be.
+ * ADR-0049 enforce-or-remove, on the principle that a published capability with
+ * zero consumers earns no exemption from its sunk cost.
+ *
+ * ## Why this STRIPS `type` rather than rewriting it to `'grid'`
+ *
+ * Deleting the key is not the platform choosing a view type: `type` carries
+ * `.default('grid')` on {@link ListViewSchema}, so a payload with no `type`
+ * parses to `grid` by the schema's own declared default — the same value, but
+ * declared in one place instead of guessed here. And it lands the row on
+ * exactly what it already rendered, so the conversion changes the document
+ * without changing a pixel. `stripKeys`-shaped deletion is idempotent by
+ * construction (a second replay finds nothing to remove).
+ *
+ * `pageName` is stripped unconditionally on a list payload, not only beside a
+ * `page` type: the key is retired on every list-view door, and a pre-#13372 row
+ * can carry it beside any type (the both-directions refusal that used to catch
+ * that is retired with the mount).
+ *
+ * `retiredFromLoadPath`: the enum refuses `'page'` by name and `pageName` is a
+ * `retiredKey()` tombstone, so a LIVE author is taught at parse rather than
+ * silently rewritten. The entry exists so stored 17.x rows replay clean through
+ * `applyConversionsToStoredItem`, and so `os migrate meta --from 17` lists the
+ * mechanical edits for author sources.
+ *
+ * ⚠️ Coverage boundary, stated rather than left to be discovered: this walks
+ * `stack.views[]` in all three persisted spellings ({@link mapViewPayloads}) —
+ * the same reach `view-export-options-pdf-removed` has, and the same reach the
+ * conversion walk offers. `objects[].listViews.*` is NOT reached by any
+ * conversion in this registry, so an object body carrying a page mount is
+ * refused at its own door rather than converted. Measured population for both:
+ * zero authored `type: 'page'` list views in this tree or any consuming app the
+ * seats can read (the 25 in-tree `type: 'page'` hits are app NAV items, a
+ * different key on `PageNavItemSchema` that stays).
+ */
+const viewPageMountRemoved: MetadataConversion = {
+  id: 'view-page-mount-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface: "view.list / view.listViews.* — the list-view type 'page' and its pageName binding",
+  summary:
+    "list-view type 'page' and its `pageName` binding removed (#17063 — the delegating render half "
+    + 'was never built, so a page view fell through to the grid branch and drew an empty table; '
+    + 'ADR-0049 enforce-or-remove)',
+  apply(stack, emit) {
+    const stripMount = (payload: Dict, path: string): Dict => {
+      const hasPageType = payload.type === 'page';
+      const hasPageName = 'pageName' in payload;
+      if (!hasPageType && !hasPageName) return payload;
+      const next = { ...payload };
+      if (hasPageType) {
+        // Deleted, not rewritten: `ListViewSchema.type` defaults to `'grid'`.
+        emit({ from: 'page', to: '(removed)', path: `${path}.type` });
+        delete next.type;
+      }
+      if (hasPageName) {
+        emit({ from: 'pageName', to: '(removed)', path: `${path}.pageName` });
+        delete next.pageName;
+      }
+      return next;
+    };
+    return mapViewPayloads(stack, (payload, kind, path) =>
+      kind === 'list' ? stripMount(payload, path) : payload);
+  },
+  fixture: {
+    before: {
+      views: [{
+        object: 'crm_contract',
+        // A complete page mount: both keys go, and the surviving `columns: []`
+        // is left alone — an empty column list is what the grid default
+        // derivation already reads as "no authored projection".
+        list: { type: 'page', pageName: 'contract_landing', columns: [] },
+        listViews: {
+          // A pre-#13372 row: `pageName` beside a type that never read it.
+          strays: { type: 'grid', pageName: 'contract_landing', columns: ['name'] },
+          // Neither key declared -> untouched, by reference.
+          all: { type: 'grid', columns: ['name'] },
+        },
+      }],
+    },
+    after: {
+      views: [{
+        object: 'crm_contract',
+        list: { columns: [] },
+        listViews: {
+          strays: { type: 'grid', columns: ['name'] },
+          all: { type: 'grid', columns: ['name'] },
+        },
+      }],
+    },
+    expectedNotices: 3,
+  },
+};
+
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -9063,6 +9181,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     connectorHealthAndTriggerDurationsUnitInKey,
     memoryPersistenceAutoSaveIntervalToMs,
     tursoConfigTimeoutToTimeoutMs,
+    viewPageMountRemoved,
   ],
 };
 

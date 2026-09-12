@@ -4554,6 +4554,34 @@ export class SqlDriver implements IDataDriver {
   protected fileColumnsMoved = false;
   /** The unresolved resolver from config, cleared once it has been asked. */
   private fileColumnsMovedResolver?: () => boolean | Promise<boolean>;
+  /**
+   * The columns whose DECLARED type is `boolean` or `toggle` — a READ-COERCION
+   * registry: its readers present the stored form (SQLite INTEGER 0/1, MySQL
+   * `tinyint(1)`) as one JS boolean.
+   *
+   * ⚠️ [#17586] SCALAR only. A `multiple: true` boolean/toggle is deliberately
+   * NOT here — the same carve-out {@link mediaFields} states just above, and
+   * the one `numericFields` / `numericValueFields` carry in both fills. Its
+   * value is a LIST of booleans in a JSON column ({@link isJsonField} reduces
+   * to `!!field.multiple` for these two types, neither being in
+   * `JSON_COLUMN_TYPES`), and "present this as ONE boolean" has no meaning
+   * over an array: `Boolean(v)` is `true` for EVERY non-empty array, so a
+   * stored `[false]` presented as `true` is the OPPOSITE of what is stored,
+   * silently. The fills spell the condition rather than each reader because
+   * no reader needs the entry — measured, all four:
+   *
+   * 1. the [#11635] Postgres aggregate CAST — would emit `cast(?? as int)`
+   *    over a `json` column, which is not a defined cast there;
+   * 2. {@link readPresentationKind} — hands the same one-boolean presenter to
+   *    the `aggregate()` / `distinct()` doors, where the raw cell is the JSON
+   *    STRING `'[false]'` and `Boolean('[false]')` is `true`: the identical
+   *    inversion one door over;
+   * 3. `formatOutput`'s row pass — the [#11782] coercion this registry exists
+   *    for, and where the collapse was filed;
+   * 4. {@link isNonTextColumn} — already carves multi-valued out AT THE READER
+   *    (`&& !this.isJsonColumn(...)`, #17343), so its answer is UNCHANGED by
+   *    the narrowing rather than merely unharmed by it.
+   */
   protected booleanFields: Record<string, string[]> = {};
   protected numericFields: Record<string, string[]> = {};
   /**
@@ -8783,11 +8811,24 @@ export class SqlDriver implements IDataDriver {
    *
    * `any` here was not "the object name goes unchecked", it was every check off
    * on the members this body READS: `where`'s filter dialect, `groupBy`'s node
-   * union, `aggregations`' node shape. #5181 narrowed the six methods
-   * `IDataDriver` declares and #6075 followed through on five drivers;
-   * `aggregate` is not on that contract, so neither reached it.
+   * union, `aggregations`' node shape. #5181 narrowed the six methods it swept
+   * and #6075 followed through on five drivers; this door was reached by
+   * neither.
+   *
+   * [#17277] The sentence that used to close the paragraph above —
+   * "`aggregate` is not on that contract" — was FALSE, and it is the whole
+   * reason #15267's census walked past this door: that census asked "is it on
+   * the contract?" and answered from THIS COMMENT rather than from the
+   * contract. `IDataDriver` declares
+   * `aggregate?(object, query, options?): Promise<Record<string, unknown>[]>`,
+   * beside the calling convention that dispatches on
+   * `typeof driver.aggregate === 'function'`. The `?` governs whether the
+   * member EXISTS, not what it returns once it does, so the declared return is
+   * a published promise here exactly as on a required door. The annotation
+   * below is the contract's own, pinned at the type level in
+   * `sql-driver-doors-declared-types.test.ts`.
    */
-  async aggregate(object: string, query: DriverQuery, options?: DriverOptions): Promise<any> {
+  async aggregate(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
     const builder = this.getBuilder(object, options);
     this.applyTenantScope(builder, object, options);
 
@@ -10046,7 +10087,12 @@ export class SqlDriver implements IDataDriver {
         // Unconditional, on BOTH arms — see {@link mediaFields}. The read-side
         // legacy-encoding repair runs on a deployment that has not moved too.
         if (!field.multiple && FILE_REFERENCE_TYPES.has(type)) mediaCols.push(name);
-        if (type === 'boolean' || type === 'toggle') booleanCols.push(name);
+        // [#17586] SCALAR only — `&& !field.multiple` is the house spelling
+        // its three neighbours in this block already carry, and this line was
+        // the single omission. See {@link booleanFields}: every reader of this
+        // registry presents its entry as ONE JS boolean, which for a
+        // multi-valued (JSON) column collapses the parsed array to `true`.
+        if ((type === 'boolean' || type === 'toggle') && !field.multiple) booleanCols.push(name);
         if (NUMERIC_SCALAR_TYPES.has(type) && !field.multiple) numericCols.push(name);
         // [#16318] The authorable half only — see {@link numericValueFields}.
         if (NUMERIC_VALUE_TYPES.has(type) && !field.multiple) numericValueCols.push(name);
@@ -10131,7 +10177,12 @@ export class SqlDriver implements IDataDriver {
         // `toggle` shares boolean storage/affinity, so it needs the same
         // read coercion (stored 1/0 → JS true/false) or it leaks back as a
         // number/string instead of a boolean (#field-zoo).
-        if (type === 'boolean' || type === 'toggle') {
+        // [#17586] SCALAR only, like the three neighbours below: a
+        // `multiple: true` boolean/toggle is a JSON column, and the read
+        // coercion this registry exists for presents ONE JS boolean — which
+        // collapses the parsed array to `true` whatever it holds. See
+        // {@link booleanFields}.
+        if ((type === 'boolean' || type === 'toggle') && !field.multiple) {
           booleanCols.push(name);
         }
         // Numeric scalars are coerced back to JS numbers on read so legacy
@@ -13773,8 +13824,9 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * [#14079/#15683] Is `localField` a column on `table` a text operator must
-   * not be aimed at — a column DECLARED numeric, boolean or temporal?
+   * [#14079/#15683/#17343] Is `localField` a column on `table` a text operator
+   * must not be aimed at — a SCALAR column DECLARED numeric, boolean or
+   * temporal?
    *
    * Reads the registries `formatOutput`'s read-coercion and the temporal seam
    * already read — `numericFields` (`NUMERIC_SCALAR_TYPES`, non-`multiple`),
@@ -13812,25 +13864,49 @@ export class SqlDriver implements IDataDriver {
    * here: an uncertified column is still a declared datetime, and gating on
    * certification would make the answer depend on repair state.
    *
-   * ⚠️ A MULTI-VALUED temporal column is excluded, and the exclusion is load
-   * bearing. `multiple: true` stores a JSON TEXT array ({@link isJsonField}),
-   * where `$contains` is not a substring test at all — it is the MEMBERSHIP
-   * spelling, the one operator #7398 left working on a JSON column after
-   * refusing the equality family there, and downstream code depends on it
+   * ⚠️ A MULTI-VALUED column is excluded on EVERY limb, and the exclusion is
+   * load bearing. `multiple: true` stores a JSON TEXT array ({@link
+   * isJsonField}), where `$contains` is not a substring test at all — it is the
+   * MEMBERSHIP spelling, the one operator #7398 left working on a JSON column
+   * after refusing the equality family there, and downstream code depends on it
    * (`sql-driver-json-column-operator-refusal.test.ts` pins it on both lowering
-   * families). The numeric limb has the same carve-out already, spelled at the
-   * registry instead: `numericFields` is filled `NUMERIC_SCALAR_TYPES.has(type)
-   * && !field.multiple`. The temporal registries carry no such condition —
-   * `dateFields` / `datetimeFields` / `timeFields` serve the read-presentation
-   * seam, which does apply to a multi-valued column — so the condition is
-   * spelled HERE, where the two questions differ, rather than by narrowing a
-   * registry three other seams read.
+   * families). Gating it turns a working membership filter into "matches
+   * nothing" — the fail-CLOSED direction that suite's own table calls out.
+   *
+   * Each limb spells the exclusion where its own registry leaves it unsaid:
+   *
+   * - **numeric** — at the REGISTRY. `numericFields` is filled
+   *   `NUMERIC_SCALAR_TYPES.has(type) && !field.multiple`, so the condition
+   *   never reaches this predicate.
+   * - **temporal** [#15683] — HERE. `dateFields` / `datetimeFields` /
+   *   `timeFields` serve the read-presentation seam, which DOES apply to a
+   *   multi-valued column, so narrowing them would break a seam that is right.
+   * - **boolean** [#17343] — HERE, and this limb had NEITHER until then.
+   *   #14079 landed this predicate describing itself as "a declared numeric or
+   *   boolean SCALAR" and annotated the numeric registry as non-`multiple`, so
+   *   the omission was the gap between that stated scope and `booleanFields`'
+   *   silence, never a ruling that a stored array of booleans is meaningless:
+   *   `boolean` + `multiple: true` is authorable, gets a JSON column here, and
+   *   its `$contains` answered correctly on every other declared class.
+   *
+   *   ⚠️ [#17586] `booleanFields` has SINCE been narrowed at both fills, for a
+   *   defect of its own (the read coercion collapsed a parsed array to a
+   *   single, inverted `true`). So this limb's carve-out is now REDUNDANT —
+   *   and it is kept deliberately, on two grounds: the registry's narrowing is
+   *   a read-coercion decision that must not silently become this gate's
+   *   correctness condition, and the carve-out is what states the rule for the
+   *   limb — a text operator is legal against a JSON column — where the
+   *   registry states only which columns take a coercion. The equivalence that
+   *   makes the two agree (for `boolean`/`toggle`, `isJsonColumn` IS
+   *   `!!field.multiple`) is pinned by execution in
+   *   `sql-driver-17586-multi-valued-boolean-read-inversion.test.ts`, so a
+   *   divergence turns that file red rather than moving this answer.
    */
   protected isNonTextColumn(table: string | null | undefined, localField: string): boolean {
     if (!table) return false;
     return (
       this.numericFields[table]?.includes(localField) === true ||
-      this.booleanFields[table]?.includes(localField) === true ||
+      (this.booleanFields[table]?.includes(localField) === true && !this.isJsonColumn(table, localField)) ||
       (this.temporalFieldKind(table, localField) !== null && !this.isJsonColumn(table, localField))
     );
   }

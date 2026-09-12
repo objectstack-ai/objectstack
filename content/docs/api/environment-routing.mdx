@@ -89,7 +89,26 @@ surface:
 |:---|:---|:---|
 | `auto` | Registers both unscoped `/api/v1/...` and scoped `/api/v1/environments/:environmentId/...` routes. | Default migration mode. |
 | `optional` | Same route surface as `auto`; resolution may come from URL, hostname, header, session, or default. | Multi-environment hosts that still accept unscoped callers. |
-| `required` | Registers only environment-scoped routes for data/meta/AI/automation/package handlers. | Hardened clients that always pass an environment id. |
+| `required` | Registers only environment-scoped routes for data/meta/AI/automation handlers, and for the REST `POST /packages/publish` route. The dispatcher's own `/packages*` bridge is the exception — it stays mounted unscoped too. | Hardened clients that always pass an environment id. |
+
+<Callout type="warn">
+**`required` does not close the unscoped `/packages*` surface.** The dispatcher
+plugin mounts the package routes at the unscoped prefix unconditionally and adds
+the scoped mount beside it, so `GET`/`POST`/`PATCH`/`DELETE`
+`/api/v1/packages...` — the destructive lifecycle verbs included — stay served
+on a `required` host. The asymmetry with the automation / action / AI families
+is deliberate and recorded at the mount site
+(`packages/runtime/src/dispatcher-plugin.ts`): removing a mounted route surface
+is a different change, with a different blast radius, from adding a missing
+door.
+
+It is not an isolation hole. An unscoped request names no environment, so it is
+resolved by steps 2–6 of the order below and is served by whichever environment
+that resolves to, behind the same project-membership and capability gates as the
+scoped URL — the scoped URL is step 1, the *stronger* way to address an
+environment, not a weaker one. What `required` does not give you for package
+routes is the guarantee that every caller has named an environment in the URL.
+</Callout>
 
 ---
 

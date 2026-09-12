@@ -52,7 +52,7 @@ const result = ApprovalDecision.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'field' \| 'expression' \| 'org_membership_level' \| 'role' \| 'user' \| 'queue'>` | ✅ |  |
+| **type** | `Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'field' \| 'expression' \| 'org_membership_level' \| 'role' \| 'user' \| 'queue'>` | ✅ | Approval step approver type. `manager` is a directory-sync dependency rather than something an author configures here: it resolves the submitter's `sys_user.manager_id` at runtime, and that column has no product write surface, so until an operator populates it from outside the product a manager step resolves to nobody and the request waits. `os lint` reports that at authoring time as `approval-approvers-may-resolve-empty` and carries the graded population routes and the full remedy; the Approvals guide states the same remedy in prose. |
 | **value** | `string` | optional | User id / membership tier / position / team / department / field — per `type`; for `expression`, a CEL expression over `current.*` / `trigger.*` / `vars.*` |
 | **resolveAs** | `Enum<'user' \| 'department' \| 'position' \| 'team'>` | optional | How an `expression` result is expanded into approvers (default 'user') |
 | **group** | `string` | optional | Group label for per_group sign-off (e.g. "legal", "finance") |
@@ -81,7 +81,7 @@ const result = ApprovalDecision.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'field' \| 'expression' \| …>` | ✅ |  |
+| **type** | `Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'field' \| 'expression' \| …>` | ✅ | Approval step approver type. `manager` is a directory-sync dependency rather than something an author configures here: it resolves the submitter's `sys_user.manager_id` at runtime, and that column has no product write surface, so until an operator populates it from outside the product a manager step resolves to nobody and the request waits. `os lint` reports that at authoring time as `approval-approvers-may-resolve-empty` and carries the graded population routes and the full remedy; the Approvals guide states the same remedy in prose. |
 | **value** | `string` | optional | User id / membership tier / position / team / department / field — per `type`; for `expression`, a CEL expression over `current.*` / `trigger.*` / `vars.*` |
 | **resolveAs** | `Enum<'user' \| 'department' \| 'position' \| 'team'>` | optional | How an `expression` result is expanded into approvers (default 'user') |
 | **group** | `string` | optional | Group label for per_group sign-off (e.g. "legal", "finance") |
@@ -111,6 +111,8 @@ const result = ApprovalDecision.parse(data);
 ---
 
 ## ApproverType
+
+Approval step approver type. `manager` is a directory-sync dependency rather than something an author configures here: it resolves the submitter's `sys_user.manager_id` at runtime, and that column has no product write surface, so until an operator populates it from outside the product a manager step resolves to nobody and the request waits. `os lint` reports that at authoring time as `approval-approvers-may-resolve-empty` and carries the graded population routes and the full remedy; the Approvals guide states the same remedy in prose.
 
 ### Allowed Values
 

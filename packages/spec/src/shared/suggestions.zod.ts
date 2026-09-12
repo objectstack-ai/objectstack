@@ -328,9 +328,15 @@ export interface StrictUnknownKeyErrorOptions {
   /**
    * Semantic near-misses: a different *word* for the same intent, usually
    * borrowed from a neighbouring schema or product where that word is correct.
-   * Edit distance cannot reach these, so they are named explicitly; plain
-   * case/underscore slips are left to {@link findClosestMatches}. Map keys are
-   * matched case-insensitively with `_` / `-` / space separators removed.
+   * Consulted BEFORE {@link findClosestMatches} and preferred over it, so an
+   * entry answers both the near-miss distance cannot reach AND the one it
+   * reaches and gets wrong — `hosts → network` is 2 edits from the declared
+   * `hooks` against a budget of 2, and the entry is what keeps the author off
+   * lifecycle hooks (#16859; this line asserted only the first half until
+   * #17361 measured 41 overruling entries across the spec). Plain
+   * case/underscore slips are still left to the fallback, which folds them.
+   * Map keys are matched case-insensitively with `_` / `-` / space separators
+   * removed.
    */
   aliases?: Readonly<Record<string, string>>;
   /**

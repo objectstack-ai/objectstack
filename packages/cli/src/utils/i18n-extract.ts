@@ -130,6 +130,7 @@ import {
   globalFilterKey,
   walkAddressedPageComponents,
 } from '@objectstack/spec/system';
+import { FLOW_REGION_SLOTS_BY_TYPE } from '@objectstack/spec/automation';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { deriveFieldGroupLayout } from '@objectstack/spec/data';
 import { expandViewContainer, InlineLocaleMapSchema } from '@objectstack/spec/ui';
@@ -359,10 +360,41 @@ function defaultListViewKey(object: string, container: any): string | undefined 
 
 /**
  * Emit label / description / emptyState for ONE view under
- * `objects.<object>._views.<viewName>.*` — the convention the runtime resolver
- * reads (`viewLabel` / `viewDescription` / `viewEmptyState` in
- * @object-ui/i18n) and the one the shipped platform bundles already carry
- * (`en.objects.generated.ts`: `sys_user._views.all_users.label`).
+ * `objects.<object>._views.<viewName>.*` — the address the shipped platform
+ * bundles already carry (`en.objects.generated.ts`:
+ * `sys_user._views.all_users.label`).
+ *
+ * **The three tails do not share one reader**, and for `description` the
+ * reader is not in the browser at all. Getting that backwards reads as "this
+ * key is dead" — the inference #15180 drew and #17546 corrected.
+ *
+ *  - **`label` — read on BOTH sides.** `resolveViewLabel`
+ *    (`packages/spec/src/system/i18n-resolver.ts`) through `translateView`,
+ *    which `@objectstack/rest` applies at the REST metadata boundary off
+ *    `TRANSLATABLE_METADATA_TYPES`; and `useObjectLabel().viewLabel` in
+ *    `@object-ui/i18n`, client-side.
+ *  - **`description` — read SERVER-SIDE ONLY**, by `resolveViewDescription`
+ *    in that same resolver and through that same `translateView`. objectui#7219
+ *    removed the `useObjectLabel().viewDescription()` member, so the server
+ *    overlay is this key's ONE reader: it lands on the `description` of the
+ *    served view document, which objectui relays (`ObjectView`) and renders
+ *    (`ListView`, via `pickLocalized`).
+ *    ⚠️ objectui pins this key as "an inert catalog entry", and no bundle in
+ *    this repo authors a `description` leaf under `_views` (the nine shipped
+ *    `en.objects.generated.ts` carry `label` and `emptyState` leaves only).
+ *    ⛔ Neither fact licenses deleting this emission: both are scoped to the
+ *    BROWSER path objectui#7219 removed, and the server reader above is
+ *    untouched by them. Absence of a browser-side helper, and absence of an
+ *    authored value, are not evidence the key is unread.
+ *  - **`emptyState` — read CLIENT-SIDE ONLY**, by
+ *    `useObjectLabel().viewEmptyState` in `@object-ui/i18n`. The spec resolver
+ *    declares no empty-state reader at all, which is why `pushViewEmptyState`
+ *    below is the site that cites the client convention.
+ *
+ * ⚠️ `viewLabel` and `viewEmptyState` were NOT retired alongside
+ * `viewDescription`: objectui kept the `viewSuffixes` helper all three shared
+ * and dropped only the `'description'` tail passed to it. Naming those two
+ * here is current, not residue.
  */
 function pushViewEntries(out: ExpectedEntry[], objectName: string, viewName: string, view: any): void {
   const root = ['objects', objectName, '_views', viewName];
@@ -1547,6 +1579,84 @@ function walkDatasets(config: any, out: ExpectedEntry[]): void {
 const SCREEN_NODE_TYPE = 'screen';
 
 /**
+ * Depth ceiling for the region recursion, mirroring the ceiling the spec-side
+ * walks use (`conversions/walk.ts`, `automation/control-flow.zod.ts`) and for
+ * the same reason: a stack handed to `defineStack` is hand-built objects rather
+ * than parsed JSON, so a region that contains itself is reachable and would
+ * otherwise be unbounded recursion on the extract path.
+ */
+const MAX_REGION_DEPTH = 32;
+
+/**
+ * Every flow node of one flow, container FIRST and depth-first — **including
+ * the nodes nested inside ADR-0031 structured regions** (`loop.config.body`,
+ * `parallel.config.branches[]`, `try_catch.config.try`/`.catch`), to any depth.
+ *
+ * **WHERE a region lives is imported, never restated.**
+ * {@link FLOW_REGION_SLOTS_BY_TYPE} (`@objectstack/spec/automation`) is the one
+ * declaration of that fact, and `automation/region-slots.ts` is explicit that
+ * the *table* is the shared thing while the *walks* are deliberately not merged
+ * — they take different inputs and yield different units (a graph, a
+ * copy-on-write rewrite, a node with a diagnostic path). This pass is a fourth
+ * unit again: it collects nodes to harvest KEYS from, rewriting nothing. So it
+ * reads that table exactly as `packages/lint`'s `walkFlowNodes` does, and a
+ * local copy of the slot list — the defect this walker's own card is an
+ * instance of, one package over — is what the import exists to prevent.
+ *
+ * ⚠️ The region-bearing descent could NOT be imported: `mapFlowNodeList`
+ * (`spec/conversions/walk.ts`) is reachable from no `exports` subpath of
+ * `@objectstack/spec` by deliberate design — its docblock says so and
+ * `packages/spec/api-surface/*.json` lists none of its symbols — and
+ * `packages/lint`'s `walkFlowNodes` is not exported from that package's entry
+ * either. Both would have to widen a package's public surface to be reused
+ * here, so the shared table is the whole of what can honestly be shared.
+ *
+ * A value that is not region-shaped passes through untouched: `config` is an
+ * open record and `body` in particular is also an ordinary key elsewhere (an
+ * `http` node's request payload), so the shape is checked, never assumed.
+ */
+function collectFlowNodesDeep(nodes: unknown): any[] {
+  const out: any[] = [];
+
+  const visit = (list: unknown, depth: number): void => {
+    if (!Array.isArray(list) || depth > MAX_REGION_DEPTH) return;
+    for (const node of list) {
+      if (!node || typeof node !== 'object' || Array.isArray(node)) continue;
+      out.push(node);
+
+      // Keyed off the node's own `type` through the Map, never an object
+      // literal: `type` is author-controlled and an open namespace (ADR-0018),
+      // so a lookup on a plain object would resolve `'constructor'` through
+      // `Object`'s prototype chain and hand this walk something that is not a
+      // slot list.
+      const slots = typeof node.type === 'string' ? FLOW_REGION_SLOTS_BY_TYPE.get(node.type) : undefined;
+      if (!slots) continue;
+      const config = node.config;
+      if (!config || typeof config !== 'object' || Array.isArray(config)) continue;
+
+      for (const { key, arity } of slots) {
+        const raw = (config as any)[key];
+        if (arity === 'many') {
+          // `parallel`: an array of regions, each with its own `nodes`.
+          if (!Array.isArray(raw)) continue;
+          for (const branch of raw) visitRegion(branch, depth + 1);
+        } else {
+          visitRegion(raw, depth + 1);
+        }
+      }
+    }
+  };
+
+  const visitRegion = (region: unknown, depth: number): void => {
+    if (!region || typeof region !== 'object' || Array.isArray(region)) return;
+    visit((region as any).nodes, depth);
+  };
+
+  visit(nodes, 0);
+  return out;
+}
+
+/**
  * Emit the screen-flow copy surface (#7646, resolver landed in #11287).
  *
  * **The hole this closes.** A `type: 'screen'` flow is a wizard the user
@@ -1588,6 +1698,29 @@ const SCREEN_NODE_TYPE = 'screen';
  * A screen node whose `waitForInput` is `false` is deliberately NOT skipped:
  * `translateFlow` overlays every screen node, and a walker that skipped one
  * would re-open the extractable-but-ungated gap in miniature.
+ *
+ * **Every screen node, at any DEPTH** (#17511). The node universe comes from
+ * {@link collectFlowNodesDeep}, not from `flow.nodes` flat: a `type: 'screen'`
+ * node inside an ADR-0031 region is a real screen — the executor pauses on it
+ * and the client receives its `ScreenSpec.nodeId` — so `translateFlow` overlays
+ * it and the bundle key is live for it. The flat walk reached the container and
+ * stopped, which was the same extractable-but-ungated gap the paragraph above
+ * refuses, one level in and worse: with no entry emitted there is no skeleton
+ * key for a translator to fill AND no coverage row to demand it, so the hole
+ * was invisible to the mechanism built to report holes.
+ *
+ * **Depth does not enter the key, on purpose.** The entry stays
+ * `flows.<flow>.screens.<node_id>.…` at every depth because that is what the
+ * resolver reads: `lookupFlowScreenCopy(bundle, flowName, nodeId)` is keyed by
+ * node id alone and, as `translateFlow`'s docblock puts it, "the bundle schema
+ * is keyed by node id and knows nothing about depth". A path segment for the
+ * region would offer a key nothing resolves — precisely the producer/consumer
+ * drift the imported key face exists to prevent. Consequence for a node id
+ * REPEATED at two depths: both screens address one bundle slot, so
+ * {@link dedupeByPath} collapses them to a single entry, first emission wins,
+ * and the walk is outer-before-inner so which one that is stays deterministic.
+ * That is not a loss — one slot can serve only one string, and the resolver
+ * overlays that string onto both nodes.
  */
 function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
   const flows: any[] = Array.isArray(config?.flows) ? config.flows : [];
@@ -1601,7 +1734,7 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
     // keeps a label-less flow from seeding an empty string anyway.
     pushOptional(out, ['flows', flowName, 'label'], flow.label, 'flow', scope);
 
-    const nodes: any[] = Array.isArray(flow.nodes) ? flow.nodes : [];
+    const nodes: any[] = collectFlowNodesDeep(flow.nodes);
     for (const node of nodes) {
       if (!node || typeof node !== 'object' || node.type !== SCREEN_NODE_TYPE) continue;
       const nodeId = typeof node.id === 'string' && node.id.length > 0 ? node.id : undefined;

@@ -1466,8 +1466,8 @@ export function buildActionEngineFacade(_deps: ActionExecutionDeps, ql: any, ec?
         async update(object: string, id: string, data: Record<string, unknown>): Promise<void> {
             await ql.update(object, data, { where: { id }, context });
         },
-        // Tolerant of both the single-id and array conventions handler suites
-        // use (CRM handlers pass one id; todo handlers pass an id array).
+        // Both spellings are DECLARED contract (#15117), not a tolerance: the
+        // spec's `ActionEngineFacade.delete` takes `string | string[]`.
         async delete(object: string, idOrIds: string | string[]): Promise<void> {
             const ids = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
             for (const id of ids) {

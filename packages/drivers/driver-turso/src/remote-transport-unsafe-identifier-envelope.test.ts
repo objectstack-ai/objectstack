@@ -10,7 +10,7 @@
  * where an identifier is INLINED into SQL (SQLite cannot bind one): `object`,
  * `field` and the `groupBy` field / output key in `aggregate`, the table and
  * column names in `syncSchema` / `syncSchemasBatch` / `buildCreateTableSQL`,
- * and the index name and columns in `syncUniqueIndexes`. It threw a bare
+ * and the index key columns in `buildDeclaredIndexDDL`. It threw a bare
  * `Error` — no `code`, no `status` — so `mapDataError`
  * (`packages/rest/src/error-response.ts`) reached none of its classifying
  * branches, fell through to its sanitised terminal and served a **500**. A
@@ -57,9 +57,12 @@
  * a separate card and stays open. [#14235] That card has since landed: the
  * `groupBy` OUT KEY position is ESCAPED rather than refused now, so its case
  * below asserts the quoted emission instead of a refusal — every OTHER
- * position named above (`object`, `field`, the `groupBy` FIELD, the DDL table,
- * column and index names) is untouched and still refuses with this envelope,
- * and the accept-set `describe` below still drives the `groupBy` FIELD.
+ * position named above (`object`, `field`, the `groupBy` FIELD, the DDL table
+ * and column names, the index key columns) is untouched and still refuses with
+ * this envelope, and the accept-set `describe` below still drives the `groupBy`
+ * FIELD. [#17609] An author-declared index NAME moved the same way, for the
+ * same reason — escaped, not refused; pinned in
+ * `turso-local-remote-declared-index-parity.test.ts`.
  *
  * ## Reverse verification — direction predicted BEFORE it was run
  *

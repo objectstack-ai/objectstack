@@ -81,10 +81,11 @@ other throw now reaches these records through the rule above rather than through
 expression each site spelled out, so its text can move too — a consequence of the rule, not a
 bounded list of exceptions. At thirteen of the fourteen sites the rule is the whole record,
 and some shapes still record `''` there: a thrown empty string, a thrown empty array, and an
-`Error` whose `name` and `message` are both empty are the ones measured. The fourteenth is
-`seed-tenancy-backfill`'s organization probe, which keeps a `|| 'unknown error'` fallback on
-top of the rule, so those same three shapes record `'unknown error'` there rather than `''`;
-that fallback is deliberate — the site reads an empty value as "the probe did not fail" — and
-whether it should go is tracked by #17167. The sentence being replaced is not a value any
+`Error` whose `name` and `message` are both empty are the ones measured. The fourteenth was
+`seed-tenancy-backfill`'s organization probe, which kept a `|| 'unknown error'` fallback on
+top of the rule, so those same three shapes recorded `'unknown error'` there rather than `''`;
+that fallback was load-bearing — the site read an empty value as "the probe did not fail" —
+and #17167 removed it in this same release, so all fourteen sites now record the channel as
+is and that site carries its failure fact structurally. The sentence being replaced is not a value any
 consumer can have been parsing: it is an opaque human diagnostic. A consumer reading these
 records gets the dialect's words back where it had been getting a placeholder.

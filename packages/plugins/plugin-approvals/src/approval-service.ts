@@ -4726,10 +4726,11 @@ export class ApprovalService implements IApprovalService {
    * `AutomationEngine.restoreConsumedSuspension` puts a stranded approval run
    * back on its pause and tells the operator to *re-issue the continuation* —
    * but for an `approval` node the only issuers are this service's doors, and
-   * every one of them guards on a `pending` request that the stranding call
-   * itself just made terminal. Re-opening the row is excluded (it would let a
-   * decided request be decided again), so what is kept instead is the SIGNAL:
-   * the exact `branchLabel` + `output` the failed resume carried.
+   * every one of them guards on a live status — `pending`, or `returned` for
+   * the revise-window doors — which the stranding call left in no state to
+   * issue the continuation it owes. Re-opening the row is excluded (it would
+   * let a decided request be decided again), so what is kept instead is the
+   * SIGNAL: the exact `branchLabel` + `output` the failed resume carried.
    *
    * ⚠️ Best-effort by construction, and it must stay that way: the decision is
    * already durable and its caller is already owed a `RESUME_FAILED` throw. A
@@ -4873,11 +4874,31 @@ export class ApprovalService implements IApprovalService {
       // fallback (#4414) warns and evaluates every out-edge, so the flow
       // proceeds with `{decision:'revise'}` where `{resubmitted:true}` was owed.
       //
-      // The discriminator is exact and structural: `action: 'resubmit'` has
-      // exactly ONE writer in this file (`resubmit`), it is inserted before
-      // that resume, and a resubmit opens the next round as a NEW row — so at
-      // most one such action row exists per request, and its presence means
+      // The discriminator's first two clauses are exact and structural:
+      // `action: 'resubmit'` has exactly ONE writer in this file (`resubmit`),
+      // and it is inserted before that resume. Its presence therefore means
       // the last continuation this row issued was the resubmit.
+      //
+      // ⚠️ What does NOT hold is the third clause this comment used to claim —
+      // "a resubmit opens the next round as a NEW row, so at most one such
+      // action row exists per request". A resubmit whose own resume STRANDS
+      // opens no next round at all, so the row stays `returned`; once an
+      // operator re-arms the pause with `restoreConsumedSuspension`, a second
+      // `resubmit` by the same submitter passes every door guard and writes a
+      // SECOND `action: 'resubmit'` row. ⇒ MORE THAN ONE such row CAN exist
+      // for one request. Measured guard by guard, on that very row in that
+      // very state, in `stranded-resubmit-second-door.test.ts` (#17601 probe,
+      // PR #17613) — read it there rather than re-deriving it from here.
+      //
+      // The read below is correct anyway, for a reason that clause never
+      // needed: it is a PRESENCE check (`limit: 1`), so it decides identically
+      // on one row or two — the pin's MEASUREMENT C drives this resolver on
+      // the doubled row and it still answers `resubmit`. What the doubling
+      // costs is the audit trail's one-row-per-advancement shape, ⛔ not the
+      // edge picked here, and that cost is ACCEPTED RESIDUE under the #17601
+      // ruling of 2026-09-11 (option B: scope this prose to what was measured,
+      // narrow no door). Requiring one row per advancement is a new card, ⛔
+      // not a local fix here.
       const resubmitted = await this.engine.find('sys_approval_action', {
         where: { request_id: requestId, action: 'resubmit' }, limit: 1, context: SYSTEM_CTX,
       });
@@ -5052,9 +5073,14 @@ export class ApprovalService implements IApprovalService {
    * `true` — and its own reason string tells the operator to *re-issue the
    * continuation*. For an `approval` node there was then nobody who could:
    *
-   *  - `decide` / `recall` / `sendBack` / `resubmit` all guard on a `pending`
-   *    request, and the row is terminal — written by the very call that
-   *    stranded the run;
+   *  - `decide` / `recall` / `sendBack` / `resubmit` each guard on a LIVE
+   *    request — `pending` for `decide` and `sendBack`, `returned` for
+   *    `resubmit`, and `pending` or the revise window for `recall` — and the
+   *    stranding call left the row where none of them can issue the
+   *    continuation it owes. ⚠️ Not because the row is never `returned`: a
+   *    stranded send-back leaves it exactly there, and `resubmit` is still
+   *    no way back — submitter-only, and it owes the `resubmit` edge where
+   *    the stranded continuation was the `revise` one;
    *  - the generic `engine.resume` refuses, because the `approval` node
    *    declares `resumeAuthority: 'service'` and the #3801 gate turns away any
    *    resume that is not the tail of a decision this service authorized.
@@ -5068,7 +5094,7 @@ export class ApprovalService implements IApprovalService {
    * ## What it deliberately does NOT do
    *
    * ⛔ It does not re-open, re-decide, or rewrite the request row: all four
-   * `pending` guards stay exactly as they are, and no status, mirror field or
+   * status guards stay exactly as they are, and no status, mirror field or
    * audit row is written. A person decided this once; this replays what they
    * decided onto the pause that was put back, and replays nothing else.
    * ⛔ It does not relax `resumeAuthority: 'service'` — the resume goes through
@@ -5100,9 +5126,17 @@ export class ApprovalService implements IApprovalService {
    *
    * Deliberately shaped like the engine verb it completes: an in-process
    * operator repair, reachable from a host or a console script, with no REST
-   * route and no entry in the spec `ApprovalService` contract — exactly as
-   * `restoreConsumedSuspension` is a class method on `AutomationEngine` and
-   * appears in no contract. It authorizes nothing new: the decision it replays
+   * route. ⚠️ That last part is where it DIFFERS from
+   * `restoreConsumedSuspension`, which does have a platform-operator door —
+   * `POST /:name/runs/:runId/restore-suspension`, the #13953 services half.
+   * This verb has none: the #15389 ruling of 2026-09-09 refused a REST/CLI
+   * route for it, so a door for it would be a new card. Both verbs are
+   * DECLARED on their spec contracts as OPTIONAL members —
+   * `IAutomationService.restoreConsumedSuspension` by #16495, and this one on
+   * `IApprovalService` by that same ruling — which declares the
+   * capability without opening a door: a caller reaching this verb through the
+   * contract must probe for presence and refuse fail-closed when it is absent.
+   * It authorizes nothing new: the decision it replays
    * was authorized and recorded when it was made, and re-authorizing it here
    * against a present-day actor would be a different and wrong question (the
    * original approver may be long gone). `requestedBy` / `reason` ride the log

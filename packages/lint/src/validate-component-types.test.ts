@@ -133,3 +133,59 @@ describe('leaves the declared vocabulary and the open arm alone', () => {
     expect(findings[0].message).toContain("'nav:menu'");
   });
 });
+
+/**
+ * #15110 — the suggester must never rename an author INTO a retired type.
+ *
+ * Measured before the fix, through this same rule: `element:fitler` was
+ * answered `Rename \`element:fitler\` → \`element:filter\``, and
+ * `element:frm` → `element:form`. Both targets are types
+ * `PageComponentSchema` refuses by name, so the tool was emitting guidance the
+ * parser rejects — wrong guidance, not a missing refusal.
+ *
+ * Pinned through the RULE, never by reading `KNOWN_COMPONENT_TYPE_CANDIDATES`:
+ * the array is the mechanism, the hint is the contract.
+ */
+describe('retired types are never proposed as typo suggestions (#15110)', () => {
+  it.each([
+    ['element:fitler', 'element:filter'],
+    ['element:frm', 'element:form'],
+  ])('a near-miss of %s no longer proposes the retired %s', (typo, retired) => {
+    const findings = validateComponentTypes(page([{ type: typo }]));
+    // The typo is still refused — the rule's own job is untouched.
+    expect(findings).toHaveLength(1);
+    const f = findings[0];
+    expect(f.rule).toBe(COMPONENT_TYPE_UNKNOWN);
+    // ...but nothing about the finding points the author at the retired name.
+    expect(f.hint).not.toContain(retired);
+    expect(f.message).not.toContain(retired);
+  });
+
+  it('the reverse direction: what it proposes instead is never worse', () => {
+    // A retired-name near-miss either proposes a type that is actually
+    // writable, or proposes nothing and falls back to the own-namespace
+    // prescription. Both are acceptable; a proposal the parser would refuse is
+    // not, which is what the per-case assertion above forbids.
+    for (const typo of ['element:fitler', 'element:frm']) {
+      const f = validateComponentTypes(page([{ type: typo }]))[0];
+      const proposed = /Rename `[^`]+` → `([^`]+)`/.exec(f.hint)?.[1];
+      if (proposed === undefined) {
+        expect(f.hint).toContain('give it its own namespace');
+        continue;
+      }
+      // Whatever it proposes must itself pass the vocabulary the rule guards.
+      expect(validateComponentTypes(page([{ type: proposed }]))).toEqual([]);
+    }
+  });
+
+  it('LIVE types are still proposed — the lit control', () => {
+    // Same rule, same call shape, same reserved-namespace typo: if the
+    // subtraction had emptied the candidate list, these would go quiet too.
+    expect(validateComponentTypes(page([{ type: 'global:serch' }]))[0].hint)
+      .toContain('global:search');
+    expect(validateComponentTypes(page([{ type: 'element:butotn' }]))[0].hint)
+      .toContain('element:button');
+    expect(validateComponentTypes(page([{ type: 'record:detials' }]))[0].hint)
+      .toContain('record:details');
+  });
+});

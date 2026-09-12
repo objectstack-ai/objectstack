@@ -689,7 +689,9 @@ export class TursoDriver extends SqlDriver {
       // DURABILITY degradation, not a functional one: writes keep succeeding,
       // reads keep returning rows, and the only thing that changed is that a
       // constraint the metadata declares is not enforced — the "looks normal
-      // from the outside" shape AGENTS.md grades at `error`. It is a SEPARATE
+      // from the outside" shape AGENTS.md grades at `error`. [#17609] A declared
+      // PLAIN index it could not create lands here too, for the same reason:
+      // every query still answers, by scanning the table. It is a SEPARATE
       // sink from the `warn` one above precisely so this class does not have to
       // share a level with the diagnostics that are merely informative.
       this.remoteTransport.setDurabilitySink((message) =>
@@ -1166,8 +1168,21 @@ export class TursoDriver extends SqlDriver {
    * [#6402] `options` is a {@link DriverOptions} for the same reason, closed as
    * one sweep across every override in this file rather than one method at a
    * time — see the block comment above `find()`.
+   *
+   * [#17277] The return is the contract's own
+   * `Promise<Record<string, unknown>[]>`, and this override needs it declared
+   * HERE: an override re-declares the door in this package's own `.d.ts`, so
+   * the `@objectstack/driver-sql` narrowing does not reach a consumer holding a
+   * `TursoDriver` — the same shape #15280 had to fix separately for `update()`.
+   * Both branches already answer it: the remote branch is
+   * `RemoteTransport.aggregate`, declared `Promise<Record<string, unknown>[]>`,
+   * and the local branch is `SqlDriver.aggregate`, narrowed alongside.
    */
-  override async aggregate(object: string, query: DriverQuery, options?: DriverOptions): Promise<any> {
+  override async aggregate(
+    object: string,
+    query: DriverQuery,
+    options?: DriverOptions,
+  ): Promise<Record<string, unknown>[]> {
     if (this.isRemote) return this.remoteTransport!.aggregate(object, this.toRemoteQuery(object, query));
     return super.aggregate(object, query, options);
   }

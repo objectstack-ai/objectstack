@@ -11,6 +11,7 @@ import {
   composeSpecChanges,
   normalizeStackInput,
   MigrationFloorError,
+  MIGRATION_MAJORS,
 } from '@objectstack/spec';
 import { PROTOCOL_MAJOR, PROTOCOL_VERSION } from '@objectstack/spec/kernel';
 import { FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, STRUCTURED_JSON_TYPES } from '@objectstack/spec/data';
@@ -46,6 +47,44 @@ async function confirm(question: string): Promise<boolean> {
 
 /** The protocol major that introduced the per-deployment value-shape gates. */
 const VALUE_SHAPE_GATE_MAJOR = 17;
+
+/**
+ * Where the chain ENDS when the author does not say — the highest major this
+ * build of `@objectstack/spec` carries a migration step for, never below the
+ * protocol major the runtime implements.
+ *
+ * ## Why not `PROTOCOL_MAJOR` (the answer this replaces)
+ *
+ * A tombstone closes with the house sentence "Run `os migrate meta --from N`
+ * to list the mechanical edits for existing sources", and its `N` is the major
+ * the source was AUTHORED against — one below the `toMajor` of the ADR-0087
+ * conversion that performs the rename. That template presumes the default
+ * terminus is at least the conversion's own `toMajor`.
+ *
+ * The presumption held only AFTER the next major shipped. Retirements land
+ * throughout a major's line: `@objectstack/spec@17.4.0` tombstones keys whose
+ * conversion is registered `toMajor: 18` and whose semantic siblings are
+ * already removed from its own exports — the build's authorable surface is
+ * ahead of the version it calls itself. Defaulting `--to` to `PROTOCOL_MAJOR`
+ * (17) then composed `17 → 17`, which selects NO step at all
+ * (`composeMigrationChain` keeps `m > fromMajor`), so the invocation 29
+ * shipped tombstones prescribe replayed an empty chain and reported
+ * `Nothing to migrate` — for the very conversions that sent the author here.
+ *
+ * Reading the terminus off `MIGRATION_MAJORS` makes the template's presumption
+ * true in every window instead of only after a major release, and it stays
+ * true one major later by construction: when 18 ships, `PROTOCOL_MAJOR`
+ * becomes 18, the 19 entries accumulating in the registry become the terminus,
+ * and `--from 18` lists them the same way.
+ *
+ * ⛔ Not "migrating past what the runtime runs": every conversion in the
+ * registry maps a shape the installed schemas REFUSE onto the one they accept
+ * (that is what makes it a conversion), so the terminus is the only target
+ * for which the command's own `schemaValid` verdict is reachable. `Math.max`
+ * keeps `PROTOCOL_MAJOR` as the floor for the reverse case — a runtime whose
+ * major moved past the last registered step.
+ */
+const CHAIN_TERMINUS_MAJOR = Math.max(PROTOCOL_MAJOR, ...MIGRATION_MAJORS);
 
 /** Flags that mean something only in `--stored` mode (#4327). */
 const STORED_ONLY_FLAGS = ['apply', 'yes', 'force', 'type', 'database-url'] as const;
@@ -127,6 +166,61 @@ function pendingDataMigrations(stack: any, fromMajor: number, toMajor: number): 
   return pending;
 }
 
+/**
+ * The answer a range holding NO migration step owes the author (#17134).
+ *
+ * `composeMigrationChain` keeps the majors `m > fromMajor && m <= toMajor`, so
+ * `--from 17 --to 17` composes zero steps and every stack — canonical or not —
+ * comes back with an empty `applied` and an empty `todos`. Reporting that as
+ * `✓ Nothing to migrate — the metadata is already canonical for this range` is
+ * not merely unhelpful: it is a green verdict on a check that never ran, and
+ * it is the SECOND signal an upgrading author has already been told to trust
+ * (the first was the tombstone that named this command). So an empty range is
+ * answered as an empty range, and — when a wider one would rewrite this very
+ * stack — with the range that lists them, because "which `--to` do I need" is
+ * the question the author is left holding.
+ *
+ * The probe is exact rather than advisory: it replays the widest chain this
+ * build carries against the SAME normalized stack, so it can only speak up
+ * when there is real work for THIS source. A genuinely canonical stack in an
+ * empty range is still told its range was empty — that much is a fact about
+ * the invocation — but is offered no phantom conversions.
+ */
+function printEmptyRangeAnswer(
+  stack: Record<string, unknown>,
+  fromMajor: number,
+  toMajor: number,
+): void {
+  printWarning(
+    `No migration step exists for protocol ${fromMajor} → ${toMajor}, so this run replayed nothing `
+    + '— that is not a finding that the metadata is canonical.',
+  );
+
+  if (toMajor >= CHAIN_TERMINUS_MAJOR) {
+    printInfo(
+      `Protocol ${CHAIN_TERMINUS_MAJOR} is the highest major this build carries a step for, so no `
+      + 'wider range is available; check `--from` against the major the metadata was authored '
+      + 'against.',
+    );
+    return;
+  }
+
+  const wider = applyMetaMigrations(stack, fromMajor, CHAIN_TERMINUS_MAJOR);
+  if (wider.applied.length === 0 && wider.todos.length === 0) {
+    printInfo(
+      `The widest range this build carries (protocol ${fromMajor} → ${CHAIN_TERMINUS_MAJOR}) has `
+      + 'nothing for this stack either.',
+    );
+    return;
+  }
+
+  printWarning(
+    `Protocol ${fromMajor} → ${CHAIN_TERMINUS_MAJOR} has ${wider.applied.length} mechanical and `
+    + `${wider.todos.length} manual change(s) for this stack — re-run with `
+    + `\`--to ${CHAIN_TERMINUS_MAJOR}\` to list them.`,
+  );
+}
+
 /** Print the data-migration advice — the last thing a crossing upgrade sees. */
 function printPendingDataMigrations(pending: PendingDataMigration[]): void {
   if (pending.length === 0) return;
@@ -147,9 +241,11 @@ function printPendingDataMigrations(pending: PendingDataMigration[]): void {
 /**
  * `os migrate meta --from N` — replay the ADR-0087 D3 migration chain.
  *
- * Composes the per-major steps N+1 → … → current and applies each major's
- * mechanical transforms (the graduated D2 conversions) to the loaded stack in
- * one run — cross-major is the designed-for case, not an edge. It reports a
+ * Composes the per-major steps N+1 → … → {@link CHAIN_TERMINUS_MAJOR} (the
+ * highest major this build has a step for, which is where `--to` defaults) and
+ * applies each major's mechanical transforms (the graduated D2 conversions) to
+ * the loaded stack in one run — cross-major is the designed-for case, not an
+ * edge. It reports a
  * generated, schema-validated diff (the mechanical rewrites) plus the structured
  * TODOs for the semantic changes the chain cannot apply, so the consumer agent
  * reviews a provably-valid change instead of hand-porting from prose.
@@ -199,7 +295,9 @@ export default class MigrateMeta extends Command {
       exclusive: ['stored'],
     }),
     to: Flags.integer({
-      description: `Target protocol major (defaults to this runtime's, ${PROTOCOL_MAJOR}).`,
+      description:
+        `Target protocol major (defaults to ${CHAIN_TERMINUS_MAJOR}, the highest major this build `
+        + `has a migration step for; this runtime implements protocol ${PROTOCOL_MAJOR}).`,
       exclusive: ['stored'],
     }),
     step: Flags.boolean({
@@ -286,7 +384,7 @@ export default class MigrateMeta extends Command {
       return;
     }
     const fromMajor = flags.from;
-    const toMajor = flags.to ?? PROTOCOL_MAJOR;
+    const toMajor = flags.to ?? CHAIN_TERMINUS_MAJOR;
 
     if (!flags.json) printHeader('Migrate · meta');
 
@@ -373,53 +471,74 @@ export default class MigrateMeta extends Command {
       console.log('');
 
       if (result.applied.length === 0 && result.todos.length === 0) {
-        printSuccess('Nothing to migrate — the metadata is already canonical for this range.');
+        // ⚠️ Two different facts wear the same empty result, and only one of
+        // them is good news (#17134). A range that CONTAINS steps and rewrote
+        // nothing is a finding about the metadata. A range that contains no
+        // step at all replayed nothing and therefore found nothing — saying
+        // "already canonical" over it is a claim about a check that never ran.
+        if (result.hops.length === 0) {
+          printEmptyRangeAnswer(normalized, fromMajor, toMajor);
+        } else {
+          printSuccess('Nothing to migrate — the metadata is already canonical for this range.');
+        }
         // Still advertise: metadata needing no rewrite says nothing about
         // whether this deployment's DATA has been migrated.
         console.log('');
         printPendingDataMigrations(dataMigrations);
-        return;
-      }
-
-      // Mechanical rewrites (auto-applied).
-      if (result.applied.length > 0) {
-        console.log(chalk.bold(`  Applied ${result.applied.length} mechanical change(s):`));
-        for (const a of result.applied) {
-          console.log(`    • ${a.path}: ${chalk.red(a.from)} → ${chalk.green(a.to)} ${chalk.dim(`(${a.conversionId})`)}`);
+        // ⛔ NOT a `return`. The schema verdict at the end of this block is the
+        // only line that can contradict a "nothing to do" answer, and returning
+        // past it was the second half of #17134: on a stack authoring a
+        // tombstoned key the same run reported `schemaValid: false` in `--json`
+        // while the human output said the metadata was canonical and stopped.
+      } else {
+        // Mechanical rewrites (auto-applied).
+        if (result.applied.length > 0) {
+          console.log(chalk.bold(`  Applied ${result.applied.length} mechanical change(s):`));
+          for (const a of result.applied) {
+            console.log(`    • ${a.path}: ${chalk.red(a.from)} → ${chalk.green(a.to)} ${chalk.dim(`(${a.conversionId})`)}`);
+          }
+          console.log('');
         }
-        console.log('');
-      }
 
-      // Per-hop checkpoints.
-      if (flags.step) {
-        for (const hop of result.hops) {
-          console.log(chalk.bold(`  ── protocol ${hop.toMajor} ──`));
-          console.log(chalk.dim(`     ${hop.rationale}`));
-          console.log(chalk.dim(`     ${hop.applied.length} mechanical, ${hop.todos.length} manual`));
+        // Per-hop checkpoints.
+        if (flags.step) {
+          for (const hop of result.hops) {
+            console.log(chalk.bold(`  ── protocol ${hop.toMajor} ──`));
+            console.log(chalk.dim(`     ${hop.rationale}`));
+            console.log(chalk.dim(`     ${hop.applied.length} mechanical, ${hop.todos.length} manual`));
+          }
+          console.log('');
         }
-        console.log('');
-      }
 
-      // Semantic TODOs (delegated to the agent — never auto-applied).
-      if (result.todos.length > 0) {
-        console.log(chalk.bold(chalk.yellow(`  ${result.todos.length} manual change(s) require your judgment:`)));
-        for (const t of result.todos) {
-          console.log(`    ${chalk.yellow('⚠')} [protocol ${t.toMajor}] ${t.surface} → ${t.replacement}`);
-          console.log(chalk.dim(`        why:    ${t.reason}`));
-          console.log(chalk.dim(`        verify: ${t.acceptanceCriteria}`));
+        // Semantic TODOs (delegated to the agent — never auto-applied).
+        if (result.todos.length > 0) {
+          console.log(chalk.bold(chalk.yellow(`  ${result.todos.length} manual change(s) require your judgment:`)));
+          for (const t of result.todos) {
+            console.log(`    ${chalk.yellow('⚠')} [protocol ${t.toMajor}] ${t.surface} → ${t.replacement}`);
+            console.log(chalk.dim(`        why:    ${t.reason}`));
+            console.log(chalk.dim(`        verify: ${t.acceptanceCriteria}`));
+          }
+          console.log('');
         }
-        console.log('');
-      }
 
-      if (flags.out) {
-        writeFileSync(resolve(flags.out), JSON.stringify(result.stack, null, 2));
-        printInfo(`Wrote migrated stack snapshot → ${chalk.white(resolve(flags.out))}`);
-      }
+        if (flags.out) {
+          writeFileSync(resolve(flags.out), JSON.stringify(result.stack, null, 2));
+          printInfo(`Wrote migrated stack snapshot → ${chalk.white(resolve(flags.out))}`);
+        }
 
-      printPendingDataMigrations(dataMigrations);
+        printPendingDataMigrations(dataMigrations);
+      }
 
       if (parsed.success) {
         printSuccess(`Migrated stack is schema-valid ${chalk.dim(`(${timer.display()})`)}`);
+      } else if (result.hops.length === 0) {
+        // "Resolve the changes above" has nothing to point at when the range
+        // held no step: this run rewrote nothing, so the refusals are exactly
+        // the ones the source had before it (#17134).
+        printWarning(
+          'Stack does not pass schema validation, and this run replayed no conversion — nothing '
+            + 'here has been fixed. Widen the range above, or run `os validate` for the refusals.',
+        );
       } else {
         printWarning(
           'Migrated stack does not yet pass schema validation — resolve the manual changes above, ' +

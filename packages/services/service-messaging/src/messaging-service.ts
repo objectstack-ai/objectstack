@@ -181,7 +181,11 @@ export class MessagingService {
     private readonly resolver: RecipientResolver;
     private readonly preferences: PreferenceResolver;
     private outbox?: INotificationOutbox;
+    /** [#17610] Fired after an `emit()` enqueues deliveries — see {@link setOutbox}. */
+    private onDeliveriesEnqueued?: () => void;
     private httpOutbox?: IHttpOutbox;
+    /** [#17623] Fired after a write leaves an HTTP delivery `pending` — see {@link setHttpOutbox}. */
+    private onHttpDeliveryEnqueued?: () => void;
     /** [#8069] Producer vetoes over redelivery, keyed by `HttpDelivery.source`. */
     private readonly redeliverGuards = new Map<string, RedeliverGuard>();
 
@@ -204,9 +208,17 @@ export class MessagingService {
      * Attach the durable delivery outbox after construction. The plugin wires
      * this once the data engine is resolvable (kernel:ready), switching `emit()`
      * from inline fan-out to the reliable enqueue → dispatcher path.
+     *
+     * [#17610] `onEnqueued` fires once per `emit()` that enqueued at least one
+     * delivery. The plugin points it at `NotificationDispatcher.wake()`: the
+     * dispatcher backs its tick interval off while the outbox is idle, and rows
+     * this process just wrote should go out on the next tick, not the next
+     * backed-off one. It belongs to the outbox it was attached with — attaching
+     * another outbox replaces (or clears) it.
      */
-    setOutbox(outbox: INotificationOutbox): void {
+    setOutbox(outbox: INotificationOutbox, options: { onEnqueued?: () => void } = {}): void {
         this.outbox = outbox;
+        this.onDeliveriesEnqueued = options.onEnqueued;
     }
 
     /**
@@ -214,9 +226,20 @@ export class MessagingService {
      * the plugin at `kernel:ready` once the data engine is resolvable. Once set,
      * {@link enqueueHttp} persists durable rows the {@link HttpDispatcher}
      * drains with retry / dead-letter; the Flow `http` node enqueues through it.
+     *
+     * [#17623] `onEnqueued` fires after every write through this service that
+     * leaves a row `pending` for the dispatcher: an {@link enqueueHttp} that
+     * enqueues a delivery — not one that parks an undeliverable record, which is
+     * `dead` on arrival — and a {@link redeliverHttp} that resets one. The plugin
+     * points it at `HttpDispatcher.wake()`: the dispatcher backs its tick
+     * interval off while the outbox is idle, and a row this process just wrote
+     * should go out on the next tick, not the next backed-off one. It belongs to
+     * the outbox it was attached with — attaching another outbox replaces (or
+     * clears) it.
      */
-    setHttpOutbox(outbox: IHttpOutbox): void {
+    setHttpOutbox(outbox: IHttpOutbox, options: { onEnqueued?: () => void } = {}): void {
         this.httpOutbox = outbox;
+        this.onHttpDeliveryEnqueued = options.onEnqueued;
     }
 
     /**
@@ -246,7 +269,10 @@ export class MessagingService {
         if (undeliverableReason !== undefined) {
             return this.httpOutbox.recordUndeliverable({ ...rest, reason: undeliverableReason });
         }
-        return this.httpOutbox.enqueue(input);
+        const id = await this.httpOutbox.enqueue(input);
+        // [#17623] Wake the dispatcher — see `setHttpOutbox`.
+        this.onHttpDeliveryEnqueued?.();
+        return id;
     }
 
     /**
@@ -296,10 +322,13 @@ export class MessagingService {
         if (!this.httpOutbox) {
             throw new Error('messaging: HTTP delivery outbox not configured');
         }
-        return this.httpOutbox.redeliver(id, {
+        const row = await this.httpOutbox.redeliver(id, {
             tenantId: options.tenantId,
             guard: (row) => this.redeliverGuards.get(row.source)?.(row),
         });
+        // [#17623] The row is `pending` again: wake the dispatcher — see `setHttpOutbox`.
+        this.onHttpDeliveryEnqueued?.();
+        return row;
     }
 
     /** List HTTP delivery rows (admin/tests). Empty when no outbox is wired. */
@@ -904,6 +933,8 @@ export class MessagingService {
             // retroactively. `failed` keeps its meaning — an enqueue that threw
             // never reached the outbox at all.
             const enqueued = deliveries.filter((d) => d.ok).length;
+            // [#17610] Wake the dispatcher — see `setOutbox`.
+            if (enqueued > 0) this.onDeliveriesEnqueued?.();
             return {
                 notificationId, deduped: false, deliveries,
                 delivered: 0, enqueued, failed: deliveries.length - enqueued,
