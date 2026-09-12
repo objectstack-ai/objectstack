@@ -75,7 +75,7 @@ export const InboxMessage = ObjectSchema.create({
             label: 'Actor',
             required: false,
             description:
-                'User who caused the event (mentioner, assigner) — same semantics as sys_notification.actor_id. Lets a client answer "did I cause this?" with a local comparison and suppress its own receipts. Null on a digest row by construction: a collapsed group has no single actor.',
+                'User who caused the event (mentioner, assigner) — same semantics as sys_notification.actor_id. Lets a client suppress its own receipts with a purely local comparison. Null on a digest row by construction: a collapsed group has no single actor.',
         }),
 
         topic: Field.text({

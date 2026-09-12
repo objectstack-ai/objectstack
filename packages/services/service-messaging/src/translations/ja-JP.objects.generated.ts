@@ -34,6 +34,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "配信レコード",
         help: "外部キー → sys_notification_delivery(アウトボックス行);P1 までは null"
       },
+      actor_id: {
+        label: "操作者",
+        help: "イベントを引き起こしたユーザー(メンション者、担当者)。sys_notification.actor_id と同じ意味です。クライアントはローカルな比較だけで自分が発生させた通知を抑制できます。ダイジェスト行は構造上 null:まとめられたグループに単一の操作者は存在しません。"
+      },
       topic: {
         label: "トピック"
       },

@@ -34,6 +34,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Entrega",
         help: "FK → sys_notification_delivery (fila de outbox); nulo hasta P1"
       },
+      actor_id: {
+        label: "Actor",
+        help: "Usuario que provocó el evento (quien menciona, quien asigna); misma semántica que sys_notification.actor_id. Permite que un cliente silencie sus propios acuses con una comparación puramente local. Nulo en una fila de resumen por construcción: un grupo colapsado no tiene un único actor."
+      },
       topic: {
         label: "Tema"
       },
