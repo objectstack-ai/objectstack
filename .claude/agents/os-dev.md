@@ -51,7 +51,7 @@ model: opus
    - 通道先探后选:同容器先测一条 repo-scoped REST 读;通 ⇒ 走 REST 列表端点 + 本地 grep。
    - 通道对照表见 `.claude/skills/pm-dispatch/references/rest-channel.md`,其 ✓ 按座位实测。
    - 403 ⇒ 改用一次定向 MCP `search_issues`,并在报告申报换道。
-   - 空结果要同会话一个已知必中的控制词答了命中才算读数。
+   - 空结果要同会话已知必中、与主张同主体同失效形态的控制词答了命中才算读数。
    - ⛔ 哪条通道都不宽表扫(全量翻页 `list_issues`、宽词搜):定向一击是上限。
    - 大宗读走零配额档:公开仓单卡网页内嵌 JSON payload 载原始 body + 全评论。
    - 其拼写与边界住 platform-readings;它只覆盖单卡读,⛔ 不拿它做 search。
