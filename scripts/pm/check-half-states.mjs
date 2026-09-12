@@ -4540,7 +4540,13 @@ export function claimGovernance(commentRows) {
     malformed:
       newest !== null && newest.branches.length === 0
         ? {
-            id: Number.isFinite(Number(newest.id)) ? Number(newest.id) : null,
+            // ⚠️ `Number(null)` is 0 and `Number('')` is 0 — a finite check alone
+            // would turn a comment with NO id into comment zero, which is a worse
+            // lie than saying the id could not be read.
+            id: newest.id === null || newest.id === undefined || newest.id === ''
+              || !Number.isFinite(Number(newest.id))
+              ? null
+              : Number(newest.id),
             createdAt: newest.createdAt,
             supersedes: governing === null ? null : governing.createdAt,
           }
@@ -21487,6 +21493,88 @@ async function selfTest() {
   t('H27: …and yields the UNJUDGED row (the comparison is impossible)', unstamped27Row.includes('UNJUDGED'), true);
   const many27 = Array.from({ length: 7 }, (_, i) => ({ branch: `claude/issue-1-b${i}`, state: 'exists', headCommittedAt: '2026-08-22T09:00:00Z' }));
   t('H27: the branch list is capped at the render budget', dead27Row({ refs: many27 }).includes(`+${7 - H20_BRANCH_LIST_CAP} more`), true);
+
+
+  // -- H60: a claim comment that parses to ZERO branches (#17149) ------------
+  //
+  // The measured specimens are quoted rather than paraphrased. Card #16322,
+  // comments 5593513389 (2026-09-08T23:46:51Z) and 5594909614
+  // (2026-09-09T02:35:21Z): the branch named INSIDE the `Claim:` sentence, with
+  // no `Branch:` line anywhere. Cards #16344 and #16712 carried the same shape
+  // on 2026-09-08T07:10Z, and a second seat's template reproduced it four more
+  // times inside three seconds on 2026-09-12T02:53Z — which is what says the
+  // cause is a TEMPLATE and not a run of typos.
+  const claimRow60 = (id, createdAt, body) => ({ id, created_at: createdAt, body });
+  const INLINE_16322_OLD = claimRow60(5593513389, '2026-09-08T23:46:51Z',
+    'Claim: session_01ADLdAs2pVcH17h9tZKWMBg — branch `claude/issue-16322-analytics-daterange-closed-vocabulary-drivers`\n\nClause-②: no\n');
+  const INLINE_16322_NEW = claimRow60(5594909614, '2026-09-09T02:35:21Z',
+    'Claim: session_01ADLdAs2pVcH17h9tZKWMBg — branch `claude/issue-16322-analytics-daterange-closed-vocabulary-drivers`\n\nClause-②: yes\n');
+  // 2026-09-12T02:53:06Z on card #16175, whose 2026-09-06 claim DOES parse —
+  // and names a different branch, so the fallback is not even about the same work.
+  const INLINE_LIVE = claimRow60(5642984850, '2026-09-12T02:53:06Z',
+    'Claim: session_012GKcPZbMoGq7WPzKLfRBTU · claude/issue-16175-staleness-mtime-false-refusal\nClause-②: no\n');
+  const PARSES_LIVE = claimRow60(5557414924, '2026-09-06T06:19:06Z',
+    'Claim: PM loop\nBranch: `claude/issue-16175-regen-sibling-stale-rules`\nClause-②: no\n');
+
+  // ★ The two-part reading. `governing` is `governingClaim`'s answer, unmoved.
+  t('H60: the governing half IS `governingClaim` — one reading, two spellings', claimGovernance(claim8878).governing?.branches.join(','), governingClaim(claim8878)?.branches.join(','));
+  t('H60: …and agrees on a thread where NOTHING parses', `${claimGovernance([INLINE_16322_NEW]).governing}`, `${governingClaim([INLINE_16322_NEW])}`);
+  t('H60: …and on an unreadable input', `${claimGovernance(undefined).governing}`, `${governingClaim(undefined)}`);
+
+  // ★ The state that used to be a silent discard.
+  t('H60: a branchless NEWEST claim is reported as malformed', claimGovernance([INLINE_16322_OLD, INLINE_16322_NEW]).malformed?.id, 5594909614);
+  t('H60: …and the reading says what governance fell back to (here: nothing parses at all)', claimGovernance([INLINE_16322_OLD, INLINE_16322_NEW]).malformed?.supersedes, null);
+  t('H60: …while a thread whose OLDER claim parses records the fallback target', claimGovernance([PARSES_LIVE, INLINE_LIVE]).malformed?.supersedes, '2026-09-06T06:19:06Z');
+  t('H60: …and governance did fall back to exactly that older claim', claimGovernance([PARSES_LIVE, INLINE_LIVE]).governing?.branches.join(','), 'claude/issue-16175-regen-sibling-stale-rules');
+  t('⛔ H60: a well-formed NEWEST claim leaves nothing malformed, even beside an older branchless one', claimGovernance([INLINE_16322_NEW, claimRow60(2, '2026-09-10T00:00:00Z', claimBody8878)]).malformed, null);
+  t('⛔ H60: a thread with no claim comment at all is not malformed — that is H2\'s row', claimGovernance([{ id: 1, created_at: '2026-09-10T00:00:00Z', body: 'a triage note' }]).malformed, null);
+  t('⛔ H60: nor is an unread thread', claimGovernance(null).malformed, null);
+  t('H60: a comment carrying no readable id still yields the state, with a null id', claimGovernance([claimRow(minsAgo20(10), 'Claim: seat, on claude/issue-1-x')]).malformed?.id, null);
+  // Recency is the SAME rule the governing half uses — `created_at`, with
+  // thread order as the fallback for an unparseable stamp (#4690).
+  t('H60: an unparseable stamp falls back to thread order, as the governing half does', claimGovernance([claimRow60(1, 'not-a-date', claimBody8878), claimRow60(2, 'not-a-date', 'Claim: seat, on claude/issue-1-x')]).malformed?.id, 2);
+  t('H60: …and in the other order the newest is the one that parses, so nothing is malformed', claimGovernance([claimRow60(1, 'not-a-date', 'Claim: seat, on claude/issue-1-x'), claimRow60(2, 'not-a-date', claimBody8878)]).malformed, null);
+
+  // ★ The row itself, and the facts its sentence must carry.
+  const gov60 = (rows) => claimGovernance(rows);
+  const h60Row = (rows, issueOver) => String(h60ClaimBranchUnparsed(issueOver ?? dispatchedCard(), gov60(rows)) ?? '');
+  const fellBack60 = h60Row([PARSES_LIVE, INLINE_LIVE]);
+  const nothing60 = h60Row([INLINE_16322_OLD, INLINE_16322_NEW]);
+  t('H60: a dispatched card whose newest claim parses to zero branches -> finding', typeof h60ClaimBranchUnparsed(dispatchedCard(), gov60([PARSES_LIVE, INLINE_LIVE])), 'string');
+  t('H60: …naming the comment, so a reader can open it', fellBack60.includes('`5642984850`'), true);
+  t('H60: …and calling the claim MALFORMED rather than absent', fellBack60.includes('MALFORMED claim, ⛔ not an absent one'), true);
+  t('H60: …and saying governance SILENTLY FELL BACK', fellBack60.includes('SILENTLY FELL BACK'), true);
+  t('H60: …naming the superseded branch it fell back to', fellBack60.includes('claude/issue-16175-regen-sibling-stale-rules'), true);
+  t('H60: …and the near-miss that is the sharper half', fellBack60.includes('right for the wrong reason'), true);
+  t('H60: the other shape says NOTHING governs, rather than reusing the fallback sentence', nothing60.includes('NOTHING governs this card'), true);
+  t('H60: …and names the two rows that then go blind', nothing60.includes('H20 can never report a missing remote ref') && nothing60.includes('H27 can never report a dead claim'), true);
+  t('H60: the remedy is a `Branch:` line of its own', fellBack60.includes('`Branch:` line of'), true);
+  t('H60: …and it is the CLAIMING SEAT\'s act', fellBack60.includes('the CLAIMING SEAT'), true);
+  t('H60: …stated as the write side, never as a widening of the reader', fellBack60.includes('⛔ The reader is NOT widened'), true);
+  t('H60: …and the template reading is offered for a whole shift of them', fellBack60.includes('SEAT TEMPLATE'), true);
+  t('H60: report-only, like every row here', fellBack60.includes('never a label written from this script'), true);
+  t('H60: not a loud finding', isLoudFinding(h60ClaimBranchUnparsed(dispatchedCard(), gov60([PARSES_LIVE, INLINE_LIVE]))), false);
+
+  // ★ The gates, and the one deliberate asymmetry with H20.
+  t('H60: a card without `pm:dispatched` is out of scope', h60ClaimBranchUnparsed(dispatchedCard(['pm:queue']), gov60([PARSES_LIVE, INLINE_LIVE])), null);
+  t('H60: an UNASSIGNED dispatched card is still judged', typeof h60ClaimBranchUnparsed(dispatchedCard(['pm:dispatched'], []), gov60([PARSES_LIVE, INLINE_LIVE])), 'string');
+  t('H60: a missing issue does not crash', h60ClaimBranchUnparsed(undefined, gov60([INLINE_LIVE])), null);
+  t('H60: a caller that read no thread gets no row — unread is not malformed (#4690)', h60ClaimBranchUnparsed(dispatchedCard(), null), null);
+  t('H60: a well-formed claim yields no row at all', h60ClaimBranchUnparsed(dispatchedCard(), gov60(claim8878)), null);
+  // ⛔ NO age gate, and the asymmetry with H20's 60 minutes is the point: a
+  // branchless claim is wrong the instant it is posted.
+  t('⛔ H60: a claim posted ONE MINUTE ago already fires — no age gate', typeof h60ClaimBranchUnparsed(dispatchedCard(), gov60([claimRow60(9, minsAgo20(1), 'Claim: seat, on claude/issue-1-x')])), 'string');
+  t('⛔ H60: …while H20 would still be waiting on exactly that card', h20NeedsRefProbe(dispatchedCard(), gov60([claimRow60(9, minsAgo20(1), claimBody8878)]).governing, NOW_20), false);
+  t('⛔ H60: and H20 can never speak about a branchless claim at all — it is given no branches', h20DispatchedNoBranchRef(dispatchedCard(), gov60([INLINE_16322_NEW]).governing, [], NOW_20), null);
+
+  // ★ The accept set did NOT move. This is the whole point: the fix is a STATE,
+  // so the next unrecognised spelling is loud on its first occurrence instead
+  // of being bought one widening at a time.
+  t('⛔ H60: the inline spelling still parses to zero branches — the reader is untouched', claimedBranches(INLINE_16322_NEW.body).length, 0);
+  t('⛔ H60: …and the claim marker still matches it, which is what makes this a STATE and not an absence', CLAIM_COMMENT_MARKER.test(INLINE_16322_NEW.body), true);
+  t('⛔ H60: #16170\'s bulleted directive still parses, so its card stays clean', h60ClaimBranchUnparsed(dispatchedCard(), gov60([claimRow60(1, '2026-09-01T00:00:00Z', 'Claim: PM loop\n- Branch: `claude/issue-15511-zh-gap-helptext`')])), null);
+  t('⛔ H60: …and the blockquoted template spelling too', h60ClaimBranchUnparsed(dispatchedCard(), gov60([claimRow60(1, '2026-09-01T00:00:00Z', 'Claim: PM loop\n> Branch: `claude/issue-6752-x`')])), null);
+  t('H60 band: the row is registered as a `state`, beside H34\'s claim-shape row', familyBand('H60'), familyBand('H34'));
 
   // -- H16: open non-draft PR stuck in a merge conflict (2026-08-19 incident) --
   // The single-PR payload shape, since `mergeable_state` is absent from the

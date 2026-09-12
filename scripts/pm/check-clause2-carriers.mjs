@@ -568,6 +568,7 @@ import {
   deliveryEvidence,
   deliveryEvidenceNote,
   claimGovernance,
+  claimedBranches,
   governingClaim,
   isGateSemanticLabel,
   labelNames,
@@ -620,6 +621,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the exit register is distinct in every direction it must be': 6,
   'the argv contract and the board provenance (#16623)': 42,
   '#17366: the correction comment — the self-solvable exit, and the three things it is not': 65,
+  '#17149: a claim that parses to ZERO branches — malformed, never absent': 26,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -627,8 +629,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // Raised by exactly the one battery #16304 adds, again by exactly the one
 // #17302 adds, and again by exactly the one #17366 adds, so the roster's
 // existing slack is preserved rather than tightened or loosened as a side
-// effect.
-const SELF_TEST_BATTERY_FLOOR = 17;
+// effect, and once more by the one #17149 adds.
+const SELF_TEST_BATTERY_FLOOR = 18;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -4322,6 +4324,101 @@ export function selfTest() {
   t('⛔ no new exit code was minted for the correction reading', new Set([EXIT_OK, EXIT_USAGE, EXIT_INCOMPLETE, EXIT_PREREQUISITE_NOT_MET, EXIT_PAIR_ADVERSE]).size === 5);
   t('…and a repaired pair answers with the SAME code a never-broken one does', pairRows(repairedPair).length === pairRows(pair({ cardComments: [CLAIMED('Clause-②: no')] })).length);
 
+  // -- #17149: a claim that parses to ZERO branches ---------------------------
+  //
+  // The declaration limb's carrier is the GOVERNING claim, and governance is
+  // resolved by a branch parse. A newest claim comment naming no parseable
+  // branch used to be discarded, and this file then read a declaration off a
+  // comment the seat had already replaced — silently, and in BOTH directions:
+  // wrong when the two disagreed, and right-for-the-wrong-reason when they
+  // agreed. The fixtures below are the MEASURED bodies, quoted rather than
+  // paraphrased, so a future widening of the branch reader cannot make this
+  // battery pass by accident.
+  battery('#17149: a claim that parses to ZERO branches — malformed, never absent');
+  // Card #16322, comments 5593513389 (2026-09-08T23:46:51Z) and 5594909614
+  // (2026-09-09T02:35:21Z) as posted: the branch named INSIDE the `Claim:`
+  // sentence, with no `Branch:` line anywhere. The two declare OPPOSITE values,
+  // which is what made the fallback visible at all.
+  const INLINE_OLD = {
+    id: 5593513389,
+    created_at: '2026-09-08T23:46:51Z',
+    body:
+      'Claim: session_01ADLdAs2pVcH17h9tZKWMBg — branch `claude/issue-16322-analytics-daterange-closed-vocabulary-drivers`\n\n' +
+      'Clause-②: no\n',
+  };
+  const INLINE_NEW = {
+    id: 5594909614,
+    created_at: '2026-09-09T02:35:21Z',
+    body:
+      'Claim: session_01ADLdAs2pVcH17h9tZKWMBg — branch `claude/issue-16322-analytics-daterange-closed-vocabulary-drivers`\n\n' +
+      'Clause-②: yes\n',
+  };
+  // The live board, 2026-09-12T02:53Z: the same spelling, a different seat's
+  // template, four claims inside three seconds. Card #16175's newest claim is
+  // branchless while its 2026-09-06 claim parses — and names a DIFFERENT branch.
+  const LIVE_BRANCHLESS = {
+    id: 5642984850,
+    created_at: '2026-09-12T02:53:06Z',
+    body: 'Claim: session_012GKcPZbMoGq7WPzKLfRBTU · claude/issue-16175-staleness-mtime-false-refusal\nClause-②: no\n',
+  };
+  const LIVE_PARSES = {
+    id: 5557414924,
+    created_at: '2026-09-06T06:19:06Z',
+    body: 'Claim: PM loop\nBranch: `claude/issue-16175-regen-sibling-stale-rules`\nClause-②: no\n',
+  };
+  const INLINE_THREAD = [INLINE_OLD, INLINE_NEW];
+  const unparsedDecl = cardDeclaration(INLINE_THREAD);
+  t('⭐ the measured inline spelling reads CLAIM-BRANCH-UNPARSED — the carrier could not be resolved', unparsedDecl.state === 'claim-branch-unparsed');
+  t('⛔ …and NOT `declared`: the line that IS on the thread belongs to a comment this run cannot confirm is current', unparsedDecl.state !== 'declared');
+  t('⛔ …nor `absent`, which would say no claim comment was written — one was', unparsedDecl.state !== 'absent');
+  t('⛔ …nor `missing`, which would send the seat looking for a line that is there', unparsedDecl.state !== 'missing');
+  t('…and it carries NO value — an unclassified result is never a reading', unparsedDecl.value === undefined);
+  t('the state names the comment it could not parse', unparsedDecl.malformedClaim?.id === 5594909614);
+  // The BEFORE-state, quantified rather than recalled: both comments carry a
+  // readable line, and they DISAGREE. That is why reading the wrong one was a
+  // wrong answer and not merely an unlucky one.
+  t('⭐ the superseded comment carried a readable declaration, and the two DISAGREE', readClause2Line(INLINE_OLD.body)?.value === 'no' && readClause2Line(INLINE_NEW.body)?.value === 'yes');
+  // The reading PRINTS, and it is UNJUDGED (exit 2) rather than a verdict.
+  const unparsedPair = pair({ cardComments: INLINE_THREAD });
+  const unparsedGap = pairUnjudged(unparsedPair);
+  t('⭐ the pair is UNJUDGED and the reading prints in full — ⛔ never silence', typeof unparsedGap === 'string' && unparsedGap.length > 0);
+  t('…naming the comment id, so a reader can open it', says(unparsedGap, '5594909614'));
+  t('…and the remedy, which is a `Branch:` line of its OWN', says(unparsedGap, '`Branch:` line of its OWN'));
+  t('…and saying in as many words that this is not a declared `no`', says(unparsedGap, 'never a declared `no`'));
+  t('…and that a whole shift reading this way is a TEMPLATE fault rather than a typo', says(unparsedGap, 'SEAT TEMPLATE fault'));
+  t('⛔ and it raises NO C2 finding — an unclassified result must never be rendered as an adverse verdict', pairRows(unparsedPair).every((r) => r.code !== 'C2'));
+  t('⛔ nor any other finding row on this pair', pairRows(unparsedPair).length === 0);
+  // The live specimen, and the fallback shape at its sharpest: the older claim
+  // names a DIFFERENT branch, so every reader downstream probes the wrong ref.
+  const liveDecl = cardDeclaration([LIVE_PARSES, LIVE_BRANCHLESS]);
+  t('⭐ the live 2026-09-12 specimen reads the same way', liveDecl.state === 'claim-branch-unparsed');
+  t('…and the state names the older claim governance would have fallen back to', liveDecl.governingClaim?.createdAt === '2026-09-06T06:19:06Z');
+  t('⚠️ …whose branch is a DIFFERENT one, so the fallback is not even about the same work', liveDecl.governingClaim?.branches.join(',') === 'claude/issue-16175-regen-sibling-stale-rules');
+  t('…and the printed gap names that older claim rather than leaving the reader to guess', says(pairUnjudged(pair({ cardComments: [LIVE_PARSES, LIVE_BRANCHLESS] })), 'claude/issue-16175-regen-sibling-stale-rules'));
+  // CONTROLS — the accept set did not move in either direction.
+  t('⛔ CONTROL: a well-formed newest claim still governs, and its value is read', cardDeclaration([
+    { id: 1, created_at: '2026-08-30T09:00:00Z', body: 'Claim: old\nBranch: `claude/issue-1-old`\nClause-②: yes' },
+    { id: 2, created_at: '2026-08-31T09:00:00Z', body: 'Claim: new\nBranch: `claude/issue-1-new`\nClause-②: no' },
+  ]).value === 'no');
+  t('⛔ CONTROL: an OLDER branchless claim is spent and raises nothing — governance is correct', cardDeclaration([
+    { id: 1, created_at: '2026-08-30T09:00:00Z', body: 'Claim: session_x · claude/issue-1-old\nClause-②: yes' },
+    { id: 2, created_at: '2026-08-31T09:00:00Z', body: 'Claim: new\nBranch: `claude/issue-1-new`\nClause-②: no' },
+  ]).state === 'declared');
+  t('⛔ CONTROL: #16170\'s bulleted `Branch:` directive still parses, so its card is unaffected', cardDeclaration([
+    { id: 1, created_at: '2026-08-31T09:00:00Z', body: 'Claim: PM loop\n- Branch: `claude/issue-15511-zh-gap-helptext`\nClause-②: no' },
+  ]).state === 'declared');
+  t('⛔ CONTROL: a thread with no claim comment at all still reads ABSENT', cardDeclaration([{ id: 1, body: 'a triage note', created_at: '2026-08-31T10:00:00Z' }]).state === 'absent');
+  t('⛔ CONTROL: an unreadable thread still reads UNREADABLE — never the new state', cardDeclaration(null).state === 'unreadable');
+  // The new state is nobody else's state: it is counted into neither not-read
+  // population and it is not the #16304 fourth reading's `absent`.
+  t('the tally counts it under NEITHER not-read population', declarationLimbTally([unparsedPair]).absent === 0 && declarationLimbTally([unparsedPair]).missing === 0);
+  t('⛔ …and the fourth reading is unavailable on it — a sibling cannot answer a question this card could not ask', readsSiblingDeclaration(unparsedPair, [unparsedPair, pair({ card: 999, cardComments: [CLAIM('Clause-②: yes')] })]) === false);
+  t('⛔ …nor is such a card a CARRIER for a sibling of its own', siblingDeclarations(pair({ card: 999, pr: 13910 }), [pair({ card: 999, pr: 13910 }), { pr: 13910, card: 13476, cardComments: INLINE_THREAD }]).length === 0);
+  // ⛔ The fix is the STATE, not a widening: the branch reader's accept set is
+  // byte-identical, which is what keeps the next unrecognised spelling loud.
+  t('⛔ the branch reader was NOT widened — the inline spelling still parses to zero', claimedBranches(INLINE_NEW.body).length === 0);
+  t('⛔ …and the claim marker still matches it, which is what makes the two-anchor split a STATE', CLAIM_COMMENT_MARKER.test(INLINE_NEW.body) === true);
+
   // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -4382,7 +4479,9 @@ export function selfTest() {
       'the correction comment that supersedes a claim declaration with the five measured prose ' +
       'spellings held out as negatives, ' +
       'the three read paths with their offline reader, the argv contract with its usage and its '
-      + 'refusal, the board provenance line, and the exit register).',
+      + 'refusal, the board provenance line, the claim whose `Branch:` line parses to ZERO '
+      + 'branches — reported as an unresolvable carrier rather than discarded — and the exit '
+      + 'register).',
   );
 
   selfTestReachedVerdict = true;
