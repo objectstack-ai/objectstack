@@ -49,6 +49,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
+    "@types/pg": "^8.15.6",
     "mysql2": "^3.23.3",
     "pg": "^8.22.0",
     "tsup": "^8.5.1",
