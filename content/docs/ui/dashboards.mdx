@@ -350,7 +350,11 @@ Add interactive filter controls that apply to all widgets:
 {/* os:check */}
 ```typescript
 globalFilters: [
-  { name: 'region', field: 'region', label: 'Region', type: 'select' },
+  // `account.region` is a DOTTED PATH walked from the bound widget's
+  // `dataset.object` (`opportunity`) through the `include: ['account']` the
+  // dataset declares. It is not the dataset's dimension that is also spelled
+  // `region` — a filter's `field` never reads dimension names.
+  { name: 'region', field: 'account.region', label: 'Region', type: 'select' },
   { field: 'owner', label: 'Sales Rep', type: 'lookup' },
 ]
 ```
@@ -358,7 +362,9 @@ globalFilters: [
 Each filter's `name` is its stable identity: the key its value is published
 under as a dashboard-level variable (readable in widget expressions as
 `page.<name>`) and the key widgets reference in `filterBindings`. It defaults
-to `field`; the name `dateRange` is reserved for the built-in date range.
+to `field`; the name `dateRange` is reserved for the built-in date range. The
+filter above names itself `region` for exactly that reason — left to default it
+would be keyed `account.region`, dots and all, in every expression and binding.
 
 ### Where a Filter's `field` Resolves
 
