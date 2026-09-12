@@ -2412,14 +2412,30 @@ export function h8MergedPrStillDispatched(issue, mergedPrs, openPrs) {
 // classifies on its SPELLING alone, whatever #N's reachability; the paragraph
 // above says why that ruling is not this card's to make.
 //
-// The ruling spelling stays fireable: a value carrying an issue reference
-// (`#N` or `owner/repo#N`) is `issue-ref`, tested BEFORE the two unfireable
-// classes, so `Restart-when: #N rules on X` reads exactly as it did. That
-// order has a measured price — on the 2026-09-11 census of the 104 open holds,
-// four values name a tracked repo path and read clean on an unrelated issue
-// mention (#8753, #8607, #8589, #6009). Recorded here, not worked around: the
-// alternative is to rank `tracked-path` above `issue-ref`, which would make
-// the advertised ruling spelling fire, and that is the question above.
+// The ruling spelling stays fireable, and it is read at the DECLARATION
+// POSITION (#17605): a value that STARTS with an issue reference (`#N` or
+// `owner/repo#N`, after the leading decoration `partOfDeclarationRe`
+// tolerates) is `issue-ref`, tested BEFORE the two unfireable classes, so
+// `Restart-when: #N rules on X` reads exactly as this header advertises it. A
+// reference the value merely CARRIES mid-sentence is a mention, not an exit,
+// and falls through to `command` / `tracked-path` / `prose`.
+//
+// That position test is what RETIRED the price this note used to record. On
+// the 2026-09-11 census of the 104 open holds, four values name a tracked repo
+// path and read clean on an unrelated mid-sentence issue mention (#8753,
+// #8607, #8589, #6009); under the declaration test all four classify
+// `tracked-path` and get the rewrite row the class exists for. ⛔ The CLASS
+// ORDER was NOT the instrument and is unchanged: ranking `tracked-path` above
+// `issue-ref` would make the advertised ruling spelling fire, and that is the
+// ruled question above. Narrowing the POSITION costs no ruling because it
+// preserves that spelling literally — and it is the shape this file already
+// carries for `Part of #N` (`partOfDeclarationRe`), not a new one.
+//
+// The `prose` row moves with it: a value that mentions a card without
+// declaring one is prescribed the DECLARATION (「declare it: `Restart-when: #N
+// rules on X`」) beside the generic 「mark it `manual` or name the event」,
+// because an author who wrote a number down was not missing an event — they
+// wrote it where nothing reads.
 //
 // ## H9's path test is WIDER than H17's, deliberately
 //
@@ -2501,6 +2517,59 @@ export function restartWhenTrackedPaths(value, isTracked = () => false) {
 }
 
 /**
+ * An issue reference a `Restart-when:` value CARRIES anywhere.
+ *
+ * The anywhere-form, kept as a LABEL and never as the class test: it is what
+ * lets the `prose` row say 「this value mentions a card」 and prescribe the
+ * declaration, instead of reporting a missing event to an author who plainly
+ * had one in mind. Same pair as `partOfRe` / `partOfDeclarationRe`, with the
+ * roles reversed — there the wide form classifies and the narrow one labels;
+ * here the narrow one classifies and the wide one labels.
+ */
+function restartWhenIssueRefRe() {
+  return /#\d+\b/;
+}
+
+/**
+ * The same reference, restricted to the DECLARATION POSITION — the value
+ * STARTS with `#N` or `owner/repo#N`, after the leading decoration
+ * `partOfDeclarationRe` tolerates (blockquote markers, a list bullet, a
+ * markdown emphasis run).
+ *
+ * ## Why this is a class TEST here, where the `Part of` one is only a label
+ *
+ * `partOfDeclarationRe`'s docblock refuses to narrow its relation, and on its
+ * own corpus that refusal is right: narrowing there EMPTIES a set and drops a
+ * row through to a fallback channel, so a real declaration written second on
+ * a line is a finding LOST. Nothing is lost here. `classifyRestartWhen` is
+ * total — every value lands in one of six classes — so a value that fails
+ * this test is not dropped, it falls through to `command` / `tracked-path` /
+ * `prose` and fires a row carrying the remedy for the shape it actually has.
+ * The direction of the error is therefore opposite: the wide form here loses
+ * findings (a mention CLEARS the card), the narrow one gains them.
+ *
+ * ## The measured reason (#17605)
+ *
+ * On the 2026-09-11 census of the 104 open `pm:on-hold` cards, the wide form
+ * read four tracked-path holds clean on an unrelated issue number mentioned
+ * mid-sentence — #8753, #8607, #8589 and #6009, every one of them a misfiled
+ * `Restart-touch:` line, exactly the class #17377 built a row for. The
+ * declaration position is H9's own advertised spelling (`Restart-when: #N
+ * rules on X`) read literally, so the narrowing costs no ruling: #13718
+ * (`#13651 closes …`) and #3267 (`objectstack-ai/cloud#861 … is scheduled`)
+ * both start with their reference and stay `issue-ref`.
+ *
+ * The qualifier is this file's one reference grammar (`referenceRe`) — a full
+ * `owner/repo`, never a bare single segment, because `/` is what separates a
+ * cross-repo reference from a path segment. The NUMBER test is left exactly as
+ * the wide form spelled it (`#\d+\b`): this card narrows the POSITION and
+ * nothing else.
+ */
+function restartWhenIssueDeclarationRe() {
+  return /^[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?[*_]{0,3}(?:[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*)?#\d+\b/;
+}
+
+/**
  * Which of the six shapes is this `Restart-when:` value? (#17377)
  *
  * The ORDER is the contract, and each step is here because a later one would
@@ -2510,9 +2579,12 @@ export function restartWhenTrackedPaths(value, isTracked = () => false) {
  *                      the one-word spelling can never be rescued by anything
  *                      that follows it
  *   2. `closed-ref`   the unlock sweep's own literal form
- *   3. `issue-ref`    any issue reference the value CARRIES — the ruling
- *                      spelling H9's header admitted (`#N rules on X`), which
- *                      is why it is tested before the two unfireable classes
+ *   3. `issue-ref`    an issue reference the value DECLARES — one it opens
+ *                      with, which is the ruling spelling H9's header admitted
+ *                      (`#N rules on X`) read literally, and why it is tested
+ *                      before the two unfireable classes. A reference merely
+ *                      CARRIED mid-sentence is a mention, not an exit, and
+ *                      falls through to 4/5/6 (#17605)
  *   4. `command`      a backticked opening span, or one of the measured bare
  *                      heads — a one-line executable predicate
  *   5. `tracked-path` some token is a tracked repo file: a misfiled
@@ -2531,7 +2603,7 @@ export function classifyRestartWhen(value, isTracked = () => false) {
   if (!v) return 'prose';
   if (/^manual\b/i.test(v)) return 'manual';
   if (/^closed\b[^\n]*?#\d+\b/i.test(v)) return 'closed-ref';
-  if (/#\d+\b/.test(v)) return 'issue-ref';
+  if (restartWhenIssueDeclarationRe().test(v)) return 'issue-ref';
   if (/^`[^`\n]+`/.test(v)) return 'command';
   if (RESTART_WHEN_COMMAND_HEADS.includes(v.split(/\s+/)[0].toLowerCase())) return 'command';
   if (restartWhenTrackedPaths(v, isTracked).length > 0) return 'tracked-path';
@@ -2640,9 +2712,15 @@ export function h9OnHoldNoRestartWhen(issue, commentBodies, isTracked = () => fa
         '`closed <owner/repo>#N`. Rewrite the line as `Restart-touch: <path>` (one path per line) ' +
         'and give `Restart-when:` a real exit or `manual`'
       : classes.includes('prose')
-        ? 'its `Restart-when:` is prose naming no issue, no tracked path and no runnable ' +
-          'command — a `manual` in disguise; nothing schedules the actor it waits on. Mark it ' +
-          '`manual` or name the event'
+        ? values.some((v, i) => classes[i] === 'prose' && restartWhenIssueRefRe().test(v))
+          ? 'its `Restart-when:` is prose that MENTIONS an issue reference mid-sentence but ' +
+            'DECLARES none — a mention is not an exit; `issue-ref` is read at the declaration ' +
+            'position, so nothing schedules the actor this value waits on. If the mentioned ' +
+            'card IS the exit, declare it: `Restart-when: #N rules on X` (the reference ' +
+            'first). Otherwise mark it `manual` or name the event'
+          : 'its `Restart-when:` is prose naming no issue, no tracked path and no runnable ' +
+            'command — a `manual` in disguise; nothing schedules the actor it waits on. Mark it ' +
+            '`manual` or name the event'
         : values.length > 0
           ? 'its only `Restart-when:` is `manual`, which no mechanism can fire'
           : commentsRead
@@ -20597,6 +20675,77 @@ async function selfTest() {
   t('gate: an executable-predicate body still buys nothing', needsRestartWhenComments(hold('Restart-when: `git grep -l foo` returns 0'), h9Tracked), false);
   t('gate: the ruling spelling still buys nothing', needsRestartWhenComments(hold('Restart-when: #13651 rules on it'), h9Tracked), false);
   t('gate: the reserved `closed …#N` class still buys nothing', needsRestartWhenComments(hold(`Restart-when: ${v5499}`), h9Tracked), false);
+
+  // -- H9: `issue-ref` is the DECLARATION position (#17605) -------------------
+  // The wide form (`/#\d+\b/`) read a MENTION as an exit, so four live holds
+  // whose value names a tracked repo path cleared H9 on an unrelated issue
+  // number written mid-sentence. Every value below is VERBATIM from the live
+  // card on 2026-09-12, pinned as a literal string for the reason the #17377
+  // specimens are: a later reader sees what the position test was measured
+  // against, not a paraphrase of it. Both directions, on the same four.
+  const v8753 =
+    'any PR makes provisionTenantScopeIndex in packages/objectql/src/registry.ts read ' +
+    'injected-column provenance (#7865 convergence map resumes), or a gate begins pinning ' +
+    '/meta/object/:name index accuracy';
+  const v8607 =
+    'the ADR-0087 changeset-gate family is reworked (scripts/check-adr-0087-registration.mjs ' +
+    'and siblings, e.g. out of #8299), or a second breaking-behavior changeset lands unmarked';
+  const v8589 =
+    'buildMcpBridge in packages/runtime/src/domains/mcp.ts reaches the engine other than ' +
+    'through callData, a third McpDataBridge implementation appears, or the #7823 tripwire is ' +
+    'narrowed or moved off the protocol ingress path';
+  const v6009 =
+    'any PR touches sqliteCanonicalDatetimeSql or backfillCanonicalDatetimes in ' +
+    'packages/drivers/driver-sql/src/sql-driver.ts (price the backfill-SET-side guard, NOT the ' +
+    'cloud#1005-rejected shared-read heuristic), or unresolvedEpochTextRows counts non-zero on ' +
+    'real data, or a bare-numeric-TEXT Field.datetime site is reported';
+  const v13718 = '#13651 closes (ask 1 lands and reports the count of constants an app cannot reach)';
+  const v3267 =
+    'objectstack-ai/cloud#861 (Phase 3 EE governance) is scheduled, or a real customer / ' +
+    'example scenario needs durable suspension inside a parallel branch (parallel approval, ' +
+    'wait signal, or a subflow containing a pause)';
+  // The census oracle: the one tracked path each of the four names, and
+  // nothing else — the fixture states the tracked set rather than inheriting
+  // whatever this checkout happens to hold (`h9Tracked`'s reason).
+  const censusTracked = (p) =>
+    ['packages/objectql/src/registry.ts', 'scripts/check-adr-0087-registration.mjs',
+      'packages/runtime/src/domains/mcp.ts',
+      'packages/drivers/driver-sql/src/sql-driver.ts'].includes(p);
+
+  t('H9 class: #8753 — a mid-sentence mention is not an exit', classifyRestartWhen(v8753, censusTracked), 'tracked-path');
+  t('H9 class: #8607 — same, the gate family it names is tracked', classifyRestartWhen(v8607, censusTracked), 'tracked-path');
+  t('H9 class: #8589 — same, and the mention sits after the path', classifyRestartWhen(v8589, censusTracked), 'tracked-path');
+  t('H9 class: #6009 — same, on a cross-repo `cloud#N` mention', classifyRestartWhen(v6009, censusTracked), 'tracked-path');
+  // The other direction: with no oracle the same four collapse into `prose` —
+  // same verdict, the less specific row — which is what the wide form's
+  // false-clean was hiding in BOTH oracle states.
+  t('H9 class: #8753 with no oracle is prose, never fireable', classifyRestartWhen(v8753), 'prose');
+  t('H9 class: #8607 with no oracle is prose, never fireable', classifyRestartWhen(v8607), 'prose');
+  t('H9 class: #8589 with no oracle is prose, never fireable', classifyRestartWhen(v8589), 'prose');
+  t('H9 class: #6009 with no oracle is prose, never fireable', classifyRestartWhen(v6009), 'prose');
+  // ⛔ And the narrowing does NOT reach a value that DECLARES its reference —
+  // the advertised spelling, read literally, in both its forms.
+  t('H9 class: #13718 declares its reference first -> still `issue-ref`', classifyRestartWhen(v13718, censusTracked), 'issue-ref');
+  t('H9 class: #3267 declares a cross-repo one -> still `issue-ref`', classifyRestartWhen(v3267, censusTracked), 'issue-ref');
+  t('H9 class: …and the decoration a declaration may carry is the `Part of` one', classifyRestartWhen('> **#13651** rules on it'), 'issue-ref');
+  t('H9 class: a bare single-segment qualifier is a path segment, not a repo', classifyRestartWhen('cloud#861 is scheduled'), 'prose');
+  // The four are H9 ROWS now, each prescribing the rewrite its class names.
+  t('H9: #8753 is a finding, not a legal hold', typeof h9OnHoldNoRestartWhen(hold(`Restart-when: ${v8753}`), undefined, censusTracked), 'string');
+  t('H9: …and the row names the tracked path it misfiled', h9row(hold(`Restart-when: ${v8753}`), undefined, censusTracked).includes('`packages/objectql/src/registry.ts`'), true);
+  t('H9: …and prescribes the `Restart-touch:` rewrite', h9row(hold(`Restart-when: ${v8753}`), undefined, censusTracked).includes('Rewrite the line as `Restart-touch: <path>`'), true);
+  t('H9: #13718 stays clean — a declaration is an exit', h9OnHoldNoRestartWhen(hold(`Restart-when: ${v13718}`), undefined, censusTracked), null);
+  t('H9: #3267 stays clean too', h9OnHoldNoRestartWhen(hold(`Restart-when: ${v3267}`), undefined, censusTracked), null);
+  // The prose row's remedy follows the value: a MENTION gets the declaration
+  // prescribed, a value with no reference at all keeps the #10102 sentence.
+  const mentionProse = 'the design session rules the question below, with #5493 context on the table';
+  t('H9: a prose value that MENTIONS a card is prose', classifyRestartWhen(mentionProse, censusTracked), 'prose');
+  t('H9: …and its row prescribes the DECLARATION', h9row(hold(`Restart-when: ${mentionProse}`), undefined, censusTracked).includes('declare it: `Restart-when: #N rules on X`'), true);
+  t('H9: …saying in as many words that a mention is not an exit', h9row(hold(`Restart-when: ${mentionProse}`), undefined, censusTracked).includes('MENTIONS an issue reference mid-sentence'), true);
+  t('H9: …while still naming the event as the other branch', h9row(hold(`Restart-when: ${mentionProse}`), undefined, censusTracked).includes('mark it `manual` or name the event'), true);
+  t('H9: a reference-free prose value does NOT gain the clause', h9row(h3739, undefined, h9Tracked).includes('declare it: `Restart-when: #N rules on X`'), false);
+  t('H9: …and keeps the #10102 sentence verbatim', h9row(h3739, undefined, h9Tracked).includes('Mark it `manual` or name the event'), true);
+  // ⛔ The class ORDER is untouched — B was never the instrument (#17605).
+  t('H9 class: the fireable set is STILL exactly the three', FIREABLE_RESTART_WHEN_CLASSES.join('|'), 'closed-ref|issue-ref|command');
 
   // -- H10: stale unclaimed p0 (routing-gap backstop) -------------------------
   const NOW = Date.parse('2026-08-16T12:00:00Z');
