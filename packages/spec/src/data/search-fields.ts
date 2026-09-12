@@ -6,10 +6,21 @@
  * ONE resolution shared by the two layers that must agree on it:
  *
  * - the ENGINE (`@objectstack/objectql` `expandSearchToFilter`), which expands
- *   a `$search` term into a `$or` of `$icontains` clauses over exactly this set
+ *   a `$search` term into a `$or` of `$icontains` clauses over this set
  *   — `$icontains` since #7641, NOT `$contains`, which is contractually
  *   case-SENSITIVE (#4706 Q2 = A): a gate, test or driver written to the old
- *   sentence is STRICTER than the platform — a false refusal, not a leak;
+ *   sentence is STRICTER than the platform — a false refusal, not a leak.
+ *   ⛔ That `$or` is NOT closed over this set, and its clauses are NOT all
+ *   `$icontains`. Since #2486, when the deployment provisioned the hidden
+ *   `__search` companion column, each latin term ORs one ADDITIONAL clause on
+ *   that companion — a field `resolveSearchFields` never returns and no
+ *   `$searchFields` override can name, so it is outside this set by
+ *   construction. That one clause is `$contains` BY DESIGN: the companion is
+ *   already lowercase on BOTH sides (the column by construction, the term by
+ *   `.toLowerCase()`), so a case-SENSITIVE operator over two folded values is
+ *   exact, not a case bug. The engine says so at the site
+ *   (`objectql/src/search-filter.ts`): `Do not "align" the two.` ⛔ So do not
+ *   reconcile the two operators — not here, not there;
  * - the INGRESS gate (`@objectstack/metadata-protocol` `findData`), which
  *   refuses a `$searchFields` override naming a field this set does not admit
  *   (#4254), instead of letting the engine drop it silently.
