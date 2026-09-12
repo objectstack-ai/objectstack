@@ -174,11 +174,67 @@ export interface LintConfigOptions {
    * JSX gate does full component/prop validation; absent, it stays parse-level.
    * The `os lint` command resolves it; `scoreMetadata` deliberately does not —
    * the scorer is a pure function of a stack and must not read the filesystem.
+   *
+   * ⚠️ That sentence is about the FILESYSTEM and about nothing else. It is not
+   * a decision about WHICH stack the scorer judges: the stack it is handed is
+   * still resolved to the collections the author declared, in either ADR-0130
+   * D4 shape, by the fold at `lintConfig`'s entry below. ⛔ Do not read it as a
+   * warrant for the scorer seeing an unfolded stack.
    */
   sduiManifest?: unknown;
 }
 
+/**
+ * `os lint`'s whole rubric: the hand-written checks below plus the shared
+ * author-time rule registry (#4409), over the stack the author DECLARED.
+ *
+ * ## Why the fold is here, at the entry, and not at the registry call alone
+ *
+ * #17069 taught the registry call inside this function to resolve `packages[]`
+ * and scoped itself the way `compile.ts` scopes it, writing down exactly what
+ * it left behind: "the hand-written checks above and `scoreMetadata` (which
+ * reaches `lintConfig` through `lint/score.js`) keep reading the caller's own
+ * stack". This is the other half of that staged change, not a reversal of it.
+ *
+ * The half it left was the sharper one. Under ADR-0130 D4 / option B every
+ * definition lives in `packages[]` and the top level carries none, so the
+ * hand-written family read an EMPTY stack: a project with a lower-case object
+ * label and no name field got `✓ All checks passed`, while the byte-identical
+ * top-level spelling of the same metadata got `convention/label-case` and
+ * `object/missing-name-field`. `scoreMetadata` reaches this same function, so
+ * an option-B project's metadata-quality rubric was computed over nothing and
+ * published `100/100 (A)` — the #15658 shape ("the linter found nothing" and
+ * "the linter never ran" collapsed into the better-looking one) arriving
+ * through the INPUT this time rather than through a swallowed crash.
+ *
+ * ## Why {@link authoringRuleUnionStack} and not a second fold
+ *
+ * `stack-collections.ts` is the ONE place this package resolves a
+ * package-owned collection, and its rule is present-wins: a key the top level
+ * already carries wins, because in today's additive shape that array already
+ * IS the union. A stack that carries its collections comes back BY IDENTITY,
+ * so every single-package project lints byte-identically to before. A second
+ * fold written here could not have that property without re-deriving it, and
+ * two folds that disagree is a worse defect than the one being removed.
+ *
+ * ## What this does NOT decide
+ *
+ * It does not choose between a per-project and a per-package metadata score.
+ * `scoreMetadata` already scores the whole project and always has: its schema
+ * half parses the artifact whole and reports `packages.0.manifest.objects.0:
+ * …` on an option-B stack today, with no fold anywhere, and on today's
+ * additive multi-package shape its lint half already reads the flattened union
+ * across every package. This fold makes the option-B shape agree with the
+ * additive one — the same thing computed, over a stack that is no longer
+ * empty — and raises no new scoping question.
+ */
 export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue[] {
+  // The stack as DECLARED, whichever ADR-0130 D4 shape it arrived in. ⛔ Never
+  // read `config.KEY` below this line — a check that skipped the fold is
+  // exactly the defect #17528 removed, and it would be invisible in every
+  // other check, because the run still exits 0 and still prints a score.
+  const stack: any = authoringRuleUnionStack(config as Record<string, unknown>);
+
   const issues: LintIssue[] = [];
 
   const push = (issue: LintIssue | null) => {
@@ -186,7 +242,7 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
   };
 
   // ── Objects ──
-  const objects: any[] = Array.isArray(config.objects) ? config.objects : [];
+  const objects: any[] = Array.isArray(stack.objects) ? stack.objects : [];
 
   for (let i = 0; i < objects.length; i++) {
     const obj = objects[i];
@@ -244,7 +300,7 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
   }
 
   // ── Views ──
-  const views: any[] = Array.isArray(config.views) ? config.views : [];
+  const views: any[] = Array.isArray(stack.views) ? stack.views : [];
   for (let i = 0; i < views.length; i++) {
     const view = views[i];
     const viewPath = `views[${i}]`;
@@ -259,7 +315,7 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
   }
 
   // ── Apps ──
-  const apps: any[] = Array.isArray(config.apps) ? config.apps : [];
+  const apps: any[] = Array.isArray(stack.apps) ? stack.apps : [];
   for (let i = 0; i < apps.length; i++) {
     const app = apps[i];
     const appPath = `apps[${i}]`;
@@ -273,7 +329,7 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
   }
 
   // ── Flows ──
-  const flows: any[] = Array.isArray(config.flows) ? config.flows : [];
+  const flows: any[] = Array.isArray(stack.flows) ? stack.flows : [];
   for (let i = 0; i < flows.length; i++) {
     const flow = flows[i];
     const flowPath = `flows[${i}]`;
@@ -283,7 +339,7 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
   }
 
   // ── Agents ──
-  const agents: any[] = Array.isArray(config.agents) ? config.agents : [];
+  const agents: any[] = Array.isArray(stack.agents) ? stack.agents : [];
   for (let i = 0; i < agents.length; i++) {
     const agent = agents[i];
     const agentPath = `agents[${i}]`;
@@ -309,7 +365,7 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
   //
   // Objects are already prefix-*enforced* (error) in defineStack; views are
   // object-derived; `doc` has its own build lint — so they are excluded here.
-  const ns: string | undefined = config.manifest?.namespace;
+  const ns: string | undefined = stack.manifest?.namespace;
 
   // Bare-named UI/automation types that share the generic registry namespace.
   // Data-driven so a new bare-named type is one line.
@@ -369,7 +425,7 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
   ];
 
   for (const { key, label, registryKey } of PREFIXED_TYPES) {
-    const items: any[] = Array.isArray(config[key]) ? config[key] : [];
+    const items: any[] = Array.isArray(stack[key]) ? stack[key] : [];
     // First occurrence of each registry key → its index, so a later duplicate
     // can point back at the original declaration.
     const firstSeen = new Map<string, number>();
@@ -427,7 +483,7 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
   // Scoped to configs that declare a manifest — a bare metadata fragment (no
   // package identity) has nowhere to hang an engines range.
   {
-    const manifest = config.manifest as Record<string, any> | undefined;
+    const manifest = stack.manifest as Record<string, any> | undefined;
     const hasRange =
       typeof manifest?.engines?.protocol === 'string' ||
       typeof manifest?.engines?.platform === 'string' ||
@@ -456,7 +512,7 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
   //
   // Reads FUNCTION values, so it must run on the normalized input before any
   // Zod parse — which is where `lintConfig` already sits.
-  issues.push(...checkHookBodyLowering(config as Record<string, unknown>));
+  issues.push(...checkHookBodyLowering(stack as Record<string, unknown>));
 
   // ── Data-model best practices (relationships / master-detail / roll-ups) ──
   // Cross-object rules that encode the conventions in ADR-0035 and the
@@ -523,14 +579,19 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
   // a stack that still carries them comes back BY IDENTITY and every
   // single-package project lints exactly as before.
   //
-  // Scoped to this call, as it is in `compile.ts`: the hand-written checks
-  // above and `scoreMetadata` (which reaches `lintConfig` through
-  // `lint/score.js`) keep reading the caller's own stack, so nothing about
-  // what this function returns for a top-level stack moves.
-  const { lowered, loweredHookRefs } = lowerCallables(config as Record<string, unknown>);
+  // ⭐ #17069 scoped its fold to THIS CALL, as `compile.ts` scopes its own, and
+  // named the two things it deliberately left reading the caller's own stack:
+  // "the hand-written checks above and `scoreMetadata`". #17528 is the other
+  // half of that staged change — the fold now happens ONCE, at this function's
+  // entry, so every check in it and every caller of it (the `os lint` command
+  // and `scoreMetadata`) judge one stack. ⛔ There is still exactly one fold
+  // and one helper: `lowerCallables` shallow-clones the top level it is handed,
+  // so `lowered` already carries the folded collections and re-folding it here
+  // would be a second call that could only ever return by identity.
+  const { lowered, loweredHookRefs } = lowerCallables(stack as Record<string, unknown>);
   for (const f of runAuthoringRules('lint', {
-    normalized: authoringRuleUnionStack(config as Record<string, unknown>),
-    parsed: authoringRuleUnionStack(lowered),
+    normalized: stack,
+    parsed: lowered,
     sduiManifest: opts.sduiManifest,
     // [#16546] Same ref set `os build` computes from the same normalized
     // input — what lets `validateReadonlyHookWrites` / `validateHookBodyWrites`

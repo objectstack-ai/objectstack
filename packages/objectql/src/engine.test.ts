@@ -927,13 +927,26 @@ describe('ObjectQL Engine', () => {
             expect(out).toMatchObject({ id: 't1', name: 'masked' });
         });
 
-        it('warns when a hook subscribes to an event the engine never dispatches', () => {
+        // [#17713] This used to assert a WARN for `beforeFindOne`. The warning
+        // fired and the registration still succeeded, so the handler was
+        // registered inert — the defect the card is about. The engine's own
+        // undispatched lifecycle names are now refused; the warn path survives
+        // only for names outside that namespace, pinned in
+        // `engine-hook-event-dispatch-gap.test.ts` alongside the full population.
+        it('refuses a hook on an engine lifecycle event the engine never dispatches', () => {
+            expect(() => engine.registerHook('beforeFindOne', async () => {}, { object: 'task' }))
+                .toThrow(/never dispatches/);
+            expect((engine as any).hooks.has('beforeFindOne')).toBe(false);
+        });
+
+        it('warns, and still registers, for an event outside the engine lifecycle namespace', () => {
             const warn = vi.spyOn((engine as any).logger, 'warn');
-            engine.registerHook('beforeFindOne', async () => {}, { object: 'task' });
+            engine.registerHook('myPlugin:flush', async () => {}, { object: 'task' });
             expect(warn).toHaveBeenCalledWith(
-                expect.stringContaining("'beforeFindOne'"),
-                expect.objectContaining({ event: 'beforeFindOne' }),
+                expect.stringContaining("'myPlugin:flush'"),
+                expect.objectContaining({ event: 'myPlugin:flush' }),
             );
+            expect((engine as any).hooks.get('myPlugin:flush')).toHaveLength(1);
         });
 
         it('does not warn for a dispatchable event', () => {

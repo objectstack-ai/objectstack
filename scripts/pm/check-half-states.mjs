@@ -13234,6 +13234,259 @@ export function h60ClaimBranchUnparsed(issue, governance) {
 }
 
 // ---------------------------------------------------------------------------
+// H61 — a LANDED carrier: a MERGED pull request, or a CLOSED card, still
+// wearing `needs:contract-review`.
+//
+// ## The class, and why it is not any row already here
+//
+// `references/contract-review.md` 载体纪律 states the invariant this row reads,
+// verbatim and untranslated: 「开着的载体恒 = 真实待审」 — an OPEN carrier is a
+// real pending review — and the clearing act that keeps it true: 「清标即落地:
+// PASS ⇒ 同席同笔剥双载体;凡清标同笔留 provenance 评论,引记录 id 与所判 head。」
+// So the carrier's whole meaning is tied to a live increment. When the
+// increment LANDS and the stroke is never written, the label outlives the thing
+// it was hung on: the PR is merged, the review it announces can no longer be
+// owed, and the sentence the board still reads is 「真实待审」.
+//
+// That is residue rather than a bypass, and the distinction is the point. The
+// FRONT end is closed: the queue guard's carrier leg (`33e07f7c`, PR #17484)
+// refuses a merge group whose queued PR still carries the label, so from that
+// commit forward a gated PR cannot enter the queue. What no reader has is the
+// list of carriers already past it — and a later reader (a seat, a post-merge
+// tier audit, a candidate query that forgets to scope `state=open`) reads each
+// one as a review still owed.
+//
+// Every neighbouring row declines this population for a stated reason of its
+// own, so none of them is a narrower version of this one:
+//
+//   H31  compares the gate's TWO CARRIERS on an OPEN card against its OPEN
+//        delivering PRs. Its own population test excludes a merged delivering
+//        PR by name, and a closed card by name.
+//   H35  reads the gate REMOVAL event — 「被剥」 vs 「从未挂过」. Here nothing
+//        was removed; the label is still on.
+//   H51  reads a carrier still present on an OPEN PR whose thread already holds
+//        a verdict for the CURRENT head. `h51SpeaksAbout` excludes a merged or
+//        closed PR in as many words — 「载体不迁移」 leaves nothing to repair on
+//        a PR that is gone — so the moment the PR merges, H51 goes silent and
+//        nothing takes over. This row is that handover.
+//   H53  reads an OPEN card carrying the gate with NO increment behind it.
+//        Opposite end: there the increment never existed, here it landed.
+//   H8   reads a MERGED PR whose card still says `pm:dispatched` — the same
+//        window, a different label and a different duty.
+//   H22  reads `pm:*` residue on a CLOSED card and files no row at all since
+//        #14072; `needs:contract-review` is not a `pm:*` state label and is not
+//        in that reading.
+//
+// The ask is the director seat's, on #17040 (comment 5597753733, 2026-09-09,
+// leak sweep of every first-parent merge since 03:28Z), quoted verbatim: 「A
+// `check-half-states` row for a **closed card still carrying `pm:*` or a
+// carrier** (row 1 left #16231 closed with `pm:queue` + `needs:contract-review`;
+// row 2 left the carrier on a merged PR).」 The `pm:*` half of that sentence is
+// H22's and stays there; the CARRIER half is this row.
+//
+// ## The population, measured 2026-09-12 across both installs
+//
+// `GET /repos/{o}/{r}/issues?state=closed&labels=needs:contract-review`, one
+// page each, both complete (39 and 29 rows, under the 100-row page):
+//
+//   objectstack  39 = 23 merged PRs + 2 closed-UNMERGED PRs + 14 closed cards
+//   objectui     29 = 17 merged PRs +  0 closed-UNMERGED PRs + 12 closed cards
+//   ──────────────────────────────────────────────────────────────────────────
+//   both         68 = 40 merged PRs + 2 closed-UNMERGED PRs + 26 closed cards
+//
+// Oldest closure carrying the label: 2026-08-20T23:58Z (objectstack),
+// 2026-08-30T17:32Z (objectui). ⚠️ That is the whole standing backlog and it is
+// NOT what this row reports — see the window note below. The card that asked
+// for the row named three specimens (objectstack #16783 / #17036, objectui
+// #8779); the class is an order of magnitude larger, and stating the two
+// numbers apart is the point of this paragraph.
+//
+// ## Closed-UNMERGED PRs are EXCLUDED, and the exclusion is measured
+//
+// Two of the 68 (objectstack #16733, #14923; objectui 0 — 2.9%) are pull
+// requests CLOSED without merging, carrier still on. They are deliberately not
+// this row's subject and are ⛔ not folded into the merged count:
+//
+//   ① The harm model does not reach them. This row exists because a gate label
+//      on a LANDED increment tells a later reader a review is owed on work that
+//      is already in `main`; the post-merge tier audit is the consumer. A PR
+//      closed unmerged delivered nothing, owes no post-merge verdict, and is
+//      the shape H51's header already calls moot — 「载体不迁移」.
+//   ② The data path does not hold them. `listRecentlyMergedPullRequests`
+//      SELECTS on `merged_at` and its own header says why in as many words: an
+//      unmerged closed PR is an abandoned attempt, not a delivery. Widening
+//      that selector would change what H8 and H49 are handed, which is a change
+//      to two other rows' inputs and ⛔ not this row's business.
+//   ③ Size. 2 of 68 measured, both on one install, neither inside the window
+//      this row reads. A separate count rendered on every run for a class that
+//      contributes nothing to it is a number a reader has to learn to ignore.
+//
+// A reader who wants them has the one-line query above; this header carries it.
+//
+// ## What this row costs: NOTHING — both populations are already in hand
+//
+// ⛔ No new fetch, no new request class, no page bought. The sweep already
+// holds both halves by the time this row runs:
+//
+//   merged PRs    `seenMerged` / `mergedWindow`, from
+//                 `listRecentlyMergedPullRequests` — H8's 8-day window. List
+//                 rows carry `labels`, `merged_at` and `head.sha`, so the
+//                 carrier test, the stamp and the head all ride the row.
+//
+// ⚠️ The sha printed is `head.sha`, ⛔ never `merge_commit_sha`, and the two
+// were confused in this row's own dispatch. 载体纪律 says a clearing write cites
+// 「所判 head」 and H51 resolves a verdict against `pr.head.sha`, so the head is
+// the only sha a contract-review record can be matched on. Measured on the
+// three specimens that filed this row: #16783 head `47eea7a8` / merge commit
+// `854639b3`, #17036 head `530469ff` / merge commit `e4fd55d9`, objectui
+// #8779 head `a04441f7` / merge commit `6cc48c4e` — the three shas quoted on
+// the card are the merge commits, and a reader searching a thread for one of
+// them finds nothing.
+//   closed cards  `seenClosed`, from `listRecentlyClosedIssues` — H22's 3-day
+//                 window, already filtered to non-PR rows, carrying `labels`
+//                 and `closed_at`.
+//
+// ⚠️ So the row's REACH is those two windows and not the standing backlog: a
+// merged carrier is visible for 8 days after it lands, a closed-card carrier
+// for 3. At the patrol's 6-hour cadence that is ~32 and ~12 consecutive sweeps
+// respectively — every new carrier is seen, and seen repeatedly, which is what
+// the consumer asked for ("a list instead of a memory"). What ages out is the
+// long tail already on the board on the day this landed. ⛔ That is a
+// deliberate boundary, not an oversight: the alternative is a
+// `state=closed&labels=…` listing, which is a new fetch class AND a second
+// closed-card reader beside `pmLabelListingPath`, whose `state=open` scoping is
+// the entire mechanism by which maintainer ruling 批 #13 holds.
+//
+// ## The repo is NOT printed on the row
+//
+// Each install sweeps its OWN repository — `resolveSweepRepo` off the runner's
+// `GITHUB_REPOSITORY`, one token, one board, ⛔ no cross-repo credential
+// anywhere — so this row can never see more than one and a repo column would be
+// a constant. The two-install figures above are a HAND measurement taken for
+// this header, not something a run can reproduce.
+//
+// ## Band: `inventory`, and each of the other three is refused by its own test
+//
+// ⛔ Not `gate`: that band exists for the row that can tell a STRIPPED gate
+// from an ungated card — an ABSENCE reading as a green light. Here the carrier
+// is PRESENT and legible; nothing was removed, which is also why H35 is silent.
+// ⛔ Not `stall`: nothing is stopped. The increment merged. There is no forward
+// motion for a later sweep to free, and this row claims none.
+// ⛔ Not `state`: that band's own definition says a LIVE card, and every
+// subject here is merged or closed — ARCHIVE, in the word ruling 批 #13 uses
+// for exactly this population.
+// ⇒ `inventory` — the band's own word is 「residue」, which is the grading
+// comment's word for this class too (5624070035). Being first in line for the
+// body trim is CORRECT for it: a landed carrier is the least urgent thing on
+// the board, and the trim callout names the family and the omitted count rather
+// than dropping rows silently.
+//
+// ⚠️ The row text is deliberately SHORT for this file. A verbose row is right
+// where a family fires once or twice; this one fires per carrier, and 20 of the
+// 23 objectstack merged carriers measured above sit inside the 8-day window on
+// the day it lands. The reasoning that would pad each row lives up here, where
+// it is read once and costs the rendered body nothing.
+//
+// ## Report-only, and emphatically — the subject is a GATE
+//
+// ⛔ This script never writes a label, and least of all this one. Clearing a
+// carrier is 清标即落地: a seat's audited act, taken in the same write as the
+// provenance comment naming the record id and the head it judged. A sweeper
+// stripping a review gate would be issuing the verdict.
+// ---------------------------------------------------------------------------
+
+/**
+ * Which MERGED pull requests this row can speak about at all.
+ *
+ * `labels` unreadable ⇒ OUT, never read as unlabelled — H31's rule, kept here
+ * so an unread field can never manufacture a clean reading (#4690).
+ *
+ * A closed-UNMERGED PR is OUT by decision, measured in the header above.
+ * `merged_at` is the test rather than `state`, which is the same field
+ * `prMergedWithinWindow` selects on, so this row and H8 can never disagree
+ * about what a merge is.
+ */
+export function h61SpeaksAboutMergedPr(pr) {
+  if (!Number.isFinite(Date.parse(pr?.merged_at ?? ''))) return false;
+  if (!Array.isArray(pr?.labels)) return false;
+  return labelNames(pr).includes(CONTRACT_REVIEW_LABEL);
+}
+
+/**
+ * Which CLOSED cards this row can speak about at all.
+ *
+ * TWO refusals stand between this leg and a pull request, because a PR reaches
+ * it wearing two different disguises and only one of them was obvious:
+ *
+ *   `pull_request`  a PR as it appears on an ISSUES listing. This is the shape
+ *                   `listRecentlyClosedIssues` already filters out, and the one
+ *                   that would read a closed-unmerged PR back in by the side
+ *                   door.
+ *   `head`          a PR as it appears on a PULLS listing — where there is no
+ *                   `pull_request` field at all, while `state` is `closed` and
+ *                   `closed_at` is readable on a merged and an abandoned PR
+ *                   alike. Without this refusal the card leg accepts every row
+ *                   of `mergedWindow`, and a closed-UNMERGED PR — the one shape
+ *                   this row EXCLUDES by decision — walks straight in. ⚠️ Caught
+ *                   by the self-test case written for that exclusion, ⛔ not by
+ *                   reading the sweep, where the two collections happen never
+ *                   to cross. A population test that is only correct because of
+ *                   its caller is one refactor from being wrong.
+ *
+ * A card list row carries neither field, so nothing legitimate is lost.
+ */
+export function h61SpeaksAboutClosedCard(issue) {
+  if (issue?.pull_request) return false;
+  if (issue?.head) return false;
+  if (String(issue?.state ?? '') !== 'closed') return false;
+  if (!Number.isFinite(Date.parse(issue?.closed_at ?? ''))) return false;
+  if (!Array.isArray(issue?.labels)) return false;
+  return labelNames(issue).includes(CONTRACT_REVIEW_LABEL);
+}
+
+/**
+ * H61 — null when the carrier is out of scope or clean, else the finding
+ * sentence.
+ *
+ * One entry point over both shapes, because they are one duty: the stroke that
+ * 载体纪律 calls 同笔剥双载体 clears BOTH carriers, so a reader handed two
+ * differently-worded rows would have to work out that they name one unwritten
+ * act.
+ *
+ * @param {{ number?: number, merged_at?: string|null, closed_at?: string|null,
+ *   state?: string, labels?: any[], head?: { sha?: string },
+ *   pull_request?: object }} row — a merged-PR list row (`mergedWindow`) or a
+ *   closed-card list row (`seenClosed`). Both carry everything read here, so
+ *   this row costs no request.
+ */
+export function h61LandedCarrierStillGated(row) {
+  const merged = h61SpeaksAboutMergedPr(row);
+  const closed = !merged && h61SpeaksAboutClosedCard(row);
+  if (!merged && !closed) return null;
+
+  const head = String(row?.head?.sha ?? '');
+  const what = merged
+    ? `MERGED ${row.merged_at} (head \`${head ? head.slice(0, 10) : 'UNREAD'}\`)`
+    : `CLOSED ${row.closed_at}`;
+  const which = merged ? 'pull request' : 'card';
+
+  return (
+    `${what} and STILL carrying \`${CONTRACT_REVIEW_LABEL}\` — the gate outlived the increment it ` +
+    `was hung on. 载体纪律: 「开着的载体恒 = 真实待审」, so this ${which} still announces a real ` +
+    'pending contract review over work that is already landed or closed; a seat, a post-merge tier ' +
+    'audit or any candidate query that forgets to scope `state=open` reads it as a review still ' +
+    'owed. ⛔ Not a bypass: the queue guard\'s carrier leg refuses a gated PR at enqueue, so this ' +
+    'is RESIDUE behind a closed front end. Remedy — WHO and HOW: the seat that owns the landing, ' +
+    'with one write — 「清标即落地」, 同笔剥双载体 plus the provenance comment naming the record id ' +
+    'and the head it judged (`references/contract-review.md` 载体纪律). ⛔ Report-only: never a ' +
+    'label written from this script — striking a review gate from a sweeper would be issuing the ' +
+    'verdict. Boundaries: an OPEN carrier is H31/H51/H53\'s, a REMOVED one is H35\'s, `pm:*` ' +
+    'residue is H22\'s, and a PR closed UNMERGED is out of this row by decision (its header says ' +
+    'why, with the count).'
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -14465,6 +14718,19 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // stopped, and it fires on a card whose dev may be working perfectly well;
   // what is broken is the READING, not the dispatch.
   H60: 'state',
+
+  // H61 is an `inventory`, and each of the other three bands is refused by its
+  // own criterion — the row's header carries the argument in full. In short:
+  // ⛔ not `gate`, which exists for a row that can tell a STRIPPED gate from an
+  // ungated card (here the carrier is PRESENT); ⛔ not `stall`, because nothing
+  // is stopped — the increment merged; ⛔ not `state`, whose own definition says
+  // a LIVE card, while every subject of this row is merged or closed, i.e.
+  // ARCHIVE in ruling 批 #13's own word for this population. What is left is the
+  // band whose word is 「residue」, which is also the grading comment's word for
+  // the class. Being first in line for the body trim is CORRECT: a landed
+  // carrier is the least urgent thing on the board, and the ledger's callout
+  // names the family and the omitted count rather than dropping rows silently.
+  H61: 'inventory',
 
   // H51 is a `state` and ⛔ NOT a `gate`, and the distinction is the gate band's
   // own criterion rather than the subject's vocabulary. That band exists for the
@@ -18357,6 +18623,31 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   }
   stats.closedFloor = CLOSED_FLOOR.raw;
 
+  // H61 (#17510) — the LANDED contract-review carrier, over BOTH windows this
+  // sweep already holds. Placed here because this is the first point at which
+  // both exist: `mergedWindow` was assembled for H8 above, `seenClosed` one
+  // line up. ⛔ No fetch, no page, no new request class — every field the row
+  // reads (`labels`, `merged_at`/`closed_at`, `head.sha`) rides a list row
+  // that was already bought.
+  //
+  // Two loops rather than one concatenation, so each leg's population test is
+  // the one its own predicate declares and a closed-UNMERGED PR cannot reach
+  // the card leg through an issues-shaped row (the header says why it is out).
+  // Counted as well as judged: a family that fires on nothing must be
+  // distinguishable from a family whose input was never read (#4690).
+  for (const pr of mergedWindow) {
+    if (!h61SpeaksAboutMergedPr(pr)) continue;
+    stats.landedCarriers = (stats.landedCarriers ?? 0) + 1;
+    const residue = h61LandedCarrierStillGated(pr);
+    if (residue) findings.push([pr, 'H61', residue]);
+  }
+  for (const card of seenClosed.values()) {
+    if (!h61SpeaksAboutClosedCard(card)) continue;
+    stats.landedCarriers = (stats.landedCarriers ?? 0) + 1;
+    const residue = h61LandedCarrierStillGated(card);
+    if (residue) findings.push([card, 'H61', residue]);
+  }
+
   // H23 — the commit-message surface (#10942). The counting is not incidental:
   // this row's measured yield is ~6 in 1,546, so a silent H23 is the normal
   // reading, and the summary line's coverage numbers are the only thing that
@@ -21991,6 +22282,81 @@ async function selfTest() {
   t('⛔ H60: #16170\'s bulleted directive still parses, so its card stays clean', h60ClaimBranchUnparsed(dispatchedCard(), gov60([claimRow60(1, '2026-09-01T00:00:00Z', 'Claim: PM loop\n- Branch: `claude/issue-15511-zh-gap-helptext`')])), null);
   t('⛔ H60: …and the blockquoted template spelling too', h60ClaimBranchUnparsed(dispatchedCard(), gov60([claimRow60(1, '2026-09-01T00:00:00Z', 'Claim: PM loop\n> Branch: `claude/issue-6752-x`')])), null);
   t('H60 band: the row is registered as a `state`, beside H34\'s claim-shape row', familyBand('H60'), familyBand('H34'));
+
+  // -- H61: a LANDED carrier — a merged PR or a closed card still gated (#17510)
+  //
+  // The specimens are the three the card was filed on, quoted from the live
+  // board on 2026-09-12, plus the closed card the director seat named in
+  // 5597753733. ⚠️ The shas are the HEADS, ⛔ not the merge commits the card's
+  // own text quotes — see the row's header for the measurement of both.
+  const gated61 = (labels = [CONTRACT_REVIEW_LABEL]) => labels.map((name) => ({ name }));
+  const mergedPr61 = (extra = {}) => ({
+    number: 16783,
+    html_url: 'https://github.com/objectstack-ai/objectstack/pull/16783',
+    state: 'closed',
+    merged_at: '2026-09-09T06:36:36Z',
+    head: { sha: '47eea7a805763efa533cb22f1325d9df25db6413' },
+    labels: gated61(['documentation', 'size/xl', 'tests', 'tooling', CONTRACT_REVIEW_LABEL]),
+    ...extra,
+  });
+  const closedCard61 = (extra = {}) => ({
+    number: 16231,
+    html_url: 'https://github.com/objectstack-ai/objectstack/issues/16231',
+    state: 'closed',
+    closed_at: '2026-09-09T06:36:37Z',
+    labels: gated61([CONTRACT_REVIEW_LABEL, 'domain:engine', 'priority:p3']),
+    ...extra,
+  });
+  const row61 = (subject) => String(h61LandedCarrierStillGated(subject) ?? '');
+
+  // ── Direction 1: it FIRES, on both shapes ────────────────────────────────
+  t('H61: a MERGED PR still carrying the gate -> finding', typeof h61LandedCarrierStillGated(mergedPr61()), 'string');
+  t('H61: …and the row prints the merge stamp', row61(mergedPr61()).includes('MERGED 2026-09-09T06:36:36Z'), true);
+  t('H61: …and the HEAD sha, abbreviated', row61(mergedPr61()).includes('`47eea7a805`'), true);
+  t('H61: …⛔ and NOT the merge commit the card quoted', row61(mergedPr61()).includes('854639b3'), false);
+  t('H61: a CLOSED card still carrying the gate -> finding', typeof h61LandedCarrierStillGated(closedCard61()), 'string');
+  t('H61: …and the row prints the closure stamp', row61(closedCard61()).includes('CLOSED 2026-09-09T06:36:37Z'), true);
+  t('H61: …and says `card`, not `pull request`', row61(closedCard61()).includes('this card still announces'), true);
+  t('H61: objectui#8779 — the sibling install\'s specimen fires the same way', typeof h61LandedCarrierStillGated(mergedPr61({ number: 8779, merged_at: '2026-09-09T06:42:59Z', head: { sha: 'a04441f7' } })), 'string');
+
+  // ── Direction 2: it is SILENT everywhere it must be ──────────────────────
+  t('⛔ H61: an OPEN PR carrying the gate is NOT this row — H51 owns it', h61LandedCarrierStillGated({ ...mergedPr61(), state: 'open', merged_at: null }), null);
+  t('⛔ H61: …and H51 still speaks about exactly that PR, so nothing fell between them', h51SpeaksAbout({ ...mergedPr61(), state: 'open', merged_at: null }), true);
+  t('⛔ H61: …while H51 is silent on the merged one, which is the handover', h51SpeaksAbout(mergedPr61()), false);
+  t('⛔ H61: an OPEN card carrying the gate is NOT this row — H53\'s population', h61LandedCarrierStillGated({ ...closedCard61(), state: 'open', closed_at: null }), null);
+  t('⛔ H61: a MERGED PR WITHOUT the gate label is clean', h61LandedCarrierStillGated(mergedPr61({ labels: gated61(['documentation', 'size/xl']) })), null);
+  t('⛔ H61: a CLOSED card without it is clean too', h61LandedCarrierStillGated(closedCard61({ labels: gated61(['domain:engine']) })), null);
+  t('⛔ H61: a CLOSED-UNMERGED PR is out by decision (#16733), read as a pulls row', h61LandedCarrierStillGated({ ...mergedPr61(), number: 16733, merged_at: null, closed_at: '2026-09-08T06:17:13Z' }), null);
+  t('⛔ H61: …and out through the ISSUES-shaped row too, so it cannot enter by the card leg', h61LandedCarrierStillGated({ ...closedCard61(), number: 16733, pull_request: { merged_at: null }, closed_at: '2026-09-08T06:17:13Z' }), null);
+  t('⛔ H61: …nor can a MERGED PR reach the card leg by wearing a `pull_request` field', h61SpeaksAboutClosedCard({ ...closedCard61(), pull_request: { merged_at: '2026-09-09T06:36:36Z' } }), false);
+  t('⛔ H61: …nor by arriving from the PULLS listing, where there is no `pull_request` field to refuse', h61SpeaksAboutClosedCard(mergedPr61()), false);
+  t('⛔ H61: …which is exactly how the closed-UNMERGED PR would have entered', h61SpeaksAboutClosedCard({ ...mergedPr61(), number: 16733, merged_at: null, closed_at: '2026-09-08T06:17:13Z' }), false);
+  t('⛔ H61: an UNREADABLE `labels` is excluded, never read as unlabelled (H31\'s rule)', h61LandedCarrierStillGated(mergedPr61({ labels: undefined })), null);
+  t('⛔ H61: …on the card leg as well', h61LandedCarrierStillGated(closedCard61({ labels: undefined })), null);
+  t('⛔ H61: an unreadable `merged_at` is not a merge this row can place in time', h61LandedCarrierStillGated(mergedPr61({ merged_at: 'nope' })), null);
+  t('⛔ H61: an unreadable `closed_at` likewise', h61LandedCarrierStillGated(closedCard61({ closed_at: 'nope' })), null);
+  t('⛔ H61: a missing row does not crash', h61LandedCarrierStillGated(undefined), null);
+
+  // ── The row's text: the remedy, the spelling, the boundaries ─────────────
+  t('H61: the row names the invariant the carrier breaks', row61(mergedPr61()).includes('开着的载体恒 = 真实待审'), true);
+  t('H61: …and the clearing act by name', row61(mergedPr61()).includes('清标即落地'), true);
+  t('H61: …as a DOUBLE-carrier stroke, which is what 载体纪律 asks for', row61(mergedPr61()).includes('同笔剥双载体'), true);
+  t('H61: …plus the provenance comment the same write owes', row61(mergedPr61()).includes('provenance comment naming the record id'), true);
+  t('H61: …and WHO acts — a seat, not this script', row61(mergedPr61()).includes('the seat that owns the landing'), true);
+  t('H61: …and forbids a label written from this script', row61(mergedPr61()).includes('never a label written from this script'), true);
+  t('H61: …and calls the class RESIDUE behind a closed front end, ⛔ not a bypass', row61(mergedPr61()).includes('RESIDUE behind a closed front end'), true);
+  t('H61: …naming every neighbouring row so the reader never re-files one of theirs', ['H31/H51/H53', 'H35', 'H22'].every((code) => row61(mergedPr61()).includes(code)), true);
+  t('H61: the gate constant is the one H31 already owns, not a second spelling', CONTRACT_REVIEW_LABEL, 'needs:contract-review');
+  t('H61: …and the row prints THAT constant rather than a re-typed literal', row61(closedCard61()).includes(`\`${CONTRACT_REVIEW_LABEL}\``), true);
+  t('H61: …which the gate-label family also still shares (H35\'s pin, from this side)', GATE_SEMANTIC_LABELS.includes(CONTRACT_REVIEW_LABEL), true);
+
+  // ── Report-only: bands and exit codes are untouched by this row ──────────
+  t('H61: not a loud finding — it never escalates a sweep', isLoudFinding(h61LandedCarrierStillGated(mergedPr61())), false);
+  t('H61 band: registered as `inventory` — residue, ⛔ not a live-card `state`', familyBand('H61'), 'inventory');
+  t('H61 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H61'), true);
+  t('H61 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  t('⛔ H61: the prerequisite-refusal exit code is unchanged — this row adds none', EXIT_PREREQUISITE_NOT_MET, 3);
+  t('⛔ H61: and the band vocabulary is unchanged — `inventory` was already one of them', HALF_STATE_FAMILY_BANDS.map((band) => band.name).join(','), 'gate,unregistered,stall,state,inventory');
 
   // -- H16: open non-draft PR stuck in a merge conflict (2026-08-19 incident) --
   // The single-PR payload shape, since `mergeable_state` is absent from the
