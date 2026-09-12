@@ -302,7 +302,7 @@ describe('PageSchema', () => {
   // This test used to assert the schema ACCEPTED it. The three pins below replace
   // it, and they assert the ENVELOPE of the refusal — code and path — plus the
   // prescription's load-bearing clause, never the whole sentence.
-  it('refuses `assignedProfiles` and prescribes the permission-set route', () => {
+  it('refuses `assignedProfiles` at the tombstone and prescribes the permission-set route', () => {
     const result = PageSchema.safeParse({
       name: 'custom_page',
       label: 'Custom Page',
@@ -311,9 +311,11 @@ describe('PageSchema', () => {
     });
 
     expect(result.success).toBe(false);
-    const issue = result.error!.issues[0]!;
-    expect(issue.code).toBe('unrecognized_keys');
-    expect(issue.path).toEqual([]);
+    // The tombstone is `z.never().optional()`, so the refusal is located AT the
+    // key rather than reported as an unrecognized key on the page.
+    const issue = result.error!.issues.find((i) => i.path[0] === 'assignedProfiles')!;
+    expect(issue).toBeDefined();
+    expect(issue.path).toEqual(['assignedProfiles']);
     expect(issue.message).toMatch(/`page\.assignedProfiles` was removed.*permission sets/s);
     // The prescription names the tool sentence the house pin governs.
     expect(issue.message).toContain('os migrate meta --from 17');

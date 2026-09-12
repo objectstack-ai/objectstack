@@ -662,11 +662,12 @@ export function checkPageSourceCompleteness(
 /**
  * The `page.assignedProfiles` tombstone prescription (ADR-0090 D2, ADR-0049).
  *
- * The key is gone from the shape, so it arrives here through the
- * `unrecognized_keys` path like any other undeclared key — `guidance` is what
- * turns that report into the upgrade. Body prose states the key's fate; the
- * closing sentence states a property of `os migrate meta` and nothing about the
- * key (the house sentence, pinned in `shared/retired-key-migrate-sentence.test.ts`).
+ * Carried by a `retiredKey()` tombstone on the shape, not by a `guidance` entry:
+ * `PageSchema` is reachable from the `page` metadata-type root, so an author can
+ * still write the key and there is someone to teach. Body prose states the key's
+ * fate; the closing sentence states a property of `os migrate meta` and nothing
+ * about the key (the house sentence, pinned in
+ * `shared/retired-key-migrate-sentence.test.ts`).
  */
 const PAGE_ASSIGNED_PROFILES_RETIRED =
   '`page.assignedProfiles` was removed in @objectstack/spec 18 (ADR-0090 D2, ADR-0049 '
@@ -731,16 +732,19 @@ export const PageSchema = lazySchema(() => strictObject({
     // ADR-0090 D2 deleted, and it gated nothing: measured across this repository
     // and objectui, no renderer, route or read door ever read it, so a page that
     // "assigned profiles" stayed open to everyone who could reach it — the
-    // declared-not-enforced shape ADR-0049 exists to close. Removed here; the
-    // strip for existing sources and stored rows is the protocol-18
-    // `page-assigned-profiles-removed` conversion.
+    // declared-not-enforced shape ADR-0049 exists to close. It is REMOVED: a
+    // `retiredKey()` tombstone in the shape below carries the prescription, and
+    // the strip for existing sources and stored rows is the protocol-18
+    // `page-assigned-profiles-removed` conversion. It is deliberately NOT a
+    // `guidance` entry here — the tombstone is the stronger channel (`tsc` as
+    // well as the parse), and a guidance entry for a key the shape declares is
+    // dead code `alias-integrity.test.ts` would flag.
     //
     // `profiles` and `assignedTo` were ALIASES into that vocabulary: an author
     // writing `profiles:` was corrected INTO the retired word, two files away
     // from `security/permission.zod.ts` answering the same word with "no Profile
     // concept". They are refusals now, and they point where page audience really
     // lives — the permission set.
-    assignedProfiles: PAGE_ASSIGNED_PROFILES_RETIRED,
     profiles: PAGE_AUDIENCE_WRONG_LAYER,
     assignedTo: PAGE_AUDIENCE_WRONG_LAYER,
     // ⛔ Neither prescription below may name a page-level audience key as the way
@@ -796,9 +800,16 @@ export const PageSchema = lazySchema(() => strictObject({
   
   /** Activation */
   isDefault: z.boolean().default(false),
-  // `assignedProfiles` removed (ADR-0090 D2 / ADR-0049) — see the guidance
-  // table above: it named a deleted concept and no reader ever enforced it.
-  // Page audience is the permission set's; the refusal carries the route.
+  // `assignedProfiles` REMOVED (ADR-0090 D2 / ADR-0049) — it named the concept
+  // D2 deleted and nothing anywhere enforced it, so a page that "assigned
+  // profiles" was open to everyone who could reach it. Page audience is the
+  // permission set's. A `retiredKey()` tombstone rather than a bare deletion:
+  // `PageSchema` is still parsed from the `page` metadata-type root, so there
+  // IS an author to warn — `tsc` types the key `never` and a value reaching a
+  // parse raises the prescription instead of a bare unrecognized-key report.
+  // The key therefore stays in the walked shape, which is why its liveness row
+  // stays too (the `rls.priority` precedent).
+  assignedProfiles: retiredKey(PAGE_ASSIGNED_PROFILES_RETIRED),
 
   /** Interface Page Configuration (Airtable Interface parity) */
   interfaceConfig: InterfacePageConfigSchema.optional()
