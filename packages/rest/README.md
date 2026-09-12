@@ -97,6 +97,29 @@ Plus metadata and discovery routes:
 | `caching.etag` | `boolean` | `true` | Emits `ETag` header. |
 | `caching.lastModified` | `boolean` | `true` | Emits `Last-Modified`. |
 
+### Environment
+
+| Variable | Values | Default | Notes |
+|:---|:---|:---|:---|
+| `OS_REST_LOG` | `debug` \| `info` \| `warn` \| `error` \| `silent` | `info` | Level for this package's own fault logging. |
+
+`OS_REST_LOG` declares how loud the REST layer is about faults **it reports
+itself** — the `[REST] …` lines written when a request fails. It is the same
+vocabulary, and the same shipped default, as `@objectstack/objectql`'s
+`OS_REGISTRY_LOG`; an unrecognised value falls back to the default rather than
+silencing anything.
+
+At the default a reported fault prints the **whole** `Error`: its message, its
+`cause` chain and its stack frames. That is deliberate and it is the reason to
+leave it alone. When a 5xx is withheld from the client, the log is the only
+place the underlying driver text exists, and that text travels on `error.cause`
+— it is printed only because a whole `Error`, not a summary, reaches the
+console. Lowering the level to `error` or `silent` discards diagnostics that
+have no second copy anywhere.
+
+⇒ Prefer declaring a quieter level in a **test harness** (`vitest.config.ts`'s
+`env` block) over exporting it for a running server.
+
 ## HTTP semantics
 
 - JSON envelope: `{ success, data, error?, meta? }`.
