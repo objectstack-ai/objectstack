@@ -58,8 +58,37 @@
 // `@objectstack/driver-sql` narrowing does not reach a consumer holding a
 // `TursoDriver`.
 //
-// `upsert()` and `beginTransaction()` remain unasserted here; their
-// annotations did not move on this card either.
+// [#17690] Three more overridden doors join the driver half — `find`,
+// `upsert` and `bulkUpdate` — plus `RemoteTransport.beginTransaction`, which
+// lives in this package and in this same tsc program. All four nested their
+// `any` inside a wider type (`Promise<any[]>`, `Promise<Record<string, any>>`,
+// `Promise<Record<string, any>[]>`, `Promise<any>`), which is exactly why
+// #15267's literal-string census never named them: the characters
+// `Promise<any>` were not there to match on three of the four. An instrument's
+// silence is only evidence if the instrument could have spoken.
+//
+// ⛔ `TursoDriver.beginTransaction()` is the one door of that card's nine that
+// is NOT pinned here, and the reason is structural rather than an omission.
+// `TursoDriver extends SqlDriver`, and `SqlDriver.beginTransaction()` publishes
+// `Promise<Knex.Transaction>` — NARROWER than the contract's `Promise<unknown>`,
+// the honest direction, and the binding declaration for an override. Swapping
+// this override onto the contract's own type therefore does not compile:
+//
+//     src/turso-driver.ts(1662,18): error TS2416: Property 'beginTransaction'
+//     in type 'TursoDriver' is not assignable to the same property in base type
+//     'SqlDriver'. Type 'Promise<unknown>' is not assignable to type
+//     'Promise<Transaction<any, any[]>>'.
+//
+// The `any` there is not masking an un-narrowed door; it is masking a genuine
+// LSP violation — in remote mode this override hands back a libsql transaction
+// while the inherited declaration promises a knex one. Closing it means either
+// widening `SqlDriver`'s honest narrowing (measured: +14 further consumer sites
+// in these three driver packages alone, and a type-safety REGRESSION for every
+// `driver-sql` consumer) or restructuring the remote transaction handle. Both
+// are decisions above an annotation swap, so the door is left named rather than
+// quietly re-masked or forced with a cast.
+//
+// `beginTransaction()` on `TursoDriver` therefore remains unasserted here.
 //
 // The runtime cases below drive the LOCAL face (`:memory:`); the remote face's
 // shapes are pinned by the `RemoteTransport` suites.
@@ -67,6 +96,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { IDataDriver } from '@objectstack/spec/contracts';
 import { TursoDriver } from './turso-driver.js';
+import { RemoteTransport } from './remote-transport.js';
 
 /** `any` defeats ordinary assignability checks; this is the standard detector. */
 type IsAny<T> = 0 extends 1 & T ? true : false;
@@ -75,6 +105,43 @@ type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B
 
 type Resolved<F> = F extends (...args: never[]) => PromiseLike<infer R> ? R : never;
 
+/**
+ * [#17690] `IsAny<T>` answers about T ITSELF, which is honestly `false` for
+ * `any[]` and for `Record<string, any>` — and those are exactly the two shapes
+ * every door on this card had regressed to. Used as the "is not `any`" half of
+ * a nested-`any` door it is a PHANTOM CHECK: it evaluates, it is green, and it
+ * is green against the very mask it is supposed to name. Measured: with
+ * `find()` put back to `Promise<any[]>`, `IsAny<Resolved<SqlDriver['find']>>`
+ * stayed `false` and only the `Equals` leg red — one half, not the two this
+ * family requires.
+ *
+ * That is the card's own lesson turning up inside its own instrument: an
+ * instrument's silence is only evidence if the instrument could have spoken.
+ * The LANDED doors carried it too, and it was measured rather than assumed:
+ * with `aggregate()` put back to its own historical `Promise<any[]>`, this file
+ * red ONCE (the `Equals` leg) and `IsAny` stayed green — so the family's
+ * "both halves per door, a regression reds the file twice" was one half for
+ * that door. Every per-door leg in this file is therefore on `ContainsAny`,
+ * closing the class with one detector rather than door by door. `ContainsAny`
+ * is a strict superset of `IsAny` here — it asks `IsAny` first — so the doors
+ * whose regression shape IS a bare `any` lose nothing.
+ * `ContainsAny` looks one and two levels in — the ROW of an array-shaped door
+ * and the CELL of a record row — so `any[]`, `Record<string, any>` and
+ * `Record<string, any>[]` all answer `true` while the contract's own
+ * `Record<string, unknown>[]` / `Record<string, unknown>` / `unknown` answer
+ * `false`. The branch order matters: `IsAny<T>` is asked FIRST so a bare `any`
+ * never reaches a distributive conditional, where it would split across both
+ * arms and answer `boolean`.
+ */
+type ContainsAny<T> = IsAny<T> extends true
+  ? true
+  : T extends readonly (infer Row)[]
+    ? ContainsAny<Row>
+    : T extends Record<string, infer Cell>
+      ? IsAny<Cell>
+      : false;
+
+
 type ContractFindOne = Resolved<IDataDriver['findOne']>;
 type ContractCreate = Resolved<IDataDriver['create']>;
 type ContractBulkCreate = Resolved<IDataDriver['bulkCreate']>;
@@ -82,12 +149,21 @@ type ContractExecute = Resolved<IDataDriver['execute']>;
 // `aggregate` is OPTIONAL on the contract (`aggregate?`), so its function type
 // is read through `NonNullable` — the door is the member, not its presence.
 type ContractAggregate = Resolved<NonNullable<IDataDriver['aggregate']>>;
+// [#17690]
+type ContractFind = Resolved<IDataDriver['find']>;
+type ContractUpsert = Resolved<IDataDriver['upsert']>;
+type ContractBulkUpdate = Resolved<IDataDriver['bulkUpdate']>;
+type ContractBeginTransaction = Resolved<IDataDriver['beginTransaction']>;
 
 type TursoFindOne = Resolved<TursoDriver['findOne']>;
 type TursoCreate = Resolved<TursoDriver['create']>;
 type TursoBulkCreate = Resolved<TursoDriver['bulkCreate']>;
 type TursoExecute = Resolved<TursoDriver['execute']>;
 type TursoAggregate = Resolved<TursoDriver['aggregate']>;
+type TursoFind = Resolved<TursoDriver['find']>;
+type TursoUpsert = Resolved<TursoDriver['upsert']>;
+type TursoBulkUpdate = Resolved<TursoDriver['bulkUpdate']>;
+type RemoteBeginTransaction = Resolved<RemoteTransport['beginTransaction']>;
 
 // 1. The contract half — what `IDataDriver` already declared before this change.
 const contractFindOne: Equals<ContractFindOne, Record<string, unknown> | null> = true;
@@ -95,21 +171,37 @@ const contractCreate: Equals<ContractCreate, Record<string, unknown>> = true;
 const contractBulkCreate: Equals<ContractBulkCreate, Record<string, unknown>[]> = true;
 const contractExecute: Equals<ContractExecute, unknown> = true;
 const contractAggregate: Equals<ContractAggregate, Record<string, unknown>[]> = true;
+const contractFind: Equals<ContractFind, Record<string, unknown>[]> = true;
+const contractUpsert: Equals<ContractUpsert, Record<string, unknown>> = true;
+const contractBulkUpdate: Equals<ContractBulkUpdate, Record<string, unknown>[]> = true;
+const contractBeginTransaction: Equals<ContractBeginTransaction, unknown> = true;
 
 // 2. The driver half — each override un-masked, reading exactly as the
 //    contract reads. `execute` needs the `IsAny` leg most of all:
 //    `Equals<any, unknown>` is already `false`, so without it a door that
 //    regressed to `any` would be reported only as "not `unknown`".
-const tursoFindOneIsAny: IsAny<TursoFindOne> = false;
+const tursoFindOneHasAny: ContainsAny<TursoFindOne> = false;
 const tursoFindOneIsContract: Equals<TursoFindOne, Record<string, unknown> | null> = true;
-const tursoCreateIsAny: IsAny<TursoCreate> = false;
+const tursoCreateHasAny: ContainsAny<TursoCreate> = false;
 const tursoCreateIsContract: Equals<TursoCreate, Record<string, unknown>> = true;
-const tursoBulkCreateIsAny: IsAny<TursoBulkCreate> = false;
+const tursoBulkCreateHasAny: ContainsAny<TursoBulkCreate> = false;
 const tursoBulkCreateIsContract: Equals<TursoBulkCreate, Record<string, unknown>[]> = true;
-const tursoExecuteIsAny: IsAny<TursoExecute> = false;
+const tursoExecuteHasAny: ContainsAny<TursoExecute> = false;
 const tursoExecuteIsContract: Equals<TursoExecute, unknown> = true;
-const tursoAggregateIsAny: IsAny<TursoAggregate> = false;
+const tursoAggregateHasAny: ContainsAny<TursoAggregate> = false;
 const tursoAggregateIsContract: Equals<TursoAggregate, Record<string, unknown>[]> = true;
+const tursoFindHasAny: ContainsAny<TursoFind> = false;
+const tursoFindIsContract: Equals<TursoFind, Record<string, unknown>[]> = true;
+const tursoUpsertHasAny: ContainsAny<TursoUpsert> = false;
+const tursoUpsertIsContract: Equals<TursoUpsert, Record<string, unknown>> = true;
+const tursoBulkUpdateHasAny: ContainsAny<TursoBulkUpdate> = false;
+const tursoBulkUpdateIsContract: Equals<TursoBulkUpdate, Record<string, unknown>[]> = true;
+// `RemoteTransport` is not an `IDataDriver` implementer, but it is the remote
+// branch of every door above, so the same two halves are owed here. The
+// `IsAny` leg carries most of the weight on an `unknown` destination:
+// `Equals<any, unknown>` is already `false`.
+const remoteBeginTransactionHasAny: ContainsAny<RemoteBeginTransaction> = false;
+const remoteBeginTransactionIsContract: Equals<RemoteBeginTransaction, unknown> = true;
 
 /**
  * The slice of the inherited (protected) Knex instance this fixture touches.
@@ -144,7 +236,7 @@ describe('TursoDriver declared return types on the doors it overrides (#15267)',
   });
 
   it('pins the driver half: no override is `any`, each is the contract type', () => {
-    expect([tursoFindOneIsAny, tursoCreateIsAny, tursoBulkCreateIsAny, tursoExecuteIsAny]).toEqual([
+    expect([tursoFindOneHasAny, tursoCreateHasAny, tursoBulkCreateHasAny, tursoExecuteHasAny]).toEqual([
       false,
       false,
       false,
@@ -159,11 +251,11 @@ describe('TursoDriver declared return types on the doors it overrides (#15267)',
   });
 
   // [#17277] The fifth overridden door, both halves. Put the annotation back
-  // to `Promise<any>` and `tursoAggregateIsAny` flips to `true` while
+  // to `Promise<any>` and `tursoAggregateHasAny` flips to `true` while
   // `tursoAggregateIsContract` flips to `false`.
   it('pins both halves of the fifth overridden door, aggregate()', () => {
     expect(contractAggregate).toBe(true);
-    expect(tursoAggregateIsAny).toBe(false);
+    expect(tursoAggregateHasAny).toBe(false);
     expect(tursoAggregateIsContract).toBe(true);
   });
 
@@ -194,6 +286,52 @@ describe('TursoDriver declared return types on the doors it overrides (#15267)',
     const result = await driver.findOne('t', { where: { id: '1' } });
     expect(result).not.toBeNull();
     expect(result === null ? 'absent' : result.name).toBe('before');
+  });
+
+  // [#17690] The three further overridden doors, plus the remote branch's own
+  // `beginTransaction`. Both halves each: put any one annotation back and
+  // `ContainsAny` flips to `true` while `Equals` flips to `false` — verified by
+  // ablating all four, two errors apiece and nothing else.
+  it('pins both halves of find(), upsert(), bulkUpdate() and RemoteTransport.beginTransaction()', () => {
+    expect([contractFind, contractUpsert, contractBulkUpdate, contractBeginTransaction]).toEqual([
+      true,
+      true,
+      true,
+      true,
+    ]);
+    expect([tursoFindHasAny, tursoUpsertHasAny, tursoBulkUpdateHasAny, remoteBeginTransactionHasAny]).toEqual([
+      false,
+      false,
+      false,
+      false,
+    ]);
+    expect([
+      tursoFindIsContract,
+      tursoUpsertIsContract,
+      tursoBulkUpdateIsContract,
+      remoteBeginTransactionIsContract,
+    ]).toEqual([true, true, true, true]);
+  });
+
+  it('find() on the local face resolves to rows the declared record type describes, and the caller narrows', async () => {
+    const rows = await driver.find('t', { where: { id: '1' } });
+    expect(rows).toHaveLength(1);
+
+    // Through the old `Promise<any[]>` this cell read compiled unchecked.
+    const name: unknown = rows[0].name;
+    expect(String(name)).toBe('before');
+  });
+
+  it('upsert() and bulkUpdate() resolve to record shapes the declared types describe, behind the same narrowing', async () => {
+    const upserted = await driver.upsert('t', { id: '9', name: 'upserted' }, ['id']);
+    const upsertedId: unknown = upserted.id;
+    expect(String(upsertedId)).toBe('9');
+
+    await driver.create('t', { id: '7', name: 'seven' });
+    const updated = await driver.bulkUpdate('t', [{ id: '7', data: { name: 'seven-updated' } }]);
+    expect(updated).toHaveLength(1);
+    const updatedName: unknown = updated[0].name;
+    expect(String(updatedName)).toBe('seven-updated');
   });
 
   it('create() and bulkCreate() resolve to record shapes the declared types describe', async () => {

@@ -90,6 +90,15 @@ export async function readDataMigrationFlag(
       deviation_observed_at:
         row.deviation_observed_at == null ? null : String(row.deviation_observed_at),
       deviation_detail: typeof row.deviation_detail === 'string' ? row.deviation_detail : undefined,
+      // [#15989] Absent on every row written before the column step existed,
+      // which reads as "the columns have NOT moved" — the answer
+      // `hasMovedFileColumns` gives such a row, and the encoding every
+      // deployment in the world is on. Carrying it is not cosmetic: dropped (as
+      // this reader dropped it until the column step landed) a MOVED deployment
+      // is indistinguishable from an unmoved one to every caller that reads its
+      // flag through this function, including the step that must refuse to move
+      // the same columns twice.
+      columns_moved_at: row.columns_moved_at == null ? null : String(row.columns_moved_at),
     };
   } catch {
     return null;
@@ -194,6 +203,13 @@ export async function recordDataMigrationRun(
     details: flag.details ?? null,
     updated_at: now,
   };
+  // [#15989] ⛔ `columns_moved_at` is deliberately NOT a key of `row`. A
+  // re-run of the backfill says nothing about the physical columns, so it must
+  // neither set the stamp nor clear it — and OMITTING the key is the only
+  // spelling that keeps that true when the read above fails: carrying
+  // `existing?.columns_moved_at ?? null` forward would write a null over a live
+  // stamp on exactly the read failure `readDataMigrationFlag` answers `null`
+  // for, demoting a moved deployment back onto the JSON arm on its next boot.
   if (existing) {
     await engine.update(DATA_MIGRATION_FLAG_OBJECT, row, { context: { ...SYSTEM_CTX } });
   } else {
@@ -204,6 +220,55 @@ export async function recordDataMigrationRun(
     );
   }
   return flag;
+}
+
+/**
+ * Stamp `columns_moved_at` — the record that THIS deployment's file-family
+ * columns were retyped and their values rewritten into the bare-id encoding
+ * (#15989, the ruling on #15041 step 2).
+ *
+ * ## Why it is a separate write from {@link recordDataMigrationRun}
+ *
+ * The two attest different facts about the same migration, and they happen at
+ * different times: the backfill converts the VALUES and can be re-run any
+ * number of times, while the column move retypes the COLUMNS once. A run that
+ * re-verifies the values must not imply the columns moved, and the columns
+ * moving must not re-date the self-check. Mechanism A's whole point is that
+ * "backfilled here, columns not moved" is representable — so the stamp is its
+ * own act, written by the step that does the moving, in the same command.
+ *
+ * ## It refuses to write on evidence it does not have
+ *
+ * There must already be a verified flag row. The column step only runs after
+ * backfill + verify report zero blocking rows, so the row is there by the time
+ * this is called; an absent or unverified row means the caller reached here by
+ * a path that skipped the gate, and stamping would certify a column move whose
+ * values were never shown converted. That is refused loudly — this is a
+ * migration command's own output, the direction this module's writes fail in.
+ *
+ * @returns the stamp written.
+ */
+export async function recordFileColumnMove(
+  engine: MigrationFlagEngine,
+  migrationId: string,
+): Promise<string> {
+  const existing = await readDataMigrationFlag(engine, migrationId);
+  if (!isDataMigrationFlagVerified(existing)) {
+    throw new Error(
+      `Refusing to record the column move for '${migrationId}': this deployment has no VERIFIED ` +
+        `${DATA_MIGRATION_FLAG_OBJECT} row for it. The column move may only be recorded by a run ` +
+        'whose backfill and self-check reported zero blocking rows — recording it otherwise would ' +
+        'certify a column move whose values were never shown converted, and the driver would then ' +
+        'write bare ids on the strength of it.',
+    );
+  }
+  const now = new Date().toISOString();
+  await engine.update(
+    DATA_MIGRATION_FLAG_OBJECT,
+    { id: migrationId, columns_moved_at: now, updated_at: now },
+    { context: { ...SYSTEM_CTX } },
+  );
+  return now;
 }
 
 /**

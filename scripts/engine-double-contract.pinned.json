@@ -2187,6 +2187,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/platform-objects/src/system/migration-flag.column-move.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/platform-objects/src/system/migration-flag.test.ts",
       "verb": "update",
       "pinned": 1
@@ -2723,6 +2728,16 @@
     },
     {
       "file": "packages/plugins/plugin-security/src/check-only-write-scope.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/claim-seed-ownership-seed-settle-rerun.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/claim-seed-ownership-seed-settle-rerun.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3740,6 +3755,11 @@
       "file": "packages/services/service-messaging/src/messaging-service.test.ts",
       "verb": "findOne",
       "pinned": 6
+    },
+    {
+      "file": "packages/services/service-messaging/src/notification-delivery-retention-sweep.test.ts",
+      "verb": "delete",
+      "pinned": 1
     },
     {
       "file": "packages/services/service-messaging/src/notification-schema-conformance.test.ts",

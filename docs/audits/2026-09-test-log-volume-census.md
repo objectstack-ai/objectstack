@@ -27,9 +27,12 @@ total volume than the five heaviest suites already were. See
 
 - **No urgency, no correctness impact.** This is CI log volume. The earlier
   reading said so and nothing here changes it.
-- **No seam was added, and none is recommended.** The two candidates — an env
-  read in the kernel logger, a level field on `BootOptions` — both touch
-  published surface, and choosing between them is not a measurement.
+- **No seam was added by this document, and neither candidate it listed is
+  recommended.** The two candidates — an env read in the kernel logger, a level
+  field on `BootOptions` — both touch published surface, and choosing between
+  them is not a measurement. ⚠️ A different seam was later ruled and built for
+  a different population: `OS_REST_LOG`, on `packages/rest`'s own fault logging
+  (#15484). See the closing section — that is not one of these two.
 - **"A reader of a production boot log may well want every one of these
   lines."** Test-environment noise and production observability are two ends of
   one switch. Nothing here is an argument for lowering the engine's boot INFO
@@ -416,6 +419,18 @@ point does the combined population cross back toward parity, let alone toward
 `console` being the majority — it stays firmly structured-dominated (77.1%)
 throughout.
 
-**No seam was added.** Per triage's ruling, this document is the measurement
-only; which of the two candidate seams (if either) to build is triage's call,
-made with this table in hand.
+**No seam was added by this document, and the reservation it held is now
+DISCHARGED.** This document was the measurement only, and it reserved to triage
+「which of the two candidate seams (if either) to build」. The maintainer decided
+it in decision batch #49, item 2 (2026-09-05, recorded on #15484): option **A**,
+a declared level seam on `packages/rest`'s `logError`, in the `OS_REGISTRY_LOG`
+shape, **with the shipped default unchanged**.
+
+⇒ The seam that was built against that ruling is `OS_REST_LOG`
+(`packages/rest/src/log.ts`, `REST_LOG_LEVELS`), enforced by
+`scripts/check-rest-log-declared.mjs`. ⛔ It is a DECLARATION, not a quieter
+product: at the shipped default a reported fault still prints the whole `Error`
+— message, `cause` chain and frames — for every real caller, and suppression is
+only ever something a harness declares. The two candidates this document listed
+(an env read in the kernel logger, a level field on `BootOptions`) remain
+unbuilt; neither was chosen.

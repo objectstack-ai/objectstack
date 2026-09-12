@@ -781,6 +781,7 @@
     "emailTemplateForm (const)",
     "gcsStorageExample (const)",
     "globalFilterKey (function)",
+    "hasMovedFileColumns (function)",
     "hasObservedDeviation (function)",
     "hasPlatformObjectPrefix (function)",
     "inProcessServiceMessage (function)",

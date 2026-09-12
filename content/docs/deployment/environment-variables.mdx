@@ -74,7 +74,7 @@ read at startup unless noted otherwise. Boolean variables accept `true` / `false
 
 | Variable | Type | Default | Description |
 |:---|:---|:---|:---|
-| `OS_AUTH_URL` | url | `http://localhost:<OS_PORT>` | Public base URL of the auth server. Required behind a proxy or in production. |
+| `OS_AUTH_URL` | url | `http://localhost:<OS_PORT>`, or `https://localhost:<OS_PORT>` when `os dev` terminates TLS (`--cert` / `--key`) | Public base URL of the auth server. Required behind a proxy or in production. When set it always wins, whatever the listener speaks — it names where the deployment is reached, not what the process bound. |
 | `OS_AUTH_SECRET` | string | auto-generated (dev) | Secret used to sign sessions and cookies. **Required** in production. |
 | `OS_AUTH_TWO_FACTOR` | boolean | `false` | Enable the low-level better-auth two-factor plugin. Keep disabled unless your UI handles enrollment, login challenge, and backup-code recovery. |
 | `OS_DISABLE_SIGNUP` | boolean | `false` | When `true`, block new email/password sign-ups. Under the `single` posture the very first user can still sign up to bootstrap admin; under the walled postures no sign-up is ever promoted, so this leaves the deployment dependent on `OS_PLATFORM_OWNER_EMAIL` alone. |

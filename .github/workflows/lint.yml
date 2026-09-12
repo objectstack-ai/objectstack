@@ -3762,6 +3762,19 @@ jobs:
       - name: Declared registry log level
         run: node scripts/check-registry-log-declared.mjs --self-test && node scripts/check-registry-log-declared.mjs
 
+      # The same defect one package down (#15484). `packages/rest`'s own fault
+      # logging hands whole `Error` objects to `console.error`, and Node prints
+      # the stack and the `[cause]` chain with them — 2,095 indented `at ` frame
+      # lines on one green run, 36.7% of the captured output, all of it through
+      # one shim. ⛔ Those frames are READ (four assertions pin the identity of
+      # the error that arrives, #5437 / #4886 / #5489), so the ruled repair was a
+      # DECLARED level, not a quieter product. This holds the two halves that rot
+      # silently: a harness declaration that is deleted or typo'd to a level the
+      # seam does not recognise (it resolves to the DEFAULT, silently), and the
+      # shipped default itself being lowered to quieten a log. Self-test first.
+      - name: Declared REST fault-log level
+        run: node scripts/check-rest-log-declared.mjs --self-test && node scripts/check-rest-log-declared.mjs
+
       # Live-server database isolation (#10382). CI provisions ONE Postgres and
       # ONE MySQL for the whole temporal-conformance job and points every live
       # leg at them, and every live suite in the repo issues a `drop` when it

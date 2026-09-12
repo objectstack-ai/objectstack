@@ -135,6 +135,71 @@ describe('resolveAuthBaseUrl — precedence (pre-existing behaviour, unchanged)'
   });
 });
 
+/**
+ * #16804 — the built-in default follows the LISTENER, and nothing else does.
+ *
+ * `os dev --cert … --key …` terminates TLS in the dev process, after which
+ * `http://localhost:<port>` is an address no client can reach. The tail is the
+ * one link in the chain nobody configured — it is this process describing its
+ * own socket — so it is the only link that moves.
+ */
+describe('resolveAuthBaseUrl — the listener protocol reaches the TAIL and stops there', () => {
+  it('derives https://localhost:<port> for a TLS listener with nothing else set', () => {
+    expect(resolveAuthBaseUrl(3000, 'https')).toEqual({
+      value: 'https://localhost:3000',
+      source: null,
+      baseOrigin: 'https://localhost:3000',
+    });
+  });
+
+  it('ABLATION: the omitted argument and an explicit `http` are the same call', () => {
+    // Acceptance 2 of the card — 「无 flag时逐字节等于今天」 — measured on the
+    // resolver rather than claimed. Driven for a plain port, dev's shifted
+    // port and an ephemeral one, because the tail interpolates the port.
+    for (const port of [3000, 3001, 45064]) {
+      expect(resolveAuthBaseUrl(port)).toEqual(resolveAuthBaseUrl(port, 'http'));
+      // …and the two legs DISCRIMINATE, so the equality above is a reading.
+      expect(resolveAuthBaseUrl(port)).not.toEqual(resolveAuthBaseUrl(port, 'https'));
+    }
+  });
+
+  it('⛔ a CONFIGURED value is never rewritten — OS_AUTH_URL wins under TLS', () => {
+    process.env.OS_AUTH_URL = 'https://tunnel.example.com';
+    const r = resolveAuthBaseUrl(3000, 'https');
+    expect(r.value).toBe('https://tunnel.example.com');
+    expect(r.source).toBe('OS_AUTH_URL');
+  });
+
+  it('⛔ including an http one — the scheme of a configured value is not upgraded', () => {
+    // The direction a "helpful" implementation gets wrong. `OS_AUTH_URL` names
+    // where the deployment is REACHED; behind a proxy that forwards plain http
+    // to this TLS listener, `http://…` is the operator's deliberate statement
+    // about a different hop, and a default has no standing to overrule it.
+    process.env.OS_AUTH_URL = 'http://proxied.example.com';
+    expect(resolveAuthBaseUrl(3000, 'https').value).toBe('http://proxied.example.com');
+    expect(resolveAuthBaseUrl(3000, 'https').baseOrigin).toBe('http://proxied.example.com');
+  });
+
+  it('⛔ nor the legacy name, nor OS_BASE_URL', () => {
+    process.env.BETTER_AUTH_URL = 'http://legacy.example.com';
+    expect(resolveAuthBaseUrl(3000, 'https').value).toBe('http://legacy.example.com');
+
+    delete process.env.BETTER_AUTH_URL;
+    process.env.OS_BASE_URL = 'http://base.example.com';
+    expect(resolveAuthBaseUrl(3000, 'https').value).toBe('http://base.example.com');
+  });
+
+  it('⛔ a set-but-empty value stays unusable — TLS manufactures no origin', () => {
+    // The tail is not reached at all here (`??` skips only unset values), so a
+    // TLS listener must not resurrect it. `baseOrigin: null` means the printers
+    // say nothing rather than guessing, and that is unchanged.
+    process.env.OS_AUTH_URL = '';
+    const r = resolveAuthBaseUrl(3000, 'https');
+    expect(r.value).toBe('');
+    expect(r.baseOrigin).toBeNull();
+  });
+});
+
 describe('resolveAuthBaseUrl — a usable base URL stays silent', () => {
   it.each([
     ['OS_AUTH_URL', 'https://app.example.com'],

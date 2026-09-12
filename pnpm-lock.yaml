@@ -158,6 +158,9 @@ importers:
       '@objectstack/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
+      '@objectstack/service-i18n':
+        specifier: workspace:*
+        version: link:../../packages/services/service-i18n
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../packages/spec
@@ -223,6 +226,9 @@ importers:
       '@objectstack/service-datasource':
         specifier: workspace:*
         version: link:../../packages/services/service-datasource
+      '@objectstack/service-i18n':
+        specifier: workspace:*
+        version: link:../../packages/services/service-i18n
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../packages/spec
@@ -287,6 +293,9 @@ importers:
       '@objectstack/runtime':
         specifier: workspace:^
         version: link:../../packages/runtime
+      '@objectstack/service-i18n':
+        specifier: workspace:*
+        version: link:../../packages/services/service-i18n
       '@objectstack/service-knowledge':
         specifier: workspace:*
         version: link:../../packages/services/service-knowledge
