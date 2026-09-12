@@ -705,13 +705,18 @@ export default defineConfig({
     // "THE NIGHTLY TIERS" for the population both read. Both `extends: true`
     // so each project inherits the `resolve.alias` table and the
     // `server.deps.external` entry above; each repeats the console-intercept
-    // disarm because the root-level one is inert under projects.
+    // disarm — and, since #17647, the registry log level — because a
+    // root-level value is inert under projects.
     projects: [
       {
         extends: true,
         test: {
           name: 'unit',
           disableConsoleIntercept: true,
+          // #13517: quiet the registry's per-item registration chatter — the
+          // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
+          // default. Enforced by scripts/check-registry-log-declared.mjs.
+          env: { OS_REGISTRY_LOG: 'warn' },
           include: UNIT_FILES,
         },
       },
@@ -720,6 +725,10 @@ export default defineConfig({
         test: {
           name: 'integration',
           disableConsoleIntercept: true,
+          // #13517: quiet the registry's per-item registration chatter — the
+          // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
+          // default. Enforced by scripts/check-registry-log-declared.mjs.
+          env: { OS_REGISTRY_LOG: 'warn' },
           include: INTEGRATION_FILES,
         },
       },

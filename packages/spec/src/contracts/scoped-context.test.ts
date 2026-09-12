@@ -289,6 +289,97 @@ describe('[#5945] the evidence bar is enforced, not just documented', () => {
   });
 });
 
+describe('[#16786] `updateById` DECLARES its answer, and the declaration is enforced', () => {
+  /**
+   * The remainder of #16786, after PR #17255 landed the `objectql` half.
+   *
+   * ## Why a probe and not an `@ts-expect-error`
+   *
+   * The same reason the module header above gives: a directive is satisfied by
+   * ANY error on the next line. The sibling pin on `IDataEngine`
+   * (`data-engine.test.ts`, #16231) can use directives because it leans on
+   * TS2578 — widening a member back makes the directive UNUSED, which is
+   * itself an error — but that mechanism is only read by
+   * `check:test-typecheck`, a gate OUTSIDE this suite. These probes fail in
+   * vitest itself.
+   *
+   * ## The failure this pin exists to catch, measured rather than assumed
+   *
+   * Reverting the member to `Promise<any>` does NOT redden the `legal-*`
+   * probes above: `legal-updateById` discards the result, and `any` compiles
+   * everywhere a narrow type does. It reddens exactly the first case below,
+   * and it reddens it by reporting NOTHING — an absent diagnostic IS the `any`
+   * reading. That is why the assertion is `toContain`, on a probe whose legal
+   * twin must stay clean: a harness that resolved nothing would report an
+   * empty string for BOTH, so the clean twin is the anti-vacuity control and
+   * `harness-self-test` is the "can this harness report at all" control.
+   *
+   * ## And why the diagnostic must NAME the shape
+   *
+   * The header records a phantom check caught only by running the reversal: a
+   * code-only assertion survived the revert because a DIFFERENT type produced
+   * the same code. So the assertion names `Record<string, any> | null` — the
+   * declared answer. `any` cannot produce that text, and neither can the
+   * `update` sibling's wider `Record<string, any> | number | null`, so a
+   * copy-paste of the wrong sibling's shape is caught too.
+   */
+  it('the answer cannot enter a record slot unnarrowed, and the null-checked read compiles', () => {
+    const results = compileProbes({
+      // The whole point of the declaration: a by-id update that matched no row
+      // answers `null`, and before this the call site was handed `any` and
+      // never asked.
+      'rejects-unnarrowed-updateById':
+        hook("const row: Record<string, any> = await ctx.api!.object('task').updateById('t1', { status: 'done' });"),
+      // Anti-vacuity twin: the CORRECT spelling must still compile clean, so
+      // the narrowing is a real answer shape and not a blanket refusal.
+      'legal-updateById-null-checked': hook([
+        "const row = await ctx.api!.object('task').updateById('t1', { status: 'done' });",
+        'if (row !== null) {',
+        '  const seen: unknown = row.status;',
+        '  void seen;',
+        '}',
+      ].join('\n')),
+      'harness-self-test': hook("const x: number = ctx.api?.object('user');"),
+    });
+
+    expect(render(results.get('harness-self-test')!), 'the harness must be able to report an error')
+      .toContain('TS2322');
+
+    const refused = render(results.get('rejects-unnarrowed-updateById')!);
+    // An EMPTY string here is the `Promise<any>` reading — this is the leg that
+    // goes red on a revert.
+    expect(refused, 'an unnarrowed record slot must be refused').toContain('TS2322');
+    expect(refused, 'the refusal must name the DECLARED answer shape, not merely error')
+      .toContain('Record<string, any> | null');
+    // ⛔ Not the `update` sibling's shape: `updateById` never reaches the
+    // predicate exit, so the affected-row count limb must not be declared here.
+    expect(refused, 'the count limb belongs to `update`, not to `updateById`')
+      .not.toContain('number | null');
+
+    expect(render(results.get('legal-updateById-null-checked')!), 'the null-checked read must compile clean')
+      .toBe('');
+  });
+
+  /**
+   * The runtime half, so the contract is implementable at the narrowed shape
+   * in BOTH directions — a record and the `null` a by-id miss resolves.
+   */
+  it('is implementable at the declared shape, null limb included', async () => {
+    const rows: Record<string, any>[] = [{ id: 'p1', status: 'open' }];
+    const repo: Pick<IScopedObjectRepository, 'updateById'> = {
+      updateById: async (id, data) => {
+        const found = rows.find((r) => r.id === id);
+        if (!found) return null;
+        Object.assign(found, data);
+        return found;
+      },
+    };
+
+    expect(await repo.updateById('p1', { status: 'filled' })).toEqual({ id: 'p1', status: 'filled' });
+    expect(await repo.updateById('nope', { status: 'filled' })).toBeNull();
+  });
+});
+
 describe('[#5945] IScopedContext is implementable', () => {
   it('accepts a minimal implementation', async () => {
     const rows = [{ id: 'c1', stage: 'hired', position_id: 'p1' }];
