@@ -292,19 +292,46 @@ describe('[#16178] a sub-day granularity is refused, not dropped', () => {
   // contract does not declare it", which is the honest sentence once the
   // declaration is gone. Both halves are pinned below.
   it.each(['second', 'minute', 'hour'])(
-    'refuses %s — now as the 400 the retirement makes correct, carrying the retirement prescription',
-    async (granularity) => {
-      // Asserted on `code` and `status` — the ADR-0112 envelope — plus the one
-      // sentence an upgrading author needs, because "is not declared" alone
-      // reads to them as a typo. A bare `toThrow()` would pass against a driver
-      // that threw for any unrelated reason.
-      const thrown = await query({
+    'refuses %s AT THE SCHEMA now, one door earlier, with the retirement prescription',
+    (granularity) => {
+      // The refusal MOVED rather than softened, and it moved toward the caller:
+      // a parsed body no longer reaches the driver at all. `query()` runs
+      // `AnalyticsQuerySchema.parse`, the route a real request body takes, so
+      // this cell measures the door a caller actually meets first.
+      //
+      // Asserted on the PRESCRIPTION, not on "it threw": a bare rejection is
+      // what zod's stock invalid-enum error already gives, and it would tell an
+      // author upgrading from 17 nothing about why the name they wrote last
+      // week is gone or what to write instead.
+      const parsed = AnalyticsQuerySchema.safeParse({
         ...BASE,
-        timeDimensions: [{ dimension: 'events.createdAt', granularity: granularity as 'day' }],
-      }).catch((e: Error & { code?: string; status?: number }) => e);
+        timeDimensions: [{ dimension: 'events.createdAt', granularity }],
+      });
+      expect(parsed.success, granularity).toBe(false);
+      if (parsed.success) return;
+      const message = parsed.error.issues.map((i) => i.message).join(' ');
+      expect(message, granularity).toContain('retired in protocol 18');
+      expect(message, granularity).toContain('os migrate meta --from 17');
+    },
+  );
+
+  it.each(['second', 'minute', 'hour'])(
+    'refuses %s at the DRIVER too, for the door that does not parse, as a 400',
+    async (granularity) => {
+      // The other door — `POST /analytics/dataset/query` types
+      // `selection.timeDimensions` from `AnalyticsQuery` and never Zod-parses
+      // them, which is the reachability `analyticsDateRangeUnrecognizedError`
+      // records for its own out-of-vocabulary refusal. 501 said "your query is
+      // right, this backend cannot"; that sentence became false the moment the
+      // contract stopped declaring the value, so the class is now 400 and the
+      // driver carries the retirement sentence itself rather than telling an
+      // upgrading author their spelling never existed.
+      const thrown = await unparsed(granularity).catch(
+        (e: Error & { code?: string; status?: number }) => e,
+      );
       expect(thrown).toMatchObject({ code: 'INVALID_QUERY', status: 400 });
-      expect((thrown as Error).message).toContain('retired');
-      expect((thrown as Error).message).toContain('protocol 18');
+      expect((thrown as Error).message, granularity).toContain('retired there');
+      expect((thrown as Error).message, granularity).toContain('protocol 18');
     },
   );
 
@@ -321,14 +348,16 @@ describe('[#16178] a sub-day granularity is refused, not dropped', () => {
   it('refuses on an EMPTY table too, so the refusal is the compile and not the data', async () => {
     // An unbucketed query over no rows answers `{rows: []}`; this one still
     // refuses, which places the refusal at compile time where the ruling put it.
+    // Driven through the unparsed door, because the parsed one now stops the
+    // value before any table — empty or not — is consulted at all.
+    const driver = new InMemoryDriver({ initialData: { events: [] } });
+    await driver.connect();
+    const service = new MemoryAnalyticsService({ driver, cubes });
     await expect(
-      query(
-        {
-          ...BASE,
-          timeDimensions: [{ dimension: 'events.createdAt', granularity: 'hour' as 'day' }],
-        },
-        [],
-      ),
+      service.query({
+        ...BASE,
+        timeDimensions: [{ dimension: 'events.createdAt', granularity: 'hour' }],
+      } as unknown as AnalyticsQuery),
     ).rejects.toMatchObject({ code: 'INVALID_QUERY', status: 400 });
   });
 
