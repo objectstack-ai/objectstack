@@ -58,9 +58,28 @@ import { RPC_QUERY_ALIAS_SLOTS } from '@objectstack/spec/data';
  * #6307 landed the first copy of this rule in `package-routes.ts`, on the
  * `?version=` of that registrar's package read/delete routes. Those routes are
  * gone (#14503 — the dispatcher's `/packages` domain is their single
- * implementation, and it reads no `version`), so the rule now has one home:
- * here, for the `rest-server.ts` read points — ONE rule and one message, not
- * a second implementation that drifts.
+ * implementation), so the rule has one home: here.
+ *
+ * That domain DOES read `?version=`: #17668 taught `GET /packages/:id` to
+ * honour it. An earlier version of this paragraph said it read none, which
+ * stopped being true the day that landed and left this module understating its
+ * own scope (#17672). A repeated occurrence there is refused with
+ * {@link repeatedQueryParamMessage} from here, so the home neither moved nor
+ * split: the rule serves TWO doors — the `rest-server.ts` read points through
+ * {@link refuseRepeatedQueryParams}, and that dispatcher domain through the
+ * message function alone — ONE rule and one message, not a second
+ * implementation that drifts.
+ *
+ * ⚠️ Why the dispatcher domain takes only the message: the two doors write
+ * their bodies through different builders. {@link refuseRepeatedQueryParams}
+ * puts the ADR-0112 body on `res` itself, which is right for the handlers in
+ * this package; a dispatcher domain RETURNS `{ handled, response }` and every
+ * error body on that surface is built by `@objectstack/runtime`'s
+ * `buildApiError`, whose envelope carries the `success` / `httpStatus` siblings
+ * this one does not — measured on #17672: the body written below fails that
+ * surface's `BaseResponseSchema` with `success is missing, must be a boolean`.
+ * So the message is the portable half and the gate is not: ⛔ a dispatcher
+ * domain calls {@link repeatedQueryParamMessage}, never this gate.
  */
 
 /**

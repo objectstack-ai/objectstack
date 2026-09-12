@@ -71,6 +71,17 @@ import { organizationIdForMetaWrite } from '@objectstack/metadata-core';
 // that already call it — the dataset query in `rest-server.ts`, the cold-boot
 // flow bind in `service-automation`, and `saveMetaItem`'s verbatim persist.
 import { stripReadDecorations } from '@objectstack/spec/kernel';
+// [#17672] The repo's ONE message for a single-valued query parameter supplied
+// more than once, from the module whose header is the authority on the rule
+// (`packages/rest/src/query-multiplicity.ts`). Imported, never restated: this
+// door carried its own sentence for the identical condition, which is the drift
+// that module's header forbids — and what stopped #17668 from importing it was
+// reachability alone, which this card closes.
+// ⛔ The gate beside it (`refuseRepeatedQueryParams`) is NOT what a dispatcher
+// domain calls: it writes the bare `{ error: { code, message } }` body onto a
+// `res`, and every error body on this surface is `deps.error`'s. See the
+// `@objectstack/rest` barrel entry that publishes the pair.
+import { repeatedQueryParamMessage } from '@objectstack/rest';
 import { setPackageDisabled } from '../package-state-store.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
@@ -566,16 +577,39 @@ function withWritableVerdict<T extends { manifest?: { id?: unknown }; id?: unkno
  * is live on every adapter this repo ships, so `?version=a&version=b` reaches
  * this door as `['a','b']` — a well-formed request carrying two conflicting
  * intents. Picking one silently is a wrong answer delivered as a success, which
- * is the defect class this card is about, so it is not done. The repo's ONE
- * rule for this condition answers `400 VALIDATION_ERROR`
- * (`refuseRepeatedQueryParams` / `repeatedQueryParamMessage` in
- * `packages/rest/src/query-multiplicity.ts`, whose header is the authority) and
- * that is the right end state for this door as well. ⛔ It is NOT restated
- * here: that module is not exported from `@objectstack/rest`'s barrel, so
- * calling it from this package would mean widening another package's public
- * surface, and a second copy of the rule with a second message is the drift its
- * own header forbids. Until the rule is reachable, this door says what it saw
- * and names no version — it does not answer `200` with the installed row.
+ * is the defect class #17416 is about, so it is not done.
+ *
+ * ## What it answers instead, and where that answer comes from (#17672)
+ *
+ * `400` with {@link repeatedQueryParamMessage} — the repo's ONE message for
+ * this condition, imported from `packages/rest/src/query-multiplicity.ts`,
+ * whose header is the authority on the rule. The status is the same one #6307
+ * chose for this same condition on this same route, and the code is
+ * `VALIDATION_ERROR`: `deps.error(msg, 400)` derives it from
+ * `standardErrorCodeForHttpStatus(400)`, the standard catalog's member for 400,
+ * so nothing in `packages/spec` moves for it.
+ *
+ * ⚠️ #17668 shipped this refusal as a `404` carrying a SECOND sentence written
+ * here, because that module was reachable from nowhere outside its package.
+ * That made a request-shape error indistinguishable from the two genuine
+ * not-founds this same door answers — "you asked for a version I do not have"
+ * and "no such id" — which is precisely what #17672 filed. The fix was
+ * reachability, not judgement: `@objectstack/rest`'s barrel now publishes the
+ * message and this door calls it, so the sentence a caller is told for a
+ * repeated parameter is the same one on every door that has the rule.
+ *
+ * ⛔ The gate beside it (`refuseRepeatedQueryParams`) is deliberately NOT
+ * called: it writes the bare ADR-0112 body onto a `res`, and this surface's
+ * envelope is `deps.error`'s, which adds the `success` / `httpStatus` siblings
+ * (measured — the gate's body fails `BaseResponseSchema` here). ⛔ And a copy
+ * of the rule in this package is never the answer: one rule, one message.
+ *
+ * ## Ordering — the id refusal still wins (#17416, unchanged)
+ *
+ * The multiplicity check stays where #17416 put the version scope: AFTER the id
+ * lookup. An id this registry does not hold is still answered
+ * `Package '<id>' not found`, whether or not a repeated `?version=` rode along
+ * — this card moved the status of a refusal, ⛔ not the order of two refusals.
  *
  * A one-element array is one occurrence encoded differently by an adapter and
  * is unwrapped, per that same rule's stated semantics.
@@ -594,12 +628,6 @@ function readRequestedVersion(raw: unknown): RequestedVersion {
     // `latest` is the installed row — see this type's header.
     if (raw === 'latest') return { kind: 'unscoped' };
     return { kind: 'exact', value: raw };
-}
-
-/** The one sentence this door answers a repeated `?version=` with. */
-function repeatedVersionMessage(id: string, count: number): string {
-    return `Package '${id}' — the "version" query parameter was supplied ${count} times, `
-        + 'so this read names no single version. Supply it at most once.';
 }
 
 /**
@@ -1317,9 +1345,13 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // here can be at the wrong version.
             const requested = readRequestedVersion(query?.version);
             if (requested.kind === 'repeated') {
+                // [#17672] A request-shape error, answered `400` in the shared
+                // rule's own words — ⛔ never a `404`, which says "not found"
+                // about a package that is right here. `deps.error` derives
+                // `VALIDATION_ERROR` from the status; see `readRequestedVersion`.
                 return {
                     handled: true,
-                    response: deps.error(repeatedVersionMessage(id, requested.count), 404),
+                    response: deps.error(repeatedQueryParamMessage('version', requested.count), 400),
                 };
             }
             if (requested.kind === 'exact') {
