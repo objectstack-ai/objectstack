@@ -56,6 +56,7 @@ import {
     demotedDeclaredCode,
     declaredUserMessage,
     declaredRefusalMessage,
+    isNativeErrorName,
     INTERNAL_ERROR_MESSAGE,
 } from '@objectstack/types';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
@@ -207,13 +208,18 @@ const UNCLASSIFIED_FAULT = (): { status: number; body: Record<string, unknown> }
  * the sandbox REFUSING is a fault, and so is the body FAULTING — only the
  * body's deliberate `throw` is an answer addressed to the caller.
  *
- * **Matched by constructor name, not by phrasing.** These eight are the ECMA-262
- * native error constructors (plus SpiderMonkey's `InternalError`, which QuickJS
- * also raises for stack exhaustion); the sandbox stringifies a thrown error as
- * `<name>: <message>`, so the name is structural evidence rather than a keyword
- * heuristic over prose. `Error:` is deliberately absent — a plain `Error` is the
- * documented way to author a refusal, and `userFacingMessage` strips that prefix
- * upstream anyway.
+ * **Matched by constructor name, not by phrasing**, and since #17681 by the ONE
+ * reader — {@link isNativeErrorName} in `@objectstack/types`, which owns the
+ * name list, the `^` anchor and the deliberate absence of a bare `Error:`. This
+ * file held the original copy; `@objectstack/objectql` and
+ * `@objectstack/runtime` each kept their own because the rule lived HERE and
+ * neither could reach it, and all three now read the one helper. ⛔ Do not
+ * re-inline the pattern: a name learned at one door and not the others is the
+ * same throw answered as a refusal at one boundary and a crash at the next.
+ *
+ * What stays local is the TRIM — `userFacingMessage` strips a leading `Error: `
+ * upstream, so what arrives here may still be padded, and the helper
+ * deliberately does not trim for its callers.
  *
  * **Deliberate, accepted cost:** a body that expresses a business rule as
  * `throw new RangeError('数量超出范围')` now gets the sanitised 500 instead of
@@ -226,11 +232,8 @@ const UNCLASSIFIED_FAULT = (): { status: number; body: Record<string, unknown> }
  * `sendThrownError`'s `logWithheldServerFault` (#5437) covers the routes that bypass
  * it — the same operator path {@link UNCLASSIFIED_FAULT} relies on.
  */
-const NATIVE_ERROR_NAME_RE =
-    /^(?:Type|Reference|Range|Syntax|URI|Eval|Internal|Aggregate)Error(?::|$)/;
-
 function isScriptFaultMessage(message: string): boolean {
-    return NATIVE_ERROR_NAME_RE.test(message.trim());
+    return isNativeErrorName(message.trim());
 }
 
 /**

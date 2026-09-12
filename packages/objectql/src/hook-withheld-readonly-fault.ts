@@ -1,5 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { isNativeErrorName } from '@objectstack/types';
+
 /**
  * [#17219] Name the withheld key when a `before*` hook faults reaching THROUGH
  * one — instead of letting the platform's own contract enforcement surface as
@@ -72,19 +74,6 @@
  */
 
 /**
- * The ECMA-262 native error constructors, plus SpiderMonkey's `InternalError`
- * which QuickJS also raises. Same structural rule — and same deliberate
- * omission of `Error:` — that `packages/rest`'s `isScriptFaultMessage` applies
- * one door down: a body's plain `Error` is the documented way to AUTHOR a
- * refusal, so it is never a crash and its words are never rewritten here.
- *
- * ⛔ Kept as its own copy rather than imported: `@objectstack/objectql` does not
- * depend on `@objectstack/rest`, and it must not start to for a regex.
- */
-const NATIVE_ERROR_NAME_RE =
-  /^(?:Type|Reference|Range|Syntax|URI|Eval|Internal|Aggregate)Error(?::|$)/;
-
-/**
  * Did the hook CRASH, as opposed to deliberately refusing?
  *
  * Two spellings, because a hook reaches this engine by two routes and they
@@ -99,12 +88,23 @@ const NATIVE_ERROR_NAME_RE =
  * A hook that threw an authored `Error` — sandboxed or not — answers `false` on
  * both, which is what keeps this from overwriting a business message that
  * `mapDataError` would otherwise serve to the caller verbatim.
+ *
+ * ⭐ The NAME LIST behind both spellings is {@link isNativeErrorName}
+ * (`@objectstack/types`, #17681) — the one reader `packages/rest`'s
+ * `isScriptFaultMessage` and `packages/runtime`'s `sandboxRefusalMessage` also
+ * call, with the same deliberate omission of a bare `Error:`. This module used
+ * to keep its own copy because the rule lived in `@objectstack/rest` and this
+ * package must not depend on rest for a regex; the shared home needs no such
+ * edge — `@objectstack/types` was already a dependency. ⛔ Do not re-inline it.
+ *
+ * The two SLOTS above stay local: which slot carries the name is this engine's
+ * own fact, and no other door has to ask both.
  */
 function isScriptCrash(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false;
   const e = err as { name?: unknown; innerMessage?: unknown };
-  if (typeof e.name === 'string' && NATIVE_ERROR_NAME_RE.test(e.name)) return true;
-  return typeof e.innerMessage === 'string' && NATIVE_ERROR_NAME_RE.test(e.innerMessage.trim());
+  if (typeof e.name === 'string' && isNativeErrorName(e.name)) return true;
+  return typeof e.innerMessage === 'string' && isNativeErrorName(e.innerMessage.trim());
 }
 
 /** Read a message off anything a hook may have thrown, without assuming a shape. */
