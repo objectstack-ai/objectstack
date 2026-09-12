@@ -1,7 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { isNativeErrorName } from '@objectstack/types';
-
 /**
  * [#17219] Name the withheld key when a `before*` hook faults reaching THROUGH
  * one — instead of letting the platform's own contract enforcement surface as
@@ -72,6 +70,8 @@ import { isNativeErrorName } from '@objectstack/types';
  * `strictReadonlyWrites` refusal and carries `drops` as part of its contract, so
  * borrowing it would make the error lie about which refusal happened.
  */
+
+import { isNativeErrorName } from '@objectstack/types';
 
 /**
  * Did the hook CRASH, as opposed to deliberately refusing?
