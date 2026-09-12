@@ -322,11 +322,11 @@ describe('PageSchema', () => {
   });
 
   it('answers `profiles:` with the permission-set route, not the retired key', () => {
-    const result = PageSchema.safeParse({ name: 'p', label: 'P', profiles: ['admin'] });
+    const result = PageSchema.safeParse({ name: 'deal_desk', label: 'Deal Desk', profiles: ['admin'] });
 
     expect(result.success).toBe(false);
-    const issue = result.error!.issues[0]!;
-    expect(issue.code).toBe('unrecognized_keys');
+    const issue = result.error!.issues.find((i) => i.code === 'unrecognized_keys')!;
+    expect(issue).toBeDefined();
     // The alias used to CORRECT the author into the retired vocabulary. It must
     // not name it any more, in either direction.
     expect(issue.message).toContain('no Profile concept');
@@ -335,11 +335,11 @@ describe('PageSchema', () => {
   });
 
   it('answers `assignedTo:` with the same sentence as `profiles:`', () => {
-    const result = PageSchema.safeParse({ name: 'p', label: 'P', assignedTo: ['admin'] });
+    const result = PageSchema.safeParse({ name: 'deal_desk', label: 'Deal Desk', assignedTo: ['admin'] });
 
     expect(result.success).toBe(false);
-    const issue = result.error!.issues[0]!;
-    expect(issue.code).toBe('unrecognized_keys');
+    const issue = result.error!.issues.find((i) => i.code === 'unrecognized_keys')!;
+    expect(issue).toBeDefined();
     expect(issue.message).toContain('no Profile concept');
     expect(issue.message).not.toContain('assignedProfiles');
   });
