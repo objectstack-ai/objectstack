@@ -285,7 +285,8 @@ export interface AdmittedValueShapeViolationTally {
  * spec. `beforeFind`/`afterFind` cover both `find` and `findOne`; the write
  * events cover both single-id and bulk (`multi: true`) writes (#3195). A hook
  * subscribing to anything outside this set would silently never fire, so
- * `registerHook` warns rather than accepting it blindly.
+ * `registerHook` refuses it where the name is one of the engine's own
+ * ({@link UNDISPATCHED_LIFECYCLE_HOOK_EVENTS}, #17713) and warns otherwise.
  *
  * ## WHEN `after*` fires, relative to the commit (#7477)
  *
@@ -326,6 +327,85 @@ const DISPATCHABLE_HOOK_EVENTS: ReadonlySet<string> = new Set([
   'beforeUpdate', 'afterUpdate',
   'beforeDelete', 'afterDelete',
 ]);
+
+/**
+ * [#17713] Every verb the engine can put on an {@link OperationContext}, as
+ * DATA rather than as a second hand-written list.
+ *
+ * The type annotation is the weld: `Record<Union, true>` is exhaustive in both
+ * directions, so a new engine method that widens `OperationContext['operation']`
+ * fails to compile here until the verb is added, and a verb dropped from the
+ * union makes its entry an excess property. `pnpm typecheck` compiles this file
+ * (it is `src`, not the test layer), so the weld is enforced by the package's
+ * own type check and not only by a test.
+ *
+ * It exists so {@link UNDISPATCHED_LIFECYCLE_HOOK_EVENTS} below is DERIVED. A
+ * hand-written list of "the events we refuse" would be this card's own defect
+ * one layer up: it would go stale the moment a verb is added, and silently.
+ */
+const ENGINE_OPERATION_VERBS: Record<OperationContext['operation'], true> = {
+  find: true,
+  findOne: true,
+  insert: true,
+  update: true,
+  delete: true,
+  count: true,
+  aggregate: true,
+};
+
+/**
+ * [#17713] The engine's own lifecycle-event NAMESPACE — `before`/`after` × every
+ * verb in {@link ENGINE_OPERATION_VERBS}. Fourteen names, of which
+ * {@link DISPATCHABLE_HOOK_EVENTS} is the eight the engine actually dispatches.
+ */
+const ENGINE_LIFECYCLE_HOOK_EVENTS: ReadonlySet<string> = new Set(
+  Object.keys(ENGINE_OPERATION_VERBS).flatMap((verb) => {
+    const suffix = `${verb.charAt(0).toUpperCase()}${verb.slice(1)}`;
+    return [`before${suffix}`, `after${suffix}`];
+  }),
+);
+
+/**
+ * [#17713] The GAP: a name inside the engine's own lifecycle namespace that the
+ * engine never dispatches. Derived, never typed out — the difference of the two
+ * sets above.
+ *
+ * Today it is exactly six: `beforeFindOne` / `afterFindOne`, `beforeCount` /
+ * `afterCount`, `beforeAggregate` / `afterAggregate`. Registering one of them is
+ * REFUSED at the door ({@link assertDispatchableHookEvent}) rather than warned
+ * about, because each is a name an author reaches for while believing they are
+ * subscribing to an engine lifecycle event — and what they get back is an inert
+ * declaration (ADR-0078: no silently inert declaration), which on a read filter
+ * means a guardrail that was never armed.
+ *
+ * ⚠️ The refusal is deliberately scoped to THIS set, not to "anything outside
+ * `DISPATCHABLE_HOOK_EVENTS`". A name outside the namespace entirely
+ * (`'myPlugin:flush'`) is a plugin dispatching its own event through the public
+ * {@link ObjectQL.triggerHooks} — the legitimate reading that made this branch a
+ * warn in the first place (#3195). That reading survives untouched; what stops
+ * being accepted is a near-miss spelling of the engine's OWN vocabulary, where
+ * no such reading exists.
+ */
+const UNDISPATCHED_LIFECYCLE_HOOK_EVENTS: ReadonlySet<string> = new Set(
+  [...ENGINE_LIFECYCLE_HOOK_EVENTS].filter((event) => !DISPATCHABLE_HOOK_EVENTS.has(event)),
+);
+
+/**
+ * [#17713] Test-visible view of the three sets the refusal is computed from, so
+ * a pin can drive its population FROM THE ENGINE instead of restating it — the
+ * acceptance criterion this card wrote ("a test per event name the engine
+ * exposes but never dispatches") is only meaningful if the population is read,
+ * not typed.
+ *
+ * Module-level export, deliberately NOT added to the package barrel
+ * (`src/index.ts` names its exports one by one), so this widens no published
+ * surface.
+ */
+export const HOOK_EVENT_DISPATCH_VOCABULARY = {
+  dispatchable: DISPATCHABLE_HOOK_EVENTS,
+  lifecycleNamespace: ENGINE_LIFECYCLE_HOOK_EVENTS,
+  undispatchedLifecycle: UNDISPATCHED_LIFECYCLE_HOOK_EVENTS,
+} as const;
 
 /**
  * [#4346] The alias slots the ENGINE option bags still admit, cut from the
@@ -1933,6 +2013,87 @@ function assertValidUnscopedMultiWriteFlag(
   );
 }
 
+/**
+ * [#17713] The per-seam prescription for a refused lifecycle event — what the
+ * author should have written instead, named concretely.
+ *
+ * The two seams are different repairs, and an author who is told only "this
+ * never fires" cannot tell them apart:
+ *
+ *  - **`*FindOne`** — the capability EXISTS and the author already has it.
+ *    `beforeFind`/`afterFind` fire for `findOne` too (the event attaches to
+ *    record materialization, not to the engine method), so the fix is a
+ *    one-word rename and nothing is lost.
+ *  - **`*Count` / `*Aggregate`** — there is no hook seam at all, by design
+ *    (`HookEvent` in `@objectstack/spec/data` says so: read authorization and
+ *    row filtering are the middleware's job). `count()` and `aggregate()` run
+ *    the middleware chain with the query AST on the operation context, so the
+ *    repair is a DIFFERENT API, not a different event name. This is the half
+ *    that would have saved the consumer on #17713: their read filter sat on
+ *    `beforeCount`, so a `limit`ed list's `total` counted rows the caller could
+ *    not see, and a `groupBy` was not narrowed at all.
+ */
+function undispatchedLifecycleEventPrescription(event: string): string {
+  if (event === 'beforeFindOne' || event === 'afterFindOne') {
+    const covering = event === 'beforeFindOne' ? 'beforeFind' : 'afterFind';
+    return (
+      `\`${covering}\` already covers \`findOne\` — the read events fire for BOTH \`find\` and `
+      + `\`findOne\`, because the event attaches to record materialization, not to the engine `
+      + `method. Register on '${covering}' instead; the handler sees single-record reads there.`
+    );
+  }
+  const verb = event.startsWith('before') ? event.slice(6) : event.slice(5);
+  const method = `${verb.charAt(0).toLowerCase()}${verb.slice(1)}`;
+  return (
+    `\`${method}()\` dispatches no hook at all, by design — it runs the MIDDLEWARE chain only, `
+    + 'with the query AST on the operation context. Filter it with '
+    + '`engine.registerMiddleware(fn)`, reading `ctx.operation === \'count\' | \'aggregate\'` and '
+    + 'composing your predicate onto `ctx.ast.where` — the same seam RLS and sharing already use, '
+    + 'so the scoping applies to the driver call itself. ⚠️ A read filter written as a HOOK does '
+    + 'not narrow a `total` or a `groupBy`: those surfaces would keep answering over rows the '
+    + 'caller cannot see.'
+  );
+}
+
+/**
+ * [#17713] Registration-time refusal for an event inside the engine's OWN
+ * lifecycle namespace that the engine never dispatches — see
+ * {@link UNDISPATCHED_LIFECYCLE_HOOK_EVENTS} for how that population is derived
+ * and why the refusal stops there.
+ *
+ * This was a `warn` from #3195 until #17713. The warning was loud (~40 lines a
+ * boot on the reporting install) and still useless: the registration SUCCEEDED,
+ * so a downstream consumer's read filters on `beforeFindOne` and `beforeCount`
+ * sat inert through every boot while the surface reported them registered. That
+ * is ADR-0078's prohibited fourth state — parsed, unmarked, silently inert — on
+ * an authorable seam, and on this seam the inert declaration is a GUARDRAIL: the
+ * author believes they narrowed what a caller can see, and they did not.
+ *
+ * A throw rather than a strict-mode-only failure, on the same reading as the
+ * four asserts above: the shape is statically decidable at the call site, it
+ * carries no recoverable intent that a warning could preserve, and a mode nobody
+ * turns on is a rule nobody gets. The `after*` names are refused alongside the
+ * `before*` ones even though the card only measured the `before*` half — they
+ * are the same gap, and refusing half a derived set would reintroduce the
+ * hand-written list.
+ *
+ * ⛔ NOT a general "unknown event names are refused". An event outside the
+ * namespace is left exactly as it was — a warn, then registered — so a plugin
+ * that dispatches its own events through the public {@link ObjectQL.triggerHooks}
+ * keeps working. That is the reading #3195 wrote down as the reason not to
+ * reject, and it is untouched here: this narrows the accept set by six names,
+ * not to eight.
+ */
+function assertDispatchableHookEvent(event: string): void {
+  if (!UNDISPATCHED_LIFECYCLE_HOOK_EVENTS.has(event)) return;
+  throw new Error(
+    `[ObjectQL] Hook '${event}' is an engine lifecycle event name the engine never dispatches, `
+    + 'so the registration would succeed and the handler would never run (ADR-0078: no silently '
+    + `inert declaration). ${undispatchedLifecycleEventPrescription(event)} `
+    + `Dispatched events: ${[...DISPATCHABLE_HOOK_EVENTS].join(', ')}.`,
+  );
+}
+
 /** Function registry entry — see `registerFunction`. */
 export interface FunctionEntry {
   handler: HookHandler;
@@ -2799,6 +2960,14 @@ export class ObjectQL implements IObjectQLEngine {
 
   /**
    * Register a hook
+   *
+   * [#17713] `event` must be one of {@link DISPATCHABLE_HOOK_EVENTS}, or a name
+   * outside the engine's lifecycle namespace entirely (a custom event a plugin
+   * dispatches itself through {@link ObjectQL.triggerHooks}). An engine
+   * lifecycle name the engine never dispatches — `beforeCount`, `beforeFindOne`
+   * and their siblings — is REFUSED here rather than registered inert; see
+   * {@link assertDispatchableHookEvent}.
+   *
    * @param event The event name (e.g. 'beforeFind', 'afterInsert')
    * @param handler The handler function
    * @param options Optional: target object(s), objects to exclude, and priority
@@ -2837,10 +3006,18 @@ export class ObjectQL implements IObjectQLEngine {
     assertHookScopeNotSelfCancelling(options?.object, options?.excludeObjects, event);
     // [#9719/#9974] The unscoped-multi-write flag on an event whose dispatch never reads it.
     assertValidUnscopedMultiWriteFlag(options?.dispatchUnscopedMultiWrite, event);
-    // [#3195] Guard against enum-vs-dispatch drift: a hook on an event the
-    // engine never triggers would register "successfully" and then silently
-    // never fire. Warn loudly rather than swallow it. Not a hard reject — a
-    // custom driver/plugin may dispatch its own events via `triggerHooks`.
+    // [#17713] An event inside the engine's OWN lifecycle namespace that the
+    // engine never dispatches — `beforeCount`, `beforeFindOne` and their four
+    // siblings. #3195 warned and registered anyway; the handler then never ran,
+    // which on a read filter is a guardrail the author believes they armed.
+    // Refused at the door, with the per-seam repair named.
+    assertDispatchableHookEvent(event);
+    // [#3195] Guard against enum-vs-dispatch drift for every OTHER unknown
+    // name: a hook on an event the engine never triggers would register
+    // "successfully" and then silently never fire. Warn loudly rather than
+    // swallow it. Still not a hard reject here — a custom driver/plugin may
+    // dispatch its own events via `triggerHooks`, and outside the engine's own
+    // vocabulary that is the likely reading (#17713 keeps it intact).
     if (!DISPATCHABLE_HOOK_EVENTS.has(event)) {
       this.logger.warn(
         `Hook registered for '${event}', which the engine never dispatches — it will never fire. ` +
