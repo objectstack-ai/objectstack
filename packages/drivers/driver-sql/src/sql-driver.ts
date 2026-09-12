@@ -108,6 +108,16 @@ import {
   type PhysicalColumn,
   type PendingSchemaWork,
 } from './schema-drift.js';
+// [#15989] The ADR-0104 column step's per-dialect statements. Built here, run
+// by `os migrate files-to-references --apply` — see {@link SqlDriver.planMediaColumnMove}.
+import {
+  isJsonColumnType,
+  mediaColumnMoveDialect,
+  mediaColumnMovePlan,
+  type MediaColumnMovePlan,
+  type MediaColumnMoveRefusal,
+  type MediaColumnMoveScan,
+} from './media-column-move.js';
 import {
   undeliveredStorageAttributes,
   formatAttribute,
@@ -11640,6 +11650,113 @@ export class SqlDriver implements IDataDriver {
     }
     out.sort((a, b) => (a.table === b.table ? (a.column ?? '').localeCompare(b.column ?? '') : a.table.localeCompare(b.table)));
     return out;
+  }
+
+  /**
+   * Every single-value media column on this datastore that still holds the
+   * legacy encoding, with the statements that move it (#15989).
+   *
+   * The read-only half of the ADR-0104 column step: it enumerates and plans,
+   * and it runs no DDL and no UPDATE. `os migrate files-to-references --apply`
+   * is what executes the plans, and only after its backfill and self-check
+   * have reported zero blocking rows — this method deliberately cannot tell
+   * whether that happened, so it must never be the thing that decides to move
+   * anything.
+   *
+   * ## The shape of each move is read off the COLUMN, never off the dialect
+   *
+   * A media column can already be a string column on a server dialect — `os
+   * generate migration --format sql` emits `VARCHAR(2048)` for the family, and
+   * a JSON-arm driver writes quoted ids into it (#15771, reproduced on live
+   * PostgreSQL 16.13). Deciding `retype` vs `unquote` from the dialect alone
+   * would leave that population full of `"file_…"` behind a `columns_moved_at`
+   * stamp claiming it had been converted. So each target is classified by
+   * introspection.
+   *
+   * ## What is left OUT, and why each omission is not a silent one
+   *
+   *  - a table the datastore does not physically have — nothing to move;
+   *  - `multiple: true` media — a list of ids, a JSON column on every
+   *    deployment and on both arms, and not part of this move at all (see
+   *    {@link mediaFields}, which already excludes it);
+   *  - a column the introspection cannot see — reported as a `refusals` entry
+   *    rather than skipped, because a column silently missing from a move is
+   *    the one way this step can under-report and still look complete;
+   *  - every dialect outside {@link MEDIA_COLUMN_MOVE_DIALECTS} — one refusal
+   *    naming the dialect. ⛔ MySQL lands here on purpose: #17788 owns its
+   *    statement order, on a real instance.
+   */
+  async planMediaColumnMove(): Promise<MediaColumnMoveScan> {
+    const dialect = mediaColumnMoveDialect(this.dialectName);
+    if (!dialect) {
+      return {
+        dialect: this.dialectName,
+        plans: [],
+        refusals: [
+          {
+            table: '*',
+            column: '*',
+            reason: 'dialect_not_supported',
+            detail:
+              `the ADR-0104 column step has no measured statement for dialect '${this.dialectName}'. ` +
+              'MySQL is tracked by #17788, where its statement ORDER is settled against a real ' +
+              'instance; no other dialect has been rehearsed. Nothing was planned and nothing ran.',
+          },
+        ],
+      };
+    }
+
+    const plans: MediaColumnMovePlan[] = [];
+    const refusals: MediaColumnMoveRefusal[] = [];
+
+    for (const [tableName] of this.managedObjectFields) {
+      const columns = this.mediaFields[tableName];
+      if (!columns || columns.length === 0) continue;
+      if (!(await this.knex.schema.hasTable(tableName))) continue;
+
+      let physical: IntrospectedColumn[];
+      try {
+        physical = await this.introspectColumns(tableName);
+      } catch (e: any) {
+        refusals.push({
+          table: tableName,
+          column: '*',
+          reason: 'introspection_failed',
+          detail:
+            `could not read the physical columns of '${tableName}' (${e?.message ?? e}), so the ` +
+            'shape of its media columns is unknown and no statement can be chosen for them.',
+        });
+        continue;
+      }
+      const byName = new Map(physical.map((c) => [c.name, c]));
+
+      for (const column of columns) {
+        const found = byName.get(column);
+        if (!found) {
+          refusals.push({
+            table: tableName,
+            column,
+            reason: 'column_absent',
+            detail:
+              `'${tableName}.${column}' is declared as a media field but the datastore has no such ` +
+              'column, so there is nothing here to move and nothing that could be verified moved.',
+          });
+          continue;
+        }
+        plans.push(
+          mediaColumnMovePlan(
+            dialect,
+            isJsonColumnType(found.type) ? 'retype' : 'unquote',
+            tableName,
+            column,
+          ),
+        );
+      }
+    }
+
+    plans.sort((a, b) => (a.table === b.table ? a.column.localeCompare(b.column) : a.table.localeCompare(b.table)));
+    refusals.sort((a, b) => (a.table === b.table ? a.column.localeCompare(b.column) : a.table.localeCompare(b.table)));
+    return { dialect, plans, refusals };
   }
 
   /**
