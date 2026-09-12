@@ -1,0 +1,30 @@
+{
+  "number": 2679,
+  "kind": "issue",
+  "title": "feat(spec): 允许对象默认列表视图使用 dropdown 快捷筛选(userFilters)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-07T15:12:46Z",
+  "updated_at": "2026-07-08T07:21:04Z",
+  "closed_at": "2026-07-08T07:21:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2679",
+  "body": "## 问题\n\nAirtable 风格的快捷筛选胶囊(`userFilters`,`element: 'dropdown'`)目前只能用在**页面列表**(InterfaceListPage,\"filters\" 模式)。**对象的默认列表视图**(\"views\" 模式)被护栏禁止携带 `userFilters`:\n\n- `packages/spec/src/ui/view.zod.ts` — `ObjectListViewSchema = ListViewSchema.omit({ userFilters: true })`,解析时静默剥离;\n- `packages/lint/src/validate-list-view-mode.ts` — `os validate` 预解析阶段整字段报错;\n- (objectui 侧)`ObjectView.renderListView` 运行时强制 `userFilters: undefined`。\n\nADR-0047 原始设计其实把 \"data 模式自动派生快捷筛选\" 写进了意图,phase-4 的一刀切抑制属于过度收敛。用户需要在**对象默认列表**上直接配置 Status / health 这类下拉胶囊。\n\n## 方案(ADR-0047 修订)\n\n在对象列表视图上**放开 `element: 'dropdown'`(及历史遗留 `toggle`)**,但**保留 `element: 'tabs'` 为页面专属**——对象视图的 ViewTabBar(已保存视图切换)已占据 tab 栏角色,`tabs` 会造成双 tab 栏冲突;需要 tab 预设时用 `listViews`。\n\n- 新增 `ObjectUserFiltersSchema`(element 限 `dropdown`/`toggle`;去掉 `tabs`/`showAllRecords`)。\n- `ObjectListViewSchema` 改为 `ListViewSchema.omit({ userFilters: true }).extend({ userFilters: ObjectUserFiltersSchema.optional() })`。\n- `validate-list-view-mode`:`quickFilters` 仍全禁;`userFilters` 仅在 `element: 'tabs'` / 携带 `tabs` 时报错,hint 指向 \"用 `listViews` 或移到页面列表\"。\n- 更新 `object-list-view.test.ts`、`validate-list-view-mode.test.ts`、`object.zod.ts` 注释、ADR-0047 修订说明。\n- app-showcase:在 `showcase_project` 默认列表加 dropdown `userFilters` 示例。\n\n> 配套 objectui 改动(放行 app-shell 运行时抑制)见 objectstack-ai/objectui 配套 issue/PR。\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 2871,
+  "kind": "pull_request",
+  "title": "feat(spec,platform-objects): action param 'visible' predicate; gate create-user phone on features.phoneNumber",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-13T03:29:32Z",
+  "updated_at": "2026-07-13T04:38:04Z",
+  "closed_at": "2026-07-13T04:38:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-13T04:38:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2871",
+  "body": "## What\n\nThe create-user form offers a **Phone Number** field that the default backend rejects — `{\"code\":\"invalid_request\",\"message\":\"Phone numbers require the phoneNumber auth plugin (auth.plugins.phoneNumber)\"}` — because `phoneNumber` is an opt-in better-auth plugin (off by default), yet the `sys_user` `create_user` action statically advertises the param. This makes the form *follow the plugin*: no phone field unless the plugin is loaded.\n\n## How\n\n- **`ActionParamSchema`** (`spec/ui/action.zod.ts`) gains an optional **`visible`** predicate (`ExpressionInputSchema` / CEL), evaluated against the same scope as action-level `visible` (`current_user` / `app` / `data` / `features`). A dialog that honors it omits the param when it's false.\n- **`sys_user.create_user`** (`platform-objects/identity/sys-user.object.ts`) gates its `phoneNumber` param on **`features.phoneNumber == true`**. `features.phoneNumber` is already served in `/api/v1/auth/config` (getPublicConfig), so the client can evaluate it.\n\nBack-compat: `visible` is optional; params without it are unaffected.\n\n## Verified\n\n- `ActionParamSchema.safeParse({...visible})` parses + preserves the predicate; a param without `visible` still parses.\n- Paired objectui change (`ActionParamDialog` honoring `param.visible`) is unit-tested (6 tests: feature-off hides, feature-on shows, absent-flag hides, malformed fails open, and the normalized `{dialect,source}` served form) with a browser regression showing the create-user dialog renders cleanly.\n\n## Pairs with\n\nobjectui **objectstack-ai/objectui#2406** — `ActionParamDialog` evaluates `param.visible`. Both must land for the phone field to hide (spec adds the field; objectui honors it).\n\n_Alternative considered — default-loading the phoneNumber plugin — was rejected: it turns an opt-in auth/sign-in surface (with an SMS-provider dependency for OTP) on for every deployment. \"Form follows plugin\" is the conservative fix._\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 2670,
+  "kind": "issue",
+  "title": "记录页头审批决策按钮（Approve/Reject）被 app 动作挤进溢出菜单；建议审批动作可优先渲染 + Action 增加显式排序",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "lizheng-steedos",
+    "id": 151509384,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-07T03:50:32Z",
+  "updated_at": "2026-07-08T15:00:37Z",
+  "closed_at": "2026-07-08T15:00:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2670",
+  "body": "## 背景\n\n承 plugin-approvals：记录处于待审批时，控制台会为审批人注入 Approve / Reject 动作。但在真实应用里发现，审批人打开待审批记录时，**页头主按钮是 app 自定义动作**（如“申请关闭商机”），而 **Approve / Reject 沉在 ⋯ 溢出菜单里**，审批人第一眼看不到该做的决策。\n\n## 问题（两点）\n\n1. **系统审批动作永远排在 app `record_header` 动作之后。** 实测某待审批商机，页头动作解析顺序为：\n   `申请关闭商机(主按钮) → 发起出差 → 打印商务方案 → Approve → Reject → 编辑/分享/删除`\n   即系统 Approve / Reject 被追加在所有 app 动作后面。\n\n2. **记录页头只把“第一个 visible 的 `record_header` 动作”渲染为唯一主按钮**，其余全部进 ⋯ 菜单。于是只要有任意 app `record_header` 动作可见，它就占据主按钮位，把审批决策挤走。\n\n结果：审批人必须点开 ⋯ 才能找到 Approve / Reject。\n\n## 复现\n\n1. 记录进入待审批（存在 pending approval，且当前登录用户是审批人）。\n2. 打开记录详情 → 页头主按钮是某个 app 动作，Approve / Reject 在 ⋯ 菜单里。\n\n## 目前的绕法（应用层，别扭）\n\n在每个 app 动作的 `visible` 里加“审批中则隐藏”，把**所有** app `record_header` 动作（含打印等）都藏起来，Approve 才会顶上来成为主按钮。问题：\n\n- 要逐个动作加条件，还得把第三方/打印动作一起藏；\n- 审批期间这些动作**彻底不可见**，而不是“排在 Approve / Reject 之后”——因为控制台无法把 app 动作排到系统审批动作之后。\n\n## 建议\n\n1. **待审批且当前用户是审批人时，控制台应优先/显著渲染 Approve / Reject**（例如作为主按钮，或独立的“审批决策”区），不被 app 动作挤进溢出菜单。\n2. 更通用地：**给 Action 增加显式的排序/优先级**（`order` / `priority`，或 `primary: true`）。目前“谁当主按钮”完全取决于 `defineStack({ actions })` 合并数组里的**注册顺序（跨文件）**——要调整只能全局重排 spread，脆弱且把不相关的功能耦合起来。有了显式优先级即可声明式地让审批决策（或任一关键动作）稳定占据主位，而不必靠隐藏其它动作来“腾位”。\n\n## 环境\n\nObjectStack + 内置 objectui 控制台（vendored bundle）。若已在较新 objectui 修复，烦请指个 issue / PR，我这边核实。\n"
+}

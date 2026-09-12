@@ -1,0 +1,32 @@
+{
+  "number": 2816,
+  "kind": "issue",
+  "title": "feat(identity): ADR-0092 实现 A — 通用身份表写守卫（registry 驱动 default-deny + sys_user 档案白名单）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-11T02:13:45Z",
+  "updated_at": "2026-07-11T07:30:57Z",
+  "closed_at": "2026-07-11T07:30:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2816",
+  "body": "## 背景\n\nADR-0092（`docs/adr/0092-sys-user-profile-field-delegation.md`，经 #2787 + #2808 落地）的实现工作第一阶段。这是**关键路径**：既是放开 `sys_user` 档案编辑的前置，也在堵一个现存安全洞 —— `admin_full_access`（通配符、无 RLS）今天可经通用 data API 裸写全部 `managedBy: 'better-auth'` 表的任意列（裸插 `sys_member` 自授成员身份、裸改 `sys_api_key`、裸删 `sys_session`），全部绕过 better-auth 副作用。\n\n## 范围（ADR-0092 D2 / D3 / D6）\n\n**D2 — 通用守卫（plugin-auth，`kernel:ready` 注册，模式同 SCIM provenance hook）**\n\n- `before{Insert,Update,Delete}` 引擎 hook，按 **schema registry 的 `managedBy === 'better-auth'` 标志**判定适用对象（不硬编码表清单；`default-permission-sets.ts` 的 `BETTER_AUTH_MANAGED_OBJECTS` 保持现状 = 权限集种子）。\n- 仅拦截**用户上下文**写入（context 带真实用户且非 `isSystem`）；better-auth adapter（无 context）、插件 `SYSTEM_CTX`、import 引擎调用直通。\n- default-deny：用户上下文的 insert / delete，以及无白名单注册对象的 update，一律 `FORBIDDEN` 级报错，**错误信息要指路**（\"use Invite / Create User / better-auth API\"）。\n- 唯一开口：`registerManagedUpdateWhitelist(object, fields)` registry，`beforeUpdate` 据此剥离名单外字段；剥空则抛错（响亮失败，非静默 no-op）。首条目：`sys_user → SYS_USER_PROFILE_EDIT_FIELDS`。\n- 覆盖单 id 与 `options.multi` 两种 update 形态。\n\n**D3 — 白名单同源模块**\n\n- 新模块（如 `sys-user-writable-fields.ts`）：`SYS_USER_PROFILE_EDIT_FIELDS = {name, image}`；`SYS_USER_IMPORT_UPDATE_FIELDS = {...PROFILE, phone_number, role}`（spread 派生，subset-by-construction）。\n- `admin-import-users.ts` 的私有 `UPDATE_ALLOWED_FIELDS` 替换为共享常量。\n\n**D6 — 会话缓存一致性**\n\n- `afterUpdate` hook（`object: 'sys_user'`）：用户上下文写入改动 Tier-1 字段后，令该用户在 secondary storage 的会话快照失效（具体键由 auth manager 负责）；未接 secondary storage 时 no-op。\n\n## 测试矩阵\n\n- [ ] 逐表：用户上下文 insert/delete/update 被拒（含错误信息指路断言）\n- [ ] `sys_user` update：名单外字段被剥离、纯名单外整包抛错、`{name, image}` 通过\n- [ ] system-context / 无 context（better-auth adapter 路径）直通不受影响\n- [ ] `options.multi` 批量 update 同样被过滤\n- [ ] import upsert 全流程回归（`SYSTEM_CTX` 直通 + 共享常量约束字段）\n- [ ] 白名单 registry 注册/未注册行为\n\n## 合并前硬性验证（ADR Risks 第 1 条）\n\ndefault-deny 最大风险是砸中未知的合法用户上下文写路径。合并前必须：\n\n1. 全量扫描仓库内对身份表的 `engine.update/insert/delete` 调用点，逐一确认上下文类型；\n2. dogfood 跑通：登录、邀请、建用户（含临时密码）、set-password、ban/unban/unlock、组织/团队生命周期、import-users、SSO/SCIM（若可用）。\n\n发现的合法路径**不得反射性加白名单**：真属内部写的改 system context，属管理操作的走/新建专用端点。\n\n## 交付物\n\n守卫 + registry + 共享模块 + import 重构 + 上述测试 + changeset（功能变更）。\n\n## 相关\n\n- ADR-0092（决策）· #2784（源 RFC）· #2766 / PR #2771（专用端点与导入）\n- 后续依赖本 issue：实现 B（affordance 翻转 + objectui 验证）"
+}

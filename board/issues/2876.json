@@ -1,0 +1,34 @@
+{
+  "number": 2876,
+  "kind": "pull_request",
+  "title": "chore: bump objectui to 2fb38edbeb12 (finish create-user phone fix — #2419)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-13T05:30:34Z",
+  "updated_at": "2026-07-13T05:39:04Z",
+  "closed_at": "2026-07-13T05:39:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-13T05:39:03Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2876",
+  "body": "## What\n\nBumps the pinned objectui SHA (`.objectui-sha`) from `9138e68413f3` →\n`2fb38edbeb12` so `scripts/build-console.sh` rebuilds the bundled Console from\nobjectui main including **objectstack-ai/objectui#2419**.\n\n## Why\n\nCompletes the **create-user phone fix** end to end. Recap of the three-part fix:\n\n1. objectui #2406 — `ActionParamDialog.filterVisibleParams` hides a param whose `visible` CEL predicate is false.\n2. framework #2871 — serves `create_user`'s `phoneNumber` param with `visible: 'features.phoneNumber == true'`.\n3. objectui #2419 — **the missing plumbing**: `resolveActionParams` now propagates `visible` from the served param through to the dialog (it was silently dropped, so the field kept rendering despite 1 + 2).\n\nThe running Console is built from this pinned SHA, so #2419 only reaches a\ndeployment once the pin advances — this PR.\n\n## Range\n\n`objectui 9138e68413f3...2fb38edbeb12` — one commit:\n\n- fix(app-shell): propagate action-param `visible` predicate through resolveActionParams (#2419)\n\n## After merge\n\n`scripts/build-console.sh` (run in CI/publish or locally) rebuilds\n`packages/console/dist` from the new SHA. In the create-user dialog the\n**Phone Number** field is then hidden whenever the `phoneNumber` auth plugin is\noff (`features.phoneNumber == false`), instead of offering a field the backend\nrejects.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

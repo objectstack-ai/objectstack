@@ -1,0 +1,35 @@
+{
+  "number": 2848,
+  "kind": "pull_request",
+  "title": "fix(settings): verified authz on settings routes — close unauthenticated write (Critical)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-12T08:45:22Z",
+  "updated_at": "2026-07-12T09:17:57Z",
+  "closed_at": "2026-07-12T09:17:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-12T09:17:55Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2848",
+  "body": "## Severity: Critical (unauthenticated remote write of platform configuration)\n\nFound by an adversarial security review of the request→`ExecutionContext` trust boundary (during the ADR-0090 D10 agent-security review). **Not related to the D10 agent work — a pre-existing issue in `@objectstack/service-settings`.**\n\n## The hole\n\nThe settings HTTP routes (`GET/PUT/POST /api/settings/*`) derived the caller's identity from **`x-user-id` / `x-tenant-id` / `x-permissions` request headers** (the route default `defaultContext`), and the write path `setMany` performed **no permission check at all**. The routes are registered on the raw Hono app (`IHttpServer`) with **no auth middleware**, and `os serve --server` composes the settings service + HTTP server by default.\n\nResult: an **unauthenticated** remote client could\n- `PUT /api/settings/<namespace>` (with `x-tenant-id: <victim>` or a global-scoped key) → **write tenant- or platform-scoped settings**, including the **auth security-policy**, localization, and company manifests;\n- `GET /api/settings` → **enumerate every namespace** (the `perms.size === 0 ⇒ return all` pass-through);\n- forge attribution via `x-user-id`.\n\n## The fix\n\n- **Verified identity.** `SettingsServicePlugin` now derives identity + capabilities from the platform's verified resolution — `resolveAuthzContext` (session cookie / API key / OAuth) — never from request headers. The route **default is now secure**: it trusts no identity header and yields an anonymous, denied context. A custom integration may still inject its own `contextFromRequest`.\n- **Capability gates.** The manifest's declared `readPermission` / `writePermission` are enforced for HTTP callers: reads of a protected namespace, writes, and actions require the declared capability (writes default to at least the read capability — **never ungated**). Enforced behind a new `enforced` flag set **only at the HTTP boundary**, so **in-process / boot callers** (`kernel.getService('settings')`, seeders, and the email/auth/storage/sms plugins that read their namespace) are **unchanged** and keep full trusted access.\n- Unauthenticated HTTP → `403 SETTINGS_FORBIDDEN`.\n\n## Behaviour change\n\nA deployment that relied on the old header-trusted default must present a real verified session / API-key / OAuth credential — which the console already does (cookie/token flows through `resolveAuthzContext`). The `contextFromRequest` option remains the escape hatch for bespoke gateways.\n\n## Tests\n\n- **Service-level** (`settings-service.test.ts`): enforced read/write/action gates; read-only capability cannot write; trusted (non-enforced) in-process callers bypass — pass-through preserved.\n- **Route-level** (`settings-routes.test.ts`): anonymous read hides protected manifests; anonymous write → 403; **spoofed `x-user-id`/`x-permissions` headers grant nothing**; a read-only caller may read but not write.\n- `@objectstack/service-settings` suite **144** green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

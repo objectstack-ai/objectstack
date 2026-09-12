@@ -1,0 +1,1 @@
+{"id":4932302986,"author":{"login":"os-zhuang","id":277994282,"type":"User"},"created_at":"2026-07-10T05:31:42Z","updated_at":"2026-07-10T05:31:42Z","html_url":"https://github.com/objectstack-ai/objectstack/issues/2735#issuecomment-4932302986","body":"Fixed in #2745 (merged): see the PR body for the root cause and verification (fresh-boot browser dogfood + full suite green)."}

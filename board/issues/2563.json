@@ -1,0 +1,30 @@
+{
+  "number": 2563,
+  "kind": "issue",
+  "title": "app-showcase: showcase_task.tabular carries a wrong-context userFilters block that ADR-0053 suppresses (P0-30 reclassified)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T06:47:04Z",
+  "updated_at": "2026-07-04T12:04:06Z",
+  "closed_at": "2026-07-04T12:04:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2563",
+  "body": "## Background\n\nDogfood finding P0-30 (\"view userFilters quick filters don't render at all\", docs/test/console-list-form-capability-report-2026-07.md) was investigated against objectui source and turns out to be **by design**, not a rendering bug:\n\n- objectui ADR-0053 (`docs/adr/0053-list-view-navigation-modes.md`): an object's default list (ObjectView, \"views\" mode) has exactly one nav control — the view switcher; `userFilters` belongs to page lists (InterfaceListPage, \"filters\" mode) only. The suppression landed in objectui PR #1801 (`app-shell/src/views/ObjectView.tsx` hardcodes `userFilters: undefined` in views mode).\n- The real defect is that the drop was **silent** (ADR-0053 phase-4 guardrail never landed) — filed as objectui#2219, fixed by objectui#2220 (one-shot console warning).\n\n## What's wrong in this repo\n\n`examples/app-showcase/src/views/task.view.ts` — the `tabular` list view carries a `userFilters` block (with a stale ADR-0047 comment) that can never render in an object list view. Ironically the same file's header comment (lines ~29-34) already states the ADR-0053 rule correctly, and the repo's page examples (`task-workbench.page.ts`, `task-triage.page.ts`, `active-projects.page.ts`) demonstrate the correct filters-mode usage.\n\nA showcase that demos a field the console is designed to ignore is actively misleading (it's how P0-30 got filed).\n\n## Fix\n\n1. Remove the wrong-context `userFilters` block from the `tabular` view; point the comment at the ADR-0053 split (named views here, userFilters in the page examples).\n2. Update the test report: reclassify P0-30 from \"rendering bug\" to \"by-design suppression + silent-drop DX gap (objectui#2219/#2220) + wrong-context showcase metadata (this issue)\". Also mark P0-29 as fixed upstream (objectui#2218)."
+}

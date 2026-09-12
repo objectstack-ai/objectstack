@@ -1,0 +1,36 @@
+{
+  "number": 2712,
+  "kind": "pull_request",
+  "title": "feat(mcp): default-on MCP surface — opt out with OS_MCP_SERVER_ENABLED=false (#2698)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-09T06:04:30Z",
+  "updated_at": "2026-07-09T06:30:28Z",
+  "closed_at": "2026-07-09T06:30:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-09T06:30:26Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2712",
+  "body": "Follow-up to #2709 (owner decision): MCP is a **core platform capability** and should not hide behind an opt-in flag. `/api/v1/mcp` is now served — and advertised in `/discovery` — by default, and the OAuth 2.1 / DCR track follows it, so a fresh deployment is connectable by any MCP client with zero configuration. Opt out with `OS_MCP_SERVER_ENABLED=false`.\n\n## What changed\n\n- **New single decision point** `isMcpServerEnabled()` in `@objectstack/types` (default **on**; explicit `false`/`0`/`off`/`no` disables). The four former ad-hoc `=== 'true'` readers all delegate to it: the runtime dispatcher's `/mcp` route gate, the CLI's MCP plugin auto-load, the REST `/discovery` advertisement, and plugin-auth's `readMcpServerEnabledEnv` (which the OAuth-provider/DCR follow-defaults build on). The served route, the advertised route, and the authorization track can no longer disagree.\n- **Env var is now tri-state**: unset → HTTP surface on; explicit `true` → additionally auto-start the long-lived **stdio** transport at boot (unchanged, deliberately still opt-in — a default must not claim the process's stdin/stdout); explicit `false` → everything off, fail-closed (404 route, no `.well-known` metadata, no DCR, no discovery advertisement).\n- OAuth 2.1 TLS rule unaffected: plain-HTTP non-loopback origins keep the OAuth track dark and stay API-key-only.\n- Docs updated (environment-variables, deployment, api, ai/agents, build-with-claude-code, mcp README) + changesets.\n\n## Verification\n\n- Unit: runtime 472 ✓, plugin-auth 285 ✓, rest 217 ✓, cli 466 ✓, mcp 62 ✓, types 7 ✓ (default-on cases added; legacy plugin-list suite pinned to opted-out so it keeps testing config resolution in isolation).\n- Live on the showcase app:\n  - **default boot (no env)**: `/.well-known/oauth-protected-resource` 200, `/discovery` advertises `routes.mcp`, unauthenticated `/api/v1/mcp` → 401 + `WWW-Authenticate` challenge, DCR register → 200.\n  - **`OS_MCP_SERVER_ENABLED=false` boot**: all of the above 404 and `routes.mcp` dropped.\n\nRefs #2698.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

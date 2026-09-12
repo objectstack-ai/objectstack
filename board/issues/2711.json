@@ -1,0 +1,35 @@
+{
+  "number": 2711,
+  "kind": "pull_request",
+  "title": "feat(security)!: ADR-0090 P3 — security publish linter (D7), delegated administration (D12), BU assignment anchor",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-09T06:00:02Z",
+  "updated_at": "2026-07-09T06:30:21Z",
+  "closed_at": "2026-07-09T06:30:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-09T06:30:19Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2711",
+  "body": "## Summary\n\nThird wave of ADR-0090 (Permission Model v2): the **D7 security-domain publish linter** and **D12 delegated administration**, plus the Addendum's assignment-level BU anchor and a D3 vocabulary sweep. Follows #2695 (ADR), #2697 (P1), #2708 (P2).\n\n### D7 — security publish linter (`@objectstack/lint` → `os compile` / `os lint`)\n\n`validateSecurityPosture(stack)` — pure, spec-only, shared shape with every other lint rule. Error rules **gate `os compile`**; each mirrors a runtime enforcement point (ADR-0049: no advisory security):\n\n| Rule | Origin |\n|---|---|\n| `security-owd-unset` (error) | objectui#2348 leave_request incident |\n| `security-owd-alias` (error, fix-it) | D4 canonical enum |\n| `security-external-wider-than-internal` (error) | D11 external ≤ internal |\n| `security-wildcard-vama` (error) | ADR-0066 superuser wildcard |\n| `security-anchor-high-privilege` (error) | D5/D9 — isDefault (everyone-suggested) sets held to the anchor tier |\n| `security-role-word` (error) | D3 vocabulary freeze (ARIA/page roles exempt) |\n| `security-private-no-readscope` (info) | admin-intent mismatch class |\n\n**The linter immediately paid for itself**: it caught `examples/app-crm` shipping **six objects with no OWD**, two more in app-showcase, a `role` field on `showcase_project_membership`, and undeclared OWD across the CLI's golden AI-authoring corpus — all fixed here (grandfather stamps per the P1 pattern; `role`→`engagement`).\n\n### D12 — delegated administration (`DelegatedAdminGate`, plugin-security)\n\n- New spec shape `PermissionSetSchema.adminScope` (`businessUnit` + `includeSubtree` + `manageAssignments`/`manageBindings`/`authorEnvironmentSets` + `assignablePermissionSets[]`), persisted as `sys_permission_set.admin_scope`, hydrated by the dbLoader and both seed paths.\n- Writes to `sys_user_position` / `sys_position_permission_set` / `sys_user_permission_set` / `sys_permission_set` are now **governed**: tenant-level admins (ADR-0066 wildcard) pass through to ordinary CRUD/RLS; delegates need a covering scope; **plain CRUD on RBAC tables no longer makes a permission administrator** (fail closed).\n- Delegate rules: assignments must be **anchored inside the subtree** (`business_unit_id`), every set reached must be **allowlisted (to others AND themselves)**, bindings require the position's full blast radius inside the subtree, single-row writes only, `granted_by` auto-stamped.\n- **Strict containment**: granting or authoring a set that itself carries an `adminScope` requires a held scope that strictly contains it — handing your own exact scope to a peer is refused (no lateral propagation).\n- `everyone`/`guest` stay tenant-level only; stored assignments to an anchor are rejected for **every** caller (anchors are implicit).\n\n### Addendum — assignment-level BU anchor\n\n`sys_user_position.business_unit_id` (+ index) with its three sanctioned consumers: D12 boundary (enforced here), audit fact, and the depth-anchor contract documented on `IHierarchyScopeResolver` for enterprise resolver implementations. Capability bits are never BU-scoped.\n\n### D9 tightening + D3 sweep\n\n- `describeHighPrivilegeBits` moved to `@objectstack/spec/security` (single definition for lint + runtime; re-exported from plugin-security); new `describeAnchorForbiddenBits` — **guest bindings now also reject edit bits** (read-only tier; create stays the case-by-case exception).\n- One-step renames (no aliases, pre-launch): `SysRole`→`SysPosition`, `SysUserRole`→`SysUserPosition`, `SysRolePermissionSet`→`SysPositionPermissionSet`; `sys_position` actions/list views/labels de-roled; `sys_business_unit_member.role_in_business_unit`→`function_in_business_unit` (+ 4-locale label updates).\n\n### Out of scope (deliberate)\n\n- D6 explain engine + access-matrix snapshot gate and the human-approval publish workflow → P4.\n- D10 agent assignment-time ceilings → needs principal-linked user rows (P4; `ai_seat` is request-time synthesized today).\n- Enterprise `hierarchy-scope-resolver` depth-anchor implementation lives in the cloud repo (contract documented here).\n\n## Verification\n\n- New: lint 17/17, delegated-admin gate 24/24, anchor tiers 8/8, spec AdminScope 27/27\n- Suites: plugin-security 225, core 315, runtime 463, plugin-sharing 75, platform-objects 71, cli 466 (golden corpus re-baselined with OWD), objectql 804, metadata-core 100, downstream-contract 14\n- **Dogfood 39 files / 191 tests green**; `example-crm` + `example-showcase` + `app-todo` + `embed-objectql` compile with the linter active\n- `check:liveness` ✓ (adminScope entry, stale isProfile entry removed) · `check:api-surface` ✓ · changeset: major (plugin-security, platform-objects) / minor (spec, lint, cli)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_012oLzaP8n7A3YKFmgaHWC8H\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012oLzaP8n7A3YKFmgaHWC8H)_"
+}

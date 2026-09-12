@@ -1,0 +1,32 @@
+{
+  "number": 2684,
+  "kind": "issue",
+  "title": "PUT /api/v1/meta/:type/:name is hard to discover — add a POST convenience alias",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "akarma-synetal",
+    "id": 112554634,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-08T04:36:39Z",
+  "updated_at": "2026-07-08T12:14:50Z",
+  "closed_at": "2026-07-08T12:14:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2684",
+  "body": "### Problem\n\nThe save endpoint for metadata items is registered as `PUT /api/v1/meta/:type/:name` in `packages/rest/src/rest-server.ts`. This is correct REST semantics, but creates discoverability friction:\n\n1. **Only PUT is accepted.** Many API clients and tools default to POST (Postman defaults, `fetch` with body, `curl -d`). Sending a POST to the correct path returns a generic 404 with no hint that PUT is the expected method.\n\n2. **No helpful error when `:name` is missing.** A request like `POST /api/v1/meta/view/?mode=draft` (trailing slash, missing name segment) doesn't match `/:type/:name` and returns `{\"error\":\"Not found\"}`. Callers have no way to distinguish \"route doesn't exist\" from \"URL is malformed.\"\n\n### Proposed solution\n\n**A.** Register a POST alias in `registerMetadataEndpoints()` (at `packages/rest/src/rest-server.ts` ~line 2746) that delegates to the same handler as the PUT route. This is safe because:\n\n- Sub-routes (`/publish`, `/rollback`) are already registered as more-specific POST paths that match first\n- The handler uses `?mode=draft` query param (not HTTP method) to distinguish draft saves\n\n**B.** Optionally register a descriptive error handler on `/:type` alone so that incomplete URLs return a useful message instead of a generic 404.\n\n### Expected outcome\n\n```bash\n# Before\n$ curl -X POST http://localhost:8080/api/v1/meta/view/my_view?mode=draft -d '{}'\n{\"error\":\"Not found\"}\n\n# After\n$ curl -X POST http://localhost:8080/api/v1/meta/view/my_view?mode=draft -d '{}'\n{\"name\":\"my_view\", ...}   # works via POST alias\n```\n\n### Where\n\n`packages/rest/src/rest-server.ts` — `registerMetadataEndpoints()`, PUT handler around line 2746"
+}

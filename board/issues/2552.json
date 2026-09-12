@@ -1,0 +1,30 @@
+{
+  "number": 2552,
+  "kind": "issue",
+  "title": "objectql: write pipeline accepts scalar values for multi-value fields (multiselect/tags/select+multiple/lookup+multiple), corrupting stored shape",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T01:18:02Z",
+  "updated_at": "2026-07-04T02:52:31Z",
+  "closed_at": "2026-07-04T02:52:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2552",
+  "body": "## 现象(实测)\n\n对 multiselect 字段直接 PATCH 一个标量字符串,服务端 200 接受并原样落库(应为数组):\n\n```bash\n# labels 字段定义:type:'multiselect'(examples/app-showcase/src/objects/project.object.ts:65-75)\ncurl -X PATCH /api/v1/data/showcase_project/<id> -d '{\"labels\":\"frontend\"}'\n# → 200,读回 \"labels\": \"frontend\"   ← 标量,数据形状已损坏\n```\n\n写坏后,依赖数组形状的消费方(网格 chips 渲染、$filter contains、汇总/分组)行为不可预期。console 旧版批量编辑正是这样把多值字段整列写坏的(objectui#2186 修了 UI 侧,但服务端至今不设防)。\n\n## 根因(扫码)\n\n`packages/objectql/src/validation/record-validator.ts` 对多值字段只校验\"元素内容\",从不校验/归一化\"值形状\":\n\n1. **multiselect / checkboxes / tags**(`record-validator.ts:210-220`):\n   ```ts\n   const arr = Array.isArray(value) ? value : [value];  // L213:标量被临时包装仅用于选项检查\n   ```\n   标量通过校验后**原样**传给 driver 落库;且 `options` 为空时(tags 常态、L212)直接 `return null`,零检查。\n\n2. **select / radio + `multiple: true`**(`record-validator.ts:203-209`):分支完全不看 `def.multiple`。数组值会被 `String(value)` 拼成 `\"a,b\"` 报 `invalid_option`(合法多选反被拒),标量则照单全收。\n\n3. **lookup + `multiple: true`**(`record-validator.ts:222-225`):`return null`,任何形状(标量/对象/嵌套)全放行。\n\n调用链上没有任何一层补救:HTTP handler 原样透传 body(`packages/runtime/src/http-dispatcher.ts:1758-1764`)→ `engine.update()` 只调上述 validateRecord(`packages/objectql/src/engine.ts:2266/2279`,insert 同:2132/2150)→ SQL driver 的 `formatInput()` 只做 JSON 序列化不做形状矫正(`packages/plugins/driver-sql/src/sql-driver.ts:3085-3148`)。POST/insert、SeedLoader(走同一 engine.insert/update)全部同样裸奔。\n\n## 影响面\n\n- `type: 'multiselect' | 'checkboxes' | 'tags'`:标量静默落库\n- `type: 'select' | 'radio'` + `multiple: true`:数组被误拒 400、标量静默落库\n- `type: 'lookup'` + `multiple: true`(含 `Field.user({multiple:true})` 等):零形状校验\n- 入口:REST PATCH/POST、engine.insert/update 全部调用方、种子加载\n\n## 修复方案\n\n1. 新增 `normalizeMultiValueFields(schema, data)`:对多值字段(multiselect/checkboxes/tags,及 select/radio/lookup 带 multiple)把标量包装为单元素数组(宽容旧客户端,Postel 法则),在 engine 4 个 validateRecord 调用点之前调用。\n2. `validateOne` 补形状校验:归一化后仍非数组(对象等不可解形状)→ 新错误码 `invalid_type` 400;select/radio+multiple 走多值分支逐元素对照 options。\n3. 单测覆盖:标量归一化、非法形状 400、select+multiple 数组合法化(现状回归:数组被误拒)。\n"
+}

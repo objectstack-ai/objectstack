@@ -1,0 +1,35 @@
+{
+  "number": 2832,
+  "kind": "pull_request",
+  "title": "feat(identity): sys_user 放开档案字段标准编辑 affordance（ADR-0092 D4，closes #2817）",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-11T07:50:49Z",
+  "updated_at": "2026-07-11T12:20:58Z",
+  "closed_at": "2026-07-11T12:20:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-11T12:20:56Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2832",
+  "body": "## 概要\n\nADR-0092 D4（#2817）—— `sys_user` 档案字段经标准编辑表单可编辑,**运行中的 Console 端到端验证通过**(编辑 name → 落库;email/role 只读)。守卫 #2828 仍确保用户上下文只能改 `{name, image}`。\n\n三块协同改动:\n\n1. **sys_user schema**（`platform-objects`）— `userActions:{edit:true}`;`name`/`image` 可编辑,其余标 `readonly`。\n2. **`/me/permissions` 提示 = 权限 ∩ 守卫**（`plugin-hono-server`,新增 `foldWildcardSuperUser` + `clampManagedObjectWrites` + 8 单测)。\n3. **`.objectui-sha` → 5da9905** — 拉入 objectui #2395（`ObjectForm` 按 `userActions.edit` 逐字段渲染)。\n\n## 根因与完整修复（浏览器验证中发现,逐层查明)\n\n放开 affordance 后表单仍全禁用,原因是**两个独立门**:\n- objectui 一刀切禁用 managed 对象 → **#2395 已修**(已合并)。\n- `/me/permissions` 客户端 FLS 与服务端强制不一致。\n\n服务端对身份表有**两层**强制:**权限集**(`checkObjectPermission`,最宽松合成、无 deny-wins,admin 的 `modifyAllRecords` 通配符放行)**∩** **身份写守卫 #2828**(全 `managedBy:'better-auth'` 表默认拒用户上下文写,仅 `sys_user` 开 `edit`)。`/me/permissions` 原来两层都没反映,于是:\n\n1. `foldWildcardSuperUser` 折入通配符超级用户位 → 修**假阴性**(admin 看不到 sys_user 可编辑,但 `PATCH /data/sys_user{name}`→200 证明服务端放行)。\n2. `clampManagedObjectWrites` 按守卫策略夹回 → 修 fold 引入的**假阳性**:`sys_member`/`sys_account`/`sys_session` 等无白名单托管表夹回 `allowEdit:false`(read 保留),与守卫一致。仅夹 `better-auth` 对象(守卫只管它们);system/config/append-only 无此守卫,权限集结果照旧(admin 可经 data API 写,提示不得漏报)。\n\n**结果:客户端 per-object FLS = 真实服务端强制(权限 ∩ 守卫)**,双向不一致均消除。此前担心的\"admin 在所有 system 表看到编辑按钮\"的影响面已由 clamp 消除。\n\n## 验证\n\n- 单测:`foldWildcardSuperUser`+`clampManagedObjectWrites`(8 例)、objectui `ObjectForm.managedEdit`(3 例,随 #2395)、身份守卫(随 #2828)。plugin-hono-server 全套 64、platform-objects 76 通过。\n- 浏览器 e2e(showcase + seeded admin):Edit → 仅 Name/Profile Image 可编辑 → Update → `/data/sys_user` 落库;email/role 不可编辑;Create/Invite 弹窗不受影响。\n- `/me/permissions` 实测:`sys_user.allowEdit` true(可编辑)、`sys_member/session/account.allowEdit` false(read 保留)—— 与守卫逐表一致。\n\n## 相关\n\nADR-0092 D4/D5 · closes #2817 · 修复 #2836（权限合成 finding）· 依赖已合并 #2828、objectui #2395 · 关联 #2833\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01YGAN5VvvBi4YRGwpNT6e21"
+}

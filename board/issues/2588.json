@@ -1,0 +1,33 @@
+{
+  "number": 2588,
+  "kind": "issue",
+  "title": "Authored (Studio) hooks never execute their body — no bodyRunner on the metadata-service bind path",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T15:38:00Z",
+  "updated_at": "2026-07-04T17:17:24Z",
+  "closed_at": "2026-07-04T17:17:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2588",
+  "body": "## Summary\n\nA hook authored in the Studio (i.e. saved as `hook` metadata via `protocol.saveMetaItem` / `publish-drafts`, not `defineStack`) **never executes its `body`** — on publish, and **even after a full restart**. The hook loads into the registry (it shows up in `GET /meta/hook`), but its logic silently never runs. This is a \"declared-but-not-wired\" runtime-authoring gap, not a stale-cache/rebind bug.\n\nFound while generalizing the flow publish-rebind fix (#2576, follow-up #2560). Only flows was a true rebind bug; hooks is deeper.\n\n## Runtime evidence (clean-instance showcase, verified)\n\n1. Authored an L2 hook into a writable base package `com.example.ops`:\n   ```json\n   { \"name\":\"rebind_probe_hook\", \"object\":\"showcase_task\", \"events\":[\"beforeUpdate\"],\n     \"body\":{ \"language\":\"js\", \"source\":\"ctx.input.assignee = 'HOOKED';\" }, \"priority\":10 }\n   ```\n2. `POST /packages/com.example.ops/publish-drafts` → then `PATCH` a `showcase_task` record → `assignee` was **not** set to `HOOKED` (hook didn't fire).\n3. **Restarted the server** → `PATCH` again → still **not** `HOOKED`. `GET /meta/hook` DOES list `rebind_probe_hook` (it's loaded, its body just never runs).\n4. **Control**: the showcase's own `defineStack` hook `showcase_normalize_task_title` (trims the title on `beforeUpdate`) **does** fire (`\"  spaced  \"` → `\"spaced\"`). So event/targeting works — the failure is isolated to the authored-hook bind path.\n\n## Root cause\n\nTwo hook-bind paths get different treatment:\n\n- **defineStack / bundle hooks** — `packages/runtime/src/app-plugin.ts:402` binds them **with** a `bodyRunner`: `hookBodyRunnerFactory(new QuickJSScriptRunner(), {...})`. Bodies run.\n- **authored / metadata-service hooks** — `packages/objectql/src/plugin.ts:978` binds them with **no** `bodyRunner`: `bindHooks(items, { packageId: 'metadata-service' })`.\n\n`bindHooksToEngine` skips any hook whose `body` is set when it has no runner (`packages/objectql/src/hook-binder.ts:144` — \"hook body present but no bodyRunner supplied\"). There is a fallback `engine._defaultBodyRunner` (`engine.ts:516-517`) and a setter `engine.setDefaultBodyRunner()` (`engine.ts:537`) — but **`setDefaultBodyRunner` is never called anywhere in the repo**, so the fallback is always undefined and authored hook bodies are silently dropped.\n\n## Impact\n\n`priority:p1`. Silent data-integrity failure: a user authors a `beforeInsert`/`beforeUpdate` normalization or a gated `after*` side-effect in the Studio, sees it saved, and it **never runs** — no error, no log. `hook` is a first-class authorable type (`hook.form.ts` Studio form exists; `HookSchema` full-featured). Part of the \"Studio authoring dead-ends\" family.\n\n## Proposed fix (two parts)\n\n1. **Wire a default bodyRunner at boot** so authored hooks execute at all. The runtime already builds one for defineStack hooks — call `ql.setDefaultBodyRunner(hookBodyRunnerFactory(new QuickJSScriptRunner(), { ql, logger, ... }))` once at boot (runtime/AppPlugin), so the metadata-service bind path (which passes no explicit runner) picks it up via the existing `_defaultBodyRunner` fallback. Also thread the `functions` map for string-`handler` hooks.\n2. **Rebind on publish** — have the objectql plugin subscribe to `metadata:reloaded` (fired on publish since #2576) and re-run `bindHooks(freshHooks, { packageId: 'metadata-service' })` (idempotent: `bindHooksToEngine` calls `unregisterHooksByPackage` first, so removed hooks tear down). Mirrors `service-automation`'s `resyncFlowsFromProtocol`.\n\n## ⚠️ Design decision needed first\n\nShould runtime-authored (DB-stored, non-code-reviewed) hooks be allowed to run sandboxed JS **at all**? The missing `setDefaultBodyRunner` call may be a deliberate gate rather than an oversight. QuickJS is capability-gated and `hook.form.ts` exists (suggesting intent = yes), but this is a privilege/security boundary the platform owner should confirm before part (1) lands. If the answer is \"no, hooks are code-only\", the fix is instead to stop the Studio from letting users author a hook that can never run.\n\nContext: post-#2576 boot-cached-consumer audit. Companion issues: authored translations (i18n) and runtime-created sharing rules have related runtime-authoring gaps.\n"
+}

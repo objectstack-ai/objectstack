@@ -1,0 +1,34 @@
+{
+  "number": 2584,
+  "kind": "pull_request",
+  "title": "docs(site): restructure IA into module-first single sidebar",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T15:10:40Z",
+  "updated_at": "2026-07-04T15:31:25Z",
+  "closed_at": "2026-07-04T15:25:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-04T15:25:22Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2584",
+  "body": "# Docs IA restructure: module-first single sidebar\n\nComplete restructure of the docs site information architecture, modeled on Better Auth's docs: **one sidebar tree, two levels, capability modules visible at first glance** — replacing the previous six `root: true` tabs (Getting Started / Concepts / Guides / Reference / Protocol / Releases) where content for any one capability was scattered across up to six places.\n\n**Preview:** https://spec-git-claude-docs-site-structure-w9lfzp-object-stack.vercel.app/docs\n\n## New sidebar (14 groups)\n\n```\nGet Started · Core Concepts\nData Modeling · Automation · Permissions & Identity · UI Engine\nAPI & SDK · AI · Plugins & Packages · Kernel & Services\nDeployment & Operations\nProtocol Spec · Reference · Releases\n```\n\n- Module taxonomy is aligned with the generated Reference domains (`data`, `automation`, `identity`/`security`, `ui`, `ai`, `api`, `kernel`), so \"module overview → module guides → schema reference\" is one predictable path.\n- Sidebar group names use capability language; protocol brand names (ObjectQL/ObjectOS/ObjectUI) stay in **Protocol Spec**, and each module index states its protocol-layer mapping (Data Modeling ↔ ObjectQL, UI Engine ↔ ObjectUI, Kernel & Services + Plugins ↔ ObjectOS).\n- The auto-generated `references/` tree (239 pages) is structurally untouched; its generator no longer emits `root: true`.\n\n## What changed\n\n**Moves (~90 pages).** `guides/` (44 flat entries), `guides/metadata/`, `guides/solutions/`, `guides/cheatsheets/` and the Concepts grab-bag are dissolved into the module groups. Full mapping is encoded in `apps/docs/redirects.mjs`.\n\n**Splits.** Six oversized multi-topic pages were split along H2 boundaries (content moved verbatim, byte-diff-verified):\n- `guides/security.mdx` (777 L) → `permissions/` index + profiles / permission-sets / roles / sharing-rules / field-level-security\n- `guides/data-modeling.mdx` (774 L) → `data-modeling/schema-design` + relationships + indexing\n- `guides/ai-capabilities.mdx` (712 L) → `ai/` index + agents / actions-as-tools / knowledge-rag / natural-language-queries\n- `guides/business-logic.mdx` (675 L) → `automation/hooks`; flow/approval/validation/formula sections merged into their dedicated pages (deduped)\n- `guides/plugins.mdx` (572 L) → `plugins/` index + merged interface/lifecycle into `plugins/anatomy` (three duplicate explanations of the Plugin interface reduced to one, verified against `packages/core/src/types.ts`)\n- `guides/api-reference.mdx` (540 L) → `api/` index + data-api / metadata-api / plugin-endpoints\n\n**Dedup / merges.**\n- `concepts/architecture.mdx` was a diverged verbatim fork of `getting-started/architecture.mdx` — one copy kept (now `concepts/architecture`)\n- `concepts/terminology.mdx` merged into `getting-started/glossary.mdx` (terminology was the fresher fork; kept its Source/Artifact & three-layer entries plus glossary's fuller Driver entry)\n- `concepts/packages.mdx` (dup of `guides/packages.mdx`) deleted\n- `guides/airtable-dashboard-analysis.mdx` and `guides/standards.mdx` (internal-facing) moved out of the site to `docs/notes/`\n\n**New content.** Docs landing page (module map) and five module overviews (`data-modeling`, `automation`, `permissions`, `ui`, `kernel`), each linking group pages + matching Protocol Spec section + Reference domain.\n\n**Redirects.** Every old URL 301s to its new home — ~90 exact entries plus wildcards for the moved `runtime-services/`/`contracts/` folders and a `/docs/guides/:path*` safety net (`apps/docs/redirects.mjs`, wired into `next.config.mjs`).\n\n**Link rewrites.** ~105 absolute `/docs/...` links rewritten across content/blog per the same mapping; ~190 relative links resolved against their pre-move locations and rewritten as absolute URLs; stale `content/docs/...` file paths updated across skills corpus, package READMEs, ADRs, and `packages/spec/src` JSDoc (source of generated reference text).\n\n**Broken-link purge.** `getting-started/quick-reference.mdx` had drifted badly from the generated reference tree: 18 table rows documented schemas that do not exist anywhere in `packages/spec/src` (deleted), 13 rows pointed at the wrong domain (relinked to the real pages — dataset lives in `ui/`, marketplace/tenant in `cloud/`, etc.), 4 rows reference real schemas with no generated page (unlinked, text kept). The mcp README bullet advertising a guide that never existed was dropped.\n\n**Tooling repointed.**\n- `packages/spec/scripts/build-skill-docs.ts` → emits `content/docs/ai/skills-reference.mdx`\n- `packages/spec/scripts/build-docs.ts` → references group no longer a root tab; banner wording updated\n- `scripts/check-doc-authoring.mjs` SKIP_FILES, `.claude/workflows/docs-accuracy-audit.js` page list regenerated (146 hand-written pages)\n- 8 package READMEs pointed at real doc files (their old `/content/docs/guides/<topic>/` links pointed at directories that never existed)\n\n## Verification\n\n- `node scripts/check-doc-authoring.mjs` — 180 files clean\n- `pnpm --filter @objectstack/spec gen:schema && gen:docs && gen:skill-docs` — regenerate cleanly into the new tree\n- Full `next build` passes (385 paths); served the built site and spot-checked: 9 representative old URLs 308-redirect to their new homes, all 14 module/group indexes and split pages return 200, landing page renders all sidebar groups\n- No `content/docs/guides|concepts/core` references remain outside CHANGELOGs\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_018r9mjpF7jr9BKdzEmUE4uZ"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 2782,
+  "kind": "issue",
+  "title": "feat(console/auth): 复用 objectui ImportWizard 接入 sys_user 身份导入（替代原 action 文件参数方案）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T11:36:35Z",
+  "updated_at": "2026-07-11T07:30:16Z",
+  "closed_at": "2026-07-11T07:30:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2782",
+  "body": "## 背景（重写说明）\n\n本 issue 原方案（action `file` 型参数 spec 扩展 + 模板下载端点）基于\"平台无导入向导 UI\"的**错误前提**——当时只探查了 framework 仓库。经核实 objectui 仓库，通用导入向导**已存在且功能完整**：\n\n- `packages/plugin-grid/src/ImportWizard.tsx`（约 2200 行）：CSV/xlsx/TSV 上传与粘贴、列自动匹配 + 保存映射模板（含服务端 mapping artifact，#2611）、预览校验、同步 `/import` + 大文件自动转异步 Job（进度轮询/取消/undo）、**客户端模板下载**（按对象 fields 生成，必填标注）。\n- 入口在 `app-shell/src/views/ObjectView.tsx` 工具栏，由 `resolveCrudAffordances().import` 门控——sys_user 因 `managedBy:'better-auth'` 默认为 false，所以 Users 列表看不到导入按钮。\n- **关键架构事实**：向导的全部写入都抽象在注入的 `dataSource` 后面（`import` / `createImportJob` / `getImportJobProgress` / `cancelImportJob` / `undoImportJob` 均为鸭子类型、feature-detected）。\n\n因此正确方案是**复用向导、替换写入目标**，而非重造 UI。原方案的两个要素全部取消：不需要 action file 参数 spec 扩展；不需要模板下载端点（客户端已有）。\n\n## 新方案\n\n**objectui 侧（主体）**：\n1. **身份导入 dataSource 适配器**：实现向导消费的 import 面——`import(objectName, request)` → `POST /api/v1/auth/admin/import-users`（该端点的请求载荷与通用 `/import` 有意同构，复用了 `prepareImportRequest`，适配层极薄）；`createImportJob` 缺省不提供（触发向导的同步回退，与后端 `ASYNC_NOT_SUPPORTED` 一致，#2781 落地后再接）；不提供 `undoImportJob`（身份导入禁 undo）。响应 `{summary, rows}` → 向导 `ImportResult` 的小映射。\n2. **身份专属 UI 增量**：passwordPolicy（invite/temporary）选择面板；temporary 策略结果的**临时密码一次性展示/CSV 下载**（红线：仅内存态，绝不持久化）；行级错误码（INVITE_REQUIRES_EMAIL 等）的友好文案。\n3. **入口放开**：对声明了自定义导入管线的对象（首个即 sys_user）显示 Import 按钮并注入身份适配器——门控条件用 `features.admin`（`/api/v1/auth/config`）而非通用 import affordance（后者对 better-auth 对象保持 false，防止误走 ObjectQL 直写路径）。\n\n**framework 侧（可选小增量）**：\n4. 评估在对象元数据上声明 `importPipeline: 'custom'` + 端点指针，让 objectui 免于硬编码 sys_user——协议化优于特例，但首版硬编码可接受。\n\n## 分工\n\n- objectui 仓库：1–3（主体工作，建议在 objectui 立对应实现 issue 并互链）\n- framework 仓库：4（可选）+ 同步限额/选项与向导的对齐（`IMPORT_USERS_MAX_ROWS=500` 需要向导侧感知，避免 5000 行阈值误导）\n\n## 相关\n\n- #2766 / PR #2771（`/admin/import-users` 端点——**后端独立端点仍然必要**：通用导入是 ObjectQL 直写，绕过 better-auth 哈希且不生成 sys_account 凭据；分叉只在写入层，UI 层完全复用）\n- #2781（异步 Job；落地后适配器补 `createImportJob`）\n- #2504 / #2611（通用导入框架与 mapping artifact）"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 2589,
+  "kind": "pull_request",
+  "title": "fix(runtime): carry spec-validation issues + 422 through metadata save/publish errors",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T15:40:40Z",
+  "updated_at": "2026-07-04T15:46:44Z",
+  "closed_at": "2026-07-04T15:46:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-04T15:46:43Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2589",
+  "body": "## Why (UX eval #4 — validation up-front + inline errors)\n\nWhen a Studio user saves an invalid metadata draft, `protocol.saveMetaItem` **already** validates it against its spec Zod schema and throws a rich, field-anchored error:\n\n```\nstatus: 422, code: 'invalid_metadata',\nissues: [{ path: 'fields.amount.type', message: 'Required', code: 'invalid_type' }, ...]\n```\n\n…but the HTTP dispatcher threw all of that away:\n- **save** (`http-dispatcher.ts` PUT catch) did `this.error(e.message, 400)` — hardcoded 400, `issues` dropped;\n- **publish** (`publishPackageDrafts` per-draft catch) flattened each failure to `{ type, name, error }` — `issues` dropped.\n\nSo the Studio could only show a generic \"failed validation\" banner / toast, never point at the offending field. This is the **server half** of making validation errors land *on the field, at the save/publish moment* (the #1 \"silent failure\" UX theme).\n\n## What\n\n- New `errorFromThrown(e, fallbackStatus)` dispatcher helper — preserves the error's own `status` (validation now surfaces as **422**, not a downgraded 400) and attaches `{ code, issues }` under `error.details` when present. Errors carrying neither behave exactly as before. Wired into the metadata **save** and **publish** catch sites.\n- `publishPackageDrafts` now carries `issues` into each `failed[]` entry.\n\nResulting error body on a failed save:\n\n```json\n{ \"success\": false, \"error\": {\n  \"message\": \"[invalid_metadata] object/bad failed spec validation: fields.amount.type: Required\",\n  \"code\": 422,\n  \"details\": { \"code\": \"invalid_metadata\", \"issues\": [{ \"path\": \"fields.amount.type\", \"message\": \"Required\", \"code\": \"invalid_type\" }] }\n} }\n```\n\n## Compatibility\n\nPurely **additive** to the error payload (`error.details.issues`). The only behavior change is the more-correct **422** (was 400) for a failed metadata save — 422 is already the validation status the protocol raises and is used elsewhere. Plain errors (no `status`/`issues`) are unchanged; the existing \"should return error if save fails\" test still asserts 400.\n\n## Tests\n\nNew dispatcher test: a `saveMetaItem` that throws a `422 / invalid_metadata / issues[...]` error yields a **422** response with `error.details.issues` preserved (path intact). Full `@objectstack/runtime` (448) + `@objectstack/metadata-protocol` (8) suites green; both packages build (incl. DTS).\n\nThe objectui half (extract `error.details.issues` → show field-anchored in the Studio) follows in a companion objectui PR; verified end-to-end there.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

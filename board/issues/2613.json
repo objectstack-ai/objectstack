@@ -1,0 +1,30 @@
+{
+  "number": 2613,
+  "kind": "issue",
+  "title": "Metadata kinds without a code-authoring surface: trigger, router, function, service, external_catalog",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-05T02:44:57Z",
+  "updated_at": "2026-07-05T07:51:09Z",
+  "closed_at": "2026-07-05T07:51:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2613",
+  "body": "While upgrading the showcase to a registry-driven coverage manifest (every kind in `DEFAULT_METADATA_TYPE_REGISTRY` must be demonstrated or explicitly waived), five kinds turned out to have **no declarative authoring surface an example app could use**:\n\n- **`trigger`** — registry entry + file patterns exist, but there is no stack collection / `defineTrigger` helper wired through `defineStack`. Record-change triggering is demonstrated *behaviorally* in the showcase via record-change flows (`requires: ['triggers']`), not as standalone `trigger` artifacts.\n- **`router` / `function` / `service`** — code-only by design (`allowRuntimeCreate: false`). The showcase's code-level equivalent is the imperative HTTP mount in `examples/app-showcase/src/system/server/recalc-endpoint.ts`. If these kinds are meant to stay code-only, consider saying so in the registry docs; if they're meant to become declarative someday, this issue tracks the gap.\n- **`external_catalog`** — runtime-created via Setup → Datasources → Sync (ADR-0062); there is no declarative artifact an app package can ship. The showcase demos the *flow that produces one* (external datasource federation), not the artifact itself.\n\nThese five are recorded as explicit **waivers** in `examples/app-showcase/src/coverage.ts` (`KIND_COVERAGE`) pointing at this issue, so the coverage test stays green without faking coverage (Prime Directive #10).\n\nDone means, per kind: either (a) a declarative authoring surface lands and the showcase demonstrates it, or (b) the registry/docs explicitly mark the kind code-only/runtime-only and the waiver is converted into a permanent, documented exclusion."
+}

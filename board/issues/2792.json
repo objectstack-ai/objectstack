@@ -1,0 +1,30 @@
+{
+  "number": 2792,
+  "kind": "pull_request",
+  "title": "chore: version packages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T14:02:17Z",
+  "updated_at": "2026-07-10T14:24:30Z",
+  "closed_at": "2026-07-10T14:24:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-10T14:24:28Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2792",
+  "body": "This PR was opened by the [Changesets release](https://github.com/changesets/action) GitHub action. When you're ready to do a release, you can merge this and the packages will be published to npm automatically. If you're not ready to do a release yet, that's fine, whenever you add more changesets to main, this PR will be updated.\n\n\n# Releases\n\n> The changelog information of each package has been omitted from this message, as the content exceeds the size limit.\n\n## @objectstack/cli@14.3.0\n\n\n## @objectstack/lint@14.3.0\n\n\n## @objectstack/metadata@14.3.0\n\n\n## @objectstack/objectql@14.3.0\n\n\n## @objectstack/platform-objects@14.3.0\n\n\n## @objectstack/plugin-auth@14.3.0\n\n\n## @objectstack/plugin-security@14.3.0\n\n\n## @objectstack/plugin-sms@14.3.0\n\n\n## @objectstack/rest@14.3.0\n\n\n## @objectstack/service-messaging@14.3.0\n\n\n## @objectstack/service-settings@14.3.0\n\n\n## @objectstack/spec@14.3.0\n\n\n## @objectstack/hono@14.3.0\n\n\n## @objectstack/account@14.3.0\n\n\n## @objectstack/setup@14.3.0\n\n\n## @objectstack/studio@14.3.0\n\n\n## @objectstack/client@14.3.0\n\n\n## @objectstack/client-react@14.3.0\n\n\n## @objectstack/cloud-connection@14.3.0\n\n\n## @objectstack/connector-mcp@14.3.0\n\n\n## @objectstack/connector-openapi@14.3.0\n\n\n## @objectstack/connector-rest@14.3.0\n\n\n## @objectstack/connector-slack@14.3.0\n\n\n## @objectstack/core@14.3.0\n\n\n## @objectstack/formula@14.3.0\n\n\n## @objectstack/mcp@14.3.0\n\n\n## @objectstack/metadata-core@14.3.0\n\n\n## @objectstack/metadata-fs@14.3.0\n\n\n## @objectstack/metadata-protocol@14.3.0\n\n\n## @objectstack/observability@14.3.0\n\n\n## @objectstack/driver-memory@14.3.0\n\n\n## @objectstack/driver-mongodb@14.3.0\n\n\n## @objectstack/driver-sql@14.3.0\n\n\n## @objectstack/driver-sqlite-wasm@14.3.0\n\n\n## @objectstack/embedder-openai@14.3.0\n\n\n## @objectstack/knowledge-memory@14.3.0\n\n\n## @objectstack/knowledge-ragflow@14.3.0\n\n\n## @objectstack/plugin-approvals@14.3.0\n\n\n## @objectstack/plugin-audit@14.3.0\n\n\n## @objectstack/plugin-dev@14.3.0\n\n\n## @objectstack/plugin-email@14.3.0\n\n\n## @objectstack/plugin-hono-server@14.3.0\n\n\n## @objectstack/plugin-reports@14.3.0\n\n\n## @objectstack/plugin-sharing@14.3.0\n\n\n## @objectstack/plugin-webhooks@14.3.0\n\n\n## @objectstack/runtime@14.3.0\n\n\n## @objectstack/service-analytics@14.3.0\n\n\n## @objectstack/service-automation@14.3.0\n\n\n## @objectstack/service-cache@14.3.0\n\n\n## @objectstack/service-cluster@14.3.0\n\n\n## @objectstack/service-cluster-redis@14.3.0\n\n\n## @objectstack/service-datasource@14.3.0\n\n\n## @objectstack/service-i18n@14.3.0\n\n\n## @objectstack/service-job@14.3.0\n\n\n## @objectstack/service-knowledge@14.3.0\n\n\n## @objectstack/service-package@14.3.0\n\n\n## @objectstack/service-queue@14.3.0\n\n\n## @objectstack/service-realtime@14.3.0\n\n\n## @objectstack/service-storage@14.3.0\n\n\n## @objectstack/trigger-api@14.3.0\n\n\n## @objectstack/trigger-record-change@14.3.0\n\n\n## @objectstack/trigger-schedule@14.3.0\n\n\n## @objectstack/types@14.3.0\n\n\n## @objectstack/verify@14.3.0\n\n\n## @objectstack/console@14.3.0\n\n\n## create-objectstack@14.3.0\n\n\n## @objectstack/sdui-parser@14.3.0\n\n\n## objectstack-vscode@14.3.0\n\n\n## @objectstack/example-crm@4.0.81\n\n\n## @objectstack/example-showcase@0.3.3\n\n\n## @objectstack/example-todo@4.0.81\n\n\n## @objectstack/example-embed-objectql@0.0.21\n\n\n## @objectstack/dogfood@0.0.29\n\n\n## @objectstack/downstream-contract@0.0.27\n\n"
+}

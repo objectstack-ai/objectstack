@@ -1,0 +1,30 @@
+{
+  "number": 2798,
+  "kind": "pull_request",
+  "title": "fix: correct JSON field serialization for PostgreSQL vs SQLite",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "akarma-synetal",
+    "id": 112554634,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T15:00:11Z",
+  "updated_at": "2026-07-11T02:04:02Z",
+  "closed_at": "2026-07-11T02:04:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-11T02:04:02Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2798",
+  "body": "## Summary\n- PostgreSQL native `jsonb` columns now correctly receive `JSON.stringify` for all values (strings, numbers, booleans, objects)\n- SQLite path unchanged: only objects/arrays are stringified (SQLite TEXT storage)\n- Previously the SQLite-only path was incorrectly applied to PostgreSQL, causing primitives in `jsonb` columns to be silently rejected\n\n## Test plan\n- [ ] Verify `jsonb` column writes with string/number/boolean values work on PostgreSQL\n- [ ] Verify existing SQLite JSON field behavior is unchanged\n\nMade with [Cursor](https://cursor.com)"
+}

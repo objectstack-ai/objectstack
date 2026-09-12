@@ -1,0 +1,30 @@
+{
+  "number": 2722,
+  "kind": "issue",
+  "title": "ADR-0090 D3 rename miss: exported RLSUserContextSchema still carries a dead `role` field",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T03:16:10Z",
+  "updated_at": "2026-07-10T05:31:05Z",
+  "closed_at": "2026-07-10T05:31:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2722",
+  "body": "## What\n\n\\`packages/spec/src/security/rls.zod.ts\\` still exports \\`RLSUserContextSchema\\` with a \\`role: string | string[]\\` field (\"User role(s)\"), missed by the P1 breaking wave (#2697).\n\n## Why it's wrong\n\n- ADR-0090 D3 makes \"role\" a reserved-forbidden word; the canonical membership field is \\`positions\\`.\n- The runtime never consumes this schema field: \\`packages/plugins/plugin-security/src/rls-compiler.ts\\` defines its **own local** \\`RLSUserContext\\` interface, which already uses \\`positions?: string[]\\`. The spec export is dead surface documenting a vocabulary that no longer exists (it also leaks into the auto-generated \\`content/docs/references/security/rls.mdx\\`).\n\n## Fix\n\nRename \\`role\\` → \\`positions\\` (\\`z.array(z.string())\\`) or delete the field in favor of the runtime shape. This is an exported-type change in the frozen spec surface (ADR-0059 §4) — either take it as part of the next spec major, or treat it as the documented dead/renderless-export exception (precedent: PR #2272). Regenerate \\`references/security/rls.mdx\\` afterwards.\n\nFound while aligning docs + showcase to ADR-0090 (P4 follow-up)."
+}

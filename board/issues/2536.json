@@ -1,0 +1,30 @@
+{
+  "number": 2536,
+  "kind": "issue",
+  "title": "chore(spec): retire the compactLayout alias + transition mirror (ADR-0085 follow-up)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-03T06:59:24Z",
+  "updated_at": "2026-07-03T10:58:06Z",
+  "closed_at": "2026-07-03T10:58:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2536",
+  "body": "## What\nRemove the deprecated `compactLayout` spelling from `ObjectSchema` now that every consumer reads the canonical `highlightFields` (ADR-0085, docs/adr/0085).\n\nThe alias currently does TWO jobs in `normalizeSemanticRoleAliases` (packages/spec/src/data/object.zod.ts):\n1. `compactLayout` → `highlightFields` (legacy-author support)\n2. `highlightFields` → `compactLayout` **back-fill mirror** (added in #2521 after browser dogfood showed old-key renderers silently losing default columns for new-key metadata)\n\n## Trigger condition — DO NOT do this early\nOne minor release must ship after the consumer switch reached the vendored console, i.e. after the release cut from #2526/#2527 (console pin `144ab55b2`, objectui#2168). The window is open once the NEXT minor after that release is being prepared.\n\n## Checklist\n- [ ] spec: drop `compactLayout` from ObjectSchema + delete both directions of the alias in `normalizeSemanticRoleAliases`; update parse tests\n- [ ] **dogfood: delete the load-bearing mirror assertion in `packages/dogfood/test/semantic-roles.dogfood.test.ts` IN THE SAME PR** — it asserts `compactLayout` is mirrored on served meta and was written to turn red if the retirement misses a consumer; also update the `showcase_semantic_zoo_legacy` fixture (it authors `compactLayout` on purpose)\n- [ ] objectui (companion PR): remove the `?? compactLayout` fallback reads added in objectui#2168 (ObjectGrid, plugin-detail synth `deriveHighlightFields`, RecordDetailView child preview + highlight strip, ObjectView ×2, InterfaceListPage)\n- [ ] downstream smoke: if hotcrm (or the pinned ref) still authors `compactLayout`, ship a hotcrm release first and bump `HOTCRM_REF` (same digestion flow as #2524)\n- [ ] changeset: minor (documented-exception path per ADR-0059 §4 / PR #2272 precedent only applies if the key is proven dead — here it is NOT dead until the alias window closes, so follow whatever the release owner rules)\n\n## Context\nFull chain: ADR #2520 → spec #2521 → consumer switch objectui#2168 → console pin #2526 → runtime guard #2528. The mirror exists ONLY for renderers older than objectui#2168."
+}

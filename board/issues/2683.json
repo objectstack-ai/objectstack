@@ -1,0 +1,34 @@
+{
+  "number": 2683,
+  "kind": "pull_request",
+  "title": "feat(spec,lint): allow dropdown userFilters on object list views (#2679)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-08T03:30:15Z",
+  "updated_at": "2026-07-08T07:21:04Z",
+  "closed_at": "2026-07-08T07:21:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-08T07:21:03Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2683",
+  "body": "Closes #2679\n\n## 问题\nAirtable 风格的快捷筛选胶囊(`userFilters`,`element: 'dropdown'`)此前只能用在**页面列表**(InterfaceListPage,\"filters\" 模式)。**对象的默认列表视图**(\"views\" 模式)被三层护栏禁止携带 `userFilters`:`ObjectListViewSchema` 编译期剥离、`validate-list-view-mode` 预解析报错、objectui 运行时强制 `undefined`。这与 ADR-0047 TL;DR #5(data 模式本应暴露快捷筛选)相悖,phase-4 一刀切属于过度收敛。\n\n## 方案(ADR-0047 修订)\n放开 `element: 'dropdown'`(及历史遗留 `toggle`),但**保留 `element: 'tabs'` 为页面专属**——对象视图的已保存视图切换器 ViewTabBar 已占据 tab 栏角色,`tabs` 会造成双 tab 栏冲突;需要预设时用 `listViews`。\n\n- **spec**:新增 `ObjectUserFiltersSchema`(element 限 `dropdown`/`toggle`,去掉 `tabs`/`showAllRecords`);`ObjectListViewSchema` 改为 `ListViewSchema.omit({ userFilters }).extend({ userFilters: ObjectUserFiltersSchema.optional() })`。\n- **lint**:`validate-list-view-mode` 中 `quickFilters` 仍全禁;`userFilters` 仅在 `element: 'tabs'` / 携带 `tabs` 时报错,hint 指向 `listViews` / 页面列表。\n- **app-showcase**:在 `showcase_project` 默认列表加 dropdown `userFilters`(status + health)示例。\n- **docs**:ADR-0047 修订说明 + 重新生成的 view 参考文档。\n\n## 测试\n- `packages/spec` `object-list-view.test.ts`(6 passed)、`packages/lint` `validate-list-view-mode.test.ts`(8 passed)。\n- 通过 **app-showcase** 的 Projects 对象**默认列表**端到端验证:状态/健康度胶囊渲染,点开自动派生选项,选 \"Active\" 将 5 → 2 条,ViewTabBar 共存无冲突,无 console 告警。\n\n配套 objectui 运行时改动:objectstack-ai/objectui#2338。"
+}

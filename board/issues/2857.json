@@ -1,0 +1,30 @@
+{
+  "number": 2857,
+  "kind": "issue",
+  "title": "sys_permission_set: env-scope permission metadata saves don't project onto the queryable data record",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-13T00:26:56Z",
+  "updated_at": "2026-07-13T02:48:46Z",
+  "closed_at": "2026-07-13T02:48:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2857",
+  "body": "## Problem\n\nA `sys_permission_set` has **two representations that are not kept in sync**:\n\n- **Metadata** — what `client.layered('permission', name)` / `client.save` read/write; the authoritative permission definition (ADR-0090). The structured permission editor writes this. Parsed camelCase fields: `objects`, `fields`, `systemPermissions`, `rowLevelSecurity`, `tabPermissions`, `adminScope`.\n- **Data record** — the queryable `sys_permission_set` object (`GET /api/v1/data/sys_permission_set`), with **snake_case JSON-string** columns: `system_permissions`, `object_permissions`, `row_level_security`, `admin_scope`, `tab_permissions`.\n\n**An environment-scope metadata save (which is live — config, no publish) does not project onto the data record.**\n\n### Repro (verified against app-showcase, 2026-07-13)\n\n1. Open the env-scope permission editor for `sales_rep` and grant `studio.access` (System Capabilities), Save.\n2. Reload the editor → the grant persists (metadata is updated). ✅\n3. `GET /api/v1/data/sys_permission_set` → `sales_rep.system_permissions` is still `\"[]\"`. ❌\n\nSame for `adminScope` (e.g. toggling `manageBindings` on `showcase_field_ops_delegate` persisted in metadata but not in the data record). Seeded sets look consistent only because both stores were seeded together.\n\n## Why it matters\n\nobjectui **ADR-0056 / #2403** (pure model: Studio designs, Setup assigns) makes Setup's `sys_permission_set` record page render each facet **read-only** from the **data record** (summary + \"Design in Studio →\" deep-link). Because env-scope metadata saves don't refresh the data record, a fresh Studio edit to any facet isn't reflected in Setup's summary until the projection catches up.\n\nThis is **display-freshness only** — enforcement and the ADR-0090 explain engine read the authoritative metadata, so access is correct. But it breaks the closed loop of the pure model (design in Studio → see it in Setup).\n\n## Ask\n\nMake the `sys_permission_set` **data-record projection track env-scope metadata saves** (project all six facet columns), so the queryable record reflects the authoritative metadata. (Alternatively, objectui could read the metadata directly for the Setup summary, but the record projection is the framework-owned bridge.)\n\n## Refs\n\n- objectui ADR-0056 (revised, pure model), epic objectstack-ai/objectui#2398, PR objectstack-ai/objectui#2403\n- Framework: `plugin-security` — `sys-permission-set.object.ts` (the JSON-string columns), the metadata `permission` type → `sys_permission_set` projection path.\n\n_Filed from objectui #2403 verification._\n"
+}

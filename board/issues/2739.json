@@ -1,0 +1,35 @@
+{
+  "number": 2739,
+  "kind": "pull_request",
+  "title": "feat(showcase,docs): ADR-0090 permission-model zoo + full docs alignment",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T03:51:11Z",
+  "updated_at": "2026-07-10T04:13:55Z",
+  "closed_at": "2026-07-10T04:13:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-10T04:13:53Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2739",
+  "body": "## What\n\nCloses the \"showcase + docs\" follow-up to the ADR-0090 Permission Model v2 waves (#2697 #2708 #2711 #2716 #2717).\n\n### Showcase permission zoo (`examples/app-showcase`)\n\n`src/security/` restructured into `positions.ts` / `permission-sets.ts` / `sharing-rules.ts` (CRM convention), exercising the FULL v2 authoring surface:\n\n| Capability | Where |\n|---|---|\n| Flat positions via `definePosition` (stale pre-D3 `parent` removed) | 6 positions |\n| CRUD + FLS + RLS (`using` + write-time `check`) | `showcase_contributor` |\n| Scope depth, read/write asymmetry (`readScope: 'org'` / `writeScope: 'own'`) | `showcase_manager`, `showcase_executive` |\n| View-All (read-only compliance) / Modify-All (`public_read` repair) | `showcase_auditor` / `showcase_ops` |\n| `systemPermissions` (`setup.access`) | `showcase_ops` |\n| `isDefault` everyone-suggestion (D5), incl. personal data on a `private`-OWD object | `showcase_member_default` |\n| Guest-safe capability for the `guest` anchor (D9) | `showcase_guest_portal` |\n| `adminScope` delegated administration (D12), BU-subtree + allowlist | `showcase_field_ops_delegate` |\n| `externalSharingModel` (D11) | announcement (`private`), account (`public_read`) |\n| Real `sys_business_unit` org tree seeded with explicit ids | `src/data/seed/` |\n| BU-subtree sharing (`unit_and_subordinates`, enforced) | `share_new_inquiries_with_field_ops` |\n| D6 access-matrix snapshot gate (31 entries) | `access-matrix.json` |\n\n**Deliberately NOT demoed** (declared ≠ enforced, Prime Directive #10): hierarchy depths (`own_and_reports`/`unit`/`unit_and_below` — enterprise `hierarchy-security`; the open runtime fails closed and `defineStack` now errors on them), `tabPermissions` (an 'app' package carries at most one app, ADR-0019 D3), owner-type sharing rules (seed-skipped `[experimental]`, kept as authoring-shape example with an honest comment).\n\n**Runtime guard**: `packages/dogfood/test/showcase-permission-zoo.dogfood.test.ts` (12 tests) proves on the served stack: BU-tree seeding, `admin_scope` persistence, OWD-private isolation, VAMA bypass (+ auditor write denial), explain-engine attribution of the granting set, delegated-admin positive/negative (subtree, allowlist incl. self, `manageBindings: false`), and the audience-anchor gate (everyone×high-privilege rejected, guest×guest-safe accepted). The D7 canary in `showcase-d7-default-profile` moved from `private_note` to `showcase_contact` (the baseline now deliberately grants private notes).\n\n### Spec\n\n`defineStack` strict cross-reference validation now treats platform-provided objects (`sys_`/`cloud_`/`ai_`) as legitimate permission-grant and seed targets — required by the D12 delegated-admin shape (CRUD on RBAC link tables) and by seeding the BU tree; mirrors the seed loader's own platform classification; typo net intact for the stack's own objects (tests added).\n\n### Docs\n\n- `content/docs/protocol/objectql/security.mdx` — full rewrite of the stale sections (profiles removed, positions, canonical OWD four + D1 private default + `externalSharingModel`, position-scoped RLS, enforced sharing recipients + `[experimental]` honesty note).\n- `isProfile` scrubbed from `ui/forms.mdx`, `getting-started/common-patterns.mdx`, `concepts/architecture.mdx`; `ui/role-based-interfaces.mdx` retitled \"Audience-based interfaces\"; dead `/docs/references/identity/role` link fixed to `identity/position`; `releases/implementation-status.mdx` no longer claims OWD aliases parse; AI actor snippets use `positions` (matches `ToolExecutionContext`); plugin-security README aligned; showcase security tour rewritten.\n- Stale zod docstrings fixed at the source (`rls`/`territory`/`sharing`/`tool`/`agent`) and `content/docs/references/**` regenerated — including the previously never-generated `security/explain.mdx` (D6 contract reference).\n\n### Verified\n\n- Full suite: 126/126 turbo tasks green (incl. 39 dogfood files / 201 tests).\n- `objectstack validate` + `compile` green; D7 posture linter runs (one intentional `security-private-no-readscope` info); D6 gate **proven to fail** on grant drift with the semantic diff (\"`showcase_member_default` gains access to `showcase_private_note` (create, read, edit)\") before the snapshot was regenerated.\n- Browser dogfood on a fresh isolated boot: Setup shows the seeded BU org tree, all 12 permission sets, all 12 positions incl. `everyone`/`guest` anchors; member sees only their own private note while the auditor sees all (VAMA) — screenshots in session; FLS budget write 400 vs name 200; ops repairs another owner's announcement via Modify-All (member 403); anchor gate rejects everyone×auditor over REST with a self-explanatory 403; anonymous traffic default-denied while the public inquiry form (Option A) accepts 201.\n\n### Out-of-scope findings filed\n\n- #2722 `RLSUserContextSchema.role` (D3 miss, dead surface) · #2723 portal `profiles` (D2 miss) · #2724 `sys_record_share` `role` enum + stale translations\n- #2734 fresh-boot tenant-RLS hides all RBAC rows from the admin (Setup Access Control empty) · #2735 JSON-field seeds crash the batch insert path · #2737 list `total` not scoped by the read filter + platform-admin wildcard VAMA not widening private reads\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

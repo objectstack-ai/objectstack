@@ -1,0 +1,32 @@
+{
+  "number": 2800,
+  "kind": "pull_request",
+  "title": "fix(security,release): qualified FLS keys + lint, PROTOCOL_VERSION auto-sync, D11 honest marking",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T15:13:15Z",
+  "updated_at": "2026-07-10T15:40:24Z",
+  "closed_at": "2026-07-10T15:40:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-10T15:40:21Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2800",
+  "body": "Three hardening items from the permission-zoo audit round.\n\n## FLS: bare keys were a silent runtime no-op — now impossible to author\n\nThe evaluator matches field-permission keys by `<object>.<field>` prefix (`getFieldPermissions`: `key.startsWith(objectName + '.')`), so a bare `budget` key matches **nothing** — the showcase contributor's declared budget masking never enforced, and the earlier verification's \"budget PATCH → 400\" was actually the `spent_within_budget` **validation rule** rejecting a tiny budget, not FLS (misattribution now corrected on the record). Fixes at every layer:\n\n- **Showcase**: keys qualified (`showcase_project.budget` / `.spent` / `.budget_remaining`) with a comment explaining why.\n- **Lint**: new D7 rule **`security-fls-unqualified-key`** (error + fix-it) — a bare FLS key is exactly the plausible-but-wrong shape AI authoring produces, and it fails silently; now it fails the build with the qualified-key prescription. 2 new fixtures.\n- **Dogfood**: the permission-zoo test now proves the served pipeline denies a contributor's `budget` write (with a LARGE value so the validation rule can't be the rejector) while an ordinary field edit passes, and the value is unchanged after the denial. 13/13 green.\n\n## Release: PROTOCOL_VERSION can no longer drift\n\n`changeset version` now chains `scripts/sync-protocol-version.mjs` (regenerates the handshake constant from the spec package major; idempotent, fails loudly on unparseable state). Root cause of the 14.0.0 main breakage (#2769): release PRs opened by changesets/action with the default `GITHUB_TOKEN` **never trigger CI** (GitHub's anti-recursion rule) — the lockstep test existed but could only fire after the merge. Fixing the value at version time is the one spot that cannot be skipped. Verified both branches: in-lockstep no-op and 13→14 repair.\n\n## D11: `externalSharingModel` honestly marked (enforce-or-mark)\n\nThe dial has **no runtime consumer** (authoring lint `security-external-wider-than-internal` + Studio `Ext` badges only; `effectiveSharingModel` reads `sharingModel` alone, and no principal ever evaluates as external today). Its liveness entry moves from the bespoke `authorable` status (outside the documented vocabulary, no gate ever checked it) to **`planned` + `authorWarn`**, so authors are told the dial does not evaluate yet; the sharing docs, design doc, and showcase comments now say the evaluator branch lands with the principal-taxonomy phase (#2696).\n\nAlso noted: ADR-0091 (grant lifecycle) was already authored and accepted upstream — no duplicate work.\n\n## Verification\n\n128/128 turbo tasks green (incl. dogfood with the new FLS enforcement assertion and the lint suite at 34 tests).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

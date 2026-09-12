@@ -1,0 +1,35 @@
+{
+  "number": 2676,
+  "kind": "pull_request",
+  "title": "fix(runtime): safe-marshal hook ctx so circular host handles don't crash the sandbox (#2674)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-07T13:43:12Z",
+  "updated_at": "2026-07-07T14:09:03Z",
+  "closed_at": "2026-07-07T14:09:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-07T14:09:00Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2676",
+  "body": "## Problem\n\nWhen a sandboxed hook executes, `QuickJSScriptRunner.installCtx` marshals the hook `ctx` into the QuickJS sandbox via `setGlobalJson` / `setObjectJson`, each of which calls a bare `JSON.stringify(v ?? null)`. If the context (or anything reachable from it) holds a live `setTimeout`/`setInterval` handle, the timer object links back on itself (`Timeout._idlePrev -> TimersList._idleNext -> …`) and `JSON.stringify` throws:\n\n```\nTypeError: Converting circular structure to JSON\n    --> starting at object with constructor 'Timeout'\n    |     property '_idlePrev' -> object with constructor 'TimersList'\n    --- property '_idleNext' closes the circle\n```\n\nThe throw happens *before* the existing `evalCode` error guard, so it escapes as an opaque circular-reference crash that takes the whole hook down (#2674).\n\n## Fix\n\nIntroduce a shared `safeJsonStringify` helper and route all three host→VM marshalling paths through it — `setGlobalJson`, `setObjectJson`, and `jsonToHandle`. It uses a `JSON.stringify` replacer that:\n\n- tracks ancestors in a `WeakSet` and drops circular back-edges (the timer case), and\n- coerces `BigInt` to a string (plain `JSON.stringify` throws on `BigInt`).\n\nOnly JSON-safe leaves are meant to cross the sandbox boundary anyway, so anything unserialisable is stripped rather than fatal, and the hook body still runs.\n\n## Tests\n\nAdded two regression tests to `quickjs-runner.test.ts`:\n\n- `ctx.input` containing a live circular `setInterval` handle marshals without crashing and the body reads the sibling fields.\n- a `BigInt` in `ctx.input` is coerced to a string instead of throwing.\n\n`pnpm vitest run src/sandbox/quickjs-runner.test.ts` → 26 passed. `turbo run build --filter=@objectstack/runtime` (incl. strict DTS) green.\n\nCloses #2674.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

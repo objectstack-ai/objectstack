@@ -1,0 +1,34 @@
+{
+  "number": 2730,
+  "kind": "pull_request",
+  "title": "ci(release): restore blocking live-hotcrm smoke — v2 adoption shipped",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T03:27:16Z",
+  "updated_at": "2026-07-10T04:52:15Z",
+  "closed_at": "2026-07-10T04:52:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-10T04:52:12Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2730",
+  "body": "## What\n\nRestores the `Downstream backward-compat smoke (live hotcrm)` step to **blocking**, executing the restore condition documented in #2719:\n\n- `HOTCRM_REF`: `v1.2.2` → `v2.0.0` (the release adopting the ADR-0090 v2 vocabulary — objectstack-ai/hotcrm#438)\n- delete the `continue-on-error: true` escape hatch and its `TEMPORARY` comment block\n\n## ⚠️ Merge order\n\n**Blocked on the `v2.0.0` tag existing in objectstack-ai/hotcrm** — merge hotcrm#438, tag `v2.0.0`, then merge this. Merging early makes the smoke fail on a missing ref.\n\nPart of the ADR-0090 tracking issue #2696.\n\n## Testing\n\n- `release.yml` parses clean (yaml)\n- hotcrm#438 was verified locally against the published 13.0.0: typecheck ✓, `objectstack validate` ✓, build incl. D7 posture check ✓, 17/17 tests ✓ — the same commands the smoke runs\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

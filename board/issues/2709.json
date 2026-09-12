@@ -1,0 +1,36 @@
+{
+  "number": 2709,
+  "kind": "pull_request",
+  "title": "feat(mcp): OAuth 2.1 authorization for /api/v1/mcp — self-serve connect for claude.ai / Claude Desktop / Claude Code (#2698)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-09T04:09:17Z",
+  "updated_at": "2026-07-09T05:43:00Z",
+  "closed_at": "2026-07-09T05:42:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-09T05:42:58Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2709",
+  "body": "Closes #2698\n\n为 `/api/v1/mcp` 增加符合 MCP 授权规范的 OAuth 2.1 通道:任何支持 OAuth 的 MCP 客户端(claude.ai 自定义连接器、Claude Desktop、Claude Code)都可以自助连接——浏览器登录、以本人身份运行,无需管理员预先发放 API key。API key 通道(CI / 无头 agent)完全不变,并新增了回归测试。设计决策与理由见 issue #2698(按 owner 决定不写 ADR,理由随 issue + changeset)。\n\n## 实现要点\n\n**每个部署就是自己的授权服务器**(issue 设计决策 #1)。复用已内嵌的 better-auth `@better-auth/oauth-provider`(此前由 `OS_OIDC_PROVIDER_ENABLED` 门控、已挂好 authorize/token/consent/revoke 端点与 `sys_oauth_*` 表),本 PR 在其上补齐 MCP 所需的部分:\n\n- **发现元数据**:新增 RFC 9728 `/.well-known/oauth-protected-resource`(含 `/api/v1/mcp` 路径插入变体),并补挂 RFC 8414 路径插入别名 `/.well-known/oauth-authorization-server/api/v1/auth`(issuer 带路径,规范客户端按此形式请求)。`/api/v1/mcp` 的 401 响应通过 `WWW-Authenticate: Bearer resource_metadata=\"…\"` 广播元数据地址,客户端由此自举整个流程。\n- **DCR(RFC 7591)强制启用**:MCP 打开时默认允许未认证动态注册(MCP 客户端在用户登录前注册;有插件级限流,且匿名注册本身不授予任何权限——拿 token 仍需交互式 PKCE 登录 + consent)。可用 `OS_OIDC_DCR_ENABLED` 或新配置字段 `plugins.dynamicClientRegistration` 强制开/关。\n- **AS 随 MCP 自动启用**:`OS_MCP_SERVER_ENABLED=true` 时 oauthProvider 自动装配(显式 `OS_OIDC_PROVIDER_ENABLED=false` 仍优先)。三处 oidcProvider 开关判断收敛到单一 `resolveOidcProviderEnabled()`,避免插件装配 / `/auth/config` / 发现路由三者漂移。\n- **Token → ExecutionContext 单源解析**:访问令牌为 jwt 插件签发的 JWT(`aud` 经 RFC 8707 `resource` 绑定到 `<origin>/api/v1/mcp`,已配置 `validAudiences`)。资源侧在 `AuthManager.verifyMcpAccessToken()` 用本部署自己的 JWKS 本地校验(签名/issuer/audience/过期,fail-closed 返回 null;无 `sub` 的 client-credentials token 一律拒绝——MCP 面是主体绑定的,无头场景走 API key)。校验通过后仅作为第二种**主体来源**,角色/权限/RLS 聚合仍走唯一的 `resolveAuthzContext`(`check:authz-resolver` 门禁通过,未复制任何角色解析)。\n- **OAuth bearer 仅在 MCP 路由生效**:`resolveExecutionContext` 新增 opt-in(仅 dispatcher 的 `/mcp` 路径开启)。理由:OAuth token 的粗粒度 scope 只在 MCP 工具分发层被强制,REST/GraphQL 不做该强制,故不给它们 OAuth 通道。**fail-closed**:凡出示了 JWT 形态的 bearer 而校验失败(未知/过期/audience 不符),请求按匿名处理并 401,绝不回落到浏览器 cookie 会话。\n- **粗粒度 scope → 工具族**(在工具分发处强制):`data:read` → list/describe/query/get,`data:write` → create/update/delete,`actions:execute` → list_actions/run_action。常量单源在 `@objectstack/spec/ai`(`MCP_OAUTH_SCOPES`)。授权范围外的工具不注册(SDK 视为 unknown tool 拒绝);token 一个 MCP scope 都没有则直接 403 `insufficient_scope`。API key / session 主体不受 scope 限制(维持原行为)。scope 只收窄工具面——每次调用仍受主体的权限与 RLS 约束。\n- **TLS 强制(localhost 豁免,OAuth 2.1)**:非回环的纯 HTTP 部署上整个 OAuth 通道保持关闭(不发布元数据、不接受 bearer),端点仅 API key 可用,并在启动日志明确警告。\n- **CLI**:`OS_MCP_SERVER_ENABLED=true` 现在会自动装配 MCP 插件(此前 dispatcher 按该环境变量放行路由、插件却要求 config `requires:['mcp']`,单开开关会得到 501)。\n\n## 测试\n\n- `plugin-auth`(31 新增):真实 jose 签名的 JWT 校验矩阵(签名/issuer/audience/过期/M2M/垃圾输入)、TLS 规则、开关解析、oauthProvider 装配(DCR 标志、scope、validAudiences)。\n- `runtime`(8 新增,走完整 `dispatch()` 管道):401+WWW-Authenticate(OAuth 关闭时保持纯 401)、token 主体绑定与 scope 透传、403 insufficient_scope、无效 bearer 不回落 cookie 会话、**API key 回归**(`x-api-key` / `Bearer osk_…` 不受影响、不被 scope 限制)。\n- `mcp`(9 新增):scope → 工具族注册收窄 + 分发时拒绝。\n- 全量套件绿:spec 6669 / cli 466 / runtime 469 / plugin-auth 292 / mcp 62;`check:authz-resolver` 通过。\n\n## 端到端验证(真实 dev 实例)\n\n针对 `objectstack dev --fresh`(showcase 应用,`OS_MCP_SERVER_ENABLED=true`)以官方 `@modelcontextprotocol/sdk` 客户端(Claude Code 同款传输实现)完成 **35/35** 项协议级检查:401 自举 → 两级 PRM → 路径插入 AS 元数据 → 未认证 DCR → PKCE(S256)+ `resource` 绑定 → consent → token(`aud=/api/v1/mcp`,含 refresh token)→ `initialize`/`tools/list`/`tools/call` 以登录用户身份跑通(RLS 生效、`sys_*` 隐藏)→ 只读 scope 收窄 → 伪造 token 401 → API key 全通道回归。说明:浏览器内交互登录/consent 页面由 Console SPA(objectui,`/_console/oauth/consent`)承载,本仓库 e2e 以协议等价方式调用同一 consent 端点;真实浏览器全流程属 dogfood 验证,配套 Setup「Connect an agent」页面在 issue 列明的后续任务中。\n\n## 文档(验收项)\n\n- `packages/mcp/README.md`:新增远程连接章节(OAuth 人机通道 + API key 无头通道,含 claude.ai 公网可达性说明)。\n- `packages/mcp/src/skill.ts`:生成的 SKILL.md「Connect」改为双通道。\n- `content/docs/ai/agents.mdx`:新增「Connect your AI (BYO-AI over MCP)」逐客户端接入表 + 私有部署可达性说明(本地客户端可达内网;claude.ai web 需公网 HTTPS)。\n- `content/docs/getting-started/build-with-claude-code.mdx`:补上具体连接片段。\n- spec schema 变更(`ExecutionContext.oauthScopes`、`plugins.dynamicClientRegistration`)已重新生成 reference docs。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01V4W4bMy8nMNGKFxTCyrfrd\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01V4W4bMy8nMNGKFxTCyrfrd)_"
+}

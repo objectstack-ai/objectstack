@@ -1,0 +1,34 @@
+{
+  "number": 2707,
+  "kind": "issue",
+  "title": "[spec/cli] 对象 enable.files/trackHistory/activities/feeds 为 dead property:schema 接受、liveness 仅告警不拦",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-09T03:48:28Z",
+  "updated_at": "2026-07-10T03:51:23Z",
+  "closed_at": "2026-07-10T03:51:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2707",
+  "body": "## 概述\n`ObjectSchema.create({ enable: { files, trackHistory, activities, feeds } })` 这些对象级 flag 在编译期被 liveness 标为 **dead(无运行时效果)**,但 schema 照样接受、typecheck 不报错——作者以为设了就有附件/历史,实际什么都没启用,直到读编译 ⚠ 才发现。\n\n## 定位\n- `packages/spec/src/data/object.zod.ts:47-80` —— zod 接受这些字段。\n- `packages/cli/src/.../lint-liveness-properties.ts:108` —— liveness **仅 ⚠ 告警,不 fail**。\n\n## 期望(二选一,让约束一致)\n- **要么**从 schema 移除这些 dead 字段 / typecheck 直接报错,并在文档指向正确写法(`Field.file` / `Field.trackHistory` / `sys_activity`);\n- **要么**让这些 flag **真正生效**(对象级开关映射到对应能力)。\n\n---\n来源(项目 dogfood):steedos-labs/os-tianshun-mtc#34\n"
+}

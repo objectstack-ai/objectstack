@@ -1,0 +1,32 @@
+{
+  "number": 2604,
+  "kind": "issue",
+  "title": "Design: record create/edit/subtable surface + return-flow model (follow-up to #2578)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-05T00:32:21Z",
+  "updated_at": "2026-07-05T06:38:11Z",
+  "closed_at": "2026-07-05T06:38:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2604",
+  "body": "Follow-up to #2578 (closed). #2578 shipped the adaptive **detail/view** surface (field-heavy → full page, light → drawer) + multi-column + `span`. It intentionally left the **create / edit / subtable** surfaces and their **return flows** undesigned. This issue picks that up.\n\nNorth star (inherited from #2578): **all metadata is AI-authored**, so surface + return must be a **platform default**, not per-object config — zero AI authoring. Presentation is not metadata.\n\n## The gap (state after #2578)\n\n| Flow | Current behavior | Status |\n|---|---|---|\n| Detail (row-click view) | **route** — page for field-heavy, drawer for light (shipped) | ✅ done |\n| List → New (create) | opens a **modal** (large), not a route | ⚠️ inconsistent with detail |\n| Detail → Edit | not wired to a route (modal) | ⚠️ undesigned |\n| Subtable → New / Edit child | untouched | ❌ missing |\n| Return from any of the above | not designed / not verified | ❌ missing |\n\n## Core decision: full-screen **modal** vs full-screen **route**?\n\nFor a field-heavy record both give a big canvas; they differ on **return** and **deep-linkability**:\n\n- **Modal (overlay):** close (X / Esc / Cancel / Save) → back exactly where you were; list scroll + filters preserved; no route wiring. Not deep-linkable; browser-back doesn't apply.\n- **Route (navigation):** URL changes → browser back + deep-link + refresh-safe. Needs explicit return wiring (origin state); nested (subtable) creates need a return stack.\n\n## Recommended model (hybrid) — from the discussion\n\n- **Detail (view) = route.** Deep-linkable / shareable; field-heavy → page. ✅ already shipped.\n- **Create + Edit = full-screen modal** (`modalSize: 'full'` when field-heavy). Trivial return (close → list/detail, context preserved); a transient task rarely needs a deep link; no return-stack wiring. *(Leaning this way; alternative = also route.)*\n- **Subtable (child) create / edit = modal / drawer over the parent detail route.** Close → parent detail intact, subtable refetches. **Never a separate route** — that loses the parent context and needs a return stack.\n\n## The three return flows\n\n**1. List → New record**\n- Modal (recommended): 取消 / X / 保存 → close → list at original position (scroll + filter kept). Save → optionally stay on the list or jump to the new record's detail.\n- Route alt (`/new`): needs a \"← back to list\" affordance + browser back; save → navigate to the new record's detail. (The origin-state infra already exists — it powers the detail page's \"← 所有记录\".)\n\n**2. Subtable → New / Edit child** *(the important one)*\n- You are on a **parent record detail (a route)**; the return target **must** be that parent detail + the subtable refreshed.\n- **Modal over the parent detail** → close = back to parent, subtable refetch. **Strongly recommended.**\n- Separate route → loses parent context, needs a return stack, re-fetches the parent. **Avoid.**\n\n**3. Detail → Edit record**\n- Detail is already a route `/record/:id`. Two clean options:\n  - (a) **In-place edit mode** — same route, view ↔ edit toggle; save / cancel → view.\n  - (b) Full-screen modal edit → save / cancel → close back to detail.\n- Either works; the invariant is: **save / cancel returns to the view state**, never leaves the user somewhere else.\n\n## Decisions to make before implementing\n\n1. **Create / Edit surface:** full-screen modal (recommended) or route?\n2. **Detail → Edit:** in-place edit mode or a separate modal / route?\n3. **Subtable:** confirm \"modal over parent detail, never a route\".\n\n## Scope / acceptance (once decided)\n\n- Create / Edit surface wired per the decision, with its return flow (make create consistent with the shipped detail behavior).\n- Subtable create / edit as a modal-over-parent, with parent-detail refresh on close.\n- Browser-verify each return: list → new → back; subtable → new → back to parent + refresh; detail → edit → back to view.\n- Zero AI authoring — surface + return are runtime defaults.\n\nRefs #2578 · code shipped in framework#2595 + objectstack-ai/objectui#2237 + framework#2599\n"
+}

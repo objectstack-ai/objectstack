@@ -1,0 +1,30 @@
+{
+  "number": 2735,
+  "kind": "issue",
+  "title": "Seed loader: JSON-object field values (location/hq) crash batch insert — showcase account/task/field_zoo seeds silently fail",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T03:36:39Z",
+  "updated_at": "2026-07-10T05:31:43Z",
+  "closed_at": "2026-07-10T05:31:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2735",
+  "body": "## What\n\nOn a fresh showcase boot (\\`objectstack dev\\` AND in-process \\`bootStack\\`), three seed datasets fail to insert:\n\n```\nERROR Insert operation failed {\"object\":\"showcase_account\", ... \"select {\\\"lat\\\":47.6062,\\\"lng\\\":-122.3321} as `hq` ...\"}\nERROR Insert operation failed — \"Wrong API use : tried to bind a value of an unknown type ([object Object]).\"\n```\n\nObjects affected: \\`showcase_account\\` (\\`hq\\` location), \\`showcase_task\\` (\\`location\\`), \\`showcase_field_zoo\\`. The JSON object value is passed RAW to the SQLite driver instead of being serialized, so the whole batch fails and those objects seed ZERO rows (Accounts/Tasks grids look empty; the field-zoo runtime guard rows are missing).\n\n## Suspicion\n\n#2680 (route bulk writes through the engine's batch insert path) — the batch path doesn't run the JSON-field serialization the single-insert path had. Single-record inserts of the same shape via REST work.\n\nRepros on a clean main-based tree; unrelated to app metadata changes. The dogfood suite stays green, so no current test asserts these seeds actually landed — worth a regression test asserting seeded row COUNTS (or the seed loader failing loudly per ADR-0049 instead of logging and continuing)."
+}

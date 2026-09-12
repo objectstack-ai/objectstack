@@ -1,0 +1,34 @@
+{
+  "number": 2538,
+  "kind": "pull_request",
+  "title": "chore(console): refresh vendored objectui SPA to 9aec6817",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-03T09:22:11Z",
+  "updated_at": "2026-07-03T09:27:56Z",
+  "closed_at": "2026-07-03T09:27:53Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-07-03T09:27:53Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2538",
+  "body": "## What\n\nRefresh the vendored `@object-ui/console` SPA pinned in `.objectui-sha` from `144ab55b` → `9aec6817` (13 upstream commits) and ship the changeset that bumps `@objectstack/console` (minor).\n\n## Upstream changes pulled in\n\n- feat(studio): Data pillar Validations + Settings views (builder-ui Phase B) (#2180)\n- feat(studio): package switcher + inline new-writable-package in the top bar (#2173)\n- feat(home,studio): builder cover on Home + builder→app bridge; builder landing joins the login journey (#2175, #2176)\n- fix(app-shell): stop double-toasting failed script/modal action errors (#2177); don't show recovery-password reminder on SSO-enforced envs or first landing (#2183, #2184)\n- fix(plugin-grid): row-selection sync on bulk-action dialog close (#2172); i18n bulk-action dialog (#2171); readable import preview (#2170)\n- fix(form): de-emphasize field labels so fieldGroups hierarchy reads (#2174)\n\n## Verification\n\n- `pnpm run build` (70/70) → `scripts/build-console.sh` at `9aec6817` → 35/35 turbo tasks green, dist 42076 KB.\n- Bundle canary `import/jobs` present — THIS framework's `@objectstack/client` is injected into the SPA.\n- `check:console-sha` gate passes (dist stamp matches pin).\n- `packages/console/dist` is gitignored and rebuilt in CI at publish."
+}

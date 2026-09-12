@@ -1,0 +1,33 @@
+{
+  "number": 2829,
+  "kind": "pull_request",
+  "title": "docs(ai): link framework AI docs' cloud pointers to the new cloud AI section",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-11T03:37:56Z",
+  "updated_at": "2026-07-11T03:46:06Z",
+  "closed_at": "2026-07-11T03:46:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-11T03:46:05Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2829",
+  "body": "Now that the cloud docs ship a complete **AI & Agents** section at [docs.objectos.app/docs/ai](https://docs.objectos.app/docs/ai) (cloud PR #806), turn the framework AI docs' two \"documented separately in the cloud docs\" / \"no built-in in-product chat\" prose pointers into concrete cross-site links.\n\nThis fulfills the cross-reference the open-edition honesty pass (#2812/#2813) promised: the framework side fences EE features and points at the cloud docs; those docs now exist and are linked. Two-site open-core doc model, end-to-end.\n\n- `content/docs/ai/natural-language-queries.mdx` — \"the cloud docs\" → link.\n- `content/docs/ai/index.mdx` — \"that runtime is documented in the cloud AI & Agents docs\" → link.\n\nDocs-only, no changeset.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 2539,
+  "kind": "pull_request",
+  "title": "chore(spec)!: retire the compactLayout alias + transition mirror (ADR-0085 window closed)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-03T10:47:15Z",
+  "updated_at": "2026-07-03T10:58:07Z",
+  "closed_at": "2026-07-03T10:58:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-03T10:58:04Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2539",
+  "body": "Executes [#2536](https://github.com/objectstack-ai/framework/issues/2536) — the trigger condition is met: objectui#2168 (consumer switch) shipped via the console pin #2526, and a full release window has passed (#2527, #2535).\n\n## What\n- `ObjectSchema` **drops `compactLayout`**: `create()` rejects it like any unknown key (loud, names the key); lenient `parse()` strips it. No silent aliasing in either direction.\n- `normalizeSemanticRoleAliases` loses the alias **and** the `highlightFields → compactLayout` back-fill mirror (added in #2521 after browser dogfood). Served metadata carries the canonical key only.\n- **27 straggler authors migrated** — system objects in plugin-audit/approvals/security/sharing/webhooks + service-storage/automation/messaging/realtime that the #2521 sweep missed (it only covered platform-objects). The `create()` type gate caught the first straggler at build time; a repo-wide grep found the rest. Zero authors remain.\n- **Load-bearing assertion flipped as designed**: the #2528 dogfood mirror assertion existed to force this PR to prove absence — it now asserts `compactLayout: undefined` on served meta.\n- liveness ledger row removed; `showcase_semantic_zoo_legacy` fixture keeps its `stageField: false` duty and authors the canonical key.\n- Downstream smoke pin → **hotcrm v1.2.2** ([hotcrm#424](https://github.com/objectstack-ai/hotcrm/pull/424): same rename + deps ^11.7.0), same digestion flow as #2524.\n\n## Verification\n- spec: 6666 tests green (alias test rewritten to assert reject/strip); `check:api-surface` **unchanged**; `check:liveness` ✓\n- dogfood: 181 tests green incl. the flipped semantic-roles assertions\n- full dependency-closure build green (the straggler hunt was driven by it)\n\n## Version\n`@objectstack/spec` minor with a documented exception (same path as the 11.7.0 ADR-0085 removals): deprecated-with-alias for a full window, zero first-party authors/consumers remain, no export-surface change. Release owner has the final word per ADR-0059 §4.\n\nCloses #2536\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

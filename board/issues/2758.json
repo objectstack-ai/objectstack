@@ -1,0 +1,33 @@
+{
+  "number": 2758,
+  "kind": "issue",
+  "title": "feat(auth): sys_user 批量导入接口 —— 导入用户的密码处理策略",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T08:34:01Z",
+  "updated_at": "2026-07-10T09:53:12Z",
+  "closed_at": "2026-07-10T09:53:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2758",
+  "body": "## 背景\n\n`sys_user` 是 `managedBy:'better-auth'` 对象,CRUD affordances 里 `create/import/edit/delete` 全 false(见 `packages/spec/src/data/object.zod.ts` 的 `CRUD_AFFORDANCE_DEFAULTS`),所以 Console 列表**没有「新增/导入」**,平台通用导入向导对它也被禁用。目前批量建号只能靠脚本循环调 better-auth 单条接口。\n\n- better-auth 协议本身**无批量 import 原语**,只有单条:`admin` 插件的 `/admin/create-user`、`/admin/list-users`、`/admin/set-role`、`/admin/set-password`(核实 `better-auth@1.6.23` `plugins/admin/routes.mjs`);核心 `/sign-up/email`。\n- 已有通用列表导入 issue #2504(L0–L4 批量/dryRun/Upsert/模板/异步 Job/校验审计)、#2460(导出+导入校验),但都是**普通业务对象**的导入,**没覆盖身份对象**的凭据/密码这一层。\n\n## 诉求\n\n提供 **sys_user(身份对象)专用的批量导入接口**,把 Excel/CSV 里的员工批量建成可登录账号。核心难点是**导入用户的密码怎么处理**。\n\n## 核心决策点:密码处理策略(必须先定)\n\n导入的用户需要一份可登录凭据,四种策略,建议**支持多种、按导入任务选**:\n\n1. **无密码 + 首登引导(最安全,推荐默认)**\n   - 建号时不设密码,批量发**邀请/魔法链接/重置密码**邮件,用户首次点链接自设密码。\n   - 依赖邮件服务(未配 EmailService 会静默失败,需在导入结果里显式标记发送失败的行)。\n   - 无邮箱的员工无法走此路 → 与 #2756 用户名登录 + 短信 OTP 关联。\n\n2. **管理员统一临时密码 + 强制改密**\n   - 导入时给一个(或每人随机生成的)临时密码,落 `requirePasswordChange` 标记,首登强制改。\n   - 需要平台支持\"强制改密\"标记与拦截(当前是否有?待确认;better-auth 无内置 `requirePasswordChange`,可能要自研 before-hook)。\n   - 临时密码的下发渠道(导出一次性 CSV?邮件?)要定,且**绝不落日志**。\n\n3. **导入历史系统的预哈希密码(迁移场景)**\n   - 老系统迁移时希望用户**沿用原密码**。better-auth 默认 scrypt;要接受外部哈希需配置自定义 `emailAndPassword.password.hash/verify`(better-auth 支持自定义 hasher)。\n   - 需支持声明哈希算法/参数;不同算法混存要能区分。复杂度最高,列为可选高级能力。\n\n4. **随机密码 + 不下发**(仅占位,用户只能靠重置登录)—— 一般不单独用,作为 1/2 的兜底。\n\n## 接口设计建议\n\n- 新增**身份专用导入端点**(如 `POST /api/v1/auth/admin/import-users`),而非放开 sys_user 的通用 import affordance——因为要走 better-auth 的建号/哈希管线,不能直接 insert。\n- 入参:`rows[]`(email/username/name/role/...)、`passwordStrategy`(上面 1–4)、`dryRun`、`upsert`(按 email/username 幂等)、可选 `sendInvitation`。\n- 复用通用导入框架的能力:dryRun、逐行校验报告、异步 Job、导入审计(对齐 #2504,避免重造)。\n- 安全:密码/哈希字段**禁止进日志/审计明文**;权限 gate(仅 `manage_platform_settings` 等);限流。\n- 幂等:重复导入按 email/username upsert,不产生重复账号(参考记忆:insert 种子无 predev 清库会重复的教训)。\n\n## 决策点(需拍板)\n\n- 默认策略选 1(邀请/首登设密)还是 2(临时密码+强制改密)?\n- 是否需要支持策略 3(预哈希迁移)?若要,自定义 hasher 的配置形态。\n- 「强制改密」标记是否已有平台支持?没有的话作为前置子任务。\n- 是走**独立 `import-users` 端点**,还是扩展 #2504 通用导入 + 给身份对象加\"凭据后处理\"钩子?建议前者(身份管线特殊)。\n\n## 影响面\n\n- `packages/plugins/plugin-auth`(导入端点 + 密码策略 + 邀请/重置复用)\n- 可能触及 `emailAndPassword.password.hash/verify`(策略 3)\n- 与通用导入框架 #2504 的能力复用/边界划分\n\n## 相关\n\n- #2504 产品级列表导入(通用对象)\n- #2460 列表导入校验/完整性\n- #2756 用户名/工号登录(无邮箱员工的导入与登录强相关)\n"
+}

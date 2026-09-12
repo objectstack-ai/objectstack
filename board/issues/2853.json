@@ -1,0 +1,35 @@
+{
+  "number": 2853,
+  "kind": "pull_request",
+  "title": "fix(sharing): verified authz on share-link routes (#2851)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-12T09:27:51Z",
+  "updated_at": "2026-07-12T10:05:47Z",
+  "closed_at": "2026-07-12T10:05:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-12T10:05:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2853",
+  "body": "Closes #2851. Companion to #2848 (settings routes) — same root cause (a raw-app route registration trusting identity headers). Found by the ADR-0090 D10 adversarial security review.\n\n## The hole\n\nThe share-link routes (`POST/GET/DELETE /api/v1/share-links`, registered by `SharingServicePlugin` on the raw Hono app) derived the caller from `x-user-id` / `x-tenant-id` headers, and the service **ignored the caller context on revoke**. So a client could:\n- forge link attribution (`created_by`);\n- `GET /api/v1/share-links?createdBy=<victim>` → **enumerate another user's link tokens**, which then resolve records via the public `/:token/resolve` under a system context (RLS bypassed);\n- `DELETE` → **revoke arbitrary users' links** (sharing DoS).\n\n## The fix\n\n- **Verified identity.** `SharingServicePlugin` derives the caller (and their `positions`/`permissions`) from `resolveAuthzContext` (session / API key / OAuth), never headers. The route default is secure (anonymous). Create / list / revoke require a signed-in principal (401 otherwise). The public `/:token/resolve` stays public (the token is the authorization) but keys its `audience: 'signed_in'` check off the **verified session**, not a spoofable `x-user-id`.\n- **List scoping.** `GET /api/v1/share-links` is forced to the caller's own links — no more `?createdBy=<victim>` enumeration.\n- **Revoke ownership.** `revokeLink` requires the caller to be the link's creator (system/internal callers bypass).\n- **Create access check.** `createLink` verifies the record is visible to the caller (read under the caller's own RLS) before minting — you can only share a record you can actually see. (This also hardens the already-verified dispatcher handler, which shares the service.)\n\n`ShareLinkExecutionContext` gains optional `positions` / `permissions` so the record-access check evaluates the real principal.\n\n## Tests\n\n- **Revoke ownership**: a non-owner is denied (403) and the row is untouched; the creator and a system caller may revoke.\n- **Create access**: an untrusted caller minting a link for a record it cannot see gets `403` (no existence leak); a system caller still gets the plain `404`.\n- `plugin-sharing` **79** green; spec `api-surface` unchanged; `tsc` clean.\n\n## Behaviour change\n\nManaging share links now requires a real verified credential (which the console already presents). The `contextFromRequest` option remains the escape hatch for bespoke gateways.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 2815,
+  "kind": "issue",
+  "title": "feat(sms/i18n): 邀请/OTP 短信文案国际化（按用户 locale 渲染）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-11T02:10:40Z",
+  "updated_at": "2026-07-11T03:31:27Z",
+  "closed_at": "2026-07-11T03:31:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2815",
+  "body": "## 背景\n\n#2780 的两处认证短信文案目前是英文硬编码在 `packages/plugins/plugin-auth/src/auth-manager.ts`：\n\n- `deliverPhoneOtp()`：`\"${code} is your ${appName} sign-in verification code. It expires in N minutes.\"`（OTP 登录/重置共用模板）\n- `sendPhoneInviteSms()`：`\"Your ${appName} account is ready. Sign in with this phone number using a verification code at ${baseUrl}, then set your password.\"`\n\n中文部署的员工收到英文短信，体验割裂。messaging `sms` channel 已经支持 `(topic, 'sms', locale)` 的 `sys_notification_template` 渲染，但 auth 的 OTP/邀请发送走的是 `services.sms.send` 直连，不经过该模板机制。\n\n## 诉求\n\n1. **按收件人 locale 渲染**：OTP/邀请文案支持 locale 化——要么复用 `sys_notification_template` 的 locale fallback 机制（新增 `auth.phone_otp` / `auth.phone_invite` 主题模板 + 内置中英 seed），要么走 service-i18n 的翻译目录；locale 来源：`sys_user.locale` → 部署默认。\n2. **阿里云模板制的约束**：阿里云短信本身按 TemplateCode 报备、无自由正文，locale 化对它意味着**每语言一个 TemplateCode** 的映射（如 `aliyun_otp_template_code_zh` / `_en`，或模板码表）。设计时需要与自由正文 provider（Twilio/log）统一在 `SendSmsInput.templateId/templateParams` 抽象下。\n3. **红线保持**：无论哪种方案，OTP 码仍只出现在短信正文，不进模板渲染日志。\n\n## 相关\n\n- #2780 / PR #2790（`deliverPhoneOtp` / `sendPhoneInviteSms` / sms channel 模板渲染）\n- objectui#2388（前端 UI 文案已走 i18n key + 英文兜底，服务端短信是剩余缺口）"
+}

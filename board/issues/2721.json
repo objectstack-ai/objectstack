@@ -1,0 +1,35 @@
+{
+  "number": 2721,
+  "kind": "pull_request",
+  "title": "feat(lint): warn when a master-detail child has no object-level CRUD grant (#2700)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T03:00:36Z",
+  "updated_at": "2026-07-10T03:43:14Z",
+  "closed_at": "2026-07-10T03:43:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-10T03:43:13Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2721",
+  "body": "Closes #2700.\n\n## Problem\n\nA downstream app (`os-tianshun-mtc`) hit a silent DX trap: a master-detail **child** object was missing object-level CRUD in its permission sets, so role-bound non-admin users couldn't read/write the subtable — surfacing only as \"can't fill in / can't submit the subtable\" with no clear error. (downstream: `steedos-labs/os-tianshun-mtc#43`)\n\nThe root cause is two **independent** permission gates:\n\n1. **Gate ① object-level CRUD** (`checkObjectPermission`) — a permission set that doesn't list the object returns `false` → `PermissionDeniedError` (403).\n2. **Gate ② record-level RLS / `controlled_by_parent`** — decides *which* records, only after gate ① passes.\n\nADR-0055's `controlled_by_parent` lives entirely in **gate ②** (read injects `masterFK IN (accessible masters)`, write requires master edit) and **never derives gate ①**. So \"child access derives from the master\" is a **record-level** guarantee only; **object-level CRUD must still be granted per-object**. Missing it, the cbp derivation never even runs — gate ① blocks first. This is deliberate secure-by-default (Salesforce parity); CRUD auto-inheritance is intentionally **not** adopted.\n\nThis \"likely misconfiguration\" is **statically detectable** but was flagged nowhere at compile time.\n\n## Change\n\nNew rule **`security-master-detail-ungranted`** (advisory `warning`, does not gate the build) in the ADR-0090 D7 security-posture linter (`validateSecurityPosture`).\n\n- **Fires** on a non-system detail object (has a `master_detail` field) that **no** authored permission set grants object-level CRUD (explicit entry or `'*'` wildcard).\n- **Silent** when: the package authors no permission sets; a package-declared `'*'` wildcard grant covers every object; or the object is `sys_*` / `isSystem`. Keeps the false-positive rate near zero.\n- The residual per-set gap (one role grants it, another forgets it) is intentionally out of scope (per #2700).\n\n### Why the D7 linter, not `data-model-rules.ts` (the issue's first suggestion)\n\nThe rule cross-references `objects × permissions`. `lintDataModel(objects)` only receives objects (and feeds the metadata-eval scorer), whereas `validateSecurityPosture(stack)` already receives the full stack and is wired into both `os lint` and `os compile` — where only `error` gates, so a `warning` prints without blocking. This is the issue's stated alternative.\n\n## Verification\n\n- `@objectstack/lint`: **173 passed** (13 new cases: incident shape, all 6 grant bits, `'*'` wildcard, array field form, system exemption, zero-permission-sets, `path`/message assertions).\n- `@objectstack/cli` (direct consumer): **334 passed** — no snapshot/count drift.\n- `tsc --noEmit`: clean.\n- Ran against the **built dist** with an incident-shaped stack → 1 warning; granting the child → silent.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

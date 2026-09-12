@@ -1,0 +1,32 @@
+{
+  "number": 2681,
+  "kind": "issue",
+  "title": "CodeQL: polynomial regex (ReDoS) in record-validator.ts / rule-validator.ts EMAIL_RE",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-07T18:13:35Z",
+  "updated_at": "2026-07-08T14:03:09Z",
+  "closed_at": "2026-07-08T14:03:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2681",
+  "body": "## Summary\n\nCodeQL flagged 2 high-severity \"Polynomial regular expression used on uncontrolled data\" alerts, surfaced on PR #2680 but **unrelated to that PR's diff** (confirmed via `git diff main` — neither file is touched there). Filing separately per repo convention rather than expanding that PR's scope.\n\n## Locations\n\n- `packages/objectql/src/validation/record-validator.ts:231` (usage) — pattern defined at line 46:\n  `const EMAIL_RE = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;`\n- `packages/objectql/src/validation/rule-validator.ts:577` (usage) — same pattern defined at line 533.\n\nCodeQL's finding: the regex \"can run slow on strings starting with `!@!.` and with many repetitions of `!.`\" — classic polynomial backtracking from two adjacent unbounded `[^...]+` quantifiers with overlapping character classes around a required literal.\n\n## Why it matters\n\nBoth files validate the `email` field type used by `validateRecord`/rule-based validation — i.e. **user-supplied record field values** run through this pattern. A field value crafted to trigger catastrophic-ish backtracking (long repeated `!.` sequences) could cause a slow validation call, tying up the event loop — a DoS vector on any write path (REST create/update, import, seed) that validates an `email`-typed field.\n\n## Suggested fix\n\nReplace with a bounded, non-backtracking email pattern, e.g. anchoring the local/domain parts with length caps or using a single-pass character class without adjacent unbounded quantifiers around the same delimiter, such as:\n\n```ts\nconst EMAIL_RE = /^[^\\s@]{1,64}@[^\\s@]{1,255}\\.[^\\s@]{1,24}$/;\n```\n\n(bound the repetition so worst-case backtracking is O(n) instead of polynomial), or adopt a well-vetted linear-time email regex. Apply the same fix to both files (they currently duplicate the pattern) — worth checking whether they can share one definition instead of two copies drifting independently.\n\n## Refs\n\n- Surfaced on PR #2680 (framework#2678, seed/import bulk-insert perf fix) — CodeQL run: https://github.com/objectstack-ai/framework/security/code-scanning?query=pr%3A2680+tool%3ACodeQL+is%3Aopen\n"
+}

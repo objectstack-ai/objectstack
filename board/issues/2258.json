@@ -1,0 +1,30 @@
+{
+  "number": 2258,
+  "kind": "issue",
+  "title": "关于导入操作的bug和改进，以及增加导出操作",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "marchtian",
+    "id": 7553007,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T03:46:56Z",
+  "updated_at": "2026-07-08T15:02:52Z",
+  "closed_at": "2026-07-08T15:02:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2258",
+  "body": "\n- [ ] 导入，录入csv是，填写映射的页面上，如果鼠标点到别处，就会退出，之前的设置 前功尽弃\n- [x] 导入，必须是csv文件，可否支持 excel？\n- [ ] 导入，必须每次输入映射关系，可否固化？普通用户不可能为了导入 去设这个\n- [ ] 导入，csv中select类型的字段，其值只能为 value，读取 csv不便"
+}

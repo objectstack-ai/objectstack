@@ -1,0 +1,35 @@
+{
+  "number": 2725,
+  "kind": "pull_request",
+  "title": "fix(runtime): resolve session identity for action body ctx.user (#2701)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T03:19:23Z",
+  "updated_at": "2026-07-10T08:04:34Z",
+  "closed_at": "2026-07-10T08:04:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-10T08:04:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2725",
+  "body": "## Problem\n\nThe `POST /actions/:object/:action` route registered its handler on the raw HTTP\nserver and called `handleActions` **directly**, bypassing `dispatcher.dispatch()`.\nSince `resolveExecutionContext` only runs inside `dispatch()`, the request's\n`executionContext` was never populated, and `handleActions` additionally built\n`ctx.user` from `_context.user` / `_context.userId` — fields `HttpProtocolContext`\nnever carries — hard-falling to `{ id: 'system' }`.\n\nNet effect: **the action body sandbox's `ctx.user` was always `system`** (no id,\nno roles), so handlers could not branch on the operator's identity/business roles\nor enforce server-side ownership. Every other entrypoint (MCP `runAction`,\nrecord-change trigger) already resolved the session correctly — the action route\nwas the single miss. (Closes #2701)\n\n## Fix\n\nRoute action requests through `dispatch()` like the automation/AI routes, so the\nper-request pipeline resolves identity (and swaps to the per-project kernel)\nbefore the action body runs — this eliminates the \"bypass dispatch\" workaround\nrather than papering over it with a fallback.\n\n- **`dispatcher-plugin.ts`** — `registerActionRoutes` now calls\n  `dispatch('POST', '/actions/…')`. The scoped-URL `:environmentId` rides on\n  `req.params` and is picked up by `prepareResolverHints`, exactly as automation does.\n- **`http-dispatcher.ts`** — `handleActions` builds `ctx.user` from the resolved\n  `ExecutionContext` (`id`, `email`, `roles`/`positions` = ADR-0090 business roles,\n  `permissions`, `tenantId`), matching the MCP/record-change paths. Falls back to a\n  `system` principal only for a genuinely anonymous / self-invoked call. The stale\n  kernel-swap comment is updated (the block is now an idempotent fallback for direct\n  `handleActions` callers).\n\nNo authoring change is required — handlers that always saw `ctx.user.id === 'system'`\nnow see the real caller.\n\n## Verification\n\n- **4 regression tests** in `http-dispatcher.test.ts`, including an **end-to-end**\n  case: mint an api key → `dispatch('/actions/…')` → `resolveExecutionContext` →\n  action, asserting the principal reaches `ctx.user` (id `user_9`, not `system`).\n- **Red-test check:** temporarily restoring the pre-fix code turns all 4 red\n  (`expected 'system' to be 'user_42'`, `'system' to be 'user_9'`, …), confirming the\n  tests actually guard the bug.\n- Typecheck (tsup DTS) passes; `dispatcher-plugin.routes` + `ready.integration`\n  tests green (9/9); full `http-dispatcher.test.ts` green (156/156).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

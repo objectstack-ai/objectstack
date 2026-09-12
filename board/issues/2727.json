@@ -1,0 +1,32 @@
+{
+  "number": 2727,
+  "kind": "issue",
+  "title": "[objectui/framework] enable.files: generic Attachments related-list (Salesforce Notes & Attachments parity)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T03:22:10Z",
+  "updated_at": "2026-07-10T05:24:54Z",
+  "closed_at": "2026-07-10T05:24:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2727",
+  "body": "## 背景\n\n#2707 处置了对象能力 flag 的 dead-property 问题:`trackHistory`/`feeds`/`activities` 已全部接线为 live(见对应 PR),**只剩 `enable.files` 是真 dead**——两层(framework 运行时 + objectui 渲染层)都没有消费者,当前保持 `dead + authorWarn`(liveness ledger),spec `describe()` 已改为如实标注 RESERVED。\n\n## 目标\n\n让 `enable.files: true` 真正生效 = 通用附件面板(Salesforce \"Notes & Attachments\" 对齐):\n\n1. **objectui**:记录详情页渲染通用 Attachments related-list(上传/列表/下载/删除),gated on `enable.files === true`(opt-in,spec default false);底层存储走 `sys_attachment`(polymorphic target: `object_name` + `record_id`)。\n2. **framework**:`sys_attachment` 目标校验——创建指向 `files` 未开启对象的附件行为需要决策(fail-closed 403 FILES_DISABLED,复用 `FEEDS_DISABLED`/`CLONE_DISABLED` 模式;注意别误伤 `Field.file`/`Field.image` 的既有存储路径,它们不依赖该 flag)。\n3. 落地后把 ledger 条目 `enable.files` 翻 live、删 authorWarn,更新 `describe()` 与 references 文档。\n\n## 约束\n\n- `Field.file`/`Field.image` 的字段级附件不受影响(它们是另一条路径,继续不依赖此 flag)。\n- opt-in 语义保持(`default(false)`):这是\"长出新面板\"不是\"关掉已有行为\",与 feeds/activities 的 opt-out 相反。\n- 完成前 `enable.files` 保持 authorWarn,防止作者误以为设了就有附件。\n\n来源:#2707 评估;liveness ledger `packages/spec/liveness/object.json` → `enable.files`。"
+}

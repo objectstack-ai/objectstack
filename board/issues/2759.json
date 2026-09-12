@@ -1,0 +1,34 @@
+{
+  "number": 2759,
+  "kind": "pull_request",
+  "title": "docs(permissions),feat(setup-nav): standalone explain/matrix/delegated-admin pages, last \"Roles\" label → Positions, objectui pin bump",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T08:36:50Z",
+  "updated_at": "2026-07-10T09:30:11Z",
+  "closed_at": "2026-07-10T09:30:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-10T09:30:09Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2759",
+  "body": "Follow-ups to the ADR-0090 zoo/fix series (#2739, #2745), rounding out the remaining suggestions.\n\n## Standalone permission docs\n\nThe three P3/P4 capabilities previously folded into `authorization.mdx` get dedicated, runbook-grade pages (structural — the summaries stay in place and now link out):\n\n- **`permissions/explain.mdx`** — decision anatomy (layers, verdicts, contributor attribution with a real showcase example), service + `GET/POST /api/v1/security/explain` usage, the D12 caller-authorization rule, and what the engine powers.\n- **`permissions/access-matrix.mdx`** — opt-in via committed `access-matrix.json`, the REAL drift-failure output (captured live: \"'showcase_member_default' gains access to 'showcase_private_note' (create, read, edit)\"), snapshot format, and how the gate composes with the D7 linter and explain.\n- **`permissions/delegated-administration.mdx`** — `adminScope` field reference, the nine runtime gate rules in one table (each proven end-to-end by `showcase-permission-zoo.dogfood.test.ts`), the assignment BU anchor, and the explain tie-in.\n\n`meta.json` gains the three pages; `apps/docs` production build green.\n\n## The last \"Roles\" in platform UI copy (ADR-0090 D3)\n\nplugin-security's Setup nav contribution renamed `nav_roles`/\"Roles\" → `nav_positions`/\"Positions\", with the four platform-objects translation bundles following (岗位 / ポジション / Posiciones). This was the label the Setup sidebar still showed next to the (already-renamed) 岗位 object page.\n\n## objectui pin bump → `397dcad73eaf`\n\nPicks up two ADR-0090 UI deliverables that landed in objectui: the Studio Access-pillar **\"why can this user access?\" explain panel** (D6, objectui#2375) and the **suggested audience-binding install prompt** (D5/D9, objectui#2376). Portal metadata has no `profiles` consumer in objectui (verified) — nothing to migrate there.\n\n## Verification\n\n- Full suite 126/126 turbo tasks green; platform-objects + plugin-security suites pass with the nav rename.\n- Vendored console rebuilt at the new pin (`build-console.sh`, bundle canary ✓) and browser-verified on a fresh `--ui --seed-admin` boot:\n  - Setup sidebar 访问控制 shows **岗位** (was 角色); the positions grid lists all 13 (7 showcase incl. `client_portal_user` + built-ins + everyone/guest).\n  - Studio → 权限 renders the 权限矩阵 with all 8 zoo sets and per-object **OWD + Ext (externalSharingModel) badges**.\n  - The **解释访问权限** panel round-trips the new REST endpoint: allowed banner, principal card (positions/permission sets), per-layer verdicts with contributor attribution.\n\nRelated: #2696 (explain tracking), ADR-0090 D3/D5/D6/D9/D12.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

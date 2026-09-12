@@ -1,0 +1,35 @@
+{
+  "number": 2728,
+  "kind": "pull_request",
+  "title": "feat(mcp): GET /api/v1/mcp/skill — env-customized Agent Skill download (#2714)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T03:23:58Z",
+  "updated_at": "2026-07-10T03:53:26Z",
+  "closed_at": "2026-07-10T03:52:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-10T03:52:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2728",
+  "body": "#2714 Phase 1 — the framework dependency called out in objectstack-ai/objectui#2363: `renderSkillMarkdown()` (the ONE generic skill, ADR-0036 Amendment C) had no HTTP outlet.\n\n## What\n\n`GET /api/v1/mcp/skill` serves the environment-customized `SKILL.md` as `text/markdown` (+ `content-disposition: inline; filename=\"SKILL.md\"`, `cache-control: no-store` — same reasoning as `/discovery`, cloud#152).\n\n- **Public** like `/discovery`: the content is generic agent instructions plus a URL the caller already knows — no schema, no tenant data.\n- **Gates mirror `/mcp`**: 404 when `OS_MCP_SERVER_ENABLED=false` (nothing advertised), 501 when the MCP plugin isn't loaded, 405 (+`Allow`) for non-GET.\n- **Env URL resolution**: auth service's canonical `getMcpResourceUrl()` first, request-host (`host` + `x-forwarded-proto`) fallback, documented placeholder last.\n- `MCPServerRuntime.renderSkill()` exposes the renderer through the registered `'mcp'` service, so the runtime keeps zero dependency on `@objectstack/mcp` (same duck-typed seam as `handleHttpRequest`).\n- Implementation note: raw text rides the dispatcher's `result` **stream channel** (single-chunk) — the `response` channel JSON-encodes bodies unconditionally, which would have shipped a quoted string.\n\n## Verification\n\n- Unit: 5 new dispatcher tests (200/content/URL-preference, opt-out 404, no-service 501, 405+Allow, anonymous access); runtime 477 ✓, mcp 64 ✓.\n- Live on showcase: raw markdown body (not JSON-quoted), correct headers, `http://localhost:3210/api/v1/mcp` injected into the Connect section from the request host.\n\nRefs #2714, objectstack-ai/objectui#2363.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

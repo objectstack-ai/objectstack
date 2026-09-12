@@ -1,0 +1,35 @@
+{
+  "number": 2547,
+  "kind": "pull_request",
+  "title": "perf(lint): load Sucrase lazily in validateReactPages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-03T14:10:50Z",
+  "updated_at": "2026-07-03T14:16:34Z",
+  "closed_at": "2026-07-03T14:16:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-03T14:16:32Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2547",
+  "body": "## Summary\n\n`@objectstack/lint` sits on the kernel boot path, but the react syntax gate (ADR-0081) only runs when a `kind:'react'` page is actually validated. The top-level `import { transform } from 'sucrase'` in `validate-react-pages.ts` made every boot parse ~1.5 MB of transpiler (~16 ms cold require) — the same boot-path problem as the TypeScript compiler in `validateReactPageProps`, fixed in #2544.\n\n- Sucrase now loads on the first validated react-source page via the same deferred `createRequire` pattern (anchor chain `import.meta.url` → `__filename` → cwd); the public API stays synchronous and unchanged, and `sucrase` stays a regular dependency in package.json.\n- If the package is missing at call time (image pruning), validation fails with an actionable error instead of killing boot. The loader call sits outside the transpile `try` so a missing package can't be swallowed as a syntax finding.\n- The boot-path guard test is generalized from `lazy-typescript.test.ts` to `lazy-deps.test.ts`, parameterized over `LAZY_DEPS = ['typescript', 'sucrase']` at all three levels: structural no-eager-import scan over src, child-process probes of both built dist formats (also asserting per-gate independence — the syntax gate must not load typescript), and in-process lazy-load behavior. An in-worker require.cache probe alone cannot catch a reintroduced eager import: vitest inlines static imports through its transform.\n\n## Red-check\n\nVerified the guard goes red for **each dep separately** by reintroducing the eager imports (string-patched, then reverted):\n- both deps eager → all 4 guard tests fail; the structural scan names both offenders\n- sucrase-only eager → dist probes fail specifically with `sucrase was loaded eagerly, at import time`\n\n## Verification\n\n- `pnpm vitest run` in packages/lint: 116/116 green, all 4 guard tests run un-skipped against built dist\n- `eslint src` clean\n- `turbo build --filter=...@objectstack/lint`: 61/61 tasks green\n- changeset: patch for `@objectstack/lint`\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

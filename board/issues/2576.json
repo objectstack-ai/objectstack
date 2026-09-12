@@ -1,0 +1,35 @@
+{
+  "number": 2576,
+  "kind": "pull_request",
+  "title": "fix(automation): bind a flow published while the server runs, without a restart",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T12:46:13Z",
+  "updated_at": "2026-07-04T12:52:41Z",
+  "closed_at": "2026-07-04T12:52:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-04T12:52:39Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2576",
+  "body": "## Summary\n\nFollow-up to #2560 (cold-boot flow binding). A flow **published while the server is running** — the Studio online-authoring journey (author a record-triggered automation, publish it, immediately update a matching record) — did **not** fire. Its trigger only bound on the next process restart.\n\nTwo gaps, both fixed:\n\n1. **The publish path fired no rebind signal.** `POST /packages/:id/publish-drafts` → `protocol.publishPackageDrafts` promotes drafts to active but emitted no event the automation service listens to. The runtime dispatcher now announces `metadata:reloaded` after a successful publish — the same signal a dev artifact reload fires (`MetadataPlugin._reloadAndAnnounce`) — so boot-cached consumers re-sync without a restart. Best-effort: a subscriber failure never fails the publish (drafts are already live); it rides the response as `rebindError`. Fires only when something was published/unhidden.\n\n2. **The runtime re-sync read the wrong source.** The automation service's `metadata:reloaded` re-sync pulled `metadata.list('flow')`, which returns **0 in a real running server** (it does not surface inline app flows), so even when the hook fired it bound nothing. It now reads `protocol.getMetaItems({ type: 'flow' })` — the same flattened flow view #2560's cold-boot bind and `GET /meta/flow` use — via a shared `readFlowDefsFromProtocol` helper, while keeping the teardown of flows removed from the artifact. A failed or unavailable protocol read returns `null` and is a **no-op — it never tears down live flows**. The `kernel:ready` cold-boot bind stays additive (no teardown), reusing the same helper.\n\nOnly one `metadata:reloaded` subscriber exists (the automation service), so firing it on publish has no collateral effect. Production is largely unaffected — a deploy reboots the process, so #2560's cold-boot bind covers it; this closes the gap for dev and single-instance Studio authoring.\n\n## Changes\n\n- `packages/services/service-automation/src/plugin.ts` — extract `readFlowDefsFromProtocol`; `metadata:reloaded` re-sync (`resyncFlowsFromMetadata` → `resyncFlowsFromProtocol`) reads the protocol and keeps teardown; `syncFlowsFromProtocol` (kernel:ready) reuses the helper, stays additive.\n- `packages/runtime/src/http-dispatcher.ts` — announce `metadata:reloaded` after a successful `publish-drafts`.\n\n## Tests\n\n- **New** `flow-publish-rebind.test.ts` (4 cases): binds a flow that appears in the protocol after boot; tears down a flow the protocol no longer serves; **reads the protocol, not `metadata.list`** (the exact bug); does not tear down live flows on a failed protocol read. The first/third fail on the pre-fix code.\n- **New** `http-dispatcher.test.ts` cases: publish-drafts announces `metadata:reloaded` / does not announce when nothing was published.\n- **Updated** `flow-hot-reload.test.ts` fake service (metadata → protocol source).\n- Green locally: `@objectstack/service-automation` 231/231, `@objectstack/runtime` 447/447; eslint clean.\n\n## Verification (end-to-end, clean instance, no restart)\n\nOn a fresh showcase (`:3210`):\n1. Authored a record-triggered flow `showcase_pubtest` as a **draft** in a writable base package.\n2. **Pre-publish** update of a `showcase_task` → flow did **not** fire (negative control — still a draft).\n3. `POST /packages/:id/publish-drafts` **without restarting** → flow became active; response carried no `rebindError`.\n4. **Post-publish** update → flow **fired** (temporary `process.stderr.write` probe in `AutomationEngine.execute`, since `logger.info` is suppressed and `sys_automation_run` only records suspended runs). Probe removed before commit.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

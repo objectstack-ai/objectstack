@@ -1,0 +1,32 @@
+{
+  "number": 2675,
+  "kind": "issue",
+  "title": "flow notify 节点无法给通知附带点击跳转目标（source_object/source_id）——inbox 通知点不进对应记录",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "lizheng-steedos",
+    "id": 151509384,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-07T09:57:49Z",
+  "updated_at": "2026-07-07T14:07:38Z",
+  "closed_at": "2026-07-07T14:07:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2675",
+  "body": "## 背景\n\n用 flow 的 `notify` 节点给业务记录相关方发 inbox 通知时，常见诉求是让通知能**点击直接跳转到某条记录**——例如「转报价审批通过 → 通知负责人 → 点进新建的报价单去补全明细」。\n\n## 问题\n\n`sys_notification` 本身有承载跳转目标的字段 **`source_object` / `source_id`**（以及 `actor_id`），但 **flow `notify` 节点没有提供任何 config 键去设置它们**——生成的通知这几个字段恒为 `null`，inbox 里点通知无处可跳。\n\n`notify` 节点实际只消费 `recipients` / `title` / `message` / `channels`；写出的 `sys_notification.payload` 只有 `{ title, body }`。\n\n## 复现（@objectstack 12.2.0，隔离实例实测）\n\n在一个 `record_change` flow 的 `notify` 节点 config 里，尝试 6 种候选键去指定跳转目标：\n`objectName`/`recordId`、`sourceObject`/`sourceId`、`source:{object,id}`、`relatedObject`/`relatedId`、`link:{object,id}`。\n\n- `os validate` **全部通过**（notify config 是宽松 passthrough，不报错）；\n- 但触发后查 `sys_notification`：`source_object` / `source_id` **全部为 `null`**——所有候选键都被忽略。\n- 对照：`payload.title` / `payload.body`、以及 `sys_notification_receipt`（inbox 投递、`state=delivered`）都正常。\n\n## 期望\n\n`notify` 节点 config 支持指定跳转目标，写入 `sys_notification.source_object` / `source_id`（或一个 `url`），inbox 即可点击跳到目标记录。例如：\n\n```ts\n{ type: 'notify', config: {\n  recipients: ['{record.sales_person}'],\n  title: '转报价申请已通过',\n  message: '…请到报价单补全明细',\n  channels: ['inbox'],\n  // 期望支持（二选一或都支持）：\n  sourceObject: 'mtc_quotation',\n  sourceId: '{new_quotation.id}',\n  // 或 url: '/…/mtc_quotation/record/{new_quotation.id}'\n}}\n```\n\n## 影响\n\n- 「通知 + 一键跳到相关记录」是审批/待办类通知的基本诉求。当前只能发纯文本通知，用户拿到通知还得自己去翻记录。\n- 变通只能用 `create_record` 直接写 `sys_notification` + `sys_notification_receipt` 并手动置 `source_*`——等于重实现通知投递管道，脆弱、易随平台演进失效。\n\n## 环境\n\n@objectstack 12.2.0。若较新版本已支持该 config 键，烦请指个键名 / PR，我这边核实。\n"
+}

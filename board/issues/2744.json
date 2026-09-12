@@ -1,0 +1,32 @@
+{
+  "number": 2744,
+  "kind": "issue",
+  "title": "[objectql] flaky wall-clock assertion in hook-binder fire-and-forget test (<20ms on shared CI runner)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T05:13:35Z",
+  "updated_at": "2026-07-10T08:22:57Z",
+  "closed_at": "2026-07-10T08:22:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2744",
+  "body": "\\`packages/objectql/src/hook-binder.test.ts\\` → \"runs async after-events fire-and-forget\" 断言 wrapped 调用在 **<20ms** 内返回(\\`expect(Date.now() - t0).toBeLessThan(20)\\`,line ~224)。共享 CI runner 慢一点就红:\n\n```\nAssertionError: expected 23 to be less than 20\n```\n\n实测在 PR #2742 的 Test Core 上随机命中(该 PR 未触碰 objectql),重跑即绿=典型 timing flake。\n\n建议:别用墙钟阈值证明 fire-and-forget——改为顺序性断言(调用返回时 handler 尚未执行:返回后立刻检查 \\`calls\\` 为空,再 await 之后为 \\`['done']\\`——测试后半段已有),或把阈值放宽到与语义匹配的量级(如 <500ms,阈值只为挡\"意外变同步 await 60ms+\")。"
+}

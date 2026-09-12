@@ -1,0 +1,35 @@
+{
+  "number": 2534,
+  "kind": "pull_request",
+  "title": "fix(runtime): surface clean business message from failed action, not the sandbox debug wrapper",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-03T05:43:44Z",
+  "updated_at": "2026-07-03T08:45:10Z",
+  "closed_at": "2026-07-03T08:45:08Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-07-03T08:45:08Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2534",
+  "body": "## 问题\n\n某项目动作 `lead_apply_convert` 校验失败时,用户看到的错误 toast 是:\n\n> **action 'lead_apply_convert' threw: Error:** 线索信息不完整,提交转商机申请前请补全:终端客户\n\n前面 `action '<name>' threw: Error:` 这段是**框架给日志/开发看的调试包装**,不该展示给终端用户。\n\n## 根因\n\n用户在 script/action body 里 `throw new Error('线索信息不完整…')`,沙箱把它包成 `<kind> '<name>' threw: <msg>`(`SandboxError.message`,用于服务端日志),而动作 HTTP 端点在 catch 里把**整个包装串**原样当作 client 端 `error` 返回(`http-dispatcher.ts` 的 `handleActions` catch),于是调试前缀泄漏到了前端 toast。\n\n## 改动\n\n- `SandboxError` 新增 `innerMessage` 字段:去掉 `<kind> '<name>' threw:` 包装、并剥掉默认的 `Error: ` 名字前缀后的**纯业务消息**。仅「用户代码抛出」的 4 个 `threw:` 站点填它;沙箱自身的内部错误(能力拒绝/超时/marshal)不填,保持原样。\n  - 保留非默认错误名(`TypeError:` / `RangeError:` 等)作为「这是真 bug 而非业务规则」的线索。\n- 动作路由:catch 里优先把 `innerMessage` 回给 client;**完整包装串仍打进服务端日志**便于排查。\n\n用户现在只会看到「线索信息不完整,提交转商机申请前请补全:终端客户」。\n\n## 测试\n\n- `packages/runtime` 全部单测通过(24/24),新增 `SandboxError.innerMessage` 断言(`.message` 留包装、`.innerMessage` 为纯业务原文)。\n- `@objectstack/runtime` turbo build(含 DTS 类型构建)通过。\n\n> 配套修复弹**两遍**的问题在 objectui: objectstack-ai/objectui#2177。两者独立,各自可单独合入。"
+}

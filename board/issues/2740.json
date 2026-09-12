@@ -1,0 +1,35 @@
+{
+  "number": 2740,
+  "kind": "pull_request",
+  "title": "fix(cli,plugin-security): os meta resync to re-materialize default permission sets (#2705)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T03:51:24Z",
+  "updated_at": "2026-07-10T11:44:34Z",
+  "closed_at": "2026-07-10T11:44:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-10T11:44:32Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2740",
+  "body": "Closes #2705 — implements the re-evaluated fix (Option B), not a blind upsert.\n\n## Problem\n\nDefault permission sets (`admin_full_access` / `member_default` / `viewer_readonly` …) are seeded **insert-once** at boot: `bootstrapPlatformAdmin` skips any row that already exists and never writes the shipped declaration back. So editing a default set's source, recompiling, and restarting `os dev` **without** `--fresh` leaves the runtime serving the **old** value — silently, because the runtime authz resolver hydrates permission sets from the `sys_permission_set` row (`resolve-authz-context.ts:230`), not the in-memory dist. A permission-gated surface (e.g. `setup.access`) keeps its stale behavior with no error, which repeatedly misled debugging.\n\nEvery *other* metadata seed (declared sets, positions, built-in roles, capabilities) already upserts on boot — the platform-default path was the lone insert-once holdout, a gap **ADR-0090 widened** by persisting more facets (`system_permissions`, delegated-admin `admin_scope`) onto the same row.\n\n## Why not a blind upsert\n\nInsert-once is **deliberate for prod**: an existing row is env-authored config and must not be clobbered on restart — it protects an admin's Setup edits and keeps the defaults env-authored (the posture `bootstrapDeclaredPermissions` relies on). This is a **dev-experience** gap, not a prod-correctness gap, so the fix is opt-in rather than a change to boot semantics.\n\n## Change\n\n- **`bootstrapPlatformAdmin` gains a `resync` option.** Default boot is unchanged (insert-once). Under `resync`, an existing row is reconciled to the shipped dist **only** when the platform still owns it (`managed_by` absent or `'platform'`); a row an admin took over (`'user'`) or a package owns (`'package'`) is an intentional override and is left alone.\n- **New `os meta resync` command** boots the runtime, reconciles the default permission-set rows to the compiled dist, and reports reconciled / preserved / newly-seeded — **without touching business data** and without a `--fresh` wipe. Confirmation-gated (`--yes` to skip; `--json` for scripting).\n\nProd boot is unaffected.\n\n## Verification\n\n- `plugin-security` **240/240**, `cli` **466/466**.\n- End-to-end `os meta resync` against `examples/app-todo`: insert path (`seeded 4 new`), overwrite path (`resynced 4`), and clean process exit (a one-shot command over the app stack; `process.exit` on the way out, matching the other one-shot CLI commands).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

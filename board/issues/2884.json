@@ -1,0 +1,35 @@
+{
+  "number": 2884,
+  "kind": "pull_request",
+  "title": "feat(auth): tenancy service + membership reconciler + degraded-tenancy fail-fast (ADR-0093 Phases 1–3)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-13T13:57:56Z",
+  "updated_at": "2026-07-13T14:42:41Z",
+  "closed_at": "2026-07-13T14:42:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-13T14:42:39Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2884",
+  "body": "Implements [ADR-0093](https://github.com/objectstack-ai/framework/blob/main/docs/adr/0093-tenancy-mode-and-membership-lifecycle.md) Phases 1–3. Follows #2882 (Phase 0 — tactical create-user bind, merged), which surfaced the two structural gaps this PR closes.\n\n## Why\n\nThe bug in #2882 (an admin-created user wasn't a member of the org) was one instance of two systemic gaps:\n1. **No one owns the \"every new user gets a membership\" invariant** — it was re-implemented or forgotten per creation path.\n2. **\"What tenancy mode is this?\" had four disagreeing answers** — the worst being *silent degradation*: `OS_MULTI_ORG_ENABLED=true` without the enterprise package strips tenant RLS with only a console warning (an ADR-0049-class unenforced security property).\n\n## What\n\n### Phase 1 — tenancy as a first-class capability\n- **`tenancy` kernel service** (`plugin-auth/src/tenancy-service.ts`) — single source of truth: `mode` / `isolationActive` / `requested` / `degraded` / `defaultOrgId()`. Derives `isolationActive` from the `org-scoping` probe, so `@objectstack/organizations` (separate repo) lights it up **with no change**.\n- **Fail-fast boot guard** (`serve.ts`, D5) — multi-org requested but unavailable ⇒ **refuse to boot** (`process.exit(1)` with an actionable message; a plain throw would be swallowed by the surrounding AuthPlugin try). Escape hatch `OS_ALLOW_DEGRADED_TENANCY=1` boots in an explicitly branded degraded state. New resolver `resolveAllowDegradedTenancy` in `@objectstack/types`.\n\n### Phase 2 — single-owner membership + consumer migration\n- **Membership reconciler** (`plugin-auth/src/reconcile-membership.ts`) composed into better-auth's `user.create.after` — the one seam every creation path flows through (signup, admin create-user, import, SSO JIT). Yields to any existing membership (host hooks win — no double bind), honors **`membershipPolicy: 'auto' | 'invite-only'`** (default `auto`), binds only to an unambiguous target org (single → default; multi → nothing).\n- **Consumers migrated to the tenancy service**: SecurityPlugin's RLS-strip gate and `getPublicConfig` (`features.multiOrgEnabled` now reflects *actual* capability; new `features.degradedTenancy`). Both keep a direct-probe fallback so lean embeddings are unchanged.\n- **#2882 endpoint bind delegates** to the shared reconciler — belt-and-suspenders until the hook's coverage of `admin.createUser` is integration-verified; both idempotent and yield-to-existing, so double-coverage is harmless (ADR-0093 D2).\n\n### Phase 3 — backfill + docs\n- **`kernel:ready` backfill** for pre-existing member-less users (single-org / `auto` only; self-guards in multi-org; `OS_SKIP_MEMBERSHIP_BACKFILL=1` opt-out).\n- **Docs**: Deployment → *Tenancy Modes & Membership*; ADR-0093 implementation notes.\n\n## Testing\n\nPure modules are fully unit-tested; wiring verified by typecheck (no new-symbol errors — remaining tsc output is the repo's pre-existing unbuilt-workspace cascade).\n\n| Suite | Result |\n|---|---|\n| `tenancy-service.test.ts` | 11 passed |\n| `reconcile-membership.test.ts` | 11 passed |\n| `admin-user-endpoints.test.ts` | 29 passed (refactor preserved the #2882 cases) |\n| `env.test.ts` (+ `resolveAllowDegradedTenancy`) | 10 passed |\n\n## New env vars\n\n| Variable | Default | Effect |\n|---|---|---|\n| `OS_ALLOW_DEGRADED_TENANCY` | off | Boot despite multi-org requested but isolation unavailable (degraded, branded). |\n| `OS_SKIP_MEMBERSHIP_BACKFILL` | off | Skip the boot-time membership backfill. |\n\n## Rollout note (breaking for silently-degraded deployments)\n\nA deployment running `OS_MULTI_ORG_ENABLED=true` **without** `@objectstack/organizations` was silently unisolated; it will now **fail to boot** after upgrade. That is intentional (ADR-0093 D5) — install the enterprise package or set `OS_ALLOW_DEGRADED_TENANCY=1` to acknowledge the state.\n\n## Deferred (per ADR non-goals)\n\nSingle-org membership still does **not** gate data access; the dual frontend feature flags keep their meaning; better-auth keeps `sys_member` CRUD; multi-org target-org policy stays \"don't guess\". Fully deleting the endpoint bind waits on integration confirmation that the hook fires for `admin.createUser`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01XbLd2KKeVs39EztDYMQ1YU\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XbLd2KKeVs39EztDYMQ1YU)_"
+}

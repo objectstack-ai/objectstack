@@ -1,0 +1,35 @@
+{
+  "number": 2718,
+  "kind": "pull_request",
+  "title": "test(mcp): SKILL.md ↔ native tool-surface drift guard (#2714)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-09T08:36:52Z",
+  "updated_at": "2026-07-09T10:19:55Z",
+  "closed_at": "2026-07-09T10:19:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-09T10:19:53Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2718",
+  "body": "Follow-up to #2715 (#2714 Phase 0): make the fixed gap structurally unrepeatable.\n\nThe 7-of-9 gap happened because `skill.ts` was written against the CRUD set after the action tools (#2307) had already shipped — nothing connected the two. This guard derives the registered tool surface from a **real `tools/list` round-trip** (`MCPServerRuntime` + full data+action bridge, the same harness as `mcp-action-tools.test.ts`) and asserts every name appears in `renderSkillMarkdown()`. No hand-maintained name list: adding a tool to `mcp-http-tools.ts` without teaching the skill turns the suite red with a pointed message naming the missing tool.\n\n**Red-proven**: temporarily stripping `run_action` from `skill.ts` fails with\n`tools registered but missing from SKILL.md — update packages/mcp/src/skill.ts: run_action`.\n\nIncludes a sanity floor (`>= 9` tools seen) so a broken harness can't pass vacuously. Test-only; no runtime change. 64/64 pass.\n\nRefs #2714, #2715.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

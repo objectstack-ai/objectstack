@@ -1,0 +1,30 @@
+{
+  "number": 2532,
+  "kind": "issue",
+  "title": "DB-created base packages vanish from GET /packages after server restart",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-03T04:54:02Z",
+  "updated_at": "2026-07-03T19:16:31Z",
+  "closed_at": "2026-07-03T19:16:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2532",
+  "body": "Found while browser-demoing the login→build journey.\n\n**Repro**\n1. `POST /api/v1/packages {id:'com.example.support', name:'客服中心'}` → 201; `GET /packages` lists it (writable base). Author objects into it, publish — all works.\n2. Restart the server on the same database.\n3. `GET /api/v1/packages` no longer lists `com.example.support`. The package's **metadata rows survive** (published objects still load and their data tables still serve), but the package registration itself is gone — so the Studio builder landing/switcher can't show it, and `POST /packages/:id/publish-drafts` presumably has nothing to bind to.\n\n**Expected**: DB-created (runtime/base) package registrations rehydrate on boot, like their metadata does.\n\n**Workaround**: re-`POST /packages` with the same id after restart re-attaches (existing metadata keeps its packageId).\n\nLikely area: package registry rehydration on boot only covers code/registry packages (and marketplace installs?), not bare runtime-created bases. Related: ADR-0070 package-first authoring; the pillar Studio builder (objectui#2175) surfaces writable bases from GET /packages.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

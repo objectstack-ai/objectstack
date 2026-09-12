@@ -1,0 +1,35 @@
+{
+  "number": 2761,
+  "kind": "pull_request",
+  "title": "feat(rest): Excel 导出 select/status 字段带颜色(白底+选项色作字体色)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T08:40:47Z",
+  "updated_at": "2026-07-10T11:33:14Z",
+  "closed_at": "2026-07-10T11:33:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-10T11:33:11Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2761",
+  "body": "Closes #2757\n\n## 做了什么\n\nExcel(xlsx)导出时,select / radio 字段单元格按其选项的 `color` 上色——**白底 + 选项色作字体色**,让导出的表格观感对齐系统里的彩色徽章。CSV / JSON 导出不变。\n\n## 改动\n\n- **`packages/rest/src/export-format.ts`**\n  - 新增 `toArgb()`:hex `#RGB` / `#RRGGBB` → exceljs ARGB `FFRRGGBB`,非法(空/命名色/rgb()/长度不符)返回 `undefined`。\n  - 新增 `cellFontColor()`:取匹配选项的颜色;非 select/radio 字段、无匹配值、选项无 color、非法 hex 一律返回 `undefined`(即不上色)。multiselect 明确排除(单元格单一字体色对多值有歧义)。\n  - `ExportFieldMeta.options` 补 `color?`。\n- **`packages/rest/src/rest-server.ts`**\n  - `createXlsxStream(res, useStyles)` 加参,透传给 exceljs `WorkbookWriter`。\n  - 导出路由:仅 xlsx 且 `effectiveLimit <= 10000` 时开样式并逐格设 `cell.font.color`。\n\n## 数量限制(对齐大厂做法)\n\n样式化导出比纯数据 dump 重,故设独立行数上限 `STYLE_ROW_CAP = 10000`:\n\n| 条件 | 行为 | 响应头 |\n|------|------|--------|\n| xlsx 且 limit ≤ 1万 | 上色 | `X-Export-Styles: applied` |\n| xlsx 且 limit > 1万 | 不上色,数据完整 | `X-Export-Styles: dropped` |\n| csv / json | 不受影响 | — |\n\n超阈值**自动降级为无样式**(仍拿到全部数据),而非直接报错。对齐 Salesforce「格式化导出上限低于纯数据导出」、ServiceNow 默认 1 万行 的行业做法。既有 5 万行硬顶不变。\n\n## 测试\n\n- 新增 `export-format.test.ts`:`toArgb` / `cellFontColor` 单测(3 位简写、6 位、非法、非 select、无 color 选项、multiselect 排除等)。\n- 扩充 `export-integration.test.ts`(真引擎 + 真 protocol):读回 xlsx 断言 `font.color.argb`(`#e11d48`→`FFE11D48`、简写 `#3ab`→`FF33AABB`),非选项列无色;`limit=20000` 降级(无样式 + `X-Export-Styles: dropped`)。\n- `@objectstack/rest` 全量:**227 passed**。\n\n## 备注\n\n- 只改字体色、不填背景(按需求定案)。若后续要\"彩底 + 自动黑白字\",在 `cellFontColor` 处扩展即可。\n- `packages/rest/src/package-routes.ts` 有两处既有 TS 报错,与本 PR 无关。"
+}

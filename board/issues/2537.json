@@ -1,0 +1,35 @@
+{
+  "number": 2537,
+  "kind": "pull_request",
+  "title": "fix(driver-sql): pre-create autonumber sequences table to avoid batch/tx deadlock",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-03T07:46:26Z",
+  "updated_at": "2026-07-03T08:45:48Z",
+  "closed_at": "2026-07-03T08:45:46Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-07-03T08:45:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2537",
+  "body": "## 问题\n\nSQLite 下 `POST /api/v1/batch` 创建含 `auto_number` 字段的对象会**死锁**(连接池 acquire 超时):\n\n```\nKnex: Timeout acquiring a connection. The pool is probably full.\n```\n\n### 根因\n\n`_objectstack_sequences` 计数表是在**第一次 autonumber 写**时懒创建的,走的是裸 `this.knex.schema.*` —— 向连接池申请**第二条**连接。而 `/batch` 端点把整批操作包在一个 `ql.transaction(...)` 里([rest-server.ts:5637](../blob/main/packages/rest/src/rest-server.ts#L5637)),SQLite 连接池上限硬编码为 1(knex `Client_SQLite3.poolDefaults → { min:1, max:1 }`,`better-sqlite3` 继承),那唯一的连接已被外层事务独占 → 第二条永远拿不到 → 超时。\n\n受 `sequencesTableReady` 进程级一次性 flag 守护,所以只有进程启动后**冷态**的第一次 autonumber 写(若恰好走 batch/事务)才 100% 触发 —— 与报告的「已 seed 库重启后首个 batch 动作中招」完全吻合。\n\n不只 SQLite:Postgres/MySQL 池默认 `max=10`,单请求不死锁,但**冷 flag 窗口内 ≥pool.max 个并发首写**会同样池耗尽死锁。\n\n## 修复\n\n1. **主修:** `initObjects` 在建表阶段(事务外、独立连接)**预建**计数表,数据写路径永不触发 DDL。\n2. **兜底:** 懒创建路径(external 对象 / 未走 initObjects 的消费者)现在在 **SQLite 上把 DDL 跑在调用方的事务连接上**,不再申请第二条连接。**刻意不在 MySQL 上走调用方事务** —— MySQL 的 DDL 会**隐式提交**调用方事务,破坏 batch 原子性;那里池宽裕,用独立连接安全建表。\n\n## 验证\n\n- 新增回归测试 `sql-driver-autonumber-tx.test.ts`:预建断言 + batch 事务首写 + 冷态事务内首写(全部 `withTimeout` 抓死锁)。\n- **反证:** stash 掉修复、只留测试跑旧代码 → 3 条全部 timeout(复现报告死锁);打回修复 → 全绿。\n- 全量 `driver-sql` 套件 **237 passed (27 files)**;DTS typecheck 通过。"
+}

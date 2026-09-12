@@ -1,0 +1,30 @@
+{
+  "number": 2698,
+  "kind": "issue",
+  "title": "feat(mcp): OAuth 2.1 authorization for /api/v1/mcp (self-serve connect from claude.ai / Claude Code / Desktop)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-09T03:20:19Z",
+  "updated_at": "2026-07-09T06:43:53Z",
+  "closed_at": "2026-07-09T05:42:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2698",
+  "body": "## Context\n\nThe open edition's AI surface is MCP-only (BYO-AI via `@objectstack/mcp`, see `content/docs/ai/agents.mdx`). Today the HTTP MCP endpoint (`/api/v1/mcp`) authenticates **only** with API keys (`x-api-key` / `Authorization: ApiKey`, hashed at rest, scoped, fail-closed — `packages/core/src/security/api-key.ts`). That works for headless agents and developers, but it blocks the mainstream human-connected clients:\n\n- **claude.ai custom connectors** and the Anthropic connector directory require the MCP-spec authorization flow (OAuth 2.1).\n- **Claude Desktop / Claude Code** offer a much smoother connect experience over OAuth (browser login as yourself) than hand-copying header config.\n- Every user currently needs an admin-minted API key before they can connect anything.\n\nThe MCP authorization spec is deliberately **decentralized**: the client discovers the authorization server via `.well-known` metadata on the MCP host itself, self-registers via Dynamic Client Registration (RFC 7591), and runs an authorization-code + PKCE flow. This means **self-hosted / private deployments work out of the box** — each deployment is its own authorization server; nothing is pre-registered with Anthropic or with any central ObjectStack service.\n\n## Goal\n\nAdd spec-compliant OAuth 2.1 authorization to the MCP endpoint so any MCP client can connect self-serve, while keeping API keys as the headless track.\n\n## Design decisions (rationale lives here + changeset; no separate ADR per repo convention)\n\n1. **Each deployment is its own authorization server.** Back the flow with the embedded better-auth instance (it already owns login/sessions). No central authority, no dependency on cloud — the community/self-hosted edition is the primary target, not an afterthought.\n2. **Discovery endpoints**: serve `.well-known/oauth-protected-resource` (resource metadata pointing at the AS) and `.well-known/oauth-authorization-server` (AS metadata) from the same origin as `/api/v1/mcp`.\n3. **Dynamic Client Registration is mandatory.** Since every deployment is a distinct AS, clients cannot ship pre-registered client IDs. DCR is the enabler for \"one generic client config works against any deployment\".\n4. **PKCE required; TLS required** (localhost exempt per OAuth 2.1). Intranet deployments with an internal CA work for local clients (Claude Code/Desktop); claude.ai web connectors additionally need the endpoint publicly reachable — a network decision, out of our hands, but must be documented.\n5. **Token → ExecutionContext mapping**: a valid access token resolves to the same principal-bound `ExecutionContext` used today (via `resolveAuthzContext`); RLS and permissions apply unchanged. OAuth adds a second *provenance* for the principal, not a second authz model.\n6. **Dual-track, additive**: API keys stay exactly as they are (CI, headless agents, environments without TLS). Nothing about the existing header auth changes.\n7. **Fail-closed** parity with API keys: unknown/expired/revoked tokens, missing scopes, or ambiguous state → 401/403, never fallback to anonymous.\n8. **Scopes**: map coarse scopes to the exposed tool families (data read, data write, actions). Keep the initial scope set minimal; finer grades can follow.\n\n## Scope\n\n- [ ] `.well-known` discovery endpoints (protected-resource + authorization-server metadata)\n- [ ] better-auth wired as the OAuth 2.1 AS: DCR, authorization-code + PKCE, token issuance/refresh, revocation\n- [ ] Bearer-token authentication on `/api/v1/mcp`, resolving to the caller's `ExecutionContext` (single-sourced through `resolveAuthzContext`, per the authz-resolver lint gate)\n- [ ] 401 responses advertise the discovery metadata (`WWW-Authenticate` per MCP spec) so clients can bootstrap the flow\n- [ ] Scope enforcement at the tool-dispatch layer, fail-closed\n- [ ] Tests: metadata endpoints, DCR round-trip, PKCE flow, token→principal mapping (RLS respected), expired/revoked/scope-miss rejections, API-key path regression\n- [ ] End-to-end verification: connect a real MCP client (Claude Code) to a dev instance via the OAuth flow\n\n## Docs to update on completion (acceptance criteria)\n\n- [ ] `packages/mcp/README.md` — connect section: OAuth as the human-client path, API key as the headless path\n- [ ] `packages/mcp/src/skill.ts` — the generated `SKILL.md` \"Connect\" section currently documents only `x-api-key`; describe both tracks\n- [ ] `content/docs/ai/agents.mdx` — BYO-AI connect instructions per client (claude.ai / Claude Desktop / Claude Code), incl. the private-deployment reachability note (local clients reach intranet; claude.ai web needs public HTTPS)\n- [ ] `content/docs/getting-started/build-with-claude-code.mdx` — update the connect snippet\n- [ ] Regenerate reference docs if any spec schema changes\n\n## Out of scope (follow-ups, tracked separately)\n\n- Official Claude Code plugin bundling the generic skill + `${OBJECTSTACK_MCP_URL}` MCP config (executes ADR-0036 Amendment C; one plugin serves every deployment — URL is the only per-customer input)\n- \"Connect an agent\" page in Setup (objectui): mint key / show per-client snippets / download `SKILL.md`\n- Anthropic connector directory submission (depends on this issue)\n"
+}

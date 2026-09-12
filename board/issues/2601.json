@@ -1,0 +1,34 @@
+{
+  "number": 2601,
+  "kind": "pull_request",
+  "title": "docs(site): mermaid rendering, stat removal, and full-corpus persona-review fixes",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T17:48:41Z",
+  "updated_at": "2026-07-05T00:09:49Z",
+  "closed_at": "2026-07-05T00:09:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-05T00:09:47Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2601",
+  "body": "# Docs: mermaid support + statistics removal + full-corpus reader review\n\nFollow-up to #2584/#2593. Three parts (one commit each):\n\n## 1. Mermaid diagrams render (`b1ec299`)\n\nFumadocs was showing the ```` ```mermaid ```` fences on 7 pages (protocol diagram, kernel architecture, API data-flow, permissions matrix, field-type decision tree, contracts, metadata-service) as plain code blocks. Added a client-side theme-aware `Mermaid` component plus a remark plugin that rewrites mermaid fences into `<Mermaid chart=.../>` — zero content changes, falls back to the source block on bad syntax.\n\n## 2. Numeric statistics removed (`8a3e5ca`)\n\nCount-style claims (\"N field types\", \"N hook events\", namespace tallies) drift from the implementation and don't help readers — replaced with qualitative descriptions across the landing page and module overviews.\n\n## 3. Full-corpus persona review (`f0f60a2`)\n\nSeven reader personas — first-time developer, schema modeler, logic author, API integrator, **security admin**, UI builder, AI-enabling admin, plugin developer, **production SRE** — each read every hand-written page in their area end-to-end and verified claims against source (`packages/spec`, `packages/plugins/plugin-security`/`plugin-sharing`, `packages/rest`, `packages/objectql`, `packages/core`, `packages/cli`, examples) before fixing. ~40 pages touched. The fixes that mattered most:\n\n**Would have broken your code:**\n- Every hook example taught `ctx.input.doc.<field>` — the engine passes a **flat** `ctx.input` (`installFlatInput`); the documented pattern never worked. Fixed in hooks, kernel/events, error-handling-server, and the plugin tutorial.\n- The plugin tutorial's manifest example omitted the **required `id`** (throws at `.parse()`), and its flagship example registered a kernel hook name that is **never triggered** — a reader shipped a silently dead plugin. Rewritten against the real `engine.registerHook` path.\n- `objects.mdx` documented `cdc`, `partitioning`, and `recordTypes` config that `ObjectSchema.create()` **hard-rejects**; AutoNumber used the wrong key (`format` → `autonumberFormat`); many field props documented were pruned in the 2026-06 dead-surface cleanup.\n\n**Would have misconfigured your security (admin persona):**\n- Docs claimed the role hierarchy gives managers automatic visibility of subordinates' records — **no such grant exists** (verified in `buildReadFilter`); rewritten around the two real opt-in paths (sharing-rule recipients, `readScope` scope-depth grants).\n- Owner-type sharing rules and `group`/`guest` recipients are **declared but not enforced** (seeder skips with a warning) — now labeled.\n- FLS was described as fail-closed; actual semantics are **default-visible for undeclared fields** — corrected, plus a warning that an object with no `sharingModel` has no record-level filter at all.\n- `maskingRule`/`encryptionConfig` were taught as live field-level features; the field wiring was pruned (never had a runtime consumer) — re-scoped to schema-shape status with the real channel (`type: 'secret'` + FLS).\n\n**Would have misled integrators/operators:**\n- Removed ADR-0019-deleted `POST /workflow/.../approve|reject` endpoints and invented webhook rate-limiting; realtime status stated honestly (in-process pub/sub; WS/SSE transport is plugin-provided, none ships open); error handling now documents the two real wire formats.\n- Deployment: env-var table render repaired and completed (`OS_SECRET_KEY`, cluster vars); stale CLI file references and ~25 dead links fixed across deployment/protocol/releases.\n- `services.*` runtime docs got a **binding note**: they are the contract surface; open-framework hooks reach the same capabilities via `ctx.api` / `ctx.getService(...)`.\n\n## Verification\n\n- `check-doc-authoring` clean (180 files); internal-link sweep: 0 broken `/docs/...` targets outside generated references\n- Full `next build` passes; mermaid transformation verified in built HTML\n\n## Follow-ups surfaced by the review (not addressed here)\n\n- **Possible code bugs:** `unit_and_subordinates` sharing recipient expands to zero users silently (`sharing-rule-service.ts` has no case for it); client `analytics.meta(cube)`/`explain` call routes the dispatcher doesn't serve; `HookContextSchema` doc-comment still says `doc` where the engine passes `data`; spec `role.zod.ts` comment repeats the manager-visibility misconception.\n- **Docs debt:** `releases/implementation-status.mdx` self-contradicts (sharing/identity marked plugin-pending vs live elsewhere) and should be regenerated; no upgrade notes for v10/v11 though packages ship 11.x; troubleshooting page is dev-time only (no production incident runbook); auth token lifecycle for integrators is undocumented; `relationships.mdx` deserves a fuller rewrite (deleteBehavior, lookup-picker config); `nameField` (ADR-0079) has no first-class doc; the `os init` scaffold emits a bare object literal while docs brand that style deprecated (needs a product decision).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_018r9mjpF7jr9BKdzEmUE4uZ\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018r9mjpF7jr9BKdzEmUE4uZ)_"
+}

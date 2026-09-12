@@ -1,0 +1,30 @@
+{
+  "number": 2616,
+  "kind": "issue",
+  "title": "Showcase 全链路浏览器 UX 测试:5 个 Bug + 交互/视觉/离线健壮性改进清单",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-07-05T02:56:47Z",
+  "updated_at": "2026-07-05T06:38:14Z",
+  "closed_at": "2026-07-05T06:38:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2616",
+  "body": "# Showcase 全链路 UX 测试(浏览器实测)\n\n**测试方法**:全新克隆构建 framework + vendored console(`.objectui-sha` = `7782698`),`objectstack dev --ui --seed-admin` 启动 `examples/app-showcase`,Playwright 驱动 Chromium 以 admin 登录,从 `/_console/apps/com.example.showcase/page/showcase_start_here` 进入,**逐一点击遍历全部 42 个导航项**,并深度测试向导创建、记录 CRUD、主从联动、抽屉编辑、审批操作;全程收集 console 错误与网络失败,所有写库操作均通过 API 查库核实。\n\n**总体结论**:骨架扎实——42 个页面全部可达、无白屏或崩溃;必填校验、Lookup、抽屉编辑、toast 等基础交互正常;向导与\"新建任务\"端到端写库成功。但存在 2 个真 Bug、1 个误导性交互、以及一批影响第一印象的细节问题,合并记录如下。\n\n---\n\n## A. Bug(按严重度)\n\n### A1. 导航标签被 i18n 对象标签覆盖(影响面最大)\n应用配置里明确写的 `label: 'Projects'/'Tasks'/'Accounts'/'Settings'`(`examples/app-showcase/src/apps/index.ts`)在侧边栏全部显示为单数 **Project / Task / Account / Setting**;只有恰好与对象标签一致的 \"Business Units\"、\"Field Zoo\" 幸免。\n\n**根因**(objectui,pinned SHA `7782698`):`UnifiedSidebar` 把导航项自己的 label 仅作为 *fallback* 传入 `useObjectLabel().objectLabel`,而 showcase 翻译包定义了 `objects.showcase_project.label: 'Project'`(`src/translations/index.ts`),i18n 翻译永远赢。\n\n**修复方向**:导航项显式 `label` 应优先于对象标签;对象类导航兜底时应取 `pluralLabel` 而非 `label`。\n\n### A2. CRM Workbench 统计卡恒为 0\n`page/showcase_crm_workbench`:表格显示 5 条项目(2 个 Active),顶部 **TOTAL PROJECTS / ACTIVE 恒为 0**,选中记录后也不变(EDITING 卡正常更新)。React 页的 rollup 计数查询与列表数据源脱节,需排查 `useAdapter` 计数查询的响应解析。\n\n### A3. Approvals 头部 \"Mark Done\" 无记录上下文仍可点击且谎报成功\n`page/showcase_review_queue`:按钮可见性表达式 `${!record.done}` 求值失败(console 警告 `record is not defined`)后按钮照常渲染;点击后弹出绿色 **\"Task marked done.\"** 成功 toast,但查库确认**没有任何记录被修改**——no-op 被报告为成功,比报错更糟。记录级 action 出现在列表页头时应禁用或隐藏;表达式求值失败不应默认放行。\n\n### A4. REST API `fields` 参数不健壮\n`GET /api/v1/data/showcase_task?fields=name` → `{\"error\":\"query.fields.map is not a function\"}`。内部实现细节泄漏给调用方;应做字符串→数组归一化,或返回清晰的 400。\n\n### A5. 每次页面导航都请求 2 次 `GET /api/v1/ai/agents` 并 404\n整个会话累计数十次无效请求刷屏 console。AI 功能未启用时客户端应探测一次并缓存,或服务端返回空列表。\n\n## B. 误导性/危险交互\n\n- **向导提交后停在原地**:`page/showcase_new_project_wizard` 第 3 步点 \"Create\" 后只弹 \"Created\" toast,表单停留在填好的第 3 步——再点一次即重复创建。应跳转到新记录,或重置并给 \"再建一个 / 查看项目\" 出口。\n- **记录详情页把开始日期渲染成 \"Overdue 6d\"**:任务详情 Schedule 区 START DATE 套用了逾期相对时间格式化器;\"开始日期在 6 天前\" ≠ \"逾期 6 天\",语义错误。\n\n## C. 离线/受限网络健壮性(代理环境实测踩中,全部无降级提示)\n\n- Work Map 底图 style 取自 `demotiles.maplibre.org` → 整张地图灰底,只剩浮空图钉;\n- 任务 Cover 种子数据用 `picsum.photos` → All Views / Task Gallery 满屏裂图;\n- console bundle 内置 Sentry 上报持续失败重试。\n\n**建议**:种子数据改本地占位图;地图加载失败显示明确降级态;OSS 开发模式默认关闭遥测。\n\n## D. 视觉打磨\n\n- **Command Center(大屏)**:三个 mini 图表被挤到 ~130px 宽,x 轴标签几乎全丢(只剩 1 个);图例/轴直接显示原始字段名 `task_count` 与原始值 Green/Red/Yellow;1440px 下内容只占左侧 60%,与\"大屏\"定位不符。\n- 仪表盘计数类 y 轴出现 0.8 / 2.3 非整数刻度;状态柱状图 5 个状态因标签抽稀只显示 3 个。\n- 任务列表 Progress 列 \"100\" 被裁成 \"10\"(列宽不足);\"0%\" 带百分号、其余裸数字,格式不一致。\n- 看板卡片裸数字(12/16/40)无标签,猜不出是估时。\n- CRM Workbench 详情面板标签值挤在一起(\"Budget Remaining90000\"、\"Tasks5\"),日期输入被截断(\"06/05/202\")。\n\n## E. 其他观察\n\n- 登录时 `GET /api/v1/auth/organization/list` 被 abort,`[AuthProvider] Failed to load organizations` 警告。\n- 组件注册表大量 bare-name fallback 覆盖警告(`field:time` / `field:address` / `view:calendar` / `view:timeline` / `plugin-charts:chart`),每页刷屏。\n\n## 亮点(保持)\n\nStart Here 教学落地页信息架构出色(两轴模型 + 决策树 + 各 kind 直达示例);记录详情页状态管道、\"Show 2 empty fields\" 折叠、Task Desk 抽屉编辑、必填校验均达到成熟产品水准;冷启动 <10s、40 插件加载迅速。\n\n---\n*测试环境:Linux 容器,Chromium headless 1440×900,端口 :3777(与 :3000 同一构建,仅隔离换端口);A1 属 objectui 仓库,A2–A5 属本仓/showcase。*"
+}

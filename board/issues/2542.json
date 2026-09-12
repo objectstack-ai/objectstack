@@ -1,0 +1,33 @@
+{
+  "number": 2542,
+  "kind": "pull_request",
+  "title": "docs: the compactLayout alias is retired, not accepted (#2536 follow-up)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-03T11:52:15Z",
+  "updated_at": "2026-07-03T11:58:52Z",
+  "closed_at": "2026-07-03T11:58:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-03T11:58:50Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2542",
+  "body": "[framework#2539](https://github.com/objectstack-ai/framework/pull/2539) retired the `compactLayout` alias; two guides (data-modeling, metadata/object) still said the old spelling is \"accepted as an alias\" — a 422 generator for AI authors who copy docs verbatim. Reworded to \"retired and now rejected\". The generated reference's \"formerly compactLayout\" wording is historical (not a teaching) and untouched, as are ADRs/changelogs.\n\n`check:doc-authoring` clean (171 files).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

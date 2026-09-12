@@ -1,0 +1,34 @@
+{
+  "number": 2592,
+  "kind": "issue",
+  "title": "Sharing rules created at runtime don't bind their hooks until restart (bindRuleHooks is boot-only)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T15:45:42Z",
+  "updated_at": "2026-07-05T02:53:14Z",
+  "closed_at": "2026-07-05T02:53:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2592",
+  "body": "## Summary\n\nA sharing rule created at runtime for an object that had **no** sharing rule at boot never binds its enforcement hook, so it silently does not take effect until the next restart. The rule *definitions* are read live (enforcement is correct once a hook fires) — the gap is that hook **binding** is boot-only, and the create trigger is a data write, so the #2576 `metadata:reloaded` path doesn't even apply here.\n\nFound in the post-#2576 boot-cached-consumer audit. NOTE: not yet runtime-verified (code analysis; high confidence) — worth a quick repro before fixing.\n\n## Evidence\n\n- `packages/plugins/plugin-sharing/src/sharing-plugin.ts:201` — `bindRuleHooks(engine, ruleService, rules, ...)` is called **once** at boot (`kernel:ready`) with the rules that existed then. It registers insert/update hooks only for the **objects** that had a rule at that moment.\n- Rule evaluation reads rules **live** from `sys_sharing_rule` on each hook fire (`sharing-rule-service.ts` — `getRule`/`evaluateAllForRecord`), so enforcement itself is not stale.\n- But sharing rules are **data rows** (`sys_sharing_rule`), authored via a data write (`defineRule` / `POST /data/sys_sharing_rule`), **not** a metadata publish. So `metadata:reloaded` never fires for a new rule — the flow-pattern rebind wouldn't trigger.\n- Result: create the first sharing rule for object `X` at runtime → no hook was ever bound for `X` → the rule never evaluates until restart. (Rules for objects that already had ≥1 rule at boot are fine.)\n\n## Impact\n\n`priority:p2`, `security` — access-control correctness: an admin adds a record-sharing rule expecting it to restrict/grant visibility, and it silently no-ops until a reboot. Narrow (only the object-had-no-rule-at-boot edge) but security-relevant.\n\n## Proposed fix\n\nGive the sharing plugin a **data-change trigger** on `sys_sharing_rule` (after insert/update/delete) that re-runs the bind: unbind all rule hooks + `bindRuleHooks` with the fresh `listRules()` (mirrors boot; enforcement already reads live so no teardown-of-definitions concern). This is a different mechanism from `metadata:reloaded` because the source is data, not metadata. Verify with a member-user E2E (create a rule at runtime for a fresh object → sharing takes effect without restart).\n\nCompanion to the hooks (#2588) and i18n runtime-authoring gaps.\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 2860,
+  "kind": "pull_request",
+  "title": "chore(ci)(deps): bump actions/stale from 10.3.0 to 10.4.0",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "dependabot[bot]",
+    "id": 49699333,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-13T02:07:59Z",
+  "updated_at": "2026-07-13T02:49:10Z",
+  "closed_at": "2026-07-13T02:49:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-13T02:49:08Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2860",
+  "body": "Bumps [actions/stale](https://github.com/actions/stale) from 10.3.0 to 10.4.0.\n<details>\n<summary>Release notes</summary>\n<p><em>Sourced from <a href=\"https://github.com/actions/stale/releases\">actions/stale's releases</a>.</em></p>\n<blockquote>\n<h2>v10.4.0</h2>\n<h2>What's Changed</h2>\n<h3>Bug Fix</h3>\n<ul>\n<li>Fixed <code>only-issue-types</code> validation  by <a href=\"https://github.com/trueberryless\"><code>@​trueberryless</code></a> in <a href=\"https://redirect.github.com/actions/stale/pull/1338\">actions/stale#1338</a></li>\n</ul>\n<h3>Dependency Updates</h3>\n<ul>\n<li>Bump undici to 6.27.0 via override, clean up stale license files, and version to 10.4.0. by <a href=\"https://github.com/dependabot\"><code>@​dependabot</code></a> in <a href=\"https://redirect.github.com/actions/stale/pull/1342\">actions/stale#1342</a></li>\n</ul>\n<h2>New Contributors</h2>\n<ul>\n<li><a href=\"https://github.com/trueberryless\"><code>@​trueberryless</code></a> made their first contribution in <a href=\"https://redirect.github.com/actions/stale/pull/1338\">actions/stale#1338</a></li>\n</ul>\n<p><strong>Full Changelog</strong>: <a href=\"https://github.com/actions/stale/compare/v10.3.0...v10.4.0\">https://github.com/actions/stale/compare/v10.3.0...v10.4.0</a></p>\n</blockquote>\n</details>\n<details>\n<summary>Commits</summary>\n<ul>\n<li><a href=\"https://github.com/actions/stale/commit/1e223db275d687790206a7acac4d1a11bd6fe629\"><code>1e223db</code></a> Bump undici to 6.27.0 via override, clean up stale license files, and version...</li>\n<li><a href=\"https://github.com/actions/stale/commit/9461cb10066d1553762bac6a02599ab8c26b14dd\"><code>9461cb1</code></a> fix: <code>only-issue-types</code> does not affect PRs (<a href=\"https://redirect.github.com/actions/stale/issues/1338\">#1338</a>)</li>\n<li>See full diff in <a href=\"https://github.com/actions/stale/compare/v10.3.0...v10.4.0\">compare view</a></li>\n</ul>\n</details>\n<br />\n\n\n[![Dependabot compatibility score](https://dependabot-badges.githubapp.com/badges/compatibility_score?dependency-name=actions/stale&package-manager=github_actions&previous-version=10.3.0&new-version=10.4.0)](https://docs.github.com/en/github/managing-security-vulnerabilities/about-dependabot-security-updates#about-compatibility-scores)\n\nDependabot will resolve any conflicts with this PR as long as you don't alter it yourself. You can also trigger a rebase manually by commenting `@dependabot rebase`.\n\n[//]: # (dependabot-automerge-start)\n[//]: # (dependabot-automerge-end)\n\n---\n\n<details>\n<summary>Dependabot commands and options</summary>\n<br />\n\nYou can trigger Dependabot actions by commenting on this PR:\n- `@dependabot rebase` will rebase this PR\n- `@dependabot recreate` will recreate this PR, overwriting any edits that have been made to it\n- `@dependabot show <dependency name> ignore conditions` will show all of the ignore conditions of the specified dependency\n- `@dependabot ignore this major version` will close this PR and stop Dependabot creating any more for this major version (unless you reopen the PR or upgrade to it yourself)\n- `@dependabot ignore this minor version` will close this PR and stop Dependabot creating any more for this minor version (unless you reopen the PR or upgrade to it yourself)\n- `@dependabot ignore this dependency` will close this PR and stop Dependabot creating any more for this dependency (unless you reopen the PR or upgrade to it yourself)\n\n\n</details>"
+}

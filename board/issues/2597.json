@@ -1,0 +1,35 @@
+{
+  "number": 2597,
+  "kind": "pull_request",
+  "title": "feat(automation): honor flow status for enable/disable + expose runtime enable/bound state",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T17:13:34Z",
+  "updated_at": "2026-07-04T17:28:15Z",
+  "closed_at": "2026-07-04T17:28:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-04T17:28:14Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2597",
+  "body": "## Why (UX eval #6 — automation enable/disable entry + status)\n\nThe engine bound and ran **every** registered flow, **ignoring the persisted `status`**. So an author had no way to turn an automation off (short of deleting it), or to see whether one was live. The Studio header even says \"Off by default · review before enabling\" — nothing enforced or reflected it. This is the **engine half** of \"a clear on/off switch + visible enabled/bound status\"; the objectui half (badges + switch) follows.\n\n## What\n\n- **`registerFlow` honors `status`**: `obsolete`/`invalid` → **disabled** (trigger not bound, `execute()` refuses); `draft`/`active` — and legacy flows with no explicit status — stay **enabled**, so **existing flows are unaffected** (zero regression; confirmed showcase flows mix `status:'active'` with default-`draft`, both keep firing). This persists the Studio switch via the existing `status` field (applied on the next publish rebind); a flip back **out** of a disabled status re-enables on re-register; a runtime `toggleFlow()` override on a still-enabled flow is preserved.\n- **New `getFlowRuntimeStates()` + `GET /api/v1/automation/_status`** → `[{ name, enabled, bound }]` for every registered flow — the truth behind the Studio's badges (persisted `status` is metadata; actually enabled + bound is engine state). Underscore-prefixed so no flow name shadows it; degrades to `[]` on an older service.\n\n## Verification\n\n**Unit** (`@objectstack/service-automation` 239, `@objectstack/runtime` 147): draft/active bind + enable (unchanged); `obsolete` neither binds nor enables and `execute()` refuses it; obsolete→active re-enables + re-binds on re-register; `_status` route shape + not shadowed by `/:name`.\n\n**Runtime** — clean showcase: `GET /automation/_status` returned all **20** flows `enabled:true`, `bound` 14/6 — the 6 unbound are screen/manually-launched flows with no trigger (correctly `bound:false`). Endpoint reflects real engine state.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

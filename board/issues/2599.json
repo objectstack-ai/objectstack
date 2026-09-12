@@ -1,0 +1,32 @@
+{
+  "number": 2599,
+  "kind": "pull_request",
+  "title": "docs(skills): teach adaptive record presentation in objectstack-ui skill (#2578)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T17:32:59Z",
+  "updated_at": "2026-07-04T17:50:40Z",
+  "closed_at": "2026-07-04T17:50:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-04T17:50:39Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2599",
+  "body": "Docs follow-up to #2578 (code shipped: framework#2595 + objectui#2237, both merged & green).\n\nAdds a **Record Presentation — surface, width & columns are auto-derived** section to the `objectstack-ui` authoring skill. Nothing in the docs taught the *deprecated* primitives, but the **new** model was untaught: since all metadata is AI-authored and the author can't know the client viewport, presentation (surface / overlay width / column count) is derived at runtime — authors write fields + `fieldGroups`, never presentation.\n\nTeaches:\n- surface (page vs drawer) auto-derived from field count; `navigation.mode` / a `Page` only to *override*\n- `span: 'full'` over the deprecated absolute `colSpan`\n- the `size` bucket over the deprecated pixel `width` / `drawerWidth`\n- column count follows the real rendered width (container queries), not authored\n\n`check:skill-docs` green. Empty changeset (docs-only, no release).\n\nRefs #2578\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

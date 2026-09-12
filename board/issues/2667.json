@@ -1,0 +1,33 @@
+{
+  "number": 2667,
+  "kind": "pull_request",
+  "title": "docs: convert ASCII diagrams to Mermaid",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-06T23:48:05Z",
+  "updated_at": "2026-07-06T23:54:01Z",
+  "closed_at": "2026-07-06T23:53:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-06T23:53:59Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2667",
+  "body": "## What & why\n\nFollow-up to #2666. The docs still had many **hand-drawn ASCII \"diagrams\"** (flows, a state machine, architecture topologies) that read as plain text. This converts the genuine diagrams to **Mermaid** — the site already renders it (`remarkMermaid` in `apps/docs/source.config.ts`, ~7 pages used it before) — so they render as themed SVG.\n\n**17 diagrams converted**, e.g.:\n- **getting-started** — the build loop (landing + `build-with-claude-code` recap)\n- **concepts/architecture** — the four usage-pattern flows\n- **protocol** — version-deprecation timeline, plugin-install **state machine** (`stateDiagram-v2`), Configuration-over-Code comparison (**subgraphs**), realtime sticky-session + **Redis pub/sub topology** (`<-->`)\n- **references** — marketplace / app-store / developer-portal journeys, seed-loader & package-upgrade flows, the skills chain\n\n**Deliberately kept as text** (Mermaid can't represent these): 44 directory/file trees and ~1000 code / wire-format / grammar blocks. A classifier pass separated real diagrams from trees/code.\n\n## Verification\n\nRan the docs site and browser-verified every new diagram renders with **no Mermaid parse errors** — covering all four syntaxes used: `flowchart`, `stateDiagram-v2`, `subgraph`+`direction`, and bidirectional `<-->` edges (screenshots for the state machine, subgraph comparison, and Redis topology). Changed pages compile `200` with zero MDX errors.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

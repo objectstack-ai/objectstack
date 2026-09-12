@@ -1,0 +1,33 @@
+{
+  "number": 2863,
+  "kind": "pull_request",
+  "title": "chore(deps)(deps): bump nanoid from 5.1.16 to 6.0.0",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "dependabot[bot]",
+    "id": 49699333,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-13T02:21:46Z",
+  "updated_at": "2026-07-13T05:48:21Z",
+  "closed_at": "2026-07-13T05:48:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-13T05:48:20Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2863",
+  "body": "Bumps [nanoid](https://github.com/ai/nanoid) from 5.1.16 to 6.0.0.\n<details>\n<summary>Release notes</summary>\n<p><em>Sourced from <a href=\"https://github.com/ai/nanoid/releases\">nanoid's releases</a>.</em></p>\n<blockquote>\n<h2>6.0.0</h2>\n<ul>\n<li>Made <code>nanoid()</code> and <code>customAlphabet()</code> 4 times faster (by <a href=\"https://github.com/orhanayd\"><code>@​orhanayd</code></a>).</li>\n<li>Removed Node.js 18 and 20 support.</li>\n</ul>\n</blockquote>\n</details>\n<details>\n<summary>Changelog</summary>\n<p><em>Sourced from <a href=\"https://github.com/ai/nanoid/blob/main/CHANGELOG.md\">nanoid's changelog</a>.</em></p>\n<blockquote>\n<h2>6.0.0</h2>\n<ul>\n<li>Made <code>nanoid()</code> and <code>customAlphabet()</code> 4 times faster (by <a href=\"https://github.com/orhanayd\"><code>@​orhanayd</code></a>).</li>\n<li>Removed Node.js 18 and 20 support.</li>\n</ul>\n</blockquote>\n</details>\n<details>\n<summary>Commits</summary>\n<ul>\n<li><a href=\"https://github.com/ai/nanoid/commit/4dacb107b54ffd0e1abfe91b7ef452e0fd5a8e12\"><code>4dacb10</code></a> Release 6.0.0 version</li>\n<li><a href=\"https://github.com/ai/nanoid/commit/09545ea0f88d13508cea6b6965d76a6848cb2194\"><code>09545ea</code></a> Simplify CLI for modern Node.js</li>\n<li><a href=\"https://github.com/ai/nanoid/commit/0966ccbcffa2e9e009d4000422aa16964177fc18\"><code>0966ccb</code></a> Remove obvious comment</li>\n<li><a href=\"https://github.com/ai/nanoid/commit/b5a0590ad6a28e5dbe700ce6189aa23abddf2a5b\"><code>b5a0590</code></a> Update docs</li>\n<li><a href=\"https://github.com/ai/nanoid/commit/0501d9cc86047b77b5b352eb6d43b67b10f18475\"><code>0501d9c</code></a> Fix alphabet duplication</li>\n<li><a href=\"https://github.com/ai/nanoid/commit/87f282154ddd6845d6f674e87fb5ea8e1d5c702e\"><code>87f2821</code></a> Remove unnecessary import for modern Node.js</li>\n<li><a href=\"https://github.com/ai/nanoid/commit/6a73bf8523e804aff400df77b743892fb1a99a9b\"><code>6a73bf8</code></a> Simplfy strings</li>\n<li><a href=\"https://github.com/ai/nanoid/commit/57a250cd7ed9c7df4748443a800df9e903d6c6f9\"><code>57a250c</code></a> Simplify code</li>\n<li><a href=\"https://github.com/ai/nanoid/commit/1a9765924719a559151b33cbff37bfb601175ba7\"><code>1a97659</code></a> Fix formatting</li>\n<li><a href=\"https://github.com/ai/nanoid/commit/1fda9370deb39a9f4af584c9dcbf3ad72bd40a49\"><code>1fda937</code></a> Remove build files</li>\n<li>Additional commits viewable in <a href=\"https://github.com/ai/nanoid/compare/5.1.16...6.0.0\">compare view</a></li>\n</ul>\n</details>\n<br />\n"
+}

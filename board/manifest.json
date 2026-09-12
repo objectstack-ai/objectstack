@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repo": "objectstack-ai/objectstack",
-  "generated_at": "2026-09-12T02:32:20.216Z",
+  "generated_at": "2026-09-12T08:28:07.034Z",
   "walk_phase": "history",
   "walk": {
     "open_set": {
@@ -11,24 +11,24 @@
     },
     "history": {
       "complete": false,
-      "cursor": "2026-07-03T02:45:32Z"
+      "cursor": "2026-07-14T05:51:00Z"
     }
   },
-  "since": "2026-06-23T13:55:29Z",
-  "since_reason": "the open set is complete — the closed history resumes at 2026-06-23T13:55:29Z",
+  "since": "2026-07-03T02:45:32Z",
+  "since_reason": "the open set is complete — the closed history resumes at 2026-07-03T02:45:32Z",
   "next_since": null,
   "resume": {
-    "since": "2026-07-03T02:45:32Z",
+    "since": "2026-07-14T05:51:00Z",
     "phase": "history",
     "stopped_by": "budget",
     "reason": "the per-run budget of 800 requests is spent"
   },
   "counts": {
     "issues_open": 580,
-    "issues_closed": 480,
+    "issues_closed": 543,
     "pulls_open": 18,
-    "pulls_closed": 1903,
-    "records": 2981
+    "pulls_closed": 2159,
+    "records": 3300
   },
   "board": {
     "open_issues_count": null,

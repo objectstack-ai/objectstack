@@ -1,0 +1,35 @@
+{
+  "number": 2893,
+  "kind": "pull_request",
+  "title": "fix(rest,client): hook 报错 toast 去掉英文调试噪音,只显示业务消息",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-14T05:05:33Z",
+  "updated_at": "2026-07-14T05:24:40Z",
+  "closed_at": "2026-07-14T05:24:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-14T05:24:37Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2893",
+  "body": "Closes #2894\n\n## 问题\n\n控制台里删除被引用记录时,hook 抛出的业务错误在 toast 里显示成:\n\n> `[ObjectStack] hook 'pm_ref_base' threw: Error: 制作基地被「项目主计划批次」引用(3 条),删除被阻断,请先解除引用`\n\n用户不关心错误来自哪个 hook——`throw new Error('…')` 是作者刻意表达的业务规则,toast 应该只显示业务消息本身。\n\n## 修复后\n\n> `制作基地被「项目主计划批次」引用(3 条),删除被阻断,请先解除引用`\n\n## 改动(两处)\n\n1. **`@objectstack/rest` `mapDataError`**:解包 `SandboxError.innerMessage`(QuickJS 沙箱在 `.message` 上带 `hook 'x' threw:` 调试包装、在 `.innerMessage` 上保留原始业务消息);实例跨边界丢失时用正则兜底剥离包装。与 http-dispatcher 里自定义 action 路由已有的解包逻辑对齐。\n   - 保留 `TypeError:` 等**非默认错误名**——那是真实脚本 bug 的信号,不是业务规则。\n   - 新分支**刻意不返回 `code` 字段**:旧版打包在控制台里的 `@objectstack/client` 会把 `code` 拼进人类可读消息(`[ObjectStack] CODE: …`),会把刚去掉的英文噪音加回来。\n2. **`@objectstack/client` `_fetch`**:`error.message` 不再拼 `[ObjectStack] CODE:` 前缀,直接用服务端的人类可读消息;`code`/`category`/`httpStatus`/`retryable`/`details` 仍挂在 error 对象上供程序读取。已确认仓库内(含 vendored console dist)没有任何代码对 `[ObjectStack]` 前缀做字符串匹配。\n\n完整调试包装(hook 名 + 堆栈)**仍写入服务端日志**(BodyRunner 的 error log + REST 的 unhandled-error log),排障能力不受影响。\n\n## 测试\n\n- **dogfood 全链路金测试**(新增 `hook-error-format.dogfood.test.ts`):真实内核 + QuickJS 沙箱 hook + 真实 REST,断言 ① DELETE 被沙箱 hook 阻断时 HTTP body 只含业务消息(无 `threw:`/`hook '`/`[ObjectStack]`/`code`);② 记录确实未被删除;③ `TypeError: boom` 名字保留。3/3 通过,且服务端日志确认仍输出完整调试包装。\n- `@objectstack/rest` 单测 +4(innerMessage 解包 / 正则兜底 / TypeError 保名 / action 包装),255 passed。\n- `@objectstack/client` 单测 +2(message 原样、code 仍可编程读取 / 空 body 回退 statusText),111 passed。\n\n## 传播说明\n\n已部署控制台要等 objectui 重建其打包的 `@objectstack/client` 并且 framework 重新 vendor console 后,客户端侧前缀移除才生效;但服务端 REST 侧的解包对旧客户端立即生效(旧客户端只会显示服务端给的干净消息,因为新分支不返回 code)。\n"
+}

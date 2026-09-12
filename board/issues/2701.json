@@ -1,0 +1,34 @@
+{
+  "number": 2701,
+  "kind": "issue",
+  "title": "[runtime] 动作 body 沙箱 ctx.user 恒为 system:REST 动作路由独漏 ec?.userId 回退",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-09T03:48:06Z",
+  "updated_at": "2026-07-10T08:04:34Z",
+  "closed_at": "2026-07-10T08:04:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2701",
+  "body": "## 概述\n`/actions/:object/:action` 路由执行动作 body 沙箱时,context 从不解析会话用户,`ctx.user` 恒为 `{ id: 'system' }`(无 id、无 roles)。导致动作 body 内无法按操作者身份/业务角色分支,也无法做服务端强制的归属校验。\n\n## 定位\n- `packages/runtime/src/http-dispatcher.ts:3271-3272` —— 构建动作执行 context 时**独漏** `ec?.userId` 回退。\n- 对照同文件其它入口均正确解析会话用户:MCP 路径 `:822`、record-change 触发 `:2972` 都带 `ec.userId`。\n- 说明这是**单点遗漏/回归**,而非有意设计。\n\n## 期望\n动作 body context 解析会话用户,至少提供 `ctx.user.id`(与 MCP/record-change 一致),并暴露业务角色。\n\n## 补充\n原 issue 还称「record-change flow 也拿不到角色」——经核查该分支**能**带 `ec.roles`,此子主张不成立,本 issue 只针对 action body。\n\n---\n来源(项目 dogfood):steedos-labs/os-tianshun-mtc#36\n"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 2799,
+  "kind": "pull_request",
+  "title": "feat: expose extended branding fields in runtime config API",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "akarma-synetal",
+    "id": 112554634,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T15:00:26Z",
+  "updated_at": "2026-07-11T02:47:13Z",
+  "closed_at": "2026-07-11T02:47:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-11T02:47:13Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2799",
+  "body": "## Summary\n- Exposes `logoUrl`, `faviconUrl`, `brandColor`, `pwaDescription`, `pwaThemeColor` in `/api/v1/runtime/config` response\n- All fields driven by corresponding `OS_*` environment variables\n- Extracts `/runtime/assets/*` serving into a standalone `createRuntimeAssetsPlugin` so branding assets (logos, favicons) resolve even when the console dist hasn't been built\n- Accepts optional `OS_RUNTIME_ASSETS_DIR` override; falls back to `process.cwd()/assets`\n\n## Test plan\n- [ ] Set `OS_LOGO_URL`, `OS_FAVICON_URL`, `OS_BRAND_COLOR`, `OS_PWA_THEME_COLOR` env vars and verify response\n- [ ] Test `/runtime/assets/:filename` serves 200 when file exists, 404 when missing\n- [ ] Test plugin silently skips when no assets directory exists\n\nMade with [Cursor](https://cursor.com)"
+}

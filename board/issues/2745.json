@@ -1,0 +1,35 @@
+{
+  "number": 2745,
+  "kind": "pull_request",
+  "title": "fix(security)!: ADR-0090 follow-ups — driver tenant wall, batch-insert marshaling, scoped counts, vocabulary leftovers",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T05:19:08Z",
+  "updated_at": "2026-07-10T05:31:06Z",
+  "closed_at": "2026-07-10T05:31:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-10T05:31:04Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2745",
+  "body": "Closes #2722, #2723, #2724, #2734, #2735, #2737 — every issue filed while dogfooding the ADR-0090 showcase permission zoo (#2739), each root-caused on the live runtime before fixing.\n\n## Runtime fixes\n\n### #2734 — driver tenant wall hid every global row (Setup Access Control empty on fresh deployments)\n`applyTenantScope` (driver-sql) used strict `organization_id = :tenantId`. Every platform bootstrap row (`sys_position`, `sys_permission_set`, `sys_business_unit`) and every pre-org first-boot seed is org-less → **any logged-in admin saw ZERO rows**, by-id reads 404'd, and the whole RBAC surface was un-administrable over REST. Now: `(org = :tenant OR org IS NULL)` — a NULL tenant column is a GLOBAL/platform row belonging to no other tenant; rows stamped with a **different** org stay invisible exactly as before (cross-tenant isolation tests unchanged + 3 new global-row tests).\n\n### #2735 — bulkCreate skipped write-side marshaling (seed batches silently failed)\nThe batch insert path (the seed/import common case since #2678) handed raw object values to the SQLite binder (\"Wrong API use: tried to bind a value of an unknown type\") — showcase accounts/tasks/field-zoo seeded ZERO rows on every fresh boot. `bulkCreate` now mirrors `create()`: per-row `formatInput` + `applyWriteColumnMap` + timestamp stamp, and `formatOutput` on the read-back. New regression test with `location`/`json`/`array` fields.\n\n### #2737 — `total` unscoped (row-count oracle) + \"admin sees less than the auditor\"\n`engine.count()`/`aggregate()` built a LOCAL ast inside the executor, discarding the RLS/OWD filters the security/sharing middlewares inject into `opCtx.ast.where` → `GET /data/:object` returned scoped `records` with a RAW-table `total`. Both now carry the ast on the opCtx exactly like `find()` (4 new tests asserting the driver receives the scoped where). The second observation (platform admin's wildcard VAMA \"not widening\" private reads) turned out to be the #2734 tenant wall hiding the member's org-less note — with the wall fixed, the admin correctly sees all private rows via the superuser wildcard, no evaluator change needed.\n\n## Vocabulary leftovers (one-step renames, no aliases)\n\n- **#2723 `PortalSchema.profiles` → `positions`** (D2 removal miss). The removed key is a loud tombstone — authoring `profiles` fails with the FROM→TO prescription instead of silently stripping an admission gate. Showcase Client Portal migrated; it now admits a REAL declared position (`client_portal_user`, added to the zoo — external portal audience for the D11 `externalSharingModel` dial).\n- **#2722 `RLSUserContextSchema.role` → `positions`** (D3 miss). Dead field — the RLS compiler already resolves `current_user.positions` via its own context type. `check:api-surface` unchanged ✓.\n- **#2724 `sys_record_share.recipient_type` `'role'` → `'position'`** + the `ShareRecipientType` contract type aligned with the (already-migrated) spec zod enum. No data migration needed: no reader expands non-`user` record-share rows (rules materialize per-user grants), so legacy `'role'` rows were inert. plugin-sharing translations regenerated via `os i18n extract` — also fixing the pre-stale `sys_sharing_rule` options block — with zh-CN/ja-JP labels patched in place per the generated-file contract (业务单元及下级 / ビジネスユニットと下位階層).\n\n## Verification\n\n- **Full suite: 126/126 turbo tasks green** (incl. dogfood 201 tests; the D7 canary in `showcase-d7-default-profile` was already migrated in #2739).\n- `check:api-surface` unchanged; spec json-schema + `references/security/rls.mdx` + `references/ui/portal.mdx` regenerated.\n- **Fresh `objectstack dev --seed-admin` boot, browser-verified with zero workarounds** (previously required sqlite org-stamp hacks):\n  - boot log: **0 seed insert failures** (was 3 failed batches);\n  - Setup → 权限集 renders all 12 permission sets, 业务单元 renders the 5-unit tree — on FIRST boot;\n  - Showcase → 客户 grid renders all 13 seeded accounts (location JSON fields intact);\n  - member's Personal Note list: 1 row + \"1 条记录\" (count == records); auditor sees 2 (VAMA); admin sees 2 via the superuser wildcard;\n  - REST matrix: member `total 1 | records 1`, auditor/admin `total 2 | records 2`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

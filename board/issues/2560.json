@@ -1,0 +1,35 @@
+{
+  "number": 2560,
+  "kind": "pull_request",
+  "title": "fix(automation): bind flow triggers on cold boot, not just after HMR reload",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T03:31:14Z",
+  "updated_at": "2026-07-04T06:50:09Z",
+  "closed_at": "2026-07-04T06:50:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-04T06:50:08Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2560",
+  "body": "## The bug\n\nRecord-triggered (and other trigger-typed) flows **silently never fired after a fresh process start** — in dev **and in production**.\n\nFound dogfooding a Studio-authored automation end-to-end on a **clean instance**: updating a record fired its audit *hook* but the *flow* never ran. **0 flows bound at boot**, while the metadata layer held **20**.\n\n## Root cause\n\nOn a cold boot the automation service pulls flows via `ql.registry.listItems('flow')`, which is **empty for flows defined inline in an app manifest** — `registerApp()` stores the app under type `'app'` and never promotes its inline flows to standalone registry `'flow'` items. The re-sync that *could* see them (`resyncFlowsFromMetadata`) runs only on the `metadata:reloaded` hook, which **never fires on a cold boot** (`os dev` restarts the process on recompile rather than firing it; production never reloads). So nothing bound its trigger.\n\n## Fix\n\nBind flows at **`kernel:ready`** from **`protocol.getMetaItems({ type: 'flow' })`** — the canonical flattened flow view that `GET /meta/flow` serves and that *does* surface inline app flows — once every plugin has finished `init()`/`start()`. `registerFlow` is idempotent, so re-binding a flow the boot pull already registered is harmless.\n\n## Verification (runtime, clean instance)\n\n- **Before:** cold boot → `bound=0`; updating a record fires **0** flows.\n- **After:** cold boot → all flows bind; one `showcase_task` → `done` update fires **10** matching record-triggered flows (`engine.execute FIRED flow=showcase_task_completed event=record-after-update`, `…_slack`, `…_assigned_notify`, `…_rest_ping`, …).\n- **Turns GREEN the pre-existing end-to-end regression** `trigger-record-change/src/record-change-integration.test.ts` (#1909) — *\"fires a flow pulled from the registry … bound when the trigger registers on kernel:ready (production ordering)\"* — which was red precisely because that binding never happened.\n- New unit test (`flow-cold-boot-bind.test.ts`): an inline-app record flow served only via `protocol.getMetaItems` is bound after `bootstrap()` with **no `metadata:reloaded` fired**; fails on the pre-fix code.\n- Full `@objectstack/service-automation` suite green (227).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

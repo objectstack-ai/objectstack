@@ -1,0 +1,33 @@
+{
+  "number": 2666,
+  "kind": "pull_request",
+  "title": "docs: reframe getting-started around the AI build/verify loop",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-06T23:04:45Z",
+  "updated_at": "2026-07-06T23:11:10Z",
+  "closed_at": "2026-07-06T23:11:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-06T23:11:08Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2666",
+  "body": "## What & why\n\nThe docs said ObjectStack is \"AI-native\" but the getting-started track still read as *\"a human hand-writes TypeScript metadata.\"* This PR makes the actual workflow the spine of the docs: **an AI agent (Claude Code) authors the typed metadata → a validation gate catches mistakes that fail silently at runtime → the human verifies in the visual Console → iterate → the built app is itself AI-operable over MCP.**\n\n## Changes\n\n**New pages (Get Started)**\n- **Build with Claude Code** — flagship tutorial running the whole loop on a live-built *Support Desk* app. All commands, generated metadata, and the `os validate` error are grounded in real local CLI output (not fabricated).\n- **How AI Development Works** — the \"why it's fast and safe\" companion (skills+AGENTS.md, `os validate`, contract-first, draft-gating, worktree isolation).\n\n**Reframes**\n- Old hand-authoring *Quick Start* → **Anatomy of an ObjectStack App** (read-the-metadata-to-verify-it). Slug `/quick-start` kept, so inbound links/SEO survive.\n- Landing + `ai/index` + `cli` + `examples` reframed around the loop; `ai/index` gets a two-axes signpost (AI *builds* the app vs the app *exposes* AI).\n- **MCP \"your app is AI-operable\"** thread pulled together: env-var value-prop, a dedicated `api/index` section + request-path diagram, a deployment pointer.\n- Organize by **real development layering — Data / Automation / Interface / Access / AI** — instead of the ObjectQL/ObjectOS/ObjectUI protocol trinity (the deep architecture page keeps the trinity as an engine reference, with a mapping note).\n\n**Diagrams** — added Mermaid (build loop, AI architecture, protocol stack, MCP request path) using the site's existing Mermaid support.\n\n**Docs-site chrome** — removed the meaningless \"Documentation\" self-link, fixed the UI Engine sidebar icon (deprecated `Layout` → `LayoutDashboard`), hid the single-language switcher.\n\n## Verification\n\nRan the docs site (`apps/docs`) and checked every changed page in the browser: all pages return 200 with **zero MDX/Mermaid compile errors**, nav order is correct, new anchors (`#your-app-as-an-mcp-server`, `#mcp-server`, `#what-you-build`) resolve, and all four Mermaid diagrams render as themed SVG. Sidebar chrome fixes verified via DOM inspection + screenshot.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

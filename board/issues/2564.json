@@ -1,0 +1,32 @@
+{
+  "number": 2564,
+  "kind": "pull_request",
+  "title": "fix(app-showcase): drop wrong-context userFilters from showcase_task.tabular + reclassify P0-30",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T06:50:52Z",
+  "updated_at": "2026-07-04T12:04:07Z",
+  "closed_at": "2026-07-04T12:04:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-04T12:04:05Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2564",
+  "body": "Fixes #2563\n\n## What\n\nDogfood finding **P0-30** (\"view `userFilters` quick filters don't render at all\") was investigated against objectui source and is **by design**, not a rendering bug: objectui ADR-0053 reserves `userFilters` for page lists (InterfaceListPage, \"filters\" mode); on an object list view (\"views\" mode) the console suppresses them — the view switcher is the only nav control there. The real defects were:\n\n1. the drop was **silent** (ADR-0053 phase-4 guardrail never landed) → filed as objectui#2219, fixed by objectui#2220 (one-shot console warning);\n2. our own showcase carried the wrong-context block — `showcase_task.tabular` defined `userFilters` under a stale ADR-0047 comment, while the same file's header already states the ADR-0053 rule and the page examples (`task-workbench` / `task-triage` / `active-projects`) demo the correct usage.\n\n## Changes\n\n- `examples/app-showcase/src/views/task.view.ts` — remove the `userFilters` block from the `tabular` view; comment now points at the ADR-0053 split (named views on the object, `userFilters` in the page examples).\n- `examples/app-showcase/docs/test/console-list-form-capability-report-2026-07.md` — reclassify P0-30 (by-design suppression + silent-drop DX gap + wrong-context metadata) and mark P0-29 fixed upstream (objectui#2218).\n\n## Verification\n\nAgainst the running showcase dev stack (port 3777):\n\n- `/api/v1/meta/app?id=showcase_app` and `/api/v1/meta/objects/showcase_task` contain **zero** `userFilters` occurrences after the change;\n- browser check: `showcase_task.tabular` renders its own columns/tab correctly, no ADR-0053 suppression warning on a clean load.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

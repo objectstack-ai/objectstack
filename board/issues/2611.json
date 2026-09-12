@@ -1,0 +1,30 @@
+{
+  "number": 2611,
+  "kind": "issue",
+  "title": "defineMapping artifacts are registered but never consumed — wire named mappings into REST import or de-scope from the stack",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-05T02:44:32Z",
+  "updated_at": "2026-07-05T08:59:44Z",
+  "closed_at": "2026-07-05T08:59:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2611",
+  "body": "`defineMapping` / the stack `mappings:` collection is registered as metadata (engine `metadataArrayKeys`, `packages/metadata/src/plugin.ts`), but **no runtime consumer resolves a named mapping**: the REST import path (`packages/rest/src/rest-server.ts`, data-import handler) only accepts an **inline per-request `mapping` body param** — it never looks up a registered mapping artifact by name.\n\nSo a `defineMapping` entry in an app stack is inert: it parses, registers, and does nothing.\n\nFound while upgrading the showcase to a registry-driven coverage manifest. Per Prime Directive #10 the showcase must not demo inert capabilities, so `mappings` is recorded as an explicit **waiver** in `STACK_COLLECTION_COVERAGE` (`examples/app-showcase/src/coverage.ts`) pointing at this issue. (app-crm does ship a `defineMapping` example — `examples/app-crm/src/data/crm-mappings.ts` — which today is declared-but-not-enforced.)\n\nResolution options:\n1. **Wire it**: let the REST import/export endpoints accept `mappingName` and resolve the registered artifact (contract-first: the artifact becomes the source of truth, inline stays as an escape hatch), or\n2. **De-scope**: drop `mappings` from the stack schema until there is a consumer, and migrate app-crm's example.\n\nOnce either lands, flip the showcase waiver to `demonstrated`."
+}

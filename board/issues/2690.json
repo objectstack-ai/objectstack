@@ -1,0 +1,35 @@
+{
+  "number": 2690,
+  "kind": "pull_request",
+  "title": "feat(spec,security,lint): ADR-0066 authoring surface — per-operation requiredPermissions (⑤) + capability-reference lint (⑨)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-08T11:30:13Z",
+  "updated_at": "2026-07-08T15:28:25Z",
+  "closed_at": "2026-07-08T15:28:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-08T15:28:23Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2690",
+  "body": "## What & why\n\nCloses two P2 model-completeness items on the authorization gap map (umbrella #2561), both on the ADR-0066 authoring surface. They ship together because ⑨'s lint understands ⑤'s per-operation shape.\n\n---\n\n### ⑤ Per-operation object `requiredPermissions`\n\nToday an object's `requiredPermissions` gates all of CRUD on one capability set; ERP routinely needs \"read-open / write-gated\" (Salesforce & Dataverse separate capability by operation).\n\n`Object.requiredPermissions` now accepts either `string[]` (all operations, original shape) or `{ read?, create?, update?, delete? }` (gates each operation class independently).\n\n- **spec** (`data/object.zod.ts`): `ObjectRequiredPermissionsSchema` union + `PerOperationRequiredPermissionsSchema` (`.strict()`, so a mistyped key is rejected at author time).\n- **plugin-security**: normalized into per-CRUD buckets; the AND-gate (before the CRUD grant, fail-closed) checks the caps for the request's operation. `crudBucketForOperation` (derived from `OPERATION_TO_PERMISSION`) folds `transfer`/`restore`→`update`, `purge`→`delete`.\n- **Backward-compatible**: the `string[]` form normalizes into an `all` bucket that unions with every operation, preserving gate-every-operation semantics.\n\n### ⑨ Author-time capability-reference lint\n\n`requiredPermissions` is a free string, so a typo (`mange_users`) is schema-valid and fails **closed** at runtime — safe but undiscoverable. New `validateCapabilityReferences` (`@objectstack/lint`) warns at author time when a `requiredPermissions` (object / field / app / action) names a capability registered nowhere.\n\n- Author-time \"known\" set = built-in platform capabilities ∪ capabilities the stack grants via a permission set's `systemPermissions` ∪ `sys_capability` seed rows.\n- **Warning, not error**: a package can't see other installed packages' capabilities, and the reference fails closed anyway. `systemPermissions` (the declaration side) is never flagged. Understands the ⑤ per-operation map and points at the exact operation slice.\n- **spec** now owns the canonical `PLATFORM_CAPABILITIES` / `PLATFORM_CAPABILITY_NAMES` (`security/capabilities.ts`) as the single source of truth; `plugin-security`'s `bootstrapSystemCapabilities` seeds from that same list (no drift between seeder and lint).\n- **cli**: wired into `os validate` and `os lint`.\n\n## Tests / verification\n\n- `plugin-security`: **192 passed** (⑤ middleware cases + `crudBucketForOperation` unit tests).\n- `lint`: **139 passed** (8 new ⑨ rule cases).\n- `spec`: **6715 passed**; API-surface snapshot regenerated (0 breaking, 7 added exports); liveness ✓.\n- Full workspace `turbo build` green (no downstream typecheck breakage).\n- End-to-end: `os validate` runs the new step clean on a real example app, and emits the expected warning on a seeded capability typo (validation still passes — non-blocking).\n- Docs (`content/docs/permissions/authorization.mdx`) + ADR-0066 ⑤/⑨ updated to \"landed\".\n\nRefs #2561\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_0187GeNqezxV6g5jiLiggfbt"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 2638,
+  "kind": "pull_request",
+  "title": "docs(showcase): demonstrate ObjectNavItem.filters + 2-day framework×objectui change digest",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-05T13:50:36Z",
+  "updated_at": "2026-07-05T15:05:50Z",
+  "closed_at": "2026-07-05T15:05:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-05T15:05:49Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2638",
+  "body": "## What\n\n两部分,都是 `examples/app-showcase`(private,免 changeset)内的示例/文档:\n\n1. **演示元数据** — `src/ui/apps/index.ts` 新增导航组「Data Slices (filters)」,\n   三个 `ObjectNavItem.filters` 切面项对准同一 `showcase_task`,预置不同\n   `filter[<field>]=<value>` 条件(framework #2626),端到端演示裸数据面\n   `/:objectName/data`(objectui #2255)与 `recordId/filters/viewName` 互斥守卫\n   (#2630)。`src/docs/showcase_tour_ui.md` 补讲解段。\n2. **主题梳理文档** — `docs/test/framework-objectui-changes-2026-07-03_05.md`,\n   按主题梳理 framework(72 提交)× objectui(49 提交)近两天全部改动:安全授权\n   (两扇门 + 反过滤预言机)、协议 spec/lint、导航切面、自适应记录面、声明式集成\n   (apis/mappings/cube)、自动化可观测性、Studio 编辑闭环、showcase 重构、\n   ADR-0088 种类精简。\n\n## Verification\n\n`ObjectNavItem.filters` 演示在各层验证:\n\n| 层 | 结果 |\n|---|---|\n| build / validate / 55 vitest / app.zod superRefine 守卫 | ✅ |\n| 后端 REST 切面语义 | ✅ in_progress=2 / urgent=2 / in_review=2 / 全量=10 |\n| 前端端到端(浏览器实测) | ✅ 导航项 href → `…/showcase_task/data?filter[status]=in_progress` → 裸数据面 + 可移除 chip「状态 = in_progress ×」+ 2 行记录 + 侧栏 active 高亮 |\n\n> 首测吃到 vendored console dist 陈旧(07-02 构建,早于 pinned `.objectui-sha=6c1ad9e`\n> 的切面路由 #2255);经官方 `scripts/build-console.sh` 按 pin **重建 dist**(独立\n> git worktree,不动共享检出)后端到端跑通。**证实特性本身正确,无需改代码** ——\n> framework main 侧只需在 objectui bump 后跑 `pnpm objectui:refresh` 让 dist 追上\n> `.objectui-sha`(发布管线职责)。详见文档 §10.3。\n\n## Notes\n\n- 仅改 3 个文件(重建的 `packages/console/dist`、`.cache` 均 gitignore)。\n- 全程用隔离端口 3777 + 独立 tempdir DB,未触碰其他 agent 占用的 3000/5180。"
+}

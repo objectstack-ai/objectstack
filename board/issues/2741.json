@@ -1,0 +1,35 @@
+{
+  "number": 2741,
+  "kind": "pull_request",
+  "title": "feat(mcp): plugin-carried Connect-an-agent Setup page + nav (#2714)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T03:53:48Z",
+  "updated_at": "2026-07-10T04:25:21Z",
+  "closed_at": "2026-07-10T04:25:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-10T04:25:19Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2741",
+  "body": "#2714 Phase 1, companion to objectstack-ai/objectui#2372 (which closes objectstack-ai/objectui#2363).\n\nThe MCP plugin now carries its own Setup surface — `CONNECT_AGENT_UI_BUNDLE` (page `connect_agent` + nav entry under **Integrations**) registered on `kernel:ready` via the manifest service, the exact pattern of the marketplace pages (cloud ADR-0009: the nav lives and dies with the capability). Gated on `isMcpServerEnabled()`: an opted-out deployment gets no page and no nav entry, mirroring the 404'd surface.\n\nThe page body is the `mcp:connect-agent` SDUI widget (objectui#2372): environment MCP URL from `/discovery`, per-client connect cards (claude.ai/Desktop, Claude Code + official plugin, Cursor deeplink, VS Code, Codex), SKILL.md download (#2728), show-once API-key minting. zh-CN nav label (`连接智能体`) added alongside the existing Setup nav translations.\n\n## Verification\n\n- mcp 66 ✓ (2 new: bundle registered by default with correct page/nav shape; nothing registered when opted out)\n- Browser-verified end-to-end with the live widget (console Vite dev → showcase server): nav entry renders under Integrations, page loads with all six cards and the real env URL, an API key minted on-page drives a real MCP `tools/list` (9 tools), SKILL.md link serves the env-customized markdown.\n\nRefs #2714.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

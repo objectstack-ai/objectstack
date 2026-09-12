@@ -1,0 +1,35 @@
+{
+  "number": 2845,
+  "kind": "pull_request",
+  "title": "feat(security): ADR-0090 D10 — delegate action capabilities to MCP agents",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-11T15:10:34Z",
+  "updated_at": "2026-07-11T15:42:46Z",
+  "closed_at": "2026-07-11T15:42:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-11T15:42:44Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2845",
+  "body": "## What\n\nFollow-up to the D10 agent principal (#2843). An MCP **agent** may now invoke the business **actions** its delegating user can run, gated by the `actions:execute` scope.\n\nBefore this, an agent principal carried **no** system capabilities (`systemPermissions = []`), so any capability-gated action (`requiredPermissions`) was denied even when the user was fully entitled to it — the most likely friction for a real agent integration, since `run_action` is a headline MCP tool.\n\n## How\n\n`resolve-execution-context` keeps the delegating user's `systemPermissions` on the agent context **only when the token carries `actions:execute`** (otherwise none — and the MCP tool surface already hides the action tools without that scope). The `actions:execute` scope *is* the user's explicit consent to let the agent act on their behalf, so the capability gate (`actionPermissionError`, which reads `ctx.systemPermissions`) is delegated accordingly. The gate itself is unchanged and identity-agnostic.\n\n## Why this is safe (does not widen data reach)\n\nThe action-invocation gate is a door **separate** from the object CRUD/FLS/RLS intersection, which is driven by the resolved **ceiling sets** (they carry no capabilities). So:\n\n- Whatever an action reads or writes still flows through `object ceiling ∩ user`. A `data:read` agent that invokes a *writing* action is still blocked **at the write**.\n- Even a `data:write` agent cannot touch better-auth-managed identity tables (the ceiling denies them).\n- Capability-gated **object** access stays denied to the agent (that gate uses the ceiling sets, not `ctx.systemPermissions`).\n- Concretely: an agent for an org-admin can *invoke* `delete_user` (the user holds `manage_org_users`), but the action's internal `sys_user` delete is blocked by the agent's ceiling → the action fails. The data ceiling backstops every action that touches platform data.\n\nThe only residual is a capability-gated action whose effect is **purely external** (send email, call webhook) — exactly what `actions:execute` consents to. Tighter per-action agent scoping is the per-client-grants follow-up.\n\n## Tests\n\n- **Producer unit** (`resolve-execution-context`): agent with `actions:execute` inherits the user's `systemPermissions` (but its DATA ceiling stays the scope-derived set); agent without it holds none.\n- **Integration** (`run_action` MCP bridge): an agent that inherited the capability runs the gated action; an agent that didn't is denied with `requires capability`.\n- Full runtime suite **495** green; `tsc` clean.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

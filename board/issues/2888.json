@@ -1,0 +1,33 @@
+{
+  "number": 2888,
+  "kind": "pull_request",
+  "title": "fix(plugin-auth): land OAuth callback errors on the console login page (objectui#2458 item 1)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-13T20:55:18Z",
+  "updated_at": "2026-07-13T21:01:59Z",
+  "closed_at": "2026-07-13T21:01:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-13T21:01:57Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2888",
+  "body": "Paired with objectstack-ai/objectui#2468 (merge that UI PR first — this redirect targets the error banner it adds; without it the login page still receives the param but shows nothing, which is no worse than today).\n\n## Problem\n\nA failed OAuth callback (expired/replayed `state` after the 10-minute signed-params window, IdP error) redirects through better-auth's default error URL: `/api/v1/auth/error?error=state_mismatch` → `/?error=state_mismatch`. The runtime's root→`/_console/` redirect **drops the query string**, so a user who just signed in successfully at the IdP lands on a silent login form with no explanation — reproduced live as the \"login silent failure\" in objectui#2458 item 1.\n\n## Change\n\nSet `onAPIError.errorURL` in the betterAuth config to `getConsolePageUrl('/login')` — the same console-page helper already used for the oidc `loginPage`/`consentPage`. better-auth's generic-oauth callback (and core error route) then lands the browser on `/_console/login?error=<code>`, which the console login page renders as a visible banner (objectui#2468).\n\nUnit test asserts the config wiring; full `auth-manager.test.ts` suite green (171 tests). End-to-end redirect chain traced live on the run-stack rig: env callback 302 → `/api/v1/auth/error?error=state_mismatch` → `/?error=state_mismatch` (query lost today); with this change the target is the login page and the banner was verified rendering via direct navigation to `/_console/login?error=state_mismatch`.\n\nRefs objectstack-ai/objectui#2458 (item 1)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

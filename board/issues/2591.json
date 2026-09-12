@@ -1,0 +1,33 @@
+{
+  "number": 2591,
+  "kind": "issue",
+  "title": "Authored (Studio) translations never reach the i18n runtime — only static bundles are loaded",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T15:45:26Z",
+  "updated_at": "2026-07-05T02:53:13Z",
+  "closed_at": "2026-07-05T02:53:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2591",
+  "body": "## Summary\n\nA translation authored in the Studio (saved as `translation` metadata) is **never loaded into the i18n runtime** — not served on publish, and not after a restart. The i18n service only ever loads **static bundles** (compiled `bundle.translations` + each plugin's own `translations/`). `translation` is flagged `allowRuntimeCreate: true` but nothing consumes runtime-authored translation items. Declared-but-not-wired, not a stale-cache bug.\n\nFound in the post-#2576 boot-cached-consumer audit.\n\n## Evidence\n\n- `packages/services/service-i18n` serves `GET /api/v1/i18n/translations/:locale` straight from an in-memory `Map` in `FileI18nAdapter` (`file-i18n-adapter.ts` — `translations` map, `getTranslations`).\n- That map is populated only via `loadTranslations(locale, data)`, and **every caller passes a static bundle**: `packages/runtime/src/app-plugin.ts:819` (`bundle.translations`) and each plugin's bundled strings (plugin-audit, plugin-security, plugin-sharing, plugin-approvals, plugin-webhooks, platform-objects — all `i18n.loadTranslations(locale, <bundled data>)`).\n- **No code reads `translation` metadata** (`getMetaItems({type:'translation'})` / `metadata.list('translation')` / sys_metadata) into the i18n service. On the showcase, `GET /api/v1/meta/translation` returns 0 items even though translations render (they come from the compiled bundle).\n- Net: authoring + publishing a `translation` in the Studio has no runtime effect whatsoever.\n\n## Impact\n\n`priority:p2` (cosmetic — labels/strings, not correctness). But it's a complete dead-end for a first-class authorable type, and undermines the localization-authoring story.\n\n## Proposed fix\n\n1. Load `translation` metadata into service-i18n at boot from the protocol (`protocol.getMetaItems({ type: 'translation' })`), mapping each item to `loadTranslations(locale, data)`. Requires deciding the translation-item → `{ [locale]: TranslationData }` shape/merge order vs the static bundle (overlay-on-top).\n2. Subscribe to `metadata:reloaded` (fired on publish since #2576) to re-sync — with a **clear-then-reload** for the authored subset (removed keys must not linger; `loadTranslations` currently deep-merges, so deletions need explicit handling).\n\nBigger than a subscription — needs the boot-load wiring + a mapping/merge design. Companion to the hooks (#2588) and sharing runtime-authoring gaps.\n"
+}

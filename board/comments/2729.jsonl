@@ -1,0 +1,1 @@
+{"id":4931741642,"author":{"login":"os-zhuang","id":277994282,"type":"User"},"created_at":"2026-07-10T03:36:50Z","updated_at":"2026-07-10T03:36:50Z","html_url":"https://github.com/objectstack-ai/objectstack/issues/2729#issuecomment-4931741642","body":"重复/已修:PR #2726(fix(spec): bump PROTOCOL_VERSION 12→13)已在 main 合入——我 pre-flight 看到的红是 worktree 基点早于该修复。关闭。"}

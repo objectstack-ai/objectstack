@@ -1,0 +1,36 @@
+{
+  "number": 2543,
+  "kind": "pull_request",
+  "title": "feat(spec): retired-key tombstones + ship CHANGELOG in the npm artifact",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-03T12:57:44Z",
+  "updated_at": "2026-07-03T13:07:59Z",
+  "closed_at": "2026-07-03T13:07:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-03T13:07:58Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2543",
+  "body": "Closes the upgrade-path gap found by role-playing the hotcrm upgrade agent: the one channel every upgrading consumer is guaranteed to hit is the `create()` rejection — and today it dead-ends. The docs site is off-artifact (version skew, needs network); the changesets' carefully-written migration notes never left the monorepo (**`CHANGELOG.md` was not in the `files` allowlist** — verified absent from a real consumer's `node_modules`).\n\n## Three pieces\n1. **Tombstones** (`UNKNOWN_KEY_GUIDANCE`, reusing the #1535 fixable-error mechanism): rejecting `compactLayout` / `detail` / `views` / `defaultDetailForm` now prints the replacement key, the version/decision that removed it, and the one-line fix. Tombstones age out ~two majors after removal — the map's content always equals the upgrade paths the platform actually digests.\n2. **`CHANGELOG.md` ships in the npm package**: migration notes travel with the exact installed version, greppable offline. `npm pack --dry-run` confirms (216KB).\n3. **`llms.txt` upgrade section + AGENTS.md discipline**: agents learn the tombstone→CHANGELOG protocol (and never to re-add keys or downgrade to silence errors); authors learn that breaking changesets must carry FROM→TO notes and key removals require a tombstone.\n\n## Verification\n- 3 new tombstone tests assert the prescriptions (replacement + version + decision reference); spec object tests 75/75 green.\n- `npm pack --dry-run` lists CHANGELOG.md.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

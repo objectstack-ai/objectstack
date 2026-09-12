@@ -1,0 +1,35 @@
+{
+  "number": 2732,
+  "kind": "pull_request",
+  "title": "feat(spec)!: book audience gates by permission set — retire the { profile } arm (ADR-0090)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T03:33:25Z",
+  "updated_at": "2026-07-10T04:43:37Z",
+  "closed_at": "2026-07-10T04:43:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-10T04:43:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2732",
+  "body": "# Summary\n\n`BookAudienceSchema` (`packages/spec/src/system/book.zod.ts`) still modelled its gated arm as `{ profile: string }` — a reference to the Profile concept ADR-0090 D2 deleted — with pre-D3 vocabulary (\"role-gated\", \"guest profile\") in the comments. This PR retires it with a launch-window one-step rename, no aliases.\n\n## Decision: permission set, not position\n\nThe gated arm becomes **`{ permissionSet: string }`**, a capability reference, for three reasons grounded in ADR-0090:\n\n1. **Package ownership (D9).** Books ship in packages; packages own permission sets but **never** positions/BUs/teams — those are environment-owned. A book gating to a position name would reference an entity the package cannot know, which is exactly the environment-ownership argument (D2 #1) that removed profiles.\n2. **D9's admin stance is this shape.** App-level admin is \"an ordinary package set (`crm_admin`) the customer binds to a position of their own choosing\" — so a CRM package's Admin Guide gates to `{ permissionSet: 'crm_admin' }`, keeping ADR-0086 provenance and uninstall semantics intact.\n3. **Vocabulary axis (D3).** \"Who may read this book\" is a capability question; capability = `permission_set`. Positions are distribution. The two literals already map to the D9 anchors: `'org'` inherits the package grant (authenticated members), `'public'` ≡ the built-in `guest` position.\n\nADR-0046 §6.7 itself glossed the arm as \"gates a book to a profile / permission set\", so this lands on the reading that survived ADR-0090.\n\n## Changes\n\n- `book.zod.ts` — union arm renamed; comments rewritten to D3 vocabulary (`guest` position, capability-gated); doc comment records the D9 rationale. The zod union now **rejects** `{ profile }` at parse time (contract-first, no lenient dialect, per the D4 discipline).\n- `book.test.ts` — audience variants updated; new test asserting `{ profile }` is rejected.\n- `content/docs/references/**` — regenerated (`gen:schema` + `gen:docs`). This also catches up `security/*` with the `AdminScope` (D12) and `explain` (D6) shapes that landed in #2711/#2716 without a docs regen.\n- Changeset: major bump for `@objectstack/spec`.\n\nThe REST read layer only evaluates `isPublicAudience` (anonymous gate), so no runtime evaluation code changes; enforcement of the gated arm remains the ADR-0046 Phase D item it already was.\n\n## Companion PR\n\nObjectUI mirrors this shape in three places (metadata-admin JSON schema `oneOf`, `BookPreview` audience chip, book list-column renderer) — companion PR in objectstack-ai/objectui updates them to `{ permissionSet }`.\n\n## Why the D3 forbidden-word lint didn't catch this\n\nThe D3 lint (`security-role-word`, `packages/lint/src/validate-security-posture.ts`, shipped in P3 #2711) validates **published stack metadata** — names/labels of objects, fields, actions, permission sets, positions, and apps. It could not have caught this because:\n\n1. The violation lives in **spec source code** (a TS comment and a zod key), which no lint scans for the word ban — the ADR's \"identifiers, UI copy, and docs\" scope is enforced for metadata only; source hygiene relied on the P1 rename sweep (#2697), which was identifier-driven (`sys_role`, `isProfile`, …) and missed this file because the arm was spelled `profile`, not `role`.\n2. Even as metadata, **books are not among the kinds the lint scans** — and `profile` (unlike `role`) is not a banned word, so a book authored with `{ profile: ... }` drew no finding. After this PR the schema itself rejects the shape, which is the stronger, contract-first gate.\n\nPossible follow-ups (not in this PR): a source/docs-level `\\brole\\b` sweep check (e.g. `content/docs/ui/role-based-interfaces.mdx` still violates the D3 docs ban), and adding book name/label to the lint's role-word scan now that book audience is a permission-model reference. Two more D2 leftovers found in objectui's `default-schemas.ts` (`role` and `profile` metadata-type entries mirroring the framework's `metadata-form-registry.ts` `profile: permissionForm` row) are flagged in the companion PR rather than fixed, since removing them needs a coordinated registry change.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Ph4jEAfWDh6taMbZweWhom\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Ph4jEAfWDh6taMbZweWhom)_"
+}

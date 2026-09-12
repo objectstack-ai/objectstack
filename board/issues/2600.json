@@ -1,0 +1,34 @@
+{
+  "number": 2600,
+  "kind": "pull_request",
+  "title": "docs(spec,skills,adr): correct related-list docs for relatedList 'primary' (#2579 follow-up)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T17:34:31Z",
+  "updated_at": "2026-07-04T17:55:24Z",
+  "closed_at": "2026-07-04T17:55:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-04T17:55:22Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2600",
+  "body": "## What\n\nDoc follow-up to #2594 (issue #2579) — corrects the related-list documentation to match the shipped `relatedList: 'primary'` behavior.\n\n- **`packages/spec/src/data/field.zod.ts`** — the `relatedList` JSDoc + `.describe()` said *\"count-aware: few children → a tab each, many → collapse\"*, but we shipped **rule Z**: non-primary related lists stack under one shared **Related** tab, and only `'primary'` earns its own tab (no count-based auto-split). Corrected. Description-only, no behavior change → **patch** changeset.\n- **`skills/objectstack-ui/SKILL.md`** — removed the now-false *\"a single Related tab is the only built-in layout / assign a custom Page to get tabs\"* claim; documents `relatedList: 'primary'` as the **zero-page** way to promote a child table to its own tab; notes columns auto-derive from `highlightFields`.\n- **`skills/objectstack-data/rules/relationships.md`** — adds the `'primary'` tri-state; fixes *\"each child yields at most one related list (first eligible FK wins)\"* → **one related list per FK** (multi-FK children); notes `relatedListColumns` is optional (auto-derives from `highlightFields`) and self-referential hierarchies surface a \"children\" list.\n- **`docs/adr/0035-config-driven-master-detail.md`** — read-side-mirror section updated for the tri-state, optional columns, and one-per-FK derivation.\n\n## Not included (intentional)\n\n- **No new ADR / no ADR-0085 addendum** — per repo convention (`fewer-adrs`), the prominence-vs-layout rationale lives in ADR-0035 + the skills + the #2594 changeset.\n- **Generated artifacts need nothing**: `packages/spec/json-schema/*` is untracked and rebuilds from source at publish; `api-surface.json` tracks exported signatures (an additive union / optional field is invisible to it — `check:api-surface` already confirmed unchanged).\n\nRefs #2579.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

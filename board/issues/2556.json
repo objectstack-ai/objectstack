@@ -1,0 +1,35 @@
+{
+  "number": 2556,
+  "kind": "pull_request",
+  "title": "fix(spec): warn loudly on view-key collisions in expandViewContainer",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T03:09:52Z",
+  "updated_at": "2026-07-04T12:07:24Z",
+  "closed_at": "2026-07-04T12:07:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-04T12:07:23Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2556",
+  "body": "Closes #2554\n\n## 问题\n\n`expandViewContainer` 中 list/form 视图共享同一个 `<object>.<key>` 命名空间。key 冲突时(典型:`formViews.default` 撞上主 `list` 隐式占用的 `default`),`uniqueViewName` 把后注册者**静默改名**为 `<key>_2` — 零告警。所有引用原名的地方(form action 的 `target`、导航 `viewName`)会解析到**另一个视图**。\n\nshowcase 实锤链路(P0-8/19/20):`showcase_log_time` action `target: 'showcase_task.default'` 意图打开 form,但 `showcase_task.default` 实际是 list 视图(form 被改名成 `default_2`)→ FormPage 渲染 list 视图配置 → 零字段黑屏 + 提交误报成功。\n\n## 修复\n\n保持改名行为不变(向后兼容),但让冲突**可见**:\n\n- **spec** (`view.zod.ts`):`ExpandedViewItem` 增加可选 `_diagnostics` 字段(复用 `MetadataValidationResult` 的 `{valid, warnings:[{path,message}]}` 形状);四个注册点在发生改名时打上 warning,消息点名两个视图名和影响面。\n- **objectql** (`engine.ts`) / **metadata** (`plugin.ts`):两个展平 loader 在启动时把 `_diagnostics.warnings` 写进日志。\n- **examples/app-showcase**:`formViews.default` → `edit`,`showcase_log_time.target` → `showcase_task.edit`,注释说明冲突原因。\n\n## 测试\n\n- `packages/metadata/src/view-expand.test.ts` 新增 3 个用例:form/list 冲突带 warning、formViews 撞 listViews key、无冲突不打 `_diagnostics`。\n- `@objectstack/spec` 6669 tests pass;`@objectstack/objectql` 737 pass;`@objectstack/metadata` 257 pass。\n\nCo-Authored-By: Claude <noreply@anthropic.com>"
+}

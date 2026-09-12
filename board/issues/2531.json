@@ -1,0 +1,34 @@
+{
+  "number": 2531,
+  "kind": "pull_request",
+  "title": "feat(studio): App Builder nav entry — pillar builder joins the login journey",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-03T03:40:39Z",
+  "updated_at": "2026-07-03T03:47:32Z",
+  "closed_at": "2026-07-03T03:47:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-03T03:47:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2531",
+  "body": "Companion to objectui#2175 (BuilderLanding + `studio:builder` component registration).\n\nAdds an **App Builder** entry (componentRef `studio:builder`, first in the Overview group) to the Studio app's navigation, so the pillar application builder is reachable from the moment a user logs in:\n\n**Login → Home → Studio app → App Builder → pick/create a writable base package → `/studio/:packageId/data`** (full-screen pillar builder) — previously the builder was a URL-only surface with zero inbound links.\n\nBrowser-verified end-to-end with a worktree build serving this nav: the sidebar entry appears (Overview: App Builder · All Metadata Types · Packages), the landing renders inside the Studio chrome, and creating 客服中心/com.example.support jumps straight into the full-screen builder.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

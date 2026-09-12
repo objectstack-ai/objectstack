@@ -1,0 +1,32 @@
+{
+  "number": 2794,
+  "kind": "pull_request",
+  "title": "chore: bump objectui to 672f18e38121 — Access-pillar effective holders + explain picker chevron",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T14:23:30Z",
+  "updated_at": "2026-07-10T14:34:15Z",
+  "closed_at": "2026-07-10T14:34:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-10T14:34:12Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2794",
+  "body": "Pulls objectstack-ai/objectui#2383 into the vendored console pin:\n\n- **已分配用户 lists effective holders** — direct grants ∪ holders of every bound position, with 直授/经岗位 badges; `everyone`-anchor bindings render as a note (objectui#2382).\n- **Explain panel user-picker chevron** — the pick-another-user affordance is discoverable (objectui#2381).\n\nBoth were browser-verified end-to-end against a live backend before the objectui merge (see #2383's verification section).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 2842,
+  "kind": "pull_request",
+  "title": "fix(platform-objects): sys_sso_provider resultDialog paths address the inner data payload",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-11T14:07:11Z",
+  "updated_at": "2026-07-11T14:21:00Z",
+  "closed_at": "2026-07-11T14:20:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-11T14:20:58Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2842",
+  "body": "## Problem\n\nThe console action runtime unwraps the `{ success, data }` response envelope before resolving `resultDialog` field paths — so paths address the **inner** `data` payload (as `create_user`, two-factor and OAuth all do). `sys_sso_provider`'s domain-verification dialog was the **only** spec written with a `data.` prefix, compensating for a runtime bug where `apiHandler` leaked the whole envelope.\n\n## Change\n\nDrop the redundant `data.` prefix from the 3 DNS-record field paths in `sys-sso-provider.object.ts`:\n\n- `data.dnsRecordType` → `dnsRecordType`\n- `data.dnsRecordName` → `dnsRecordName`\n- `data.dnsRecordValue` → `dnsRecordValue`\n\nNow consistent with every other object's `resultDialog`. Adds a regression assertion in `platform-objects.test.ts`.\n\n## ⚠️ Release-coupled\n\nMust ship **together** with the objectui runtime fix (companion PR: **objectstack-ai/objectui#2396**), which makes `apiHandler` unwrap the envelope. Once that lands, the old `data.` prefix double-nests and blanks this dialog; before it lands, dropping the prefix blanks it. Either half alone temporarily breaks the opt-in (`OS_SSO_DOMAIN_VERIFICATION`) SSO domain-verification reveal dialog — a niche admin surface.\n\n## Test\n\n`pnpm --filter @objectstack/platform-objects exec vitest run src/platform-objects.test.ts` → **64/64 pass** (incl. the new `SysSsoProvider` path assertion).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

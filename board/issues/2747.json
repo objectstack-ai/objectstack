@@ -1,0 +1,30 @@
+{
+  "number": 2747,
+  "kind": "issue",
+  "title": "Package uninstall does not clean up data-plane permission rows by package_id (ADR-0086 D3 wiring gap)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T05:53:27Z",
+  "updated_at": "2026-07-10T09:24:33Z",
+  "closed_at": "2026-07-10T09:24:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2747",
+  "body": "## 问题\n\n`DELETE /api/v1/packages/:id` 的卸载路径(`SchemaRegistry.uninstallPackage` + `MetadataProtocol.deletePackage`)只删除 `sys_metadata` 覆盖行和 `sys_packages` 持久化记录——**没有任何按 `package_id` 清理数据面权限行的逻辑**:\n\n- `sys_permission_set` 中 `managed_by:'package'` 且 `package_id = <被卸载包>` 的行不会被删除;\n- 指向这些权限集的 `sys_position_permission_set` / `sys_user_permission_set` 绑定行也原样保留。\n\nADR-0086 D3 引入 `package_id`/`managed_by` 溯源列正是为了让卸载语义可定义(`sys-permission-set.object.ts` 里的 `package_id` 索引注释也写明是\"for the uninstall/upgrade query\"),但消费这条索引做删除的接线目前不存在。ADR-0090 D5 也明确要求:\"uninstalling the package (removing its sets by `packageId`, ADR-0086 D3) revokes it everywhere at once. No ghost grants.\" 当前实现达不到这一点——卸载后授权继续生效(ghost grants),直到有人手工清理。\n\n## 复现\n\n1. 运行时安装一个带 `permissions` 声明的包(或声明在 stack 里,启动 seeder 落库);\n2. 确认 `sys_permission_set` 出现 `managed_by:'package'` 的行,并给某岗位绑定该权限集;\n3. `DELETE /api/v1/packages/:id` 卸载;\n4. `sys_permission_set` / `sys_position_permission_set` 行仍在,持有者权限不变。\n\n## 期望\n\n卸载时按 `package_id` 删除该包的权限集行及其绑定(级联或先删绑定),使授权立刻全局失效。plugin-security 需要一个卸载钩子(目前完全没有 uninstall 处理器),或由 protocol 的 `deletePackage` 发出事件供 plugin-security 消费。\n\n## 备注\n\n- 发现于 #2746(D5 建议绑定表面)的实现探查;该 PR 的 `sys_audience_binding_suggestion` 通过收敛式对账自行清理 pending 行,不受此缺口影响,但权限集/绑定本体的清理超出其范围。\n- 相关:ADR-0086 D3/D4、ADR-0090 D5、#2696。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01DP13MuGwFWLcVxVtuA7rgq"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 2868,
+  "kind": "pull_request",
+  "title": "fix(objectql): apply defaultValue on explicit null at insert (#2706)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-13T02:57:06Z",
+  "updated_at": "2026-07-13T05:47:45Z",
+  "closed_at": "2026-07-13T05:47:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-13T05:47:43Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2868",
+  "body": "## 背景\n\n修复 #2706 中归属本仓库(objectql)的子问题。\n\n## 排查结论\n\n- **#1 解析顺序晚于 beforeInsert hook** — 已由 #2703 / #2748 修复(`applyFieldDefaults` 现已在 `beforeInsert` 之前执行),含回归测试,**本次无需再动**。\n- **#2 显式 `null` 不回填** — 本 PR 修复。\n- **#3 创建表单不预填 `current_user`** — 归属 objectui,本仓库不涉及。\n\n## 改动\n\n`applyFieldDefaults` 原判据为 `out[f.name] !== undefined`,只有\"省略\"字段才回填 default;表单把未选控件序列化成显式 `null` 时会落库 `null`(`current_user` 令牌与静态默认都不生效)。\n\n- 判据改为 `out[f.name] != null`:insert 时\"省略\"与\"显式 null\"一视同仁,都视为\"未提供值\"并回填 default。\n- 空串 `''` 仍视为真实值,不覆盖。\n- **仅影响 insert 路径**:`applyFieldDefaults` 只在 `insert()` 调用,`update()` 从不调用它,因此 update 的\"置 null\"语义完全不受影响。\n- 更新函数文档注释,明确 omitted / explicit null 均按\"未提供\"处理的语义。\n\n## 测试\n\n新增两条回归测试(`engine.test.ts`):\n- 显式 `owner:null, status:null` → 回填 `current_user` + 静态默认;\n- 显式 `status:''` → 保留空串不覆盖。\n\n`packages/objectql` 全部 48 条测试通过。\n\nRefs #2706(本仓库子项 #1/#2;#3 归 objectui,保留 issue 开启)"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 2595,
+  "kind": "pull_request",
+  "title": "feat(spec,lint): adaptive record surface + semantic span + navigation.size (#2578)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T16:55:04Z",
+  "updated_at": "2026-07-04T17:10:33Z",
+  "closed_at": "2026-07-04T17:10:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-04T17:10:31Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2595",
+  "body": "Framework / spec side of #2578. All metadata is AI-authored, so the design goal is to make AI unable to get presentation wrong — presentation (surface / width / columns) is runtime-derivable, so **none of it is an authored key**.\n\n## What\n\n- **`deriveRecordSurface`** (`spec/src/data/record-surface.ts`) — the default record surface (page vs drawer/modal) derived from authorable field count; mobile always pages. A **derivation, not an authored key**: a `recordSurface` object key fails ADR-0085 §2's admission test (field count is machine-inferable). Explicit override remains the assigned-page path.\n- **`FormField.span`** (`auto` | `full`) — relative field width, decoupled from the per-surface derived column count; replaces the fragile absolute `colSpan` (retained + clamped by the renderer).\n- **`NavigationConfig.size`** (`auto` | sm | md | lg | xl | full) — T-shirt overlay size aligned with `FormView.modalSize`; **deprecates the pixel `width` / `drawerWidth`** (a pixel width can't be authored blind — the author doesn't know the client viewport). `auto` ⇒ renderer derives size from field count + viewport, AI writes nothing.\n- **`validateFormLayout`** lint — `form-field-unknown` + `absolute-colspan-discouraged` (both warnings with fix hints; ADR-0078/0019, same bar for AI and hand authors).\n- ADR-0085 §2 clarification (records `recordSurface` as rejected, to prevent re-proposal) + changeset.\n\n## Tests\n- spec **6677** tests + `check:api-surface` (regenerated, additive) — green\n- lint **121** tests — green\n\n## Companion\nRenderer side lives in **objectstack-ai/objectui** (companion PR). Build-independent: objectui ships a local mirror of `deriveRecordSurface` pending this spec's release, then consolidates to the import.\n\nRefs #2578\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

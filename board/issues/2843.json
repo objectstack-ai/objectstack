@@ -1,0 +1,35 @@
+{
+  "number": 2843,
+  "kind": "pull_request",
+  "title": "feat(security): ADR-0090 D10 — activate agent principal (OAuth → scope ceiling)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-11T14:19:59Z",
+  "updated_at": "2026-07-11T14:52:03Z",
+  "closed_at": "2026-07-11T14:52:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-11T14:52:00Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2843",
+  "body": "## What\n\nWires the **producer** side of the ADR-0090 D10 agent intersection that shipped in #2838, so it stops being **dormant**. An MCP request authenticated with an OAuth access token is now resolved as an AI **agent acting on behalf of** the human `sub`, and its effective permission is the **intersection** of a scope-derived capability ceiling **and** the user's own grants.\n\nBefore this, `principalKind:'agent'` / `onBehalfOf` were a P1 context *shape* that nothing ever produced — the D10 enforcement engine had no input. #2698 already captured the OAuth `clientId` (`azp`) but discarded it; this translates it.\n\n## How\n\n- **`resolve-execution-context` (producer)** — when a verified MCP OAuth token names an authorized client (`azp`), the request resolves to `principalKind:'agent'` with `onBehalfOf:{ userId }` (the human). The agent's OWN grants are **replaced** by the scope-derived ceiling: `data:read` → read-only, `data:write` → full CRUD, neither → no data access. `userId` stays the human so owner-stamping and `current_user.*` RLS resolve to them; the user-derived `systemPermissions` are cleared so a cap-gated action can't ride the user's capabilities. A token **without** a client stays a `human` principal (not every bearer is an agent).\n- **`plugin-security`** — three built-in ceiling sets (`mcp_agent_data_read` / `mcp_agent_data_write` / `mcp_agent_restricted`): pure CRUD bits, **no row-level security** (all row/owner/tenant narrowing comes from the delegating user on the *other* side of the intersection). An `agent` principal **skips the additive human baseline** (`member_default`) — its grants are exactly its ceiling — and its fallback is the restricted (no-object-access) set, so a mis-resolved agent fails **CLOSED**, never open.\n- **`spec`** — `MCP_AGENT_PERMISSION_SET_*` + `scopesToAgentPermissionSets()`, single-sourced beside the OAuth scope constants; `api-surface.json` regenerated.\n\n## Behaviour change (a security tightening)\n\nPreviously an MCP OAuth request executed with the **full authority of the logged-in user**, and scopes narrowed only the *tool surface* (which tools are exposed). Now the scope is also a real **data-layer ceiling**: a `data:read` token can never write ANY record — even via a crafted call — no matter what the user could do. This is strictly consistent with the existing contract that \"a scope can never grant more than the user could do\" (the intersection only ever narrows) and closes the gap where a compromised or confused agent could act with the user's full reach.\n\n## Tests\n\n- **Producer mapping** — unit-tested in `@objectstack/runtime` (`resolve-execution-context`): `data:read`/`data:write`/`actions:execute` → correct ceiling + `principalKind:'agent'` + `onBehalfOf`; a token with no client stays `human`. Full runtime suite **491** green (incl. the existing MCP-OAuth dispatcher tests).\n- **Enforcement** — dogfooded against the served engine (`showcase-agent-scope-ceiling`, real SQLite + RLS + private-OWD): a `data:read` agent acting for a member who owns a record can **read** it but cannot **edit** or **create**; a `data:write` agent for the same user **can** edit; the human control can do both.\n- No regression: `plugin-security` **298**, `plugin-sharing` **76**, and the D10/OWD/permission-zoo dogfood suites unchanged. `check:api-surface` + `tsc` clean.\n\n## Scope / follow-ups\n\n- **One ceiling per token today**, derived from the coarse `data:read`/`data:write` scopes. Per-client custom grants (binding permission sets to a specific OAuth application) remain a follow-up — the `sys_oauth_application` record is better-auth-managed and has no grant linkage yet.\n- **Action capabilities**: an agent's `systemPermissions` are empty, so cap-gated *actions* are denied to agents by default (fail-safe). Giving agent ceilings specific action capabilities is a follow-up.\n- The **agent grant-ceiling lint** (D10 rule 2) is now less necessary — the ceiling sets are platform-owned and carry no high-privilege bits by construction.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

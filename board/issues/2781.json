@@ -1,0 +1,32 @@
+{
+  "number": 2781,
+  "kind": "issue",
+  "title": "feat(auth): 身份批量导入的异步 Job 支持（>500 行，invite 策略）",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T11:36:24Z",
+  "updated_at": "2026-07-11T02:38:54Z",
+  "closed_at": "2026-07-11T02:38:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2781",
+  "body": "## 背景\n\n#2766（PR #2771）的 `POST /api/v1/auth/admin/import-users` 为**同步专用**，上限 500 行（scrypt 每行 ~100ms），`async: true` 返回 `ASYNC_NOT_SUPPORTED`。大批量（数千员工）目前只能分批调用。\n\n## 诉求\n\n复用现有 `sys_import_job` 对象 + service-job 基建（通用导入的异步路径参照 `rest-server.ts` 的 import job worker），给身份导入加异步 Job：\n\n- `POST /admin/import-users` 支持 `async: true`（或按行数自动升级），返回 `{ jobId }`；进度/结果走现有 sys_import_job 查询面。\n- Job 上限建议 ~10,000 行（scrypt 串行 ≈ 17 分钟，实现期实测定稿）；worker 内 `await` 串行即可（scrypt 吃满单核，无并发收益）。\n- **仅支持 `invite` 策略**。`temporary` 策略明确拒绝：Job 结果是持久化面，红线禁止临时密码进入任何持久化（见 PR #2771 的红线测试）；除非未来引入\"临时密码经邮件/短信逐行下发\"的通道，否则 temporary 只走同步。\n- 行级结果采样沿用 `IMPORT_JOB_RESULTS_CAP` 语义；**不写 undo_log**（撤销=批量删用户，与同步版一致禁用）。\n- 邮件逐行发送失败落行级 `INVITE_EMAIL_FAILED`，Job 不因单行邮件失败而失败。\n- 进程内 Job 的既有限制（重启悬挂、单节点）沿用通用导入语义，发布说明标注。\n\n## 相关\n\n- #2766 / PR #2771（同步版实现，含 `IdentityImportProtocol` 适配器，本 issue 是其复用）\n- #2504（通用导入框架）"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 2786,
+  "kind": "issue",
+  "title": "ADR-0057 data lifecycle P1–P4: retention contract, rotation, separation, governance (tracking)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T11:41:21Z",
+  "updated_at": "2026-07-11T01:32:16Z",
+  "closed_at": "2026-07-11T01:32:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2786",
+  "body": "Tracking issue for **ADR-0057 (system data lifecycle & retention)** phases P1–P4 — `docs/adr/0057-system-data-lifecycle-and-retention.md` §4 Rollout. The roadmap currently lives only in the ADR document with no claimable work item; this issue is the entry point.\n\n## Background\n\nOrigin incident: a dev `dev.db` reached **260 MB**, ~76 % of row growth being platform-produced telemetry with no retention contract (audit + activity double-writes) plus `auto_vacuum=NONE`. **P0 (stop-the-bleed) shipped with the ADR** (#2079): `SKIP_OBJECTS` exclusion for operational objects, SQLite `auto_vacuum=INCREMENTAL` default, showcase digest 20s→60s. P0 removes the acute growth but nothing is *bounded by construction* yet — that's P1+.\n\n## Phases (each independently shippable)\n\n- [ ] **P1 — contract**: `lifecycleClass` + `lifecycle` spec shapes; `LifecycleService` Reaper; spec-liveness enforcement for the new properties; dogfood growth gate (fail CI when a booted example app's DB grows past budget)\n- [ ] **P2 — rotation/TTL**: Rotator (shard + `DROP`) for high-frequency telemetry tables; transient-class TTL expiry\n- [ ] **P3 — separation**: telemetry/audit on a dedicated datasource; Archiver cold-store path\n- [ ] **P4 — governance**: per-table storage quotas, growth alerts, tenant-level retention overrides\n\n## Why now\n\nThe v2 permission launch (ADR-0090, #2696→closed) added more system tables with unbounded append semantics (`sys_automation_run` run history, audience-binding suggestions, explain traces if ever persisted). Every new ledger-shaped table added without a `lifecycleClass` deepens the migration debt P1 is designed to cap. Benchmarks in the ADR-0090 follow-up parking lot (#2776 item 3, 100k-user × 10M-record) will also be unrunnable without bounded telemetry.\n\n## References\n\n- ADR: `docs/adr/0057-system-data-lifecycle-and-retention.md` (P0 shipped there; P1–P4 \"proposed\")\n- P0 PR: #2079\n- Comparable platforms surveyed in the ADR: Salesforce / ServiceNow / Dataverse retention models\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

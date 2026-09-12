@@ -1,0 +1,33 @@
+{
+  "number": 2621,
+  "kind": "pull_request",
+  "title": "fix(showcase,rest,runtime): resolve #2616 findings — REST fields crash, AI 404 spam, dead-end wizard, unbound Mark Done, stuck KPI cards, offline seed images",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-05T03:36:21Z",
+  "updated_at": "2026-07-05T06:38:14Z",
+  "closed_at": "2026-07-05T06:38:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-05T06:38:13Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2621",
+  "body": "## Summary\n\nFixes the framework-repo-scoped bugs and improvements found in #2616's full-chain browser UX pass over the showcase app.\n\n- **REST (A4)** — `packages/metadata-protocol/src/protocol.ts`: normalize a string `fields` query param (e.g. `?fields=name`) the same way `select` already is, so `GET /api/v1/data/showcase_task?fields=name` no longer crashes with `query.fields.map is not a function`. Also added a defensive `Array.isArray` guard in `packages/plugins/driver-sql/src/sql-driver.ts`'s SELECT clause.\n- **Runtime (A5)** — `packages/runtime/src/http-dispatcher.ts`: `GET /ai/agents` now returns `200 {agents:[]}` instead of a 404 when no AI service is configured (the open-source default), instead of spamming the console on every navigation.\n- **CRM Workbench / Account Cockpit (A2)** — switched off the legacy `top`/`$filter` query aliases (removed in 11.0 per the canonical `QueryOptionsV2` contract) to `limit`/`where`, and stopped silently swallowing fetch errors in the KPI-refresh effect — previously there was no way to tell why the stat cards were stuck at 0.\n- **Review Queue (A3)** — dropped `showcase_mark_done` from the page toolbar (`interfaceConfig.buttons`). It's a record-scoped action (`visible: '!record.done'`) with nothing to evaluate against on an unbound list-page header; it already surfaces correctly per-row via its existing `list_item` location.\n- **New Project Wizard (B1)** — added an explicit `submitBehavior: {kind:'thank-you', ...}`, matching the pattern already used in `contact.view.ts`/`inquiry.view.ts`, so a successful create swaps the filled step-3 form for a confirmation panel instead of leaving it open to an accidental duplicate submit.\n- **Seed data (C)** — replaced `picsum.photos` task cover URLs with local `data:image/svg+xml` placeholders (colored by task status) — Gallery/All Views no longer show a wall of broken images in offline/restricted-network environments.\n- **Command Center (D)** — added `stepSize: 1` to count-based chart y-axes to reduce fractional tick marks, and added the page to the e2e smoke suite (`showcase-smoke.spec.ts`) — it previously had zero automated coverage — with the chart-width assertion tightened from `>0` to `>200` so a repeat of the reported ~130px chart-width collapse fails CI.\n\n### Out of scope (tracked in #2620)\n\nSeveral #2616 findings trace to the sibling `objectui` repo (pinned via `.objectui-sha`, not present in this checkout, and not in this session's GitHub access scope): the sidebar i18n label override (A1), the ActionEngine `visible`-expression fail-open default + toast timing (A3 residual), whether the wizard renderer actually honors `submitBehavior` (B1, needs objectui-side verification), the \"Overdue Nd\" formatter applied uniformly regardless of date-field semantics (B2), the MapLibre `demotiles.maplibre.org` default tile style with no offline fallback (C2), Sentry telemetry retries baked into the console bundle (C3), the DOM-level chart width-collapse rendering + raw-field-name chart labels (D residual), and the `AuthProvider`/`useAgents` double-fetch caching plus bare-name component-registry warnings (E residual). All consolidated in #2620 for whoever picks up the objectui side.\n\n## Test plan\n\n- [x] `pnpm build` — full monorepo build green (70/70 tasks)\n- [x] `pnpm test` for `@objectstack/metadata-protocol` (3/3 files, 11/11 tests), `@objectstack/driver-sql` (28/28 files, 248/248 tests), `@objectstack/runtime` (29/29 files, 454/454 tests), `@objectstack/example-showcase` (8/8 files, 39/39 tests) — all passing\n- [x] Live smoke test against a `--fresh --seed-admin` instance:\n  - `GET /api/v1/data/showcase_task?fields=title` → correctly projects `{title: ...}` (previously crashed on any single-value `fields=`)\n  - `GET /api/v1/ai/agents` → `200 {\"agents\":[]}` (previously `404`)\n  - `GET /api/v1/data/showcase_project?limit=200` → correct record count, confirming the canonical `limit` key CRM Workbench now uses works end-to-end\n- [ ] e2e Playwright smoke suite not runnable in this environment (vendored `@object-ui/console` SPA isn't present in this checkout — build logs confirm \"Console dist not found\"); the new `Command Center` smoke case and tightened width assertion should be exercised by CI where the console bundle is available\n\nFixes #2616\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012BjVb4Jx6bv9uX31vzEZau)_"
+}

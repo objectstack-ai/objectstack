@@ -1,0 +1,35 @@
+{
+  "number": 2733,
+  "kind": "pull_request",
+  "title": "feat(data): enable.feeds/activities real opt-out gates + trackHistory contract (#2707)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T03:34:09Z",
+  "updated_at": "2026-07-10T03:51:24Z",
+  "closed_at": "2026-07-10T03:51:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-10T03:51:22Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2733",
+  "body": "Closes #2707。按\"分 flag 接线(enforce),不移除\"处置——评估结论:四个 flag 并不同质,移除方案不可行(trackHistory 实为 live;spec 在 fixed 组移字段=全平台 major;examples/下游有真实使用)。\n\n## 分 flag 处置\n\n| flag | 处置 | 契约 |\n|---|---|---|\n| `activities` | **接线为 opt-out writer 闸门** | spec 默认 `false→true`;显式 `false` 时 plugin-audit 只跳过 sys_activity 时间线镜像(**审计行不受影响**)。行为兼容;同时是 ADR-0057 想要的按对象 activity 增长控制杆 |\n| `feeds` | **接线为 opt-out + 服务端强制** | spec 默认 `false→true`;显式 `false` → 引擎 hook 缝拒绝 sys_comment 创建,403 `FEEDS_DISABLED`(fail-closed,复用 `CLONE_DISABLED` 模式)+ `mapDataError` 专属分支(通用 data 路由不走 `sendError` 的 `.status` 透传——运行时冒烟抓到 403 退化成 400 后补) |\n| `trackHistory` | **ledger 纠错→live + 契约成文** | ledger 定性\"dead\"是错的:objectui 自 2026-05 起用它门控 History 标签页(按 ledger 自己的规则 objectui 消费者算 live 证据)。旧 authorWarn hint(\"改用 Field.trackHistory\")照做会丢 History 标签页——已替换为两级契约:对象 flag=History 标签页总开关;`Field.trackHistory`=diff 选择器;审计**采集**保持无条件(合规账本) |\n| `files` | **保持 dead+authorWarn,roadmap #2727** | 唯一两层都无消费者的 flag。`describe()` 改为如实标注 RESERVED,不再宣传不存在的能力 |\n\n默认值翻转是必须的:`default(false)` 会把\"没设\"编译成显式 `false`,opt-out 语义无法区分\"作者显式关\"和\"默认\"——与 `trash`/`mru`/`clone` 同姿态。\n\n## 为什么不把 lint 升级成 error\n\nadvisory-only 是 lint-liveness-properties 文件头写明的设计决定(signal over noise);修复路线是把 flag 变 live(enforce-or-remove 里选 enforce),不是把警告变错误。收口后 authorWarn 只剩 `enable.files` 一个,警告面从 4 降到 1。\n\n## 验证\n\n- 单测:plugin-audit 28 ✓(含新增 opt-out/403 gate 测试)、rest 217+1 ✓、cli 468 ✓(lint 契约测试更新)、objectql 804 ✓、spec 6671 ✓(唯一红=存量 #2729,与本 PR 无关,已单独报)\n- 闸门:`check:liveness` ✓、`check:api-surface` ✓(表面无变化)\n- 编译期:app-todo(四 flag 全 true)编译告警从 4 条降到 1 条(仅 `enable.files`,hint 已更新)\n- **运行时端到端**(fresh showcase):默认对象=activity 镜像 ✓ + 评论 201 ✓;探针对象(`feeds:false, activities:false`)=0 条 activity 镜像 + 1 条审计行 + 评论 403 `FEEDS_DISABLED` ✓\n- 文档:references/data/object.mdx 由 gen:docs 再生成(仅本表)\n\n## 配套\n\n- objectui PR: objectstack-ai/objectui#2370(渲染层同契约闸门 + 错误注释修正)\n- Roadmap: #2727(enable.files → 通用 Attachments related-list)\n- 顺带发现并单独报:#2729(PROTOCOL_MAJOR 12 vs package major 13,main 上存量红测试)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

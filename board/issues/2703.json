@@ -1,0 +1,34 @@
+{
+  "number": 2703,
+  "kind": "issue",
+  "title": "[objectql] 字段 defaultValue 解析晚于 beforeInsert hook,派生字段 hook 读到 null",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-09T03:48:13Z",
+  "updated_at": "2026-07-10T11:33:25Z",
+  "closed_at": "2026-07-10T11:33:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2703",
+  "body": "## 概述\n字段 `defaultValue`(含 `Field.user({defaultValue:'current_user'})`)由运行时在用户 `beforeInsert` hook **之后**才解析。于是「从被默认的字段派生第二个字段」的 hook,读到的是**还未填充的 `null`**。\n\n## 定位\n- `packages/objectql/src/engine.ts:2143` —— 执行 beforeInsert hook。\n- `packages/objectql/src/engine.ts:2181` —— `applyFieldDefaults`(默认值解析)**在其后**。\n→ hook 读到的目标字段仍为 null,依赖它派生的字段算错。\n\n## 复现(概要)\n`sales_person: Field.user({ defaultValue: 'current_user' })`,POST 不带 `sales_person`:结果行 `sales_person` 被正确回填,但 beforeInsert 里派生的 `current_status` 因当时读到 `sales_person == null` 而算成 `unassigned`。显式传 `sales_person` → hook 看得到 → 正确。\n\n## 期望\n把 `defaultValue`(尤其 `current_user`)解析**提前到 beforeInsert hook 之前**,让派生 hook 能看到默认值;或至少文档明确当前顺序。\n\n---\n来源(项目 dogfood):steedos-labs/os-tianshun-mtc#29 · 与 #31 同族(#31 为 defaultValue 三问汇总)\n"
+}

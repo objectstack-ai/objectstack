@@ -1,0 +1,35 @@
+{
+  "number": 2838,
+  "kind": "pull_request",
+  "title": "feat(security): ADR-0090 D10 — agent/service intersection runtime",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-11T13:39:06Z",
+  "updated_at": "2026-07-11T13:45:47Z",
+  "closed_at": "2026-07-11T13:45:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-11T13:45:45Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2838",
+  "body": "## What\n\nImplements the ADR-0090 **D10 \"agent intersection\"** runtime. When a request's principal acts `onBehalfOf` a user (an AI agent, or a service acting for a person), the effective permission is now the **intersection** of the principal's own grants and the delegator's grants — never the union. Confused-deputy prevention: an over-privileged agent can never see or touch anything the user it stands in for could not, and vice-versa.\n\nUntil now `principalKind:'agent'` / `onBehalfOf` was a P1 context *shape* the evaluator never read — this wires the semantics in.\n\n## How\n\nThe intersection is applied at **every** enforcement axis, gated on the presence of the delegation link so the ordinary (non-delegated) path is **byte-identical** — `delegatorSets` stays `null` and every combine reduces to today's expression.\n\n**`plugin-security` middleware** — the delegator's effective permission sets are reconstructed once (via the shared `buildContextForUser`) and AND-composed into:\n- required-capability gate (both principals must hold every required cap)\n- object CRUD (both must grant the op)\n- FLS — read mask, write-forbid, and the predicate-oracle guard all use the intersected field map\n- row-level `using` pre-image on by-id writes (target row must satisfy both filters)\n- `check` post-image (new/changed row must satisfy both checks)\n- RLS read-filter injection (both narrow the `where`)\n- View/Modify-All survives only when **both** principals hold it\n\n**Fail-closed on a dangling link**: a deleted delegator is *denied*, not resolved — the additive `member_default` baseline would otherwise resurrect access for a non-existent user, so the `sys_user` existence check is the only correct fail-closed point.\n\n**`plugin-sharing` middleware** — the OWD / record-share owner-match is *identity-scoped*, so it re-runs the visibility filter (and `canEdit`) under the **delegator's own identity + depth** and AND-s it in. This is the crux the dogfood surfaced: narrowing the depth stash alone would wrongly scope the *agent's* identity to the delegator's depth (`owner_id = agentId`), hiding the very rows the delegator legitimately owns. Now an agent with View-All acting for a plain member sees exactly *that member's* rows — not everyone's, and not nothing.\n\n**explain engine** — every layer reports the narrower verdict when `onBehalfOf` is set (so the D6 access explanation stays truthful for delegated principals); a dangling delegator reads as a fail-closed deny.\n\nDelegator resolution + the pure combinators (`resolveDelegatorContext`, `intersectFieldMasks`, `narrowerScope`) are single-sourced in `explain-engine.ts` and reused by both the enforcement middleware and the explanation, so enforcement and its explanation cannot drift.\n\n## Tests\n\n- **11 unit tests** (`security-plugin.test.ts` → \"ADR-0090 D10 agent intersection\") driving the **real** registered middleware with in-memory `ql`/metadata: CRUD both-ways + symmetry, capability gate, read-filter AND, non-delegated byte-identity, View-All stripped, FLS mask intersection, per-identity depth stash, fail-closed dangling link, explain attribution.\n- **served-engine dogfood** (`showcase-agent-intersection.dogfood.test.ts`) against the real RLS compiler + SQLite: an agent holding `showcase_auditor` (View-All) reads another user's private note alone, but acting on behalf of a plain member the intersection **strips** View-All (hidden) **yet still surfaces the delegator's own note** — plus fail-closed + explain.\n\nGreen: `plugin-security` **297**, `plugin-sharing` **76**, and the permission/OWD/sharing dogfood suites unchanged.\n\n## First-cut scope (documented in code)\n\n- **One delegation hop** — the `onBehalfOf` shape carries a single delegator; any single-hop intersection is a safe lower bound on a true multi-hop chain (each hop only narrows), so this never escalates.\n- Tenant-scoped substitution bags (`tenantId`, `org_user_ids`, `email`) are inherited from the live principal; person-specific membership bags left unresolved **narrow**, never widen.\n- The **agent grant-ceiling lint** (D10 rule 2) is a follow-up — the runtime intersection already caps the agent regardless of what its own sets carry, and the lint needs an agent-set designation convention that does not yet exist.\n- **Producer seam**: nothing sets `onBehalfOf` in production yet, so this lands dormant until the MCP/agent dispatch path populates it. The change is safe to ship ahead of the producer.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

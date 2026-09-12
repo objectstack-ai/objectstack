@@ -1,0 +1,33 @@
+{
+  "number": 2851,
+  "kind": "issue",
+  "title": "Security: share-link routes trust x-user-id/x-tenant-id headers (forge attribution, enumerate others' tokens)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-12T08:47:24Z",
+  "updated_at": "2026-07-12T10:05:47Z",
+  "closed_at": "2026-07-12T10:05:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2851",
+  "body": "Found by the ADR-0090 D10 adversarial security review. **Same root cause as the settings-routes fix (#2848) — the raw-app route registration trusts identity headers.**\n\n## What\n\n`packages/plugins/plugin-sharing/src/share-link-routes.ts:~37-46` uses a `defaultContext` that reads `x-user-id` / `x-tenant-id` from request headers, wired **without** a verified `contextFromRequest` (`sharing-plugin.ts:~291`). Registered on the raw Hono app with no auth middleware.\n\n## Impact\n\n- `createLink` stamps `created_by: context.userId` → a client can **forge attribution** to any user, and create links for any record of a `publicSharing`-enabled object (existence checked with `SYSTEM_CTX`, so the caller's own access is never verified).\n- `GET /api/v1/share-links` with `X-User-Id: <victim>` → `listLinks(createdBy: victim)` **enumerates another user's share-link tokens**, which then resolve records via the public `/:token/resolve` endpoint under `SYSTEM_CTX` (RLS bypassed).\n- `DELETE` → revoke arbitrary users' links.\n\nA separate, correctly-verified share-link handler exists in the dispatcher (`http-dispatcher.ts:~3879`, uses `context.executionContext`); the raw-app header-trusted route shadows it.\n\n## Fix direction\n\nSame pattern as #2848: derive identity from the verified `resolveAuthzContext` (session/API-key/OAuth) instead of headers; make the default secure; verify the caller's own access to the record before `createLink`. Consider removing the raw-app route in favour of the verified dispatcher handler.\n\n## Refs\n- `packages/plugins/plugin-sharing/src/share-link-routes.ts:~37-46`, `sharing-plugin.ts:~291`\n- `packages/plugins/plugin-sharing/src/share-link-service.ts:~197-278`\n- Companion fix: #2848 (settings routes)"
+}

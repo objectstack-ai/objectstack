@@ -1,0 +1,35 @@
+{
+  "number": 2540,
+  "kind": "pull_request",
+  "title": "fix(protocol): persist versionless package installs; drop sys_packages on delete",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-03T10:56:05Z",
+  "updated_at": "2026-07-03T19:16:32Z",
+  "closed_at": "2026-07-03T19:16:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-03T19:16:29Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2540",
+  "body": "Fixes #2532 — runtime-created base packages vanished from `GET /packages` after a server restart (their metadata and tables survived; only the package registration was lost).\n\n## Root cause\n\n`protocol.installPackage` writes both package stores (in-memory registry + durable `sys_packages` via the `package` service), but the durable half was guarded by:\n\n```ts\nif (pkgSvc?.publish && (manifest as any)?.version) { … }\n```\n\nRuntime-created bases arrive **versionless** (`{id, name}` from the builder / Setup) — so persistence was **silently skipped** for exactly those packages. `service-package` hydrates `sys_packages` back into the registry at boot, so no row = no package after restart.\n\n## Fix\n\n- **Default the version** (`0.1.0`) instead of skipping persistence — the registry and the durable row must agree.\n- A failed persist now **logs loudly** (`persist FAILED … will not survive a restart`) instead of silently succeeding in-memory (kept non-fatal by design).\n- **`deletePackage` drops the `sys_packages` record** — otherwise, once installs persist, an uninstalled package would RESURRECT at the next boot via hydration.\n\n## Verified\n\n- Unit: `durable-package.test.ts` — versionless persists with defaulted version; explicit version untouched; persist failure non-fatal + loud; delete drops the durable row. metadata-protocol suite 8/8.\n- E2E (three boots, one db): install versionless → **restart → still listed** · DELETE (200) → **restart → stays gone** (no resurrection).\n\nFound while browser-demoing the login→build journey; workaround (re-POST same id) no longer needed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

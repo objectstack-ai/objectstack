@@ -1,0 +1,30 @@
+{
+  "number": 2737,
+  "kind": "issue",
+  "title": "List `total` is not scoped by the read filter (row-count oracle) + platform-admin '*' wildcard VAMA does not widen private-object reads",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T03:45:07Z",
+  "updated_at": "2026-07-10T05:31:45Z",
+  "closed_at": "2026-07-10T05:31:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2737",
+  "body": "Two observations from browser-verifying the ADR-0090 showcase permission zoo (fresh \\`objectstack dev\\` boot, 2 private notes exist — one owned by admin, one by a plain member):\n\n## 1. \\`total\\` vs \\`records\\` mismatch — count not scoped (leak)\n\n\\`GET /api/v1/data/showcase_private_note\\` as the plain member returns \\`{\"total\": 2, \"records\": [<their own 1 note>]}\\` — the OWD/RLS read filter is applied to the rows but NOT to the count. A principal can enumerate how many records exist beyond their visibility (row-count oracle), and pagination math is wrong. Expected: \\`total: 1\\`.\n\nInconsistently, the ADMIN's request returns \\`total: 1\\` (scoped to own) — so the count path applies a filter for one principal shape and not the other.\n\n## 2. Platform admin's \\`'*'\\` wildcard \\`viewAllRecords\\` does not widen private-object list reads\n\nThe seeded platform admin (\\`admin_full_access\\`: \\`objects['*'].viewAllRecords: true\\`, superuser) sees ONLY their own private notes (1), while a user holding a set with **object-level** \\`viewAllRecords\\` on \\`showcase_private_note\\` (\\`showcase_auditor\\`) correctly sees all (2). If ADR-0066's superuser-wildcard semantics are meant to include read-widening, the sharing read-filter builder is ignoring wildcard VAMA; if the narrower behavior is intended (explicit per-object VAMA only), it should be documented — today the admin sees strictly less than an auditor, which surprises.\n\nRepro: examples/app-showcase zoo — \\`showcase_auditor\\` vs the seeded dev admin over \\`/api/v1/data/showcase_private_note\\`."
+}

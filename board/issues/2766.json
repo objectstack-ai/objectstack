@@ -1,0 +1,33 @@
+{
+  "number": 2766,
+  "kind": "issue",
+  "title": "feat(auth): 管理员直建用户 + 手机号登录 + sys_user 批量导入 —— 分阶段实施（#2758 重排）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T09:32:43Z",
+  "updated_at": "2026-07-10T11:43:19Z",
+  "closed_at": "2026-07-10T11:43:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2766",
+  "body": "## 背景\n\n#2758 提出 sys_user 批量导入。经评估重排为三阶段：先补\"管理员后台直接创建/管理用户\"这一更根本的产品缺口（今天 Console 上 sys_user 没有任何不依赖邮件的建号入口），再接手机号登录（无邮箱员工），最后做批量导入——此时导入只是\"建号原语 × 现有导入框架\"的组装。\n\n**已拍板决策**：\n- 手机号只做「phoneNumber 插件 + 手机号+密码登录」；短信 OTP/SMS 基建另立 issue\n- 导入密码策略 = 1（邀请/重置邮件）+ 2（临时密码+强制改密）；策略 3（预哈希迁移）不做，另立 issue\n- 独立身份导入端点，**不放开** sys_user 通用 import affordance（ObjectQL 直写会绕过 better-auth 哈希、不生成 sys_account 凭证）\n- 导入禁 undo（撤销=批量删用户，不可逆风险过大）\n- #2756（username 登录）从前置依赖降级为正交需求，不阻塞本计划\n\n**跨阶段安全红线**：\n1. 密码/临时密码绝不进日志（含 console.warn）、审计 payload、sys_import_job 结果采样、任何持久化字段；只允许出现在 HTTP 响应体（一次性）或邮件正文\n2. 手机号明文绝不进占位邮箱（sys_user exportCsv 开启，会随导出扩散）\n3. 占位邮箱绝不作为真实收件人（邮件回调前置拦截）\n\n## V1 — 管理员直建用户 + 强制改密标记\n\n- `POST /api/v1/auth/admin/create-user`：email/name/role + `password` 或 `generatePassword`，`mustChangePassword` 默认 true；内部走 `auth.api.createUser()`（保证 scrypt 哈希 + sys_account 生成）\n- `POST /api/v1/auth/admin/set-user-password`：包装 better-auth set-password，附加打戳/生成临时密码/显式审计\n- `sys_user.must_change_password` 字段 + `computeAuthGate()` 新分支（复用 `PASSWORD_EXPIRED` code，白嫖现有 403 拦截与 Console 改密跳转，ADR-0069 机制）；改密成功清标记\n- `create_user` action（list_toolbar，纯 schema，`resultDialog` 一次性展示临时密码）；现有 `set_user_password` action 改指包装端点\n- 权限：ADR-0068 平台管理员 gate；显式审计 `user.admin_created` / `user.admin_password_set`\n\n## V1.5 — phoneNumber 插件 + 占位邮箱（与 V1 可并行）\n\n- better-auth `phoneNumber` 插件接入（`enabled.phoneNumber` 默认关，opt-in）；`sendOTP` 显式抛 NOT_SUPPORTED 封死 OTP 路径；登录走原生 `/sign-in/phone-number`（手机号+密码）\n- `sys_user` 加 `phone_number`（可空 unique）/`phone_number_verified` 列 + `auth-schema-config.ts` 映射\n- 占位邮箱：`u-<不透明token>@placeholder.invalid`（RFC 2606 保留 TLD，物理不可投递；**绝不含手机号子串**）；`create-user` 无 email 时自动生成\n- 所有邮件回调对占位邮箱前置拦截（显式错误码，不静默）；顺手收敛未配邮件时 console.warn 打印完整 reset/magic 链接的泄露面\n- `features.phoneNumber` 暴露到 `/api/v1/auth/config`\n\n## V2 — 批量导入端点\n\n- 前置重构：`prepareImportRequest`（rest-server.ts 内 module-private）抽取为 `packages/rest/src/import-prepare.ts` 并导出（CSV/xlsx 解析复用，行为零变化）\n- `POST /api/v1/auth/admin/import-users`：`mode: insert|upsert`、`matchBy: email|phone`、`passwordPolicy: invite|temporary`、`dryRun`、`async`\n- 复用 `runImport()` + 自写 `IdentityImportProtocol` 适配器：`createData` 逐行 `auth.api.createUser` + 打戳 + 行级审计；`updateData` 只更档案字段，**upsert 更新行绝不重设密码**\n- invite 策略：无真实邮箱行（缺失/非法/占位邮箱）校验期报行错误 `INVITE_REQUIRES_EMAIL`；未配邮件服务整请求 400\n- temporary 策略：同步路径临时密码仅响应体逐行一次性返回；异步 Job 强制已配邮件、密码只经邮件下发（Job 结果是持久化面，红线禁入）\n- 阈值：同步 ≤500 行（scrypt 每行~百毫秒），大批量走 `sys_import_job` 异步；Job 上限 ~10,000\n- 显式审计（better-auth 写入不经 ObjectQL hook，plugin-audit 通用 writer 抓不到）：行级 `user.imported` + run 级 `user.import_run`\n\n## 影响面\n\n- `packages/plugins/plugin-auth`（端点/插件接线/authGate/占位邮箱）\n- `packages/platform-objects`（sys_user 字段与 actions）\n- `packages/rest`（prepareImportRequest 抽取）\n- `packages/spec`（如 features flag 类型需要）\n\n## 相关\n\n- #2758（原始需求，本 issue 为其实施重排）\n- #2756（username 登录，正交）\n- #2504 / #2460（通用导入框架，后端已实现，本计划复用其 runImport/coerceRow/sys_import_job）\n\n后续另立：策略 3 预哈希迁移、短信 OTP/SMS 基建、Console 导入向导 UI、档案字段经引擎 hook 委托放开 edit affordance 的评估。"
+}

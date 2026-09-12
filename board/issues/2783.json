@@ -1,0 +1,33 @@
+{
+  "number": 2783,
+  "kind": "issue",
+  "title": "feat(auth): 预哈希密码迁移（导入历史系统用户沿用原密码）—— 自定义 hasher 多算法 dispatch",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T11:36:48Z",
+  "updated_at": "2026-07-11T03:11:20Z",
+  "closed_at": "2026-07-10T11:45:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2783",
+  "body": "## 背景\n\n#2758 的策略 3：老系统迁移时希望用户**沿用原密码**，导入行携带预哈希值而非明文。#2766（PR #2771）明确将其排除在 V2 之外——当前 `/admin/import-users` 会忽略导入行的 password 列。\n\n## 现状可依托的点\n\n- better-auth 支持自定义 `emailAndPassword.password.hash/verify`；`resolvePasswordHasher()`（`auth-manager.ts`）已有注入雏形（目前仅 WebContainer 环境注入 noble-scrypt，与原生 scrypt 互验）。\n\n## 诉求\n\n1. **哈希格式约定**：导入行声明算法与参数，如 `{algo}${params}${salt}${hash}`（bcrypt/pbkdf2/sha256+salt/旧 scrypt 参数等），入库带算法前缀以便混存区分。\n2. **verify 端多算法 dispatch**：登录验证时按前缀选择验证器；未带前缀的走 better-auth 原生 scrypt（存量不受影响）。\n3. **首登 rehash**：外部算法验证成功后，用原生 scrypt 重哈希替换，存量逐步收敛到单一算法。\n4. **导入接线**：`/admin/import-users` 增加 `passwordPolicy: 'prehashed'`，行携带 `password_hash` 列；红线不变——哈希值同样**禁止进日志/审计/Job 结果**（哈希也是凭据材料）。\n5. 支持的算法集合从最小可用开始（建议 bcrypt + pbkdf2），按迁移需求扩。\n\n## 风险\n\n- 弱哈希（如无盐 MD5/SHA1）应明确拒绝导入而非兼容。\n- 自定义 hasher 是全局配置，需确认对 haveIBeenPwned、密码历史（`previous_password_hashes`）等既有机制的兼容性。\n\n## 相关\n\n- #2758（原始需求，策略 3）、#2766 / PR #2771（导入端点，本 issue 在其上扩展）"
+}

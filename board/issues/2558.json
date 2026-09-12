@@ -1,0 +1,35 @@
+{
+  "number": 2558,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): inherit view identity onto runtime overlays",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T03:18:53Z",
+  "updated_at": "2026-07-04T12:01:44Z",
+  "closed_at": "2026-07-04T12:01:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-04T12:01:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2558",
+  "body": "Closes #2555\n\n## 问题(3777 实测复现)\n\n用户在 console 网格上点一次列排序,该视图从视图切换器**永久消失**:\n\n1. **写路径**:console PUT 回写的是 raw view config(带 `sort:[…]`),没有顶层 `viewKind`/`object`;`normalizeViewMetadata` 只补 `name`,`saveMetaItem` 原样落 `sys_metadata`。\n2. **读路径**:`getMetaItems` 把 overlay 行按 name **整条替换**注册表的展平条目 —— 展平条目上的 `viewKind: 'list'`、`object` 就此丢失。\n3. **消费端**:切换器端点(`rest-server.ts`)过滤 `v.viewKind && v.object === obj`,缺身份字段的行被滤掉。`GET /meta/view?object=showcase_task` 从 17 项掉到 15 项。\n\n## 修复(双保险)\n\n- **写路径(治本)**:`saveMetaItem` 把 registry 中将被遮蔽的同名条目作为 `baseline` 传入 `normalizeViewMetadata`,非容器 body 缺 `viewKind`/`object`/`label` 时继承后再持久化。overlay 自己的字段永远优先;`defineView` 容器 body 不动(身份在展平时派生);registry 无 `getItem` 的部分 mock 下降级为原行为。\n- **读路径(治已污染数据)**:`getMetaItems` 合并循环里,type=view 的 DB 行缺身份字段时从被遮蔽条目继承 —— 已被 pre-fix 保存污染的库(如 3777 环境的 2 行)读取即恢复,无需手工清库。\n\n两处共用同一个 `viewIdentityPatch` helper。\n\n## 测试\n\n- 新增 [protocol-view-identity-overlay.test.ts](packages/objectql/src/protocol-view-identity-overlay.test.ts):写路径继承、读路径治愈、overlay 字段优先、无 baseline 时保持原行为(4 例,stub engine 端到端,payload 取自 3777 实测 sys_metadata 行)。\n- [normalize-view-metadata.test.ts](packages/objectql/src/normalize-view-metadata.test.ts) 新增 4 个纯函数用例(含容器 body 不动、引用语义不变)。\n- 全量:`@objectstack/metadata-protocol` 8 pass;`@objectstack/objectql` 745 pass(60 files)。\n\nCo-Authored-By: Claude <noreply@anthropic.com>"
+}

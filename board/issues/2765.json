@@ -1,0 +1,34 @@
+{
+  "number": 2765,
+  "kind": "pull_request",
+  "title": "docs(liveness): record tenancy.strategy/crossTenantAccess removal decision (#2763)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T09:31:56Z",
+  "updated_at": "2026-07-10T09:49:12Z",
+  "closed_at": "2026-07-10T09:49:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-10T09:49:10Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2765",
+  "body": "#2763 决策记录落进 ledger:owner 定向(2026-07-10)——平台只有两种多租户模式(租户独立库=环境级零配置;共享库=组织行级隔离 `enabled`+`tenantField`),对象级隔离策略无需求。`tenancy.strategy`/`crossTenantAccess` 定为下个 spec major 移除。\n\n本 PR 只改 ledger note/authorHint:编译期告警文案从泛泛的\"inert\"升级为\"已决策移除(#2763),真实机制是 X\"——作者在 major 到来前每次编译都能看到明确指向。\n\n验证:`check:liveness` ✓、cli lint 契约测试 14 ✓。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

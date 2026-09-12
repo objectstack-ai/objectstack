@@ -1,0 +1,33 @@
+{
+  "number": 2749,
+  "kind": "pull_request",
+  "title": "test(objectql): de-flake hook-binder fire-and-forget assertion (#2744)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T08:07:38Z",
+  "updated_at": "2026-07-10T08:22:57Z",
+  "closed_at": "2026-07-10T08:22:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-10T08:22:55Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2749",
+  "body": "Closes #2744。\n\n`hook-binder.test.ts` 的 fire-and-forget 用例用墙钟阈值(`<20ms`)证明\"未 await handler\",共享 CI runner 慢一点就随机红(PR #2742 实测 23ms,重跑即绿)。改为**顺序性断言**:wrapper resolve 后同步检查 `calls` 仍为空——handler 的 30ms timer 是宏任务,不可能在 wrapper 的 promise 链与同步断言之间触发,与机器快慢无关;而 wrapper 若真 await 了 handler,`calls` 此处必然已是 `['done']`,照样红。测试后半段(60ms 后 `['done']`)不变。\n\n纯测试改动;`vitest run src/hook-binder.test.ts` 15/15 ✓。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

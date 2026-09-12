@@ -1,0 +1,35 @@
+{
+  "number": 2773,
+  "kind": "pull_request",
+  "title": "fix(security,hono): /me/apps registry + capability resolution; anchor-bindable member_default (ADR-0090 D5)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T10:29:05Z",
+  "updated_at": "2026-07-10T10:47:32Z",
+  "closed_at": "2026-07-10T10:47:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-10T10:47:30Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2773",
+  "body": "Closes #2752, closes #2753 — the two remaining permission-runtime issues from the ADR-0090 dogfood series. Also records the #2754 investigation and two new Access-pillar findings.\n\n## #2752 — `/me/apps` was dead, twice over\n\n1. **Wrong source:** it read `metadata.list('app')` while stack apps are registered into the **engine registry** (runtime AppPlugin) → `{\"apps\":[]}` for every principal, leaving `tabPermissions` and `AppSchema.requiredPermissions` with no enforced consumer. Now sources `registry.getAllApps()` (nav contributions merged; metadata service as additive fallback).\n2. **Empty filter inputs:** its capability/tab filters read `execCtx.systemPermissions`/`tabPermissions`, which `resolveCtx` never populates — so even with apps listed, every `requiredPermissions` app was hidden **from the platform admin too**. The endpoint now resolves the caller's effective surface the same way `/auth/me/permissions` does (evaluator + bootstrap + metadata + DB loader), and the DB loader finally carries `system_permissions`/`tab_permissions` (a direct grant of `setup.access` used to vanish here).\n\n**Live proof** (fresh boot): admin `/me/apps` → `['account', 'setup', 'showcase_app']` (setup via the `setup.access` capability); plain member → `['account', 'showcase_app']`; anonymous → `[]`. (Studio's absence is by design — serve.ts deliberately doesn't load `@objectstack/studio` as an app tile.)\n\n## #2753 — the baseline now actually binds to `everyone`\n\nEvery boot logged `refusing to bind fallback set to everyone — high-privilege bits {\"set\":\"member_default\",\"offending\":\"delete/purge/transfer on '*'\"}` — the platform's own default violated its own D5 tier and flowed through the separate fallback channel D5 explicitly rejected. Two aligned changes:\n\n- **`describeHighPrivilegeBits` calibrated to the ADR text** (D5 lists exactly VAMA, delete/purge/transfer, systemPermissions). The blanket `'*'`-wildcard rejection was an over-tightening — it moves to the **guest** tier where D9 specifies it (\"explicit objects only\"). Spec + lint + runtime gate share the predicate, so all three surfaces stay in lockstep; `check:api-surface` unchanged.\n- **`member_default` drops `allowDelete`** from its wildcard. ⚠️ **Behavior change:** deleting records is no longer a baseline right — members keep create/read/edit-own; the owner-scoped delete RLS stays as a narrowing defense for members granted a delete bit elsewhere. Domains that want member deletes grant them per object via ordinary position-distributed sets.\n\nWith the baseline anchor-safe, bootstrap's existing binding path succeeds: **\"what new users get\" ≡ \"what is bound to `everyone`\"** — same table, audit, and explain path. Proven by the new `me-apps-and-everyone-baseline` dogfood (5 tests: registry-sourced app list, capability gating, anonymous empty, the everyone←member_default binding row, and the delete-refusal).\n\n## #2754 — investigated, not currently reproducible\n\nThe enterprise `organizations` package does not exist yet, and cloud's multi-org wiring still imports the retired `plugin-org-scoping` (dead code — filed objectstack-ai/cloud#796). Design options recorded on #2754 for whoever lands the package.\n\n## Access-pillar dogfood (business-admin walkthrough on this branch's build)\n\nWorked: matrix edit → draft → 变更 badge; per-object OWD+Ext badges; suggested-binding lifecycle (`/security/suggested-bindings` shows the showcase everyone-suggestion `confirmed`); explain panel end-to-end for self; REST explain-another-user with D12 authorization. Filed:\n- objectstack-ai/objectui#2381 — explain panel can't target another user (the D6 \"view as\" core case; REST already supports it)\n- objectstack-ai/objectui#2382 — 已分配用户 counts direct grants only; position-held users show as 0 人\n\n## Verification\n\n126/126 turbo tasks green (incl. all dogfoods with the new baseline posture); live browser + REST checks above on a fresh `--ui --seed-admin` boot.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

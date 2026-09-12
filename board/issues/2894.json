@@ -1,0 +1,30 @@
+{
+  "number": 2894,
+  "kind": "issue",
+  "title": "hook 业务报错在控制台 toast 显示英文调试噪音([ObjectStack] hook 'x' threw: Error: …)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-14T05:16:29Z",
+  "updated_at": "2026-07-14T05:24:39Z",
+  "closed_at": "2026-07-14T05:24:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2894",
+  "body": "## 现象\n\n在控制台删除被引用记录时,引用完整性 hook 抛出的**业务错误**在报错 toast 里显示成:\n\n> `[ObjectStack] hook 'pm_ref_base' threw: Error: 制作基地被「项目主计划批次」引用(3 条),删除被阻断,请先解除引用`\n\n最终用户不关心错误来自哪个 ObjectStack hook——`throw new Error('…')` 是 hook 作者刻意表达的业务规则,toast 应该只显示:\n\n> `制作基地被「项目主计划批次」引用(3 条),删除被阻断,请先解除引用`\n\n## 根因(三层拼接)\n\n1. QuickJS 沙箱把 hook 抛错包装成 `hook 'x' threw: Error: …`(SandboxError.message,本意是服务端日志用),原始业务消息保留在 `.innerMessage`;\n2. REST 数据路由的 `mapDataError` **没有**解包 `innerMessage`(自定义 action 路由 http-dispatcher 里早就解包了,数据 CRUD 路径漏了);\n3. 客户端 SDK `_fetch` 又拼了 `[ObjectStack] CODE:` 前缀。\n\n## 修复要求\n\n- toast 只显示业务消息本身;\n- 完整调试包装(hook 名 + 堆栈)仍要写服务端日志,排障不受影响;\n- `TypeError:` 等非默认错误名保留(真实脚本 bug 的信号,区别于业务规则);\n- 兼容旧版打包 client(不能返回会被旧 client 拼进消息的 `code` 字段)。\n\n## 待办\n\n- [x] 服务端 REST `mapDataError` 解包 innerMessage + 正则兜底\n- [x] 客户端 SDK 去掉 `[ObjectStack] CODE:` 前缀\n- [x] dogfood 全链路金测试(真实内核 + 沙箱 hook + 真实 REST)\n- [ ] 合并发版后真机 UI 实测,截图回帖本 issue"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 2847,
+  "kind": "pull_request",
+  "title": "fix(plugin-auth): route invitation accept link through the Console base path",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-12T03:13:47Z",
+  "updated_at": "2026-07-13T00:27:56Z",
+  "closed_at": "2026-07-13T00:27:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-13T00:27:54Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2847",
+  "body": "## Problem\n\nThe \"accept invitation\" link in invitation emails did not open. On `cloud.objectos.ai` the link was missing the `https://` prefix (relative-looking, unclickable), and it also pointed at the wrong path.\n\n## Root cause\n\n`sendInvitationEmail` built the accept URL straight from `config.baseUrl` with no scheme guarantee and no UI mount prefix:\n\n```ts\nconst baseUrl = (this.config.baseUrl ?? '').replace(/\\/$/, '');\nconst acceptUrl = `${baseUrl}/accept-invitation/${invitation.id}`;\n```\n\nTwo defects:\n\n1. **Missing scheme** — when `baseUrl` is a bare host (e.g. `cloud.objectos.ai`), the result is relative-looking; email clients won't linkify it.\n2. **Missing Console base path** — verified against the `objectui` Console frontend: the accept-invitation page is a React Router route `/accept-invitation/:invitationId` mounted under the SPA basename (`import.meta.env.BASE_URL` = `/_console/`), the **same router** that serves `/login`, `/register`, `/oauth/consent`. The Console's own \"copy invitation link\" action builds `${origin}${BASE_URL}accept-invitation/<id>`. The emailed root-path link omitted that prefix and 404'd at the host root.\n\n## Fix\n\nThe link is now built to match the frontend's canonical form:\n\n```ts\nconst uiBase = (this.config.uiBasePath ?? '/_console').replace(/\\/$/, '');\nconst acceptUrl = `${this.getCanonicalOrigin()}${uiBase}/accept-invitation/${invitation.id}`;\n```\n\n- `getCanonicalOrigin()` is hardened to always return an absolute origin — it prepends `https://` when `baseUrl` has no scheme, and trims a trailing slash. (This also hardens the OAuth issuer / consent / device-flow URLs that share the helper.)\n- The `uiBasePath` prefix (default `/_console`, configurable for Console mounted elsewhere) matches `loginPage`/`consentPage` construction already in this file and the frontend router.\n\nResult on `cloud.objectos.ai`: `https://cloud.objectos.ai/_console/accept-invitation/<token>`.\n\n## Verification\n\nCross-checked against `objectstack-ai/objectui`:\n- `apps/console/src/App.tsx` — `<Route path=\"/accept-invitation/:invitationId\">` inside `<BrowserRouter basename={BASENAME}>`, alongside `/login` and `/register`.\n- `packages/app-shell/.../InvitationsPage.tsx` + `InviteMemberDialog.tsx` — the \"copy link\" helper builds `${origin}${BASE_URL}accept-invitation/<id>`.\n\n## Tests\n\nAdded three cases (bare host → `https://…/_console/…`; explicit scheme preserved; custom `uiBasePath` honoured). Full `@objectstack/plugin-auth` suite passes.\n\n## Changeset\n\n`@objectstack/plugin-auth`: patch.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 2723,
+  "kind": "issue",
+  "title": "ADR-0090 D2 removal miss: PortalSchema still gates access by `profiles`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T03:16:32Z",
+  "updated_at": "2026-07-10T05:31:38Z",
+  "closed_at": "2026-07-10T05:31:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2723",
+  "body": "## What\n\n\\`packages/spec/src/ui/portal.zod.ts\\` (~L250) still uses the REMOVED Profile concept as the portal's access gate: \\`profiles: z.array(...)\\` with docstrings like \"A portal must admit at least one profile\" and \"Portal ≠ permission boundary. The Profile is.\"\n\nADR-0090 D2 deleted \\`isProfile\\` / the Profile concept from the permission model; the audience story is now positions + audience anchors (D5/D9) and the external OWD dial (D11).\n\n## Blast radius\n\n- Auto-generated \\`content/docs/references/ui/portal.mdx\\` teaches the removed concept (L16/L32/L36/L50/L101).\n- \\`examples/app-showcase/src/ui/portals/index.ts\\` authors \\`profiles: ['client_portal_user']\\` — a grant that references nothing.\n\n## Fix (breaking, needs migration)\n\nReplace \\`profiles\\` with position-based admission (e.g. \\`positions: string[]\\`, or an explicit external-audience binding per ADR-0090 D11 principals). Requires: zod change + tombstone in \\`UNKNOWN_KEY_GUIDANCE\\` + changeset with FROM→TO mapping + showcase portal update + doc regen.\n\nFound while aligning docs + showcase to ADR-0090 (P4 follow-up)."
+}

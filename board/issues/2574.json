@@ -1,0 +1,30 @@
+{
+  "number": 2574,
+  "kind": "issue",
+  "title": "有的对象字段特别多，如何配置多列编辑/显示，如何支持部分对象新增编辑查看详情时自动切换到全屏幕窗口而不是弹出窗口",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T12:24:08Z",
+  "updated_at": "2026-07-04T13:45:25Z",
+  "closed_at": "2026-07-04T13:45:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2574",
+  "body": null
+}

@@ -1,0 +1,35 @@
+{
+  "number": 2694,
+  "kind": "pull_request",
+  "title": "feat(metadata-protocol): enforce package namespace prefix for Studio-authored packages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-08T16:34:56Z",
+  "updated_at": "2026-07-08T16:57:14Z",
+  "closed_at": "2026-07-08T16:57:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-08T16:57:12Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2694",
+  "body": "## Why\n\nPer the protocol (ADR-0028 current-state contract; `manifest.zod` `namespace`), every `object.name` in a package **must** carry the package's namespace prefix (`crm_account`, `showcase_project`). `defineStack()` enforces this at compile time via `validateNamespacePrefix`.\n\n**Studio / runtime-authored packages bypassed it entirely:** they are created without a `namespace` at all, and neither the runtime create path nor the publish path ran the check. So an admin building a package in Studio got objects with bare, collision-prone names (two packages could each publish `leave_request` → silent table/route collision, exactly the risk ADR-0028/ADR-0048 flag).\n\nFound by dogfooding: a Studio-built package `com.example.leave` persisted `namespace: null`, and its object `leave_request` published with zero prefix validation.\n\n## What\n\nTwo runtime changes, both in `@objectstack/metadata-protocol`:\n\n- **`installPackage`** derives a default namespace from the package id (`com.example.leave` → `leave`) when the manifest declares none, and persists it on the single `manifest` object shared by the in-memory registry and the durable `sys_packages` row. **An explicitly declared namespace always wins** — HotCRM's `crm` (which differs from its id's last segment `hotcrm`) is untouched.\n- **`publishPackageDrafts`** rejects any object draft whose name lacks the `<ns>_` prefix, **before promoting anything** (the publish is atomic), with an actionable message. Namespace-less legacy packages are **grandfathered** — mirroring `defineStack`, the rule is not invented at enforcement time; the default is derived+persisted once at install.\n\nThe per-object check and the id→namespace derivation are extracted into `@objectstack/spec/kernel` (`validateObjectNamespacePrefix`, `deriveNamespaceFromPackageId`) as the **single source** shared by `defineStack` and the runtime publish path, so the two enforcement points cannot drift. `validateNamespacePrefix` in `stack.zod.ts` is refactored onto the shared helper (behavior-preserving).\n\n## Verification\n\nUnit/regression (all green):\n- `spec`: `namespace-prefix.test.ts` (10 new) + `stack.test.ts` namespace suite — 95 passed.\n- `objectql`: `protocol-publish-package-drafts.test.ts` (+3: reject / allow-prefixed / grandfather), `protocol-install-package.test.ts` (+2: derive / explicit-wins), plus install/lifecycle/collision suites — no regressions.\n\nLive end-to-end on a running showcase app (rebuild + restart):\n- New package `com.example.hr` → namespace auto-derived to `hr` ✅\n- Object `ticket` → publish **rejected**: `Object 'ticket' is missing the package namespace prefix. Rename it to 'hr_ticket' (namespace = 'hr').` ✅\n- Mixed good+bad drafts → whole atomic batch rejected, nothing published ✅\n- Compliant `pto_request` under namespace `pto` → publishes ✅\n- Grandfathered: pre-existing namespace-less `com.example.leave` still reads; `showcase` unaffected ✅\n\n## Follow-up (objectui, separate)\n\nStudio's \"新建软件包\" dialog should surface the namespace (default-derived, editable) and \"新建对象\" should auto-prefix the identifier, so authors never hit the publish-time rejection. Filed separately.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

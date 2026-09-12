@@ -1,0 +1,36 @@
+{
+  "number": 2699,
+  "kind": "pull_request",
+  "title": "ADR-0081 (cloud): open org-management basics + retire plugin-org-scoping to enterprise",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-09T03:28:33Z",
+  "updated_at": "2026-07-09T05:17:47Z",
+  "closed_at": "2026-07-09T05:17:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-09T05:17:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2699",
+  "body": "Implements the framework side of cloud ADR-0081 (org management: open basics, enterprise multi-org). Two commits, reviewable independently:\n\n## 1. Open single-org basics (D1)\nSingle-org deployments had **no way to add a user at all** — invite affordances hid behind `features.multiOrgEnabled`, and nothing ever created an org (no `activeOrganizationId` → better-auth `invite-member` unresolvable).\n\n- **plugin-auth** now owns `ensureDefaultOrganization` (the multi-org seed-ownership step became an injectable option) and runs it in single-org mode on `kernel:ready` + after every admin grant (`autoDefaultOrganization` opt-out).\n- **plugin-auth** adds a default `session.create.before` hook stamping `activeOrganizationId` from the caller's membership (owner-preferred; host hooks — e.g. the cloud's — chain first and win; `autoActiveOrganization` opt-out).\n- **platform-objects** re-gates member/invitation/team actions from `features.multiOrgEnabled` to `features.organization` (the capability is always mounted); `sys_organization`'s own create/leave/delete keep the multi-org gate so the single-org default org stays protected.\n- **Setup nav**: new `nav_organization` entry deep-links to the ACTIVE org's record page (`{current_org_id}`); Teams/Invitations drop the `org-scoping` service gate; the Organizations LIST keeps it.\n\n## 2. Retire plugin-org-scoping (D2, BREAKING)\nThe multi-org runtime moves to the **closed-source `@objectstack/organizations`** package (cloud repo), which keeps registering the historical `org-scoping` service (plugin-security probe + nav gates unaffected). serve / plugin-dev / verify mount it best-effort by name; missing package = loud warn (or an actionable error for verify's explicit `multiTenant` opt-in). The dogfood multi-org RLS gate skips (loudly) when the package isn't linked.\n\n## Verification\n- Unit: plugin-auth 252 ✓, plugin-security 183 ✓, platform-objects 63 ✓, org-scoping wrapper 20 ✓ (pre-migration).\n- Browser E2E (single-org, real signup): first-run wizard → default org (CJK rename) + owner membership + active-org session; invite → accept → change role → remove, all through better-auth.\n- Browser E2E (multi-org with the enterprise package linked): bootstrap, second-org create, `{current_org_id}` nav following org switch; missing-package downgrade warning verified.\n\nPairs with objectstack-ai/objectui feat/team-org-context and objectstack-ai/cloud feat/console-team-page (cloud#738).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

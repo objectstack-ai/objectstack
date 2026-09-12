@@ -1,0 +1,36 @@
+{
+  "number": 2671,
+  "kind": "pull_request",
+  "title": "feat(verify): reusable checkReadCoercion driver conformance helper + cross-driver test",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-07T04:02:41Z",
+  "updated_at": "2026-07-07T05:29:47Z",
+  "closed_at": "2026-07-07T05:29:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-07T05:29:45Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2671",
+  "body": "## Why\n\nA stored value must read back as its **declared type** on every driver: a `boolean` as a JS boolean (not the integer `0/1` SQLite stores), a `json` field as an object/array (not serialized text), an `integer` as a number. When two drivers disagree, code green on one silently breaks on the other.\n\nThis is the invariant behind the 2026-07-06 `case_escalation` incident: a boolean guard `field != true` read the field back as integer `1` on Turso, so `1 != true` was always true and the flow self-triggered forever — while the local repro (memory / better-sqlite3, both of which coerce) was green in 6s. The storage-specific fixes live in each driver (`driver-sql`'s `formatOutput`; cloud's `driver-turso` remote path — cloud PR #753, merged). This PR adds the **shared, checked contract**.\n\n## What\n\n- **`@objectstack/verify`: new `checkReadCoercion(driver)`** — a reusable, driver-agnostic conformance helper. Mirrors the existing `checkLedger` idiom: returns a list of problems (empty = conformant) with **no test-runner dependency**, and takes any driver structurally (`CoercibleDriver`), so out-of-tree drivers — e.g. cloud's `driver-turso` in remote mode — can run the identical contract against themselves. Reads back its own row by id so it's robust when the probe object already holds rows.\n- **`packages/dogfood`**: a cross-driver conformance test consumes the shared helper, running it against `driver-sql` (better-sqlite3 `:memory:`) and `driver-memory` (asserting `toEqual([])`) plus a negative check that a raw non-coercing driver yields 3 problems. (dogfood already tests through `@objectstack/verify` and runs as the Dogfood Regression Gate; drivers added as its devDeps.)\n- **changeset**: minor for `@objectstack/verify` (new public API).\n\n## Verification (built from source, run locally + CI green)\n\n- Dogfood suite **191 passed / 39 files** incl. the new conformance test (both drivers → `[]`; non-coercing stub → 3 problems).\n- `turbo run build --filter=./packages/*` **60/60** (no dependency cycle).\n- `@objectstack/verify` build incl. DTS clean; ESLint clean.\n- All 17 PR checks green.\n\n## Follow-up (separate, needs a framework SHA bump in cloud)\n\nCloud's `driver-turso` remote-read test can switch to importing `checkReadCoercion` from `@objectstack/verify` to run the identical contract against itself in remote mode — lands whenever cloud next bumps `.framework-sha` (not worth a dedicated bump on its own).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_015EsQntpH9mUZqG7LAWzPAK"
+}

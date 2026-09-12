@@ -1,0 +1,35 @@
+{
+  "number": 2746,
+  "kind": "pull_request",
+  "title": "feat(security): ADR-0090 D5/D9 suggested-audience-binding surface + confirm/dismiss API",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T05:39:00Z",
+  "updated_at": "2026-07-10T08:02:44Z",
+  "closed_at": "2026-07-10T08:02:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-10T08:02:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2746",
+  "body": "## 摘要\n\n补上 #2696 中标记为\"缺失框架表面\"的 D5 安装建议确认能力:包权限集声明 `isDefault: true` 是安装时的**建议**(\"把此权限集绑定到 `everyone` 岗位\"),此前服务端只在启动时把它读成 fallback 权限集名称——安装后既没有可查询的待确认建议列表,也没有确认/绑定端点。本 PR 提供两者,绝不自动绑定(D5 语义)。\n\n## plugin-security\n\n- 新增系统对象 **`sys_audience_binding_suggestion`**(数据 API 只读;`package_id × permission_set_name × anchor` 唯一;anchor 取值 `everyone`/`guest`,为 D9 的 guest 泛化预留,当前唯一生产来源是 `isDefault` → `everyone`)。\n- 新增**收敛式对账** `syncAudienceBindingSuggestions`:同时读取启动声明的 stack 元数据和**已安装包的 manifest**(registry 在 `installPackage` 时同步更新,所以运行时 `POST /api/v1/packages` 安装后立即可见,无需重启);声明消失(卸载/升级去掉标志)→ 删除 pending 行;绑定在别处已建立(启动基线绑定、管理员手工绑定)→ 标记 `confirmed`(observed)。在启动、`permission` 发布物化之后、以及每次 list 调用时运行。\n- `security` 服务新增 `listAudienceBindingSuggestions` / `confirmAudienceBindingSuggestion` / `dismissAudienceBindingSuggestion`,三者都预先用租户级管理员(ADR-0066 超级用户通配符)门禁——受众锚点是租户级的(D12,委托管理员不可触碰)。\n- **confirm 用调用者的执行上下文写 `sys_position_permission_set`**(绝不 `isSystem`),因此 D5/D9 受众锚点门禁(高权限位拒绝)和 D12 委托管理门禁真实生效;另做一次 `describeAnchorForbiddenBits` 预检,让被拒时报错信息友好。本会话内刚安装、尚未物化的权限集,先经由与启动 seeder / 发布物化器相同的 provenance 检查 upsert(ADR-0086 D4)落库再绑定。\n\n## HTTP 表面(rest + runtime 双层)\n\nhono 开发/生产栈的 `/api/v1` 由 `@objectstack/rest` 提供,适配器部署走 runtime `HttpDispatcher`——两层都注册了路由,委托同一个 `security` 服务:\n\n- `GET /api/v1/security/suggested-bindings?status=&packageId=`\n- `POST /api/v1/security/suggested-bindings/:id/confirm`\n- `POST /api/v1/security/suggested-bindings/:id/dismiss`\n\n未认证 401;服务端类型化错误映射 403/404/409;未装 plugin-security 时 501(rest)/503(dispatcher)。\n\n## 测试与验证\n\n- `suggested-audience-bindings.test.ts`(18 个用例):对账的幂等/剪枝/observed-confirm、confirm 的物化+调用者上下文断言、高权限位早期拒绝、外包名冲突拒绝、404/409、非管理员拒绝等。\n- `http-dispatcher.test.ts` 新增 6 个路由用例;rest 218 个用例全绿。\n- `pnpm turbo test --filter=...@objectstack/plugin-security --filter=...@objectstack/runtime` 全绿(69 个任务)。\n- **真实环境端到端验证**(fresh showcase,`objectstack dev --seed-admin --fresh`):匿名 list → 401;管理员 list → showcase 的第二个 `isDefault` 权限集(`showcase_member_default`)以 pending 出现;confirm → 200、`bindingCreated: true`、`sys_position_permission_set` 行由调用者(非 system)创建;重复 confirm → 409。\n- CodeQL 高危告警(请求路径上的多项式回溯正则)已修复(改用 `split('/').filter(Boolean)`)。\n\n## 文档\n\n`content/docs/permissions/permission-sets.mdx` 的 `isDefault` 小节补充了新表面与端点说明。\n\n## 关联\n\n- 配套 ObjectUI PR:objectstack-ai/objectui#2376(安装流程提示 + Studio Access 支柱横幅),依赖本 PR 的端点。\n- 完成 #2696 中 \"D5 `isDefault` install-suggestion confirm UI — no pending-suggestion list / confirm-bind API exists\" 的框架侧事项。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01DP13MuGwFWLcVxVtuA7rgq"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 2581,
+  "kind": "pull_request",
+  "title": "feat(automation): durable run history with failure reasons (run observability)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T13:53:56Z",
+  "updated_at": "2026-07-04T14:01:29Z",
+  "closed_at": "2026-07-04T14:01:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-04T14:01:27Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2581",
+  "body": "## Why\n\nAutomation runs were observable **only in memory**. The engine kept the last N runs in a ring buffer, so after a process restart (or once the buffer evicted the entry) you could not answer *\"did this flow run, and why did it fail?\"* — and a **failed run surfaced no reason at all**. This was the single biggest silent-trust gap for anyone authoring automations: a flow could stop firing or start failing with nothing durable to inspect.\n\nThis is the #1 UX recommendation from the online-automation dogfood: **run observability** — durable, queryable runs with status + failure reason.\n\n## What\n\n`sys_automation_run` — previously the ADR-0019 store for *live suspended* runs only — becomes a durable **run-history** table.\n\n- **engine** — `recordLog` mirrors every **terminal** run (`completed` / `failed`) to the store via `recordTerminal` (fire-and-forget). `listRuns()` merges durable history with the in-memory buffer (in-memory wins on id, newest-first) so the Studio \"Runs\" surface shows runs that predate the current process.\n- **store** — `recordTerminal` / `listHistory` on both `SuspendedRunStore` impls. Terminal history rows use a **`run_`-prefixed id**, disjoint from live suspended runs (raw `runId`, `status: 'paused'`, deleted on completion), so the suspend save/load/delete/list path is untouched and resume sweeps (`list()` filters `status: 'paused'`) never see history rows.\n- **schema** — `finished_at` / `duration_ms` / `error` (all optional) + the `status` enum gains `running` / `completed` / `failed` alongside `paused`.\n\n## Safe & additive\n\n- Distinct id namespace ⇒ **zero collision** with the ADR-0019 suspend/resume lifecycle.\n- Persisting is **best-effort + fire-and-forget** — a history write/read failure is logged and swallowed, **never** breaking the run that produced it.\n- New fields optional; new store methods optional (in-memory/test defaults still work).\n\n## Verification\n\n**Unit** — new `run-history.test.ts`: completed persistence, failed persistence *with error*, read-across-restart (fresh engine over the same store), best-effort isolation (a throwing store never breaks the run). Full suite green (231 passed), DTS typecheck clean.\n\n**Runtime, end-to-end on a clean showcase instance** (the standard that caught the earlier no-op #2560 fix — a fake-service unit test alone can mask a runtime-broken change):\n- schedule-triggered `showcase_scheduled_digest` + 7 task-completion flows → durable **`completed`** rows with `finished_at`;\n- `showcase_resilient_sync` → a **`failed`** row carrying its `try_catch` failure reason;\n- a live `showcase_task_follow_up` **`paused`** suspended run coexisted **without collision**;\n- after a **full process restart**, the `failed` row — reason intact — was still queryable via `/api/v1/data/sys_automation_run`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

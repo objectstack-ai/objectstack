@@ -1,0 +1,35 @@
+{
+  "number": 2544,
+  "kind": "pull_request",
+  "title": "perf(lint): load the TypeScript compiler lazily in validateReactPageProps",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-03T13:29:49Z",
+  "updated_at": "2026-07-03T13:37:05Z",
+  "closed_at": "2026-07-03T13:37:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-03T13:37:03Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2544",
+  "body": "## Why\n\n`@objectstack/lint` is loaded on the kernel boot path, but the react-source prop gate ([validate-react-page-props.ts](https://github.com/objectstack-ai/framework/blob/main/packages/lint/src/validate-react-page-props.ts), ADR-0081 Phase 2, #2482) only runs when a `kind:'react'` page is actually validated — a rare, trusted-tier case. Its top-level `import ts from 'typescript'` meant:\n\n- **every kernel boot eagerly parses the ~9 MB compiler** — measured ~70–85 ms on a warm M-series laptop, worse on CF container cold starts where cold-start is already a known pain;\n- **boot hard-crashes if the package is pruned from the image** — cloud's Docker pruner stripped `typescript` and container boot died (worked around cloud-side in cloud#728 by keeping the package).\n\n## What\n\n- The compiler now loads **lazily, on the first validated react-source page**, via a deferred `createRequire` — the same bundling-safe pattern as driver-sqlite-wasm's `knex-wasm-dialect` (static `node:module` import survives esbuild/tsup; the `createRequire(...)` call is deferred because `import.meta.url` is an empty stub in the CJS build, falling back to `__filename`).\n- **Public API unchanged and still synchronous** (`(stack) => ReactPropFinding[]` — the package-wide contract); no caller changes, no api-surface impact.\n- `typescript` **stays a regular dependency** in `packages/lint/package.json`.\n- If the package is missing at call time, validation throws an actionable error naming the package and the fix, instead of killing boot. The load call sits outside the parse `try` so a missing compiler can't be swallowed as \"unparseable source\".\n- `packages/lint/tsconfig.json` gains `\"types\": [\"node\"]` (needed for `node:module`/`__filename` in the dts build; same as driver-sqlite-wasm).\n\n## Verification\n\n- `packages/lint`: 116/116 tests green ×3 runs; eslint clean; `turbo build --filter=...@objectstack/lint` (lint + all dependents incl. CLI) green.\n- New `lazy-typescript.test.ts` guards the contract at three levels, because vitest inlines static imports through its transform so an in-worker `require.cache` probe alone **cannot** catch a reintroduced eager import (found out the hard way — the first cut of the test stayed green under a red-check):\n  1. structural — no src file may eagerly `import ... from 'typescript'` (only `import type`);\n  2. built dist — child `node` processes import both dist formats and assert the compiler is absent until a react page is validated (auto-skips if dist isn't built);\n  3. behavioral — the lazy path loads on demand and the gate still yields findings.\n  Red-check: reintroducing the eager import turns exactly these three tests red.\n- Pruned-image simulation (resolution poisoning of `typescript` only): boot import OK → non-react stacks validate fine → react-page validation fails with the clear message. Measured on ESM dist: importing `@objectstack/lint` 85 ms with `typescript` **not** loaded; first react-page validation pays a one-time +66 ms.\n- Repo audit: no other package source has an eager `typescript` import.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

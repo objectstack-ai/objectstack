@@ -1,0 +1,35 @@
+{
+  "number": 2661,
+  "kind": "pull_request",
+  "title": "fix(seed/automation): package seed can't wedge the platform — suppress flows on seed + coerce SQLite booleans + re-entrancy loop guard",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-06T16:34:18Z",
+  "updated_at": "2026-07-06T16:48:40Z",
+  "closed_at": "2026-07-06T16:48:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-06T16:48:38Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2661",
+  "body": "## Why\n\nA new workspace that installed HotCRM was **unopenable** (2026-07-06): its per-env kernel first-boot hung forever (`503 kernel_warming`, `sso-open` retried to `attempt=5`). Root cause, confirmed by connecting to the live env's turso DB and watching the loop:\n\nHotCRM's `case_escalation` flow fires on `record-after-update` and its action writes back to the same case (`is_escalated=true, status='escalated', escalated_date=NOW()`), which re-triggers record-after-update. The guard `record.is_escalated != true` was meant to stop the second fire — but a `boolean` field persists as integer `1` on SQLite/libsql and CEL `1 != true` is `true`, so the guard **never trips** and the flow loops forever. The first-boot metadata seed awaits automation to settle → never settles → the whole kernel build hangs. (InMemoryDriver stores real booleans, which is why faithful local repro was green — it masked the bug.)\n\n## What (three layers, so a package seed can never again wedge the platform)\n\n1. **Seed suppresses record-change automation.** A package's metadata seed is pre-existing end-state reference data, not user events — firing on-create/on-update flows for it is semantically wrong and was the loop's vector. New `ExecutionContext.skipTriggers`; seed-loader `SEED_OPTIONS` sets it; `buildSession` threads it onto `HookContext.session`; the RecordChangeTrigger dispatch handler skips flow launch when set. **Lifecycle hooks still run** — only automation flows are suppressed.\n\n2. **Coerce boolean fields for the flow/hook view.** New `coerceBooleanFields(schema,row)` (record-validator) converts SQLite 0/1 (and `'0'/'1'/'true'/'false'`) → real booleans on a shallow copy; the engine applies it to `hookContext.result` (and `.previous` on update) before after-hooks fire, so flow conditions and `{record.<bool>}` see JS booleans. **The value returned to the caller is untouched** (no API shape change); null/undefined preserved.\n\n3. **Flow re-entrancy loop guard** (backstop for any self-trigger). `activeRecordFlows`: the SAME flow re-entering for the SAME record while an execution is still on the stack is broken (returns skipped). The existing intra-run `MAX_NODE_REENTRIES` can't see this because each re-fire is a NEW run. Different flows / records untouched.\n\n## Tests\n\nobjectql **797**, service-automation **252**, trigger-record-change **22**, record-validator **34** — all green. New: 6 `coerceBooleanFields` cases, 2 seed-skip dispatch cases, 3 loop-guard cases.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

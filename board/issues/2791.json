@@ -1,0 +1,35 @@
+{
+  "number": 2791,
+  "kind": "pull_request",
+  "title": "feat(lifecycle): ADR-0057 P1–P4 — lifecycle contract, Reaper/Rotator/Archiver, datasource separation, governance (#2786)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T13:52:16Z",
+  "updated_at": "2026-07-11T01:32:17Z",
+  "closed_at": "2026-07-11T01:32:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-11T01:32:14Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2791",
+  "body": "Implements **ADR-0057 data lifecycle P1–P4** (tracking issue #2786) — platform-generated data becomes *bounded by construction*. Grew out of the 260 MB `dev.db` incident: every platform-generated object defaulted to immortal, and the file never shrank.\n\n## P1 — contract (`spec`, `objectql`, `driver-sql`)\n\n- New **`lifecycle`** object property: `class: record | audit | telemetry | transient | event` + `retention.maxAge` / `ttl.{field, expireAfter}` / `storage(rotation)` / `archive.{after, to, keep}` / `reclaim`, with duration literals (`'6h'`, `'14d'`, `'7y'`). Parse-time invariants (ADR §3.5 enforce-or-remove): a non-`record` class with no bounding policy is rejected; policies on `record` are rejected; `archive.after` must equal `retention.maxAge`.\n- **LifecycleService** registered by `ObjectQLPlugin` (platform-owned, default-on; `OS_LIFECYCLE_DISABLED=1` or `lifecycle.enabled=false` to opt out). The **Reaper** bulk-deletes rows past `retention.maxAge`/`ttl` hourly under a system context — one afterDelete hook max per object per sweep, and telemetry `sys_*` objects are in the audit writer's `SKIP_OBJECTS`, so cleanup never re-feeds the tables it drains (ADR-0052 self-audit trap).\n- `SqlDriver.reclaimSpace()` — the `PRAGMA incremental_vacuum` hook the ADR's P0 text described but which had never actually landed.\n- **11 platform objects annotated**: `sys_activity` 14d+rotation, `sys_audit_log` 90d→archive 7y, `sys_metadata_audit` 365d→archive, `sys_job_run`/`sys_automation_run`/`sys_http_delivery` 30d, notification pipeline (event/delivery/receipt/inbox) one 90d window, `sys_device_code` `expires_at`+1d.\n- **Gates**: spec-liveness classifies `object/lifecycle` and binds it to a dogfood proof (`HIGH_RISK_CLASSES` `data-lifecycle`); new dogfood **storage-growth gate** (`@proof: adr0057-lifecycle-bounded-growth`) boots showcase, reaps a backdated runaway writer, and asserts record-class data is untouched.\n\n## P2 — Rotator (`driver-sql`)\n\n`storage: { strategy: 'rotation', shards, unit }` physically time-shards the table on SQLite (ServiceNow Table Rotation model): writes land in the current shard (`<table>__r<key>`), reads go through a UNION-ALL view under the base name, expiry is an **O(1) `DROP`** of shards past the `shards × unit` window. Legacy tables are adopted as the first shard on upgrade (no data loss); by-id and bulk writes fan out shard-wise; other dialects fall back to an equivalent age-based reap so the declared bound holds everywhere. (Transient TTL expiry shipped with the P1 Reaper — TTL and age reaping are one mechanism per §3.3.)\n\n## P3 — separation + Archiver (`objectql`)\n\n- Registering a datasource named **`telemetry`** routes `telemetry`/`event`/`audit` objects to it (engine `getDriver` step 3; opt-in purely by the datasource's existence). `transient` deliberately stays on the primary — some of those objects (better-auth's `sys_device_code`) are accessed outside the engine.\n- **Archiver**: audit objects with `archive` declared get retain → archive → delete — batched idempotent copies to the cold store, hot-delete of exactly the copied ids, `archive.keep` pruning of the archive itself. **Hard rule:** no archive datasource ⇒ rows retained and reported `archive-pending`; a compliance ledger is never dropped unarchived.\n\n## P4 — governance (`objectql` + settings)\n\nNew `lifecycle` settings namespace: runtime enable switch, **`retention_overrides`** (tenant-scoped — regulated tenants set years, dev sets days, ADR §3.2; per-tenant windows sweep each overriding tenant on its own cutoff while the global pass covers everyone else including NULL-org rows), **`quotas`/`quota_defaults`** and **`growth_alert_rows`** — quota/growth breaches are observe-and-alert only (`report.alerts` + `onAlert` sink), never deletion beyond declared policy.\n\n## Verification\n\n- 26 LifecycleService unit tests (Reaper/Rotator/Archiver/governance), 5 driver rotation tests, 3 datasource-routing tests, 9 spec schema tests\n- Dogfood storage-growth gate: 6 end-to-end cases through a real showcase boot (contract coverage, reap, rotation via engine→driver, archive-safety, hot→cold drain to a real second SQL store)\n- Full test suites of all 11 touched packages green (68 turbo tasks, incl. the complete dogfood suite); spec-liveness gate green\n\nAlso included: the initial doc-only commit syncing the ADR header (P0 shipped in #2079), and a final commit marking §4 P1–P4 implemented + the changeset (all `minor`, per the launch-window convention).\n\nCloses #2786.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01BNBzMWmSECrbiEDdVzwBt3"
+}

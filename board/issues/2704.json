@@ -1,0 +1,34 @@
+{
+  "number": 2704,
+  "kind": "issue",
+  "title": "[driver-sql] 未知查询 operator(is/is_null)静默透传返整表,应报错;缺 $null 处理",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-09T03:48:17Z",
+  "updated_at": "2026-07-13T05:48:04Z",
+  "closed_at": "2026-07-13T05:48:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2704",
+  "body": "## 概述\n列表视图对可空字段做 IS NULL 过滤时,**唯一真正生效**的是 `{ field, operator: 'equals', value: null }`(映射成查询 op `=`,引擎把 `[\"field\",\"=\",null]` 当 IS NULL)。其余写法静默出错:\n- `operator: 'is'` / `'is_null'` → 引擎发出 op `is`/`isnull`,**静默忽略 → 返回整表**(无报错,只是行数错——比 400 更危险,权限/分配类视图上易出安全问题)。\n- `operator: 'is_empty'` → **400** `The operator \"is_empty\" is not permitted` → 整个 grid 空白。\n\n## 定位\n- `packages/adapters/driver-sql/src/sql-driver.ts:2683-2684` —— default 分支把未知 operator **原样透传** knex,规格白名单未在数组 where 路径生效。\n- `:2742-2776` —— 缺 `$null` case 处理。\n\n## 期望\n- 未知 operator 应**报错**而非静默透传返整表;\n- 或让 `is_null` / `is_empty` 成为受支持的 null 判断 op,与 `equals`+null 语义统一。\n\n---\n来源(项目 dogfood):steedos-labs/os-tianshun-mtc#28\n"
+}

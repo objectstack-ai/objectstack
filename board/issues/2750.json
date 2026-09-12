@@ -1,0 +1,35 @@
+{
+  "number": 2750,
+  "kind": "pull_request",
+  "title": "chore(liveness): authorWarn sweep across all governed types + lint coverage to match",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T08:17:17Z",
+  "updated_at": "2026-07-10T08:43:49Z",
+  "closed_at": "2026-07-10T08:43:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-10T08:43:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2750",
+  "body": "#2707/#2727 收口后的 liveness 巡检发现两处缺口,本 PR 一并关闭:\n\n## 1. 高危误导 dead 属性没标 authorWarn(12 项新标)\n\n安全/可靠性语义优先:`object.tenancy.strategy`/`crossTenantAccess`(只有 enabled+tenantField 被读——作者以为设了隔离策略/跨租户开关就生效)、`tool.permissions`(工具调用**不**被它门控)、`permission.contextVariables`(RLS 只认 current_user.* 内置)、`flow.errorHandling.fallbackNodeId`(引擎走 per-node fault edges)、`flow.nodes[].outputSchema`(从不校验)、`action.timeout`(运行期无强制)、`agent.tenantId`、`object.abstract`、`field.dependencies`、`flow.template`、`dataset.measures[].certified`。每项都带指向正确写法的 authorHint。良性展示元数据(label/description/tags)按 README 规则不标。\n\n## 2. lint 只扫 object+field——给其他类型标了也无声\n\n`lintLivenessProperties` 扩展到**全部 governed 类型**(flows/actions/agents/tools/skills/datasets/permissions/hooks/pages 作为 stack 平铺集合),并支持数组容器 fan-out(每个 flow node、每个 dataset measure;每 item+path 只报一条)。机制仍是 ledger 驱动——之后的覆盖增长继续只改 ledger 不改代码。\n\n## 3. README 对账 + 跨仓证据规则\n\n计数表漂移严重(field 表里写 34 live/39 dead,ledger 实际 54/6;action 行还说 \"`disabled` CEL ignored\",它 2026-06 就已经 live)——重写为真实数字+可再生脚本(防再漂);\"Adding a type\" 增加规则:**判 dead 前必须 grep ../objectui**(enable.trackHistory 被误标一个月的教训,#2707)。\n\n## 验证\n\n- `check:liveness` ✓(gate 校验分类完整性,不受 authorWarn 影响)\n- cli 42 文件/476 用例 ✓,其中 lint 契约测试 14 个(新增:flow fault-edge、数组 fan-out 单条化、tenancy.strategy 警但 tenancy.enabled 不警、action.timeout、tool.permissions、permission.contextVariables、dataset certified)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

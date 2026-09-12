@@ -1,0 +1,32 @@
+{
+  "number": 2854,
+  "kind": "pull_request",
+  "title": "fix(analytics): scope /analytics/query + /sql to the caller (RLS) (#2852)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-12T10:12:17Z",
+  "updated_at": "2026-07-12T10:50:19Z",
+  "closed_at": "2026-07-12T10:50:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-12T10:50:17Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2854",
+  "body": "Closes the reachable part of #2852. Found by the ADR-0090 D10 adversarial security review.\n\n## The hole\n\n`handleAnalytics` (the `/api/v1/analytics/*` dispatcher) received the request context as `_context` (unused) and called `analyticsService.query(body)` with **no execution context**. The analytics service's per-object read-scope provider (`getReadScope` → security `getReadFilter`) therefore got `undefined` and applied **no tenant/RLS filter** — so an authenticated caller hitting `POST /analytics/query` received rows their row-level security would otherwise hide.\n\n## The fix\n\nThread `context.executionContext` into `analyticsService.query(…)` and `generateSql(…)` — both already accept an optional `ExecutionContext`. Each object in the query is now scoped by its per-object read filter (tenant + RLS), matching the `/analytics/dataset/query` bridge path which already threads it.\n\n## Residual (tracked in #2852)\n\nThe analytics read-scope provider (`getReadFilter` in plugin-security) does not yet apply the ADR-0090 **D10 agent delegator intersection**. This is latent today — analytics is not reachable over the OAuth `/mcp` surface, so no agent principal drives it — but it should be brought in lock-step with the engine middleware when analytics becomes agent-reachable.\n\n## Tests\n\n- Dispatcher test asserts the execution context now reaches `query` and `generateSql`.\n- `runtime` http-dispatcher suite **165** green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

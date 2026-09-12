@@ -1,0 +1,33 @@
+{
+  "number": 2864,
+  "kind": "pull_request",
+  "title": "chore(deps)(deps): bump @marcbachmann/cel-js from 7.6.1 to 8.0.0",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "dependabot[bot]",
+    "id": 49699333,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-13T02:22:34Z",
+  "updated_at": "2026-07-13T02:51:12Z",
+  "closed_at": "2026-07-13T02:51:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-13T02:51:11Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2864",
+  "body": "Bumps [@marcbachmann/cel-js](https://github.com/marcbachmann/cel-js) from 7.6.1 to 8.0.0.\n<details>\n<summary>Release notes</summary>\n<p><em>Sourced from <a href=\"https://github.com/marcbachmann/cel-js/releases\">@​marcbachmann/cel-js's releases</a>.</em></p>\n<blockquote>\n<h2>v8.0.0</h2>\n<h1><a href=\"https://github.com/marcbachmann/cel-js/compare/v7.6.2...v8.0.0\">8.0.0</a> (2026-07-07)</h1>\n<h3>Bug Fixes</h3>\n<ul>\n<li>rename Evaluator.eval() to run() so cel-js can be bundled under SES (<a href=\"https://github.com/marcbachmann/cel-js/commit/86cd97216a1cbb522eda81aaa0221c245d5913d7\">86cd972</a>)</li>\n</ul>\n<h3>BREAKING CHANGES</h3>\n<ul>\n<li>Custom macro registrations need to use <code>evaluator.run</code> instead of <code>evaluator.eval</code>.</li>\n</ul>\n<p>SES's static &quot;direct eval&quot; check (used by MetaMask Snaps and other\nlockdown environments) rejects any bundle that contains a bare <code>eval(</code>\ntoken. The Evaluator's recursive node-evaluation method was named <code>eval</code>,\nso minified cel-js output gets rejected and the library can't be bundled\ninto a snap.</p>\n<p>Rename that method to <code>run</code> (definition + all internal call sites in\noperators/macros/optional, plus the README and index.d.ts examples).\n<code>evaluate</code> is already the public string-expression entry point\n(Environment.evaluate / the top-level evaluate()), so <code>run</code> avoids the\nclash.</p>\n</blockquote>\n</details>\n<details>\n<summary>Commits</summary>\n<ul>\n<li><a href=\"https://github.com/marcbachmann/cel-js/commit/86cd97216a1cbb522eda81aaa0221c245d5913d7\"><code>86cd972</code></a> fix: rename Evaluator.eval() to run() so cel-js can be bundled under SES</li>\n<li><a href=\"https://github.com/marcbachmann/cel-js/commit/19d1a99fe5191e9b51951dc25c94355f9ad3b592\"><code>19d1a99</code></a> chore(deps): update dependency globals from 17.6.0 to v17.7.0</li>\n<li><a href=\"https://github.com/marcbachmann/cel-js/commit/2bff81ff93f0d1212527071b384739da5447790e\"><code>2bff81f</code></a> fix(deps): update dependency bench-node from 0.14.0 to ^0.15.0</li>\n<li><a href=\"https://github.com/marcbachmann/cel-js/commit/0bbf424520346e2a1ddd7fdb0f701f89b72778cd\"><code>0bbf424</code></a> chore(deps): update dependency globals from 17.5.0 to v17.6.0</li>\n<li>See full diff in <a href=\"https://github.com/marcbachmann/cel-js/compare/v7.6.1...v8.0.0\">compare view</a></li>\n</ul>\n</details>\n<br />\n\n\n[![Dependabot compatibility score](https://dependabot-badges.githubapp.com/badges/compatibility_score?dependency-name=@marcbachmann/cel-js&package-manager=npm_and_yarn&previous-version=7.6.1&new-version=8.0.0)](https://docs.github.com/en/github/managing-security-vulnerabilities/about-dependabot-security-updates#about-compatibility-scores)\n\nDependabot will resolve any conflicts with this PR as long as you don't alter it yourself. You can also trigger a rebase manually by commenting `@dependabot rebase`.\n\n[//]: # (dependabot-automerge-start)\n[//]: # (dependabot-automerge-end)\n\n---\n\n<details>\n<summary>Dependabot commands and options</summary>\n<br />\n\nYou can trigger Dependabot actions by commenting on this PR:\n- `@dependabot rebase` will rebase this PR\n- `@dependabot recreate` will recreate this PR, overwriting any edits that have been made to it\n- `@dependabot show <dependency name> ignore conditions` will show all of the ignore conditions of the specified dependency\n- `@dependabot ignore this major version` will close this PR and stop Dependabot creating any more for this major version (unless you reopen the PR or upgrade to it yourself)\n- `@dependabot ignore this minor version` will close this PR and stop Dependabot creating any more for this minor version (unless you reopen the PR or upgrade to it yourself)\n- `@dependabot ignore this dependency` will close this PR and stop Dependabot creating any more for this dependency (unless you reopen the PR or upgrade to it yourself)\n\n\n</details>"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 2582,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0087 — metadata protocol upgrades for AI consumers (conversion over notification, replayable migration chain)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T14:34:55Z",
+  "updated_at": "2026-07-04T15:01:17Z",
+  "closed_at": "2026-07-04T15:01:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-04T15:01:15Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2582",
+  "body": "## Summary\n\nAdds **ADR-0087**, the consumer-facing sequel to ADR-0059: how externally developed metadata apps upgrade stably across protocol majors — designed for the actual consumer population: **AI-agent-maintained apps**, arriving from **any past major**, not humans marching one release at a time.\n\nThe design ladder (best outcome first):\n\n- **L0 — Don't break**: ADR-0059's frozen gates, unchanged.\n- **L1 — Break invisibly (D2)**: a versioned, declarative **conversion layer** in the spec converts N−1 shapes centrally at load for one major (fleet-compatibility window). The 11.0 calibration: `http_request → http` and the client-react alias removals were 100% convertible — most consumers would have needed **zero action**. Includes the explicit boundary argument for why a centralized, versioned, loud, tested, expiring conversion table does **not** violate Prime Directive #12 (it's the owned version history of one contract, not scattered consumer-side dialect fallbacks — and it gives the existing executor fallbacks a retirement path).\n- **L2 — Break executably (D3)**: retired conversions **graduate into a permanent, ordered, fixture-tested migration chain**; `objectstack migrate meta --from N` replays any past major → current in one command, with per-hop verify checkpoints for bisection. **Timeliness is never load-bearing**: a consumer that slept through four majors replays four steps on arrival — no warning window to have missed.\n- **L3 — Break loudly and structurally (D1)**: enforce the currently-inert `engines.protocol` handshake (`PluginEnginesSchema`, declared but checked nowhere — an ADR-0078 violation) so mismatch is a structured, machine-actionable load-time refusal naming the exact replay command, never a downstream crash.\n- **D4**: machine-readable-first release artifacts — composable per-major `spec-changes.json` + an **MCP upgrade surface** (`spec_changes(from,to)`, `spec_deprecations`, `spec_migrate(dryRun)`); the prose guide becomes a generated projection of the registry.\n- **D5/D6**: the consumer's own `validate && typecheck && test` loop is the acceptance test of an autonomous upgrade; rehearsal inverts — consumer agents pull RCs from the `next` dist-tag and verify themselves (the blocking hotcrm smoke stays; a framework-side community smoke ring is rejected as the wrong direction).\n\nPhased P0–P3, independently shippable, evidence-gated; nothing in ADR-0059 changes.\n\n## Revision history in this PR\n\n- **v1**: human-communication paradigm (deprecation warnings in consumer CI, N−1 warning window, prose guides as release gate).\n- **v2 (current)**: two review corrections — (1) the consumer is an AI agent, so notification-oriented design optimizes the wrong scarce resource; (2) a one-major warning window is worthless to cross-major upgraders. Replaced by conversion-over-notification + the replayable chain above.\n\n## Verification\n\n- Doc-only change; `node scripts/check-doc-authoring.mjs` passes (172 files clean).\n- All cross-referenced ADR files (0025, 0033, 0049, 0054, 0059, 0078) verified present.\n- Claims grounded in source: `PluginEnginesSchema` in `packages/spec/src/kernel/manifest.zod.ts` is unenforced (repo-wide grep), `api-surface.json` diff is PR-gate-only, `docs/upgrading-to-11.md` exists by convention only.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01HjDghc79qFSJkJt2zvBxtU"
+}

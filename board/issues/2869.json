@@ -1,0 +1,35 @@
+{
+  "number": 2869,
+  "kind": "pull_request",
+  "title": "fix(auth): single-source Console page-URL building; fix SMS + OAuth-callback landing paths",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-13T03:02:45Z",
+  "updated_at": "2026-07-13T04:41:01Z",
+  "closed_at": "2026-07-13T04:40:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-13T04:40:59Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2869",
+  "body": "## Context\n\nThird and final follow-up to the invitation-link fixes (#2847, #2865). Those patched one link at a time; this PR removes the **root cause** and closes the two remaining known cases.\n\n## Root cause\n\nThe correct URL of a Console page is always `${origin}${uiBasePath}${path}`, but that composition was hand-written at every call site. That's exactly how the scheme / `/_console` prefix kept getting dropped one link at a time.\n\n## Changes\n\n### `@objectstack/plugin-auth`\n- **Single source of truth** — new `getConsolePageUrl(path)` helper. `loginPage`, `consentPage`, device `verificationUri`, and the invitation accept URL all compose through it. Future page links can't drift (no more hand-concatenated `${baseUrl}${uiBase}/...`).\n- **Phone-invite SMS** now links to the real Console sign-in page (`${origin}${uiBasePath}/login`) via a new `{{loginUrl}}` template variable, instead of the bare origin (which relied on a root redirect that may not exist). `{{baseUrl}}` is still provided for backward-compat with tenant-overridden templates.\n\n### `@objectstack/client`\n- **`signInWithProvider`** now defaults `callbackURL` to the current page (`window.location.href`) instead of a hard-coded `origin + '/login'`. The SDK cannot know the app's mount path (Console lives under `/_console`, others differ), so returning the user to where they started is the only base-path-correct default — and it mirrors the neighbouring `linkSocial`. Callers can still pass an explicit `callbackURL`.\n\n## Tests\n- `getConsolePageUrl`-backed links keep the `/_console` prefix + absolute origin (existing invitation/issuer tests).\n- Phone-invite SMS body targets `…/_console/login` (both en + zh).\n- Client `signInWithProvider`: default `callbackURL` = current page; explicit override respected.\n- `@objectstack/plugin-auth` 406 pass; `@objectstack/client` 109 pass.\n\n## Changeset\n`@objectstack/plugin-auth`: patch, `@objectstack/client`: patch.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

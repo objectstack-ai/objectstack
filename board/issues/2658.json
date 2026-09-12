@@ -1,0 +1,33 @@
+{
+  "number": 2658,
+  "kind": "pull_request",
+  "title": "chore(deps)(deps-dev): bump ai from 7.0.15 to 7.0.16 in the development-dependencies group across 1 directory",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "dependabot[bot]",
+    "id": 49699333,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-06T15:45:58Z",
+  "updated_at": "2026-07-07T00:31:59Z",
+  "closed_at": "2026-07-07T00:31:58Z",
+  "closed_by": {
+    "login": "dependabot[bot]",
+    "id": 49699333,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2658",
+  "body": "Bumps the development-dependencies group with 1 update in the / directory: [ai](https://github.com/vercel/ai/tree/HEAD/packages/ai).\n\nUpdates `ai` from 7.0.15 to 7.0.16\n<details>\n<summary>Release notes</summary>\n<p><em>Sourced from <a href=\"https://github.com/vercel/ai/releases\">ai's releases</a>.</em></p>\n<blockquote>\n<h2>ai@7.0.16</h2>\n<h3>Patch Changes</h3>\n<ul>\n<li>a8f9b6d: Preserve signed tool approval metadata when recording approval responses.</li>\n</ul>\n</blockquote>\n</details>\n<details>\n<summary>Changelog</summary>\n<p><em>Sourced from <a href=\"https://github.com/vercel/ai/blob/main/packages/ai/CHANGELOG.md\">ai's changelog</a>.</em></p>\n<blockquote>\n<h2>7.0.16</h2>\n<h3>Patch Changes</h3>\n<ul>\n<li>a8f9b6d: Preserve signed tool approval metadata when recording approval responses.</li>\n</ul>\n</blockquote>\n</details>\n<details>\n<summary>Commits</summary>\n<ul>\n<li><a href=\"https://github.com/vercel/ai/commit/8eeb080e1caa3455bd1c3d0c4c33316ff4e63fd3\"><code>8eeb080</code></a> Version Packages (<a href=\"https://github.com/vercel/ai/tree/HEAD/packages/ai/issues/16742\">#16742</a>)</li>\n<li><a href=\"https://github.com/vercel/ai/commit/a8f9b6d7b19b6d6d8ee9468d1c547649af118863\"><code>a8f9b6d</code></a> fix: preserve signed tool approval metadata across approval responses (<a href=\"https://github.com/vercel/ai/tree/HEAD/packages/ai/issues/16592\">#16592</a>)</li>\n<li>See full diff in <a href=\"https://github.com/vercel/ai/commits/ai@7.0.16/packages/ai\">compare view</a></li>\n</ul>\n</details>\n<br />"
+}

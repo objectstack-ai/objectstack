@@ -1,0 +1,35 @@
+{
+  "number": 2867,
+  "kind": "pull_request",
+  "title": "fix(plugin-security): project env-scope permission-set edits onto sys_permission_set (#2857)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-13T02:39:10Z",
+  "updated_at": "2026-07-13T02:48:47Z",
+  "closed_at": "2026-07-13T02:48:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-13T02:48:45Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2867",
+  "body": "## What\n\nCloses the split-brain where an **environment-scope** permission-set edit updates the metadata overlay but not the queryable `sys_permission_set` record. Fixes #2857.\n\n## Why\n\nA `sys_permission_set` has two representations:\n- **Metadata** — what `client.save('permission', …)` / `client.layered` read-write (authoritative; enforcement + ADR-0090 explain read it).\n- **Data record** — `/api/v1/data/sys_permission_set`, snake_case JSON-string columns, what the admin/Setup surface reads.\n\nThe camelCase→snake projection (`toRowFields` / `upsertPackagePermissionSet`) runs only at **boot** and on **publish** (the package door), and the publish path refuses env-authored rows. So an env-scope `saveMetaItem('permission', …)` persists the `sys_metadata` overlay (the layered read reflects it) but never touches the record → the admin surface goes stale. Enforcement stays correct (it reads the metadata), so this is display-freshness, but it breaks the loop for the objectui pure-model work (objectstack-ai/objectui#2403: Studio designs → Setup shows read-only).\n\n## How\n\nAdds the **environment door**, mirroring the existing `authored-translation-sync` mutation-listener pattern:\n\n- `subscribeEnvPermissionProjection(protocol, ql, logger)` — hooks the protocol's post-persistence `onMetadataMutation` choke point (wired once in `SecurityPlugin.runBootstrap`, guarded so `runBootstrap`'s re-run doesn't double-subscribe).\n- `projectEnvPermissionOnMutation` — on an **active** (non-draft) `permission` event, re-reads the **fresh effective body** via `getMetaItemLayered` (the boot-cached `MetadataManager` registry would hand back a stale declared body for a seeded set), tolerating both the layered envelope (`{effective|code}`) and a direct body.\n- `upsertEnvPermissionSet` — projects the six facets (`objects`→`object_permissions`, …, `adminScope`→`admin_scope`). Ownership is decided by the **record's** `managed_by`, never the body: the layered read stamps `_packageId` provenance on env-authored sets too, so only the record can distinguish the doors. Env-authored rows (`platform`/`user`/absent) are projected; a `package`-owned record's baseline is left to boot re-seed / publish.\n\nStorage columns unchanged.\n\n## Tested\n\n- **Unit — 21 tests** (`bootstrap-declared-permissions.test.ts`): projection for all six facets; env upsert vs package-record refusal; the `_packageId`-provenance regression (record decides, not body); the direct-body-shape regression (`getMetaItemLayered` can return the body directly — a `?? null` fallback would silently drop it); and the mutation wiring via a mock protocol (envelope + direct shapes, draft/non-permission skip, no-`onMetadataMutation` → no-op).\n- **No regression** — 153 `plugin-security` tests pass.\n\n## ⚠️ Verification honesty\n\nI could **not** get a clean **live** end-to-end (start backend → env `save` → assert the record refreshes) in my local isolated worktree backend: `require.resolve('@objectstack/plugin-security')` fails from the example app, and the dev server loaded a **stale** `plugin-security` via pnpm/worktree resolution rather than my rebuilt `dist`, so the running backend never had this code (a marker file placed at the subscriber's first line never appeared across 7 rebuild/restart attempts). This is a **worktree/pnpm-resolution artifact of my local setup, not a code issue** — the projection + wiring logic is deterministically unit-tested above, and the wiring mirrors the proven `authored-translation-sync` listener. **Please confirm the live projection under CI / a clean install.** (The two bugs the unit tests caught — the over-eager `_packageId` guard and the dropped direct-body — were found *during* this debugging, so it was productive.)\n\n## Refs\n\n- objectui pure-model (merged): objectstack-ai/objectui#2403 · ADR-0056 · epic objectstack-ai/objectui#2398\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

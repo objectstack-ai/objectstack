@@ -1,0 +1,35 @@
+{
+  "number": 2742,
+  "kind": "pull_request",
+  "title": "feat(data): enable.files goes live — opt-in gate for the generic Attachments surface (#2727)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T05:04:28Z",
+  "updated_at": "2026-07-10T05:24:55Z",
+  "closed_at": "2026-07-10T05:24:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-10T05:24:53Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2742",
+  "body": "Closes #2727。#2707 收口后唯一剩下的 dead ObjectCapabilities flag 接线为 live——至此 **`enable` 块 100% live**,编译期 liveness authorWarn 对 ObjectCapabilities 归零。\n\n## 契约(opt-IN,与 feeds/activities 的 opt-out 相反)\n\n`enable.files` 默认保持 `false`:附件面板是**新表面**不是既有行为,opt-in 语义正确且零行为回归。\n\n- **plugin-audit**:`sys_attachment` beforeInsert hook——join 行只允许指向显式声明 `enable: { files: true }` 的对象;缺 enable 块、缺 flag、显式 false、未知对象一律 fail-closed 403 `FILES_DISABLED`(复用 `CLONE_DISABLED`/`FEEDS_DISABLED` 模式)。\n- **rest**:`mapDataError` 增加 `FILES_DISABLED` 分支(#2707 教训:通用 data 路由不走 `sendError` 的 `.status` 透传,引入错误码时同步接映射,这次没等冒烟抓 400 才补)。\n- **`Field.file`/`Field.image` 不受影响**:字段附件存记录自身列,从不写 sys_attachment。\n- **ledger**:`enable.files` dead→live、撤 authorWarn;README 计数 object 35 live/13 dead;cli lint 契约测试改锚 `versioning` 为 canonical 误导性 dead 例子;`describe()`/references 文档改为真实契约。\n\n## 验证\n\n- 单测:plugin-audit 32 ✓(4 个新 gate 测试:true 放行/缺省拒/显式 false 拒/未知对象拒)、rest 139 ✓(FILES_DISABLED 映射)、cli 464 ✓、spec 75 ✓\n- 闸门:`check:liveness` ✓、`check:api-surface` ✓\n- **运行时 E2E**(fresh showcase):presigned 三步上传 200/200 → `files:true` 探针对象 attach **201**;指向无 flag 对象 attach → **403 `FILES_DISABLED`**(带 code+目标对象);稳定下载端点 200 返回原字节\n- **浏览器实测**(objectui 配套分支,console dev):面板在 `files:true` 对象渲染(上传按钮/列表/下载/删除),无 flag 对象不渲染\n\n## 配套\n\n- objectui PR: objectstack-ai/objectui#2374(`RecordAttachmentsPanel`)。**合并顺序:本 PR 先**(闸门先于面板)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

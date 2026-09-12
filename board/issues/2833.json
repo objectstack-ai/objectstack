@@ -1,0 +1,32 @@
+{
+  "number": 2833,
+  "kind": "issue",
+  "title": "[objectui] 记录表单渲染器需按 userActions.edit + 逐字段 readonly 渲染 managedBy 对象（ADR-0092 D4 配套）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-11T08:07:53Z",
+  "updated_at": "2026-07-11T12:21:31Z",
+  "closed_at": "2026-07-11T12:21:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2833",
+  "body": "## 背景\n\nADR-0092 D4 的框架侧（#2817 / PR #2832）已给 `sys_user` 加 `userActions: { edit: true }` 并对非档案字段做逐字段 `readonly` 治理。server 元数据正确（`/api/v1/meta/object/sys_user` 返回 `userActions.edit=true`、仅 `name`/`image` 的 `readonly=false`）。\n\n## 问题（浏览器验证发现）\n\n当前 vendored console（objectui `@object-ui/console` 14.3.0，framework 里 pin SHA `6fa8e6a`）的**记录表单渲染器**把 `protection.lock:'full'` / `managedBy:'better-auth'` 对象的**所有**表单字段渲染为 `readonly disabled` —— 包括本应可编辑的 `name`/`image`。\n\n现象（Setup → Users → 行菜单 Edit）：\n- ✅ 行菜单出现 \"Edit\"（`resolveCrudAffordances` 正确解析了 `userActions.edit`）\n- ✅ Edit 表单只暴露 Name + Profile Image 两个字段（只读字段正确排除）\n- ❌ 但这两个字段的 `<input>` 带 `readonly disabled` 属性,无法输入 → affordance \"可见但不可用\"\n\nDOM 证据：`<input readonly disabled name=\"name\" group=\"Identity\" value=\"Dev Admin\" schema=\"[object Object]\">`。字段 widget 的只读判定为 `field.readonly || <form-level lock>`;`name` 的 `field.readonly=false`,故是**表单级/对象级**的一刀切锁定（`RecordFormPage` 仅用 `managedBy` 渲染 badge,禁用逻辑在共享 widget 层）。\n\n## 需求\n\n记录表单渲染器应：**当对象 `userActions.edit === true` 时,按逐字段 `readonly` 渲染,而非按 `protection.lock` / `managedBy` 对整个表单一刀切禁用。** `protection.lock` 是元数据保护（能否改 schema,ADR-0010）,不应等同于记录数据只读。\n\n## 联动\n\n- objectui 改动合并后,在 framework 跑 `pnpm objectui:refresh` 更新 pin SHA + vendored bundle。\n- 在此之前,#2832 的 affordance 在 Console 里\"可见但不可用\"（服务端守卫 #2828 已兜底安全,仅 UX 不完整）。\n\n## 相关\n\n- ADR-0092 D4 · framework #2817 / PR #2832 · 依赖已合并的守卫 #2828\n- 注：本 issue 描述 objectui 仓库的改动;开在 framework 仅为跟踪跨仓库依赖（AGENTS.md Prime Directive #10）。"
+}

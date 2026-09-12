@@ -1,0 +1,30 @@
+{
+  "number": 2752,
+  "kind": "issue",
+  "title": "/me/apps returns [] for every principal — reads metadata.list('app') while stack apps live in the engine registry (tabPermissions' only enforced consumer is dead)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T08:20:14Z",
+  "updated_at": "2026-07-10T10:47:31Z",
+  "closed_at": "2026-07-10T10:47:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2752",
+  "body": "## Observed (live dev server, showcase, admin + members)\n\n`GET /api/v1/me/apps` → `{\"apps\":[]}` for EVERY authenticated principal, including the platform admin — while the console's app switcher (which uses the registry-backed meta routes) correctly shows Showcase/Setup.\n\n## Root cause\n\n`packages/plugins/plugin-hono-server/src/hono-plugin.ts:838` — the handler lists apps via the metadata service:\n\n```ts\nconst all: any[] = (await metadata.list('app')) ?? [];\n```\n\nbut stack-declared apps are registered into the ENGINE REGISTRY by the runtime AppPlugin (`packages/runtime/src/app-plugin.ts` — `registerApp()`; see the comment at :307 \"The engine already indexed them for the write gate via registerApp()\"). `MetadataManager.list('app')` has no such items → always `[]`.\n\n## Why it matters\n\n`/me/apps` is the ONLY enforced consumer of two authorization surfaces:\n- `PermissionSet.tabPermissions` (merged hidden/visible votes — filters `tabs[app.name] === 'hidden'`),\n- `AppSchema.requiredPermissions` ⊆ caller's systemPermissions.\n\nWith the endpoint dead, both surfaces are declared-but-unenforced (ADR-0049 enforce-or-remove): a set voting an app `hidden` and an app requiring `setup.access` change nothing anywhere reachable.\n\n## Fix direction\n\nRead the app list from the same authoritative source the meta routes use (engine registry), or mirror registry apps into the metadata service; keep the existing tabPermissions/requiredPermissions filtering. Add a dogfood asserting a fresh member sees the showcase app and that a `requiredPermissions: ['setup.access']` app appears only for holders.\n\nFound while browser-verifying the ADR-0090 permission zoo (#2739/#2745)."
+}

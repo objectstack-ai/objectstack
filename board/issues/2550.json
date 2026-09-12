@@ -1,0 +1,34 @@
+{
+  "number": 2550,
+  "kind": "pull_request",
+  "title": "test(app-showcase): console 列表/表单能力全量实测报告(35 项问题)+ 用例元数据补齐",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-03T17:27:05Z",
+  "updated_at": "2026-07-04T02:51:44Z",
+  "closed_at": "2026-07-04T02:51:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-04T02:51:43Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2550",
+  "body": "## 概要\n\n按要求用**内置浏览器真实操作**对 showcase 的对象列表/表单全部能力做了无遗漏实测(行按钮、行内编辑、列表选中批量按钮、批量修改、表单分组、字段显示隐藏、lookup 级联选择、视图路由、userFilters、筛选/分组/排序/搜索、分页、6 种可视化、主子表、related list、flow action、必填校验、国际化),全程截图留痕,关键断言用 REST API 与视图 meta 双重核验。\n\n## 产出\n\n- **问题记录 md**:`examples/app-showcase/docs/test/console-list-form-capability-report-2026-07.md` — **35 项问题**(P0×11 / P1×11 / P2×13)+ 20+ 项验证正常能力清单\n- **Word 报告**(文字+37 张截图):`examples/app-showcase/docs/test/showcase-console-capability-test-report.docx`\n- **截图留痕**:`examples/app-showcase/docs/test/screenshots/`(01–38)\n- **测试用例元数据补齐**:任务视图 inlineEdit、发票 contact dependsOn 级联、form 视图 visibleOn 用例、contact 种子、翻译 bundle 全列覆盖、Analytics 导航入口\n- `.claude/launch.json`:可复现的独立端口(3777)dev 测试配置(相对路径)\n\n## P0 摘要(详见 md)\n\n| # | 问题 |\n| --- | --- |\n| 10 | 行内编辑完全不可用(按钮可开,单元格点击永不进编辑,反而打开记录预览) |\n| 8/19/20 | form action 全链崩坏:form 视图与 list 视图同名被静默改名 default_2;`/_console/forms/*` 渲染器黑屏+零字段+误报成功 |\n| 27/35 | flow action:toolbar 启动无记录上下文即崩(裸英文技术 toast);行级启动更新成功却同时弹错误+成功双 toast |\n| 16 | 表单视图级 FormField.visibleOn 完全不生效(对象字段级三种条件规则均正常,对照确认) |\n| 21 | 级联 lookup 双缺陷:选完父值子字段仍锁死;旁路表格选择器完全不过滤,级联约束可绕过 |\n| 12 | 批量编辑多选 select 被单选化,落库标量写坏数据 |\n| 29 | 导航 viewName 生成短名路由,视图解析静默失败回退默认视图(面包屑却显示目标视图名) |\n| 30 | 视图 userFilters 配置完全不渲染 |\n\n## 验证\n\n- `pnpm validate` ✅(20 Objects / 174 Fields / 4 Views / 7 Actions…)\n- `pnpm typecheck` ✅\n- `pnpm test` ✅(39/39)\n\nCo-Authored-By: Claude <noreply@anthropic.com>"
+}

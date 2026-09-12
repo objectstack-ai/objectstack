@@ -1,0 +1,32 @@
+{
+  "number": 2665,
+  "kind": "pull_request",
+  "title": "chore(cli,plugin-dev): drop unused @objectstack/studio dependency",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-06T23:03:52Z",
+  "updated_at": "2026-07-06T23:09:21Z",
+  "closed_at": "2026-07-06T23:09:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-06T23:09:19Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2665",
+  "body": "## What\n\nFollow-up to [`3b9fd940`](https://github.com/objectstack-ai/framework/commit/3b9fd940f1d7688db8382fc3d83db74a34461250), which stopped `os dev` / `os start` / `os serve` from default-loading the Studio app (the console now hosts it at `/_console/studio/<pkg>/<pillar>`).\n\nWith the default registration removed, neither `cli` nor `plugin-dev` imports `@objectstack/studio` at runtime any more, so the dependency was dead weight. This drops it from both.\n\n## Changes\n\n- **`packages/cli/package.json` + `packages/plugins/plugin-dev/package.json`** — remove the `@objectstack/studio` dependency.\n- **`packages/cli/src/adr-0048-app-split.test.ts`** — the last remaining consumer imported `createStudioAppPlugin`. It now exercises the identical one-app-package split via **Setup + Account** (same code path; the regression's intent — distinct package ids / coexistence / distinct namespaces — is preserved).\n- changeset (`cli` + `plugin-dev` patch).\n\nThe `@objectstack/studio` package itself is unchanged and still registerable explicitly.\n\n## Verification\n\n- `vitest run adr-0048-app-split.test.ts` → 4 passed.\n- `cli` and `plugin-dev` build green after the dep removal.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

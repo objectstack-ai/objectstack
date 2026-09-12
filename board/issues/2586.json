@@ -1,0 +1,32 @@
+{
+  "number": 2586,
+  "kind": "pull_request",
+  "title": "fix(spec): view-reference build lint — collision warns, form-target errors (#2554)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/l"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T15:17:09Z",
+  "updated_at": "2026-07-04T16:00:27Z",
+  "closed_at": "2026-07-04T16:00:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-04T16:00:25Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2586",
+  "body": "Closes #2554. Supersedes #2556.\n\n## Problem\n\n`list` and `form` views share one `<object>.<key>` namespace during container expansion, and the default `list` implicitly claims `<object>.default`. On a key collision the loser is silently renamed to `<key>_2`, so any reference to the requested name (a form action `target`, a nav `viewName`) resolves to the **other** view — the root cause of a `type:'form'` action opening a LIST view as a blank form (a submit can even silently no-op). objectui #2209 (landed the same day as #2556) turned the runtime symptom into a loud error; this PR shifts that guard **left to build time**.\n\n## Fix\n\n- **spec** — `expandViewContainer` gains a behaviour-preserving companion `expandViewContainerWithDiagnostics` that reports every `<object>.<key>` collision, captured at the exact points the shared `used` set forces a rename (zero-drift with the runtime expansion). `expandViewContainer` delegates to it; **runtime behaviour is unchanged**.\n- **cli** — new `lint-view-refs` wired into `os compile`, mirroring the existing broken/fragile two-level authoring lints (flow-patterns, autonumber, liveness). Severity split **tuned so an upgrade does NOT break existing apps that merely have a colliding key**:\n\n  | rule | severity | why |\n  |---|---|---|\n  | `view-ref-form-target-kind` — a `type:'form'` target resolves to a LIST view | **ERROR** (fails build) | the concrete #2554 breakage; high-confidence |\n  | `view-key-collision` | WARNING | fragile, not broken — only bites if the requested name is referenced |\n  | `view-ref-form-target-missing` | WARNING | possibly a view the lint didn't collect — avoid a false-positive failure |\n\n  Shifts objectui's runtime `viewKind` guard left to compile time: the author (often an AI generating templates) sees the error on `os compile`, not the end user on click.\n- **examples/app-showcase** — fix 3 real collisions the lint surfaced (`formViews.default` → `edit`), and point the Log Time form action at the form view.\n\n## Why not make list/form share a name at the storage level (the \"pure\" fix)?\n\nThat would need ~6 `view`-type special-cases across two registries' `register`/`get`/`unregister`, and `get('view', name)` is a **hot path** (`GET /meta/:type/:name`, hit on every form open). High-risk surgery to solve a problem objectui #2209 already de-fanged. This lint reaches the same north-star (author sees the error at build, not the user at click) with **zero registry churn and zero data-migration risk**.\n\n## Verification\n\n- **Unit**: cli **466/466**, metadata **257/257** (incl. collision capture + `expandViewContainer` delegation invariance).\n- **E2E**: showcase `os compile` green; **full `turbo build` 71/71**.\n- **Revert-proof**: target → LIST view → **build red** (`EEXIT 1`); collision-only → **build green + warning**.\n- **Downstream dogfood**: ran the lint against 11 real compiled stacks (hotcrm + 10 templates, **88 view containers**) → **0 false positives, 0 blocked, 0 skipped** (full object-name coverage). These apps carry no `type:'form'` actions, so the target-kind gate's \"catches real bugs\" property is proven by the showcase revert-proof; the downstream run proves \"never misfires\".\n\n## Blast radius\n\n- **Runtime: zero.** `expandViewContainer` behaviour is unchanged; registry/addressing untouched; the lint only runs at `os compile`. Deployed apps are unaffected.\n- **Build:** a colliding key only **warns**; only a form action that genuinely resolves to a LIST view fails the build — and that is a runtime-guaranteed bug (objectui #2209 already errors on it at runtime).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

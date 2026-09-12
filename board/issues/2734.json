@@ -1,0 +1,30 @@
+{
+  "number": 2734,
+  "kind": "issue",
+  "title": "Fresh `objectstack dev` boot: tenant admin sees ZERO rows in sys_position / sys_permission_set / sys_business_unit over REST (Setup Access Control renders empty)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T03:36:23Z",
+  "updated_at": "2026-07-10T05:31:05Z",
+  "closed_at": "2026-07-10T05:31:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2734",
+  "body": "## Repro (current main, single-tenant, no enterprise packages)\n\n```bash\npnpm -C examples/app-showcase exec objectstack dev --seed-admin -p 39112 -d file:/tmp/x/data.db\n# sign in admin@objectos.ai/admin123, then:\nGET /api/v1/data/sys_position        → {\"records\":[],\"total\":0}\nGET /api/v1/data/sys_permission_set  → {\"records\":[],\"total\":0}\nGET /api/v1/data/sys_business_unit   → {\"records\":[],\"total\":0}\n```\n\nThe rows exist (sqlite shows 12 positions / 12 sets seeded, `organization_id = NULL`). By-id GET also 404s. Setup → Access Control (角色/权限集/业务单元) renders \"no data\" for the platform admin on a fresh deployment.\n\n## Diagnosis\n\n- Stamping one row `organization_id = <admin org>` directly in sqlite makes exactly that row appear → the **wildcard \\`tenant_isolation\\` RLS (\\`organization_id == current_user.organization_id\\`) is ACTIVE**, filtering all NULL-org platform rows.\n- \\`SecurityPlugin.collectRLSPolicies\\` is supposed to STRIP wildcard org policies when the enterprise \\`org-scoping\\` service is absent (single-tenant mode) — no \\`OS_MULTI_ORG_ENABLED\\`, no \\`@objectstack/organizations\\` in this boot, so stripping should apply but evidently does not on this path. On the dev server the admin resolves \\`[admin_full_access, organization_admin]\\` (org-owner membership); in an in-process \\`bootStack\\` boot the same request returns all 12 rows and the admin resolves \\`[admin_full_access, member_default]\\` — the divergence tracks the \\`organization_admin\\` set's DB-row RLS. Possibly related to ADR-0081 (#2699) open org-management basics.\n\n## Also: first-boot seed org-stamp ordering\n\nOn the FIRST boot business seeds run before any \\`sys_organization\\` exists → \\`fallbackOrgId\\` is unset → business rows get \\`organization_id = NULL\\` → invisible to the admin until a RESTART re-runs the upsert with the org present. Fresh-boot UX: an empty-looking workspace.\n\nEnforcement itself is fine (deny-by-default) — this is an admin-visibility regression: a fresh deployment's admin cannot see or administer the RBAC tables over REST at all.\n\nFound while browser-verifying the ADR-0090 showcase permission zoo; repros identically on a clean main checkout without those changes."
+}

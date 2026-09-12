@@ -1,0 +1,34 @@
+{
+  "number": 2812,
+  "kind": "pull_request",
+  "title": "docs(ai),liveness: open-edition honesty for the agent capability",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-11T01:43:01Z",
+  "updated_at": "2026-07-11T01:56:41Z",
+  "closed_at": "2026-07-11T01:56:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-11T01:56:39Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2812",
+  "body": "Three \"declared ≠ delivered on the open edition\" cleanups surfaced by a whole-platform agent-capability audit. No behavior change — docs + liveness `_note` annotations only.\n\n## 1. `aggregate_data` over-claim (Natural Language Queries)\n\nThe doc told readers their own AI gets `query_records` / `get_record` / **`aggregate_data`** via the open `@objectstack/mcp`. But the open native HTTP surface (`mcp-http-tools.ts`) registers exactly **9 tools** — `list_objects`, `describe_object`, `query_records`, `get_record`, `create_record`, `update_record`, `delete_record`, `list_actions`, `run_action` — and **none is `aggregate_data`**; `query_records` has no aggregation arguments. `aggregate_data` is a **cloud** data tool (`cloud/.../tools/data-tools.ts`); in framework the name appears only in a read-only *classification* set (`mcp-server-runtime.ts:54`), never as a registered tool. Fixed: the doc lists the real open read tools and fences aggregation to the cloud runtime with a callout.\n\n## 2. \"Skill\" terminology collision\n\nTwo unrelated concepts share the word \"skill,\" both under `/docs/ai`:\n- **Authoring skills** (`skills.mdx` / `skills-reference.mdx`) = `SKILL.md` knowledge modules (skills.sh) that teach a coding assistant to *write* metadata — open, dev-time, never run.\n- **Agent skills** (`defineSkill` / `SkillSchema` in `agents.mdx`) = runtime capability bundles attached to the `ask`/`build` platform agents — cloud runtime.\n\n`agents.mdx` even used both senses within a few lines. Added cross-linked disambiguation callouts to both pages.\n\n## 3. Liveness cites cloud code as framework evidence\n\nThe `agent`/`skill`/`tool`/`action` liveness ledgers point `evidence` at `packages/services/service-ai/src/...` — but that framework tree is a **stale, untracked build artifact** (`git ls-files` returns nothing; no `src/`, no `package.json`). The real consumer is the closed cloud `@objectstack/service-ai`. So the open framework's own ledger reads as if it locally enforces an agent runtime it doesn't contain — the single most confusing artifact for anyone auditing \"what does open actually do.\" Each file's `_note` now states the evidence lives in cloud/EE and these props are `live` because that cloud runtime consumes them.\n\n## Verification\n\n- Liveness gate green (`check:liveness` exit 0, \"all governed-type properties classified\"; `staleEvidence` is a warning that never counted toward failure, so no regression).\n- Callout `type=\"warn\"` is an already-used variant; anchor target confirmed; Callout tags balanced in all edited files; all four liveness JSONs re-validated.\n\nThe audit's larger finding — that the platform's agent capability is bifurcated (open = MCP + authoring schemas + knowledge; cloud/EE = the entire execution runtime, ask/build, conversation store, chat backend) — is left as-is: the open/cloud line in `content/docs/ai/index.mdx` already draws it correctly. This PR only removes the three concrete honesty gaps.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

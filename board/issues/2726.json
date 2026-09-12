@@ -1,0 +1,33 @@
+{
+  "number": 2726,
+  "kind": "pull_request",
+  "title": "fix(spec): bump PROTOCOL_VERSION 12→13 to match spec major (unblock main CI)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T03:20:26Z",
+  "updated_at": "2026-07-10T03:30:48Z",
+  "closed_at": "2026-07-10T03:30:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-10T03:30:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2726",
+  "body": "## Problem\n\n`main`'s CI is red. The version-packages roll (#2720) took `@objectstack/spec` to major **13.0.0** but left `PROTOCOL_VERSION` at **12.0.0**. `packages/spec/src/kernel/protocol-version.test.ts` — the lockstep guard that asserts the protocol major equals the package major — now fails:\n\n```\nFAIL protocol-version.test.ts > stays in lockstep with the package major (no drift)\nAssertionError: expected 12 to be 13\n```\n\nThis reddens **Test Core** on every open PR (e.g. #2721), not just here.\n\n## Fix\n\nBump `PROTOCOL_VERSION` `12.0.0 → 13.0.0` so the loader/installer handshake advertises the major the package actually ships. One-line source change + changeset.\n\n## Verification\n\n- `packages/spec` full suite (CI-faithful `pnpm run test`): **6672 passed / 247 files** — the previously-failing test is green, zero regressions (matches CI's `6672` total).\n- Repo-wide scan: no `engines.protocol` pins or `PROTOCOL_MAJOR === 12` assertions anywhere, so nothing depended on the old value.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

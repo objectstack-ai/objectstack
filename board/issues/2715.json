@@ -1,0 +1,35 @@
+{
+  "number": 2715,
+  "kind": "pull_request",
+  "title": "fix(mcp): SKILL.md documents the business-action tools (#2714 Phase 0)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-09T06:56:40Z",
+  "updated_at": "2026-07-09T07:07:36Z",
+  "closed_at": "2026-07-09T07:07:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-09T07:07:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2715",
+  "body": "#2714 **Phase 0** — prerequisite for every distribution shell (they all copy the rendered skill).\n\n`renderSkillMarkdown()` documented only the 7 object-CRUD tools; the MCP surface exposes 9. The business-action pair from #2307 (`list_actions` / `run_action`) was absent, so an agent installing the skill never learned it can run approvals, conversions, or flow triggers directly — it would hand-edit the underlying records instead.\n\n## Changes (skill content only, no runtime behavior)\n\n- **Tools section**: adds `list_actions()` and `run_action({ actionName, objectName?, recordId?, params? })` with their real semantics (record-scoped actions, destructive flag, param declaration, `objectName` as disambiguator only)\n- **Intro / When-to-use / Discover / Workflow**: business actions woven in as first-class — discovery step 3 is `list_actions`, and the workflow branches to `run_action` when a matching action exists\n- **New convention**: *prefer actions over hand-edits* — actions carry the app's validation and side effects; confirm destructive or confirmation-flagged actions with the user first\n- Tests: full 9-tool surface asserted + a dedicated action-preference assertion (63 pass)\n\nRefs #2714, #2698.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

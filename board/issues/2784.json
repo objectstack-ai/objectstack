@@ -1,0 +1,32 @@
+{
+  "number": 2784,
+  "kind": "issue",
+  "title": "rfc(identity): 评估 sys_user 档案字段经引擎 hook 委托，放开 edit affordance",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T11:37:00Z",
+  "updated_at": "2026-07-11T02:15:24Z",
+  "closed_at": "2026-07-10T12:48:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2784",
+  "body": "## 背景\n\n`sys_user` 为 `managedBy:'better-auth'`，CRUD affordances 全关（ADR-0010：直接 ObjectQL 写入绕过哈希管线、不产 sys_account、破坏 session 一致性）。#2766 后所有写操作都有专用端点（create-user / set-user-password / import-users / ban 等），但**纯档案字段**（姓名等不碰凭据的列）的编辑仍不能走标准表单/data API，UI 一致性欠佳。\n\n## 评估内容（ADR 级决策，先 RFC 后实现）\n\n1. 哪些字段可安全放开：候选 = `name`、`phone_number`、image 等档案列；**永不放开** = email（登录标识）、password/凭据、role/banned、全部 system-managed стamp 列（`password_changed_at`、`must_change_password`、`locked_until` 等）。\n2. 机制：ObjectQL before-update hook 做字段白名单过滤 + 必要时委托 better-auth `internalAdapter.updateUser`（session 缓存一致性）；还是仅放开 `edit` affordance + 字段级 readonly 控制。\n3. 与 `/admin/import-users` upsert 的 `UPDATE_ALLOWED_FIELDS`（PR #2771）保持同一份白名单，避免两处漂移。\n4. 审计：hook 路径天然被 plugin-audit 捕获（相对专用端点的显式审计是个优势）。\n5. 风险面：放开写口子后 RLS/权限模型对 sys_user 行级更新的覆盖是否充分（谁能改谁的档案）。\n\n产出：ADR + 决策；若通过，再立实现 issue。\n\n## 相关\n\n- ADR-0010（身份表归 better-auth 管辖）、#2766 / PR #2771"
+}

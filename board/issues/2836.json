@@ -1,0 +1,32 @@
+{
+  "number": 2836,
+  "kind": "issue",
+  "title": "ADR-0092 D4/D5: sys_user 编辑对\"同时持有 organization_admin 的平台管理员\"被权限合成挡住（explicit deny 胜 wildcard allow）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-11T10:13:16Z",
+  "updated_at": "2026-07-11T12:20:58Z",
+  "closed_at": "2026-07-11T12:20:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2836",
+  "body": "## 背景\n\n浏览器验证 ADR-0092 D4（#2817 / PR #2832 + objectui #2395 已合并）时发现:`sys_user` 的标准编辑表单在 Setup 里以 seeded 平台管理员身份打开时,**所有字段仍不可编辑**。\n\n## 根因（权威数据）\n\n`GET /api/v1/auth/me/permissions`(seeded admin)对 `sys_user` 返回 `allowEdit:false`,而通配符 `*` 返回 `allowEdit:true`。console 的字段级安全(FLS)据此正确禁用表单 —— 这不是 objectui 渲染 bug(objectui #2395 已修一刀切禁用),而是**有效权限**本身为 deny。\n\nseeded admin 同时持有两个权限集：\n- `admin_full_access`：仅通配符 `*: { allowEdit:true }`,无 `sys_user` 专项。\n- `organization_admin`：含 `denyWritesOnManagedObjects()` → 显式 `sys_user: { allowEdit:false }`。\n\n**显式 per-object deny 胜过 wildcard allow**(narrowing 语义),故合成结果 `sys_user.allowEdit:false`。\n\n- **纯 `admin_full_access`** 持有者(无 org_admin)：`sys_user` 落到通配符 → `allowEdit:true` → 编辑表单**可用**。\n- **同时是 org owner 的平台管理员**（seeded dev-admin 即此情形,org owner 自动获授 organization_admin）：被显式 deny 挡住。\n\n## 影响\n\nADR-0092 D5 假设\"平台管理员(admin_full_access)本就过了权限层\"。该假设对**单独** admin_full_access 成立,但对\"平台管理员 ∩ 组织所有者\"不成立 —— 而 dev seed 与不少真实部署里两者恰好重合。结果:D4 的编辑 affordance 对这类主体\"可见但不可用\"。\n\n## 决策选项（安全敏感,需 ADR 级定夺）\n\n1. **接受现状**:D4 面向纯平台管理员;org-owner-兼-平台管理员的编辑归 D5 已明确 defer 的\"org-admin-scoped profile editing\"后续。文档说明即可。\n2. **admin_full_access 增设显式 `sys_user: { allowEdit:true, allowRead:true }`**(仅档案语义,凭据仍靠守卫 #2828 拦列),让其在合成中盖过 org_admin 的 managed-deny。需确认合成里\"同优先级显式 allow vs 显式 deny\"的胜负规则。\n3. **调整合成语义**:平台管理员(持 manage_users / 无 RLS 的 admin_full_access)的 wildcard 不被 org 级 managed-deny 收窄。影响面最大,谨慎。\n\n服务端守卫 #2828 已确保:即便放开 allowEdit,用户上下文对 `sys_user` 也只能改 `{name, image}`,凭据/系统列仍被剥离。故选项 2/3 的实际写入面仍受控。\n\n## 相关\n\nADR-0092 D4/D5 · #2817 / PR #2832（元数据,draft）· #2828（守卫,已合并）· objectui #2395（表单渲染器,已合并）· #2833"
+}

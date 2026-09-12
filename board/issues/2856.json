@@ -1,0 +1,34 @@
+{
+  "number": 2856,
+  "kind": "pull_request",
+  "title": "docs: correct agent permission-model framing to match shipped D10",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-12T13:00:39Z",
+  "updated_at": "2026-07-12T13:38:46Z",
+  "closed_at": "2026-07-12T13:38:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-12T13:38:44Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2856",
+  "body": "Documentation accuracy pass after the ADR-0090 D10 agent work shipped this session (#2838 / #2843 / #2845). The agent docs still described the old model — \"runs as you / consent scopes narrow which tool families\" — which is now inaccurate.\n\n## What changed and why\n\nAn OAuth-connected MCP client is now an **agent acting on behalf of** the signing-in user, resolved to `principalKind:'agent'` + `onBehalfOf`. Every call is bounded by the **intersection** of a scope-derived ceiling and the user's own permissions/RLS — it can never exceed either. Consent scopes are a real **data-layer ceiling**, not just a tool-family filter (a `data:read` token can never write a record, even where the user could).\n\n- **`packages/mcp/src/skill.ts`** (the SKILL.md served at `GET /api/v1/mcp/skill` — downloaded by every connecting agent): \"every operation runs **as you**\" → the intersection framing + the read-only-scope-can't-write caveat.\n- **`content/docs/ai/agents.mdx`** (user-facing): same correction to the OAuth track.\n- **`docs/design/permission-model.md`** — the \"declared ≠ delivered\" reconciliation:\n  - the agent **overlap rule** is marked *enforced* (the evaluator intersects at every layer; the producer resolves the agent principal — #2838/#2843/#2845);\n  - the three agent guardrails are honestly marked: **Ceiling** (the runtime intersection caps it today; the dedicated bind-time *lint* is planned, #2849), **human co-sign** (planned), and **double-signature audit** (planned — the writer stamps only the delegating user; agent provenance is not yet captured).\n- **`docs/adr/0090`** — a status note that D10 evaluation semantics have landed.\n\n## Notes\n\nPure docs + the served SKILL.md string. The `permission-model.md` change is the honest counterpart to the D11 liveness discipline — it stops the design doc from over-claiming agent guardrails that are still on the roadmap while under-claiming the intersection that now ships.\n\n`@objectstack/mcp` suite **66** green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

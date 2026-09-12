@@ -1,0 +1,32 @@
+{
+  "number": 2729,
+  "kind": "issue",
+  "title": "[spec] PROTOCOL_MAJOR (12) drifted from package major (13) — protocol-version lockstep test red on main",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T03:24:26Z",
+  "updated_at": "2026-07-10T03:36:51Z",
+  "closed_at": "2026-07-10T03:36:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2729",
+  "body": "\\`packages/spec/src/kernel/protocol-version.test.ts\\` (\"stays in lockstep with the package major\") 在 origin/main 上红:release PR #2720 把 \\`@objectstack/spec\\` bump 到 13.0.0,但源码里 \\`PROTOCOL_MAJOR\\` 仍是 12。\n\n复现:\n```\ncd packages/spec && npx vitest run src/kernel/protocol-version.test.ts\n# AssertionError: expected 12 to be 13\n```\n\n修复=把 PROTOCOL_MAJOR 提到 13(或按 lockstep 约定应有的机制让 version-packages 时自动同步)。发现于 #2707 相关 PR 的 pre-flight 测试(与该 PR 无关,单独报)。"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 2608,
+  "kind": "pull_request",
+  "title": "fix: wire Studio-authored actions, translations, and runtime sharing rules (#2605, #2591, #2592)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-05T02:37:04Z",
+  "updated_at": "2026-07-05T02:53:14Z",
+  "closed_at": "2026-07-05T02:53:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-05T02:53:12Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2608",
+  "body": "Closes the three open members of the \"declared but never wired\" family tracked in #2605, each following the #2596 authored-hooks template. Fixes #2591, fixes #2592.\n\n## 1. Authored actions now execute (#2605 item 1 — verified broken, then fixed)\n\n`engine.executeAction` reads a map populated **only** from the app bundle at boot; nothing ever registered handlers for `action` metadata. Runtime probe on the live showcase confirmed the gap: `POST /api/v1/actions/showcase_task/probe_authored_action` → `Action not found` even though the row was stored + listed.\n\n- **runtime/AppPlugin** installs a QuickJS-sandboxed default action runner at boot (`engine.setDefaultActionRunner`) — the action-path twin of the #2596 hook body runner. Opt out with `OS_DISABLE_AUTHORED_ACTIONS=1`.\n- **objectql/ObjectQLPlugin** gains `resyncAuthoredActions`: reads active `action` rows **and** actions embedded in authored `object` rows' `actions[]`, unions them with `loadMany('action')` (fresher DB row wins), filters package-artifact actions (AppPlugin owns those — `registerAction` replaces by key, so re-registering would clobber), and registers the rest under `packageId: 'metadata-service'`. Runs at `kernel:ready`, on `metadata:reloaded`, and on `action`/`object` protocol mutations; serialized; full-replace so edits re-register and deletes tear down; a failed read never tears down live registrations.\n\n## 2. Authored translations reach the i18n runtime (#2591)\n\nOnly static bundles (app `bundle.translations`, plugin `translations/`) were ever loaded — a published `translation` item was a dead-end on publish AND after restart.\n\n- Both adapters now carry a **separate authored layer**: `FileI18nAdapter` (service-i18n) and the kernel's in-memory fallback `createMemoryI18n` (core) — the fallback is what dev/standalone stacks actually run, which the runtime probe surfaced (the first cut only patched service-i18n and did nothing on the showcase).\n- The shared sync lives in core (`wireAuthoredTranslationSync` / `readAuthoredTranslationLayer`) and is wired by **both** AppPlugin and I18nServicePlugin with single-owner semantics (first wirer per i18n service instance wins). Locale resolution: `_meta.locale` → top-level `locale` → BCP-47-shaped item name; the name pattern is deliberately narrow so snake_case item names don't classify as locales.\n- **Clear-then-reload**: each sync replaces the authored layer wholesale, so deleted items/keys stop resolving instead of lingering in the deep-merged static map. Authored values win over static bundle values on read.\n\n## 3. Sharing rules created at runtime bind without a restart (#2592)\n\n`bindRuleHooks` was boot-only, and rule authoring is a **data insert** — `metadata:reloaded` never fires — so the first runtime rule for an object with no boot-time rule silently never evaluated.\n\n- **plugin-sharing** binds `afterInsert`/`afterUpdate`/`afterDelete` triggers on `sys_sharing_rule` (own package id `plugin-sharing:rule-rebind`, so the rebind's own `unbindAllRuleHooks` can never tear its triggers down) that re-run the boot bind from a fresh `listRules()`. Serialized so overlapping writes can't leave a stale snapshot bound; awaited so the rule is enforceable when the authoring call returns; fail-safe so a rebind failure never fails the rule write and keeps previous bindings.\n\n## Runtime verification (live showcase server, `objectstack dev --seed-admin`)\n\nThe #2560 lesson — mocked tests pass while the real runtime is broken — so every claim was probed end-to-end:\n\n| Probe | Before | After (no restart) | After restart |\n|---|---|---|---|\n| `PUT /meta/action/...` (script body) → `POST /actions/showcase_task/...` | `Action not found` | body executed: `{ok:true, doubled:42}` | still executes |\n| `PUT /meta/translation/zh-CN` → `GET /i18n/translations/zh-CN` | key absent | `probe_hello = 你好，探针` | still served |\n| `PUT` + `DELETE /meta/translation/fr` | — | live on save, **gone after delete** (clear-then-reload) | — |\n| Create `sys_sharing_rule` for `showcase_contact` (0 rules at boot) → insert matching record | (hook never bound) | `sys_record_share` row written, `reason: rule:probe_share_contacts` | — |\n\n## Tests\n\n- `objectql`: 13 new tests (`plugin-authored-actions.test.ts`) mirroring the #2596 suite; artifact filter, embedded-object shape, union semantics, teardown, failed-read no-op, mutation routing. Full suite 775 green (one pinned-invariant test updated to allow the new narrow `action`/`object` boot reads — object hydration is still asserted NOT to happen).\n- `service-i18n`: 13 new tests (adapter layer semantics + plugin sync wiring); one stale assertion updated (`registerRoutes:false` now asserts \"no routes registered\" instead of \"no hooks at all\"). 48 green.\n- `plugin-sharing`: 6 new tests (`rule-rebind.test.ts`) incl. the exact #2592 repro and rebind serialization.\n- `core`: 302 green; `runtime`: 454 green.\n\n## Residual (called out, not in scope)\n\n- MCP `run_action` / `list_actions` resolve declarations from object schema (`obj.actions`), so a *standalone* authored action executes via the REST route but isn't discoverable via MCP until standalone `action` items are merged into object reads — same declaration-surfacing gap as the Studio-rail listing task (`task_8dd7c8a0`). Object-embedded authored actions are fully covered on both surfaces.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Ag7HEv9FABsCQnVNNcPweH\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Ag7HEv9FABsCQnVNNcPweH)_"
+}

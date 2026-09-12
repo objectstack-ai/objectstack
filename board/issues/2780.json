@@ -1,0 +1,33 @@
+{
+  "number": 2780,
+  "kind": "issue",
+  "title": "feat(messaging/auth): 短信基建（SMS provider + messaging sms channel）+ 手机号 OTP 首登/重置",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T11:36:11Z",
+  "updated_at": "2026-07-10T13:10:57Z",
+  "closed_at": "2026-07-10T13:10:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2780",
+  "body": "## 背景\n\n#2766（PR #2771）接入了 better-auth `phoneNumber` 插件，但**只开了手机号+密码登录**：`sendOTP` 显式抛 `NOT_SUPPORTED`，因为平台目前没有任何短信发送能力——`NotificationChannel` 类型里声明了 `'sms'`（`packages/spec/src/contracts/notification-service.ts:19`），但 `service-messaging` 没有 sms channel 实现，也没有短信 provider 抽象。\n\n无邮箱员工目前的密码找回只能靠管理员 `set-user-password`。OTP 首登/自助重置需要这块基建。\n\n## 诉求\n\n1. **短信 provider 抽象与对接**：参照 email channel 的模式（`packages/services/service-messaging/src/email-channel.ts`，在 provider service 存在时注册 channel），定义 sender surface + 至少一个 provider 实现（阿里云短信 / Twilio，配置走 service-settings 模式）。\n2. **messaging `sms` channel**：注册进 `messaging-service-plugin.ts` 的可插拔 channel 体系，`notify(channels:['sms'])` 可用。\n3. **auth 侧接线**：`auth-manager.ts` 的 `phoneNumber({ sendOTP })` 从抛错改为经 sms channel 发送，打开：\n   - `POST /phone-number/send-otp` + `/phone-number/verify`（OTP 登录/验证）\n   - `POST /phone-number/request-password-reset` + `/phone-number/reset-password`（自助重置）\n4. **导入联动**：`/admin/import-users` 的 `invite` 策略对有手机号的行支持\"短信邀请\"变体（无邮箱员工也能走首登自设密码路径）。\n\n## 安全要求（必须与功能同 PR）\n\n- **OTP 端点限流 + 按号码冷却**（SMS pumping 成本滥用是邮件渠道没有的攻击面）；OTP 尝试次数上限（better-auth `allowedAttempts`）。\n- OTP/验证码绝不落日志。\n- 占位邮箱用户（`placeholder.invalid`）的短信路径与邮件拦截逻辑对齐。\n\n## 相关\n\n- #2766 / PR #2771（phoneNumber 插件接入、占位邮箱、导入端点）\n- #2758（原始批量导入需求）"
+}

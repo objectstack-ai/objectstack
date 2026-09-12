@@ -1,0 +1,32 @@
+{
+  "number": 2700,
+  "kind": "issue",
+  "title": "[平台/DX] 编译期 lint:master-detail 子对象在所有权限集中都无对象级 CRUD 授权时告警",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-09T03:29:12Z",
+  "updated_at": "2026-07-10T03:43:14Z",
+  "closed_at": "2026-07-10T03:43:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2700",
+  "body": "## 背景\n\n下游 App(os-tianshun-mtc)踩了一个静默的 DX 陷阱:master-detail **子对象**在权限集里漏配了对象级 CRUD 授权,导致绑定角色权限集的非 admin 用户**读写不了该子表**,且前端表现为\"子表填不进/提交不了\"而无清晰提示,排查成本高。\n下游 issue:steedos-labs/os-tianshun-mtc#43\n\n## 根因(已核实)\n\n权限模型是两道独立的门(`packages/plugins/plugin-security/src/security-plugin.ts:490-506` → `:772-796`):\n\n1. **门① 对象级 CRUD** —— `checkObjectPermission` 查权限集里对象的 `allowRead/Create/Edit/Delete`;权限集没列该对象 → `return false` → 抛 `PermissionDeniedError`(403)。\n2. **门② 记录级 sharingModel/RLS** —— 过门①后才决定\"哪些记录\"可见可写。\n\nADR-0055 的 `controlled_by_parent` 全部生效在**门②**(读注入 `masterFK IN (可访问主表 id 集)` `security-plugin.ts:1340-1368`;写要求对主表有 edit 权限 `:1384-1443`),**从不派生门①的对象级 CRUD**。dogfood fixture 印证:`cbp_note` 即使声明 `controlled_by_parent`,权限集仍必须显式写全 CRUD(`packages/dogfood/test/fixtures/cbp-fixture.ts:70`)。\n\n所以\"子表访问从主表派生\"仅限**记录级**;**对象级 CRUD 授权仍需逐对象显式给**,漏了就连 cbp 派生逻辑都走不到,门①先挡死。这是刻意的 secure-by-default 语义(与 Salesforce 一致),**不打算改成 CRUD 自动继承**。\n\n## 缺口\n\n现状确认:`packages/cli/src/lint/data-model-rules.ts` 的 R2–R7 与 `packages/lint/src/` 全部 validator,**没有任何一条**检查\"master-detail 子对象在所有权限集中都无对象级 CRUD 授权\"。这类\"疑似漏配\"是**静态可检测**的,但目前编译期不提示,只能等线上踩坑。\n\n## 建议实现\n\n新增编译期 lint 规则(挂进 `data-model-rules.ts`,与 R2–R7 同级;或作为 ADR-0090 D7 \"security-domain publish linter\" 的首批规则):\n\n- **规则名**(暂定):`permission/master-detail-detail-ungranted`\n- **触发条件**:某对象含 `master_detail` 字段(是 detail 对象),且在包内**所有**权限集中都缺该对象的对象级 CRUD 授权(`allowRead/Create/Edit/Delete` 全无)。\n- **级别**:warning(不阻断 build),文案参照现有 liveness/dead-property 告警,提示\"该子对象可能漏配权限——master-detail 的记录级访问从主表派生,但对象级 CRUD 仍需显式授权\"。\n- **可能的误报规避**:仅对确实是 detail(有 required master_detail 字段)的对象生效;若对象根本不该被角色用户访问(纯系统对象)可能产生噪音,视情况加白名单/降级为 info。\n\n## 不在本 issue 范围\n\n- **CRUD 自动继承**(下游建议②):不采纳,违反 secure-by-default。\n- **运行时 403 呈现**:引擎已明确抛 403,\"静默失败\"是 console 前端把 403 吞成空相关列表——属于 objectui 侧,并入 os-tianshun-mtc#37/#41,不在 framework。\n\n## 相关\n\n- ADR-0055(master-detail controlled_by_parent)`docs/adr/0055-master-detail-controlled-by-parent.md`\n- ADR-0090 D7(security-domain publish linter,P3 未实现)`docs/adr/0090-permission-model-v2-concept-convergence.md`\n"
+}

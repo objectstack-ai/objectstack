@@ -1,0 +1,32 @@
+{
+  "number": 2817,
+  "kind": "issue",
+  "title": "feat(identity): ADR-0092 实现 B — sys_user 放开 edit affordance + 表单字段只读治理（依赖 #2816）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-11T02:14:05Z",
+  "updated_at": "2026-07-11T12:20:57Z",
+  "closed_at": "2026-07-11T12:20:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2817",
+  "body": "## 背景\n\nADR-0092 实现第二阶段（D4）。**硬性时序约束（ADR-0049）：本 issue 必须在 #2816 的守卫合并之后才能开工/发布** —— affordance 先于服务端强制上线即\"声明但不强制的安全属性\"。\n\n## 范围（ADR-0092 D4）\n\n**affordance 翻转**\n\n- `sys_user` schema 增加 `userActions: { edit: true }`；create / import / delete 保持 `managedBy: 'better-auth'` 桶默认（关闭）。`managedBy` 标志本身不动（继续驱动守卫、权限集种子、system-field 注入跳过）。\n- 其它身份表的 affordance 一律不动。\n\n**表单字段只读治理**\n\n- 所有非 Tier-1 字段（白名单外）必须在标准编辑表单中渲染为不可编辑。多数 Tier-2/3 列已带 `readonly: true`；余下需处理：`email`、`email_verified`、`two_factor_enabled`、`role`、`banned`、`ban_reason`、`ban_expires`、`ai_access`。\n- ⚠️ 实现前先验证：`email` / `role` 被 action params 引用（`create_user`、`invite_user`、`set_user_role` 的 `{ field: ... }` param）。确认字段级 `readonly: true` 不会连带禁用这些 action 表单的输入框，再在 `readonly` 与表单级排除两种机制间取舍。\n\n**objectui 浏览器验证（dogfood）**\n\n- 起真实后端（showcase），以平台管理员身份：Users 列表出现 Edit 入口 → 编辑他人 `name`/`image` 成功且审计有字段级 before/after 记录 → 表单中 email/role/ban 等字段不可编辑 → 直接 PATCH data API 提交名单外字段被 400/403 拒绝。\n- 以普通成员身份：无 Edit 入口，PATCH 被权限层拒绝；自助路径 `update_my_profile` 不回归。\n- UI 侧如需改动在 `../objectui` 仓库另行 PR，本仓库跑 `pnpm objectui:refresh` 联动。\n\n## 交付物\n\nschema 变更 + 字段只读处理 + dogfood 验证记录 + changeset + 文档更新（identity/user-management guide：平台管理员可表单编辑档案字段，其余走专用 action）。\n\n## 相关\n\n- 依赖：#2816（守卫）· 决策：ADR-0092 · 源 RFC：#2784"
+}

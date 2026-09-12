@@ -1,0 +1,33 @@
+{
+  "number": 2695,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0090 — Permission Model v2: concept convergence, final naming, AI-authoring safety",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-08T17:28:17Z",
+  "updated_at": "2026-07-09T01:09:53Z",
+  "closed_at": "2026-07-09T01:07:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-09T01:07:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2695",
+  "body": "## What\n\nTwo documents, deciding and describing the converged permission model ahead of launch:\n\n- **`docs/adr/0090-permission-model-v2-concept-convergence.md`** — the decision record (Status: Proposed). Twelve decisions:\n  - **D1** — custom objects default to OWD `private`; the unset state ceases to exist (existing metadata grandfathered by explicit stamping, no silent behavior change)\n  - **D2** — the Profile concept is removed (`isProfile` deleted from `PermissionSetSchema`); `isDefault` narrows to an install-time package *suggestion*\n  - **D3** — `sys_role` / `sys_user_role` / `sys_role_permission_set` / `ctx.roles[]` / `current_user.role` renamed to **`position`**; \"role\" becomes a lint-enforced reserved-forbidden word (single exception: better-auth's `sys_member.role`, already projected as `org_membership_level`)\n  - **D4** — OWD enum drops the `read` / `read_write` / `full` aliases; authoring rejects, no lenient parse\n  - **D5** — a built-in, undeletable **`everyone` position** carries default grants: packages suggest, admins confirm, resolution is per-request (abolishes the fallback cliff; no second distribution channel)\n  - **D6** — an **explain engine** is promoted to P0, and an **access-matrix snapshot** gates security-domain publishes with semantic diffs\n  - **D7** — security-domain publish **linter** + tiered human gates (AI may draft anything; it may not silently publish capability)\n  - **D8** — **teams receive sharing and never carry capability** (no permission-set bindings, no record ownership)\n  - **D9** — **audience anchors**: builtin **`guest`** position joins `everyone`; packages suggest bindings to audiences, never ship shared builtin sets; deliberately **no admin anchor** (the superuser wildcard already covers every new package)\n  - **D10** — **principal taxonomy** (`kind: human | agent | service | guest | system`, `audience: internal | external`, `onBehalfOf`): **AI agents act on the intersection** of their own grants and their delegator's, under a lint-enforced ceiling, with human co-sign for destructive operations; services are seatless least-privilege machine identities\n  - **D11** — **external OWD dimension**: optional `externalSharingModel`, default `private`, validated `external ≤ internal`; BU depth inapplicable to externals\n  - **D12** — **delegated administration**: admin scopes (BU subtree + assignable-set allowlist + structural no-self-escalation) so subsidiary admins run their own units without tenant-wide power\n- **`docs/design/permission-model.md`** — the companion **complete reference** for the decided model: the five concepts, the evaluation pipeline, OWD semantics (internal + external dials), a worked CRM-package example (developer story + admin story), the `everyone`/`guest` baselines, plain-language sections on principal kinds (the agent \"overlap rule\") and delegated administration, the AI-safety layers, a \"if you come from Salesforce/Dataverse/ServiceNow/SAP/AWS\" mapping table, and the glossary/naming rules.\n\n## Why\n\nThree forcing facts, argued in the ADR's Context: the pre-launch window is the only zero-cost moment for breaking renames (hence no aliases — explicitly superseding ADR-0057 D5/D7's alias clauses); the metadata is AI-authored, so vocabulary size is attack surface; and a dogfood incident (objectstack-ai/objectui#2348) proved the current \"unset OWD = fully public\" default silently inverts the admin's mental model into org-wide read/write. D9–D12 add the operating-a-large-organization dimension raised in review: universal audiences, AI-agent/service principals, portal users, and subsidiary-scoped administration.\n\n## Relationship to existing ADRs\n\nBuilds on 0049 / 0056 / 0057 / 0066 / 0086. Amends: ADR-0056 D7 (default-profile fallback → replaced by the `everyone` position), ADR-0057 D5/D7 (deprecated-alias discipline → superseded pre-launch). ADR-0057's core (BU tree, scope depth, `sys_user_role` decoupling) is untouched and load-bearing. Six named follow-up ADRs are scoped out explicitly (grant lifecycle/recertification, SoD, scale hardening, dimension restrictions, ALM promotion, portal identity) and tracked on #2696.\n\n## What this PR does NOT do\n\nDocs only — no spec, plugin, or runtime changes. Implementation is phased in the ADR (P1 breaking wave incl. ctx/`externalSharingModel` spec shapes → P2 audience anchors → P3 linter/gates/delegated admin → P4 explain/matrix), each phase with its own proofs per ADR-0054 discipline.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_012oLzaP8n7A3YKFmgaHWC8H"
+}

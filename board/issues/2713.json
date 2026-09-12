@@ -1,0 +1,30 @@
+{
+  "number": 2713,
+  "kind": "issue",
+  "title": "feat(distribution): official Claude Code plugin — one plugin for every deployment",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-09T06:35:39Z",
+  "updated_at": "2026-07-10T03:56:05Z",
+  "closed_at": "2026-07-10T03:56:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2713",
+  "body": "## Context\n\nWith OAuth 2.1 (#2709) and the default-on MCP surface (#2712) merged, any deployment is self-serve connectable: paste the URL, log in through the browser. The remaining friction is *distribution* — users shouldn't need to hand-write MCP config or know what a SKILL.md is.\n\nPer ADR-0036 Amendment C, the cross-agent distributable is ONE generic skill (`packages/mcp/src/skill.ts`, `renderSkillMarkdown`) — schema-free, valid for every deployment. That makes a single official Claude Code plugin sufficient for **all** customers, including private deployments: the deployment URL is the only per-customer input, and OAuth + Dynamic Client Registration handle identity against any deployment with no pre-registered credentials.\n\n## Deliverable\n\nA public plugin repo (proposal: `objectstack-ai/claude-plugin`) installable via `claude plugin marketplace add objectstack-ai/claude-plugin`, containing:\n\n- [ ] `.claude-plugin/plugin.json` — plugin metadata (name `objectstack`, description, version)\n- [ ] `.mcp.json` — bundled MCP server config with env interpolation: `{\"objectstack\": {\"type\": \"http\", \"url\": \"${OBJECTSTACK_MCP_URL}\"}}` — set the env once, connect to your own deployment\n- [ ] `skills/objectstack/SKILL.md` — the generic skill rendered from `renderSkillMarkdown()` (URL placeholder variant)\n- [ ] `commands/connect.md` — `/objectstack:connect` guided command: ask for the deployment URL, run `claude mcp add --transport http <name> <url>` on the user's behalf (supports multiple environments via distinct server names); OAuth login pops automatically\n- [ ] README: install + connect walkthrough for Claude Code, incl. the API-key fallback for headless use\n- [ ] **Sync guard**: CI (here or in the plugin repo) that fails when the plugin's SKILL.md drifts from `@objectstack/mcp`'s `renderSkillMarkdown()` output — `skill.ts` stays the single source\n\n## Non-goals\n\n- No per-app or per-customer artifacts (ADR-0036 Amendment C)\n- claude.ai web users don't need this plugin (custom connector = paste URL); the plugin serves Claude Code/Desktop users\n\nRefs #2698. Companion: the Setup \"Connect an agent\" page (objectui) should link to this plugin as the last step of its Claude Code card.\n"
+}

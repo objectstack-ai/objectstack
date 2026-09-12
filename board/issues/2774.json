@@ -1,0 +1,37 @@
+{
+  "number": 2774,
+  "kind": "pull_request",
+  "title": "feat(security)!: enforce book audience at the REST read layer; finish the ADR-0090 D2/D3 cleanup the P1 wave missed",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T10:34:52Z",
+  "updated_at": "2026-07-10T11:32:35Z",
+  "closed_at": "2026-07-10T11:32:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-10T11:32:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2774",
+  "body": "# Summary\n\nFollow-through on #2732 (book audience `{ permissionSet }` rename). Five threads, all ADR-0090-grounded:\n\n## 1. The read layer now ENFORCES book audience (ADR-0049)\n\nThe gated arm existed but nothing enforced it — an unenforced security property. Now:\n\n- **`/meta/book` (list + item), `/meta/doc` (list + item), `/meta/book/:name/tree`**: anonymous callers see only `public` books/docs; `{ permissionSet }`-gated books require the caller to *hold* the named set; authenticated non-holders get 403, anonymous get 401.\n- **A doc's effective audience is the union over the books that CLAIM it** (ADR-0046 §6.7). Unclaimed docs default to `org`. Deliberate subtlety: the tree renderer's *orphan* pass (\"nothing is ever dropped\") does **not** count as a claim — otherwise any `public` book would leak every unclaimed doc of its package. Tree entries are additionally filtered per-doc, so an anonymous reader of a public book never sees nav entries that would 401 on fetch.\n- **Fail closed** (ADR-0049): when permission-set holdings cannot be resolved (security service absent / resolution throws), gated audiences deny.\n- **`doc`/`book` single-item reads bypass the shared meta cache** — a per-caller gate cannot share ETags across viewers.\n- Plumbing: pure helpers in spec (`audienceAllows`, `resolveDocAudiences`, `docAudienceAllows`, `resolveBookClaimedDocs`) so REST and any future portal shell share ONE semantics; `plugin-security`'s `security` service gains `resolvePermissionSetNames(ctx)` — the same resolution as data-plane enforcement (positions expanded, additive baseline), so the docs gate can never drift from it.\n\n## 2. D2/D3 leftovers — two real regressions found\n\n- `METADATA_FORM_REGISTRY` still had dead `role`/`profile` keys while **the `position` type had LOST its form layout** in the P1 rename → `role:` → `position:`, `profile:` deleted.\n- `metadata`'s `ARTIFACT_FIELD_TO_TYPE` still mapped `roles → 'role'`, which matches nothing since stacks declare `positions` — **compiled positions were silently dropped from artifact ingestion** → `positions → 'position'`.\n- `EnvironmentArtifactMetadataSchema`: `roles`/`profiles` → `positions` (old artifacts still parse via `passthrough()`).\n- Metadata-form translations (en/zh-CN/ja-JP/es-ES): `role`/`profile` groups removed (their copy still taught the pre-D3 hierarchy model), `position` group added, with a vocabulary regression test in platform-objects.\n\n## 3. D3 vocabulary ratchet for docs + source fixes\n\n- New `scripts/check-role-word.mjs` (wired into lint.yml): `\\brole\\b` scan over `content/docs` + `skills` with a **ratchet baseline** — the 45 current files are frozen (many are legitimate: better-auth boundary, ARIA samples, educational \"formerly roles\"); NEW occurrences fail CI; improvements must ratchet the baseline down.\n- `content/docs/ui/role-based-interfaces.mdx` → **`audience-based-interfaces.mdx`** (content was already audience-vocabulary; the URL wasn't), all inbound links updated.\n- Stale permission-vocabulary copy fixed in 5 docs (incl. a reference to the long-renamed `bootstrapDeclaredRoles`); identifier/comment cleanup in `security-plugin.ts`, `bootstrap-declared-positions.ts`, `position.test.ts`, `audit.zod.ts`; `Role` → `Position` in the eslint + check-doc-authoring domain lists (`defineRole` no longer exists).\n\n## 4. Publish lint learns about books\n\n- Book name/label join the `security-role-word` scan (book `audience` is a permission-model reference now).\n- New advisory rule **`security-book-audience-unknown-set`**: a `{ permissionSet }` audience naming a set the stack does not declare. Runtime fails closed — the typo cost is \"nobody can read the book\" — so surface it at author time; `warning` because an environment-authored book may legitimately reference an installed package's set.\n\n## Verification\n\nspec (full), objectql (808), cli (464), rest (227 + 9 new gating tests), metadata (260), platform-objects (76 incl. new vocabulary guard), plugin-security (261), lint (32 incl. 3 new) — all green. eslint, `check:role-word`, `check:doc-authoring`, `check:api-surface` (regenerated), `check:liveness`, `check:skill-docs`, `check-changeset-fixed` all pass. Changeset included (spec major; rest/plugin-security/lint/metadata minor; platform-objects patch).\n\n## Known follow-ups (not in this PR)\n\n- Ratchet the 45-file role-word baseline down incrementally.\n- `AgentSchema.role` (AI persona string) → `persona` — the last substantive source-level exception to the word ban.\n- `resolveBookTree`'s orphan pass is not package-scoped: without a `?package` query, other packages' unclaimed docs join any book's Uncategorized group. The audience gate now bounds the blast radius, but nav correctness deserves its own issue.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Ph4jEAfWDh6taMbZweWhom\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Ph4jEAfWDh6taMbZweWhom)_"
+}

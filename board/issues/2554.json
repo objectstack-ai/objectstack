@@ -1,0 +1,30 @@
+{
+  "number": 2554,
+  "kind": "issue",
+  "title": "expandViewContainer silently renames colliding form view keys (formViews.default → default_2) — form action targets break",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T02:59:10Z",
+  "updated_at": "2026-07-04T12:07:24Z",
+  "closed_at": "2026-07-04T12:07:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2554",
+  "body": "## 现象(P0-19 / P0-8,app-showcase 实测)\n\n`showcase_task` 的 `defineView` 容器里 `formViews.default` 展平后被静默改名为 `showcase_task.default_2`:\n\n```\nGET /api/v1/meta/view?object=showcase_task\n→ showcase_task.default_2 (viewKind: form)   ← 作者写的是 formViews.default\n→ showcase_task.default   (viewKind: list)   ← 主 list 隐式占用了 'default'\n```\n\n结果:form action `target: 'showcase_task.default'`(examples/app-showcase/src/actions/index.ts:120 Log Time)解析到 **list 视图**,`/forms/showcase_task.default` 渲染黑屏(标题取 list 的 \"All Tasks\"、零字段、裸 Submit)。冲突静默发生,build/boot 无任何告警。\n\n## 根因(扫码)\n\n`packages/spec/src/ui/view.zod.ts`:\n\n- `expandViewContainer`(:1183)把 list 与 form 家族展平进**同一个 `<object>.<key>` 命名空间**(共享 `used` 集合);主 `list` 无 name 时隐式占用 key `'default'`(:1205)。\n- `formViews.default` 是最自然的作者写法,展平时必然撞名,被 `uniqueViewName`(:1157-1163)静默加 `_2` 后缀:`while (used.has(name)) name = \\`${base}_${i++}\\``。\n- 两个 loader(`packages/objectql/src/engine.ts:1062`、`packages/metadata/src/plugin.ts:560`)共用该函数,均不输出任何告警。\n\n## 修复方案\n\n1. `expandViewContainer` 在被改名的 `ExpandedViewItem` 上附 `_diagnostics` 警告(既有诊断机制),说明原始 key、实际注册名、以及 action target 会解析到谁。\n2. 两个 loader 检测到改名诊断时输出 `logger.warn`,作者在 dev/boot 日志可见。\n3. app-showcase 示例修正:`formViews.default` 改用不冲突的 key,`LogTimeAction.target` 指向真实存在的 form 视图名。\n\n命名行为本身(`_2` 后缀)保持不变以免破坏既有引用;命名空间分离(list/form 分家)留待 ADR。"
+}

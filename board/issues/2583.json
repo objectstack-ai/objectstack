@@ -1,0 +1,35 @@
+{
+  "number": 2583,
+  "kind": "pull_request",
+  "title": "feat(spec,lint): reject userFilters on object list views (ADR-0053 phase 4)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T14:58:19Z",
+  "updated_at": "2026-07-04T15:51:22Z",
+  "closed_at": "2026-07-04T15:51:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-04T15:51:20Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2583",
+  "body": "Lands the **ADR-0053 phase-4 guardrail**: `userFilters` / `quickFilters` are reserved for page lists (`InterfaceListPage`, \"filters\" mode). On an **object list view** (\"views\" mode — where the `ViewTabBar` is the only nav control) they were **silently dropped** at every layer. The runtime suppression is correct, but the schema still accepted the field, so an author (human or AI) got a valid schema, a passing build, and a toolbar with nothing where the filter controls should be.\n\nThis is the framework/schema half of the fix. objectui [#2219](https://github.com/objectstack-ai/objectui/issues/2219) tracks the issue; objectui [#2220](https://github.com/objectstack-ai/objectui/pull/2220) shipped the interim **runtime `console.warn`** that this guardrail supersedes.\n\n## Design — layered defence (no runtime break)\n\nThe hard constraint from ADR-0053 is **no `mode` discriminator**: the mode is decided by *context* (object list → views; page list → filters), so a single schema can't tell which context it's in. The fix splits across three layers:\n\n| Layer | Mechanism | Effect |\n|-------|-----------|--------|\n| **Type (author time)** | `ObjectListViewSchema = ListViewSchema.omit({ userFilters })`; object built-in `listViews` + `defineView` `list`/`listViews` use it | `userFilters` on an object list view is a **`tsc` error** — the primary defence for AI-authored `.ts` |\n| **Runtime (back-compat)** | default **strip** (no `.strict`), so a stray `userFilters` is dropped at parse | `ObjectSchema.parse` **never throws** — existing metadata keeps loading, no line-side break |\n| **Author / CI** | new `@objectstack/lint` `validateListViewMode`, wired into `os validate` | reports the wrong-context field **PRE-parse** (before the schema strips it) with a fix hint, for the AI self-correction loop |\n\nThe full `ListViewSchema` used by page lists (\"filters\" mode) is **untouched** — page `userFilters` stays valid.\n\n### Why lint runs pre-parse\n`ObjectStackDefinitionSchema.objects` deep-parses through `ObjectSchema`, so once the schema strips `userFilters`, a post-parse stack no longer has it. The rule therefore runs on the `normalizeStackInput` output (pre-parse), where the field is still present. Confirmed `normalizeStackInput` preserves it.\n\n## Changes\n- `spec/src/ui/view.zod.ts` — new `ObjectListViewSchema`; `ViewSchema.list` / `listViews` use it.\n- `spec/src/data/object.zod.ts` — object built-in `listViews` uses it.\n- `lint/src/validate-list-view-mode.ts` (+ export) — new rule, scans `objects[*].listViews`, `views[*].list`, `views[*].listViews`.\n- `cli/src/commands/validate.ts` — wires the rule into `os validate` (on `normalized`, pre-parse).\n\n## Testing\n- **spec**: 6673 tests green (incl. 4 new — strip-not-throw, shape omits `userFilters`, page schema still accepts it). **Zero regressions**, so nothing depended on object `listViews` keeping `userFilters`.\n- **lint**: 122 tests green (incl. 6 new — object/view context hits, quickFilters, array + name-keyed-map forms, clean stack stays silent).\n- **build**: `turbo run build --filter=@objectstack/cli...` — 54 pkgs, `tsc` typecheck green.\n- **e2e**: `normalizeStackInput` → `validateListViewMode` catches both array (`objects`) and map (`views`) forms.\n\n## Rollout\nNeeds a `@objectstack/spec` release before objectui can bump and consume the tightened schema; objectui's runtime warn (#2220) already covers the gap in the meantime. objectui's hand-written mirror (`packages/types`) is intentionally **not** switched to import spec here — the two `ListViewSchema` copies have drifted and that's a separate migration.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

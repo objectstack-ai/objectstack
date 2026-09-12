@@ -1,0 +1,35 @@
+{
+  "number": 2846,
+  "kind": "pull_request",
+  "title": "feat(platform-objects): surface sys_user admin actions on the record-detail header",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-11T15:51:04Z",
+  "updated_at": "2026-07-11T15:59:22Z",
+  "closed_at": "2026-07-11T15:59:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-11T15:59:21Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2846",
+  "body": "## Problem\n\nA platform admin viewing an open **user record** could not run the account-management actions — Ban/Unban, Unlock Account, Set Password, Set Platform Role, Impersonate. They were declared `locations: ['list_item']` only, so they appeared **only in the Users list row menu**. To reset a password or impersonate, the admin had to navigate back to the Users list and find the row. (Surfaced by a Setup-app review.)\n\n## Change\n\nAdd `record_header` to each of those six admin actions in `sys-user.object.ts`, so they also render on the user record-detail header — overflowing into the ⋯ \"More\" menu.\n\n**No objectui change is required.** The detail page already:\n- renders `record_header` actions and overflows extras past the 3rd into the \"More\" menu (`action-bar.tsx`),\n- injects `userId` from the viewed record (`RecordDetailView` apiHandler, `pageRecord.id`),\n- drives the param / confirm / result dialogs (Set Password's temp-password reveal, Impersonate's confirm, etc.).\n\n`record_header` is deliberately the string used: it is the **only** detail-surface location objectui consumes (it does not read `record_more`).\n\n## Test\n\n`pnpm --filter @objectstack/platform-objects exec vitest run src/platform-objects.test.ts` → **65/65 pass**, incl. the new assertion that each admin action carries both `list_item` and `record_header`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

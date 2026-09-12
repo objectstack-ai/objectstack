@@ -1,0 +1,34 @@
+{
+  "number": 2882,
+  "kind": "pull_request",
+  "title": "fix(auth): bind admin-created users to the sole organization",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-13T11:50:09Z",
+  "updated_at": "2026-07-13T13:38:31Z",
+  "closed_at": "2026-07-13T13:38:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-13T13:38:29Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2882",
+  "body": "## Problem\n\nCreating a user via **Setup → Users → Create User** (`POST /api/v1/auth/admin/create-user`) built a login-capable account but never wrote a `sys_member` row. The invite (`organization/invite-member`) and add-member (`organization/add-member`) flows *do* create membership. So the two \"add a teammate\" paths diverged: in a single-org deployment the admin-created user did **not** \"belong to\" the Default Organization and was missing from the Members list — while invited users showed up. That inconsistency is what this PR resolves.\n\nNote: in single-org mode membership does not gate data access (no `OrgScopingPlugin`, the `tenant_isolation` RLS wildcard is stripped — RBAC permission sets gate access), so this was a UX/consistency wart, not a security hole. But the missing membership was still confusing and out of step with the invite flow.\n\n## Change\n\n### 1. Tactical fix — `runAdminCreateUser` binds membership\n\n`runAdminCreateUser` now binds the newly-created user to the organization **when it is unambiguous** — i.e. exactly one `sys_organization` exists (single-org, including plugin-auth's default-org bootstrap, ADR-0081 D1):\n\n- **Single-org (1 org):** insert `sys_member { organization_id, user_id, role: 'member' }`.\n- **Multi-org (≥2 orgs):** no-op — the active-org-aware invite / add-member endpoints own membership there, and guessing an org from this header-less server call would risk the wrong one.\n- **Zero orgs (org capability off):** no-op.\n\nThe bind is:\n- **idempotent** — checks for an existing `(organization_id, user_id)` membership before inserting, so retries/races don't trip the unique index;\n- **best-effort** — a failure logs a warning and never fails account creation;\n- **observable** — the outcome is surfaced in the response `data` and the audit metadata (`organizationId`, `membershipCreated`).\n\nThis mirrors the existing pattern in `ensure-default-organization.ts`, which already inserts `sys_member` directly under a system context.\n\n### 2. Strategic proposal — ADR-0093 (Proposed)\n\nThe bug is one instance of two structural gaps, so this PR also carries the ADR that proposes closing them for good:\n\n**`docs/adr/0093-tenancy-mode-and-membership-lifecycle.md`** — *Tenancy mode as a first-class capability, and a single owner for the user→membership lifecycle.* Key decisions (Proposed, for review):\n\n- **D1/D2** — the \"every new user gets a membership\" invariant gets ONE owner: a membership reconciler composed into better-auth's `user.create.after` hook (covers create-user, import-users, signup, SSO JIT — present and future paths), with an explicit `membershipPolicy: 'auto' | 'invite-only'`. Host hooks chain first and win; the reconciler yields to existing memberships.\n- **D3/D4** — a `tenancy` kernel service (`mode`, `isolationActive`, `requested`, `degraded`, `defaultOrgId()`) becomes the single source of truth, retiring the four ambient signals (env flag, `org-scoping` probe, org row-counting — including this PR's own heuristic — and frontend feature flags re-derivation).\n- **D5** — the silent degraded state (`OS_MULTI_ORG_ENABLED=true` but `@objectstack/organizations` missing → tenant RLS stripped with only a console warning) **fails fast** at boot, with an explicit `OS_ALLOW_DEGRADED_TENANCY=1` escape hatch that brands the deployment degraded end-to-end.\n- **D6** — bounded idempotent backfill for pre-existing member-less users (single-org only).\n- **D8** — explicit non-goals: single-org membership still does not gate data access; RLS strip semantics and the dual feature flags keep their meaning.\n\nPhase 2 of the ADR retires this PR's endpoint-level bind in favor of the reconciler; the two are safely double-covered in the interim (both idempotent, both yield-to-existing).\n\n## Files\n\n- `packages/plugins/plugin-auth/src/admin-user-endpoints.ts` — add `bindUserToSoleOrganization` (+ `findRows` / `genMemberId` helpers), an optional `find` on the `AdminUserDataEngine` surface, and wire the bind into `runAdminCreateUser`.\n- `packages/plugins/plugin-auth/src/admin-user-endpoints.test.ts` — cover single-org bind, multi-org no-op, idempotency, bind-failure isolation, and the no-`find` no-op.\n- `docs/adr/0093-tenancy-mode-and-membership-lifecycle.md` — the strategic proposal above (Status: Proposed).\n\n## Testing\n\n- `vitest run src/admin-user-endpoints.test.ts` → **29 passed** (24 existing + 5 new).\n- The endpoint wiring (`auth-plugin.ts`) already passes the full ObjectQL engine through `getDataEngine()`, which exposes `find`, so no route change was needed.\n\n## Out of scope / follow-up\n\n- The bulk **import-users** flow (`admin-import-users.ts`) creates users the same way; per ADR-0093 Phase 2 it gets covered by the reconciler rather than another endpoint-level patch.\n- ADR-0093 Phases 1–3 (tenancy service, fail-fast, reconciler, backfill) land as separate PRs once the ADR is accepted.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01XbLd2KKeVs39EztDYMQ1YU"
+}

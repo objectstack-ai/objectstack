@@ -1,0 +1,32 @@
+{
+  "number": 2548,
+  "kind": "pull_request",
+  "title": "demo(app-showcase): 批量编辑增强的可操作示例(多选/日期/可搜索选人)(#2185)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-03T14:38:54Z",
+  "updated_at": "2026-07-03T14:58:22Z",
+  "closed_at": "2026-07-03T14:58:20Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-07-03T14:58:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2548",
+  "body": "## 目的\n\n给 objectui #2185 的批量编辑增强(多选/日期控件、单选可搜索选人组件)在 framework 的 `examples/app-showcase` 里加一套**可真实操作**的示例,方便 dogfood 和回归。对应 objectui 侧:PR #2186(已合并)+ #2190(嵌套下拉/选人组件的关闭行为修复)。\n\n## 改动\n\n**`examples/app-showcase/src/objects/project.object.ts`**\n- 新增 `labels`(多选,固定选项)\n- 新增 `team_members: Field.user({ multiple: true })`\n\n**`examples/app-showcase/src/views/project.view.ts`** — Project 列表网格上加了四个 `bulkActionDefs`,每个都覆盖 #2185 新增的一种控件:\n- **Set Labels** → `select` 多选(固定选项)\n- **Assign Team** → `lookup` 多选(用户;数组补丁)\n- **Reassign Account** → `lookup` 单选(可搜索的 reference 选人组件,不是裸下拉)\n- **Reschedule** → 新的 `date` 控件 + 单选 `select` 同屏\n\n## 验证\n\n在 `objectstack dev` 起的 showcase 上,用真实后端逐个跑通并查库核对持久化:\n\n- Set Labels:`labels: [\"frontend\",\"devops\"]` 落到 5 行 ✓\n- Assign Team:`team_members` 数组落到 5 行 ✓\n- Reassign Account:`account` 单值(非数组)落到 5 行 ✓\n- Reschedule:`end_date: \"2026-12-31\"` 落到 5 行 ✓\n\n> 注:此 PR 只含 showcase 示例源码(objects/views),不含任何 `dist` 构建产物。\n"
+}

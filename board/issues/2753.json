@@ -1,0 +1,30 @@
+{
+  "number": 2753,
+  "kind": "issue",
+  "title": "Builtin member_default carries anchor-forbidden bits — every boot logs 'refusing to bind fallback set to everyone' (platform baseline violates its own D5 tier)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T08:20:42Z",
+  "updated_at": "2026-07-10T10:47:31Z",
+  "closed_at": "2026-07-10T10:47:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2753",
+  "body": "## Observed\n\nEvery kernel boot logs:\n\n```\nWARN [security] refusing to bind fallback set to everyone — high-privilege bits {\"set\":\"member_default\",\"offending\":\"delete/purge/transfer on '*'\"}\n```\n\nThe built-in `member_default` (packages/plugins/plugin-security/src/objects/default-permission-sets.ts) grants `'*'` wildcard write bits that `describeHighPrivilegeBits` correctly classifies as anchor-forbidden (ADR-0090 D5) — so the runtime refuses to bind the platform's OWN default baseline to the `everyone` anchor, and it only takes effect through the separate `fallbackPermissionSet` append in `resolvePermissionSetsForContext`.\n\n## Why it matters\n\n- The additive-baseline story (D5: \"what new users get ≡ what is bound to `everyone`\") is broken for the default deployment: the baseline flows through a second, anchor-invisible channel — exactly the \"second distribution channel\" D5 rejected. Explain (D6) attributes it as a fallback, not an `everyone` binding.\n- The platform ships a default that its own publish linter would reject from any package author.\n\n## Fix direction\n\nRestructure `member_default` to be anchor-bindable: drop the `'*'` `allowDelete`/`allowPurge`/`allowTransfer` bits (owner-scoped delete via the existing owner-RLS'd explicit grants where genuinely needed), then bind it to `everyone` at bootstrap and retire the fallback append (or keep it only as the empty-resolution fail-safe). Blast radius: several dogfood tests exercise member owner-writes via the wildcard — they should keep passing via owner-RLS'd explicit grants; the change must be proven with the P2 grant-liveness e2e.\n\nFound while browser-verifying the ADR-0090 permission zoo (#2739/#2745)."
+}

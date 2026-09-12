@@ -1,0 +1,30 @@
+{
+  "number": 2669,
+  "kind": "issue",
+  "title": "plugin-approvals: role 审批人对权限集业务角色静默失效（落到无人），建议解析或至少 build 告警",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "lizheng-steedos",
+    "id": 151509384,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-07T03:48:58Z",
+  "updated_at": "2026-07-14T05:51:00Z",
+  "closed_at": "2026-07-14T05:51:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2669",
+  "body": "## 背景\n\n在一个真实 CRM 应用（线索→商机→报价 全流程审批）中，多个审批 Flow 用 `{ type: 'role', value: '<业务角色>' }` 作为审批人，例如：\n\n- `quotation_approval` → `{ type: 'role', value: 'sales_director' }`\n- `opportunity_close_approval` → `{ type: 'role', value: 'line_manager' }`\n\n这些业务角色（`sales_director` / `line_manager`）是通过**权限集**实现的（`defineStack({ roles, permissions })` / `sys_permission_set` / `sys_user_permission_set`），不是 better-auth 的 `sys_member.role`。\n\n## 问题\n\nplugin-approvals 的 `role` 审批人解析走 better-auth 的 `sys_member.role`（只有 `owner` / `admin` / `member`）。业务角色解析不到时会 **fallback 成字面量**——审批请求的 `pending_approvers` 实际是 `[\"role:sales_director\"]` 这样的字符串，**路由不到任何真实用户** → 审批中心空白、审批永久卡住。\n\n关键在于**静默**：`os build` / `os validate` 不报错，运行时也不报错，审批请求照常生成，只是没有人能处理它。属于 #2605 “declared but never wired / silently does nothing” 家族。\n\n## 复现（已在真实应用 + 隔离实例验证）\n\n1. 用权限集定义业务角色 `sales_director`（非 better-auth member role）。\n2. 审批节点：`config.approvers = [{ type: 'role', value: 'sales_director' }]`。\n3. 触发审批 → `GET /api/v1/approvals/requests` 里该请求 `pending_approvers = [\"role:sales_director\"]`（字面量，非 user id）。\n4. 拥有该业务角色的真实用户在“待我审批”里**看不到**这条。\n\n对照组：改成 `{ type: 'team', value: 'team_sales_director' }`（#1519 引入的 team 类型）→ `pending_approvers` 为真实 user id（如 `qXWF39k5uzW58DC44LJycTWFZ1MSFYgT`），正常路由。\n\n## 影响\n\n- 任何以业务角色作审批人的 Flow 都会静默路由到无人。本项目里就有 **2 个既有 Flow**（`quotation_approval`、`opportunity_close_approval`）因此实际失效。\n- 排查成本高：全程无任何报错，表现像“审批系统坏了”。\n\n## 建议\n\n1. **首选**：`role` 审批人也解析应用侧角色模型（`defineStack({ roles })` / 权限集绑定 `sys_user_permission_set`），而不仅是 better-auth member role。\n2. **至少**：`os build` / `os validate` 阶段，当 `role` 审批人的 value 解析不到任何可路由主体时发出告警（对齐 #2605 的治理方向）。\n3. **文档**：明确 `role` 仅认 better-auth member role，业务角色请用 `team` / `department`。\n\n## 相关\n\n- #1519 platform/org-independent approver type（加了 `team`，是目前的绕法）\n- #2605 silently-does-nothing 家族\n"
+}

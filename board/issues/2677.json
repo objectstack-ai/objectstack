@@ -1,0 +1,35 @@
+{
+  "number": 2677,
+  "kind": "pull_request",
+  "title": "feat(automation): notify node click-through target (source_object/source_id) (#2675)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-07T13:47:47Z",
+  "updated_at": "2026-07-07T14:07:38Z",
+  "closed_at": "2026-07-07T14:07:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-07T14:07:36Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2677",
+  "body": "## 问题\n\nFixes #2675.\n\nFlow 的 `notify` 节点无法给通知附带点击跳转目标——生成的 `sys_notification.source_object` / `source_id` 恒为 `null`，inbox 里点通知无处可跳。节点此前只消费 `recipients` / `title` / `message` / `channels`，写出的 payload 只有 `{ title, body }`。\n\n根因很窄：下游 messaging 服务的 `emit()` **早已支持** `source: { object, id }` / `actorId`，会把它们写进 `sys_notification.source_object` / `source_id` / `actor_id`，并在无显式 URL 时合成 `/{object}/{id}` 的 inbox 深链（`actionUrlFor`）。缺口只在 **notify 节点从不把这些从 config 转发进 `emit()`**。\n\n## 改动\n\n`packages/services/service-automation/src/builtin/notify-node.ts`:\n\n- 从 config 读取跳转目标并转发给 `messaging.emit({ source, actorId })`：\n  - 扁平键 `sourceObject` / `sourceId`(canonical，对齐 DB 列名)\n  - 或嵌套 `source: { object, id }`(对齐 emit 契约)\n  - `actorId`\n- 两个键都走 `interpolate`，支持 `sourceId: '{new_quotation.id}'` 这类流程变量。\n- **半指定即丢弃**(只给 object 不给 id，或反之)——inbox 绝不渲染死链。\n- 显式 `actionUrl` / `url` 仍优先于合成链;新增 `url` 作为 `actionUrl` 别名。\n- 给 descriptor 补 `configSchema`,让 Studio 表单可发现这些键(不加 `required`,不锁死额外键——纯 discoverability)。\n\n用法(即 issue 的期望):\n\n```ts\n{ type: 'notify', config: {\n  recipients: ['{record.sales_person}'],\n  title: '转报价申请已通过',\n  message: '…请到报价单补全明细',\n  channels: ['inbox'],\n  sourceObject: 'mtc_quotation',\n  sourceId: '{new_quotation.id}',\n  // 或显式 url: '/…/mtc_quotation/record/{new_quotation.id}'\n}}\n```\n\n## 验证\n\n- 新增 4 个 notify 节点单测(sourceObject/sourceId 转发+插值、嵌套 `source` 形式 + actorId、半指定丢弃、`url` 别名)。\n- `service-automation` 全套 **256 passed**;`service-messaging` `emit()` 已有测试覆盖 `source` → `source_object`/`source_id` 落库 + `/{object}/{id}` 深链合成,整条链路端到端有据。\n- 包 build(tsup + DTS 严格类型门)通过。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

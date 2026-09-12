@@ -1,0 +1,30 @@
+{
+  "number": 2724,
+  "kind": "issue",
+  "title": "ADR-0090 D3 leftovers in plugin-sharing: sys_record_share `role` recipient enum + \"角色及下级\" translations",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T03:16:33Z",
+  "updated_at": "2026-07-10T05:31:40Z",
+  "closed_at": "2026-07-10T05:31:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2724",
+  "body": "## What\n\nTwo D3 (word-ban / rename) leftovers in \\`packages/plugins/plugin-sharing\\`:\n\n1. \\`src/objects/sys-record-share.object.ts\\` (~L138): the \\`recipient_type\\` enum is still \\`['user', 'group', 'role', 'unit_and_subordinates', 'guest']\\` — the sharing recipient rename (\\`role\\` → \\`position\\`, ADR-0090 D3) reached \\`sys_sharing_rule\\` but not the share-grant table. Stored rows may carry the old value, so this needs a data migration pass, not just an enum edit.\n2. Generated translations still label \\`unit_and_subordinates\\` as \"角色及下级\" (zh-CN) / \"ロールと下位階層\" (ja-JP) — \"role\" vocabulary in UI copy, which D3 bans. Source label fix + \\`i18n-extract\\` regeneration.\n\n## Fix\n\n- Migrate \\`sys_record_share.recipient_type\\` \\`'role'\\` → \\`'position'\\` (enum + stamped rows) in the same style as the D1/D4 grandfathering pass.\n- Update the field labels/descriptions and regenerate the plugin's translation bundles (\"业务单元及下级\" /「ビジネスユニットと下位階層」).\n\nFound while aligning docs + showcase to ADR-0090 (P4 follow-up)."
+}

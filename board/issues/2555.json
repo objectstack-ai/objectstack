@@ -1,0 +1,30 @@
+{
+  "number": 2555,
+  "kind": "issue",
+  "title": "Runtime view overlay drops viewKind/object — one grid sort permanently removes the view from the switcher",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T02:59:29Z",
+  "updated_at": "2026-07-04T12:01:43Z",
+  "closed_at": "2026-07-04T12:01:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2555",
+  "body": "## 现象(app-showcase 3777 实测)\n\n用户在 console 网格上点一次列排序(或行内编辑等触发视图个性化保存的操作)后,该视图从视图切换器**永久消失**:\n\n- `sys_metadata` 出现 `type=view, name=showcase_task.default` 的 runtime 行,内容是 console PUT 回写的 raw view config(带 `sort:[{id:\"29200fa8-…\",field:\"estimate_hours\",order:\"desc\"}]`),**没有 `viewKind`/`object` 顶层字段**。\n- `GET /api/v1/meta/view?object=showcase_task` 从 17 项掉到 15 项:`showcase_task.default`、`showcase_task.grid` 消失。\n\n## 根因(扫码)\n\n1. **写路径**:`packages/metadata-protocol/src/protocol.ts:317` `normalizeViewMetadata` 只补 `name`,不补 `viewKind`/`object`;`saveMetaItem`(:3501)将 client 发来的 raw item 原样落 `sys_metadata`(:3779 repo.put,无 merge)。\n2. **读路径**:`getMetaItems`(:1155)把 sys_metadata 行按 name **整条替换**内存注册表中 package 层的展平条目(:1243 `byName.set(data.name, data)`),仅补 `_packageId` —— 展平条目上的 `viewKind: 'list'`、`object` 就此丢失。\n3. **消费端**:视图切换器端点 `packages/rest/src/rest-server.ts:2348` 过滤 `v.viewKind && v.object === obj` —— 缺 viewKind 的覆盖行被滤掉,视图从切换器消失。\n\n## 修复方案\n\n- **写路径**(治本):`saveMetaItem` 保存 record-form 的 view(非 defineView 容器)时,若缺 `viewKind`/`object`,从注册表现有同名条目继承这两个身份字段后再持久化。\n- **读路径**(治已损坏数据):`getMetaItems` 合并循环中,type=view 且 DB 行缺 `viewKind` 而被覆盖的注册表条目有,则继承 `viewKind`/`object`,其余字段仍以 DB 行为准。"
+}

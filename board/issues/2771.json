@@ -1,0 +1,36 @@
+{
+  "number": 2771,
+  "kind": "pull_request",
+  "title": "feat(auth): 管理员直建用户 + 手机号登录 + sys_user 批量导入（#2766 V1/V1.5/V2）",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T10:24:15Z",
+  "updated_at": "2026-07-10T11:42:26Z",
+  "closed_at": "2026-07-10T11:42:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-10T11:42:23Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2771",
+  "body": "Implements #2766 (re-scoped from #2758) in three staged commits on one branch.\n\n## V1 — Admin direct user management（不依赖邮件的建号路径）\n\n- **`POST /api/v1/auth/admin/create-user`** — ADR-0068 platform-admin gate, then a trusted header-less `auth.api.createUser` call so the account goes through the better-auth pipeline (scrypt hash + credential `sys_account`). Supports an explicit password (complexity-checked) or a generated temporary password returned **once** in the response.\n- **`POST /api/v1/auth/admin/set-user-password`** — intentionally shadows the stock better-auth route (registered before the catch-all): the stock handler only honors the legacy `role === 'admin'` scalar, which ADR-0068 platform admins may not carry. Mirrors the stock hash + credential-account core through `$context`, adds generate-password + must-change stamping.\n- **`sys_user.must_change_password`** + a `computeAuthGate()` branch reusing the `PASSWORD_EXPIRED` code, so the existing 403 transport seams and the Console change-password redirect apply unchanged (ADR-0069). Cleared by `stampPasswordChangedAt` on any completed password change. Gate activation uses a lazy-TTL \"any flagged user\" cache mirroring `_orgMfaCache` — zero hot-path cost for deployments that never use the feature; primed synchronously on the issuing node.\n- New `create_user` action + upgraded `set_user_password` action on `sys_user` (pure schema; `resultDialog` one-shot reveal for the temporary password; zero frontend code).\n- `features.admin` now mirrors `enabled.admin` (SCIM forces the admin plugin on per ADR-0071; previously advertised `false` in SCIM deployments).\n- Explicit best-effort `sys_audit_log` rows — better-auth writes bypass the ObjectQL lifecycle hooks plugin-audit subscribes to.\n\n## V1.5 — phoneNumber plugin + placeholder emails（无邮箱员工可建号可登录）\n\n- better-auth `phoneNumber` plugin behind opt-in `auth.plugins.phoneNumber`; **phone+password sign-in only** (`POST /sign-in/phone-number`). `sendOTP` throws `NOT_SUPPORTED` — the OTP surface needs SMS infrastructure tracked separately.\n- `sys_user.phone_number` (unique) / `phone_number_verified`, snake_case-mapped via `buildPhoneNumberPluginSchema()`.\n- Phone-only accounts get a placeholder email `u-<random base32>@placeholder.invalid` — RFC 2606 reserved TLD (physically undeliverable), local part **never derived from the phone number** (`sys_user` has `exportCsv` enabled; the email column spreads). Every mail callback (reset / invitation / magic link) refuses placeholder recipients with an explicit `PLACEHOLDER_EMAIL` error.\n- Hardening ride-along: invitation/magic-link \"no email service\" warn logs no longer print bearer URLs outside dev.\n\n## V2 — `POST /api/v1/auth/admin/import-users`（身份专用批量导入）\n\n- Reuses the generic import **framework** — `prepareImportRequest` (rows[]/csv/xlsxBase64 + mapping; extracted from rest-server.ts in its own refactor commit, behavior unchanged) and the `runImport` row engine (dryRun / upsert matching / row results) — with an identity `ImportProtocolLike` whose `createData` drives `auth.api.createUser` per row. The generic `/data/sys_user/import` path stays closed (ObjectQL direct writes can't produce credentials).\n- `passwordPolicy: 'invite'` — rows need a real email (row-level `INVITE_REQUIRES_EMAIL` at validation/dryRun; request-level 400 without an EmailService); created accounts get a set-your-password reset email; email failure marks the row `INVITE_EMAIL_FAILED` (created, not rolled back).\n- `passwordPolicy: 'temporary'` — per-row generated passwords returned **once** in the response; `must_change_password` stamped. **Red-line tests assert no password ever reaches audit rows, logs, or any persisted surface.**\n- `mode: insert|upsert`, `matchBy: email|phone`; upsert updates touch **profile fields only** (`name`/`phone_number`/`role`) — never email, never credentials — so a re-imported CSV can't silently reset existing users' passwords. Blank match keys skip instead of creating duplicates. Imported `password` columns are ignored (pre-hashed migration is explicitly out of scope, per #2766).\n- Sync only, ≤500 rows/request (scrypt ~100ms/row). `async: true` returns `ASYNC_NOT_SUPPORTED` with batching guidance — an async job result is a persistence surface and cannot carry temporary passwords; the async invite-flow job is a tracked follow-up. **No undo by design** (undo = bulk-deleting users).\n\n## Testing\n\n- 353 tests across the touched packages (`plugin-auth` 339, incl. 14 new import tests + red-line no-password-leak assertions; `rest` 227 with the existing import-integration suite as the extraction regression gate; `spec` 6676; `platform-objects` 71) — all green via `turbo run test`.\n- `tsc --noEmit` clean for plugin-auth; rest has two pre-existing unrelated errors in `package-routes.ts` (untouched).\n\n## Runtime-verify notes for reviewers\n\n- `auth.api.createUser` header-less trusted-call semantics and `requestPasswordReset` were verified against the installed `better-auth@1.6.23` dist.\n- `data: { phoneNumber }` on createUser persisting the plugin schema field is the documented carrier for plugin user-model fields; worth one end-to-end smoke on a real DB alongside the `must_change_password` 403 → change-password → clear loop.\n\nRef #2766, #2758. Related: #2756 (username sign-in, orthogonal), #2504/#2460 (generic import framework, reused here).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016r6eiJzivw1CkwTDSGho1o\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016r6eiJzivw1CkwTDSGho1o)_"
+}

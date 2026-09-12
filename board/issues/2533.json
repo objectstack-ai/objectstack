@@ -1,0 +1,34 @@
+{
+  "number": 2533,
+  "kind": "pull_request",
+  "title": "feat(setup): Packages entry in Setup's Apps group",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-03T05:19:46Z",
+  "updated_at": "2026-07-03T05:26:16Z",
+  "closed_at": "2026-07-03T05:26:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-03T05:26:14Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2533",
+  "body": "Companion to objectui#2176 (Home builder cover + builder→app bridge), implementing the settled journey split: **Home cover = creation, /studio = 设计界面, the app = published front-end, Setup = administration**.\n\nPackage administration is an operator concern (ADR-0084: packages are Operate, out of the builder) — so `group_apps` in the Setup app gains a **Packages** entry bound to the console's existing `developer:packages` page, alongside the capability-plugin marketplace entries (Browse Marketplace / Installed Apps / Cloud Connection).\n\nPer owner direction the classic Studio app is **not** removed in this step.\n\n**Browser-verified** (worktree build, fresh db): Setup › Apps shows Packages first; the page renders (package list + New Package + Import). `platform-objects` tests **63/63** green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

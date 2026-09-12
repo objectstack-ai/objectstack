@@ -1,0 +1,35 @@
+{
+  "number": 2553,
+  "kind": "pull_request",
+  "title": "fix(objectql): enforce array shape for multi-value fields in the write pipeline",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T01:40:14Z",
+  "updated_at": "2026-07-04T02:52:32Z",
+  "closed_at": "2026-07-04T02:52:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-04T02:52:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2553",
+  "body": "Closes #2552\n\n## Problem (scanned from source, verified via REST e2e)\n\nThe write pipeline stored a lone scalar sent at a multi-value field **verbatim** — `PATCH { labels: \"frontend\" }` at a `multiselect` returned 200 and the column read back as a string, silently corrupting the array shape for every consumer. Found via the console bulk-edit dialog (pre-#2186 objectui sent scalars for multi params), but the server-side hole accepts it from ANY client.\n\nWorse, `select`+`multiple` mis-rejected **legal arrays**: the single-select validation branch (`record-validator.ts`) stringified `[\"a\",\"b\"]` to `\"a,b\"` and threw `invalid_option`.\n\nScan also confirmed the runtime expands `Field.user` to `type: 'user'` (NOT `'lookup'`) — e2e against the showcase `team_members` field caught that a lookup-only type set missed it. Per `packages/spec/src/data/field.zod.ts:377`, `multiple` applies to select/lookup/file/image, and `user` is stored identically to `lookup`.\n\n## Fix (`@objectstack/objectql`)\n\n- **`normalizeMultiValueFields`** (new, called at all 4 validateRecord call-sites in `engine.ts`): coerces unambiguous scalars (string/number/boolean) into single-element arrays IN PLACE before validation, for `multiselect`/`checkboxes`/`tags` and `select`/`radio`/`lookup`/`user`/`file`/`image` with `multiple: true`.\n- **`validateRecord`**: multi-value fields must now be arrays — anything un-wrappable (plain objects, junk) is rejected with a new `invalid_type` code instead of hitting storage. Array **elements** are still validated against `options`; reference/attachment types skip options (integrity handled elsewhere).\n- Single `select`/`radio` branch now guarded with `multiple !== true`, fixing the legal-array mis-rejection.\n\n## Tests\n\n- Unit: `record-validator.test.ts` — normalization, shape rejection, element option checks, single-select non-regression (incl. `user`/`file` types).\n- Engine-level: `engine-multivalue-normalize.test.ts` (new) — asserts on **what the driver receives** across insert/update for all covered types.\n- Full `@objectstack/objectql` suite: 59 files / 737 tests pass.\n- REST e2e on a live showcase dev server (SQLite inspected directly):\n  - scalar `PATCH {\"team_members\":\"<uid>\"}` at a `user`+`multiple` field → stored as `[\"<uid>\"]` ✅\n  - junk object → `400 invalid_type` ✅\n  - illegal option scalar → `400 invalid_option` ✅\n  - legal arrays pass through unchanged ✅\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 2872,
+  "kind": "pull_request",
+  "title": "fix(driver-sql): fail-loud on unknown filter operators; real IS NULL / IS NOT NULL; $not (#2704)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-13T03:56:50Z",
+  "updated_at": "2026-07-13T05:48:05Z",
+  "closed_at": "2026-07-13T05:48:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-13T05:48:02Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2872",
+  "body": "Closes #2704.\n\n## 问题\n\ndriver-sql 把它**不认识的 filter 算子直接原样转发给 Knex**。当比较值是 `null` 时,这会静默编译成**整表匹配**——于是一个按权限/负责人范围过滤的列表视图会把**所有行**都返回出去(数据泄漏)。触发场景很现实:ObjectUI 客户端对空值筛选发的是 `is_null` / `isnull` / `is_empty` 这类拼写。\n\n具体三个坑:\n1. **数组格式** where 的 `default` 分支透传未知算子 → `is_null` + null 比较值 → 整表匹配;`is_empty` → Knex 直接抛 400。\n2. **对象格式**(`{field:{$op:value}}`)把未知 `$op` **静默降级成相等比较**,且完全没有 `$null` 处理。\n3. 没有真正的空值判断:`field = null` 在 SQL 里永远渲染不出 `IS NULL`。\n\n## 改动\n\n- 空值谓词渲染成**真正的 SQL**:`is_null`/`isnull`/`is_empty`(及否定式)→ `IS NULL`/`IS NOT NULL`,与 `equals`+null 语义对齐;`!= null` → `IS NOT NULL`。\n- 两条 filter 路径都补齐 spec 全量算子 + 客户端别名:`$between`/`$startsWith`/`$endsWith`/`$notContains`/`$null`/`$exists`,以及逻辑算子 **`$not`**(取反子条件——CEL `!expr` 的权限 scope 会编成它,`driver-mongodb`/`driver-memory` 都已实现,driver-sql 此前是缺的)。\n- `contains`/`startsWith`/`endsWith` 的值做 LIKE 转义并显式 `ESCAPE '\\'`,防止用户输入里的 `%`/`_` 扩大匹配范围。\n- **未知算子在两条路径都抛错**(fail-loud),不再静默返回整表。\n- `@objectstack/spec`:`VALID_AST_OPERATORS`/`AST_OPERATOR_MAP` 识别客户端别名拼写并映射到 `$null`,保证数组-AST → 对象-filter 转换与驱动一致。\n\n顺带修掉的潜在 bug:CEL 派生的 `$startsWith`/`$endsWith`/`$null` 范围过滤(此前对 SQL 静默错误)、better-auth `$regex` contains(此前退化成精确匹配)。\n\n## 测试\n\n新增 `sql-driver-null-operators.test.ts`(17 个用例,覆盖两条路径的空值算子、`!=`+null、`$not`、`$startsWith`、`$regex`、未知算子抛错、count 范围正确)。\n\n- driver-sql: **275 passed**\n- spec: 6716 passed\n- plugin-auth: 322 passed(2 个预存在的无关 import 失败)\n- driver-sql / spec build 均成功\n\n## 范围说明\n\n本 PR **只覆盖 SQL 驱动**。理想上\"未知算子就报错\"应在 `parseFilterAST` 边界统一做,但 objectql 引擎目前把 `ast.where` 原样透传给驱动、绕过了 `parseFilterAST`,所以驱动层是当前唯一能拦截的地方。让**所有驱动**统一 fail-loud 是一个更大的独立改动,单独开 issue 跟踪。"
+}

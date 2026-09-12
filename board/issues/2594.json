@@ -1,0 +1,35 @@
+{
+  "number": 2594,
+  "kind": "pull_request",
+  "title": "feat(spec): detail-page related-list tabs via relatedList: 'primary' (#2579)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T16:12:59Z",
+  "updated_at": "2026-07-04T16:38:41Z",
+  "closed_at": "2026-07-04T16:38:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-04T16:38:39Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2594",
+  "body": "## What\n\nDetail-page related lists become configurable via **field annotations** instead of a hand-authored page — see issue #2579.\n\n**spec (`@objectstack/spec`, minor):**\n- `Field.relatedList` → tri-state `boolean | 'primary'`. `'primary'` marks a **core** relationship that the detail page promotes to its **own tab** (ADR-0085 *prominence*, not a layout switch); non-primary children collapse into a single shared \"Related\" tab. `false`/`true` keep their meaning, so this is additive and **opt-in per relationship** (no `'primary'` anywhere → byte-for-byte the legacy stacked default).\n- `RecordRelatedListProps.columns` → **optional**; columns derive from the child object's `highlightFields` / default list columns when omitted.\n\n**dogfood acceptance (`examples/app-showcase`):** `showcase_account`'s hand-authored `account-detail.page.ts` is **deleted**; the equivalent Projects/Invoices tabs now come purely from `relatedList: 'primary'` on the child FKs, and the deleted page's `highlights` slot migrates to the object's `highlightFields` semantic role.\n\n## Companion PR\n\nRenderer + derivation (rule Z tabs, multi-FK, self-ref, unified picker columns): **objectstack-ai/objectui#2235**.\n\n## Verification\n\n- **spec:** 6672 tests pass; `pnpm build` OK; `check:api-surface` **unchanged** (it tracks exported signatures, not zod field internals, so an additive union / optional field is invisible to it).\n- **showcase:** `tsc --noEmit` clean — the only remaining errors are `Cannot find module '@objectstack/*'` for workspace deps not built in the worktree, which CI's build step resolves.\n\n## Design notes (from the issue)\n\n- **Ordering** of related lists (tab order + Related-stack order) stays a deterministic default (owned-first) with precise ordering delegated to a custom page (ADR-0085) — no object-level order key.\n- Rejected (see issue): a `view` ref on `record:related_list` (AI dangling-ref surface), an object-level `relatedLists[]` array, and an object-level `relatedLayout` switch.\n\nRefs #2579 (close once this **and** the companion objectui PR merge).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}
