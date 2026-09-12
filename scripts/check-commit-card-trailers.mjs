@@ -2,9 +2,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * check:commit-card-trailers — the PRE-PUSH refusal over card relations in
- * commit messages. No commit may carry a card relation in its message: the pull
- * request body is the only carrier of the relation.
+ * check:commit-card-trailers — the PRE-PUSH refusal over what a commit message
+ * may not carry. TWO finding classes, one event: a card relation, whose only
+ * carrier is the pull request body; and a model identifier in the harness
+ * trailer pair, which the rules declare model-free.
  *
  *   node scripts/check-commit-card-trailers.mjs --pre-push   # git hands the refs on stdin
  *   node scripts/check-commit-card-trailers.mjs --range origin/main..HEAD
@@ -93,6 +94,43 @@
  * The harness trailer pair — the session URL and the co-author line — carries
  * no reference at all and is pinned green for the same reason.
  *
+ * ## The SECOND finding class: a model identifier in the trailer pair
+ *
+ * The rules declare the pair exactly — a session trailer carrying a session URL
+ * and a co-author trailer reading `Claude` at the anthropic address — and
+ * declare it model-free. That rule had no instrument at all until this class:
+ * eighteen commits on five open branches carried a model-named co-author value
+ * past green CI in one shift, and 「landed history is not rewritten」, so the
+ * residue is permanent the moment a branch lands. Same bet as the class above,
+ * then: refuse at the one moment the repair is still free.
+ *
+ * WHAT IS JUDGED is the trailer VALUE, and only inside the trailer block:
+ *
+ *   - a `Co-authored-by` value that names Claude at the anthropic address must
+ *     read exactly `Claude` in front of the address; whatever else stands there
+ *     is the finding, quoted back. A co-author who is NOT that identity — a
+ *     human, any other address — is never this rule's business.
+ *   - an id-form model name (the word claude, a hyphen, a model word) anywhere
+ *     in that value, which is how a model reaches a trailer through the address
+ *     instead of the display name.
+ *   - the session trailer's value, cheaply: a session URL or a finding, and a
+ *     session URL carries no model.
+ *
+ * ⛔ NOT A LIST OF MODEL NAMES. A list goes stale the day a model is renamed,
+ * and the population this exists for is whatever the harness writes NEXT. The
+ * shape above is the declared spelling itself, so a name nobody has seen yet
+ * fails it for exactly the reason the measured four do.
+ *
+ * ⛔ NOT the message body. The rule this enforces is about the PAIR, so a
+ * commit whose prose names a model for a legitimate reason — explaining a
+ * fixture, quoting the order it is correcting — declares nothing and is
+ * untouched. That is the line the bare-reference class above already draws, and
+ * it is where GitHub reads co-authorship from too: trailer position only.
+ *
+ * The merge commits scripts/pm/os-regen-merge.sh writes carry no trailer at
+ * all, so they carry no model and are CLEAN here. The rule is about the pair
+ * when the pair is present, which is the disposition this class ships with.
+ *
  * ## The range, and why the zero sha is not the interesting half
  *
  * git hands a pre-push hook one line per ref on stdin:
@@ -156,9 +194,10 @@ export const OVERRIDE_ENV = 'OS_ALLOW_CARD_TRAILER_PUSH';
 const HOOK_SOURCE = '.githooks/pre-push';
 
 /**
- * The contract the finding CITES. Quoted, not restated: the sentence is written
- * down elsewhere in this repository, that copy is the authority, and a gate
- * that paraphrased it would become a second source for one rule.
+ * The contract BOTH finding classes CITE — one sentence carries both halves,
+ * which is why there is one constant. Quoted, not restated: the sentence is
+ * written down elsewhere in this repository, that copy is the authority, and a
+ * gate that paraphrased it would become a second source for one rule.
  *
  * ⛔ Nothing inside the corner brackets may be written HERE — a sentence added
  * here rather than there attributes to the ruling a claim it does not make, and
@@ -169,14 +208,14 @@ const HOOK_SOURCE = '.githooks/pre-push';
  * The path is named in prose here rather than as a literal because it is
  * spelled once, as a literal, at AGENT_RULES_SOURCE.
  */
-const RELATION_CONTRACT =
+const TRAILER_CONTRACT =
   'The contract is written down in the agent rules at .claude/agents/os-dev.md — '
   + '「卡片关系只在 PR 正文声明一次:commit ⛔ 不带卡片 trailer,其 trailer pair 一律 model-free。」 '
   + '(The card relation is declared ONCE, in the PR body; a commit carries no card trailer, '
   + 'and its trailer pair is model-free.)';
 
 /**
- * The file RELATION_CONTRACT quotes — a REAL input, read by the self-test.
+ * The file TRAILER_CONTRACT quotes — a REAL input, read by the self-test.
  *
  * Quoted as a path literal on purpose, unlike the paths in the header: editing
  * the sentence at the other end of it breaks the citation pin, so a card
@@ -257,6 +296,126 @@ export function trailerCardRefs(message) {
   return found;
 }
 
+/** The declared co-author value — the whole model-free rule, as one string. */
+export const DECLARED_COAUTHOR = 'Claude <noreply@anthropic.com>';
+
+/** The declared session value's prefix. A URL is the only legal shape here. */
+export const DECLARED_SESSION_PREFIX = 'https://claude.ai/code/session_';
+
+/** The address domain that makes a co-author trailer the harness identity. */
+const HARNESS_ADDRESS = /@anthropic\.com$/i;
+
+/** A trailer line split into its token and its value. */
+const TRAILER_FIELD = /^([A-Za-z][A-Za-z0-9-]*):[ \t]+(.*)$/;
+
+/**
+ * The id form of a model name — the word claude, a hyphen, a model word.
+ *
+ * Deliberately not a list of models: it binds the SHAPE, so a model nobody has
+ * named yet matches for the same reason the measured ones do. Read over a
+ * trailer VALUE only, never a whole line: the session trailer's own TOKEN is
+ * the word claude and a hyphen, and a rule read one field wider would refuse
+ * the model-free pair itself.
+ */
+const MODEL_ID_FORM = /\bclaude-[a-z]+(?:[-.][a-z0-9]+)*\b/i;
+
+/**
+ * The trailer block's fields — `{ line, token, value, text }` each.
+ *
+ * A continuation line carries no token of its own and is skipped: it belongs
+ * to the field above it, which is where the value is judged.
+ */
+export function trailerFields(message) {
+  const block = trailerBlock(message);
+  if (block === null) return [];
+  const fields = [];
+  block.lines.forEach((text, i) => {
+    const parsed = TRAILER_FIELD.exec(text);
+    if (parsed === null) return;
+    fields.push({ line: block.from + i + 1, token: parsed[1], value: parsed[2].trim(), text });
+  });
+  return fields;
+}
+
+/** The address inside a trailer value, or '' when it names none. */
+function trailerAddress(value) {
+  const found = /<([^<>]*)>[ \t]*$/.exec(String(value ?? ''));
+  return found === null ? '' : found[1].trim();
+}
+
+/** The display name standing in front of that address. */
+function trailerDisplayName(value) {
+  return String(value ?? '').replace(/<[^<>]*>[ \t]*$/, '').trim();
+}
+
+/**
+ * What a co-author trailer value carries in place of the model-free name, or
+ * null when it carries nothing — which includes every co-author who is not the
+ * harness identity at all.
+ *
+ * Two shapes, in order: the id form anywhere in the value (an address can carry
+ * a model as easily as a display name), then the display name, which must read
+ * exactly the bare name and nothing more. Case is not the rule's business —
+ * a differently-cased bare name carries no model — so it is compared folded.
+ */
+export function coauthorModelIdentifier(value) {
+  const text = String(value ?? '');
+  const id = MODEL_ID_FORM.exec(text);
+  if (id !== null) return id[0];
+  const address = trailerAddress(text);
+  if (!HARNESS_ADDRESS.test(address)) return null;
+  const display = trailerDisplayName(text);
+  const bare = trailerDisplayName(DECLARED_COAUTHOR);
+  if (display.toLowerCase() === bare.toLowerCase()) return null;
+  return display === '' ? address : display;
+}
+
+/**
+ * What a session trailer value carries in place of a session URL, or null.
+ *
+ * The cheap half of the pair: a URL has no room for a model, so asserting the
+ * shape asserts the rule. The id form is read first so a value that carries a
+ * model AND a URL is named by the model it carries.
+ */
+export function sessionTrailerProblem(value) {
+  const text = String(value ?? '').trim();
+  const id = MODEL_ID_FORM.exec(text);
+  if (id !== null) return id[0];
+  if (text.startsWith(DECLARED_SESSION_PREFIX)) return null;
+  return text === '' ? '(an empty value)' : text;
+}
+
+/**
+ * The trailer pair's findings — `{ line, text, why }` each, empty when clean.
+ *
+ * Only the two tokens the rules name are judged, by git's own case-insensitive
+ * key matching; any other trailer a commit carries is nobody's business here.
+ */
+export function trailerPairFindings(message) {
+  const found = [];
+  for (const field of trailerFields(message)) {
+    const token = field.token.toLowerCase();
+    if (token === 'co-authored-by') {
+      const carried = coauthorModelIdentifier(field.value);
+      if (carried === null) continue;
+      found.push({
+        line: field.line,
+        text: field.text.trim(),
+        why: `\`${carried}\` in a co-author trailer — the pair is model-free: \`${DECLARED_COAUTHOR}\`.`,
+      });
+    } else if (token === 'claude-session') {
+      const carried = sessionTrailerProblem(field.value);
+      if (carried === null) continue;
+      found.push({
+        line: field.line,
+        text: field.text.trim(),
+        why: `\`${carried}\` in the session trailer — its value is a session URL, which carries no model.`,
+      });
+    }
+  }
+  return found;
+}
+
 /** The commit's subject, trimmed to a length that keeps a log line readable. */
 export function commitSubject(message) {
   const first = String(message ?? '').split('\n', 1)[0].trim();
@@ -274,7 +433,9 @@ function lineNaming(message, card) {
  * One commit's findings — `{ line, text, why }` each, empty when clean.
  *
  * Deduplicated per line and card: a trailer line carrying a relation is one
- * mistake and one line to edit, not two findings because two rules saw it.
+ * mistake and one line to edit, not two findings because two rules saw it. The
+ * trailer-pair class dedupes per LINE for the same reason — that line is one
+ * reword whatever else is wrong with it.
  */
 export function commitFindings(message) {
   const lines = String(message ?? '').split('\n');
@@ -295,6 +456,12 @@ export function commitFindings(message) {
       text: text.trim(),
       why: `\`#${card}\` in a TRAILER line — a bare card reference is a declaration too.`,
     });
+  }
+  const claimed = new Set([...found.values()].map((finding) => finding.line));
+  for (const finding of trailerPairFindings(message)) {
+    if (claimed.has(finding.line)) continue;
+    claimed.add(finding.line);
+    found.set(`${finding.line}:pair`, finding);
   }
   return [...found.values()].sort((a, b) => a.line - b.line || a.why.localeCompare(b.why));
 }
@@ -447,14 +614,16 @@ export function judge({ commits, problem, where = 'this push' }) {
     return {
       exit: EXIT_CLEAN,
       lines: [
-        `✓ check:commit-card-trailers: ${commits.length} commit message(s) on ${where} carry no card relation.`,
+        `✓ check:commit-card-trailers: ${commits.length} commit message(s) on ${where} carry no card relation`
+          + ' and no model identifier in the trailer pair.',
       ],
     };
   }
 
   const lines = [
-    `✗ check:commit-card-trailers: ${offenders.length} commit message(s) on ${where} carry a card relation.`,
-    '  The PR body is the only carrier of the relation.',
+    `✗ check:commit-card-trailers: ${offenders.length} commit message(s) on ${where} carry a card relation`,
+    '  or a model identifier in the trailer pair. The PR body is the only carrier of the relation, and',
+    '  the pair names Claude and no model.',
     '',
   ];
   for (const commit of offenders) {
@@ -466,7 +635,7 @@ export function judge({ commits, problem, where = 'this push' }) {
     lines.push('');
   }
   lines.push(
-    `  ${RELATION_CONTRACT}`,
+    `  ${TRAILER_CONTRACT}`,
     '',
     '  REMEDY — and it is the cheap one, which is the whole reason this refusal happens HERE. Every',
     '  commit above is UNPUBLISHED: this check judges only what the remote does not already have, so',
@@ -474,10 +643,12 @@ export function judge({ commits, problem, where = 'this push' }) {
     '',
     '    the tip commit only    git commit --amend        (then push)',
     '    an older one           git reset --soft <the commit before it>, then commit again with the',
-    '                           relation removed from the message',
+    '                           finding removed from the message',
     '',
-    '  State the relation ONCE, in the pull request body, where the contract puts it — and where, since',
-    '  the squash message is taken from the body, it is also what lands on the default branch.',
+    '  A card relation is stated ONCE, in the pull request body, where the contract puts it — and where,',
+    '  since the squash message is taken from the body, it is also what lands on the default branch.',
+    `  A model identifier is removed by rewording the trailer to the model-free pair: \`${DECLARED_COAUTHOR}\``,
+    `  beside a session trailer whose value is a ${DECLARED_SESSION_PREFIX}… URL.`,
     '',
     '  ⛔ Do NOT reach for the override to get past this. Once these commits are pushed the repair above',
     '  is gone: the only thing that would remove the message from a published branch is the history',
@@ -495,6 +666,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'Every card-relation spelling in a commit message is a finding, including': 12,
   'The shapes that must stay green, so the gate does not tax ordinary commit': 8,
   'A bare reference in TRAILER position is a declaration; one in prose is not.': 7,
+  'The trailer pair is model-free: every measured spelling is a finding, and': 14,
+  '…and the shapes it must NOT refuse, so the pair stays cheap to write.': 10,
   'The finding names the commit AND the line, which is what a pusher acts on.': 6,
   'Delegation, not a second copy of the rule: the commit surface is the': 4,
   'The push arithmetic: which refs are judged, and what the range excludes.': 8,
@@ -504,7 +677,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 8;
+const SELF_TEST_BATTERY_FLOOR = 10;
 
 const UNATTRIBUTED_BATTERY = '(no battery open)';
 
@@ -659,13 +832,118 @@ function selfTest() {
   t('a continuation line stays inside the block', trailerBlock('s\n\nToken: value\n  continued\n')?.lines.length, 2);
   t('the trailer reference is reported at its own line number', trailerCardRefs('s\n\nbody\n\nIssue: #4242\n')[0]?.line, 5);
 
+  battery('The trailer pair is model-free: every measured spelling is a finding, and');
+  // The four display-name spellings measured on this board, each as the harness
+  // wrote it. They are fixtures, not a vocabulary — the rule below them binds a
+  // shape, and the ninth case proves it on a model nobody has shipped.
+  const pairWith = (coauthor, session = `${DECLARED_SESSION_PREFIX}01EXAMPLE`) =>
+    `fix(x): a subject\n\nbody prose\n\nClaude-Session: ${session}\nCo-authored-by: ${coauthor}\n`;
+  for (const name of ['Claude Opus 5', 'Claude Fable 5.1', 'Claude Sonnet 5', 'Claude Haiku 4.5']) {
+    t(
+      `the measured display-name spelling "${name}" is a finding`,
+      verdict(pairWith(`${name} <noreply@anthropic.com>`)).exit,
+      EXIT_FINDING,
+    );
+  }
+  for (const id of ['claude-opus-5', 'claude-sonnet-5', 'claude-fable-5-1', 'claude-haiku-4-5']) {
+    t(
+      `the id form "${id}" is a finding wherever in the value it sits`,
+      verdict(pairWith(`Claude <${id}@anthropic.com>`)).exit,
+      EXIT_FINDING,
+    );
+  }
+  t(
+    'a model word nobody has shipped binds too — the rule is the declared spelling, not a list',
+    verdict(pairWith('Claude Quartz 9 <noreply@anthropic.com>')).exit,
+    EXIT_FINDING,
+  );
+  t(
+    "the qualified harness form binds as well (the display name is still not the declared one)",
+    verdict(pairWith('Claude Opus 5 (1M context) <noreply@anthropic.com>')).exit,
+    EXIT_FINDING,
+  );
+  t(
+    "git's trailer keys are case-insensitive, so the other capitalisation binds",
+    verdict(`fix(x): a subject\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\n`).exit,
+    EXIT_FINDING,
+  );
+  t(
+    'a session trailer whose value is not a session URL is a finding',
+    verdict(pairWith(DECLARED_COAUTHOR, 'Claude Opus 5, this round')).exit,
+    EXIT_FINDING,
+  );
+  const modelNamed = verdict(pairWith('Claude Opus 5 <noreply@anthropic.com>')).lines.join('\n');
+  t('the finding quotes the offending trailer line back', modelNamed.includes('Co-authored-by: Claude Opus 5'), true);
+  t('the finding names its line number', modelNamed.includes('line 6'), true);
+  t('the remedy names the model-free pair verbatim', modelNamed.includes(DECLARED_COAUTHOR), true);
+
+  battery('…and the shapes it must NOT refuse, so the pair stays cheap to write.');
+  t(
+    'the declared model-free pair is clean',
+    verdict(pairWith(DECLARED_COAUTHOR)).exit,
+    EXIT_CLEAN,
+  );
+  t(
+    'a differently-cased bare name carries no model and stays clean',
+    verdict(pairWith('claude <noreply@anthropic.com>')).exit,
+    EXIT_CLEAN,
+  );
+  t(
+    'the merge commit os-regen-merge writes carries no trailer at all and is clean',
+    verdict("Merge remote-tracking branch 'origin/main' into claude/issue-1-x\n").exit,
+    EXIT_CLEAN,
+  );
+  t(
+    'a human co-author at their own address is never this rule’s business',
+    verdict(`fix(x): a subject\n\nCo-authored-by: A Maintainer <maintainer@example.invalid>\n`).exit,
+    EXIT_CLEAN,
+  );
+  t(
+    'body PROSE naming a model — explaining a fixture — is not a declaration and stays clean',
+    verdict(
+      'test(scripts): pin the Claude Opus 5 spelling as a fixture\n\n'
+        + 'The fixture reads Claude Opus 5 because that is what the harness wrote.\n\n'
+        + `Claude-Session: ${DECLARED_SESSION_PREFIX}01EXAMPLE\nCo-authored-by: ${DECLARED_COAUTHOR}\n`,
+    ).exit,
+    EXIT_CLEAN,
+  );
+  t(
+    'a model name in the SUBJECT is prose too — the rule is about the pair',
+    verdict('docs(agents): say the pair carries Claude Opus 5 nowhere\n').exit,
+    EXIT_CLEAN,
+  );
+  t(
+    "the three substring false positives stay clean under the second class too",
+    [
+      'refactor(spec): read the enum as a closed ten-member set\n',
+      'perf(cli): hoist findClosestMatches out of the loop\n',
+      'test(rest): add a fixture for the empty page\n',
+    ].every((message) => verdict(message).exit === EXIT_CLEAN),
+    true,
+  );
+  t(
+    'the session trailer TOKEN is not read as an id form (it would refuse the model-free pair)',
+    coauthorModelIdentifier(DECLARED_COAUTHOR),
+    null,
+  );
+  t(
+    'a trailer pair sitting in a paragraph that is not a trailer block is out of scope',
+    verdict('fix(x): a subject\n\nCo-authored-by: Claude Opus 5 <noreply@anthropic.com>\nand a prose line\n').exit,
+    EXIT_CLEAN,
+  );
+  t(
+    'one line carrying BOTH a card relation and a model is ONE finding — one line to reword',
+    commitFindings(`fix(x): a subject\n\nCo-authored-by: Claude Opus 5 <noreply@anthropic.com> #4242\n`).length,
+    1,
+  );
+
   battery('The finding names the commit AND the line, which is what a pusher acts on.');
   const named = verdict('fix(x): the subject that must be quoted back\n\nsome body\n\nPart-of: #4242\n').lines.join('\n');
   t('the finding names the offending commit by short sha', named.includes('00deadbee'), true);
   t('the finding quotes the commit subject back', named.includes('the subject that must be quoted back'), true);
   t('the finding names the line number', named.includes('line 5'), true);
   t('the finding quotes the offending line', named.includes('Part-of: #4242'), true);
-  t('the finding CITES the contract rather than restating it', named.includes(RELATION_CONTRACT), true);
+  t('the finding CITES the contract rather than restating it', named.includes(TRAILER_CONTRACT), true);
   t(
     'the remedy is the cheap one and says why it is available here',
     named.includes('UNPUBLISHED') && named.includes('git commit --amend') && named.includes('needs no force-push'),
@@ -749,7 +1027,7 @@ function selfTest() {
     true,
   );
   const agentRules = readFileSync(join(ROOT, AGENT_RULES_SOURCE), 'utf8');
-  const cited = citedSentences(RELATION_CONTRACT);
+  const cited = citedSentences(TRAILER_CONTRACT);
   t('the citation carries quoted sentences at all (never a vacuous zero)', cited.length > 0, true);
   t(
     'every sentence inside the corner brackets is verbatim in the cited rules file',
