@@ -131,6 +131,50 @@ export function printMcpConnectHint(
   console.log(chalk.dim('     Disable   OS_MCP_SERVER_ENABLED=false'));
 }
 
+/**
+ * The hop outward: relay the `serve` child's `objectstack:seed-settled`
+ * announcement to `os dev`'s OWN parent (#17329).
+ *
+ * ## Why the hop exists at all
+ *
+ * `os dev` is a spawner. It runs `serve --dev` over
+ * `stdio: ['inherit','inherit','inherit','ipc']`, so the child's settle
+ * announcement lands HERE and stops — while the consumer that needs it (a demo
+ * script, a test harness, anything that spawns `os dev` and wants to print one
+ * line after the boot) holds a channel to `os dev`, not to a grandchild process
+ * it did not start and cannot name. One hop is the whole of the missing piece:
+ * the producer already exists, and the child already announces.
+ *
+ * ## Relayed verbatim, deliberately
+ *
+ * ⛔ Nothing here re-derives, re-summarises or re-grades the message. The child
+ * read the settlement tally off the kernel that did the seeding; this process
+ * has no kernel and could only guess. Passing the object through means `os
+ * dev`'s parent and the `serve` child can never be made to say two different
+ * things about one boot — the same rule the `MCP:` row above follows for the
+ * origin, and for the same reason.
+ *
+ * ## An IPC channel stays OPTIONAL for this command
+ *
+ * ⛔ A parent that holds no channel must be unaffected, and is: `process.send`
+ * is `undefined` under an ordinary terminal `os dev`, so this returns having
+ * done nothing, printed nothing, and changed no byte of that transcript. The
+ * `serve` child's own `announceListening` is best-effort for exactly this
+ * reason and this is its mirror — ⛔ this message does not make an IPC channel
+ * a requirement of running a published command.
+ *
+ * @returns `true` when the message was a settle announcement (handled here, and
+ *   the caller should stop) — `false` for every other message, which the
+ *   caller's own branches still own.
+ */
+export function forwardSeedSettledToParent(msg: unknown): boolean {
+  if ((msg as { type?: unknown } | null | undefined)?.type !== 'objectstack:seed-settled') return false;
+  try {
+    if (typeof process.send === 'function') process.send(msg);
+  } catch { /* the parent's channel closed — best-effort, exactly like the child's */ }
+  return true;
+}
+
 export default class Dev extends Command {
   static override description =
     'Start development mode — watch sources, rebuild the artifact, and restart the server on change';
@@ -566,6 +610,10 @@ export default class Dev extends Command {
         // its HTTP server is up. We surface it so the printed URL is correct
         // even when the port was auto-shifted (e.g. 3000 busy → 3001).
         child.on('message', (msg: any) => {
+          // #17329 — the hop outward. Handled first and exclusively: a settle
+          // announcement carries no port and has nothing to do with the block
+          // below. See {@link forwardSeedSettledToParent}.
+          if (forwardSeedSettledToParent(msg)) return;
           if (msg?.type === 'objectstack:listening' && msg.port) {
             const actual = String(msg.port);
             if (actual !== requestedPort) {
