@@ -1030,6 +1030,33 @@ jobs:
       - name: Single-claim path guard self-test
         run: pnpm check:single-claim-paths
 
+      # Closing-target claim guard self-test (#15845). Same split as the step
+      # above and for the same reason: the guard is a PR-scoped blocking check
+      # in its own workflow, because its question is about the COMMENT THREAD of
+      # the card a PR closes and needs a pull request plus an API read that this
+      # job has neither of. What runs HERE is the half that needs no PR — the
+      # verdict layer, the exit-code contract, the collection policy over a fake
+      # transport, and the wiring.
+      #
+      # Three things make this step worth its second. (a) The ACCEPTANCE PAIR:
+      # a correct claim is green and a claim naming a DIFFERENT branch is red,
+      # because a probe exercised only on its red half has not been shown to
+      # reach the card at all. (b) The NEGATIVE CONTROLS: a PR that closes
+      # nothing and a PR carrying only `Part of` make zero API calls and emit no
+      # annotation, so the gate cannot become a tax on correct PRs. (c) The COST
+      # assertions are measured over a fake transport with a call log, so
+      # "bounded by the closing-keyword count" is a test rather than a claim in
+      # a header.
+      #
+      # It also pins the WIRING (the guard workflow still invokes the script,
+      # still carries the check-run name the script pins, still subscribes to
+      # `edited` and `synchronize`, still takes the `merge_group` leg without
+      # which the queue claim would be prose, and still passes the head ref and
+      # the token), so unwiring the gate reddens here rather than going quiet.
+      # Dependency-free, imports two sibling modules, reads one file; ~0.1s.
+      - name: Closing-target claim guard self-test
+        run: pnpm check:closing-target-claim
+
       # PM half-state sweeper self-test (#8528). `scripts/pm/check-half-states.mjs`
       # carried a 79-case --self-test — the H1..H7 predicates, the seat-sticker
       # parser, the transport classifier and its measured container classes —
