@@ -880,10 +880,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "模式",
         helpText: "页面覆盖模式：完整（full）或插槽式（slotted），仅用于记录页。"
       },
-      assignedProfiles: {
-        label: "指定配置文件",
-        helpText: "此页面对哪些 Profile 可用"
-      },
       aria: {
         label: "无障碍",
         helpText: "无障碍标签与角色"

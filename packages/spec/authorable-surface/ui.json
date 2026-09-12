@@ -892,7 +892,7 @@
     "ui/Page:_packageVersion",
     "ui/Page:_provenance",
     "ui/Page:aria",
-    "ui/Page:assignedProfiles",
+    "ui/Page:assignedProfiles [RETIRED]",
     "ui/Page:description",
     "ui/Page:icon",
     "ui/Page:interfaceConfig",

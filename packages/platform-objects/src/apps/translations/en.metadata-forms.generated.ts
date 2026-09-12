@@ -880,10 +880,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Kind",
         helpText: "Page override mode: full or slotted (for record pages)"
       },
-      assignedProfiles: {
-        label: "Assigned Profiles",
-        helpText: "Profiles that can access this page"
-      },
       aria: {
         label: "Aria",
         helpText: "Accessibility attributes (ARIA labels, roles)"
