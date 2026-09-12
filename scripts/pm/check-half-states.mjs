@@ -12275,6 +12275,58 @@ export function cronPeriodHours(crons, fromMs = Date.now()) {
 }
 
 /**
+ * The first fire of the UNION of these crons STRICTLY AFTER `fromMs`, or `null`
+ * when no cron here can be read or none fires inside the horizon.
+ *
+ * The same expansion `cronPeriodHours` walks, asked a different question: that
+ * one measures the widest gap, this one names the next instant. A reader of a
+ * `Swept` line cannot act on a period alone — 「stalled」 is decidable only
+ * against a DEADLINE — so the renderer stamps this beside the period rather
+ * than leaving the arithmetic to whoever is reading the anchor at 03:00.
+ *
+ * ⛔ `null` is rendered as a refusal by the caller, never as a default: a
+ * deadline nobody declared would make the heartbeat reading a fiction, which is
+ * the defect this whole line exists to close.
+ *
+ * @param {string[]} crons
+ * @param {number} fromMs — the instant to search forward from, UTC.
+ * @returns {number|null}
+ */
+export function nextCronFire(crons, fromMs) {
+  const list = Array.isArray(crons) ? crons : [];
+  if (list.length === 0 || !Number.isFinite(fromMs)) return null;
+  const parsed = list.map(parseCron);
+  if (parsed.some((p) => !p)) return null;
+  const day = new Date(fromMs);
+  day.setUTCHours(0, 0, 0, 0);
+  let best = null;
+  for (let d = 0; d < H57_CRON_HORIZON_DAYS; d++) {
+    const at = new Date(day.getTime() + d * 86_400_000);
+    const month = at.getUTCMonth() + 1;
+    const dom = at.getUTCDate();
+    const dow = at.getUTCDay();
+    for (const cron of parsed) {
+      if (!cron.month.includes(month)) continue;
+      // POSIX cron, the same rule `cronPeriodHours` applies: with BOTH day
+      // fields restricted the day matches when EITHER does.
+      const domHit = cron.dom.includes(dom);
+      const dowHit = cron.dow.includes(dow);
+      const dayHit =
+        cron.domRestricted && cron.dowRestricted ? domHit || dowHit : domHit && dowHit;
+      if (!dayHit) continue;
+      for (const h of cron.hour) {
+        for (const m of cron.minute) {
+          const fire = at.getTime() + h * 3_600_000 + m * 60_000;
+          if (fire > fromMs && (best === null || fire < best)) best = fire;
+        }
+      }
+    }
+    if (best !== null) return best;
+  }
+  return null;
+}
+
+/**
  * Is this workflow in H57's population at all, and if not, why not — one
  * three-valued answer so the sweep never has to re-derive the reason for the
  * clause that reports it.
@@ -14548,6 +14600,42 @@ export function normalizeProvenance(text) {
     .slice(0, 300);
 }
 
+/**
+ * The EXPECTATION stamped beside the `Swept` timestamp — the schedule, the
+ * interval, and the deadline the next healthy heartbeat has to beat.
+ *
+ * The heartbeat sentence under the stamp asks the reader to judge whether the
+ * `Swept` line 「stops advancing」. That judgement takes an input the body used
+ * to withhold: this patrol fires every 6h while three of its sibling anchors
+ * fire daily, so a reader who learns one cadence from a neighbour reads a
+ * healthy anchor as a dead caller in one direction and three missed runs as
+ * healthy in the other. Rendering the deadline is what turns the instruction
+ * into something a reader can act on without going and reading a workflow file.
+ *
+ * ⛔ A cron this file cannot read refuses LOUDLY rather than falling back to
+ * `PATROL_CADENCE_HOURS` alone: a deadline computed from a schedule nobody
+ * could parse would be a fiction with a timestamp on it, which is worse than
+ * the silence this line replaces.
+ *
+ * `cron` is a parameter with the constant as its default for ONE reason: the
+ * refusal branch below is unreachable while `PATROL_CRON` parses, and a branch
+ * no case can enter is a branch nothing pins. The self-test drives it through
+ * this seam; every caller uses the default.
+ *
+ * @param {Date} sweptAt — the same clock the stamp is rendered from.
+ * @param {string} [cron] — the schedule to compute the deadline from.
+ * @returns {string} one ` · `-joined fragment, with no leading separator.
+ */
+export function renderCadenceExpectation(sweptAt, cron = PATROL_CRON) {
+  const schedule = `expected every ${PATROL_CADENCE_HOURS}h (cron \`${cron}\` UTC)`;
+  const next = nextCronFire([cron], sweptAt.getTime());
+  if (next === null) {
+    return `${schedule} · ⚠️ next fire UNCOMPUTED — \`${cron}\` did not parse, so this body states`
+      + ' no deadline and the heartbeat above is NOT decidable from it';
+  }
+  return `${schedule} · next by ${new Date(next).toISOString().slice(0, 16)}Z`;
+}
+
 // ---------------------------------------------------------------------------
 // The ROW-FAMILY REGISTRY and the trim's priority order (#13947)
 //
@@ -15200,11 +15288,14 @@ export function renderMarkdown(findings, counts, options = {}) {
       ' state. Each predicate and the protocol clause it enforces are documented in' +
       ' `scripts/pm/check-half-states.mjs`.',
     '',
-    `_Swept ${sweptAt.toISOString()}${provenance ? ` · ${provenance}` : ''}_`,
+    `_Swept ${sweptAt.toISOString()} · ${renderCadenceExpectation(sweptAt)}` +
+      `${provenance ? ` · ${provenance}` : ''}_`,
     '',
-    'The timestamp above is the patrol\'s own heartbeat: a `Swept` line that stops advancing means the' +
-      ' standing caller died, which is the failure this anchor was created to make visible. Read it' +
-      ' before you read the rows.',
+    'The timestamp above is the patrol\'s own heartbeat, and the line states the cadence that makes' +
+      ' 「stalled」 decidable: a `Swept` line still sitting there past the `next by` deadline beside it' +
+      ' means the standing caller died, which is the failure this anchor was created to make visible.' +
+      ' ⛔ Do not carry a cadence over from a sibling anchor — the four patrols differ by 4× and each' +
+      ' states its own. Read it before you read the rows.',
     '',
   ];
 
@@ -16443,6 +16534,23 @@ export function sweepOverlap(coverageDays, cadenceHours = PATROL_CADENCE_HOURS) 
 
 /** The scheduled patrol's period — `cron: '37 1,7,13,19 * * *'` in the workflow. */
 export const PATROL_CADENCE_HOURS = 6;
+
+/**
+ * The standing caller's schedule, verbatim, as `half-state-patrol.yml` declares
+ * it. Stated here rather than passed in like `--provenance`, and the split is
+ * deliberate: provenance is the CALLER'S IDENTITY (run 123, commit abc) which
+ * this repo-agnostic sweeper genuinely cannot know, while the cadence is a fact
+ * about the sweep itself that this file ALREADY asserts one line above — a
+ * second route for the same fact would be a second place to drift from.
+ *
+ * ⚠️ Its one obligation: `half-state-patrol.yml` is copied VERBATIM into
+ * sibling repos together with this script, so the pair travels as a unit and
+ * the two stay equal by construction. Change one and change the other in the
+ * same edit — this constant and `PATROL_CADENCE_HOURS` are what the anchor
+ * body's own heartbeat deadline is computed from, and a stale one publishes a
+ * deadline nobody schedules.
+ */
+export const PATROL_CRON = '37 1,7,13,19 * * *';
 
 // ---------------------------------------------------------------------------
 // The shared window vocabulary (#13606) — what DID fall out of converting the
@@ -23036,6 +23144,33 @@ async function selfTest() {
   t('provenance: absent leaves the swept line alone', renderMarkdown([], counts).includes('_Swept ') && !renderMarkdown([], counts).includes(' · undefined'), true);
   t('provenance: present is stamped after the timestamp', renderMarkdown([], counts, { provenance: 'run 7' }).includes(' · run 7_'), true);
   t('markdown: the sweep timestamp is the patrol heartbeat', renderMarkdown([], counts, { sweptAt: new Date('2026-08-19T06:00:00Z') }).includes('_Swept 2026-08-19T06:00:00.000Z'), true);
+
+  // ── The heartbeat's EXPECTATION (#17720) ──────────────────────────────────
+  // 「a `Swept` line that stops advancing means the caller died」 is an
+  // instruction no reader can act on while the body withholds the interval that
+  // makes 「stalled」 decidable — and this patrol fires 4× more often than the
+  // three sibling anchors that carry the same sentence, so a cadence carried
+  // over from a neighbour is wrong in both directions. These cases pin the
+  // deadline itself, computed from a FIXED clock: a rendered interval nothing
+  // pins is prose again the first time the schedule moves.
+  t('#17720 next fire: the first slot strictly after the clock', nextCronFire([PATROL_CRON], Date.parse('2026-08-19T06:00:00Z')), Date.parse('2026-08-19T07:37:00Z'));
+  t('#17720 next fire: STRICTLY after — standing on a fire returns the NEXT one, never itself', nextCronFire([PATROL_CRON], Date.parse('2026-08-19T01:37:00Z')), Date.parse('2026-08-19T07:37:00Z'));
+  t('#17720 next fire: the last slot of the day rolls to tomorrow', nextCronFire([PATROL_CRON], Date.parse('2026-08-19T19:38:00Z')), Date.parse('2026-08-20T01:37:00Z'));
+  t('#17720 next fire: a month boundary rolls too', nextCronFire([PATROL_CRON], Date.parse('2026-08-31T23:00:00Z')), Date.parse('2026-09-01T01:37:00Z'));
+  t('#17720 next fire: a daily cron reads the same way', nextCronFire(['19 4 * * *'], Date.parse('2026-08-19T06:00:00Z')), Date.parse('2026-08-20T04:19:00Z'));
+  t('#17720 next fire: ⛔ an unreadable cron refuses rather than guessing a period', nextCronFire(['every six hours'], Date.parse('2026-08-19T06:00:00Z')), null);
+  t('#17720 next fire: ⛔ no cron at all refuses too', nextCronFire([], Date.parse('2026-08-19T06:00:00Z')), null);
+  t('#17720 cadence: the declared interval is rendered', renderCadenceExpectation(new Date('2026-08-19T06:00:00Z')).includes('expected every 6h (cron `37 1,7,13,19 * * *` UTC)'), true);
+  t('#17720 cadence: …with the deadline computed from that same clock', renderCadenceExpectation(new Date('2026-08-19T06:00:00Z')).includes('next by 2026-08-19T07:37Z'), true);
+  t('#17720 cadence: the deadline MOVES with the clock — it is computed, not a literal', renderCadenceExpectation(new Date('2026-08-19T14:00:00Z')).includes('next by 2026-08-19T19:37Z'), true);
+  t('#17720 cadence: ⛔ an unreadable schedule states NO deadline and says so', renderCadenceExpectation(new Date('2026-08-19T06:00:00Z'), 'every six hours').includes('next fire UNCOMPUTED'), true);
+  t('#17720 cadence: ⛔ …and never renders a `next by` it could not compute', renderCadenceExpectation(new Date('2026-08-19T06:00:00Z'), 'every six hours').includes('next by'), false);
+  t('#17720 cadence: the cron literal equals the interval it is declared beside', cronPeriodHours([PATROL_CRON], Date.parse('2026-08-19T00:00:00Z')), PATROL_CADENCE_HOURS);
+  const heartbeat17720 = renderMarkdown([], counts, { sweptAt: new Date('2026-08-19T06:00:00Z'), provenance: 'run 7' });
+  t('#17720 stamp: the expectation rides the `Swept` line itself', heartbeat17720.includes('_Swept 2026-08-19T06:00:00.000Z · expected every 6h (cron `37 1,7,13,19 * * *` UTC) · next by 2026-08-19T07:37Z · run 7_'), true);
+  t('#17720 stamp: …and the provenance field is still last, intact', heartbeat17720.includes(' · run 7_'), true);
+  t('#17720 sentence: the heartbeat instruction now POINTS at the rendered deadline', heartbeat17720.includes('past the `next by` deadline beside it'), true);
+  t('#17720 sentence: …and warns off the sibling anchors\' 4×-different cadences', heartbeat17720.includes('Do not carry a cadence over from a sibling anchor'), true);
 
   // -- H17 section rendering, both media (#10034) ---------------------------
   // The section has three states and two of them read identically if you are
