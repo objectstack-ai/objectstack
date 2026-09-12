@@ -607,7 +607,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - governed 面统一定义:`docs/adr/**` + `.claude/**`(全量,含 agents/hooks/settings)+ `skills/**`。
 - governed 面同含 `AGENTS.md` + `CLAUDE.md`;agent 指令文件跨仓同判,仓集读 `GOVERNED_REPOS`,此处不列。
 - 路径面一条命中 ⇒ ACCEPT 换终局四件套,混合 diff ⛔ 不按比例判;要拆让 dev 单独开 PR。
-- ① 复核结论照常写在 issue 上;技能面 PR 的复核席须跑在契约复审档位。
+- ① 复核结论照常写在 issue 上;技能面 hunk 须由契约复审档的席复核,档外席先交 skills 席。
 - ② PR 留给维护者看得见地悬着;终局两条:人工直合即审核记录;授权批准 ⇒ 队列放行。
 - 看得见 = ACCEPT 同笔挂 `needs-user-decision` + 贴终稿「维护者速读」评论;①仍是审核记录。
 - 速读五段固定:改了什么/为什么改/风险与代价(含回滚)/席位意见/你要做的(一个动作)。
