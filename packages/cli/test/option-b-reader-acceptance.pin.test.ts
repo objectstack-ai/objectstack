@@ -278,17 +278,24 @@ describe('#15004 — option-B acceptance pin: every subsystem must see its colle
     // that is what makes the next card's raise a step it cannot skip without
     // this line failing.
     //
+    // ⚠️ RAISED AGAIN by #17527, which added the metadata-summary row
+    // (`collectMetadataStats` — the reader `os validate`, `os build` and
+    // `os info` share). 36 is MEASURED at the boundary in the same session, the
+    // way 35 was: written `toBeGreaterThanOrEqual(37)` the run reports
+    // `expected 36 to be greater than or equal to 37`, so the floor is the
+    // exact count and not slack.
+    //
     // `>=` rather than `toBe` on purpose, and it is the same shrink-only
     // direction the ledger uses: a row ADDED to the probe is welcome and stays
     // green, a row that stops being measured is red. Raise the floor when the
     // probe grows; ⛔ never lower it to make a red run green.
     expect(
       additive.rows.length,
-      `The probe measured ${additive.rows.length} rows, fewer than the 35 it measured when ` +
+      `The probe measured ${additive.rows.length} rows, fewer than the 36 it measured when ` +
         `this floor was set. A row that stops being measured stops being able to fail, which ` +
         `is the one direction this pin cannot detect anywhere else — fix the probe rather ` +
         `than the floor.`,
-    ).toBeGreaterThanOrEqual(35);
+    ).toBeGreaterThanOrEqual(36);
   });
 
   // ── The pin ──────────────────────────────────────────────────────────────
@@ -352,5 +359,17 @@ describe('#15004 — option-B acceptance pin: every subsystem must see its colle
     ]) {
       expect(ids, `#15006 site no longer measured: ${site}`).toContain(site);
     }
+  });
+
+  it('#17527 — the metadata summary reader is represented', () => {
+    // The row-count floor above is a COUNT, so it cannot tell "this row left"
+    // from "this row left and another arrived". This names the row, for the
+    // same reason the block above names its four: the reader is shared by
+    // `os validate`, `os build` and `os info`, and when it lost `packages[]`
+    // all three reported a conforming project as declaring nothing while
+    // `--strict` exited 1 on `No objects defined`.
+    const site =
+      'B2/B3 · cli metadata summary (collectMetadataStats — validate, build, info) · every counted collection';
+    expect(optionB.rows.map((r) => r.id), `#17527 site no longer measured: ${site}`).toContain(site);
   });
 });

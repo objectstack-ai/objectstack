@@ -5,6 +5,7 @@ import type { ZodError } from 'zod';
 import { formatZodIssue, type ConversionNotice } from '@objectstack/spec';
 import type { TenancyPosture } from '@objectstack/spec/security';
 import { writeStdoutDirect } from './json-stdout.js';
+import { authoringRuleUnionStack } from './stack-collections.js';
 
 // ─── Constants ──────────────────────────────────────────────────────
 export const CLI_NAME = 'objectstack';
@@ -545,17 +546,78 @@ export interface MetadataStats {
   devPlugins: number;
 }
 
+/**
+ * The metadata summary `os validate`, `os build`/`os compile` and `os info` all
+ * print — counted over the stack the author actually declared, in either
+ * ADR-0130 D4 shape.
+ *
+ * ## Why the fold is INSIDE this function and not at the three call sites
+ *
+ * Until #17527 every member here was `count(config.KEY)` against the TOP LEVEL
+ * alone. On an option-B project — every definition inside `packages[]`, none
+ * flattened up — all three commands reported `Data: 0 Objects`, and
+ * `os validate` raised `No objects defined — this stack has no data model` on a
+ * stack that declares a data model. Under `--strict` that warning is not
+ * cosmetic: it is the gating error, so a CONFORMING project could not pass its
+ * own validator, and the sentence it died on was false on its face.
+ *
+ * Folding at the call sites would have fixed the three commands and left the
+ * reader itself still top-level-only — and the reader is what
+ * `test/option-b-reader-acceptance.pin.test.ts` measures. That pin's probe
+ * CALLS readers; a row can only attach to a callable, and a row shaped like
+ * "assert `config.objects` is non-empty" is explicitly forbidden there because
+ * it is a second copy of the read it watches. So the fold lives here, the probe
+ * calls this function, and the pin goes red if it ever stops resolving
+ * `packages[]`.
+ *
+ * ## Why {@link authoringRuleUnionStack} and not a second fold
+ *
+ * `stack-collections.ts` is the ONE place this package resolves a
+ * package-owned collection, and its rule is strictly additive: a key the top
+ * level already carries WINS, because in today's additive shape that array
+ * already IS the union (`composeStacks` flattened it). That property is exactly
+ * what this reader needs — an object reachable from both the top level and a
+ * `packages[]` entry is counted ONCE, so the corrected number is the union and
+ * never the sum. A second fold written here could not have that property
+ * without re-deriving it, and two folds that disagree is a worse defect than
+ * the one being removed.
+ *
+ * The seam also derives the folded key set from the two schemas rather than a
+ * hand-list, so a metadata family added to the stack schema next month is
+ * folded without anyone remembering to come back here.
+ *
+ * ## What this DOES change beyond the counts
+ *
+ * `authoringRuleUnionStack` resolves package order through
+ * `resolveArtifactPackageOrder`, whose ADR-0112 refusals (a duplicate package
+ * id, a malformed entry) are deliberately not swallowed. `os validate` and
+ * `os compile` already drive that same seam on the same config well above their
+ * `collectMetadataStats` call, so their behaviour on a malformed `packages` is
+ * unchanged. `os info` did not, so it now reports such a stack as a named `422`
+ * through its own `catch` instead of printing `Data: 0 Objects` for an artifact
+ * it could not read — the "absence must be loud" direction, and the reason the
+ * duplicate-id case cannot double-count either.
+ *
+ * A stack whose top level carries its collections — every stack the platform
+ * emits today — is returned by IDENTITY from the seam, so this function's
+ * answer for it is byte-identical to the pre-#17527 one.
+ */
 export function collectMetadataStats(config: any): MetadataStats {
+  // The stack as DECLARED, whichever shape it arrived in. ⛔ Never re-read
+  // `config.KEY` below this line — a member that skipped the fold is exactly
+  // the defect #17527 removed, and it would be invisible in every other member.
+  const stack: any = authoringRuleUnionStack(config);
+
   const count = (val: any) => {
     if (Array.isArray(val)) return val.length;
     if (val && typeof val === 'object') return Object.keys(val).length;
     return 0;
   };
-  
+
   // Count total fields across all objects
   let fields = 0;
-  const objects = Array.isArray(config.objects) ? config.objects :
-    (config.objects && typeof config.objects === 'object' ? Object.values(config.objects) : []);
+  const objects = Array.isArray(stack.objects) ? stack.objects :
+    (stack.objects && typeof stack.objects === 'object' ? Object.values(stack.objects) : []);
   for (const obj of objects as any[]) {
     if (obj.fields && typeof obj.fields === 'object') {
       fields += Object.keys(obj.fields).length;
@@ -563,24 +625,24 @@ export function collectMetadataStats(config: any): MetadataStats {
   }
 
   return {
-    objects: count(config.objects),
-    objectExtensions: count(config.objectExtensions),
+    objects: count(stack.objects),
+    objectExtensions: count(stack.objectExtensions),
     fields,
-    views: count(config.views),
-    pages: count(config.pages),
-    apps: count(config.apps),
-    dashboards: count(config.dashboards),
-    reports: count(config.reports),
-    actions: count(config.actions),
-    flows: count(config.flows),
-    workflows: count(config.workflows),
-    agents: count(config.agents),
-    apis: count(config.apis),
-    positions: count(config.positions),
-    permissions: count(config.permissions),
-    datasources: count(config.datasources),
-    plugins: count(config.plugins),
-    devPlugins: count(config.devPlugins),
+    views: count(stack.views),
+    pages: count(stack.pages),
+    apps: count(stack.apps),
+    dashboards: count(stack.dashboards),
+    reports: count(stack.reports),
+    actions: count(stack.actions),
+    flows: count(stack.flows),
+    workflows: count(stack.workflows),
+    agents: count(stack.agents),
+    apis: count(stack.apis),
+    positions: count(stack.positions),
+    permissions: count(stack.permissions),
+    datasources: count(stack.datasources),
+    plugins: count(stack.plugins),
+    devPlugins: count(stack.devPlugins),
   };
 }
 

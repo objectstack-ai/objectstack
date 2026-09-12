@@ -76,6 +76,11 @@ import { ObjectStackDefinitionSchema, normalizeStackInput } from '@objectstack/s
 // `compile.ts` runs, so the artifact written below is the artifact `os build`
 // would write (minus `docs`, which is filesystem input rather than stack input).
 import { lowerCallables } from '../../src/utils/lower-callables.js';
+// [#17527] The metadata summary every `os validate` / `os build` / `os info`
+// run prints. Reached as SOURCE, by relative path, for the same reason
+// `lowerCallables` is: it ships inside `@objectstack/cli`, so the row below
+// measures the reader in this checkout rather than a built artifact.
+import { collectMetadataStats, type MetadataStats } from '../../src/utils/format.js';
 // [#15006] The CLI's OWN reads of a package-owned collection. Until that card
 // these were inline expressions inside oclif command bodies — no exported
 // reader, nothing a probe could call — which is why the four rows they carry
@@ -484,6 +489,28 @@ export async function measureShape(project: unknown, projectRoot: string): Promi
   rows.push(countRow(
     'B3 · cli build union author-time rule input (os build) · every package-owned collection',
     unionItems,
+  ));
+
+  // [#17527] The metadata SUMMARY — the one reader shared by `os validate`,
+  // `os build`/`os compile` and `os info`, and the reader this file's header
+  // names as the thing it exists to catch: older than the probe, never
+  // enumerated, so it arrived under the floor rather than over it. It counted
+  // the top level alone, so an option-B project was reported as declaring
+  // nothing by all three commands, and `os validate --strict` EXITED 1 on
+  // `No objects defined — this stack has no data model`.
+  //
+  // Counted over the reader's RETURN VALUE across every member of
+  // `MetadataStats`, per this file's rule — never over `project.<collection>`,
+  // which would be a second copy of the read the row watches. `fields` is
+  // excluded from the sum because it is a total over `objects[].fields` rather
+  // than a collection of its own, and double-counting it here would make a
+  // zero-objects report look non-zero.
+  const summary = collectMetadataStats(project);
+  const summaryItems = (Object.entries(summary) as [keyof MetadataStats, number][])
+    .reduce((n, [key, value]) => (key === 'fields' ? n : n + value), 0);
+  rows.push(countRow(
+    'B2/B3 · cli metadata summary (collectMetadataStats — validate, build, info) · every counted collection',
+    summaryItems,
   ));
 
   // ── B2 · `os verify`'s readers (#15229) ──────────────────────────────────
