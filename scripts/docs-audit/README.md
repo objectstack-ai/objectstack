@@ -121,9 +121,12 @@ card, not a local fix.
 ⚠️ The authorable surface is read as the **union** of `packages/spec/authorable-surface/`
 (the live per-category ratchet, read as one set) and
 `packages/spec/authorable-surface.base.json` (the artifact #12824 names). The second is an
-**anchor**, pinned at a fixed `baseRev` for the deletion gate — measured on this tree it
-lagged the ratchet by 532 keys, including `data/Object:editMode` and every key of
-`security/OrgScopingEntitlement` and `api/ProvenanceWaiver`. Reading the anchor alone would
+**anchor**, pinned at a fixed `baseRev` for the deletion gate, so it is missing every key
+authored since — **`check:authorable-surface` prints that lag on every run**, and ⛔ a
+count copied into prose here rots (that gate is the live instrument; this sentence is
+not). What the lag *is* does not rot, and is what this rule needs: `data/Object:editMode`
+and every key of `security/OrgScopingEntitlement` and `api/ProvenanceWaiver` are absent
+from the anchor and present in `authorable-surface/`. Reading the anchor alone would
 suppress anchors on genuinely authorable keys, and that class grows with every key added
 after `baseRev`. A union can only ever keep an anchor one source vouches for, never drop
 one more. `[RETIRED]` is stripped for the same reason: a tombstoned key still rejects with
