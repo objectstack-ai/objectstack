@@ -255,21 +255,45 @@ Subscribe to changes on a specific object:
 **Request:**
 ```json
 {
+  "messageId": "550e8400-e29b-41d4-a716-446655440000",
   "type": "subscribe",
-  "subscription_id": "sub_1",
-  "object": "task",
-  "events": ["created", "updated", "deleted"],
-  "filter": {
-    "assignee_id": "user_123"
+  "timestamp": "2024-01-16T14:30:00Z",
+  "subscription": {
+    "subscriptionId": "9f8c1e42-5b7a-4d33-9e10-6c2f8a91b4d7",
+    "events": ["data.record.created", "data.record.updated", "data.record.deleted"],
+    "objects": ["task"]
   }
 }
 ```
 
+**`SubscribeMessageSchema` declares exactly two things of its own** — `type: "subscribe"` and a
+`subscription` object — on top of the three `BaseWebSocketMessage` fields every message carries.
+Nothing else sits at the top level: the subscription's own fields live **inside** `subscription`
+(`EventSubscriptionSchema`), and they are camelCase.
+
 **Parameters:**
-- `subscription_id`: Client-generated unique ID for this subscription
-- `object`: Object name to subscribe to
-- `events`: Array of events to listen for (default: all)
-- `filter`: Optional filter (same syntax as HTTP API filters)
+- `messageId`: UUID for this message (`BaseWebSocketMessage`)
+- `timestamp`: ISO 8601 datetime the message was sent (`BaseWebSocketMessage`)
+- `subscription.subscriptionId`: **UUID** identifying the subscription — the schema declares
+  `z.string().uuid()`, so an opaque handle like `"sub_1"` does not parse
+- `subscription.events`: array of event **patterns**, not bare verbs — lowercase dot notation with
+  wildcards (`"data.record.*"`, `"*.created"`). The platform-checked vocabulary is the closed
+  `DataEventType` / `BulkDataEventType` enums (`packages/spec/src/api/events.zod.ts`), whose members
+  are `data.record.created` / `data.record.updated` / `data.record.deleted` and their bulk siblings
+- `subscription.objects`: optional **array** of object names to filter events by (`["account",
+  "contact"]`) — plural, and an array even for a single object
+- `subscription.channels`: optional array of channel names for scoped subscriptions
+- `subscription.filters`: optional, and **declared `unknown`** — see the callout below
+
+<Callout type="warn">
+  ⛔ **`filters` is declared but not enforced — it is not "the same syntax as HTTP API filters".**
+  `EventSubscriptionSchema.filters` is `z.unknown()`, and no runtime evaluates a payload filter:
+  `matchesSubscription` (`@objectstack/service-realtime`) matches on object name and event type
+  only. A subscription carrying `filters` therefore **receives every event its patterns match** —
+  the extra conditions are silently ignored, in the permissive direction. The key is typed
+  `unknown` deliberately, because validating a shape nothing reads would imply an enforcement that
+  does not exist (objectui#2945). Narrow with `objects` and `events`, and re-check on the client.
+</Callout>
 
 **Success Response:**
 
@@ -378,10 +402,18 @@ Stop receiving events for a subscription:
 **Request:**
 ```json
 {
+  "messageId": "b3d1a77e-4c62-4f0b-9a55-1d8e2f6c0b34",
   "type": "unsubscribe",
-  "subscription_id": "sub_1"
+  "timestamp": "2024-01-16T14:35:00Z",
+  "request": {
+    "subscriptionId": "9f8c1e42-5b7a-4d33-9e10-6c2f8a91b4d7"
+  }
 }
 ```
+
+`UnsubscribeMessageSchema` nests its payload under `request` (`UnsubscribeRequestSchema`), whose one
+field is `subscriptionId` — a UUID, and the same UUID the subscribe message declared. Note the key
+is **not** the `subscription` of a subscribe message: the two envelopes use different wrappers.
 
 **Response:** the same `ack` envelope as a subscribe acknowledgement — there is no `unsubscribed`
 type either.
@@ -398,47 +430,67 @@ type either.
 
 ### Subscribe to Specific Record
 
-Watch a single record for changes:
+Watch a single record for changes — **narrowed on the client**, because the declared subscription
+has no record-level field:
 
 **Request:**
 ```json
 {
+  "messageId": "c1f4b9a2-6e78-4a31-bb05-9d3e7c2a1f80",
   "type": "subscribe",
-  "subscription_id": "sub_2",
-  "object": "task",
-  "record_id": "task_456",
-  "events": ["updated", "deleted"]
+  "timestamp": "2024-01-16T14:40:00Z",
+  "subscription": {
+    "subscriptionId": "2a6d5f14-8b90-4c27-a3e1-7f05b8d29c46",
+    "events": ["data.record.updated", "data.record.deleted"],
+    "objects": ["task"]
+  }
 }
 ```
+
+<Callout type="warn">
+  ⛔ **There is no `recordId` on a subscription, and no `record_id` anywhere in the protocol.**
+  `EventSubscriptionSchema` declares exactly `subscriptionId`, `events`, `objects`, `filters` and
+  `channels` — the narrowest scope the contract can express is **object + event pattern**. This
+  page used to show a top-level `record_id`, which no schema declares and no runtime reads.
+  Subscribe at object scope as above and compare the incoming event's own record identity on the
+  client; `filters` cannot do it for you (see the callout under **Subscribe to Object Events**).
+</Callout>
 
 **Use case:** Detail pages that need to reflect live changes to the currently viewed record.
 
 ### Subscribe to Query Results
 
-Subscribe to a dynamic set of records matching a query:
+Subscribe to a dynamic set of records matching a query — again **narrowed on the client**, because
+the declared subscription carries no query:
 
 **Request:**
 ```json
 {
+  "messageId": "d8e0c3b5-1f47-4d92-8a6c-5b4e9f210a73",
   "type": "subscribe",
-  "subscription_id": "sub_3",
-  "object": "task",
-  "query": {
-    "filter": {
-      "status": "todo",
-      "assignee_id": "user_123"
-    },
-    "sort": "-priority"
-  },
-  "events": ["created", "updated", "deleted"]
+  "timestamp": "2024-01-16T14:45:00Z",
+  "subscription": {
+    "subscriptionId": "6b3c9e07-2d54-4f18-9c8a-0e7d1b5a4632",
+    "events": ["data.record.created", "data.record.updated", "data.record.deleted"],
+    "objects": ["task"]
+  }
 }
 ```
 
-**Behavior:**
-- Receive `created` events when records matching query are created
-- Receive `updated` events when subscribed records change
-- Receive `deleted` events when subscribed records are deleted
-- Automatically receive events when records enter/exit the query filter
+<Callout type="warn">
+  ⛔ **There is no `query` on a subscription either, and no server-side query membership tracking.**
+  A top-level `query` object appeared on this page but is declared nowhere: `EventSubscriptionSchema`
+  has no such field, and the only payload-shaped key it does have — `filters` — is `unknown` and
+  unenforced. Nothing computes whether a record entered or left a result set, so a server cannot
+  send you an "entered/exited" signal it does not track.
+</Callout>
+
+**Behavior at object scope** — what the declared subscription above actually delivers:
+- Receive `data.record.created` events for every `task` the subscription's patterns match
+- Receive `data.record.updated` events for every `task` that changes
+- Receive `data.record.deleted` events for every `task` that is deleted
+- Evaluate query membership **on the client**: apply the predicate to each event and derive the
+  enter/exit transitions yourself by comparing against the set you are already holding
 
 **Example:** Task enters subscription:
 ```json
@@ -625,20 +677,26 @@ class ObjectStackClient {
   }
   
   resubscribe() {
-    this.subscriptions.forEach((config, id) => {
-      this.send({ ...config, subscription_id: id });
+    this.subscriptions.forEach((subscription, id) => {
+      this.send({ type: 'subscribe', subscription: { ...subscription, subscriptionId: id } });
     });
   }
-  
-  subscribe(config) {
-    const id = `sub_${Date.now()}`;
-    this.subscriptions.set(id, config);
-    this.send({ ...config, type: 'subscribe', subscription_id: id });
+
+  subscribe(subscription) {
+    // `subscriptionId` is declared `z.string().uuid()` — not an opaque handle.
+    const id = crypto.randomUUID();
+    this.subscriptions.set(id, subscription);
+    this.send({ type: 'subscribe', subscription: { ...subscription, subscriptionId: id } });
     return id;
   }
-  
+
   send(message) {
-    this.ws.send(JSON.stringify(message));
+    // Every message carries the three `BaseWebSocketMessage` fields.
+    this.ws.send(JSON.stringify({
+      messageId: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      ...message,
+    }));
   }
 }
 
@@ -654,10 +712,14 @@ Real-time subscriptions respect object-level and row-level permissions:
 **Scenario:** User subscribes to all tasks:
 ```json
 {
+  "messageId": "e5a7d210-3c86-4b4f-9017-8f2c6d3b5a19",
   "type": "subscribe",
-  "subscription_id": "sub_1",
-  "object": "task",
-  "events": ["created", "updated"]
+  "timestamp": "2024-01-16T14:50:00Z",
+  "subscription": {
+    "subscriptionId": "9f8c1e42-5b7a-4d33-9e10-6c2f8a91b4d7",
+    "events": ["data.record.created", "data.record.updated"],
+    "objects": ["task"]
+  }
 }
 ```
 
