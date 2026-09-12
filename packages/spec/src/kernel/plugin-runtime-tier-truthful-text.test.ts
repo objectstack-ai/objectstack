@@ -42,6 +42,13 @@ import { entry as loadingRetiredEntry } from '../migrations/entries/semantic/17.
 const SAYS_PUBLISH_GATE_ENFORCED = /publish gate/i;
 const SAYS_422 = /422/;
 const SAYS_LOAD_SIDE_NOT_ENFORCED = /load-side enforcement is NOT implemented/i;
+/**
+ * [#17147] The permissions half of the same sentence, under the same rule: the
+ * granted set is REGISTERED at load and queried by nothing. Probes the two
+ * load-bearing words rather than a whole clause, so a rewording that keeps the
+ * fact keeps the pin.
+ */
+const SAYS_GRANT_REGISTERED_NOT_ENFORCED = /REGISTERED on the PluginPermissionEnforcer at load and queried by\s+nothing/i;
 
 describe('[#11330] manifest.runtime trust-tier text is truthful', () => {
   const baseManifest = {
@@ -100,19 +107,48 @@ describe('[#11330] manifest.runtime trust-tier text is truthful', () => {
     ).not.toMatch(/trust tier \(`manifest\.runtime`\) and the permission declarations, which are enforced/);
   });
 
-  it('leaves the PERMISSIONS half of that sentence verbatim (#11333 owns it)', () => {
-    // Coordination pin from the ruling: the tombstone sentence has two halves —
-    // the trust tier (this card) and the permission declarations (#11333). This
-    // card corrects ONLY its own half. If #11333 later corrects the permissions
-    // half, this expectation is the thing that goes red and tells that author
-    // the pin is theirs to update — which is exactly the handoff the ruling
-    // asked for ("⛔ 不两张各改一半" without a signal between them).
+  it('[#17147] states the PERMISSIONS half truthfully too — the handoff landed', () => {
+    // The coordination pin this replaces read
+    // `expect(message).toContain('the permission declarations, which are enforced')`
+    // and existed to go RED the day #11333 corrected the other half of the
+    // sentence. It did its job: maintainer ruling 2026-09-12 took option B on
+    // the permissions half as well — say it truthfully now — so the retracted
+    // claim is gone and the truthful split is asserted in its place.
+    //
+    // Both halves of the tombstone now name a surface that does NOT confine a
+    // plugin, for two DIFFERENT reasons, and the sentence has to keep both:
+    //   • the trust tier — enforced at the marketplace publish gate, not at load;
+    //   • the permission declarations — REGISTERED on the enforcer at load
+    //     (#13457) and queried by nothing, so they refuse no operation.
+    // The measurement behind the second lives in `@objectstack/core`:
+    // `granted-permissions-not-enforced.pin.test.ts` goes red when a production
+    // `SecurePluginContext` construction site appears (#17147, the ADR-0025
+    // materialize seam), which is the signal that this text is stale again.
     const result = ManifestSchema.safeParse({ ...baseManifest, loading: { strategy: 'lazy' } });
     expect(result.success).toBe(false);
     if (result.success) return;
 
     const message = result.error.issues.find((i) => i.path[0] === 'loading')!.message;
-    expect(message).toContain('the permission declarations, which are enforced');
+    expect(message).toMatch(SAYS_GRANT_REGISTERED_NOT_ENFORCED);
+    // The negative pin, for the same reason the tier half carries one: without
+    // it, a future edit could re-add the retracted sentence beside the truthful
+    // one and the positive assertion above would stay green.
+    expect(
+      message,
+      'the tombstone must not claim the permission declarations are enforced',
+    ).not.toMatch(/permission declarations, which are enforced/);
+  });
+
+  it('[#17147] corrects the permissions half in the shipped ADR-0087 D3 entry too', () => {
+    // Same two-carrier problem the tier half had: the tombstone ships once in
+    // the schema and once through this entry into `docs/protocol-upgrade-guide.md`.
+    const text = loadingRetiredEntry.replacement;
+
+    expect(text).toMatch(SAYS_GRANT_REGISTERED_NOT_ENFORCED);
+    expect(
+      text,
+      'the D3 entry must not present the permission declarations as an enforced surface',
+    ).not.toMatch(/permission declarations, which\s+are the surfaces the platform actually enforces/);
   });
 
   it('corrects the same claim in the shipped ADR-0087 D3 entry', () => {

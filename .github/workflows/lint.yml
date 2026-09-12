@@ -982,6 +982,21 @@ jobs:
       - name: Part-of closing-keyword guard self-test
         run: pnpm check:partof-closing-keyword
 
+      # Commit card-trailer refusal self-test. The check itself is a PRE-PUSH
+      # hook — it judges the commits a push would publish, which no CI job has
+      # and no CI job should try to reconstruct — so what runs HERE is its
+      # self-test, the half whose verdict depends on nothing but the script.
+      # Unconditional for the same reason as the step above.
+      #
+      # It is the only thing standing behind that hook: a hook is registered per
+      # clone, runs on a developer's machine, and reports to nobody, so a break
+      # in its rule is invisible everywhere else. The self-test also pins the
+      # WIRING (the hook still calls the script, and still runs the os-regen
+      # deferral check it carried before), so unwiring it reddens here rather
+      # than going quiet. Pure functions plus two file reads; ~0.1s.
+      - name: Commit card-trailer pre-push refusal self-test
+        run: pnpm check:commit-card-trailers
+
       # Publish-smoke tarball pin-set self-test. The assertion it pins lives on
       # the RELEASE path (scripts/publish-smoke-pack.mjs runs only inside the
       # packed-tarball smoke), so without this step a regression in it would be
