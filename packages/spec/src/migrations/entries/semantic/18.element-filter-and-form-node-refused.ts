@@ -56,7 +56,8 @@ export const entry: SemanticMigration = {
     + 'place they stripped properties is a place a bare node can be sitting). `os validate` '
     + 'is clean: the refusal is reported at the node\'s `type` path with '
     + '`params.retiredComponentType` naming the element, so a remaining node is named '
-    + 'individually rather than as one page-level failure. Re-running `os migrate meta '
-    + '--from 17` then reports the migrated stack schema-valid instead of asking for the '
-    + 'manual changes again',
+    + 'individually rather than as one page-level failure. Replaying the same 17 → 18 chain '
+    + 'over the edited source then reports the migrated stack schema-valid — '
+    + '`schemaValid: true` in `--json`, and the run closes with the schema-valid line '
+    + 'rather than the manual-changes warning',
 };
