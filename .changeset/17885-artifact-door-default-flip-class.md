@@ -1,5 +1,5 @@
 ---
-"@objectstack/spec": patch
+"@objectstack/spec": minor
 "@objectstack/metadata-core": patch
 ---
 
