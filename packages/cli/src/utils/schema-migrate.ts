@@ -18,7 +18,12 @@
  * stack alone — run `os build` first so its objects are visible.
  */
 import chalk from 'chalk';
-import type { ManagedDriftEntry, DriftCategory, PendingSchemaWork } from '@objectstack/driver-sql';
+import type {
+  ManagedDriftEntry,
+  DriftCategory,
+  MediaColumnMoveScan,
+  PendingSchemaWork,
+} from '@objectstack/driver-sql';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import { describeDriverConnection } from './connection-display.js';
 import { reserveStdoutForJson } from './json-stdout.js';
@@ -36,6 +41,15 @@ export interface SqlDriverLike {
     entries: ManagedDriftEntry[],
     opts: { allowDestructive?: boolean },
   ): Promise<{ applied: ManagedDriftEntry[]; skipped: ManagedDriftEntry[] }>;
+  /**
+   * The ADR-0104 file-family column step's read-only planner (#15989) —
+   * optional, so a driver with no media arm (every driver that is not this
+   * repo's SQL one, and an older published build of it) still boots and simply
+   * offers no plan. ⛔ Its absence must read as "cannot plan", never as
+   * "nothing to move": the two are the same shape from here, and only the
+   * caller's own refusal branch can tell an operator which it was.
+   */
+  planMediaColumnMove?: () => Promise<MediaColumnMoveScan>;
   /** Deferred-DDL surface (#3917) — optional, so a driver without it still boots. */
   setDeferredDdl?: (deferred: boolean) => void;
   previewDeferredSchemaWork?: () => Promise<PendingSchemaWork[]>;

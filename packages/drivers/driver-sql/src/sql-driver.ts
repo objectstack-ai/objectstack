@@ -108,6 +108,16 @@ import {
   type PhysicalColumn,
   type PendingSchemaWork,
 } from './schema-drift.js';
+// [#15989] The ADR-0104 column step's per-dialect statements. Built here, run
+// by `os migrate files-to-references --apply` — see {@link SqlDriver.planMediaColumnMove}.
+import {
+  isJsonColumnType,
+  mediaColumnMoveDialect,
+  mediaColumnMovePlan,
+  type MediaColumnMovePlan,
+  type MediaColumnMoveRefusal,
+  type MediaColumnMoveScan,
+} from './media-column-move.js';
 import {
   undeliveredStorageAttributes,
   formatAttribute,
@@ -4445,7 +4455,16 @@ export type SqlDriverConfig = Knex.Config & {
    * `registerObjectMetadata`-only) simply never resolves it and stays on the
    * JSON arm, which is again the correct fail-toward.
    *
-   * @see {@link SqlDriver.setFileColumnsMoved}
+   * ## Naming it at all — in EITHER polarity — shuts out the engine's supply
+   *
+   * The ordinary composition does not set this key: `ObjectQL.registerDriver`
+   * hands the driver a resolver over `sys_migration.columns_moved_at` instead
+   * (see {@link SqlDriver.setFileColumnsMovedResolver}). Setting it here says
+   * the host knows its own storage better than the ledger does, so the engine
+   * will not contradict it — and that is true of `false` as much as of `true`,
+   * since a declared `false` overruled to `true` is bare ids in a JSON column.
+   *
+   * @see {@link SqlDriver.setFileColumnsMovedResolver}
    */
   fileColumnsMoved?: boolean | (() => boolean | Promise<boolean>);
 };
@@ -4554,6 +4573,16 @@ export class SqlDriver implements IDataDriver {
   protected fileColumnsMoved = false;
   /** The unresolved resolver from config, cleared once it has been asked. */
   private fileColumnsMovedResolver?: () => boolean | Promise<boolean>;
+  /**
+   * Did the HOST name {@link SqlDriverConfig.fileColumnsMoved} at
+   * construction, in either polarity (#15989)?
+   *
+   * Distinguishes "the host declared `false`" from "the host said nothing" —
+   * two states the boolean field above cannot tell apart, because both leave
+   * it `false`. Only the second is an empty slot
+   * {@link setFileColumnsMovedResolver} may fill.
+   */
+  private fileColumnsMovedDeclared = false;
   /**
    * The columns whose DECLARED type is `boolean` or `toggle` — a READ-COERCION
    * registry: its readers present the stored form (SQLite INTEGER 0/1, MySQL
@@ -5276,6 +5305,11 @@ export class SqlDriver implements IDataDriver {
     // are ObjectStack concerns, not Knex options — strip them before handing
     // the config to Knex.
     const { schemaMode, autoMigrate, sqliteJournalMode, sqliteAbsentFile, fileColumnsMoved, ...knexConfig } = config;
+    // [#15989] Recorded before the branch, and on the KEY rather than on the
+    // value: `fileColumnsMoved: false` is a host declaration just as much as
+    // `true` is, and it must shut the engine's supply seam out — see
+    // {@link setFileColumnsMovedResolver}.
+    this.fileColumnsMovedDeclared = fileColumnsMoved !== undefined;
     if (typeof fileColumnsMoved === 'function') {
       this.fileColumnsMovedResolver = fileColumnsMoved;
     } else if (fileColumnsMoved === true) {
@@ -11673,6 +11707,118 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * Every single-value media column on this datastore that still holds the
+   * legacy encoding, with the statements that move it (#15989).
+   *
+   * The read-only half of the ADR-0104 column step: it enumerates and plans,
+   * and it runs no DDL and no UPDATE. `os migrate files-to-references --apply`
+   * is what executes the plans, and only after its backfill and self-check
+   * have reported zero blocking rows — this method deliberately cannot tell
+   * whether that happened, so it must never be the thing that decides to move
+   * anything.
+   *
+   * ## The shape of each move is read off the COLUMN, never off the dialect
+   *
+   * A media column can already be a string column on a server dialect — `os
+   * generate migration --format sql` emits `VARCHAR(2048)` for the family, and
+   * a JSON-arm driver writes quoted ids into it (#15771, reproduced on live
+   * PostgreSQL 16.13). Deciding `retype` vs `unquote` from the dialect alone
+   * would leave that population full of `"file_…"` behind a `columns_moved_at`
+   * stamp claiming it had been converted. So each target is classified by
+   * introspection.
+   *
+   * ## What is left OUT, and why each omission is not a silent one
+   *
+   *  - a table the datastore does not physically have — nothing to move;
+   *  - `multiple: true` media — a list of ids, a JSON column on every
+   *    deployment and on both arms, and not part of this move at all (see
+   *    {@link mediaFields}, which already excludes it);
+   *  - a column the introspection cannot see — reported as a `refusals` entry
+   *    rather than skipped, because a column silently missing from a move is
+   *    the one way this step can under-report and still look complete;
+   *  - every dialect outside {@link MEDIA_COLUMN_MOVE_DIALECTS} — one refusal
+   *    naming the dialect. ⛔ MySQL lands here on purpose: #17788 owns its
+   *    statement order, on a real instance.
+   */
+  async planMediaColumnMove(): Promise<MediaColumnMoveScan> {
+    const dialect = mediaColumnMoveDialect(this.dialectName);
+    if (!dialect) {
+      return {
+        dialect: this.dialectName,
+        plans: [],
+        refusals: [
+          {
+            table: '*',
+            column: '*',
+            reason: 'dialect_not_supported',
+            // ⛔ No tracker id in the string: this `detail` reaches an operator
+            // reading a migration report, who has no tracker to resolve one
+            // against (`check:doc-authoring`). The card that owns the MySQL
+            // leg is #17788; the reader who can resolve that reads this line.
+            detail:
+              `the ADR-0104 column step has no measured statement for dialect '${this.dialectName}'. ` +
+              'The MySQL leg is tracked separately and is settled against a real instance, because ' +
+              'its statement ORDER is what the ADR leaves open; no other dialect has been ' +
+              'rehearsed. Nothing was planned and nothing ran.',
+          },
+        ],
+      };
+    }
+
+    const plans: MediaColumnMovePlan[] = [];
+    const refusals: MediaColumnMoveRefusal[] = [];
+
+    for (const [tableName] of this.managedObjectFields) {
+      const columns = this.mediaFields[tableName];
+      if (!columns || columns.length === 0) continue;
+      if (!(await this.knex.schema.hasTable(tableName))) continue;
+
+      let physical: IntrospectedColumn[];
+      try {
+        physical = await this.introspectColumns(tableName);
+      } catch (e: any) {
+        refusals.push({
+          table: tableName,
+          column: '*',
+          reason: 'introspection_failed',
+          detail:
+            `could not read the physical columns of '${tableName}' (${e?.message ?? e}), so the ` +
+            'shape of its media columns is unknown and no statement can be chosen for them.',
+        });
+        continue;
+      }
+      const byName = new Map(physical.map((c) => [c.name, c]));
+
+      for (const column of columns) {
+        const found = byName.get(column);
+        if (!found) {
+          refusals.push({
+            table: tableName,
+            column,
+            reason: 'column_absent',
+            detail:
+              `'${tableName}.${column}' is declared as a media field but the datastore has no such ` +
+              'column, so there is nothing here to move and nothing that could be verified moved.',
+          });
+          continue;
+        }
+        plans.push(
+          mediaColumnMovePlan(
+            dialect,
+            isJsonColumnType(found.type) ? 'retype' : 'unquote',
+            tableName,
+            column,
+          ),
+        );
+      }
+    }
+
+    plans.sort((a, b) => (a.table === b.table ? a.column.localeCompare(b.column) : a.table.localeCompare(b.table)));
+    refusals.sort((a, b) => (a.table === b.table ? a.column.localeCompare(b.column) : a.table.localeCompare(b.table)));
+    return { dialect, plans, refusals };
+  }
+
+  /**
    * Boot-time per-table drift handling (P1 + P2): detect divergence, in dev
    * auto-reconcile the *safe* (loosening) subset when `autoMigrate==='safe'`,
    * then WARN once per remaining divergence with an actionable hint.
@@ -17363,9 +17509,58 @@ export class SqlDriver implements IDataDriver {
    * this memoized without a second boolean: a repeat `initObjects` (the batched
    * and deferred-DDL paths both call it more than once) finds nothing to ask.
    */
+  /**
+   * The kernel→driver supply seam for the ADR-0104 media arm (#15989).
+   *
+   * `ObjectQL.registerDriver` calls this with a closure over the engine's own
+   * `haveFileColumnsMoved()`, which reads `sys_migration.columns_moved_at`.
+   * It is the counterpart of {@link SqlDriverConfig.fileColumnsMoved} for the
+   * ordinary composition, where nobody hand-writes that option: the driver is
+   * constructed in an app's config long before any row can be read, so what
+   * arrives here is the question and {@link resolveFileColumnsMoved} asks it
+   * once, at `initObjects`.
+   *
+   * ## ⛔ A host declaration is never overruled — this fills an empty slot only
+   *
+   * If the config named `fileColumnsMoved` at all (a boolean of either
+   * polarity, or a resolver of the host's own), this is a NO-OP. The host is
+   * the more specific authority about its own storage, and the failure the
+   * engine could cause by overruling a declared `false` is the one this whole
+   * mechanism exists to prevent: bare ids written into a JSON column.
+   *
+   * ## It changes nothing that has already been asked
+   *
+   * After `initObjects` has run once the arm is resolved and frozen — every
+   * media column's `isJsonField` answer is already in `jsonFields` — so a
+   * resolver arriving later would be a promise this driver cannot keep. A
+   * registration after the first `initObjects` therefore leaves the resolved
+   * arm alone; the only thing it could do instead is change the write encoding
+   * of a table whose columns were built for the other one.
+   *
+   * @returns whether the resolver was taken, so a caller can tell an
+   *          installation from a refusal instead of inferring it.
+   */
+  setFileColumnsMovedResolver(resolve: () => boolean | Promise<boolean>): boolean {
+    if (this.fileColumnsMovedDeclared) return false;
+    if (this.fileColumnsMovedAsked) return false;
+    this.fileColumnsMovedResolver = resolve;
+    return true;
+  }
+
+  /** Has {@link resolveFileColumnsMoved} already run to completion? */
+  private fileColumnsMovedAsked = false;
+
   protected async resolveFileColumnsMoved(): Promise<void> {
     const resolver = this.fileColumnsMovedResolver;
-    if (!resolver) return;
+    if (!resolver) {
+      // A driver with nothing to ask has still settled its arm: `false`, the
+      // JSON encoding, which is what it will keep for the rest of its life.
+      // Recorded so a resolver supplied AFTER the first `initObjects` is
+      // refused rather than silently changing an already-frozen answer.
+      this.fileColumnsMovedAsked = true;
+      return;
+    }
+    this.fileColumnsMovedAsked = true;
     this.fileColumnsMovedResolver = undefined;
     try {
       this.fileColumnsMoved = (await resolver()) === true;

@@ -2187,6 +2187,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/platform-objects/src/system/migration-flag.column-move.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/platform-objects/src/system/migration-flag.test.ts",
       "verb": "update",
       "pinned": 1
