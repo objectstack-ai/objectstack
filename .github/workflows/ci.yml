@@ -1490,12 +1490,63 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # ⛔ THE DOGFOOD PACKAGE'S DEPENDENCY CLOSURE IS BUILT HERE, IN A RUN
+      # THAT CARRIES NO PASSTHROUGH, so that the sharded run in the next step
+      # can be `--only` (#16395's shape, applied to this job by #16886).
+      #
+      # Turbo folds a run-level passthrough into the hash of EVERY task in the
+      # run, not only the task that receives it -- and `-- --shard=k/3` is the
+      # whole reason each shard gets its own invocation at all (the next step's
+      # comment says what those args are for). Measured on turbo 2.10.10,
+      # `--filter=@objectstack/dogfood`, `turbo run test ... --dry=json`
+      # (67 tasks: 66 `build` + 1 `test`):
+      #
+      #   plain vs plain              67 identical,  0 changed  <- control, fires
+      #   plain vs -- --shard=1/3      0 identical, 67 changed
+      #   --shard=1/3 vs 2/3           0 identical, 67 changed
+      #   --shard=2/3 vs 3/3           0 identical, 67 changed
+      #
+      # So the three shards hashed one 66-package build closure three ways, and
+      # NONE of them could hit the ordinary `build` cache every other job in
+      # this workflow populates -- that cache is written with NO passthrough in
+      # the hash. The `Restore Turbo cache` step above addresses the symptom
+      # (its shard-scoped key keeps a shard warm against its OWN history); it
+      # cannot make three disagreeing closure hashes agree.
+      #
+      # `turbo run build --filter=@objectstack/dogfood` is that closure and
+      # nothing more: measured 66 build tasks, all 66 hash-IDENTICAL to the ones
+      # in the passthrough-free test plan (0 differing, 0 missing), so they
+      # REPLAY here instead of re-executing per shard. The plan carries one
+      # further node, `@objectstack/dogfood#build`, whose command is
+      # `<NONEXISTENT>` in the dry output because the package declares no
+      # `build` script -- it executes nothing and exists only as the root its
+      # 66 `^build` dependencies hang from.
+      #
+      # ⚠ THIS IS ITS OWN STEP, not a second guarded run inside the step below,
+      # because a guarded SITE is the triple (file, job, step) --
+      # `measure-stall-guard-headroom` REFUSES to report a verdict when two
+      # guarded runs share one. `pnpm check:stall-guard-budget` and
+      # `pnpm check:stall-guard-headroom` both read this step, so it keeps its
+      # own `--stall-minutes` and its own headroom row. The step is NOT allowed
+      # to buy itself room by raising this job's `timeout-minutes`: that budget
+      # is the instrument that shows this fix working (#16886).
+      - name: Build the dogfood package's dependency closure
+        env:
+          NODE_OPTIONS: --report-on-signal --report-signal=SIGUSR2 --report-directory=${{ runner.temp }}/stall-reports
+        run: |
+          mkdir -p "$RUNNER_TEMP/stall-reports"
+          node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/dogfood-build.log" --stall-minutes 10 \
+            --report-dir "$RUNNER_TEMP/stall-reports" -- \
+            pnpm turbo run build --filter=@objectstack/dogfood --concurrency=4 --log-order=stream
+
       # Boots real example apps in-process (in-memory SQLite) and exercises them
       # through the real HTTP + service stack — catches runtime regressions that
       # build / unit tests / spec-liveness pass over (e.g. the #2018 tz-bucketing
       # break, which was green on every static gate). The `--` args reach the
       # package's `vitest run` and are hashed into the turbo task, so each
-      # shard caches independently.
+      # shard caches its test leg independently -- and under `--only` that is
+      # the ONLY task the passthrough is hashed into; the build closure it used
+      # to scatter is built once, shard-independently, by the step above.
       # run-with-stall-guard: same wiring as Test Core (see the comment there;
       # #4250/#4314) — it tees to dogfood.log itself for the completeness guard
       # below, propagates the suite's real exit status (no `| tee` + pipefail),
@@ -1515,9 +1566,17 @@ jobs:
           # globalPassThroughEnv entry or turbo strips it — see the script header.
           export VITEST_MAX_WORKERS="$(node scripts/vitest-worker-cap.mjs)"
           mkdir -p "$RUNNER_TEMP/stall-reports"
+          # `--only` (#16395's flag, #16886's site): the step above already
+          # built this package's dependency closure in a passthrough-free run,
+          # so this run must schedule the ONE task the passthrough is for.
+          # Without it turbo re-hashes the whole `^build` closure under
+          # `--shard=k/3` and rebuilds it, once per shard -- the step comment
+          # above carries the measurement. ⚠ That build step is load-bearing
+          # for this flag: with the closure unbuilt, this run fails LOUDLY
+          # here (imports resolve to a missing dist), never as a silent green.
           node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/dogfood.log" --stall-minutes 10 \
             --report-dir "$RUNNER_TEMP/stall-reports" -- \
-            pnpm turbo run test --filter=@objectstack/dogfood --log-order=stream -- --shard=${{ matrix.shard }}/3
+            pnpm turbo run test --filter=@objectstack/dogfood --only --log-order=stream -- --shard=${{ matrix.shard }}/3
 
       # Dogfood boots real apps in-process, so a native/OOM abort is likelier
       # here than in the unit suites — and a shard that dies silently looks like
