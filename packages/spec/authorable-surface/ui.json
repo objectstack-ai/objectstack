@@ -780,7 +780,7 @@
     "ui/ObjectKanbanProps:grouping",
     "ui/ObjectKanbanProps:limit",
     "ui/ObjectKanbanProps:objectName",
-    "ui/ObjectKanbanProps:quickAdd",
+    "ui/ObjectKanbanProps:quickAdd [RETIRED]",
     "ui/ObjectKanbanProps:swimlaneField",
     "ui/ObjectKanbanProps:titleField",
     "ui/ObjectListView:addRecord",

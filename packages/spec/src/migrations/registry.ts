@@ -5448,7 +5448,7 @@ const step18: MigrationStep = {
     'was wrong. A retiredKey tombstone on `ObjectKanbanPropsSchema` with one D2 conversion that ' +
     'is a pure lossless DELETE (the key never had an effect to preserve) scoped by component ' +
     '`type`: `quickAdd` stays LIVE on the `kanban-ui` block, where a React host supplies the ' +
-    'runtime slot, and the ruling keeps it there deliberately.',
+    'runtime slot, and the ruling keeps it there deliberately. ' +
     'It also removes `page.assignedProfiles` (ADR-0090 D2 / ADR-0049 enforce-or-remove; ' +
     'maintainer ruling 2026-09-12 \u300c\u540c\u610f\u300d). The key was authorable on the published ' +
     '`PageSchema` and named for the Profile concept ADR-0090 D2 deleted, while the schema\'s own ' +
