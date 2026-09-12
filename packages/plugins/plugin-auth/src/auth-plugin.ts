@@ -44,7 +44,6 @@ import {
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
 import { runAttributedToUser } from './auth-actor-attribution.js';
 import type { AuthEventAuditSurface } from './auth-session-audit.js';
-import type { ResolvedSocialProvider } from './backfill-account-issuer.js';
 import { createTenancyService, type TenancyService } from './tenancy-service.js';
 import {
   backfillMemberships,
@@ -353,35 +352,6 @@ export class AuthPlugin implements Plugin {
         enabled: true,
       };
       config.socialProviders = socialProviders;
-    }
-  }
-
-  /**
-   * The social providers better-auth built for this runtime, straight off its
-   * own context — each one carrying the `accountIssuer` it will key its
-   * accounts by. Read rather than reconstructed: reconstructing it from the
-   * configured ids is exactly the guess that mis-stamped Google links.
-   *
-   * Returns `undefined` when the instance cannot be reached (auth not built
-   * yet, or a host-supplied instance that exposes no context) — the backfill
-   * then falls back to the id-derived issuers and reports what it cannot
-   * resolve, which is the pre-existing behaviour, not a new failure.
-   */
-  private async resolveInstantiatedSocialProviders(
-    ctx: PluginContext,
-  ): Promise<ResolvedSocialProvider[] | undefined> {
-    try {
-      const auth = await this.authManager?.getAuthInstance();
-      const context = await (auth as any)?.$context;
-      const providers = context?.socialProviders;
-      if (!Array.isArray(providers)) return undefined;
-      return providers.filter((p: any) => typeof p?.id === 'string' && p.id);
-    } catch (e) {
-      ctx.logger.warn?.(
-        '[auth] could not read better-auth\'s instantiated social providers — account issuers fall back to the id-derived values',
-        { error: (e as Error)?.message },
-      );
-      return undefined;
     }
   }
 
@@ -1084,38 +1054,6 @@ export class AuthPlugin implements Plugin {
     // so it runs whenever the runtime boots in development.
     ctx.hook('kernel:ready', async () => {
       await this.maybeSeedDevAdmin(ctx);
-    });
-
-    // better-auth 1.7 resolves every account by (issuer, accountId).
-    // Rows written before the upgrade have no issuer and are therefore
-    // invisible to sign-in, so stamp them once at boot. Idempotent: a database
-    // whose rows already carry the right issuer costs one empty query.
-    //
-    // The providers are handed over as better-auth INSTANTIATED them, because
-    // the issuer is theirs to declare and only they know it — Google names
-    // `https://accounts.google.com`, GitHub names nothing and takes the
-    // synthetic fallback. Deriving it from the configured ids instead is what
-    // stamped Google links with a value sign-in never looks them up under.
-    ctx.hook('kernel:ready', async () => {
-      try {
-        const ql = ctx.getService<IDataEngine>('objectql');
-        if (!ql) return;
-        const { backfillAccountIssuer } = await import('./backfill-account-issuer.js');
-        await backfillAccountIssuer(ql, {
-          logger: ctx.logger,
-          socialProviders: await this.resolveInstantiatedSocialProviders(ctx),
-          socialProviderIds: Object.keys(this.configuredSocialProviders ?? {}),
-          oidcProviderIssuers: Object.fromEntries(
-            (this.options.oidcProviders ?? [])
-              .filter((p): p is typeof p & { issuer: string } => typeof p.issuer === 'string' && !!p.issuer)
-              .map((p) => [p.providerId, p.issuer]),
-          ),
-        });
-      } catch (e) {
-        ctx.logger.warn?.('[auth] account issuer backfill failed', {
-          error: (e as Error).message,
-        });
-      }
     });
 
     // [#8317] The one-off half of the ruling: rows written BEFORE the

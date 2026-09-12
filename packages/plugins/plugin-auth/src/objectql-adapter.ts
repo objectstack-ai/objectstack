@@ -7,6 +7,7 @@ import { SystemObjectName } from '@objectstack/spec/system';
 import { resolveAttributedUserId } from './auth-actor-attribution.js';
 import { inScimRequestScope } from './scim-connection-service.js';
 import { adoptExistingMembership } from './adopt-membership.js';
+import { refuseIssuerRepointWithLiveBindings } from './account-identity-preflight.js';
 import {
   filterRevokedSessionRows,
   hideRevokedSessionRow,
@@ -980,6 +981,18 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         // would encrypt at registration and then write cleartext back on the
         // first config edit, leaving a column that only LOOKS protected.
         liftClientSecretForWrite(objectName, patch);
+        // [#17440] Write door #2 again, for a different column. Account
+        // identity is `(provider_id, account_id)` since better-auth 1.7.3, and
+        // no column records which IdP vouched for a row — so re-pointing a
+        // provider at a new issuer while accounts are still bound to it can
+        // hand the new IdP's subject the old IdP's account. This is the LAST
+        // moment at which the two are still distinguishable.
+        await refuseIssuerRepointWithLiveBindings(
+          dataEngine as never,
+          objectName,
+          record as Record<string, unknown>,
+          patch as Record<string, unknown>,
+        );
         const result = await dataEngine.update(objectName, { ...patch, id: record.id });
         // [#16231] The payload carries the resolved `id` and no `where`, so
         // the engine dispatches `by-id` and answers the record or `null`. The
@@ -1006,6 +1019,14 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         // be the one path that writes the secret back in cleartext.
         liftClientSecretForWrite(objectName, patch);
         for (const record of records) {
+          // [#17440] Same rule on the bulk door — a re-point smuggled through
+          // `updateMany` is the same re-point.
+          await refuseIssuerRepointWithLiveBindings(
+            dataEngine as never,
+            objectName,
+            record as Record<string, unknown>,
+            patch as Record<string, unknown>,
+          );
           await dataEngine.update(objectName, { ...patch, id: record.id });
         }
         return records.length;

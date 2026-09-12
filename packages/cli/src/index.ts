@@ -31,6 +31,10 @@ export { default as MigrateResumeCommand } from './commands/migrate/resume.js';
 // #4556: rewrite the legacy `'system'` sentinel in
 // `sys_metadata_history.recorded_by` to NULL, through the same journal.
 export { default as MigrateRecordedByCommand } from './commands/migrate/recorded-by.js';
+// #17440: the read-only row pre-flight ADR-0120 D4 requires before
+// `sys_account.issuer` is dropped and account identity re-keys onto
+// (provider_id, account_id).
+export { default as MigrateAccountIssuerCommand } from './commands/migrate/account-issuer.js';
 
 // ─── Environments topic subcommands ─────────────────────────────────
 export { default as EnvironmentsListCommand } from './commands/environments/list.js';

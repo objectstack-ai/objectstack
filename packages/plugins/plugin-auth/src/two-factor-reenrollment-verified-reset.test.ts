@@ -24,6 +24,27 @@
 // end to end, a legitimate rotation completes end to end, and the backup codes
 // the enable response issues still complete a sign-in.
 //
+// ## [#17440] What the better-auth 1.7.3 lift moved
+//
+// 1.7.3 added the same gate one layer up, in `dist/plugins/two-factor`:
+// `/two-factor/enable` now throws `TOTP_ALREADY_ENABLED` when a two-factor row
+// exists with `verified !== false`. So point ② above is no longer true of a
+// CONFIRMED account — the endpoint refuses instead of answering 200 — and the
+// inheritance defect cannot be reproduced through this route at all.
+//
+// Two consequences, both pinned below rather than assumed:
+//
+//   • the re-enrollment legs now assert the UPSTREAM refusal envelope, plus
+//     the property behind it (nothing was rotated behind the refusal), and the
+//     #10700 inertness assertion moves to the unconfirmed path, which is the
+//     one upstream's gate still admits;
+//   • ⭐ upstream's gate READS `verified` — the exact field #10700 was about —
+//     so `two-factor-reenrollment-verified-reset.ts` is what keeps that gate's
+//     input truthful. ⛔ It is not dead code superseded by the vendor.
+//
+// The rotation still-works leg moved with it: rotation now goes
+// `/two-factor/disable` → `enable` → confirm.
+//
 // Real better-auth pipeline throughout, following
 // `two-factor-rotated-token-echo.test.ts`: requests go in as `Request` objects
 // through `AuthManager.handleRequest`, the secrets are the ones better-auth
@@ -281,8 +302,29 @@ describe('#10700 — first enrollment still completes (the still-works floor)', 
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-describe('#10700 — a re-enrolled secret is inert until it is confirmed', () => {
-  it('the flag describes the STORED secret, and the challenge refuses the unconfirmed one', async () => {
+describe('#10700 — the inheritance path is now REFUSED at the route (better-auth 1.7.3)', () => {
+  /**
+   * [#17440] What changed under the family lift, and why this is a stronger
+   * pin rather than a weaker one.
+   *
+   * better-auth 1.7.3 added the gate #10700 was about, one layer above ours
+   * (`dist/plugins/two-factor/index.mjs`):
+   *
+   *   if (existingTwoFactor && existingTwoFactor.verified !== false)
+   *     throw APIError.from("BAD_REQUEST", TOTP_ALREADY_ENABLED);
+   *
+   * So a second `/two-factor/enable` on a CONFIRMED account no longer reaches
+   * the handler that rewrote the secret — the inheritance defect cannot be
+   * reproduced through this route at all. 1.7.2 had no such code
+   * (`TOTP_ALREADY_ENABLED` appears in 0 files there and 5 in 1.7.3, measured
+   * against a control code present in both).
+   *
+   * ⭐ That gate READS `verified`, which is precisely the field #10700 was
+   * about. Our data-layer reset (`two-factor-reenrollment-verified-reset.ts`)
+   * is therefore not dead code superseded by upstream — it is what keeps the
+   * input to upstream's new gate truthful. ⛔ Do not delete it as unreachable.
+   */
+  it('a re-enroll on a confirmed account is refused, and nothing is rotated behind the refusal', async () => {
     const { engine, manager, userId, firstSecret, sessionCookie } = await arrangeConfirmedEnrolment();
 
     const reenrolled = await post(
@@ -291,62 +333,127 @@ describe('#10700 — a re-enrolled secret is inert until it is confirmed', () =>
       { password: PASSWORD },
       { cookie: sessionCookie },
     );
-    expect(reenrolled.status, `two-factor/enable (re-enroll): ${await reenrolled.clone().text()}`).toBe(200);
-    const secondSecret = await secretFromEnableResponse(reenrolled);
+    // ADR-0112: code AND status, never a status alone.
+    expect(await refusal(reenrolled)).toEqual({ status: 400, code: 'TOTP_ALREADY_ENABLED' });
+
+    // The refusal is not a partial write: the flag still describes the stored
+    // secret, and the stored secret is still the confirmed one.
+    await expectVerified(manager, engine, userId, true, 'a refused re-enroll must not clear the flag');
+
+    const { cookie, methods } = await beginChallenge(manager);
+    expect(methods, 'the confirmed factor is still offered').toContain('totp');
+    const completed = await post(manager, '/two-factor/verify-totp', { code: totp(firstSecret) }, { cookie });
+    expect(completed.status, `verify-totp (original secret after a refused re-enroll): ${await completed.clone().text()}`).toBe(200);
+    expect(
+      await principalFor(manager, { cookie: cookieHeader(completed) }),
+      'the original confirmed secret still signs the user in',
+    ).toBe(userId);
+  });
+
+  /**
+   * The complement, and the reason the refusal above is a gate rather than a
+   * blanket ban: an UNCONFIRMED enrollment is still re-enrollable
+   * (`verified !== false` is the condition), and on that path the #10700
+   * property is asserted exactly as before — a secret nobody confirmed is
+   * inert at the challenge.
+   */
+  it('an UNCONFIRMED enrollment can still be re-enrolled, and the new secret stays inert', async () => {
+    const engine = createMemoryEngine();
+    const manager = makeManager(engine);
+
+    const signedUp = await post(manager, '/sign-up/email', {
+      email: EMAIL,
+      password: PASSWORD,
+      name: 'Re-enrolling User',
+    });
+    expect(signedUp.status, `sign-up: ${await signedUp.clone().text()}`).toBe(200);
+    const userId = userIdFor(engine, EMAIL);
+
+    const first = await post(manager, '/two-factor/enable', { password: PASSWORD }, { cookie: cookieHeader(signedUp) });
+    expect(first.status, `two-factor/enable (first): ${await first.clone().text()}`).toBe(200);
+    const firstSecret = await secretFromEnableResponse(first);
+    await expectVerified(manager, engine, userId, false, 'a fresh enrollment must not read as confirmed');
+
+    // Allowed: `verified === false`, so upstream's gate does not fire.
+    const second = await post(manager, '/two-factor/enable', { password: PASSWORD }, { cookie: cookieHeader(signedUp) });
+    expect(second.status, `two-factor/enable (re-enroll, unconfirmed): ${await second.clone().text()}`).toBe(200);
+    const secondSecret = await secretFromEnableResponse(second);
     expect(
       secondSecret.equals(firstSecret),
       'the premise: re-enrolling hands out a DIFFERENT secret',
     ).toBe(false);
 
-    // ① The flag. Against the unfixed handler this read `true` — inherited
-    //    from the enrollment that confirmed the PREVIOUS secret.
-    await expectVerified(
-      manager,
-      engine,
-      userId,
-      false,
-      'verified must describe the secret stored beside it, not the enrollment before it',
-    );
+    await expectVerified(manager, engine, userId, false, 'and it still reads as unconfirmed');
 
-    // ② What the challenge accepts — the half the flag alone cannot show.
-    const { cookie, methods } = await beginChallenge(manager);
+    // What the RUNTIME does with it — the half the flag alone cannot show.
+    // An unconfirmed factor gates nothing, so a sign-in does not stop at a
+    // challenge at all: there is no live factor to challenge with.
+    const signedIn = await post(manager, '/sign-in/email', { email: EMAIL, password: PASSWORD });
+    expect(signedIn.status, `sign-in: ${await signedIn.clone().text()}`).toBe(200);
+    const body = (await signedIn.clone().json()) as { twoFactorRedirect?: boolean };
     expect(
-      methods,
-      'the challenge must not offer a factor nobody has confirmed',
-    ).not.toContain('totp');
+      body.twoFactorRedirect,
+      'an unconfirmed factor must not gate sign-in — it is inert, not half-live',
+    ).not.toBe(true);
 
-    const withNewSecret = await post(manager, '/two-factor/verify-totp', { code: totp(secondSecret) }, { cookie });
-    // ADR-0112: code AND status. Against the unfixed handler this was a 200
-    // that installed a full session for a secret no one had ever confirmed.
-    expect(await refusal(withNewSecret)).toEqual({ status: 400, code: 'TOTP_NOT_ENABLED' });
-    expect(
-      await principalFor(manager, { cookie: cookieHeader(withNewSecret) }),
-      'a refused challenge must install nobody',
-    ).toBeNull();
-  });
-
-  it('confirming the re-enrolled secret makes it — and only it — live at the challenge', async () => {
-    const { engine, manager, userId, firstSecret, sessionCookie } = await arrangeConfirmedEnrolment();
-
-    const reenrolled = await post(
+    // And the re-enrollment really REPLACED the stored secret rather than
+    // adding a second live one — the half a flag assertion cannot show. The
+    // superseded secret no longer confirms; the current one does.
+    const sessionForConfirm = cookieHeader(signedIn);
+    const withOldSecret = await post(
       manager,
-      '/two-factor/enable',
-      { password: PASSWORD },
-      { cookie: sessionCookie },
+      '/two-factor/verify-totp',
+      { code: totp(firstSecret) },
+      { cookie: sessionForConfirm },
     );
-    expect(reenrolled.status).toBe(200);
-    const secondSecret = await secretFromEnableResponse(reenrolled);
+    expect(await refusal(withOldSecret)).toEqual({ status: 401, code: 'INVALID_CODE' });
+    await expectVerified(manager, engine, userId, false, 'a refused confirmation must not flip the flag');
 
-    // The still-works leg for rotation: the confirmation step is reachable
-    // with the session the caller already holds. An implementation that just
-    // refused `enable` never gets here.
-    const confirmed = await post(
+    const withNewSecret = await post(
       manager,
       '/two-factor/verify-totp',
       { code: totp(secondSecret) },
-      { cookie: sessionCookie },
+      { cookie: sessionForConfirm },
     );
-    expect(confirmed.status, `verify-totp (re-enrol confirmation): ${await confirmed.clone().text()}`).toBe(200);
+    expect(withNewSecret.status, `verify-totp (current secret): ${await withNewSecret.clone().text()}`).toBe(200);
+    await expectVerified(manager, engine, userId, true, 'the CURRENT secret is the one that confirms');
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+/**
+ * The still-works floor for ROTATION. [#17440] Rotation now goes through
+ * `/two-factor/disable` first, because 1.7.3 refuses `enable` on a confirmed
+ * factor — so this leg moved rather than disappeared. It stays load-bearing
+ * for the same reason it always was: an implementation that simply refused
+ * every re-enrollment would satisfy the refusal pins above while breaking
+ * every legitimate secret rotation.
+ */
+describe('#10700 — a legitimate rotation still completes, end to end', () => {
+  it('disable → enable → confirm makes the NEW secret live and the old one dead', async () => {
+    const { engine, manager, userId, firstSecret, sessionCookie } = await arrangeConfirmedEnrolment();
+
+    const disabled = await post(manager, '/two-factor/disable', { password: PASSWORD }, { cookie: sessionCookie });
+    expect(disabled.status, `two-factor/disable: ${await disabled.clone().text()}`).toBe(200);
+
+    // `disable` ends the session it was called with (better-auth deletes it on
+    // the way out), so the rotation continues under the cookie IT installed —
+    // reusing the stale one answers 401 and would read as "rotation is broken".
+    const rotatingCookie = cookieHeader(disabled) || sessionCookie;
+    expect(rotatingCookie, 'disable installed no usable session cookie').toContain('session_token=');
+
+    const reenrolled = await post(manager, '/two-factor/enable', { password: PASSWORD }, { cookie: rotatingCookie });
+    expect(reenrolled.status, `two-factor/enable (after disable): ${await reenrolled.clone().text()}`).toBe(200);
+    const secondSecret = await secretFromEnableResponse(reenrolled);
+    expect(secondSecret.equals(firstSecret), 'rotation hands out a DIFFERENT secret').toBe(false);
+
+    // The backup codes this response issues are the recovery floor — the same
+    // floor the old re-enrollment window pinned, on the path that still exists.
+    const { backupCodes } = (await reenrolled.clone().json()) as { backupCodes: string[] };
+    expect(Array.isArray(backupCodes) && backupCodes.length > 0, 'rotation must issue backup codes').toBe(true);
+
+    const confirmed = await post(manager, '/two-factor/verify-totp', { code: totp(secondSecret) }, { cookie: rotatingCookie });
+    expect(confirmed.status, `verify-totp (rotation confirmation): ${await confirmed.clone().text()}`).toBe(200);
     await expectVerified(manager, engine, userId, true, 'confirming a rotation must flip the flag back');
 
     const { cookie, methods } = await beginChallenge(manager);
@@ -360,63 +467,17 @@ describe('#10700 — a re-enrolled secret is inert until it is confirmed', () =>
     // an implementation that never rotated anything.
     const stale = await beginChallenge(manager);
     const withOldSecret = await post(manager, '/two-factor/verify-totp', { code: totp(firstSecret) }, { cookie: stale.cookie });
-    // Measured, and deliberately a DIFFERENT envelope from the one above: a
-    // superseded secret is now merely a wrong code (`401 INVALID_CODE`, from
-    // `verify-two-factor.mjs`'s `invalid()`), whereas an unconfirmed factor is
-    // refused by the gate before any code is checked (`400 TOTP_NOT_ENABLED`).
-    // Asserting the pair keeps "refused" from collapsing into one status.
     expect(await refusal(withOldSecret)).toEqual({ status: 401, code: 'INVALID_CODE' });
     expect(await principalFor(manager, { cookie: cookieHeader(withOldSecret) })).toBeNull();
-  });
-});
 
-// ───────────────────────────────────────────────────────────────────────────
-// The availability window, pinned as it ACTUALLY is rather than as one would
-// like it to be. `/two-factor/enable` rewrites the account's single
-// `sys_two_factor` row unconditionally, so the previously confirmed secret
-// stops working the moment the call returns — that is true before this change
-// and after it, and this fix does not claim otherwise. What the fix changes is
-// WHERE the caller finds out: with a live session in hand rather than at the
-// next sign-in with none. These two pins hold the floor that does exist, so a
-// later change that quietly removes the recovery path turns red here.
-describe('#10700 — the window between re-enrolling and confirming', () => {
-  it('the superseded secret is gone from the challenge, and the fresh backup codes are the way back in', async () => {
-    const { manager, userId, firstSecret, sessionCookie } = await arrangeConfirmedEnrolment();
-
-    const reenrolled = await post(
-      manager,
-      '/two-factor/enable',
-      { password: PASSWORD },
-      { cookie: sessionCookie },
-    );
-    expect(reenrolled.status).toBe(200);
-    const { backupCodes } = (await reenrolled.clone().json()) as { backupCodes: string[] };
-    expect(Array.isArray(backupCodes) && backupCodes.length > 0, 're-enrolling must issue backup codes').toBe(true);
-
-    // The superseded secret: refused, and refused for the reason the flag
-    // gives — the factor is unconfirmed, not merely mistyped.
-    const stale = await beginChallenge(manager);
-    const withOldSecret = await post(
-      manager,
-      '/two-factor/verify-totp',
-      { code: totp(firstSecret) },
-      { cookie: stale.cookie },
-    );
-    expect(await refusal(withOldSecret)).toEqual({ status: 400, code: 'TOTP_NOT_ENABLED' });
-
-    // The floor: the caller is not locked out. The codes THIS response handed
-    // over complete the sign-in.
+    // The recovery floor, driven: the codes THIS rotation handed over complete
+    // a sign-in.
     const recovery = await beginChallenge(manager);
-    const rescued = await post(
-      manager,
-      '/two-factor/verify-backup-code',
-      { code: backupCodes[0] },
-      { cookie: recovery.cookie },
-    );
+    const rescued = await post(manager, '/two-factor/verify-backup-code', { code: backupCodes[0] }, { cookie: recovery.cookie });
     expect(rescued.status, `verify-backup-code: ${await rescued.clone().text()}`).toBe(200);
     expect(
       await principalFor(manager, { cookie: cookieHeader(rescued) }),
-      'the backup code issued by the re-enrollment must sign the user in',
+      'the backup code issued by the rotation must sign the user in',
     ).toBe(userId);
   });
 });

@@ -3885,7 +3885,10 @@ export class AuthManager {
     //
     // Handing better-auth no `database` makes it build its own in-memory store
     // in `getBaseAdapter`, and that store is keyed by the schema KEY while
-    // every read resolves by `modelName`. Measured on better-auth 1.7.2:
+    // every read resolves by `modelName`. Re-measured 2026-09-11 on the
+    // installed better-auth 1.7.3, unchanged from the 1.7.2 reading it replaces
+    // (`db/adapter-base.mjs` builds the store by schema KEY;
+    // `@better-auth/memory-adapter` throws on the lookup, naming the model):
     //
     //   getAuthTables(options) -> { oauthResource: { modelName: 'sys_oauth_resource' }, … }
     //   its memoryDB           -> { oauthResource: [] }            // keyed by KEY
