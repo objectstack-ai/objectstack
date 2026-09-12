@@ -43,7 +43,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { ENGINE_DELETE_REJECT_MESSAGE, assertEngineDeleteDispatch } from '@objectstack/objectql';
+import { ENGINE_DELETE_REJECT_MESSAGE, assertEngineDeleteDispatch } from '@objectstack/metadata-core';
 import { buildActionEngineFacade } from './action-execution.js';
 
 const deps: any = { resolveService: () => undefined, getObjectQL: async () => undefined };
