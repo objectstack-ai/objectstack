@@ -22,7 +22,7 @@
 - 同 PR 的 `list_pull_requests` 会回 `merged: false` 与 `merged_at` 并存 ⇒ 只读布尔即读成没合。
 - `list_pull_requests` 的 `fields` 请求 `merged_by` 不返回该字段 ⇒ 字段缺席不是值读数。
 - `mergeable_state` 惰性计算,`unknown` 不是读数 —— 挂 unknown 等于挂在可能脏的头上。
-- `dirty` 即队列入口否决(冲突对象是当前 main);draft PR 恒回 `draft`。
+- `dirty` 即入队否决(冲突对象是当前 main);draft PR 照答 `clean`/`blocked`/`unknown`,不答 `draft`。
 - `needs:contract-review` 是合并闸:实测 `blocked` 而 `mergeable: true`,无标签同形兄弟回 `clean`。
 - ready 翻转实测两序列 `clean→blocked→clean` 与 `blocked→unstable→clean`;`unstable` 瞬态非失败。
 - 判头脏走零配额本地试合并:fetch PR ref 后 `git merge-tree --write-tree origin/main <ref>`。
@@ -394,6 +394,7 @@
 - issue 正文 `PATCH` 识别按整块:送全块或不送页脚都存回恰一条,已有页脚归一末尾不复制。
 - 无横线的裸页脚不算页脚:它被保留而整块另追加,总数二 ⇒ 恒一条只对上行两输入成立。
 - 该格两空:MCP 送裸页脚、`title`/`labels` 单字段 `issue_write` 是否动页脚,均未实测。
+- issue `PATCH` 同体带 `labels` 与 `type` 回 500 且零写入;拆两次写各 200,已带 type 的卡未实测。
 - 内联双引号 JSON 建卡:标题反引号标识符被 shell 以 root 展开,正文完好 —— 内容被执行。
 - heredoc 定界符不加引号会展开正文里每个反引号 ⇒ 请求体永不过会展开的 shell 上下文。
 - `cmd | tail; echo $?` 读到的是 `tail` 的状态 ⇒ 退出码在任何管道之前捕获。

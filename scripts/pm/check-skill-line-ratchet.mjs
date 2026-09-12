@@ -766,7 +766,7 @@ export const CEILINGS = new Map([
   // folds among this file's adjacent rule pairs, and re-wrap funding is refused
   // per the 2026-08-17 rule in any case. Landed count, headroom 0, same
   // convention.
-  // Raised 425 → 448 by the ELEVENTH readings increment, again under the STANDING
+  // Raised 425 → 449 by the ELEVENTH readings increment, again under the STANDING
   // one-file exception quoted above rather than a fresh decision card, and again
   // recorded as a `ruledRaises` record citing it. Its carrier was a FOLDED family
   // of five cards, so the candidate set spans all five bodies and their grading
@@ -805,9 +805,12 @@ export const CEILINGS = new Map([
   // marker itself, absent from this file until now — `CLAIM_COMMENT_MARKER` reads
   // a line-beginning `Claim:`/`Claimed:` with optional whitespace or one `>` (+1)
   // and a `**` or backtick before the word makes the comment invisible to the
-  // round-opening mutex readings and to the enqueue limb (+1) = +23 exactly.
+  // round-opening mutex readings and to the enqueue limb (+1); and the rider
+  // admitted in the family's own review — a bare-REST issue `PATCH` carrying
+  // `labels` and `type` in ONE body answers 500 and writes nothing, while the
+  // same two fields as two consecutive writes both answer 200 (+1) = +24 exactly.
   //
-  // THREE corrections are paid in place and buy nothing, each because a new cell
+  // FOUR corrections are paid in place and buy nothing, each because a new cell
   // contradicts the row rather than extending it: the success-sequence row, which
   // keyed on `removed_from_merge_queue` being followed by `merged` within ~1 s
   // when the two are measured arriving in the SAME second and in no fixed order;
@@ -815,7 +818,10 @@ export const CEILINGS = new Map([
   // no footer but NOT for a bare footer without its rule line; and the
   // write-entities prescription, which is true of body prose and false inside an
   // inline code span, where the entity does not decode and corrupts a verbatim
-  // quotation.
+  // quotation. The fourth is the reviewer's own, authorised in the family's
+  // review against seven draft PRs read across two repos: a draft's
+  // `mergeable_state` answers `clean`, `blocked` or `unknown` like any other
+  // PR's, and NOT the literal `draft` the row asserted it always returns.
   //
   // ⚠️ The candidate set was larger than what landed, and the cut is the
   // exception's own dedup condition doing its work rather than an author
@@ -830,15 +836,17 @@ export const CEILINGS = new Map([
   // being read from the `event=merge_group` runs, and the queue's serial 15–30
   // minutes per PR, which together are the whole of the 「a quiet `main` tip is
   // not a stall」 reading; and the inert echoed `merge_method`, re-measured a
-  // fourth time this round and unchanged. Candidates 31 / landed 24 readings
-  // (23 new lines + 3 in-place corrections; two readings needed two lines each
-  // under the 120-byte cap) / already present 7 / refused 0.
+  // fourth time this round and unchanged. Candidates 33 / landed 26 readings
+  // (24 new lines + 4 in-place corrections; two readings needed two lines each
+  // under the 120-byte cap) / already present 7 / refused 0. The last two of the
+  // 33 arrived in the family's review round — the rider card's 500 reading and
+  // the draft `mergeable_state` correction — and are counted here, not deferred.
   //
   // Nothing else was paid in place: the fourth increment MEASURED zero
   // line-neutral folds among this file's adjacent rule pairs, and re-wrap funding
   // is refused per the 2026-08-17 rule in any case. Landed count, headroom 0,
   // same convention.
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 448],
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 449],
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing
@@ -1428,7 +1436,7 @@ export const CROSS_FILE_MOVES = new Map([
         {
           // The ELEVENTH increment, under the same STANDING exception — the same
           // words again, for the same reason: a record that quotes no ruling is
-          // RED and each record stands alone. The +23 is accounted for line by
+          // RED and each record stands alone. The +24 is accounted for line by
           // line beside this entry's ceiling above, and the exception's own
           // conditions (per-item verification and the candidate / landed /
           // already-present / refused counts) are carried by the raising PR's
@@ -1440,7 +1448,7 @@ export const CROSS_FILE_MOVES = new Map([
             + ' 增量抬上限到落地行数,免决策卡,记 `ruledRaises` 引常设裁决。条件:席位验收评论'
             + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
           date: '2026-09-12',
-          delta: 23,
+          delta: 24,
         },
       ],
       sources: [
