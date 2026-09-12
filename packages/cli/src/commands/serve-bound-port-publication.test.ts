@@ -47,12 +47,22 @@ import { fileURLToPath } from 'node:url';
 import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
 
 import {
+  composeSeedSettledMessage,
+  createSeedSettlementAnnouncer,
   publishBoundPort,
+  readSeedSettlement,
   resolveBoundPort,
   runtimeBoundPortChannels,
+  runtimeSeedSettlementChannels,
   runtimeStateFileName,
+  seedingHasSettled,
   type BoundPortChannels,
+  type SeedSettledMessage,
 } from './serve.js';
+// #17329 — the published contract's own shapes, so the fixtures below cannot
+// drift from what the runtime actually hands the CLI.
+import type { SeedSettlementSnapshot, SeedSuppressionReason } from '@objectstack/spec/contracts';
+import type { SeedSourceSummary } from '../utils/format.js';
 import { MAX_PORT } from '../utils/port-contract.js';
 
 /** …/packages/cli/src/commands — seeded from `import.meta.url`. */
@@ -446,6 +456,274 @@ describe('#13062 all THREE channels publish that one number', () => {
       expect(SERVE).toContain('new HonoServerPlugin({');
       expect(SERVE.slice(SERVE.indexOf('new HonoServerPlugin({'))).toMatch(/^new HonoServerPlugin\(\{\s*\n\s*port,/);
       expect(SERVE).toContain('port = await getAvailablePort(requestedPort)');
+    });
+  });
+});
+
+/**
+ * #17329 — the SECOND ipc message: "this boot's seeding has come to rest".
+ *
+ * ## The defect, and the two clocks that hid it
+ *
+ * `✓ Server is ready` is true about the HTTP server and says nothing about the
+ * app. `AppPlugin` races its inline seed against `OS_INLINE_SEED_BUDGET_MS`
+ * (default 8s) and past it hands the rest to a detached promise, so the banner
+ * prints, a parent proceeds, and the continuation's error wall lands later —
+ * measured once at 82 seconds later, 120 `ERROR` lines. Which side wins is
+ * decided by whether the seed fits its budget on a contended box, so the same
+ * command on the same corpus disagrees between two containers.
+ *
+ * Everything that WOULD distinguish them arrives on the child's inherited
+ * stdio, and reading that costs the boot its TTY. So the fact moves to the
+ * channel the `os dev` parent already holds, beside `objectstack:listening`.
+ *
+ * ## ⭐ Why `inFlight`, and why that is the whole acceptance of the card
+ *
+ * The obvious predicate — `pending === 0` — is WRONG, and wrong in the
+ * direction that reproduces the defect one level up. Two shapes register a seed
+ * source and deliberately never run it (multi-tenant per-org replay,
+ * `skipSeedData` planning boots); both keep `pending` above zero for the life
+ * of the process by design. A `pending`-keyed message would never be sent on
+ * either, and its ABSENCE would be indistinguishable from a boot still writing
+ * — which is exactly how this defect hid the first time.
+ */
+describe('#17329 the `objectstack:seed-settled` ipc message', () => {
+  /** A settlement snapshot, with `pending` kept consistent by construction. */
+  const snap = (inFlight: number, suppressed: SeedSuppressionReason[] = []): SeedSettlementSnapshot => ({
+    pending: inFlight + suppressed.length,
+    inFlight,
+    suppressed,
+  });
+
+  /** An announcer over a mutable tally, so a boot's clock can be driven. */
+  const harness = (initial: SeedSettlementSnapshot | undefined) => {
+    const state = { snapshot: initial, summary: undefined as SeedSourceSummary[] | undefined };
+    const sent: SeedSettledMessage[] = [];
+    const announcer = createSeedSettlementAnnouncer({
+      readSettlement: () => state.snapshot,
+      readSummary: () => state.summary,
+      announceSettled: (m) => { sent.push(m); },
+    });
+    return { state, sent, announcer };
+  };
+
+  const s = (o: Partial<SeedSourceSummary> & { source: string }): SeedSourceSummary => ({
+    inserted: 0, updated: 0, skipped: 0, rejected: 0, ...o,
+  });
+
+  it('really reaches `process.send`, like the first message', () => {
+    // Pinned by OBSERVING the send, not by grepping for the call — the same
+    // rule the `objectstack:listening` leg above follows.
+    const channels = runtimeSeedSettlementChannels(undefined);
+    const sent = recordingProcessSend(() => {
+      channels.announceSettled({
+        type: 'objectstack:seed-settled', ok: true, suppressed: [], sources: [],
+      });
+    });
+    expect(sent).toEqual([{
+      type: 'objectstack:seed-settled', ok: true, suppressed: [], sources: [],
+    }]);
+  });
+
+  it('and stays silent, rather than throwing, when no IPC channel is open', () => {
+    // The ordinary `os serve` case: no parent, no fd 3. ⛔ This message must
+    // not make an IPC channel a requirement of a published command.
+    const channels = runtimeSeedSettlementChannels(undefined);
+    const prior = process.send;
+    (process as { send?: unknown }).send = undefined;
+    try {
+      expect(() => channels.announceSettled({
+        type: 'objectstack:seed-settled', ok: true, suppressed: [], sources: [],
+      })).not.toThrow();
+    } finally {
+      (process as { send?: unknown }).send = prior;
+    }
+  });
+
+  describe('the ordering contract — never before `objectstack:listening`', () => {
+    it('a settle during `runtime.start()` is LATCHED until the release', () => {
+      // The ordinary in-budget boot: seeding finished long before the bound
+      // port was published. A parent that waits for `objectstack:listening`
+      // and only then listens for the settle would MISS a message sent during
+      // the boot, so nothing may be sent until the release.
+      const { sent, announcer } = harness(snap(0));
+      announcer.check();      // `app:seeded`, mid-boot
+      announcer.check();      // `kernel:ready`, still mid-boot
+      expect(sent, 'a settle overtook the listening announcement').toEqual([]);
+
+      announcer.release();    // …after publishBoundPort drove its three
+      expect(sent).toHaveLength(1);
+      expect(sent[0].type).toBe('objectstack:seed-settled');
+    });
+
+    it('and the release is what sends it — not a later hook that may never fire', () => {
+      // ⛔ Ablation of the leg above: if the release only opened a gate and
+      // waited for the NEXT hook, an in-budget boot (whose hooks have all
+      // already fired) would never announce at all.
+      const { sent, announcer } = harness(snap(0));
+      announcer.release();
+      expect(sent, 'the release did not evaluate the tally it just un-gated').toHaveLength(1);
+    });
+  });
+
+  describe('the over-budget path — the clock the card is about', () => {
+    it('withholds while a source is still writing, then speaks when it settles', () => {
+      const { state, sent, announcer } = harness(snap(1));
+      announcer.release();
+      expect(sent, 'announced settled over a seed that was still writing').toEqual([]);
+
+      // The detached continuation finishes: the runtime settles the source and
+      // fires `app:seeded`, which is the only signal on this path.
+      state.snapshot = snap(0);
+      state.summary = [s({ source: 'showcase', inserted: 132 })];
+      announcer.check();
+
+      expect(sent).toHaveLength(1);
+      expect(sent[0].sources).toEqual([s({ source: 'showcase', inserted: 132 })]);
+      expect(sent[0].ok).toBe(true);
+    });
+
+    it('sends exactly ONCE, however many times the hooks fire', () => {
+      // `app:seeded` fires once per config app, and `kernel:ready` fires beside
+      // it; a bundle with several apps would otherwise announce several times
+      // and a parent reading one message would act on the first source's tally.
+      const { sent, announcer } = harness(snap(0));
+      announcer.release();
+      announcer.check();
+      announcer.check();
+      announcer.check();
+      expect(sent).toHaveLength(1);
+    });
+
+    it('reports failure as settled too — a failed seed has still come to rest', () => {
+      // ⛔ Not "announce only on success". A parent waiting for the boot to
+      // stop moving must be released by a seed that failed just as much as by
+      // one that worked; withholding here recreates the hang this closes.
+      const { state, sent, announcer } = harness(snap(1));
+      announcer.release();
+      state.snapshot = snap(0);
+      state.summary = [s({ source: 'showcase', inserted: 24, rejected: 14 })];
+      announcer.check();
+
+      expect(sent).toHaveLength(1);
+      expect(sent[0].ok, 'a seed that dropped 14 records reported ok').toBe(false);
+      expect(sent[0].sources[0].rejected).toBe(14);
+    });
+  });
+
+  describe('⭐ ruled item 3 — the two modes that report `pending > 0` FOREVER', () => {
+    // 「multi-tenant replay and `skipSeedData` report `pending > 0` for the whole
+    // boot — a consumer waiting on the new message must not hang forever there;
+    // the message's contract states what it means in those modes.」
+    it.each([
+      ['multi-tenant-replay' as const],
+      ['skip-seed-data' as const],
+    ])('%s: announces, carrying the reason — it does NOT hang', (reason) => {
+      // `suppress()` moves the source out of `inFlight` and records why, inside
+      // Phase 2 `start()`. So `kernel:ready` — the only hook that runs on these
+      // boots, since `app:seeded` never fires — finds nothing in flight.
+      const { sent, announcer } = harness(snap(0, [reason]));
+      announcer.release();
+
+      expect(sent, 'a consumer on this boot would wait for a message never coming').toHaveLength(1);
+      expect(sent[0].suppressed).toEqual([reason]);
+      expect(sent[0].sources, 'no rows were written by this boot').toEqual([]);
+    });
+
+    it('⛔ and `pending` is NOT the predicate — the ablation that proves it', () => {
+      // The discriminating reading. Both boots below report `pending: 1`; only
+      // one of them has work outstanding. A `pending`-keyed message would treat
+      // them identically and hang on both.
+      const suppressed = snap(0, ['multi-tenant-replay']);
+      const writing = snap(1);
+      expect(suppressed.pending, 'the two modes must be indistinguishable BY PENDING').toBe(writing.pending);
+
+      expect(seedingHasSettled(suppressed)).toBe(true);
+      expect(seedingHasSettled(writing)).toBe(false);
+    });
+  });
+
+  describe('a kernel with no seed pipeline at all', () => {
+    it('counts as settled — an absent service is an answer, not a not-yet', () => {
+      // Every source is declared in Phase 2 `start()`, which completes before
+      // `kernel:ready`, so "no service" is the fact "this kernel does not seed".
+      // ⛔ Treating it as unsettled would hang every app that ships no seeds.
+      expect(seedingHasSettled(undefined)).toBe(true);
+      const { sent, announcer } = harness(undefined);
+      announcer.release();
+      expect(sent).toHaveLength(1);
+      expect(sent[0]).toEqual({
+        type: 'objectstack:seed-settled', ok: true, suppressed: [], sources: [],
+      });
+    });
+
+    it('and `readSeedSettlement` survives a kernel whose `getService` THROWS', () => {
+      // `getService` throws on an unregistered name rather than returning
+      // undefined — the same trap `resolveBoundPort` documents above.
+      const throwing = { getService: (n: string) => { throw new Error(`Service '${n}' not found`); } };
+      expect(readSeedSettlement(throwing)).toBeUndefined();
+      expect(readSeedSettlement(undefined)).toBeUndefined();
+      // A service present but answering nothing usable is the same as absent.
+      const garbage = { getService: () => ({ snapshot: () => ({}) }) };
+      expect(readSeedSettlement(garbage)).toBeUndefined();
+      // …and the positive control, so those zeros are readings: a real tracker
+      // IS read back through the same accessor.
+      const real = { getService: () => ({ snapshot: () => snap(2) }) };
+      expect(readSeedSettlement(real)).toEqual(snap(2));
+    });
+  });
+
+  describe('`ok` is a verdict on what the summary CONTAINS', () => {
+    it.each([
+      ['a clean source', [{ source: 'showcase', inserted: 132 }], true],
+      ['rejected records', [{ source: 'showcase', inserted: 24, rejected: 14 }], false],
+      ['dropped references', [{ source: 'showcase', inserted: 42, droppedRefs: 3 }], false],
+      ['an empty install', [{ source: 'hotcrm', emptyInstall: true }], false],
+      ['one clean and one broken', [{ source: 'a', inserted: 9 }, { source: 'b', rejected: 1 }], false],
+    ])('%s', (_label, sources, expected) => {
+      const message = composeSeedSettledMessage(
+        snap(0),
+        (sources as Array<Partial<SeedSourceSummary> & { source: string }>).map(s),
+      );
+      expect(message.ok).toBe(expected);
+    });
+
+    it('an absent summary is `ok` with an empty `sources` — "nothing reported a problem"', () => {
+      // Documented rather than smoothed over: on a suppressed boot this reads
+      // "nothing ran", which is why the contract says to read `ok` against
+      // `sources` and `suppressed` rather than alone.
+      const message = composeSeedSettledMessage(snap(0, ['skip-seed-data']), undefined);
+      expect(message).toEqual({
+        type: 'objectstack:seed-settled',
+        ok: true,
+        suppressed: ['skip-seed-data'],
+        sources: [],
+      });
+    });
+  });
+
+  describe('the wiring inside `run()`, which is still un-enterable in-process', () => {
+    // Same reason the bound-port wiring above is a source pin: `run()` is one
+    // ~3000-line method that needs a whole kernel to enter. Comments are MASKED
+    // by the same separator, so a sentence about the release can never answer
+    // for code that does not perform it.
+    it('releases the latch AFTER the bound-port channels have been driven', () => {
+      const publish = SERVE.indexOf('publishBoundPort(boundPort, runtimeBoundPortChannels(printBanner), boundProtocol);');
+      const release = SERVE.indexOf('seedSettlement.release();');
+      expect(publish, 'the bound-port publish site moved or was renamed').toBeGreaterThan(-1);
+      expect(release, 'the settle latch is never released — the message can never be sent').toBeGreaterThan(-1);
+      expect(release, 'the settle announcement can now overtake `objectstack:listening`').toBeGreaterThan(publish);
+    });
+
+    it('subscribes BOTH hooks — `kernel:ready` is the suppressed boot\'s only one', () => {
+      expect(SERVE).toContain("ctx.hook('app:seeded', () => { seedSettlement.check(); });");
+      expect(SERVE).toContain("ctx.hook('kernel:ready', () => { seedSettlement.check(); });");
+    });
+
+    it('⛔ and the bound-port seam still has exactly ONE call site', () => {
+      // The #13062 pin, re-read here because this card added a publication
+      // beside it: a second `publishBoundPort` call is that defect returning.
+      expect(SERVE.match(/publishBoundPort\(/g) ?? []).toHaveLength(2);
     });
   });
 });
