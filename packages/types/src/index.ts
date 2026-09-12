@@ -7,6 +7,16 @@ export * from './degraded-boot.js';
 export * from './email-verified.js';
 export * from './env.js';
 export * from './error-leak.js';
+// [#17681] The SIBLING question, kept deliberately separate: `error-leak.js`
+// asks "is this message a driver dump?", this asks "did the JS RUNTIME raise
+// it?" — the crash-vs-refusal half of what a door does with a sandboxed body's
+// throw. It had three copies (rest's `isScriptFaultMessage`, objectql's
+// `isScriptCrash`, runtime's `sandboxRefusalMessage`), each a copy only because
+// the rule then lived in `@objectstack/rest`; every consumer already depends on
+// this package, so adopting the predicate adds no edge. ⛔ Never merge the two
+// predicates — a driver dump and a runtime crash are withheld for different
+// reasons and at different statuses.
+export * from './native-error-name.js';
 // Seek-based pagination for batch walks — the offset alternative that neither
 // skips rows when the walk mutates as it goes, nor costs O(n²/p) (#4363).
 export * from './keyset-walk.js';
