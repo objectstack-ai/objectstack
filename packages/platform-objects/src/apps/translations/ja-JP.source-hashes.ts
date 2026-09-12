@@ -29,6 +29,25 @@
  * the false claim this mechanism exists to detect — the served text would go
  * back to being silently wrong.
  *
+ * ## Which table wins for a path that appears in BOTH
+ *
+ * **This one.** A `--no-objects-only` extract records provenance for whatever
+ * sections it generated, so since #16872 a path under `apps` / `dashboards` /
+ * `pages` can carry an entry in `<locale>.source-hashes.generated.ts` as well
+ * as here. The two are read by two predicates over two tables and neither
+ * consults the other, so "wins" is a question about what a HUMAN maintains:
+ * maintain the digest HERE, exactly as this header already says, and ignore the
+ * generated one — it is regenerated from the tree on every extract and any
+ * edit to it is overwritten.
+ *
+ * The overlap cannot serve wrong text. The generated table only ever records a
+ * leaf whose bytes are still a copy of a source revision, so the only paths
+ * that can appear in both are the ones a translator deliberately left equal to
+ * the English source; for those, both predicates substitute the SAME source
+ * string and the served bytes are identical either way. Re-translate such a
+ * leaf and the next extract drops its generated entry by itself, leaving this
+ * table the only claim about it.
+ *
  * Backfilled once from the then-current source, per the ruling's
  * legacy-trusted note: every translation that existed when this landed is
  * trusted, not marked stale.

@@ -139,6 +139,46 @@
  * no longer a copy of the recorded revision, so no claim is being made about it
  * any more.
  *
+ * ## The population follows the RUN, not the section name
+ *
+ * The two lists above are a PROXY for the discriminator, and the proxy is exact
+ * only while `--objects-only` is the only emission mode. Under
+ * `--no-objects-only --fill=default` an `apps` leaf is a source copy BY
+ * CONSTRUCTION — it got there the generated way — and the proxy misclassifies
+ * it into the one set whose table a generator never writes. #16872 measured the
+ * consequence: the leaf drifts from its source, keeps being served, and nothing
+ * on disk records that it might have.
+ *
+ * ⚠️ The fix is NOT to add `'apps'` to {@link GENERATED_SECTIONS}. That would
+ * make {@link collectSourceLeaves} and {@link collectGeneratedLeaves} walk one
+ * section — two predicates permanently on one path, the "two owners on one
+ * fact" this module refuses — and it would assert `apps` is ALWAYS generated,
+ * which is false for every bundle set that ships today. The population has to
+ * follow the run:
+ *
+ *  - **write** — {@link collectFilledFromHashes} takes the sections the run
+ *    generated. `os i18n extract` passes what it built; which of them become
+ *    committed bundles is a later, separate decision the extractor already
+ *    derives (`narrowToCommittedSections`).
+ *  - **read** — {@link findStaleFills} walks the sections the recorded table
+ *    names. One run wrote that table, so the table is the record of what the
+ *    run emitted, and the two ends cannot disagree about it.
+ *
+ * Widening the generated population is safe in a way widening the hand-authored
+ * one would not be, and the reason is the per-leaf value test in
+ * {@link collectFilledFromHashes}: a leaf someone actually TRANSLATED satisfies
+ * neither `value === currentSource` nor `previous[path] === hash(value)`, so it
+ * gets no record and stays legacy-trusted. The section list is the only part of
+ * this mechanism that cannot tell a fill from a translation; the value test
+ * can, exactly, per leaf. That is why the fix belongs in the population and not
+ * in a new predicate.
+ *
+ * ⚠️ What this does NOT touch: `apps` stays in
+ * {@link HAND_AUTHORED_SECTIONS}, {@link collectSourceHashes} still walks it,
+ * and the extractor still never writes `<locale>.source-hashes.ts`. A path can
+ * now in principle appear in BOTH tables; that file's header says which one
+ * wins, and it is the hand table — see there.
+ *
  * ## Why the generated tables can be BACKFILLED with no history
  *
  * The generated predicate only ever fires on a leaf whose value is still a byte
@@ -174,6 +214,15 @@ export const HAND_AUTHORED_SECTIONS = ['apps', 'dashboards', 'pages'] as const;
  * These were excluded from this module until #11671 measured that the hole it
  * closes occurs here too — see the module note for the claim that was wrong and
  * why it was wrong.
+ *
+ * ⚠️ This is the DEFAULT population, not the definition of "generated". A
+ * `--no-objects-only` run emits `apps` / `dashboards` / `pages` as well, and
+ * `--fill=default` fills them FROM THE SOURCE — leaves carrying exactly the
+ * property the generated predicate exists to judge. Reading this constant as
+ * the definition left every one of them judged by nobody (#16872). The
+ * population is now derived from the RUN at both ends; this list is only what a
+ * caller that says nothing is assumed to have emitted. See "## The population
+ * follows the RUN" in the module note.
  */
 export const GENERATED_SECTIONS = ['objects', 'metadataForms'] as const;
 
@@ -245,9 +294,20 @@ export function collectSourceLeaves(data: TranslationData | undefined): Map<stri
  * because the two populations are judged by two different predicates, and a
  * single call that could return either is one `??` away from applying the wrong
  * one to the wrong half.
+ *
+ * `sections` names the population for THIS call and defaults to
+ * {@link GENERATED_SECTIONS}. A caller that knows which sections a run actually
+ * emitted passes them instead of inheriting the default — the
+ * `--no-objects-only` case (#16872). Note this parameter widens the GENERATED
+ * walk only: it is deliberately absent from {@link collectSourceLeaves},
+ * because every rule downstream of THIS walk is self-discriminating per leaf
+ * and none downstream of that one is.
  */
-export function collectGeneratedLeaves(data: TranslationData | undefined): Map<string, string> {
-  return collectLeavesOf(data, GENERATED_SECTIONS);
+export function collectGeneratedLeaves(
+  data: TranslationData | undefined,
+  sections: readonly string[] = GENERATED_SECTIONS,
+): Map<string, string> {
+  return collectLeavesOf(data, sections);
 }
 
 function collectLeavesOf(
@@ -315,6 +375,13 @@ export function collectSourceHashes(source: TranslationData | undefined): Record
  * is dropped on the next extract and the leaf goes back to legacy-trusted
  * instead of being reported stale forever.
  *
+ * `sections` is the population THIS RUN generated, defaulting to
+ * {@link GENERATED_SECTIONS} for a caller that does not know. The extractor
+ * passes the sections it actually built, which is the whole of what makes a
+ * `--no-objects-only` run's `apps` leaves recordable (#16872) — and it still
+ * owns none of the RULE: the three bullets above are unchanged, so a wider
+ * population can only ever add records for leaves that ARE source copies.
+ *
  * Pure and total: same inputs, same table. That is what lets `os i18n extract
  * --check` compare the committed companion byte-for-byte.
  */
@@ -322,10 +389,11 @@ export function collectFilledFromHashes(
   translated: TranslationData | undefined,
   source: TranslationData | undefined,
   previous: SourceHashes | undefined,
+  sections: readonly string[] = GENERATED_SECTIONS,
 ): Record<string, string> {
-  const sourceLeaves = collectGeneratedLeaves(source);
+  const sourceLeaves = collectGeneratedLeaves(source, sections);
   const hashes: Record<string, string> = {};
-  for (const [path, value] of collectGeneratedLeaves(translated)) {
+  for (const [path, value] of collectGeneratedLeaves(translated, sections)) {
     const digest = hashSource(value);
     const isCurrentCopy = sourceLeaves.get(path) === value;
     const wasRecordedCopy = previous?.[path] === digest;
@@ -380,6 +448,37 @@ export function findStaleLeaves(
   return stale;
 }
 
+/**
+ * The sections a recorded table actually makes claims about — the distinct
+ * first dotted segment of its keys.
+ *
+ * This is the READ half of "the population follows the run", and it needs no
+ * parameter because the table IS the record of what the run emitted: one run
+ * wrote it, over the sections that run generated. Deriving the read population
+ * from the artefact the write population produced is what keeps the two ends
+ * from being two facts that can disagree — the failure the module refuses
+ * everywhere else.
+ *
+ * It is also provably not a widening of what was already EFFECTIVE. A leaf in a
+ * section with no records is skipped as legacy-trusted by every rule below, so
+ * walking {@link GENERATED_SECTIONS} and walking this set have always produced
+ * the same verdicts; what changes is only that a section the run DID record is
+ * no longer assumed impossible. Measured on this tree when this landed: all
+ * three committed generated tables carry `objects` and `metadataForms` keys and
+ * nothing else, so this returns exactly {@link GENERATED_SECTIONS} today.
+ *
+ * Deliberately module-private. The published surface grows by one optional
+ * parameter (#16872), not by a second exported way to name a population.
+ */
+function recordedSections(recorded: SourceHashes): readonly string[] {
+  const sections = new Set<string>();
+  for (const path of Object.keys(recorded)) {
+    const head = path.split('.', 1)[0];
+    if (head) sections.add(head);
+  }
+  return [...sections];
+}
+
 /** A generated leaf still holding a byte copy of a source revision that has moved on. */
 export interface StaleFill {
   /** Dotted leaf path, e.g. `objects.sys_user.fields.email.help`. */
@@ -409,6 +508,13 @@ export interface StaleFill {
  *
  * A path whose source string no longer exists is not reported — that is a
  * REMOVED key, which `check:i18n`'s key-set comparison owns.
+ *
+ * The population walked is {@link recordedSections}(`recorded`), not
+ * {@link GENERATED_SECTIONS}: a record written for a section a
+ * `--no-objects-only` run emitted is read back by the same name it was written
+ * under (#16872). Before that, a record could be WRITTEN for a leaf this
+ * predicate would never walk — provenance recorded on disk and consulted by
+ * nobody, which is the harm one layer past the one #16242 described.
  */
 export function findStaleFills(
   translated: TranslationData | undefined,
@@ -416,10 +522,11 @@ export function findStaleFills(
   recorded: SourceHashes | undefined,
 ): StaleFill[] {
   if (!translated || !recorded) return [];
-  const sourceLeaves = collectGeneratedLeaves(source);
+  const sections = recordedSections(recorded);
+  const sourceLeaves = collectGeneratedLeaves(source, sections);
   const stale: StaleFill[] = [];
 
-  for (const [path, value] of collectGeneratedLeaves(translated)) {
+  for (const [path, value] of collectGeneratedLeaves(translated, sections)) {
     const recordedHash = recorded[path];
     if (recordedHash === undefined) continue; // legacy-trusted
     if (hashSource(value) !== recordedHash) continue; // re-translated since — not our claim
@@ -455,7 +562,8 @@ function setDeep(target: Record<string, unknown>, path: string, value: string): 
  * untouched.
  *
  * `recorded` judges the hand-authored sections ({@link findStaleLeaves}); the
- * optional `filledFrom` judges the generated ones ({@link findStaleFills}).
+ * optional `filledFrom` judges the generated ones ({@link findStaleFills}), over
+ * whatever sections `filledFrom` itself records.
  * Omitting `filledFrom` leaves the generated sections entirely legacy-trusted,
  * which is what every caller did before #11671 and is still the honest default
  * for a bundle with no committed `<locale>.source-hashes.generated.ts`.
@@ -474,7 +582,14 @@ export function withSourceFallback(
   if (stale.length === 0 && staleFills.length === 0) return translated;
 
   const handAuthored = collectSourceLeaves(source);
-  const generated = collectGeneratedLeaves(source);
+  // The same population {@link findStaleFills} judged, so every path it
+  // reported has a source string to substitute. Reading this from
+  // GENERATED_SECTIONS while the stale set came from the table was the shape
+  // that served the superseded draft for a recorded `apps` leaf (#16872).
+  const generated = collectGeneratedLeaves(
+    source,
+    filledFrom ? recordedSections(filledFrom) : GENERATED_SECTIONS,
+  );
   const next: Record<string, unknown> = { ...translated };
   for (const { path } of stale) {
     const sourceValue = handAuthored.get(path);
