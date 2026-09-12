@@ -654,7 +654,7 @@ content/docs/     # 📝 Docs content
 | `Identity` | `identity/` | User, Organization, Profile |
 | `Security` | `security/` | Permission, Role, Policy |
 | `Kernel` | `kernel/` | Plugin lifecycle (PluginContext) |
-| `Cloud` | `cloud/` | Multi-tenant, deployment, environment |
+| `Marketplace` | `marketplace/` | Package, Version, Listing, Install, Template |
 | `QA` | `qa/` | Test, validation |
 | `Contracts` | `contracts/` | Cross-package interfaces |
 | `Integration` | `integration/` | External integrations |
