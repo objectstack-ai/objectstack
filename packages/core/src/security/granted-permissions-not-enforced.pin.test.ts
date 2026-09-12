@@ -62,6 +62,16 @@ const toRepoPath = (absolute: string) => relative(REPO_ROOT, absolute).split(sep
 /** The file that declares the enforcer, the secure context and every gate. */
 const HOME = toRepoPath(join(HERE, 'plugin-permission-enforcer.ts'));
 
+/** This file, so the repo-wide sweep below can exclude its own specimen. */
+const SELF = toRepoPath(fileURLToPath(import.meta.url));
+
+/**
+ * The retracted claim, as data. It shipped on the enforcer docblock and — found
+ * only by a post-merge sweep — as a case title in the runtime's seam test. Held
+ * once so the sweep and the single-file read cannot drift apart.
+ */
+const RETRACTED = 'enforces exactly the consented surface';
+
 /**
  * Generous on purpose: the scan costs tens of milliseconds, but a merge-queue
  * runner doing a full monorepo build at the same time can starve it, and a pin
@@ -169,8 +179,31 @@ describe('[#17147] the install-time granted permission set is registered, not en
     expect(
       text,
       'the retracted sentence must not come back beside the truthful one',
-    ).not.toContain('enforces exactly the consented surface');
+    ).not.toContain(RETRACTED);
   });
+
+  it('the retracted phrasing is absent from the WHOLE repo, not just its own file', () => {
+    // [#17147 follow-up] The single-file version above missed one: the runtime's
+    // own seam test carried `a CONSENTED entry enforces exactly the consented
+    // surface` as a CASE TITLE. Nothing in it asserted a refusal — it reads a
+    // permission bag and checks what the bag answers — but a case title is read
+    // as evidence (ADR-0033), and that one said the platform confines plugins.
+    // Found by a post-merge sweep, not by this pin, which is why the pin now
+    // sweeps instead of reading one file.
+    const offenders = gitGrep(RETRACTED).filter((p) => p !== SELF);
+
+    expect(
+      offenders,
+      'the retracted phrasing came back somewhere. It says the platform confines a plugin, '
+      + 'which it does not — see this file\'s header for the measurement, and use `answers` / '
+      + '`registered` / `bound` instead.',
+    ).toEqual([]);
+
+    // Anti-vacuity: this file itself carries the needle, so a scan that saw the
+    // tree must return at least SELF. An empty raw result means the scan is
+    // broken or the file is untracked, and `.filter` would hide both.
+    expect(gitGrep(RETRACTED), 'the scan did not even see this file').toContain(SELF);
+  }, SCAN_TIMEOUT_MS);
 
   it('registers a grant without gating anything — the behaviour the text describes', async () => {
     // Anti-vacuity for the prose above: assert the FACT, not only the sentence.
