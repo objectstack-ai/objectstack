@@ -1415,6 +1415,63 @@ describe('conversion layer (ADR-0087 D2)', () => {
       expect(entry!.retiredFromLoadPath).toBe(true);
       expect(entry!.toMajor).toBe(17);
     });
+
+    // ---- the seam's own refusal (`excludeConversionIds`, #17885) ----
+
+    /**
+     * A seam that has opened the retired window may still refuse a named
+     * entry. The artifact-ingestion door does exactly this for the DEFAULT-FLIP
+     * class: its evidence is the artifact's DECLARED `engines.protocol` floor,
+     * which is a dependency range and not an age, so "this input predates the
+     * flip" is a guess there — while at the stored-row seam above it is a fact.
+     * Pinned on the primitive so the option cannot quietly stop working while
+     * the door's own suite still reads green for another reason.
+     */
+    it('a seam can refuse a named entry by id even with `includeRetired: true`', () => {
+      const before = storedApp({ hidden: true, label: 'PM', navigation: [] });
+      const notices: ConversionNotice[] = [];
+      const out = applyConversions(before, {
+        includeRetired: true,
+        excludeConversionIds: ['app-hidden-to-unpublished'],
+        onNotice: (n) => notices.push(n),
+      });
+      expect(out).toBe(before);
+      expect(appOf(out)).toEqual({ name: 'production_management', hidden: true, label: 'PM', navigation: [] });
+      expect(notices).toEqual([]);
+    });
+
+    /**
+     * ⭐ FIRING CONTROL for the refusal above — it excludes ONE id, not the
+     * window. `page-kind-jsx-to-html` (not retired) and the retired app entry
+     * are driven through the SAME call: the named one is refused, the other
+     * still fires.
+     */
+    it('refuses only the named id — the rest of the chain still runs', () => {
+      const notices: ConversionNotice[] = [];
+      const out = applyConversions(
+        {
+          apps: [{ name: 'production_management', hidden: true, navigation: [] }],
+          pages: [{ name: 'landing', kind: 'jsx', source: '<div>hi</div>' }],
+        },
+        {
+          includeRetired: true,
+          excludeConversionIds: ['app-hidden-to-unpublished'],
+          onNotice: (n) => notices.push(n),
+        },
+      );
+      expect(appOf(out).hidden, 'the refused entry did not fire').toBe(true);
+      expect(appOf(out)._unpublished).toBeUndefined();
+      expect((out.pages as Record<string, unknown>[])[0]!.kind, 'the rest of the chain did').toBe('html');
+      expect(notices.map((n) => n.conversionId)).toEqual(['page-kind-jsx-to-html']);
+    });
+
+    it('an absent or empty exclusion list changes nothing', () => {
+      const shape = () => storedApp({ hidden: true, navigation: [] });
+      const withEmpty = applyConversions(shape(), { includeRetired: true, excludeConversionIds: [] });
+      const without = applyConversions(shape(), { includeRetired: true });
+      expect(appOf(withEmpty)._unpublished).toBe(true);
+      expect(appOf(without)._unpublished).toBe(true);
+    });
   });
 
   /**
