@@ -1,0 +1,32 @@
+{
+  "number": 2898,
+  "kind": "issue",
+  "title": "metadata-protocol: reject env-scope overlays of package-owned permission sets at authoring time (ADR-0094 D5)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-14T06:18:49Z",
+  "updated_at": "2026-07-14T10:01:06Z",
+  "closed_at": "2026-07-14T10:01:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2898",
+  "body": "## Context\n\nADR-0094 (framework#2875) makes the metadata layer the single authoritative store for permission-set definitions, with `sys_permission_set` a pure projection. For **package-owned** names (`managed_by:'package'`), the projector deliberately refuses env-scope bodies — the package door owns those records (ADR-0086 D4), and the ADR-0086 two-doors gate already blocks admin data-door writes on them.\n\n## The gap\n\nThe metadata type registry declares `permission` with `allowOrgOverride: true`, so `saveMetaItem` **accepts** an env-scope overlay of a package-owned set. That overlay then:\n\n- shows in the Studio layered read (`overlay` / `effective`),\n- but is **not projected** onto the record (refused, warn-only), and\n- is **not enforced** for package-baseline resolution.\n\nThat is a declared-but-inert authoring surface — an ADR-0049 violation: the author gets no error and no effect.\n\n## Proposed fix\n\nReject the write at authoring time, mirroring the data-plane two-doors gate: `saveMetaItem('permission', name, …)` at env scope should fail with a structured 403/422 (`package_owned`) when the target name's `sys_permission_set` record is `managed_by:'package'` — \"edit the package and re-publish\" guidance included. Likely needs a small per-type authoring-gate seam in the protocol (the generic layer must not know `sys_permission_set`'s shape), registered by plugin-security next to its mutation projector.\n\n## References\n\n- ADR-0094 D5 (documents this as a surfaced-not-fixed follow-up)\n- ADR-0086 two-doors; ADR-0049 no-unenforced-security-properties\n- `upsertEnvPermissionSet` refusal in `packages/plugins/plugin-security/src/permission-set-projection.ts`\n\n_Filed while landing #2875 (Prime Directive #10 — out-of-scope finding)._"
+}

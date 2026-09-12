@@ -1,0 +1,32 @@
+{
+  "number": 3050,
+  "kind": "issue",
+  "title": "OWD posture is lint-only at runtime: env can widen a packaged object's sharingModel via OS_METADATA_WRITABLE, and external≤internal (ADR-0090 D11) is never enforced on the write path",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T11:33:21Z",
+  "updated_at": "2026-07-16T12:34:32Z",
+  "closed_at": "2026-07-16T12:34:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3050",
+  "body": "## Summary\n\nADR-0086 D1 classifies OWD (`object.sharingModel`) as *package metadata whose environment may only **tighten***, and ADR-0090 D11 requires `externalSharingModel ≤ sharingModel`. Both rules exist today **only as CLI lint** (`validateSecurityPosture`, run by `os compile`/`os lint`) — **nothing enforces them on the runtime metadata write path**. Per ADR-0049 (no unenforced security properties) this is a gap to close, not a doc to keep.\n\n## Verified write paths (HEAD 2026-07-16)\n\n| Path | Verdict | Evidence |\n|---|---|---|\n| Env overlay of a **packaged** object (default deploy) | ✅ GUARDED — `403 not_overridable` | `object` type ships `allowOrgOverride:false` (`spec/kernel/metadata-plugin.zod.ts:599`); rejection in `saveMetaItem` (`metadata-protocol/src/protocol.ts:3825`) |\n| Same, with **`OS_METADATA_WRITABLE=object`** | ❌ **WIDE OPEN** | `envWritableTypes()` flips `isOverlayAllowed('object')` (`protocol.ts:3319-3386`); after that there is **no field-level guard on `sharingModel` anywhere** in `saveMetaItem`/`publishMetaItem` — an env overlay can take a packaged object from `private` to `public_read_write` with zero validation |\n| `external ≤ internal` (D11) at runtime | ❌ **NEVER ENFORCED** | `object.zod.ts:910` states the rule in `.describe()` prose only — no zod refine; the only enforcement is lint rule `SECURITY_EXTERNAL_WIDER` (`packages/lint/src/validate-security-posture.ts:216-245`), which does not run on `saveMetaItem`/`publishMetaItem` |\n| Runtime-created env-owned object edits | ⚠️ ungated by design (env owns it) — but D11 still unenforced | `allowRuntimeCreate:true`; no posture check on save |\n| ADR-0090 D7 security-domain publish gate | CLI-only | `validateSecurityPosture` invoked from `cli/src/commands/compile.ts:354` etc.; absent from `metadata-protocol/src/protocol.ts` |\n\nAlso relevant: the ADR-0094 addendum names a **`registerAuthoringGate`** protocol seam — it was never implemented (only the post-persist `registerMutationProjector` exists, `protocol.ts:892`, which is too late to reject a write).\n\n## Proposed fix (small, write-path only — no boot/parse behavior change)\n\n1. **`metadata-protocol`**: implement the ADR-0094-promised `registerAuthoringGate(type, gate)` seam — a per-type, **awaited, throwing** hook invoked in `saveMetaItem` (after the existing overlay/runtime-create authorization, before persistence) and in `publishMetaItem` (before promotion), receiving `{ type, name, state, organizationId, body, isArtifactBacked, declaredBody? }`.\n2. **`plugin-security`**: register an `object` posture gate (feature-detected, mirroring the `permission` projector wiring):\n   - **R1 tighten-only**: an env-scope write over an artifact-backed object may not set `sharingModel`/`externalSharingModel` wider than the packaged declaration (`OWD width: private < public_read < public_read_write`; `controlled_by_parent` excluded, mirroring lint). Closes the `OS_METADATA_WRITABLE` hole while keeping the escape hatch usable for tightening.\n   - **R2 external≤internal**: any object write must satisfy D11 ordering.\n3. **Grandfathering**: enforced on writes only — existing stored metadata keeps loading; no zod refine (a parse-time refine would break boot of grandfathered stacks, the ADR-0090 D1 lesson).\n\nRejections use the D4-style fix-it message; widening a packaged OWD legitimately = author it in the package and publish (draft/publish gate, ADR-0090 D7), not an env overlay.\n\n## Refs\n\nADR-0086 D1 (env may only tighten OWD; left open in its \"Neutral/open\" list and its 2026-07-16 re-evaluation), ADR-0090 D7/D11, ADR-0094 addendum (`registerAuthoringGate`), ADR-0049. Umbrella: #2561."
+}

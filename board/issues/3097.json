@@ -1,0 +1,35 @@
+{
+  "number": 3097,
+  "kind": "pull_request",
+  "title": "fix(seed): seed replay must not corrupt lookup natural keys on the upsert update path",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T07:02:52Z",
+  "updated_at": "2026-07-17T07:20:04Z",
+  "closed_at": "2026-07-17T07:20:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T07:20:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3097",
+  "body": "## 问题\n\n第三方评估(15.1.x,2026-07-17,记忆 `project_thirdparty_eval_15_1_findings`)实测:**每次 dev server 重启,seed upsert 重放都会破坏以 natural key 书写的 lookup/master_detail 引用** ——\n\n```\nupdate my_app_interview set candidate = NULL … NOT NULL constraint failed: my_app_interview.candidate\n```\n\n只有字段恰好 required(NOT NULL 列)才拦住了写入;**可空 lookup 会被静默清成 NULL = 数据破坏**。首次启动 insert 路径一切正常,掩盖了问题。\n\n## 根因链(三层叠加)\n\n用原评估工程(15.1.0 发布包 + 其 dev.db 现场)完整复现,链路为:\n\n1. **父记录 update 被合理拒绝后断链**:评估者在 kanban 上拖动过 candidate.stage,重放想写回 seed 值被 `state_machine` 规则拒绝(合理)。但 update 失败的 catch 分支不登记 `insertedRecords` 的 externalId → id 映射,导致**所有子 dataset 的内存 natural-key 解析全部失联**。\n2. **DB 回退探测列硬编码 `name`**:`resolveFromDatabase` 不知道目标 dataset 声明的 `externalId: 'email'`,拿 `where name = 'alice@example.com'` 去查(name 实际是 `Alice Zhang`)必然落空。首次启动全靠内存解析,从未暴露。\n3. **multiPass defer 直接把 NULL 写穿 update**:解析失败后 `record[field] = null` 随 pass 1 的 update 落库,覆盖已存在行的正确引用 —— pass 2 也救不回(同样解析不到)。\n\n## 修复(`SeedLoaderService`,单一实现,三条生产路径共享)\n\n- **解析失败绝不写 NULL**:defer 改为**移除字段**(insert 缺列=占位待 pass 2;update 不碰该列=保留现值);非 multiPass 下彻底解析不到则**整条记录丢弃并大声报错**(计入 errored),绝不把 natural-key 字符串或 NULL 写进 FK 列。object-wrapper 守卫同样改为移除字段。\n- **DB 探测按目标 dataset 的 externalId**:探测顺序 `dataset externalId` → `name` → `id`,全部精确匹配 —— 多探测只可能救回引用,不可能误配。\n- **update 先登记映射再写**:行存在与否与写入成败无关,`state_machine` 拒绝不再级联断链(批量路径与 self-ref 路径都修)。\n- **幂等重放**(评估发现的顺带项):upsert/update 时若 seed 声明的字段与现有行完全一致 → skip。消除每次重启的 `updated_at` 刷新、生命周期重校验与 FSM 误拒;比较是保守宽松(driver 往返的布尔 0/1、日期字符串、数字字符串),拿不准一律按\"有变化\"回退老行为。\n\n## 验证\n\n- **新回归测试** `seed-loader-replay.test.ts`(5 个,mock 的 `find` 真正按 `where` 过滤 —— 旧 mock 返回全表,正好掩盖缺陷 2):两次 load 重放、父 update 被拒的级联、externalId DB 探测、defer 不碰列、单 pass 丢记录、无变化全跳过。**对未修复代码 4/5 红**(stash 验证),修复后全绿。\n- **真实栈端到端**(AppPlugin → ObjectQL → SqlDriver,三次 boot,含用户改行 + FSM 拒绝):6 项检查全 PASS —— 子表引用保持正确 id、重放更新正常落地、FSM 拒绝只报错不级联、第三次 boot 完全幂等(零 update、零 updated_at 变化)。\n- 受影响包全测:metadata-protocol 34 ✓ / runtime 544 ✓ / objectql 904 ✓ / spec 6888 ✓ / cloud-connection ✓。\n\n## 影响面\n\n- `packages/metadata-protocol/src/seed-loader.ts` 单文件实现;runtime / objectql 仅 re-export,REST publish、单租户 inline seed、多租户 per-org replayer 三条路径同时受益。\n- 行为变化:重放无变化记录从 `updated` 变为 `skipped`(summary 计数语义不变);非 multiPass 解析失败从\"带未解析字符串写入\"变为\"丢弃并报错\"(更严格,LOUD)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

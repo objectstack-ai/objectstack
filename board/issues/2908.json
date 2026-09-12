@@ -1,0 +1,30 @@
+{
+  "number": 2908,
+  "kind": "issue",
+  "title": "CI: build the examples/docker reference image against a freshly scaffolded project",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-14T08:19:27Z",
+  "updated_at": "2026-07-14T11:55:58Z",
+  "closed_at": "2026-07-14T11:55:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2908",
+  "body": "## 背景\n\nPR #2907 新增了 `examples/docker/`（可复制进 `npm create objectstack` 项目的参考 Dockerfile / docker-compose），并被 `deployment/self-hosting` 文档引用。文件内容与已验证的裸机流程（`npm ci → npx os build → os start` + `/api/v1/health` 探针）一一对应，但**镜像构建本身没有 CI 覆盖**（开发会话环境无 docker daemon，无法本地验证）。\n\n按 Prime Directive #10（不演示运行时未交付的能力），这个缺口应由 CI 补上，否则参考 Dockerfile 会像 create-objectstack 模板一样静默腐化（见 #2907 描述：模板锁 `^6.0.0` 直到 14.x 才被发现）。\n\n## 建议\n\n新增一个 workflow job（或并入现有 CI），在 ubuntu runner 上：\n\n1. `node packages/create-objectstack/bin/create-objectstack.js smoke --skip-install --skip-skills`（用仓库内构建的 dist，验证模板与脚手架本身）\n2. 把 `examples/docker/{Dockerfile,docker-compose.yml,.dockerignore}` 复制进生成的项目\n3. `docker build` 该项目（GitHub runner 自带 docker）\n4. `docker run` + 轮询 `GET /api/v1/health`，非 200 即失败\n\n这同时给了脚手架端到端链路（scaffold → install → build → boot）一个持续回归门，正是 #2907 手工做过的验证的自动化版本。\n\n## 参考\n\n- `examples/docker/README.md` 中的使用步骤即为 job 脚本蓝本\n- 健康/就绪端点：`/api/v1/health`、`/api/v1/ready`（`packages/runtime/src/http-dispatcher.ts`）\n"
+}

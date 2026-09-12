@@ -1,0 +1,33 @@
+{
+  "number": 3090,
+  "kind": "pull_request",
+  "title": "docs(site): landing v2 — narrative redesign (loop · gates · vocabulary)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T05:44:21Z",
+  "updated_at": "2026-07-17T06:15:01Z",
+  "closed_at": "2026-07-17T06:14:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T06:14:59Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3090",
+  "body": "## 背景\n\n两轮迭代合一:① hero 文案从类目词换成与 www.objectos.ai 镜像的叙事;② 按维护者定的开源核心叙事(创建项目 → 描述需求、Claude Code 自动开发、浏览器预览 → 元数据能力清单)整页重设计,并解决\"首页有点丑\"。\n\n## 页面结构(spec-sheet 美学:蓝图网格、mono 编号小节、Bricolage Grotesque 标题、品牌渐变第二拍)\n\n- **Hero**:\"AI writes the app. **ObjectStack is what it writes.**\" + 防错链 lead + 右侧「故事卡」一图讲完闭环(需求一句话 → Claude Code 写 typed metadata diff → `os validate ✓` → `os dev` Console 预览)+ proof strip(~1% · Typed, validated, governed · Self-host)\n- **01 The loop**:`npx create-objectstack` 创建 → 描述需求(agent 写元数据、validation gate 拦静默错误)→ 浏览器预览;需求变更同循环\n- **02 The gates**:Typed(tsc+Zod)/ Validated(os validate)/ Reviewed(Console 小 diff 人审)/ Governed(运行时权限+审计)\n- **03 The vocabulary**:12 项企业软件元数据能力(objects/permissions/flows/approvals/views/dashboards/actions/api/mcp/i18n/seed/drivers)+ 与\"AI 裸写一次性代码库\"的对比段 + 数据条(1,600+ schemas · 5 drivers · 7 adapters · MCP)\n- **Closing**:ontology 开放协议一句话(链 objectos.ai 长文)+ ObjectOS 互链\n- 站点 `<title>` 模板去掉 \"Protocol\" 类目词\n\n## 验证\n\n- `types:check` ✅;本地 dev 浏览器逐区块实测(亮/暗色、1280 视口),hero/loop/gates/vocabulary/closing 截图确认\n- 事实核对:`npx create-objectstack`(README:111)、`os dev` Console(README:75)、1,600+ schemas(README:36)、视图类型与能力清单与 spec/README 一致\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

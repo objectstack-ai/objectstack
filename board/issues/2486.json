@@ -1,0 +1,32 @@
+{
+  "number": 2486,
+  "kind": "issue",
+  "title": "通用拼音搜索:locale 开关 + 名称字段拼音伴随列(接入 ADR-0061,纯加性)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-30T13:37:45Z",
+  "updated_at": "2026-07-16T07:12:34Z",
+  "closed_at": "2026-07-16T07:12:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2486",
+  "body": "## 背景 / 问题\n\n拼音搜索是中文场景下的**横切需求**——选人(`sys_user`)、客户、产品、部门等几乎任何带中文名称的对象都需要\"输全拼或首字母就能搜到\"。如果在每个对象上手搓去规范化拼音列,就是**同一个 hack 复制 N 份**,无法维护。\n\n应做成**平台级通用能力**,并且做成**最小的纯加性增量**:在 ADR-0061 现有 `$search` 之上,只为\"输拼音\"这一件事补一条伴随列,**其它搜索行为一律不动**,任何对象、任何搜索界面(lookup picker / 列表快搜 / ⌘K)透明获得拼音召回。\n\n### 为什么不靠数据库分词器(已核实)\n\n考察过 SQLite/Turso 的原生 FTS 方案后排除了\"分词器路线\":\n\n- **Turso Cloud 不支持加载传统 C 扩展**(如 `simple` 拼音分词器)——走 WASM UDF,官方策略是用原生能力替代扩展加载;\n- **FTS5 与 Turso 新引擎(Tantivy)两边都没有原生拼音**;Tantivy 的中文分词(jieba/lindera)是进程内 Rust crate,hosted 是否暴露未确认;\n- 各方言 FTS 互不通(SQLite FTS5 / Postgres tsvector·pg_trgm / Turso Tantivy)。\n\n→ **结论:用\"去规范化拼音伴随列 + `$contains`\"**,它**方言无关、引擎无关、不赌平台扩展**;将来 Tier-2 上原生 FTS 时,这列被一并索引即可,无缝叠加。\n\n## 把需求削到本质:只有\"输拼音\"需要新东西\n\nCJK 记录搜索的四种输入里,**只有两种**是现有 `$contains` 覆盖不了的:\n\n| 用户输入 | 例(找\"张伟\") | 现状能否命中 | 需要什么 |\n|---|---|---|---|\n| 中文 | 打 `张` | ✅ 源列 `$contains \"张\"` 直接命中 | **什么都不用** |\n| 其它字段原文 | 打 email / 编号 | ✅ 源列直接命中 | **什么都不用** |\n| 全拼 | 打 `zhangwei` | ❌ 源列是\"张伟\"不是 zhangwei | 伴随列 |\n| 首字母 | 打 `zw` | ❌ 同上 | 伴随列 |\n\n所以**整个功能的净增量 = 给名称字段挂一条拼音伴随列,查询期 OR 进去**。多字段搜索本来就靠源列直接搜,不需要任何归一化;非名称字段直接搜,零成本。**不引入 search blob、不改 `searchableFields`/auto-default、不给一堆字段物化。**\n\n## 方案:locale 开关 + 名称字段拼音伴随列(纯加性)\n\n### 没有字段级标记,用 locale 门控的平台开关\n\n拼音是 **deployment/locale 级**能力,不是字段级:中文部署要,纯日文/英文部署不要。所以**不引入字段元数据 `pinyin`**:\n\n- 平台开关 `OS_SEARCH_PINYIN_ENABLED`,默认值由配置的 locale 推导(挂了任意 `zh-*` 就默认开),可显式覆盖;\n- 和 host capability(如 `OS_PAGE_REACT`)同形态:OSS / 非中文部署**不拉 `pinyin-pro`、不付计算成本**,`pinyin-pro` 懒加载;\n- **附带好处:没有字段级声明,就不存在\"声明了没人执行\"的死标记(ADR-0049),也不需要额外的 `os build` enforce 闸。** 开关 on/off 整体生效,没有\"某字段假装支持拼音\"的中间态。\n\n### 物化集 ≠ 搜索集:只挂名称字段\n\n拼音物化是有成本的(写时跑 `pinyin-pro` + 一列存储),而**绝大多数短文本字段不需要拼音搜**——选人/客户/产品/部门 99% 是按**名字**搜拼音。所以:\n\n- **只对 display/name 字段派生**一条伴随列 → **1 列 / 对象**;\n- 与纯文本搜索的 `searchableFields` 宽度**解耦**:搜索集可以宽(纯 `$contains` 同一次全扫,宽度只是召回噪声,非 I/O 成本),拼音物化保持窄。\n\n### 一条伴随列就够召回(`<field>__search`)\n\n`$contains` 是子串匹配,全拼 `zhangwei` 与首字母 `zw` **互不为子串**——但**存进同一列**即可两种都召回:\n\n| 列 | 存(以\"张伟\"为例) | 命中输入 |\n|---|---|---|\n| `<field>__search` | `zhangwei zw` | `zhang` / `wei` / `zhangwei`(全拼子串)、`zw`(首字母) |\n\n> 全拼命中优先于首字母的**相关性排序**、以及对短首字母的**整词/前缀防噪**,都属于 Tier-2(原生 FTS / 带权索引),本期不做——故一列足够,不拆两列。\n\n### 列在编译期声明,插件只填值(对齐先例)\n\n参照 `plugin-sharing` 维护 `sys_user.primary_business_unit_id` 的**真实**形态:那列**声明在对象自身上**,插件只用 hook 维护值,并**不**运行时注入物理列。照此:\n\n- 开关开时,**对象编译期**对名称字段物化隐藏伴随列 `<field>__search`(`hidden`、`searchable:false`、不进可请求集);migration 正常加列,不破坏 ADR-0045 additive-materialization;\n- `plugin-pinyin-search` 退化为**纯 hook**:create/update before-save 时,若源字段(含 CJK)变更则用 `pinyin-pro` 算\"全拼 + 首字母\"写入伴随列;**只在源字段真的变了才重算**,避免写放大。\n\n### 查询期接入(`packages/objectql/src/search-filter.ts`)\n\n纯加性,**不改 `resolveSearchFields` 的返回**(伴随列对前端透明):\n\n- `resolveSearchFields` 维持原样,返回源字段;`$searchFields` override 与 allowed 求交时天然够不到伴随列;\n- `expandSearchToFilter` 生成子句时,若名称字段存在 `<field>__search` 列,**额外 OR 上 `{ <field>__search: { $contains: term } }`**;\n- `$contains` + `$or` 所有驱动已支持,**零驱动改动**。\n\n### 安全护栏(FLS / secret)\n\n伴随列只吸纳**对该对象所有访问者一律可读**的字段(名称字段通常如此)。带字段级读限制 / secret / PII 的字段**不进伴随列**——否则\"搜什么命中谁\"会成为绕过 FLS 的推断 oracle(前端隐藏字段挡不住结果集泄露)。这与 ADR-0061 D5\"secret/PII 永不可搜\"同类,只是把\"受限读\"也一并排除。normalizer 入口一行过滤即可,默认安全,不靠作者记得。\n\n### 写路径兜底\n\n伴随列是 denormalized-on-write,绕过 hook 的写入(bulk import / 迁移直写)会让伴随列为空 → 拼音搜不到却不报错。兜底:**开关首次开启时批量回填**(分批后台任务),并提供**定期对账/重建**入口。\n\n## 组件清单\n\n- **平台开关**:`OS_SEARCH_PINYIN_ENABLED`(locale 推导默认值,懒加载 `pinyin-pro`)。**无字段元数据改动。**\n- **编译期物化**:display/name 字段 → 隐藏伴随列 `<field>__search`。\n- **`plugin-pinyin-search`**:before-save hook(源字段变更 → 算全拼/首字母)+ 回填/对账任务。\n- **集成点**:`expandSearchToFilter` 对名称字段额外 OR 上伴随列;`resolveSearchFields` 不变。\n- **拼音库**:`pinyin-pro`(多音字启发式)。\n- **安全**:伴随列排除 FLS 受限 / secret / PII 字段。\n\n## 通用化接缝(留口子)\n\n拼音是\"**搜索归一化伴随列**\"的一个实例。hook/列命名按 `normalizers: ['pinyin', ...]` 泛化,**但只实现 pinyin**;后续可扩简繁转换、全/半角归一、重音折叠——同一套\"从源字段派生可搜索归一化形式\"的机制。\n\n## 待定 / 决策点\n\n- **多音字**:`pinyin-pro` 默认启发式即可,接受少量漏召;姓氏多音(单/查/重/解)误召率值得在选人器 dogfood 量一下。是否对特定字典覆盖留 P2。\n- **回填规模/性能**:大表回填走批处理 / 后台任务 + 对账重建。\n\n## 范围 / 非目标\n\n- 仅提供 **Tier-1**(`$contains` over 名称字段伴随列)的拼音召回;相关性排序(全拼优先)/ typo 容错 / 整词防噪属 **Tier-2**(原生 FTS)。\n- **只物化 display/name 字段**;**不引入** search blob、**不改** `searchableFields`/auto-default、**不给** 非名称字段物化——多字段/非名称搜索直接打源列即可。\n- **不依赖** Turso 分词器/可加载扩展,**方言/引擎无关**。\n- 与具体业务对象解耦:开关一开,任何对象的名称字段即得拼音召回。\n\n## 关联\n\n- ADR-0061 `docs/adr/0061-record-search-architecture.md`(记录搜索架构 / Tier-1 字段解析)——本功能为其提供拼音召回,纯加性叠加。\n- 集成点:`packages/objectql/src/search-filter.ts`(`expandSearchToFilter`)。\n- 模式先例:`plugin-sharing/src/primary-bu-projection.ts`——列声明在对象上、插件只用 hook 维护值。\n- 下游受益:objectstack-ai/objectui#2112(分层选人器,picker 仅发 `$search`,拼音透明点亮)。\n"
+}

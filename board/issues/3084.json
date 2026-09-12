@@ -1,0 +1,34 @@
+{
+  "number": 3084,
+  "kind": "pull_request",
+  "title": "docs(releases): lead v15 with outcome-oriented highlights",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T02:20:58Z",
+  "updated_at": "2026-07-17T02:39:54Z",
+  "closed_at": "2026-07-17T02:39:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T02:39:52Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3084",
+  "body": "Follow-up to #3082 per release review: the v15 page should showcase what shipped, not how it was built.\n\n- New opening: a plain-language intro + **Highlights — 15.0.0** (record-level access explanation, safer multi-tenant by construction, the docked AI workspace, project-ready Gantt, loud config errors, phone sign-in) and **Highlights — 15.1.0** (permission-following attachments, no-code connectors, dashboard-wide filters, pinyin search, whole-record inline edit, everyday quality) — outcomes first, no ADR/PR jargon.\n- Detail sections reordered feature-first: features → Console → breaking/migration → behavior → hardening (15.0), capabilities → Console → behavior → security → fixes (15.1). **No content removed** — migrations keep their full text, they just stop leading the page.\n- Frontmatter + releases-index descriptions reworded to outcomes.\n\nChecks: `check:role-word` OK, `check:release-notes` OK.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

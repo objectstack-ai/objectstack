@@ -1,0 +1,33 @@
+{
+  "number": 3088,
+  "kind": "pull_request",
+  "title": "feat(docs): landing page at / + self-hosted logo assets",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T05:09:57Z",
+  "updated_at": "2026-07-17T05:16:02Z",
+  "closed_at": "2026-07-17T05:16:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T05:16:01Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3088",
+  "body": "## 背景\n\n按 objectos / objectstack 分拆决议,www.objectstack.ai 营销站将作废(仓库 archive、域名 301 到 docs.objectstack.ai),docs 站升格为 objectstack 开源项目的官网门面。本 PR 是 framework 侧的配套小改。\n\n## 改动\n\n- **`/` 从 redirect(/docs) 改为一屏极简 landing**:hero(README 官方定位文案)+ Get started(→ /docs/getting-started)/ Documentation / GitHub 三个按钮 + 底部 ObjectOS 互链(「需要官方带 AI 的托管运行时 → www.objectos.ai」)。复用 blog 页已有的 `HomeLayout + baseOptions()` 模式,仅英文(站点当前 `languages: ['en']`)。\n- **logo / favicon 本地化**:导航 logo 和 favicon 原来热链 `https://objectstack.ai/logo.svg|png` —— 该 URL 现在已经 500(重定向链坏掉),即线上导航 logo 和 favicon 目前是坏的。改为 `public/logo.svg` + `app/favicon.ico` 本地服务,顺带移除 next.config 里对 objectstack.ai 的 `images.remotePatterns` 白名单(唯一使用处已消失)。\n- **顶部导航补 Docs / Blog 链接**(landing 和 blog 的 HomeLayout 上可见,DocsLayout 侧边栏同步出现)。\n\n## 验证\n\n- `pnpm run types:check` ✅(fumadocs-mdx + next typegen + tsc)\n- `pnpm --filter @objectstack/docs build` ✅(400+ 页全部预渲染成功)\n- 浏览器实测:`/` 200 直出 landing(亮/暗色均正常,窄视口响应式 OK);Get started 落到 \"What is ObjectStack?\";本地 logo 在导航正常渲染。\n\n## 后续(不在本 PR)\n\n- Vercel:objectstack.ai + www 域名 301 → docs.objectstack.ai;GitHub archive www.objectstack.ai 与 website-astro 仓库。\n- `content/docs.site.json`(protocol 站)及 cloud 仓库同名文件里指向 www.objectstack.ai 的导航链接待清理。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

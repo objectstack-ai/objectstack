@@ -1,0 +1,30 @@
+{
+  "number": 3023,
+  "kind": "issue",
+  "title": "属主守卫与级联 set_null 冲突:非特权删除 sys_user 时 owner_id 级联置空被 #3004 守卫拦截(级联中途失败)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T05:23:33Z",
+  "updated_at": "2026-07-16T11:39:16Z",
+  "closed_at": "2026-07-16T11:39:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3023",
+  "body": "## 背景\n\n#3004 修复(PR #3018)后,`plugin-security` step 3.5 把 `owner_id` 变成非特权写入者的系统托管字段:update 携带 `owner_id`(含置为 `null` 的弃权)在无 transfer 授权时被拒。\n\n## 问题\n\n`owner_id` 是指向 `sys_user` 的 `lookup`,默认 `deleteBehavior: 'set_null'`(`packages/objectql/src/registry.ts` 约 334–345)。删除一个 `sys_user` 时,`cascadeDeleteRelations`(`packages/objectql/src/engine.ts` 约 2527+,仅对单条删除生效)会对每个引用该用户的子记录执行:\n\n```ts\nthis.update(childName, { id: depId, owner_id: null }, { context })  // 沿用删除者的上下文\n```\n\n该级联 update 携带 `owner_id: null`,以**删除者的上下文**重新进入中间件。若删除者是非 `isSystem`、且在这些子对象上**不持有** `allowTransfer`/`modifyAllRecords` 的主体,step 3.5 会把它判为“弃权”而抛 `PermissionDeniedError` —— 由于没有事务包裹,级联会**中途失败**,留下部分已置空/已删除的子记录。\n\n## 触发条件(较窄)\n\n- 仅在删除 `sys_user`(唯一被 `owner_id` 引用的对象)时触发;\n- 且删除者是非系统上下文、缺少 transfer 授权(平台/组织管理员默认持有 `modifyAllRecords`,不受影响)。\n\n## 期望\n\n级联 `set_null` 是引擎内部的引用完整性操作,不是用户发起的属主变更,不应被属主转移守卫拦截。可选方案:\n1. `cascadeDeleteRelations` 的 `set_null` 写入使用受控的系统上下文(引用完整性本就应覆盖删除者不可见的子记录);或\n2. 为引擎内部级联写入打标,step 3.5 对其豁免。\n\n## 关联\n\n- 从 PR #3018(#3004 / #2982)的对抗式代码审查中发现。\n- 属 #3004 守卫的边界交互,非该 PR 主线场景,单列跟踪。"
+}

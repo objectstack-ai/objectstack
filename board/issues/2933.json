@@ -1,0 +1,35 @@
+{
+  "number": 2933,
+  "kind": "pull_request",
+  "title": "feat(plugin-security): B1 — 租户隔离拆为 Layer 0（ADR-0095 D1 + 四处授权 delta）(#2920)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-14T16:03:53Z",
+  "updated_at": "2026-07-14T23:46:10Z",
+  "closed_at": "2026-07-14T23:46:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-14T23:46:08Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2933",
+  "body": "## 概述\n\n落地 **ADR-0095 D1**：租户隔离从「OR 合并进 RLS 编译器的通配 `tenant_isolation` 策略」抽为**独立、始终最先、AND 组合**的 **Layer 0**（`tenant-layer.ts`）。有效行过滤器 = `Layer0(tenant) AND Layer1(业务 RLS)`，两层不共享编译器 / 合并步 / 旁路位——**W1 从结构上消失，W2 从结构上分离**。\n\n架构师已裁决**接受四处授权 delta**（均 W1 同源、朝更强/更正确隔离），本 PR 据此落地并扩写了 ADR。\n\n两个 commit：\n1. `test:` 单元层矩阵门（抽取前快照）。\n2. `feat:` Layer 0 抽取（生产改动 + 矩阵门翻转 + ADR 扩写）。\n\n---\n\n## 改动结构\n\n- **新增 `tenant-layer.ts`**：`computeTenantLayer0Filter` 消费 `tenancy` service（`isolationActive`）+ ctx.organization_id；`andComposeLayers`。规则：single/未激活 → null；非租户对象（tenancyDisabled 或无 organization_id 列）→ null；platform-admin 姿态 + 对象 posture 允许（private/platform-global/better-auth）→ 豁免 null；multi 缺 org → fail-closed deny；否则 `{organization_id}`。**租户对象判定直接用字段集 + posture，不依赖有 bug 的 `extractTargetField`**（见 #2936）。\n- **`security-plugin.ts` `computeRlsFilter`** 改为 `Layer0 AND Layer1`：W2 超级用户短路现只管 **Layer 1 业务 RLS**；Layer 0 有独立豁免。`getReadFilter` / by-id 写 pre-image（step 2.7）经由 `computeRlsFilter` 自动获得 Layer 0。\n- **`computeWriteCheckFilter` 有意不加租户 post-image check**：种子 `tenant_isolation` 只有 `using` 无 `check`（无既有行为可保持），insert 的租户落位由企业版 auto-stamp 负责，update/delete 由 Layer 0 pre-image 保证；强加会有 insert 被误拒的回归风险。ADR 已注明。\n- **退役种子 3 处 `tenant_isolation`**（`organization_admin`/`member_default`/`viewer_readonly`）。\n- **`applyTenantScope`（driver 层）不动**（纵深防御）。\n\n---\n\n## 四处授权 delta（前 → 后）\n\n| delta | 前 | 后 |\n|---|---|---|\n| **(a) W1 读** | `org OR status==public`（异租户 public 行**可见**）| `org AND status==public`（**不可见**）|\n| **(b) W1 写** | member by-id 写 = `org OR created_by`（组织内任意行）| `org AND created_by`（**仅 owner**）— **release-notes BREAKING** |\n| **(c) platform-global 读** | 幻影 `{organization_id}`（该对象无此列 → 0行/驱动不定）| `null`（全局目录可见）|\n| **(e) 无 active org 写** | `{created_by}`（可写任意组织自己的行）| Layer 0 **fail-closed 拒绝** |\n\n其余所有格 = 同可见性简化（org_admin 重复-OR 去重、better-auth 死子句消除），矩阵门已逐格锁定并注释。**single 模式 Layer 0 完全惰性，零变化。**\n\n**(b) 迁移说明**：若部署依赖「成员组织内互编记录」（旧 OR 合并静默允许），成员 by-id 写现仅限自己创建的记录；需要组织内互编处请用**每对象、position 分发**的 edit 权限集显式授予。\n\n---\n\n## 退役 vs 保留\n\n- **退役**（租户墙 → Layer 0）：`organization_admin` / `member_default` / `viewer_readonly` 三处 `tenant_isolation`。\n- **保留**（业务 RLS / 身份表自限，勿删）：`owner_only_writes` / `owner_only_deletes`；所有 `sys_*_self`、`sys_user_org_members`、`organization_admin` 的 `sys_organization_self` / `sys_member_org` / `sys_invitation_org` / `sys_team_org`。\n\n---\n\n## 验证（实际跑动数字）\n\n```\nplugin-security 全量               16 files / 355 passed\nauthz-matrix-gate.test.ts          6 passed（W1 读/写两格已翻转为 AND，标 [ADR-0095 D1 accepted delta]）\ntsc --noEmit -p tsconfig.json      EXIT=0\nplugin-security build (tsup+dts)   success\ndogfood authz-conformance.test     1 passed（ledger + multi-tenant enforcement 引用已更新为 Layer 0）\ndogfood rls-fixture.dogfood        4 passed（单租户 RLS 行为不变）\ndogfood single-tenant-identity     passed\ndogfood rls-multitenant.dogfood    SKIPPED（多组织隔离需企业版 @objectstack/organizations，open-core 不可跑；非本 PR 回归）\n```\n> 多组织行为保持的最终裁判在单元层**矩阵门**（可跑、全绿）；dogfood 的多租户 e2e 在 open-core 无法起真机（跳过属既有限制）。**未冒出第五处 delta。**\n\n---\n\n## 新开 issue\n- **#2936**（security）：`extractTargetField` 只认 `=` 不认 `==`，导致 field-existence/tenancy-disabled 网对 canonical `==` 策略 inert。B1 的 Layer 0 已内部绕开（delta c 由此修正）；但 **Layer 1 业务策略仍受影响**，待单独评审（勿夹带进本 PR）。\n\n---\n\n## Reviewer checklist（重点复核）\n- [ ] **退役/保留分类**：确认仅 3 处 wildcard `tenant_isolation` 退役，carve-out（owner_only / `_self` / `_org`）全部保留。\n- [ ] **W2 豁免改造**：Layer 0 独立豁免（platform-admin 证据 + 对象 posture），public 业务对象上 admin 仍被组织墙挡（矩阵门 `[W2]` 已锁）。\n- [ ] **四格 delta**：a/b/c/e 的前后语义与迁移说明，尤其 (b) 的 BREAKING 影响面。\n- [ ] **`computeWriteCheckFilter` 不加租户 check** 的取舍是否认可（vs 未来加租户 WITH-CHECK 需先定 auto-stamp 顺序）。\n- [ ] **同可见性简化**（重复-OR 去重、死子句消除）逐格认可。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

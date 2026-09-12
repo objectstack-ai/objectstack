@@ -1,0 +1,30 @@
+{
+  "number": 2823,
+  "kind": "issue",
+  "title": "问题（Showcase）：Capability Map 的项目链接被解析到页面路由下",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-11T03:16:59Z",
+  "updated_at": "2026-07-17T14:07:06Z",
+  "closed_at": "2026-07-17T14:07:06Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2823",
+  "body": "## 复现\n\n1. 打开 `/apps/com.example.showcase/page/showcase_capability_map`。\n2. 如果尚未登录，先登录；重定向后会返回同一个 Capability Map URL。\n3. 在主内容区域找到 `DATA — Objects, fields & rules`。\n4. 点击 `Projects (backbone)`。\n5. 页面打开嵌套的 `/apps/com.example.showcase/page/apps/com.example.showcase/showcase_project` URL，并显示 `Page not found`。\n\n预期 URL：`/apps/com.example.showcase/showcase_project`；实际 URL：`/apps/com.example.showcase/page/apps/com.example.showcase/showcase_project`。\n\n![Capability Map Projects link opens Page not found](https://raw.githubusercontent.com/yinlianghui/objectstack-backup/82dd18a60b6120644945c107acb9ef9a15b8b0bf/framework/issue-2678/2026-07-11/screenshots/f-ui-002-capability-projects-page-not-found.png)\n\n## 范围\n\n该问题是在 #2678 UI QA 期间偶然发现的；它与 #2680 的批量写入行为无关，也没有证据证明它是由 #2680 引入的回归。\n"
+}

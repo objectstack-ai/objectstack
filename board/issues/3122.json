@@ -1,0 +1,34 @@
+{
+  "number": 3122,
+  "kind": "pull_request",
+  "title": "docs(approvals): drop duplicate role-vs-position callout (unbreak role-word ratchet)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T12:03:40Z",
+  "updated_at": "2026-07-17T12:22:27Z",
+  "closed_at": "2026-07-17T12:22:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3122",
+  "body": "## Why main is red\n\nThe `ESLint` job of **Lint & Type Check** fails on `main` at its *Reserved-word (\"role\") docs ratchet* step, so **every open PR inherits a red check**. `pnpm lint` itself is clean — this is not an eslint rule failure.\n\n```\n• content/docs/automation/approvals.mdx: role-word count grew 5 → 9.\n  New occurrences are banned (ADR-0090 D3).\n```\n\nIntroduced by 25a19be72 (#3113). Red at 021ba4caf and every commit after.\n\n## The occurrences are not drift — and must not be reworded\n\nThe obvious fix (swap `role` → the D3 vocabulary) is **wrong here**, so this PR does not do it:\n\n- `role` is a **real, shipping approver type** — [`approval.zod.ts:14`](packages/spec/src/automation/approval.zod.ts#L14), sitting in the enum next to `position` with a comment explaining exactly why it stays.\n- It resolves against **better-auth's org-membership tier** (`sys_member.role`: owner/admin/member) — which ADR-0090 D3 names as its **single documented exception**: *\"the better-auth boundary — `sys_member.role` is third-party schema we do not own; it remains.\"*\n- Writing `position` in these spots would make the docs **factually wrong**. Distinguishing the two *is the entire point of the passage* — and of the [`approval-role-not-membership-tier`](packages/lint/src/validate-approval-approvers.ts) lint rule, which exists precisely because authors confuse them and their approvals silently route to nobody.\n\n## What the ratchet did catch\n\nReal redundancy. The callout added under *\"The request opens, the run pauses\"* restates the callout ~75 lines above it — same fact, same page, and the **older one says more** (it names the lint rule and `sys_user_position`). **Removed the duplicate** (−3 occurrences). That's a docs improvement on its own merits.\n\nThat left `role:<r>` in the `approverId` filter list (−1 short): a genuine *new* fact at the same sanctioned boundary ([`approval-service.ts:231`](packages/spec/src/contracts/approval-service.ts#L231)). Rather than delete a true API detail to satisfy a counter, the **surviving callout is tightened** — it stated role-the-approver-type twice (*\"The `role` approver type is…\"* and *\"authored as `type: 'role'`\"*), now once. That frees the slot and the file lands back at **exactly 5**.\n\n## Baseline deliberately NOT bumped\n\nA high-water mark that only ratchets down is the point of the gate. `scripts/role-word-baseline.json` is untouched — the only changed file is the `.mdx`.\n\n## Reviewer's judgment call\n\nI tightened the surviving callout partly to stay under the cap. If maintainers would rather keep that callout's original wording and ratchet the baseline 5 → 6 for `role:<r>`, that is a defensible call — the ratchet is a blunt per-file counter that can't tell a sanctioned better-auth mention from real drift. I didn't make that call unilaterally, because it's a human decision, not a reflex.\n\n## Verification\n\n| Gate | Result |\n|---|---|\n| `node scripts/check-role-word.mjs` | `OK (49 baselined file(s), no new occurrences)` — exit **0** |\n| `pnpm lint` | exit **0** |\n\nDocs-only change → `skip-changeset`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

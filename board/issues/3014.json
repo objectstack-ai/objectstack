@@ -1,0 +1,35 @@
+{
+  "number": 3014,
+  "kind": "pull_request",
+  "title": "feat(spec): structured buttons + defaults config on FormViewSchema (#2998)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T04:49:10Z",
+  "updated_at": "2026-07-16T09:25:12Z",
+  "closed_at": "2026-07-16T09:25:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-16T09:25:10Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3014",
+  "body": "实现 #2998 的 **Track A**:为 `FormViewSchema` 增加结构化的 `buttons` + `defaults` 配置(Track B —— 将 `view` 纳入 liveness ledger —— 按 issue 的排期约定另开专门 PR,不在本 PR 范围内)。\n\n## 背景\n\nobjectui 侧的 `ObjectForm` 今天读取一组 **spec 中不存在** 的扁平表单键(`showSubmit`/`submitText`/`showCancel`/`cancelText`/`showReset`/`initialValues`,见 objectui#2545 与 `docs/audits/2026-06-viewschema-property-liveness.md:25`)。`FormViewSchema` 是 strip 模式容器,这些键在 `.parse()` 时被**静默剥除** —— 正是 ADR-0078 禁止的 \"parsed → silently inert\" 形态。本 PR 按 issue 中的草图把这组渲染器自造键收编进协议。\n\n## 变更内容\n\n- **`buttons`**(新增可选顶层键,紧邻 `submitBehavior`):`submit` / `cancel` / `reset` 三个动作按钮的 `{ show, label }` 结构化配置。叶子 schema `FormButtonConfigSchema`(新导出)按 ADR-0089 D3a 使用 `.strict()`,拼错键(如把 `submitText` 写进 `buttons.submit`)会**大声报错**而不是消失;`label` 复用 `I18nLabelSchema`。\n- **`defaults`**(新增可选顶层键):create 模式表单的初始字段值,按字段机器名(machine name)索引 —— 收编 objectui 的 `initialValues`。\n- **ADR-0078 约束的落地形态**:本仓库对 `FormViewSchema` 没有运行时消费者,新增无人读取的可写面本身就是 parsed-but-inert。由于本 session 仓库范围仅限 framework,无法同批联动 objectui 渲染器,故按 issue 列出的 **fallback 形态**落地:两个键的 TSDoc 与 `.describe()` 均标注 `[EXPERIMENTAL — NOT ENFORCED, #2998]`,直到 objectui 侧接线(objectui#2545)。该标记与 liveness ledger 的 experimental 正则(`check-liveness.mts` `MARKER_RE`)匹配,Track B 入册时可直接归类为 `experimental`,不会挡 gate。\n- **纯增量**:容器是 strip 模式,不改变任何既有键的形状 —— minor changeset,无需 tombstone。\n- 测试(`view.test.ts` 新增 6 例):解析往返、部分配置、strict 叶子对旧扁平键/拼错键的拒绝、experimental 标记断言;`api-surface.json` 重新生成(+2 个导出);自动生成的 `content/docs/references/ui/view.mdx` 同步再生(仅本变更相关的 hunk;`gen:docs` 顺带再生的无关陈旧文件已回退,未纳入)。\n\n## 遗留的开放问题(维持现状,未动)\n\n- wizard 的 `nextText`/`prevText` 目前 spec 中并不存在,`showStepIndicator` 已在 spec —— issue 中标记为 open question,本 PR 不折叠进 `buttons`,留待 objectui 接线时一并定夺。\n- `submitBehavior` 在审计中被判定为 dead(无渲染器消费者,audit L20)—— 与新块相邻,建议在 objectui#2545 接线时一并布线或另行处置。\n\n## 验证\n\n- `pnpm test`(turbo 全仓)**126/126 任务全绿**;spec 包 253 个测试文件 6861 例通过。\n- `pnpm --filter @objectstack/spec build` + `gen:api-surface` 通过,surface diff 仅 +`FormButtonConfigSchema` / +`FormButtonConfig`。\n\nGrounding: ADR-0078(escape hatch)、ADR-0089 D3a(strict 叶子)、ADR-0049/0050。Refs objectstack-ai/objectui#2545、objectstack-ai/objectui#1763。\n\nRefs #2998(仅完成 Track A;Track B 另开 PR 跟踪,**不要**因本 PR 合并而关闭该 issue)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_013Ue47V8zZ5QhcYMPiRQDA7"
+}

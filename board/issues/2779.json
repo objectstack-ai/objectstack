@@ -1,0 +1,30 @@
+{
+  "number": 2779,
+  "kind": "issue",
+  "title": "[lint] Escalate approval-role-not-membership-tier from warning to error once downstream migration completes",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-07-10T11:33:16Z",
+  "updated_at": "2026-07-15T13:04:12Z",
+  "closed_at": "2026-07-15T13:04:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2779",
+  "body": "#2738 引入的 `approval-role-not-membership-tier` 目前是 **warning**:`{ type: 'role', value: '<非 membership tier>' }` 在运行时必然路由不到人(请求卡死),从\"要么 gate 要么不存在\"(ADR-0049 / ADR-0090 D7)的口径看应该是 error——但在 hotcrm 等下游完成迁移(#2777)之前升级会把它们的发布直接打红,所以先保持 warning。\n\n## 待办(被 #2777 阻塞)\n\n- [ ] #2777 完成、下游 `os lint` 无该告警后,把 `packages/lint/src/validate-approval-approvers.ts` 中该规则 severity 升为 `error`(`os compile` 即 gate)\n- [ ] 评估 `approval-approver-type-unknown` 是否同步升级(off-spec 的 `business_unit`/`bu` 方言在 expandApprovers 里仍被容忍,属 PD #12 债务——升 error 前先决定运行时方言分支去留,避免\"lint 禁止但运行时支持\"的分裂)\n- [ ] `approval-escalation-reassign-no-target`(#2767)保持 warning(合法退化,非必然故障)\n- [ ] 更新规则文件头部表格与 changeset(breaking changeset 需带 FROM→TO 迁移说明)\n\n## 备注\n\n自定义 better-auth membership tier 理论上合法(`sys_member.role` 是自由字符串)。升 error 时如有真实场景,提供豁免机制(如已知 tier 白名单可配置)再落地。\n\nRefs: #2738, #2767, #2777, ADR-0049, ADR-0090 D7。"
+}

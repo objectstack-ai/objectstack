@@ -1,0 +1,35 @@
+{
+  "number": 2945,
+  "kind": "pull_request",
+  "title": "fix(plugin-security): 约束 self-delegation position anchor 防横向可见性越权（#830 follow-up）",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-15T03:44:29Z",
+  "updated_at": "2026-07-15T03:54:19Z",
+  "closed_at": "2026-07-15T03:54:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-15T03:54:17Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2945",
+  "body": "## 漏洞（MEDIUM，横向可见性越权 / lateral escalation）\n\ncloud#830（C1 position-anchor，已合并）把 `sys_user_position.business_unit_id` 从「reserved」变成**可见性 load-bearing**：它是 `readScope` 的深度锚定，`unit`/`unit_and_below` 的持有者可见的 owner 集合以该 BU 为根（`unit_and_below` 覆盖整棵子树）。\n\n委派管理员的自助代理（**D3 self-delegation**）路径 `assertSelfDelegation`（`packages/plugins/plugin-security/src/delegated-admin-gate.ts`）此前对 `business_unit_id` **没有任何 subtree/来源约束**。后果：\n\n- Alice 只需直接持有一个 `delegatable: true`、带 `unit`/`unit_and_below` readScope 的**非 admin-scope** position P（锚定在低层 BU）。\n- 她把 P 代理给同谋 Bob，并把 `business_unit_id` 设成**任意高层 / 祖先 BU**。\n- Bob 遂获得该 BU（及 `unit_and_below` 整棵子树）成员记录的可见性——**超出 Alice 自己的范围**。\n- 互相代理可双向获得。\n\nresolver 的「锚定只收窄不放宽」断言在 anchor 是成员 BU 祖先时不成立——而 D3 路径正是唯一没堵住这条的地方。主攻击面（直接自写 `sys_user_position`、自我代理、委派管理员路径的 anchor 落自己 subtree）此前均已封死。\n\n## 修法选择与理由\n\n采用任务的**首选方案**（约束而非禁止），理由：产品语义上 D3 代理本就允许携带 anchor（例如把「华东销售经理」职务代理给某人、锚定在华东某子单元）——一刀切禁止 anchor 会砍掉合法用法。改为强制**收窄不放宽**：\n\n> self-delegation 的 `business_unit_id` 必须落在**委派人自己对该 position 的有效 anchor** 之内。\n\n「有效 anchor」= 委派人自己**直接持有**该 position 的行的 anchor 子树；若该直接持有行本身无 anchor，则回退到委派人**成员 BU** 的子树（无锚持有解析到本人成员 BU）。这与 D12 委派管理员路径「assignments 必须落自己 subtree」（`assertAssignmentWrite`，L392-402）**同精神、复用同款 subtree 逻辑**。\n\n- **Fail-closed**：无法证明落在委派人范围内的 anchor（范围不可解析）一律拒。\n- **无 anchor 的代理行保持原行为**：代理人解析到自己的成员 BU，不构成放宽。\n\n实现：`activeHoldings` 现返回每个持有行的 `businessUnitId`；新增 `resolveSubtreeById` / `delegatorAnchorSubtree`（`resolveSubtree` 重构复用之，行为不变）；`assertSelfDelegation` 新增步骤 4b anchor 收窄校验。\n\n## 测试矩阵（实测全绿，401 passed）\n\n| 场景 | 期望 | 结果 |\n|---|---|---|\n| anchor = 委派人自己 anchor（east） | 放行 | ✅ |\n| anchor 落委派人子树内（east_sales，收窄） | 放行 | ✅ |\n| anchor = 祖先 BU（hq，放宽） | **拒**（never widen） | ✅ |\n| anchor = 无关兄弟 BU（west） | **拒**（outside your own effective anchor） | ✅ |\n| 无 anchor 的 D3 行 | 原行为，放行 | ✅ |\n| 互相代理跨范围（双向） | 两个方向都**拒** | ✅ |\n| 委派人无锚持有 → 用成员 BU 兜底：成员 BU 及以下放行、其父拒 | 收窄成立 | ✅ |\n| fail-closed：委派人无可解析范围 | **拒**（cannot be validated） | ✅ |\n| 经代理获得的持有行不能再作源做带锚再代理 | **拒**（chains cut，原有 D3 校验先命中） | ✅ |\n| 委派管理员路径（非 delegation write）不受影响 | 原行为 | ✅（既有测试） |\n| 直接自写 `sys_user_position` 仍封禁 | 原行为 | ✅（既有测试） |\n\n`pnpm --filter @objectstack/plugin-security test` → 18 files / 401 tests passed；`tsc --noEmit` 0 error；`build` 通过。\n\n## 是否彻底堵住\n\n对 **load-bearing 的 `unit_and_below`** 情形：Bob 的 owner 集合 ⊆ Alice 的 owner 集合，「锚定只收窄不放宽」不变量在 D3 路径重建。祖先 / 任意高层 / 无关 BU 的锚定被 fail-closed 拒绝，主向量关闭。\n\n## 存疑点 / reviewer 注意\n\n1. **`unit`（单层，非 `_and_below`）readScope 下的子孙 anchor**：本修复用 **subtree 包含**作边界（与 D12 admin 路径一致）。若 P 的 readScope 是纯 `unit`，Alice 锚定 east 只看 east 一层，而允许 Bob 锚定 east 的子孙 `east_sales` 在严格意义上让 Bob 看到 Alice 看不到的一层（横向而非放宽）。这与 D12 委派管理员路径既有的同一边界取舍一致（该路径也用 subtree），且**主向量（祖先/高层放宽）已完全关闭**。若要对纯 `unit` 也精确收敛，需在 gate 里解析 position 所分发各 set 的 per-object readScope——依赖 cloud enterprise resolver 语义，超出本 follow-up 范围，建议单独 issue 跟踪。\n2. **anchor 是 BU id（lookup）而非 name**：故新增 `resolveSubtreeById`（既有 `resolveSubtree` 按 name 解析根后同样走子树遍历，已重构复用）。\n3. cloud resolver（`security-enterprise/hierarchy/resolver.ts` 的 `anchoredBusinessUnits`）不在本仓库 checkout 内，anchor→owner 语义依 ADR-0090 Addendum 与任务描述推断；建议 reviewer 对照 cloud#830 确认「无 anchor = 解析到持有者成员 BU」这一回退语义无误（本修复的成员 BU 兜底依赖它）。\n\n## Reviewer checklist\n\n- [ ] 确认 anchor 收窄边界（subtree 包含）符合 cloud#830 的 anchor→owner 语义\n- [ ] 确认「无 anchor D3 = 原行为」是期望的产品语义（未收紧无锚代理）\n- [ ] 确认成员 BU 兜底（无锚直接持有）符合 resolver 的无锚回退\n- [ ] 确认存疑点 1（纯 `unit` 子孙 anchor）取舍可接受，或决定单开 issue\n- [ ] fail-closed 分支（范围不可解析→拒）无误伤合法路径\n\n## 关联\n\n- 起因：cloud#830（C1 position-anchor，已合并）\n- 跟踪：framework#2920（本横向越权向量）\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_019QRUvVfpvSycAHMMF2xTxs"
+}

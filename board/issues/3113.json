@@ -1,0 +1,33 @@
+{
+  "number": 3113,
+  "kind": "pull_request",
+  "title": "docs: P1 wave 2 — RLS, translations, flow expressions/API, approval lifecycle",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T10:01:12Z",
+  "updated_at": "2026-07-17T10:10:31Z",
+  "closed_at": "2026-07-17T10:10:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T10:10:29Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3113",
+  "body": "## 背景\n\n审计修复第三批(P1 wave 2),补齐四个功能点缺口。每页先派源码调研 agent(只收带 file:line 证据的事实),**结果修正了审计自身的三处判断**——这正是\"文档不撒谎\"该有的做法。\n\n## 1. 新增 `permissions/rls.mdx`\n\n- **审计以为**三处文档 `operation` 取值互相矛盾(select/all/update)。**实际不矛盾**:`rls.zod.ts:111` 枚举五值全合法,三处只是不同用例。故本页不\"裁决\",而是讲**何时选哪个**。\n- **真正的地雷(全站零文档)**:RLS 表达式只有 4 种形式能编译(`col == current_user.prop` / `col == 'literal'` / `col IN (current_user.array)` / `1 = 1`);**AND/OR/比较符/IS NULL/LIKE/子查询/NOW() 全部拒绝**,写错即 fail-closed 静默拒绝。补\"用多条策略代替 AND/OR\"的正解。\n- 另含:裸列名(无 `record.` 前缀,与 UI/flow 方言不同)、`current_user.*` 变量表(及**为何不暴露 name**——重名=越权)、叠加语义(Layer0 租户墙 AND Layer1;层内策略 OR)、四条 fail-closed 路径、**\"无适用策略=不限制\"陷阱**、`/security/explain` 验证。\n\n## 2. 新增 `ui/translations.mdx`\n\n12 项 landing 能力里**唯一指南层完全空白**的一项。bundle 形态(locale map)、注册、可翻译面速查表、locale 解析(Accept-Language → `?locale=` → default;`zh-CN`→`zh`→`en`→字面量,永不抛错)、三种文件组织、`os i18n extract`/`check --strict --threshold` 作 CI 门。**诚实边界**:`validationMessages` 无 runtime 消费者、ICU 未实现、文件 bundle(`objects.`)与运行时 `translation` 元数据(`o.`)两套 shape 未桥接(故建议以文件授权)。\n\n## 3. `automation/flows.mdx` 两节 + 三处示例 bug\n\n- **Expressions in flows**:三方言确实并存且按位置决定——start/edge `condition` 是**裸 CEL**、decision `expression` **必须 `{花括号}`**、字段值是**插值**。顺手修掉该页两个真 bug:`expression: 'order_amount > 10000'`(缺花括号)会退化成字符串比较**恒真**,永远走第一分支且不报错;`due_date: 'TODAY() + 7'`(缺花括号)把字面量文本写进日期字段。另 `object:` → `objectName:`(canonical;别名会被发布门拒绝)。\n- **Run a flow via API**:补上该页此前只提及、从不给出的路径 `POST /api/v1/automation/:name/trigger`,含 runs/resume/screen、`isInput` 与 body 映射、身份转发与 runAs、以及 **`success:true` + `skipped:true`(condition_not_met)** 陷阱。\n\n## 4. `automation/approvals.mdx` 生命周期 walkthrough\n\n- **审计以为**待办队列缺失。**实际存在**:`sys_approval_request` 自带 `my_pending` 视图 + Setup→Approvals 导航 + `GET /approvals/requests?approverId=&status=`(approverId 可传 user id/email/`role:x` 多值)。\n- **真正的缺口**:**开启审批不发任何通知**(reminder/escalation/return 有 topic,初始请求没有)——如实写明 + 两条出路(flow 加 notify 节点 / 装 messaging 用 remind)。\n- 另含:approve/reject 端点与权限判定(actor 必须在 pending_approvers)、**unanimous 下非最后一位 approve 不终结(仍 pending)**的易错点、`type:'role'` ≠ 职位(是 better-auth 层级,写 sales_manager 静默无人)、字段镜像与记录锁、escalation 四种 action **及其\"需 job 服务否则 display-only\"前置**、6 条错误码映射。\n\n## 验证\n\n`pnpm --filter @objectstack/docs build` ✅(exit 0)。(`types:check` 首跑因 `.source` 生成顺序偶发失败,重跑通过——既有 flake,与本改动无关。)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 3140,
+  "kind": "pull_request",
+  "title": "docs: remove stray -- from fresh-backend dev commands",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T12:50:59Z",
+  "updated_at": "2026-07-17T15:25:12Z",
+  "closed_at": "2026-07-17T15:25:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3140",
+  "body": "## Summary\n\nThe documented fresh-backend command `pnpm dev -- --fresh -p <port>` fails: pnpm passes the `--` separator through to the script verbatim, so the CLI receives `objectstack dev --seed-admin -- --fresh -p <port>`, treats everything after `--` as positional arguments, and exits with `Unexpected arguments: -p, <port>` (exit code 2) before binding the port.\n\nThis PR removes the stray `--` from every documented occurrence (6 commands across 4 files) and fixes the AGENTS.md note that claimed \"flags after `--` are forwarded\" — that claim was the root cause of the wrong examples.\n\n- **AGENTS.md**: dev-server table, forwarding note, `dev:crm` example, multi-agent discipline §8\n- **content/docs/deployment/index.mdx** and **single-project-mode.mdx**: local runtime examples\n- **docs/adr/0015-external-datasource-federation.md**: example command in the validation walkthrough\n\n## Verification\n\n- With `--`: reproduced — CLI prints usage and exits 2 (matches the issue's 2/2 failures).\n- Without `--`: `pnpm --filter @objectstack/example-showcase dev --fresh -p 38423` boots a fresh backend; `/api/v1/health` returns 200. Server torn down after verification.\n- `grep -rn -- '-- --fresh'` over AGENTS.md, content/, docs/ returns no matches.\n\nDocs-only change; no CLI or runtime behavior touched.\n\nFixes #2801\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

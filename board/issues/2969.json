@@ -1,0 +1,36 @@
+{
+  "number": 2969,
+  "kind": "pull_request",
+  "title": "feat(attachments): sys_file orphan lifecycle + non-admin permission matrix (#2755)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-15T14:46:30Z",
+  "updated_at": "2026-07-15T15:00:28Z",
+  "closed_at": "2026-07-15T15:00:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-15T15:00:25Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2969",
+  "body": "Closes #2755. Follow-up to the #2727 generic Attachments surface (#2742 + objectui #2374), closing the two v1 boundaries the close-out review named.\n\n## Part 1 — sys_file orphan lifecycle (ADR-0057)\n\nDeleting a `sys_attachment` join row deleted only the join row; the backing `sys_file` row and its storage bytes were orphaned forever (no delete route, no hook, nothing ever wrote the declared `status:'deleted'`). One file can back many attachments (ContentDocumentLink), so no naive cascade.\n\n- **objectql** — `LifecycleService` gains a **reap guard** seam (`registerReapGuard(object, guard)`). A guarded object is never blind-deleted: candidates are fetched in batches, the guard confirms each id (after external cleanup) or vetoes it, an erroring guard fails safe, and an engine without row reads skips the object (`reap-guard-unsupported`). Deletes are per-id (the engine's delete path reads `where.id` as a scalar target).\n- **service-storage** — `sys_file` gains the `attachments` scope option, a `deleted_at` tombstone field, and an ADR-0057 `lifecycle` block (`ttl 30d` on `deleted_at` for orphans; `retention 7d onlyWhen status=pending` for abandoned uploads — committed rows carry neither trigger, so they stay immortal). Tombstone hooks on `sys_attachment` mark a file `deleted` when its **last** attachments-scope join row is removed and un-tombstone on re-attach; the `sys_file` reap guard re-verifies zero references at sweep time and deletes the storage bytes before confirming each reap. Detection stays inside the single platform sweep (ADR-0057 §3.3 — no bespoke sweeper).\n\n## Part 2 — non-admin permission matrix + enforcement (ADR-0049)\n\nThe #2742 E2E used only the seeded admin. Verified statically and now enforced/dogfooded: members inherited wildcard CRUD with zero row scoping.\n\n- **service-storage attachment access hooks** (Salesforce parent-derived semantics): create requires caller READ visibility of the parent record (403 `ATTACHMENT_PARENT_ACCESS`) and server-stamps `uploaded_by` from the session; delete requires uploader-or-parent-editor via `sharing.canEdit` (403 `ATTACHMENT_DELETE_DENIED`; multi-deletes need every row to pass).\n- **storage routes** — optional `resolveSession` gate: with an auth service wired, the six upload entry points 401 anonymous callers (fail-closed on resolver errors) and stamp `owner_id`; bare kernels/tests stay open. Downloads stay anonymous capability URLs (follow-up).\n- **`sys_attachment.share_type` / `visibility` REMOVED** — modeled in v1 with zero runtime consumers (ADR-0049 state 3); translation bundles regenerated.\n- **rest** — `mapDataError` branches for the two new 403 codes (#2707 lesson).\n\n## Dogfood deliverable\n\nNew `packages/dogfood/test/attachments-permission-matrix.dogfood.test.ts` (+ fixture, + `@objectstack/verify` `BootOptions.extraPlugins` seam) boots the real serve pairing and drives genuine signed-up members through the presigned three-step upload and `/data` path. Pinned findings include a **dogfood finding**: the `everyone` baseline (`member_default`) carries no delete bit (ADR-0090 D5), so an ungranted member cannot delete even their own attachment — apps enable attachment management via a granted set (the fixture ships one). The Part-1 block proves bytes actually disappear from disk after the sweep and that re-referenced/fresh/committed files survive.\n\n## Verification\n\n- Unit: `objectql` 857 ✓, `service-storage` 76 ✓ (new: reap guard, tombstone hooks, access hooks, upload-auth gate), `rest` 270 ✓, `plugin-audit` 32 ✓, `platform-objects` 80 ✓\n- Dogfood: full suite 256 ✓ / 3 skipped incl. the new 13-case matrix (multiTenant block skips without the enterprise package)\n- Gates: `check:liveness` ✓, `check:api-surface` ✓\n\n> ℹ️ The red **Validate Package Dependencies** check is a repo-wide infra failure (`pnpm audit` hits npm's retired audit endpoint → `410 / ERR_PNPM_AUDIT_BAD_RESPONSE`), not caused by this diff; the changeset check in that same job passes.\n\n## Decisions taken (repo-owner input, confirmed during planning)\n\nLifecycle class `transient` with 30d/7d windows (governance-overridable); `share_type`/`visibility` **removed** (vs experimental-mark); attach/delete gate strength = read-visibility for create + uploader∨canEdit for delete; upload auth = 401 only when a resolver is wired.\n\n## Follow-ups\n\nConsolidated into tracking issue #2970 (parent-visibility inheritance, authenticated downloads, edit-on-parent parity, `sys_upload_session` lifecycle, `enable.trash` enforce-or-remove, optional showcase browser dogfood) — each is a known-gap pin in the matrix today.\n\n## Companion\n\nobjectui #2532 (RecordAttachmentsPanel: authenticated uploads + friendly denial copy). **Merge order: this PR first** (server gates before the panel adapts).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

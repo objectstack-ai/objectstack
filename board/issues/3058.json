@@ -1,0 +1,33 @@
+{
+  "number": 3058,
+  "kind": "issue",
+  "title": "架构:把「服务端托管字段」收敛成一个声明式 schema 概念(统一 owner_id / 公开表单托管集 / organization_id 的中间件特例)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T12:40:28Z",
+  "updated_at": "2026-07-18T12:19:16Z",
+  "closed_at": "2026-07-18T12:19:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3058",
+  "body": "## 背景\n\n写路径上「哪些字段由服务端托管、客户端不得自由写」的规则,目前散落成 `plugin-security` 中间件里的 **N 个互相独立的特例**,每个都是单独硬编码 + 单独执法:\n\n1. **`owner_id`(属主锚点,#3004 / PR #3018)** — step 3.5 硬编码字段名 `owner_id`:insert 空值回填 acting user、伪造/转移/弃权需 `allowTransfer`/`modifyAllRecords`;非 scalar 拒绝、原型链防护、数组 change-set fail-closed;级联 set_null 经 `__referentialFieldClear` 豁免(#3023 / PR #3048)。\n2. **公开表单托管集(#3022 / PR #3036)** — 新增 `@objectstack/spec/security` 的 `PUBLIC_FORM_SERVER_MANAGED_FIELDS`(`id` / `owner_id` / `organization_id` / `tenant_id` / 审计列 / `is_deleted` / `deleted_at` / `__search`),在匿名公开表单路径**逐行剥离**;路由层白名单无条件排除。\n3. **`organization_id`(租户墙,ADR-0095 / #2937 / #2946)** — step 3.7 硬编码字段名 `organization_id`:供给值必须过 Layer 0 租户 CHECK,否则拒绝(防跨租户搬运)。\n\n三处各自定义「托管字段是哪些、怎么执法」,彼此不共享抽象。\n\n## 问题(为什么这是债)\n\n- **漂移风险**:同一个概念(`owner_id` 是系统托管锚点)在 step 3.5、`PUBLIC_FORM_SERVER_MANAGED_FIELDS`、以及未来任何新入口各写一遍。新增一个托管字段(例如 `created_by` 想在某入口强制),要在 N 处分别改。\n- **入口覆盖不均**:已认证写路径(step 3.5/3.7)与匿名公开表单(#3022)是两套独立实现;两者互补但没有单一事实源,一个入口补了、另一个可能漏(#3022 正是这样被单独发现的)。\n- **契约不透明**:「这个字段服务端托管」是对象/字段的**语义属性**,却只存在于运行时中间件的 if 分支里,authoring/spec 层看不到、explain 引擎也无法统一解释。违反 Prime Directive #12(contract-first:把约束放在正确的层、声明式表达)。\n\n## 提议(结构性,需 ADR)\n\n把「服务端托管字段」提升为一个**声明式 schema 概念**,一处声明、一处执法:\n\n- 在 `packages/spec` 的 Field/Object schema 上引入一个声明(草案命名,待 ADR 定稿),例如字段级 `systemManaged: { onInsert: 'stampActor' | 'reject' | 'strip', onUpdate: 'reject' | 'strip' | 'immutable', requiresCapability?: string }`,或对象级的托管字段策略表。\n  - `owner_id` → `onInsert: stampActor`(空值回填)、`onUpdate: reject`(除非 `allowTransfer`);\n  - 审计列(`created_by` 等)→ `immutable`/`strip`;\n  - `organization_id` → 由租户层(`@objectstack/organizations`)贡献其托管策略(跨租户 CHECK);\n  - 公开表单托管集 → 从同一声明**派生**(`PUBLIC_FORM_SERVER_MANAGED_FIELDS` 不再手维护)。\n- **单一执法点**:中间件读该声明统一执行(insert 回填/拒绝、update 拒绝/剥离、能力门),已认证与匿名公开表单共用同一派生集合;`__referentialFieldClear` 这类引擎内部豁免也纳入统一模型。\n- explain 引擎据同一声明解释「为什么这个字段写不进去」。\n\n## 范围与非目标\n\n- 结构性重构,**需先起 ADR** 定字段/对象声明的形状、迁移路径(现有三处特例逐步收敛到声明,保留行为等价),再分阶段落地。\n- **非目标**:改变现有任一特例的运行时行为(#3004 / #3022 / #3023 / ADR-0095 的语义保持不变),只是把它们统一到一个声明式来源之下。\n\n## 关联\n\n- #3004 / PR #3018(owner_id 守卫)、#3023 / PR #3048(级联豁免)、#3053(守卫后续加固)\n- #3022 / PR #3036(公开表单托管集 `PUBLIC_FORM_SERVER_MANAGED_FIELDS`)\n- ADR-0095 / #2937 / #2946(organization_id 租户墙)\n- 授权总跟踪 #2920\n- 来源:PR #3018 对抗式代码审查的 altitude 结论(owner_id 守卫是「共享基础设施上的特例」,应提炼底层机制而非叠加特例)。"
+}

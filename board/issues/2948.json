@@ -1,0 +1,33 @@
+{
+  "number": 2948,
+  "kind": "issue",
+  "title": "security: 服务端 readonly 字段在 UPDATE 时未强制（可被用户上下文覆盖）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-15T04:08:00Z",
+  "updated_at": "2026-07-15T15:56:54Z",
+  "closed_at": "2026-07-15T12:01:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2948",
+  "body": "## 背景\n\n修复跨租户 UPDATE 写（#2946 / Finding 1）时发现一个**更广的完整性缺口**：字段的 `readonly: true` 声明**在服务端 update 时未被强制**。\n\n- `record-validator.ts`（~L357/367）对 system/readonly 字段只是**跳过**校验，不拒绝其变更。\n- `engine.ts`（~L2397）update 时只剥离 `readonlyWhen`（条件只读）字段，**从不**剥离静态 `readonly` 字段。\n- 结果：用户上下文的 update 可以把任意 `readonly` 字段的新值直接传进 `driver.update`。\n\n#2946 只堵了 `organization_id` 的**跨租户面**（经 Layer 0 post-image 检查，让 org_id 在非平台用户上下文里事实不可变）。但**其余所有 `readonly` 字段**仍可被 update 覆盖——这是 org_id 之外的、更广的租内完整性面。\n\n## 影响\n\n严重性低于跨租户（这是**租内**字段篡改，不跨租户），但仍是完整性漏洞：任何声明了 `readonly` 的字段（审计戳、provenance、系统计算值等）可被普通用户经 data API 的 update 覆盖，除非另有 FLS/护栏专门保护该字段。\n\n## 建议\n\n在引擎/安全层统一强制静态 `readonly`：用户上下文（非 system）的 update 若显式改动一个 `readonly` 字段，**剥离该变更或 fail-closed 拒绝**（与 `readonlyWhen` 的剥离对称）。需核实：\n- 哪些「合法」写路径依赖覆盖 readonly（应走 system context）；\n- 与 FLS `allowEdit:false` 的关系（是否已有部分覆盖）；\n- 是否需要区分「剥离静默」vs「显式拒绝」（倾向剥离，兼容性更好）。\n\n## 关联\n#2946（org_id 跨租户面已堵）· ADR-0092（身份表写守卫，相关但不同层）· tracking #2920\n\n发现于 #2920 的安全审查。"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 2643,
+  "kind": "issue",
+  "title": "Epic: implement ADR-0087 — metadata protocol upgrade contract (handshake · conversion · migration chain)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-07-05T16:34:38Z",
+  "updated_at": "2026-07-15T15:26:44Z",
+  "closed_at": "2026-07-15T15:26:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2643",
+  "body": "Tracking epic for landing **[ADR-0087](https://github.com/objectstack-ai/framework/blob/main/docs/adr/0087-metadata-protocol-upgrade-contract.md)** (accepted in #2582). The ADR designs how externally developed, **AI-agent-maintained** metadata apps upgrade stably across protocol majors — arriving from *any* past version — instead of crashing on a deliberate, gated, documented break.\n\n## Why (the problem the ADR closes)\n\nADR-0059 already guarantees a breaking change cannot leave this repo silently (frozen witnesses + pre-publish hotcrm smoke). What is missing is the **consumer side**: a package built against protocol N loaded by an N+2 runtime is never told \"incompatible — here is the migration\"; it runs until some deep `.parse()` or renderer contract fails. And `PluginEnginesSchema.protocol` (`packages/spec/src/kernel/manifest.zod.ts`) — the field that *should* gate this — is declared, documented, and **checked nowhere**, an ADR-0078 \"declarable-but-inert\" violation.\n\n## The preference ladder (design, not restated here — see the ADR)\n\n- **L0 — don't break**: ADR-0059's gates, unchanged.\n- **L1 — break invisibly**: a versioned load-time **conversion layer** (most breaks need zero consumer action). → P1\n- **L2 — break executably**: a permanent, fixture-tested **migration chain**, `migrate meta --from N` replays any past major → current. → P2\n- **L3 — break loudly & structurally**: enforce the `engines.protocol` **handshake** with a machine-actionable diagnostic. → P0\n- **verify**: the consumer's own `validate && typecheck && test` loop is the acceptance test.\n\nGoverning constraint: **timeliness is never load-bearing** (a cross-major consumer was never present for any warning window), and **the consumer's maintainer is an AI agent** (machine-executability + structure beat human notification).\n\n## Phases (independently shippable, evidence-gated)\n\n- [x] **P0 — enforce the protocol handshake** (D1) · #2644 · install seam in #2650; load seams (boot rehydration + AppPlugin) / lint nudge / scaffold stamping in #2972\n- [x] **P1 — the conversion layer** (D2) · #2645 · shipped in #2897; window retirement (`retiredFromLoadPath`) in #2972\n- [x] **P2 — change manifest + migration chain + generated guide** (D3, D4 artifacts) · #2647 · chain + `composeSpecChanges` in #2897; `spec-changes.json` release artifact + generated guide (both CI drift-checked) in #2972; chain backfilled for majors 12–15 in #2972\n- [ ] **P3 — MCP upgrade surface + RC discipline** (D4 tools, D6) · #2648 · **deferred, evidence-gated** per ADR Boundaries (closed as not planned; reopen when external-consumer demand justifies the surface)\n\nDo **not** parallelize: P1 depends on P0's `PROTOCOL_VERSION` + handshake seam; P2/P3 depend on P1. The ADR gates each phase on evidence from the previous.\n\n## Boundaries\n\n- Nothing in ADR-0059 changes; the conversion layer converts **at load** and never rewrites consumer source (that is P2's explicit `migrate meta` only).\n- The consumer-side autonomous-upgrade agent is out of scope (belongs to consumers / ADR-0033 toolchain); this epic makes it *possible*.\n\n## Existing momentum (already in the ADR-0087 direction)\n\n- 11.10.0 (#2543) shipped **retired-key tombstones** (\"the error IS the guide\") + **CHANGELOG inside the npm artifact** + an `llms.txt` \"Upgrading Across Spec Versions\" section — a partial D3/D4 down payment.\n- #2590 backfilled the root protocol CHANGELOG (10.0.0 → 11.10.0), making the deprecation → retirement windows visible end-to-end — the traceability seed for the D4 `spec-changes` history.\n\n## Live deprecation windows to route through the new pipeline (not the old hand-migration path)\n\nThese are the first real test subjects for P1/P2 — retire them via a conversion-table entry + chain step, not a bespoke tombstone:\n\n- `titleFormat` → `nameField` (deprecated 11.3.0) — ✅ step-11 semantic entry (#2897)\n- `kind: 'jsx'` → `kind: 'html'` (aliased 11.4.0) — ✅ conversion + chain step (#2897)\n- `sqlPredicateToCel` SQL-ish RLS predicates → canonical CEL (deprecated 10.0.0) — ✅ step-11 semantic entry (#2897)\n\nRefs: ADR-0087, ADR-0059, ADR-0078, ADR-0025 §3.2/§3.10."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 3102,
+  "kind": "pull_request",
+  "title": "fix(cli): hide platform i18n baseline from os lint by default",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T07:39:25Z",
+  "updated_at": "2026-07-17T11:28:49Z",
+  "closed_at": "2026-07-17T11:28:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T11:28:47Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3102",
+  "body": "## 问题(15.1 第三方评估 P2 #2)\n\n`os lint` 在 create-objectstack 新项目上开箱报 848 个错误(现版 821),全部是 `i18n/missing-metadataForm` —— 平台内置元数据表单(email_template 等)的翻译键,来自 lint 无条件遍历静态注册表(`DEFAULT_METADATA_TYPE_REGISTRY` + `METADATA_FORM_REGISTRY`)。这些翻译平台包(`packages/platform-objects` 的 4 个 locale bundle)在运行时本来就提供,对用户项目纯属噪声,把用户自己的 lint 信号完全淹没。\n\n## 修复\n\n「给平台补翻译」不适用——翻译已存在,只是 lint 把平台基线错算到用户项目头上。故收敛 lint 作用域:\n\n- 新增 `foldCoverageIssues()`:`source === 'metadataForm'`(lint 时唯一且充分的平台判据,静态注册表遍历是它唯一来源)的问题默认隐藏并计数\n- 新 flag `--include-platform` 恢复全量审计\n- 人类输出加一行 dim 摘要:`platform built-ins: N i18n issue(s) hidden — rerun with --include-platform to audit them`\n- `--json` 输出加 `hiddenPlatform` 字段\n- 用户 authored 元数据(object/field/view/action)的 i18n 覆盖报告不变\n\n## 真机验证(脚手架新项目)\n\n| 命令 | 结果 |\n|:--|:--|\n| 发布版 `npx os lint` | 821 error(s),全是 metadataForm 噪声(复现) |\n| 补丁版默认 | **4 error(s)**(用户自己对象的真实 i18n 信号)+ `platform built-ins: 817 i18n issue(s) hidden` |\n| 补丁版 `--include-platform` | 821 error(s) |\n| 补丁版 `--json` | `hiddenPlatform: 817`,`total: 4` |\n\n单测:新增 `lint-platform-fold.test.ts`;`pnpm --filter @objectstack/cli test` 516 → 519 全绿(新增 lint-platform-fold 3 例);tsc build 干净。\n\n注:blank 模板自身还有 4 条真实的用户侧 i18n 缺口(模板不带翻译 bundle),属于另一个模板 DX 问题,不在本 PR 扩散——已单独记 issue。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

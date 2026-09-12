@@ -1,0 +1,30 @@
+{
+  "number": 2916,
+  "kind": "issue",
+  "title": "导出/导入文件名与多语言优化:显示名+视图名+时间戳命名、模板全中文、导出↔导入选项标签闭环",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-14T13:38:47Z",
+  "updated_at": "2026-07-14T14:11:11Z",
+  "closed_at": "2026-07-14T14:11:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2916",
+  "body": "## 背景(用户反馈,3 个递进诉求)\n\n1. **导出文件名难用**:CSV/Excel 导出直接落盘为 `contracts.csv` 这种裸 API 名,重复导出互相覆盖、中文用户不可读。期望「对象显示名-时间戳.扩展名」。\n2. **导入「下载模板」仍有英文**:表头漏出 \"Owner\"/\"Done\"/\"Sync Status\" 等英文,示例行是 `Backlog`/`prepare` 这类 slug/英文标签。深挖后还发现平台级缺陷:**导出/模板写出的是翻译后的选项标签,但导入 coercion 只认作者原始标签**——用户把自己刚导出的中文文件原样导回,select 字段全报 `invalid_option`(导出↔导入闭环断裂)。\n3. **文件名希望带上视图名**:同一对象不同保存视图(如 In Progress / Done)的导出文件名完全相同,无法区分。\n\n## 方案与范围\n\n**objectui(前端,PR objectstack-ai/objectui#2491)**\n- `buildExportFileName(ext, { prefix, label, objectName, viewLabel }, now?)`:生成 `对象显示名-视图名-yyyymmdd-hhmmss.扩展名`;`exportOptions.fileNamePrefix` 仍为完整前缀;视图名与对象名重复时省略;80 字符截断 + 非法字符清洗(保留 Unicode)。\n- ObjectGrid / ListView 全部导出路径统一走它;app-shell 与 plugin-view 的 ObjectView 把 `viewDef.label` 写进传给 ListView 的 schema(此前从不传递)。\n- 导入模板:示例行优先取选项显示标签;模板文件名本地化 `{{object}}-导入模板.csv`。\n\n**framework(服务端,PR objectstack-ai/framework#2911)**\n- `GET /data/:object/export` 的 `Content-Disposition` 改为「对象显示名-时间戳」,RFC 5987/6266 双写(ASCII 兜底 + `filename*=UTF-8''…`)。\n- 系统字段(owner_id/created_at/…)标签内置 en/zh-CN/ja-JP/es-ES 回退,修掉 \"Owner\" 漏出。\n- **导入接受翻译后选项标签**:`prepareImportRequest` 新增 `localizeSchema` 钩子,REST 导入路由传 `translateMetaItem`,翻译标签并入选项匹配同义词;作者标签/选项 code 照常,非法值照常报错。\n- plugin-reports 附件文件名清洗保留 Unicode;showcase 补全 showcase_task 翻译包并开启导出演示。\n\n## 验收标准(均已真机 UI 实测通过)\n\n- [x] 导出 CSV/XLSX 落盘名:`任务-In Progress-20260714-082725.csv` / `…-082801.xlsx`\n- [x] 模板落盘名 `任务-导入模板.csv`,表头与示例行零英文(`所有者,…,同步状态,同步错误` + `待规划/低/已同步`)\n- [x] 中文导出文件原样导回:dry-run `{\"total\":1,\"ok\":1,\"errors\":0}`;英文标签不回归;非法值仍报 `invalid_option`\n- [x] 单测:rest 265/265、spec 6756、export-filename 15/15、plugin-list 149、plugin-grid 194、plugin-view 28、app-shell 698\n- [x] 双仓 PR CI 全绿\n\n## 关联\n\n- 服务端 PR:objectstack-ai/framework#2911(合并即关闭本 issue)\n- 前端 PR:objectstack-ai/objectui#2491\n- 测试报告:见下方评论及两个 PR 内的实测报告评论\n"
+}

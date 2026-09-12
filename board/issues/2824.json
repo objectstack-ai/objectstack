@@ -1,0 +1,32 @@
+{
+  "number": 2824,
+  "kind": "issue",
+  "title": "问题（导入）：取消后，运行中的异步任务仍未停止",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-11T03:16:59Z",
+  "updated_at": "2026-07-16T14:59:33Z",
+  "closed_at": "2026-07-16T14:59:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2824",
+  "body": "## 问题\n\n在已确认的本地 SQLite 场景中，用户在一个 50,000 行异步 CSV 导入仍处于 `running` 状态时点击取消，但后端任务没有停止。任务最终进入 `succeeded` 状态，并写入全部 50,000 行。\n\n## 复现规则\n\n使用固定测试版本和全新的本地 SQLite 环境。准备一批足以触发异步后台导入、且不会在取消操作前立即完成的有效记录；本次验证使用 50,000 条可唯一识别的记录，并选择始终新建。\n\n1. 启动异步导入。\n2. 确认任务仍为 `running` 且进度尚未完成。\n3. 点击取消。\n4. 等待后端任务进入终态，再核对 `sys_import_job` 的状态和处理计数，以及目标业务表的实际写入数量。\n\n## 实际现象\n\n点击取消时，任务仍处于 `running` 状态，进度为 0/50,000：\n\n![Cancel control visible while running](https://raw.githubusercontent.com/yinlianghui/objectstack-backup/82dd18a60b6120644945c107acb9ef9a15b8b0bf/framework/issue-2678/2026-07-11/screenshots/ui-05-cancel-button-visible.png)\n\n点击后，向导显示 `cancelled`、导入 0 行。该前端状态不一致问题由 objectstack-ai/objectui#2393 单独跟踪：\n\n![Wizard reports cancelled](https://raw.githubusercontent.com/yinlianghui/objectstack-backup/82dd18a60b6120644945c107acb9ef9a15b8b0bf/framework/issue-2678/2026-07-11/screenshots/ui-05-cancel-confirmed.png)\n\n同一个任务最终出现以下结果：\n\n- 导入历史显示成功、50,000/50,000、新建 50,000 条。\n- 独立复核的 `sys_import_job` 记录为 `status=succeeded`、`total_rows=50000`、`processed_rows=50000`、`created_count=50000`、`updated_count=0`、`skipped_count=0`、`error_count=0`。\n- `showcase_account` 中存在本轮前缀对应的全部 50,000 条记录，`count(distinct name)=50000`。\n- 原始 QA 复现 2/2 次；独立复核又复现 1/1 次，累计 3/3 次结果一致。\n\n![Import history shows succeeded](https://raw.githubusercontent.com/yinlianghui/objectstack-backup/82dd18a60b6120644945c107acb9ef9a15b8b0bf/framework/issue-2678/2026-07-11/screenshots/ui-05-cancelled-job-history-succeeded.png)\n\n## 影响\n\n用户无法停止正在执行的大型导入。即使已经点击取消，后端仍可能继续写入剩余记录并以成功结束，造成用户未打算保留的数据完整落库，并增加后续清理成本。\n"
+}

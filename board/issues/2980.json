@@ -1,0 +1,33 @@
+{
+  "number": 2980,
+  "kind": "issue",
+  "title": "Security: Reports surface ignores caller identity — cross-user/cross-tenant IDOR (read/delete any report) + scheduled reports bypass owner RLS",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-15T15:26:46Z",
+  "updated_at": "2026-07-15T16:32:19Z",
+  "closed_at": "2026-07-15T16:32:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2980",
+  "body": "Surfaced by the ADR-0096 execution-surface audit (the #2849 bug-class sweep). Two related defects on the reports surface, same root: **`ReportService` discards the caller's `ExecutionContext` and runs against `sys_saved_report` / the report's target object with `SYSTEM_CTX` (`{ isSystem: true }`)**, so RLS/FLS/ownership/tenant scoping are all bypassed. The REST route layer only calls `enforceAuth` (authentication), not ownership.\n\n## Finding 1 — IDOR: any authenticated user can read or delete any saved report\n\n`packages/plugins/plugin-reports/src/report-service.ts`:\n- `getReport(reportId, _context)` (`:244`) — `_context` **unused**; queries `sys_saved_report` by id with `SYSTEM_CTX` (`:246`).\n- `deleteReport(reportId, _context)` (`:251`) — same; deletes by id + cascades schedules with `SYSTEM_CTX` (`:255-260`).\n- `listReports({ object, ownerId })` (`:231`) — `ownerId` is **caller-supplied and optional**; with it omitted, returns up to 500 reports across all owners with `SYSTEM_CTX` (`:238-239`).\n\nThe routes (`packages/rest/src/rest-server.ts`):\n- `GET /data/reports/:id` (`:5448`) → `svc.getReport(req.params.id, context)`\n- `DELETE /data/reports/:id` (`:5472`) → `svc.deleteReport(req.params.id, context)`\n- `GET /data/reports` (`:5400`) → `svc.listReports({ object, ownerId: q.ownerId }, context)`\n\nEach does `enforceAuth(req, res, context)` then hands the id/query to the service, which throws the context away. **Impact:** an authenticated low-privilege user reads or deletes any other user's saved report by id (cross-owner; cross-tenant in `tenancy.mode='multi'`), and enumerates all reports via the list endpoint.\n\n## Finding 2 — Scheduled reports run as system, exfiltrating the target object\n\n`report-service.ts` `dispatchDue()` (`:411-425`) executes each due schedule via:\n```ts\nconst report = await this.getReport(schedule.report_id, { isSystem: true });      // :413\nconst result = await this.executeReport({ ...report, format: fmt }, { isSystem: true }, false); // :425\n```\n`executeReport` threads its context into the **target-object** query (`:299-306`), so `{ isSystem: true }` makes the scheduled run **bypass the report owner's RLS/sharing** and email out **every row** of the target object. The interactive path (`:299`, caller-scoped) is correct; the scheduled path is not. Unlike flows post-#1888, reports have no owner-scoped `runAs` — and there is no warning/lint here.\n\n## Suggested fix\n\n- `get/delete/listReports` must run under the **caller's** context (respect `_context`), or enforce an explicit owner/tenant predicate against `sys_saved_report`. `SYSTEM_CTX` is legitimate only for server-controlled metadata stamps (`last_run_at`), not for authorization-bearing reads/deletes.\n- `dispatchDue` must resolve the **schedule/report owner** (`owner_id`, already on the row) to a real `ExecutionContext` and run `executeReport` under it — the reports analogue of ADR-0073 `runAs:'user'`/owner-scoping — not `{ isSystem: true }`.\n\n## Relationship to ADR-0096 / #2849\n\nThis is the **TRUSTED-IMPLICIT** class the ADR names (a surface that ignores the caller and rides system authority). It is *not* the #2849 empty-principal fall-open (it's an unconditional `SYSTEM_CTX` bypass), but it is exactly what the ADR-0096 D4 conformance matrix + D2 `systemContext(reason)` audit would have caught. Tracking under the ADR-0096 evidence base; fix independently of the mechanism.\n\nRefs: ADR-0096 (PR #2975), #2849, ADR-0073 (`runAs` posture)."
+}

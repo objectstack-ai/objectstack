@@ -1,0 +1,30 @@
+{
+  "number": 3234,
+  "kind": "issue",
+  "title": "Long-loop run history truncation drops container + early-iteration step logs (compactStepsForHistory)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T15:57:45Z",
+  "updated_at": "2026-07-18T20:43:52Z",
+  "closed_at": "2026-07-18T20:43:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3234",
+  "body": "Follow-up to #1505 (region step logs) — now that per-iteration / per-region body steps are recorded (engine) and surfaced (objectui#2667), a durable-history edge case remains.\n\n### The gap\n`AutomationEngine.compactStepsForHistory()` bounds the persisted step log to the **last** `MAX_PERSISTED_HISTORY_STEPS` entries:\n\n```ts\n// packages/services/service-automation/src/engine.ts\nprivate compactStepsForHistory(steps: StepLogEntry[]): StepLogEntry[] {\n    return steps.slice(-MAX_PERSISTED_HISTORY_STEPS).map(...);\n}\n```\n\nThis keeps `steps_json` cheap under retention (#2585), but with the #1505 structured-region work a single `loop` can now emit **many** steps (`iterations × body-steps`). For a long loop the tail-slice can drop:\n\n- the **loop/parallel/try_catch container step** itself (it precedes all its body steps), and\n- the **early iterations'** body steps.\n\n### Impact\n`listRuns` / `getRun` serve the durable row after a process restart or ring-buffer eviction (the in-memory log has full detail; durable history is the fallback). So post-restart, the Runs surface shows only the loop's *last* few iterations, and — because the container step was sliced off — the objectui `FlowRunsPanel` (#2667) can no longer attach those body steps to their container. Its `buildStepTree` degrades them safely to **top-level** rows (visible, so nothing vanishes), but the per-iteration grouping and early-iteration detail are lost exactly for the big loops where they matter most for debugging/audit.\n\n### Possible directions (to decide)\n- Retain region **boundaries** when compacting: always keep each container step + a per-iteration **summary** (e.g. first/last iteration, failed iterations), downsampling the middle.\n- Or keep the newest N **per region** rather than N globally, so early iterations of a still-relevant region survive.\n- Or raise/relax the cap for region-bearing runs while keeping a hard byte ceiling on `steps_json` (#2585).\n- Whichever: keep `buildStepTree`'s orphan-degradation as the safety net.\n\n### Files\n- `packages/services/service-automation/src/engine.ts` — `compactStepsForHistory`, `MAX_PERSISTED_HISTORY_STEPS`, `recordTerminal` persistence path.\n- Consumer: `objectui` `FlowRunsPanel.tsx` (`buildStepTree`)."
+}

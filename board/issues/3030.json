@@ -1,0 +1,32 @@
+{
+  "number": 3030,
+  "kind": "issue",
+  "title": "i18n: console action-dialog param labels are untranslatable — `os i18n extract` skips `actions[].params`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T08:01:30Z",
+  "updated_at": "2026-07-16T13:09:01Z",
+  "closed_at": "2026-07-16T13:09:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3030",
+  "body": "## Problem\n\nThe Setup app's **Create User** dialog (and every other action param dialog: Set Password, Ban User, Change Email, 2FA, OAuth register…) shows raw English param labels even when the console locale is `zh-CN` — \"Generate temporary password\", \"Password (leave empty to generate)\", \"Require password change on first login\", etc.\n\n## Root cause\n\nThe console client already resolves param translations from `o.<object>._actions.<action>.params.<param>.{label,helpText,placeholder,options.*}`, but the CLI extractor (`os i18n extract`, `packages/cli/src/utils/i18n-extract.ts`) never walked `actions[].params`, so those keys were never emitted into the generated per-locale bundles and there was nothing for translators to fill.\n\n## Fix\n\n- Extend `collectExpectedEntries` to emit param entries for object actions **and** top-level (global) actions:\n  - inline params → `label` / `helpText` / `placeholder` / `options.<value>`;\n  - field-backed params (`{ field: 'email' }`) → skipped unless they carry a literal override (field translations already cover them at runtime).\n- Regenerate `packages/platform-objects/src/apps/translations/{en,zh-CN,ja-JP,es-ES}.{objects,metadata-forms}.generated.ts` and fill the ~26 new key groups per locale (create_user, set_password, ban, change password/email, 2FA, OAuth register params + sys_jwks alg/curve fields + page `variables.*` form keys).\n- Re-running extract with `--merge` is idempotent (zero regressions on a second pass).\n\nVerified in the showcase: with `zh-CN` active the Create User dialog now renders fully in Chinese.\n\n## Out of scope (follow-ups)\n\n- `resultDialog` copy (e.g. the \"User Created\" result dialog) has no translation slot yet.\n- `_actions.<action>.description` translation slot is missing."
+}

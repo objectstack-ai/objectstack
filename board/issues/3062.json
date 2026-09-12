@@ -1,0 +1,36 @@
+{
+  "number": 3062,
+  "kind": "pull_request",
+  "title": "feat(showcase): live provider:'mcp' declarative connector demo + CI-pinned dogfood proof (#3056)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T13:55:17Z",
+  "updated_at": "2026-07-16T14:37:39Z",
+  "closed_at": "2026-07-16T14:09:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-16T14:09:24Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3062",
+  "body": "实现 #3056 的 **showcase 演示部分**:落地 ADR-0097 最初设想的 `provider: 'mcp'` 验收演示(#3017 延后项),并用 dogfood 测试把它钉进 CI。前置安全闸 #3055(默认拒绝声明式 stdio)已随 #3059 合入,本 PR 是其第一个 dogfood 用户。\n\n> **范围说明**:#3056 的另一半——`create-objectstack` 模板默认内置三个通用执行器——首版曾包含在本 PR,但 `scaffold-e2e` 作业从 **npm registry** 安装脚手架应用,而 `ConnectorOpenApiPlugin` 与 #3055 的 `declarativeStdio` 只存在于**未发布**的 15.1.0(排队于 Changesets release PR)。模板不能引用未发布 API(真实 `npm create objectstack` 用户会同样炸),故该部分已从本 PR 移除,待 15.1.0 发布后作为小跟进落地(届时模板现有 `^15.0.0` pin 自然解析到 15.1.0)。#3056 保持打开跟踪。\n\n## 变更\n\n### showcase:live `provider: 'mcp'` 演示(CI 确定性)\n- **`scripts/mcp-fixture.mjs`** —— 仓内极小 stdio MCP 服务器,一个确定性工具 `echo_upper`。选 stdio fixture 而非 http 自连:spawn 发生在 materialization 时刻,无网络、无端口、无启动时序耦合,Dogfood 门不会时序抖动。\n- **`DevToolsMcpConnector`**(`provider: 'mcp'`,transport `node ./scripts/mcp-fixture.mjs`)+ **`ShowcaseMcpConnectorEchoFlow`**(connector_action → `echo_upper`,输出变量携带 `structuredContent`)。\n- `objectstack.config.ts` 接线 `new ConnectorMcpPlugin({ declarativeStdio: ['node'] })` —— **dogfood #3055 的 opt-in**,注释如实说明粗粒度信任边界;coverage 注记同步(三个通用执行器的声明式实例现已全部演示)。\n\n### dogfood:把演示钉进 CI\n`showcase-declarative-mcp.dogfood.test.ts` 启动**真实 showcase**(chdir 到应用根,与 `os dev` 的运行方式一致;vitest 每文件独立进程,chdir 隔离),经 `extraPlugins` 注入三个执行器(`bootStack` 不装配 stack 的 `plugins:`),断言:\n1. `GET /automation/connectors` 列出 `showcase_mcp_tools`:`origin: 'declarative'`、`state: 'ready'`、含 `echo_upper`(即 fixture 成功 spawn + `tools/list` 映射);rest/openapi 姊妹实例同样 ready;catalog descriptor 不在注册表;\n2. 触发 flow → run 成功且输出含 `OBJECTSTACK`(fixture 的 `tools/call` 结果完成全链路往返)。\n\n### 文档\n`content/docs/automation/flows.mdx` 节点表后新增一段:`connector_action` 的连接器从哪来、三个通用执行器与声明式 provider 条目的关系(showcase 已全部接线)、stdio opt-in 的安全语义。\n\n## 验证\n- dogfood 新证明 2/2 ✓;`turbo test`(dogfood + showcase + create-objectstack)63 任务全绿 ✓\n- showcase `validate`(23 flows / 8 plugins)+ `typecheck` + 55 测试 ✓;eslint ✓;lockfile 已更新(showcase/dogfood 新依赖)\n\nRefs #3056(showcase 演示部分;模板预设部分待 15.1.0 发布)、#3055 / #3059、#3017 / #3049、ADR-0097 §6。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Pbmw3pMqNJfPbkvwh9Fkjs"
+}

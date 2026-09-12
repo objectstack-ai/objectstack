@@ -1,0 +1,35 @@
+{
+  "number": 3162,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): strip static `readonly` on INSERT at the data-write ingress (#3043)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T04:14:01Z",
+  "updated_at": "2026-07-18T05:46:26Z",
+  "closed_at": "2026-07-18T05:46:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-18T05:46:24Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3162",
+  "body": "## 背景\n\n关闭 #3043。#2948/#3003 让静态 `readonly: true` 字段在**非 system 的 UPDATE** 上被引擎服务端剥离(伪造 `approval_status: 'approved'` 的 PATCH 被静默丢弃),但 **INSERT 被有意豁免**。对审批/状态/判定类字段,这个豁免其实是**更短的一条攻击路径**:攻击者无需像 #3003 那样先建 draft 再 PATCH,可以**直接 `POST` 一条已经 `approval_status: 'approved'` 的新记录**——只需一步,且 UPDATE 侧的剥离完全拦不到。\n\n## 方案(经两轮讨论定型)\n\n最初尝试在**引擎 `insert()`** 里剥离(与 #2948 对称),但发现 blast radius 远超计划预估:`better-auth` adapter、`metadata-repo` 等**核心框架写入方**都用非 system 上下文经 `engine.insert` 播种 readonly 列(`email`/凭据、`event_seq`/`id`),被剥离后 dev-admin 登录失败、元数据事件日志 NOT NULL 崩溃——core/platform 里约 40+ 处同类调用点。\n\n因此改为在**外部数据写入入口 `DataProtocol`** 剥离(`createData` / `createManyData` / `batchData` / `cloneData`)。这是每个**外部程序化 create 的唯一汇聚点**——REST CRUD、GraphQL/MCP dispatcher(`bridge.create` → `callData` → `createData`)、批量 import——而**可信内部写入方**(better-auth adapter、metadata repo、seed loader)直接调 `engine.insert`,**绕过**此处。在入口拦截可一次性覆盖所有 caller/agent 路径(含 MCP,回应了 review 中的 agent 关切),又不误伤合法在创建时播种 readonly 列的内部写入方。\n\n### 关键性质\n- **仅剥离 caller 显式提交的键**:入口处 payload 是纯 caller 输入(`owner_id`/`organization_id` stamp 稍后在 `engine.insert` 内注入),故服务端 stamp 不受影响。\n- **回落默认值**:被剥离字段在引擎内回落到 `defaultValue`(伪造的 `approval_status` → `draft`,而非 NULL)。\n- **`isSystem` 豁免**;**静默**(HTTP 2xx);批量/import 逐行剥离;`readonlyWhen` 保持 INSERT 豁免。\n- **仅作者自定义业务对象**:平台对象(`managedBy` 或 `sys_` 命名空间)有各自的字段写入治理,静默剥离不得抢先——例如 ADR-0086 对 `sys_permission_set` 伪造 `managed_by:'package'`/`package_id` 是**硬拒绝 403**,#3004 拒绝伪造 `owner_id`,而这些列本身是 `readonly`;若在此剥离会把本应被拒绝的 payload 静默吞掉。#3043 的威胁面是 app 审批/状态字段,从不涉及 `sys_`——这与 `applySystemFields` 的平台/自定义边界一致。\n\n### 行为变化(需评审确认)\n非 system 经数据 API(REST/GraphQL/MCP/import)对**自定义对象**的 create,不再能从 payload 播种 readonly 列。需要在创建时写只读列的合法流程(导入历史 provenance、迁移、程序化 seed)必须走 system 上下文——**与 UPDATE 侧剥离早已施加的要求相同**。\n\n## 测试 / 证明\n- **入口单测** `metadata-protocol/src/protocol.readonly-insert.test.ts`(6 用例):非 system 伪造被剥离 + 默认值回落;system 上下文放行;无 context 默认非 system 剥离;`createManyData`/`batchData` 逐行剥离;**平台对象(sys_/managedBy)不剥离**,交由其自有 guard。\n- **dogfood HTTP 证明** `showcase-static-readonly.dogfood.test.ts`:非 system POST 伪造 `showcase_contact.lead_score` 端到端被剥离(不落库);同时 `two-doors-permission` 的 ADR-0086 provenance 伪造仍返回 **403**(平台对象 guard 未被抢先)。\n- **authz-conformance 矩阵** `readonly-static-write` 行扩展到 INSERT 面(入口位置 + 平台对象豁免)。\n- 契约面:`field.zod` 的 `readonly` describe(+ 重新生成 reference doc)、spec liveness note 同步更新。\n\n## 本地验证\n- ✅ 全量 dogfood 套件:294 passed / 3 skipped,0 failed(含 sign-in、权限、provenance、readonly 各面)\n- ✅ `@objectstack/metadata-protocol` 全套 + 新入口单测;`@objectstack/rest` 298 passed\n- ✅ `@objectstack/spec` `check:docs`(258 files in sync);相关包 build/typecheck 通过\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

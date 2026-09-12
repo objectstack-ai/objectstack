@@ -1,0 +1,32 @@
+{
+  "number": 2647,
+  "kind": "issue",
+  "title": "ADR-0087 P2: replayable migration chain + machine-readable change manifest + generated guide",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-07-05T16:35:40Z",
+  "updated_at": "2026-07-15T15:25:55Z",
+  "closed_at": "2026-07-15T15:25:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2647",
+  "body": "Part of #2643 (ADR-0087). Covers **D3** (the migration chain) and the **D4 artifacts** (change manifest + generated guide). For the semantic changes conversion can't hide, ship declarative migrations that replay from **any** past major to current in one command; publish the machine-readable change record that everything else consumes.\n\nDepends on **P1** (retired conversions graduate into the chain).\n\n## D3 — the replayable migration chain\n\n- [ ] Per-major declarative migration artifacts `migrations/N.json`: per-surface transforms with machine-readable pre/post conditions + a single prose `rationale` field. Two feeders: **semantic changes** authored for major N, and **graduated conversions** (P1 entries retired from the load path).\n- [ ] **`objectstack migrate meta --from N`** composes steps N→N+1→…→current and applies them to the consumer's metadata source files in one run. Cross-major is the designed-for case, not an edge.\n- [ ] **`--step`** checkpoints after each major so an agent can run its verify loop per hop and bisect a failure to the exact major (`git bisect` for an upgrade).\n- [ ] A migration that can't be expressed declaratively emits a **structured TODO** (surface, reason, acceptance criteria) — never silence.\n\n## D4 — machine-readable-first release artifacts\n\n- [ ] **`spec-changes.json`** per release: the Release workflow diffs the current `api-surface.json` against the previously published one (reusing the ADR-0059 §3 gate artifact instead of discarding it), joins the conversion table + migration set → `{ from, to, added[], converted[], migrated[], removed[] }`, each entry with replacement + conversion/migration id + rationale anchor. Per-major manifests **compose** into a single `from→to` view.\n- [ ] The major-N **upgrade guide is generated** from `spec-changes.json` rationales (hand-written narrative only for architectural context) — a projection of the registry, so it can't drift.\n\n## Acceptance criteria\n\n- A metadata app authored at 10.x runs `migrate meta --from 10` and lands on current in one command; the diff is generated + provably schema-valid; the consumer's own `validate && typecheck && test` passes.\n- CI **replays the full chain** from the oldest supported major's fixtures to current on every release; a composability break is a release blocker.\n- The support floor (how far back the chain reaches) is an explicit, documented release-policy value — not an accident of deletion.\n- `spec-changes.json` validates against its own schema and is attached to the release; the generated guide matches it entry-for-entry.\n- The three live windows (`titleFormat`, `kind:'jsx'`, `sqlPredicateToCel`) each appear as a chain step + a `spec-changes.json` entry.\n\n## Boundaries\n\n- Declarative migrations express less than arbitrary code; the structured-TODO hatch keeps honesty and delegates judgment to the consumer agent.\n- Prose is load-bearing in exactly one place: the `rationale` field.\n\nRefs: #2643, ADR-0087 (D3, D4), ADR-0059 §3."
+}

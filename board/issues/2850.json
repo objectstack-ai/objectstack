@@ -1,0 +1,35 @@
+{
+  "number": 2850,
+  "kind": "issue",
+  "title": "Security: $expand bypasses RLS/FLS on the referenced object (data leak on lookups)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-12T08:47:08Z",
+  "updated_at": "2026-07-15T13:36:55Z",
+  "closed_at": "2026-07-15T13:36:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2850",
+  "body": "Found by the ADR-0090 D10 adversarial security review. **Pre-existing, general (affects all callers, not agent-specific).**\n\n## What\n\n`expandRelatedRecords` (`packages/objectql/src/engine.ts:~1890-1896`) resolves the referenced object by calling the **driver directly**, not `this.find()`:\n\n```ts\nconst expandOpts = this.buildDriverOptions(execCtx);\nconst relatedRecords = await driver.find(referenceObject, relatedQuery, expandOpts) ?? [];\n```\n\nIt never re-enters `executeWithMiddleware`, so the referenced object's **RLS, FLS, and CRUD gate are NOT applied** — only `tenantId` is threaded (`buildDriverOptions`), so cross-tenant is still blocked. The middleware's post-pass FLS masking (`security-plugin.ts` ~1023) masks only the **top-level** object; `field-masker` does not recurse into expanded/nested records.\n\n## Impact\n\nA caller who can legitimately read a base row can `?expand=<fk>` and receive the **full referenced record** — including rows the referenced object's owner-only RLS would hide and fields FLS would mask — for any FK on a row it can see. Tenant isolation is the only surviving boundary.\n\nReachable via the REST data API: `GET /data/:object/:id?expand=…` and `POST /data/:object/query` forward `expand` (`http-dispatcher.ts:~1953`). (The MCP `query`/`get` tools do **not** forward `expand`, so the pure-agent surface is not exposed — but any API-key/session user is.)\n\n## Fix direction\n\nRoute `$expand` resolution through the security middleware for the referenced object (RLS + FLS applied per referenced object), or apply the referenced object's read filter + field mask to the expanded batch before attaching. Preserve the batched `$in` performance (don't N+1).\n\n## Refs\n- `packages/objectql/src/engine.ts:~1821-1903` (expandRelatedRecords)\n- `packages/runtime/src/http-dispatcher.ts:~1953-1958` (REST expand forwarding)"
+}

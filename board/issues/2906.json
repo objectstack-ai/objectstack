@@ -1,0 +1,34 @@
+{
+  "number": 2906,
+  "kind": "pull_request",
+  "title": "feat(i18n): translate system account & messaging surfaces (zh-CN/ja-JP/es-ES)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-14T08:09:39Z",
+  "updated_at": "2026-07-14T10:55:07Z",
+  "closed_at": "2026-07-14T10:55:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-14T10:55:04Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2906",
+  "body": "## Summary\n\nLocalizes the `sys_user` / `sys_organization` / `sys_business_unit` / `sys_team` list & detail pages, the `account:profile_card` page and the `sys_inbox_message` `mine` view (user request). Framework side of a two-repo change — companion PR: [objectui#2489](https://github.com/objectstack-ai/objectui/pull/2489).\n\n- **spec**: `ObjectTranslationDataSchema` / `ObjectTranslationNodeSchema` accept `_views.<view>.emptyState.{title,message}` so list-view empty states are translatable.\n- **cli**: `os i18n extract` emits `_views.<view>.emptyState` keys when a view declares an empty state.\n- **platform-objects**:\n  - fill every missing zh-CN/ja-JP/es-ES translation for `sys_user`, `sys_organization`, `sys_business_unit` (fields, options, views, actions);\n  - replace hardcoded English tab/section/action labels in the `sys_user` / `sys_organization` / `sys_position` detail pages with inline `{ en, 'zh-CN', 'ja-JP', 'es-ES' }` i18n objects;\n  - rebuild the sys_user Security tab on `record:quick_actions` + `actionNames` so change-password / change-email / 2FA / delete-account buttons resolve object action translations.\n- **service-messaging**: new ADR-0029 D8 `MessagingTranslations` bundle covering the seven `sys_*` messaging objects, registered on `kernel:ready`; zh-CN fully translated, ja-JP/es-ES cover `sys_inbox_message` (incl. the `mine` view empty state).\n\n## ⚠️ Rollout dependency\n\nThe inline i18n label objects only render localized once [objectui#2489](https://github.com/objectstack-ai/objectui/pull/2489) lands — the console previously normalized the runtime locale to a bare base code (`zh`) and `pickLocalized` couldn't upgrade back to the `zh-CN` metadata keys. After that PR merges, run `pnpm objectui:refresh` here to pull the fix into the vendored `/_console`.\n\n## Tests\n\n- `packages/platform-objects`: **80/80** ✅ (`pnpm -F @objectstack/platform-objects test`)\n- objectui side: i18n 177/177, plugin-detail 185/185, app-shell 1278/1278, plugin-tree 6/6 ✅\n\n## Live UI verification (real backend, Playwright, locales zh-CN / ja / es)\n\nBackend from this branch's `platform-objects` dist on :18742, console dev server (with objectui#2489) on :5190. Full screenshot set: [gist](https://gist.github.com/baozhoutao/4a7ef9d1a7347424338b261b96e5d5cb).\n\n| sys_user list | sys_user detail | Security tab |\n|---|---|---|\n| ![zh user list](https://gist.githubusercontent.com/baozhoutao/4a7ef9d1a7347424338b261b96e5d5cb/raw/zh-01-sys_user-list.png) | ![zh user detail](https://gist.githubusercontent.com/baozhoutao/4a7ef9d1a7347424338b261b96e5d5cb/raw/zh-02-sys_user-detail.png) | ![zh security](https://gist.githubusercontent.com/baozhoutao/4a7ef9d1a7347424338b261b96e5d5cb/raw/zh-02b-sys_user-security-tab.png) |\n\n| sys_organization detail | sys_business_unit list | sys_business_unit detail |\n|---|---|---|\n| ![zh org](https://gist.githubusercontent.com/baozhoutao/4a7ef9d1a7347424338b261b96e5d5cb/raw/zh-04-sys_organization-detail.png) | ![zh bu list](https://gist.githubusercontent.com/baozhoutao/4a7ef9d1a7347424338b261b96e5d5cb/raw/zh-05-sys_business_unit-list.png) | ![zh bu detail](https://gist.githubusercontent.com/baozhoutao/4a7ef9d1a7347424338b261b96e5d5cb/raw/zh-06-sys_business_unit-detail.png) |\n\n| sys_team list | sys_team detail | inbox mine (zh) |\n|---|---|---|\n| ![zh team list](https://gist.githubusercontent.com/baozhoutao/4a7ef9d1a7347424338b261b96e5d5cb/raw/zh-07-sys_team-list.png) | ![zh team detail](https://gist.githubusercontent.com/baozhoutao/4a7ef9d1a7347424338b261b96e5d5cb/raw/zh-08-sys_team-detail.png) | ![zh inbox](https://gist.githubusercontent.com/baozhoutao/4a7ef9d1a7347424338b261b96e5d5cb/raw/zh-10-inbox-mine.png) |\n\n| profile_card (zh) | ja sys_user detail | es sys_user detail |\n|---|---|---|\n| ![zh profile](https://gist.githubusercontent.com/baozhoutao/4a7ef9d1a7347424338b261b96e5d5cb/raw/zh-09-profile_card.png) | ![ja user](https://gist.githubusercontent.com/baozhoutao/4a7ef9d1a7347424338b261b96e5d5cb/raw/ja-03-sys_user-detail.png) | ![es user](https://gist.githubusercontent.com/baozhoutao/4a7ef9d1a7347424338b261b96e5d5cb/raw/es-03-sys_user-detail.png) |\n\nVerified in all three locales:\n- sys_user 详情:alert「邮箱未验证 / 重新发送验证邮件」、tabs「岗位|会话|关联账号|组织|OAuth 应用|安全|API 密钥」、「分配岗位」\n- 安全 tab:「修改密码|修改邮箱|启用双因素认证|重发验证邮件|删除我的账号」\n- org 详情:「成员|邀请|团队|添加成员|所有者」;业务单元树列头「名称/类型/业务单元负责人/启用」\n- inbox `mine`:列头/空态/行内编辑(ja:「インライン編集」)\n\n## Known remaining English (out of scope)\n\n- Builder toolbar \"Unpublished app…\" banner + History/Publish buttons (objectui builder chrome).\n- Platform role raw value `user` (field data value, not a label).\n- Activity-feed audit strings (`Created sys_team \"…\"`, server-generated).\n\n## Changeset\n\n`.changeset/sys-tables-account-i18n.md` — minor for `@objectstack/spec` / `@objectstack/cli` / `@objectstack/service-messaging`, patch for `@objectstack/platform-objects`.\n"
+}

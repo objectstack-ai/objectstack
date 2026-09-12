@@ -1,0 +1,33 @@
+{
+  "number": 3092,
+  "kind": "pull_request",
+  "title": "docs: P0 audit fixes — resolve contradictions, hand over the keys",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T06:52:50Z",
+  "updated_at": "2026-07-17T06:58:54Z",
+  "closed_at": "2026-07-17T06:58:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T06:58:51Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3092",
+  "body": "## 背景\n\n对全站文档做了客户视角审计(8 个并行审计员逐页精读 110 页手写指南 + 抽样生成参考,统一评估框架:定位/可运行示例/覆盖面/闭环/AI 视角/排错)。总结论:**概念层能理解,动手层会卡住**。本 PR 是审计修复的第一批(P0)——全部为\"文档自相矛盾/教死 API/关键钥匙缺失\"类,每处都有源码依据。\n\n## 矛盾修正(文档两处说法打架,或在教已死的 API)\n\n- **OWD 词汇**:permissions-matrix 的表格/示例/callout 全部改为 canonical 四值(`public_read` 等,ADR-0090 D4 已移除 legacy 别名 —— spec `object.zod.ts:940` 白纸黑字);原页 callout 还在说\"legacy 两者皆可\"\n- **referenceFilters 死 API**:relationships.mdx 明确它 schema-accepted-but-inert,fields.mdx 却当正例教 —— 改为结构化 `lookupFilters` + `dependsOn`;field-types/validation-rules 属性表标注 Legacy\n- **percent 语义**:三页三种说法(0-100 / 0-1 / decimal)—— 统一为小数存储(0.85 = 85%,与 UI 渲染一致)\n- **hook input 形状**:插件教程 handler 用扁平 `input.first_name`、测试传 `{doc:{...}}`、kernel/events.mdx 契约是 `{doc}` —— 三处统一到 `{doc}`\n- **libsql**:self-hosting 说可用 `libsql://`,与 env-vars/drivers 两页\"不支持\"矛盾(该驱动在 Cloud 仓库)—— 修正并在 backup 页限定\n- **api/index MCP 行**:\"无需 per-action 开关\"是 #2849 之前的旧表述,与 `ai.exposed` 治理直接冲突 —— 修正\n- **permission-metadata**:\"`roles` is the only canonical role field\"违反自家 D3 词汇冻结 —— 改 `positions`\n- **common-patterns**:自称 copy-pasteable 但示例过不了自家 validate gate —— 全部对象补 `sharingModel`(含 `controlled_by_parent` 教学点)+ 页首 namespace 前缀警告\n\n## 钥匙补齐(此前的文档死胡同)\n\n- **主路径登录墙**:build-with-claude-code 第 5 步补 seeded dev admin 凭据(`admin@objectos.ai`/`admin123`);bare `os` → `npx os`;MCP 接入补 localhost 示例\n- **api/index 新增 Authentication 节**:session sign-in + API key(`POST /api/v1/keys`,`x-api-key: osk_…`)—— 此前整个 api 板块不告诉你 token 从哪来\n- **self-hosting 新增 First boot 节**:首个注册用户 = bootstrap admin(生产无 dev 凭据的说明)\n- **vercel**:InMemoryDriver 冷启动丢数据警告\n- **前置条件**:脚手架路径只需 Node 18+(pnpm/TS 是 monorepo 场景,原表格误导)\n- kernel/services-checklist 加过时横幅;quick-reference 摘掉两个 404 链接;examples/docker 坏链改指 docker/(连 docker/README 一起)\n\n## 验证\n\n- `pnpm --filter @objectstack/docs build` ✅(含 spec gen,MDX 全量编译通过)\n- 每处修改的事实依据均来自 spec/runtime 源码或既有正典文档页(commit message 有对照)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

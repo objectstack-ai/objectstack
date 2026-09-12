@@ -1,0 +1,34 @@
+{
+  "number": 2606,
+  "kind": "issue",
+  "title": "条件 tab:给 page:tabs 的 item 加 visibility(CEL)—— #2579 follow-up",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-05T00:44:18Z",
+  "updated_at": "2026-07-15T14:56:11Z",
+  "closed_at": "2026-07-15T14:56:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2606",
+  "body": "## 背景\n\n这是 #2579(详情页相关子表 tab)里明确 defer 的 follow-up —— 见该 issue 的「相关 follow-up」一节。\n\n`PageComponentSchema` 已有 `visibility: ExpressionInputSchema`(CEL 谓词,`packages/spec/src/ui/page.zod.ts` L109),所以**页面组件**可按记录状态条件显隐。但 `page:tabs` 的 **item 本身**没有 `visibility` —— 形状只有 `{ label, icon?, children }`(`packages/spec/src/ui/component.zod.ts` `PageTabsProps`)。\n\n后果:你能用组件级 `visibility` 隐藏一个 tab 的**内容**,但 **tab 头(标签)还在**,点进去是空的。无法真正「整条 tab 按记录状态显隐」。\n\n典型企业需求:\n- \"Contracts\" tab 仅当 `record.status == 'customer'` 显示;\n- 按记录阶段 / 角色显隐的 tab。\n\n## 提案\n\n给 `PageTabsProps.items[]` 加一个可选 `visibility`,复用与组件级 `visibility` / action `visible` 相同的 `ExpressionInputSchema`(CEL):\n\n```ts\nitems: z.array(z.object({\n  label: I18nLabelSchema,\n  icon: z.string().optional(),\n  visibility: ExpressionInputSchema.optional()\n    .describe('Visibility predicate (CEL). When false, the whole tab (header + panel) is omitted.'),\n  children: z.array(z.unknown()).describe('Child components'),\n})),\n```\n\n**语义**:`visibility` 求值为 false → 整条 tab(头 + 面板)从 tab 条移除,而不是留一个空头。求值上下文与组件级 `visibility` 一致(record + page 变量;page 变量变化时响应式重算)。\n\n**渲染器(objectui)**:`page:tabs` 渲染时过滤掉 `visibility` 为 false 的 item;若**当前激活的 tab 被隐藏** → 自动回落到第一个可见 tab(避免空白)。\n\n## 设计边界(与 #2579 一致)\n\n- 这是 **Tier 2(page 层)** 能力 —— 条件 / 排布归 page,**不进对象层**(ADR-0085 准入测试:对象层只放跨表面业务意图,不放「隐藏 / 重排」)。所以只加在 `PageTabsProps`,不碰 `ObjectSchema`。\n- 复用现有 CEL(`ExpressionInputSchema`),不引入新表达式机制;与 `PageComponentSchema.visibility`、action `visible` / `disabled`、nav 可见条件同源。\n- 加性、向后兼容(可选字段)→ **minor**。\n\n## 改动范围\n\n- **framework(spec)**:`packages/spec/src/ui/component.zod.ts` 的 `PageTabsProps.items` 加 `visibility`;补测试。\n- **objectui(渲染)**:`page:tabs` 渲染器按 `visibility` 过滤 item + 激活 tab 回落;补测试。\n\n## 验收\n\n- page:tabs 某 item 带 `visibility: 'record.status == \"customer\"'`:非 customer 记录看不到该 tab 头,customer 记录看得到。\n- 激活的 tab 被隐藏时自动落到第一个可见 tab,无空白面板。\n- 不带 `visibility` 的 item 行为完全不变。\n\nRefs #2579.\n"
+}

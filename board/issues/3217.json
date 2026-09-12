@@ -1,0 +1,36 @@
+{
+  "number": 3217,
+  "kind": "pull_request",
+  "title": "feat(mcp): #3167 PR-B — stdio/HTTP off-switch split + `os dev` connect UX + exposure-policy docs",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T14:13:17Z",
+  "updated_at": "2026-07-18T17:11:57Z",
+  "closed_at": "2026-07-18T16:40:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-18T16:40:17Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3217",
+  "body": "## What & why\n\n#3167 的 **PR-B**,方向已拍定的**非重叠**部分。\n\n> **范围调整(重要)**:开发期间 **#3228 已在 main 落地了 HTTP 身份准入的 e2e 证明**(基于 showcase、标 HIGH-RISK,并重指了 `mcp-http-identity` 矩阵行)。因此本 PR **rebase 到 main 之上,撤掉了我原来那份重复的 `cbp` 证明**(#3228 的更强),只保留 #3228 **没做**的部分。\n\n审计确认:serve-side 插件早已默认接线(`serve.ts`:`isMcpServerEnabled()` → `requires.push('mcp')`),HTTP 面早已准入且现已被 #3228 的 e2e 证明钉死。本 PR 补齐剩下的收口 + 可发现性 + 政策成文。\n\n## 改动(单 commit)\n\n- **Decision 2(off-switch 语义)**:HTTP 面与 stdio 传输此前**共用一个开关**——`OS_MCP_SERVER_ENABLED=true` 开 HTTP 的同时**静默启动无 principal 的裸权限 stdio 桥**。拆开:\n  - `@objectstack/types` 新增 `resolveMcpStdioAutoStart()`;stdio 归 `OS_MCP_STDIO_ENABLED`(默认关),`OS_MCP_SERVER_ENABLED` 只管 HTTP。旧 `=true` 触发 stdio 保留一 release + deprecation 警告;`=false` 语义不变。\n  - `@objectstack/mcp` `plugin.start()` 改走新开关,legacy alias 触发时 warn 一次。**未动** `bridgeResources(...)`(`mcp-stdio-authority` 探针键);矩阵该行 env 引用已同步。\n- **Decision 3(dev 亲和)**:`os dev` 启动打印 MCP endpoint / skill URL / 可直接粘贴的 `claude mcp add` 命令(gate 在 `isMcpServerEnabled()`,opt-out 零广告)。\n- **Decision 4(暴露政策)**:现行默认(非系统对象 + `ai.exposed` action、~10 工具脊柱)在 `connect-mcp.mdx` 写成 **v1 承诺政策** + metadata 可著述的后续方向。\n- 附:env-var 文档拆分 + deprecation callout;blank 脚手架 README serve 侧说明;单测钉住三态开关语义;changeset(types/mcp/cli minor + create-objectstack patch)。\n\n## 验证(rebase 后,本地)\n- `packages/types` env **20/20**;`packages/mcp` plugin **14/14**(向后兼容);dogfood `authz-conformance` + **#3228 的 `showcase-mcp-http-identity`(回归)** 合计 **13/13** —— 我的 `plugin.ts` stdio 改动对 HTTP 面无回归,矩阵 ledger 仍 sound。\n- eslint 干净;`turbo build`(types/mcp/cli/verify/showcase 闭包,含 tsc)绿。\n\n## 不在本 PR(明确 defer)\n- **stdio principal 线程化**(把长驻 bridge 升级为 principal-bound)——安全改动,单独 PR;\n- **showcase 自连接 demo**——dogfood gate 不能变 timing-sensitive,单独 PR。\n\nRefs #3167(PR-B)、#3228(HTTP 证明,已合)、#3202(PR-A)、ADR-0096、ADR-0097。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_0115eg8dAaCfWaDYYAm3ma36"
+}

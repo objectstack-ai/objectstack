@@ -1,0 +1,30 @@
+{
+  "number": 3055,
+  "kind": "issue",
+  "title": "feat(connector-mcp): policy-gate declarative stdio transports — default-deny + host allowlist (ADR-0097 security follow-up)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T12:33:21Z",
+  "updated_at": "2026-07-16T13:31:48Z",
+  "closed_at": "2026-07-16T13:31:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3055",
+  "body": "Security follow-up to ADR-0097 / #3017 (#3049), and the **precondition** for shipping `connector-mcp` in any default preset (see the companion default-preset issue).\n\n## Threat model\n\nA declarative `provider: 'mcp'` instance may name a **stdio transport**:\n\n```ts\nconnectors: [{\n  name: 'tools',\n  provider: 'mcp',\n  providerConfig: { transport: { kind: 'stdio', command: 'bash', args: ['-c', '…'] } },\n}]\n```\n\nMaterialization spawns that command as a **local child process** (`StdioClientTransport`). Declarative entries arrive through *metadata* — including a **Studio publish at runtime**, which triggers the `metadata:reloaded` reconcile and materializes new instances on a live server (soft mode skips *failures*, not successes). Net: anyone who can publish metadata can execute arbitrary commands on the server.\n\nToday the accidental barrier is that the host must consciously install `@objectstack/connector-mcp`. If the plugin becomes part of the default preset — which the ADR-0097 \"expressible *and executable* as pure metadata\" promise wants — that barrier disappears. The gate must become **explicit policy** instead.\n\n## Ask\n\n- `createMcpProviderFactory` gains a `declarativeStdio` policy, **default deny**:\n  - `undefined` / `false` → a declarative stdio transport is rejected;\n  - `string[]` → allowlist, matched against `transport.command` by strict equality;\n  - `true` → allow any command (explicit full trust).\n- `ConnectorMcpPlugin` plumbs the option through: `new ConnectorMcpPlugin({ declarativeStdio: ['npx'] })`.\n- A policy violation is a **configuration fault** — plain throw (fatal at boot, skipped+logged on reload), with an actionable message telling the host exactly how to opt in. It must NOT be classified `CONNECTOR_UPSTREAM_UNAVAILABLE` (#3049): a security rejection is not retryable-into-existence.\n- **`http` transports stay unaffected** (outbound HTTP is the same trust class as the `http` node / rest connector).\n- **Hand-wired paths stay unaffected** (`createMcpConnector` / plugin instance options): host *code* wrote that command — a different trust anchor than metadata.\n- Docs: ADR-0097 addendum (+ ADR-0024 §4 cross-ref). Be honest that a command allowlist is a **coarse** boundary (allowlisting `npx` ≈ allowing any package); real sandboxing / multi-tenant isolation remains the enterprise tier per ADR-0024 §4.\n- Tests: default-deny (plain throw, not unavailable-coded), allowlist hit/miss, `true` passthrough, http unaffected, hand-wired path unaffected.\n\n## Refs\n- ADR-0097 (`docs/adr/0097-declarative-connector-instances.md`), ADR-0024 §4 (trust model)\n- #3017 / #3049 (degrade+retry — the fault-classification seam this slots into)\n- #2977 (ADR-0097 implementation)"
+}

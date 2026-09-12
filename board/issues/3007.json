@@ -1,0 +1,33 @@
+{
+  "number": 3007,
+  "kind": "pull_request",
+  "title": "feat(client): pass `overwrite` through packages.install for upgrade flows",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T04:32:35Z",
+  "updated_at": "2026-07-16T05:15:13Z",
+  "closed_at": "2026-07-16T05:15:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-16T05:15:11Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3007",
+  "body": "## Why\n#2971 made `POST /packages` return **409 Conflict** on a duplicate package id (with an `overwrite: true` escape hatch for intentional upgrade / re-install). The SDK's `client.packages.install()` had no way to set that flag, so any future upgrade/re-install flow built on the SDK would hit the 409 with no recourse. (409-blast-radius audit found no current caller — this is future-proofing the API surface, tracked in objectui#2555.)\n\n## What\n- `packages.install(manifest, options)` options bag gains `overwrite?: boolean`, passed through the POST body **only when explicitly set** — the default request body stays byte-identical, so the server keeps rejecting duplicate ids by default.\n- JSDoc documents the 409 semantics.\n\n## Tests\nFirst SDK tests for `packages.install` (`client.test.ts`, existing `createMockClient` harness):\n1. default POST body carries manifest/enableOnInstall and **omits** `overwrite`;\n2. `{ overwrite: true }` carries the flag.\n\n`client.test.ts`: 91/91 pass; `tsc --noEmit` clean.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

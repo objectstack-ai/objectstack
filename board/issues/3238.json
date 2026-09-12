@@ -1,0 +1,33 @@
+{
+  "number": 3238,
+  "kind": "pull_request",
+  "title": "feat(lint): catch legacy pre-ADR-0021 dashboard analytics keys at author time (#1878/#1894)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T16:13:09Z",
+  "updated_at": "2026-07-18T20:44:04Z",
+  "closed_at": "2026-07-18T20:44:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-18T20:44:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3238",
+  "body": "## Summary\n\nPart of the metadata-liveness follow-through (#1878), serving the platform's core goal — **AI writes metadata, humans review, and we catch AI mistakes at author time (in CI) rather than leaving silent no-ops for a human reviewer to miss.**\n\nAn author (very often an AI) can still write the removed pre-ADR-0021 inline-analytics shape on a dashboard widget — `categoryField` / `valueField` / `xAxisField` / `yAxisFields` / `aggregate` / `aggregation` / `rowField` / `columnField`. Post-cutover the renderer routes dataset-bound widgets through `DatasetWidget` and **never reads these keys**. Two failure modes, two severities:\n\n| Case | Behavior | Rule | Severity |\n|---|---|---|---|\n| Legacy key present **and** a data source exists (`dataset`/`object`/`data`) | widget still renders; legacy key is ignored noise | `widget-legacy-analytics-shape` | **warning** (suppressible) |\n| Legacy key is the **only** data wiring — no `dataset`, no `object`, no inline `data` | widget has no data at all → **renders nothing** | `widget-legacy-analytics-unrenderable` | **error** (not suppressible) |\n\n## Why this shape\n- Lives in `validateWidgetBindings`, which runs **only in the CLI author path** (`objectstack compile` / `validate` / `doctor` / `lint`) — the path AI writes to and CI gates. It is **not** in objectui or any Studio/runtime authoring path, so this **does not touch Studio** (which still authors the legacy shape via its own inspectors — a separate, deferred workstream).\n- The **error** only fails builds that are **already broken** (the widget renders nothing regardless), so it surfaces an existing defect rather than introducing a new gate. That's the highest-leverage AI-safety move in an AI-writes / human-reviews model: a silently-blank widget is exactly what a reviewer misses, so it should hard-fail in CI.\n- The framework `DashboardWidgetSchema` is already clean (declares none of these keys; examples are 100% dataset-shaped), so nothing regresses. A hard schema `.strict()` is a separate, breaking step blocked on migrating Studio's `WidgetConfigPanel` — deliberately **out of scope** here.\n\n## Testing\n- 7 cases total: warning (dataset-bound legacy key, object-bound legacy pivot, clean widget = no finding, suppression) + error (unrenderable → error, object-bound → warning not error, error-not-suppressible).\n- Full `validate-widget-bindings` suite green (**40 passed**).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01LddW4NaQBdf5FTEnBPpnUJ"
+}

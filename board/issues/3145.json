@@ -1,0 +1,34 @@
+{
+  "number": 3145,
+  "kind": "pull_request",
+  "title": "refactor(spec): build-docs uses the shared generated-output sink",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T13:59:13Z",
+  "updated_at": "2026-07-17T14:16:54Z",
+  "closed_at": "2026-07-17T14:16:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T14:16:52Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3145",
+  "body": "Collects the debt [#3138](https://github.com/objectstack-ai/framework/pull/3138) deliberately left behind.\n\n#3138 extracted the `emit()` / `manageDir()` / `flush()` sink to `lib/generated-output.ts` and moved `build-skill-references` + `build-react-blocks-contract` onto it — but left `build-docs.ts` carrying the inline original, because [#3126](https://github.com/objectstack-ai/framework/pull/3126) was rewriting the same file at the time and the migration would have conflicted. #3126 has landed (`a6058728d`), so the conflict is gone.\n\n## Why this duplication in particular is worth removing\n\nTwo copies of a check/write sink is the one duplication this design cannot afford. The sink's entire claim is that `--check` and write are *the same code* — and that claim holds **per copy**. A fix to one (say the empty-dir prune #3138 added) silently leaves the other behind, and the failure mode isn't cosmetic: it's a gate that passes on output a real run wouldn't produce. Exactly the false-green the gate exists to prevent.\n\n## `wasEmitted()` added to the shared sink\n\n`build-docs` is the first caller whose later output depends on its earlier output — each category `index.mdx` links only the pages that were actually generated (a `.zod.ts` whose schemas are all unrepresentable in JSON Schema produces no page, and carding it would be a dangling 404).\n\nThat question belongs to the sink: it already owns the `emitted` map, and having the caller keep a second copy would fork the very state the sink exists to consolidate. Under `--check` it also *must* come from the sink — nothing is written, so the disk still holds the stale tree and reading it would make the check diverge from the run it models.\n\nNew export, no signature change; the other two callers are untouched.\n\nThe guard moves from an inline `managedDirs.size === 0` to `flush()`'s `guard` hook, same meaning: `json-schema/` is gitignored, so a fresh checkout that skips `gen:schema` emits almost nothing and \"nothing differs\" would read as success.\n\n## Verified, not assumed\n\nNet **−58 lines**. A refactor of gate machinery is exactly where \"it's only a refactor\" gets you a gate that no longer bites, so the full red-test suite was re-run rather than skipped:\n\n| Check | Result |\n| :--- | :--- |\n| Regenerate → byte-identical output | ✅ all 258 files, tree stays clean |\n| In-sync tree | ✅ exit 0 |\n| Stale content (#3076 replayed) | ✅ exit 1 — `~ … (out of date)` |\n| Missing page | ✅ exit 1 — `+ … (missing — spec adds it)` |\n| Stale leftover page | ✅ exit 1 — `- … (stale — …)` |\n| No-schema guard | ✅ exit 1, not a vacuous pass |\n| `check:skill-refs` / `check:react-blocks` regression | ✅ both exit 0, `skills/` stays clean |\n| #3138's reverse test: hand-written `.md` in `skills/*/references/` | ✅ gate stays green **and** the file survives a write |\n\n`tsc --noEmit` clean.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

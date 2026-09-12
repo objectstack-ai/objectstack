@@ -1,0 +1,32 @@
+{
+  "number": 3016,
+  "kind": "issue",
+  "title": "feat(connector-openapi): declarative provider — resolve providerConfig.spec from a file path (ADR-0096 follow-up)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T04:53:12Z",
+  "updated_at": "2026-07-16T07:48:56Z",
+  "closed_at": "2026-07-16T07:48:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3016",
+  "body": "Follow-up to #2977 / ADR-0096. Deferred enhancement identified while implementing the declarative provider factories (#2994).\n\n## Context\n\nADR-0096's canonical example authors an OpenAPI-backed instance as:\n\n```ts\nconnectors: [{\n  name: 'billing',\n  provider: 'openapi',\n  providerConfig: { spec: './billing-openapi.json', baseUrl: 'https://billing.example.com' },\n  auth: { type: 'bearer', credentialRef: 'billing_api_token' },\n}]\n```\n\nThe landed `openapi` provider factory materializes handlers from an **inline** spec object. It does **not** yet resolve `providerConfig.spec` given as a **file path** (`'./billing-openapi.json'`) — reading and parsing the document from disk, relative to the owning stack/package root, at materialization time.\n\n## Ask\n\n- Support `providerConfig.spec: string` as a path resolved **relative to the stack/package** that declares the connector (mirror how other metadata file references resolve).\n- Read + parse the OpenAPI document during boot reconcile. Missing file / unparseable spec ⇒ **fatal at boot, soft on reload** — same policy as the rest of the ADR-0096 reconcile (`materializeDeclaredConnectors`, #3001).\n- Keep inline spec objects working (union: inline object | file path | remote URL).\n- Guard path traversal: confine reads to the package root; reject absolute / `..`-escaping paths.\n- Tests: file-path happy path, missing file (fatal at boot / skipped on reload), traversal rejection.\n\n## Refs\n- ADR-0096 (`docs/adr/0096-declarative-connector-instances.md`), ADR-0023 (OpenAPI generator)\n- #2994 (declarative provider factories), #3001 (runtime reconcile)"
+}

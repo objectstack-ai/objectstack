@@ -1,0 +1,32 @@
+{
+  "number": 2378,
+  "kind": "issue",
+  "title": "[11.0][A3] Remove deprecated IDataEngine interface (use IDataDriver)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T14:36:16Z",
+  "updated_at": "2026-07-18T06:24:41Z",
+  "closed_at": "2026-07-18T06:24:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2378",
+  "body": "**Part of 11.0 breaking-change batch (#2364).**\n\nRemove the deprecated `IDataEngine` interface — the old name for `IDataDriver`. (Owner decision: remove in 11.0, not deferred to v12.)\n\n### Scope\n- Defined in `packages/spec/src/contracts/data-engine.ts` (+ re-export in `packages/core/src/contracts/data-engine.ts`).\n- **~271 typed references** — narrow change, wide blast radius. Every `: IDataEngine` / `implements IDataEngine` / `import { IDataEngine }` switches to `IDataDriver`:\n  - `packages/objectql/src/engine.ts` (`ObjectQL implements IDataEngine`)\n  - `packages/plugins/plugin-auth/src/objectql-adapter.ts` (3 signatures)\n  - `packages/plugins/plugin-audit/src/audit-writers.ts` (re-export)\n  - spec/core contract barrels\n\n### Checklist\n- [ ] Replace all `IDataEngine` usages with `IDataDriver`\n- [ ] Remove the `IDataEngine` export from spec + core contracts\n- [ ] Full-repo `tsc` typecheck (catches any missed ref)\n- [ ] `gen:api-surface` + commit snapshot\n- [ ] major changeset\n\n**Risk**: low (pure type rename, no behavior change) but wide — miss one ref → typecheck red.\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 3105,
+  "kind": "pull_request",
+  "title": "docs(agents): refresh the stale declared≠enforced example in Prime Directive #10",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T09:17:35Z",
+  "updated_at": "2026-07-17T09:34:15Z",
+  "closed_at": "2026-07-17T09:34:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T09:34:12Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3105",
+  "body": "## What\n\nPrime Directive #10 in `AGENTS.md` illustrates *\"never advertise a capability the runtime doesn't deliver\"* with a validation-rule example that has gone stale:\n\n> the spec declares 9 validation-rule types but the write-path validator enforces only 3 (`state_machine`/`script`/`cross_field`); the other 6 are tracked in #1475 rather than demoed in the showcase\n\n#1475 is closed and that 9-vs-3 split no longer exists. Verified against the tree today:\n\n| | then (as the example claims) | now (verified) |\n|---|---|---|\n| `ValidationRuleSchema` declares | 9 types | **6** — `script`/`state_machine`/`format`/`cross_field`/`json_schema`/`conditional` |\n| `rule-validator.ts` switch handles | 3 types | **all 6**, with real handlers (no stub cases) |\n\nDiffing #1475's list of 6 unenforced types (`unique`/`format`/`json_schema`/`async`/`custom`/`conditional`) against the 6 that survive shows how it was resolved: `unique`/`async`/`custom` were **trimmed** (they'd need I/O or a handler model — uniqueness went to a DB index), and `format`/`json_schema`/`conditional` got **real enforcement**.\n\n## The example is still true — one layer down\n\nAdversarial verification of my own first draft caught it saying *\"the runtime validator enforces all 6.\"* That sentence is itself the failure mode this directive prohibits.\n\n`evaluateValidationRules()` has exactly two call sites: `engine.ts:2265` (insert) and `engine.ts:2440` (single-id update). The `options.multi` → `driver.updateMany` branch (`engine.ts:2442-2487`) **never calls it**. On a bulk update all 6 rule types are silent no-ops — along with field-level `requiredWhen` and per-option `visibleWhen` authorization, which live inside the same evaluator. The guard warning at `engine.ts:2449` is gated on `needsPriorRecord()`, which returns `false` for `format`/`json_schema` — so those two fail with no signal at all.\n\nFiled as #3106 (`bug`+`security`) rather than fixed here, per this very directive. The wording now says what's true and carries the transferable lesson: **a `case` label is not enforcement — check the call site.**\n\n## Why past tense rather than a fresh example\n\nA stale example is itself the thing the directive warns about — docs advertising a state the code no longer has. Swapping in a different live gap just restarts the same clock. The closed-loop account can't drift, and it happens to demonstrate all three verbs the directive prescribes — *\"fix it, trim it, or file an issue\"* — in one case: **filed** (#1475) → **trimmed** (3 types) → **implemented** (3 types). The live #3106 pointer then keeps the directive honest about the limit of that fix.\n\n## Notes\n\n- Text-only; one line in `AGENTS.md`. No code or behavior touched — #3106 stays out of this PR deliberately.\n- Two in-repo comments overstate enforcement the same way my first draft did (`validation.zod.ts:17-18`, `rule-validator.ts:35-38` — both say \"no silent no-ops\"). Accurate about the switch, not about the system. Logged in #3106; out of scope here.\n- The other #1475 reference (`AGENTS.md:111`, merge discipline / auto-merge landing a red PR) is a different claim and still accurate — left alone.\n- `skip-changeset`: no package changes, nothing user-facing to version.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

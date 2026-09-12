@@ -1,0 +1,34 @@
+{
+  "number": 2955,
+  "kind": "pull_request",
+  "title": "docs: reposition ObjectStack vs ObjectOS + retire 'ObjectOS' as the control-layer name",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-15T09:03:48Z",
+  "updated_at": "2026-07-15T11:54:30Z",
+  "closed_at": "2026-07-15T11:54:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-15T11:54:27Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2955",
+  "body": "## 背景\n\n品牌战略调整:**ObjectStack** 是面向开发商的开源品牌(协议 + 工具链 + 生产 runtime),**ObjectOS** 是面向最终用户组织的官方商业运行环境(Cloud & Enterprise,不再提供免费/社区版)。本 PR 把 framework 仓库的对外表述与此对齐,共三部分:定位改写、功能层商业提及清理、协议层命名退役。\n\n## 变更内容\n\n### 1. 定位改写(README / LICENSING)\n- README:顶部双行定位图(builders vs end users);`os start` / 官方镜像即可完整上生产;移除 4 处社区版 objectos 仓库链接,改链 docs.objectos.ai;权限审计执行主体纠正为 runtime。\n- LICENSING.md:本仓库含构建/运行/自托管全部能力,Apache-2.0,无 dev/prod 功能门;ObjectOS 各版本为商业产品。\n- 品牌统一:`ObjectStack Cloud` → `ObjectOS Cloud`(current 页面;历史 release notes 不动)。\n\n### 2. 功能层商业提及清理(纪律:产品层保留边界声明,功能层零商业细节)\n- Turso/libsql 改为「不支持」;`OS_CLUSTER_DRIVER` 的「redis 属 EE」说法**本身过时**(`@objectstack/service-cluster-redis` 是本仓库开源包),已纠正;\n- AI 文档区系统性清理(9 个文件):删除私有 cloud 仓库 ADR 链接(公众 404)、`@objectstack/service-ai` 包名/构造函数/闭源文件名;边界陈述保留(schema 开源、产品内 chat runtime 属 ObjectOS、开源路径 `@objectstack/mcp` BYO-AI)。\n\n### 3. 协议层命名退役:`ObjectOS` 层 → **Kernel**\nObjectOS 既是商业产品名又是开源控制层名,是永久性语义冲突。退役后格局:**ObjectQL(数据,保留——真实开源查询语言)/ Kernel(控制,新名)/ ObjectUI(视图,保留——独立开源仓库)**;`Object*` 前缀只留给真实产品/技术。\n- README(删除消歧注——冲突消失后不再需要)、ARCHITECTURE、concepts/architecture、protocol 索引卡、protocol/diagram、glossary(含正式迁移说明)、implementation-status 等 ~15 个文件;\n- `protocol/objectos/` 落地页改题为 \"Kernel: The System Protocol\",行为叙述页主语改为 ObjectStack;**目录/URL 迁移到 `protocol/kernel/` 留待后续**(需配重定向);\n- skills 与 spec prompts 同步。\n\n## 验证\n\n- 全量 grep:手写文档中 ObjectOS 仅剩产品用法(Cloud/Enterprise/产品边界)与 glossary 迁移说明;`cloud / Enterprise`、`service-ai`、私有 ADR 链接、`ObjectStack Cloud` 清零(references/ 自动生成目录与历史 release notes 除外)。\n- ASCII 架构图对齐已手工校正(architecture.mdx、protocol/objectos/index.mdx、knowledge.mdx)。\n- 纯文档/文案改动,无包代码变更,不含 changeset。\n\n## 后续(不在本 PR)\n\n- 重新生成 `docs/screenshots/layers.png`(alt 文本已更新,截图本体仍写 ObjectOS 层);\n- `packages/spec` 源码 TSDoc/字符串中 ~43 处 ObjectOS(供给自动生成的 references/ 文档),需连带重新生成;\n- `content/docs/protocol/objectos/` → `protocol/kernel/` 目录迁移 + 重定向;\n- 配套 PR:cloud#834、objectui#2510。\n\n## 备注\n\n- `Check Changeset` 的 no-major guard 预计仍红——main 上 4 个既存 major changeset 所致,与本 PR 无关(同 #2952)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_0162o68e5w3bpUBEVRQboUGG"
+}

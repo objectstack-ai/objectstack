@@ -1,0 +1,35 @@
+{
+  "number": 3080,
+  "kind": "pull_request",
+  "title": "fix(plugin-auth,platform-objects): close @better-auth/oauth-provider 1.7 schema drift — restore platform SSO",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T16:37:56Z",
+  "updated_at": "2026-07-16T17:06:13Z",
+  "closed_at": "2026-07-16T17:05:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-16T17:05:26Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3080",
+  "body": "## 问题\n\nbetter-auth 1.7.0-rc.1 升级(4ab16f8c5 “pnpm upgrade”)改变了 `@better-auth/oauth-provider` 的模型 schema,但 `sys_oauth_*` 平台对象和 `auth-schema-config.ts` 里的 camelCase→snake_case 映射没有跟上。实测(cloud 本地 rig,三仓 main)平台 SSO token 交换 500:\n\n```\ntable sys_oauth_access_token has no column named authorizationCodeId\n```\n\n新字段没有 fieldName 映射时 camelCase 直通(其它列都是 snake_case),列也不存在 —— SQLite 与 prod PG 同炸。这是「Continue with ObjectStack」全环境登录链路的断点之一(另两个在 cloud / objectui,见下)。\n\n## 修复\n\n**补列(1.7 完整对齐):**\n- `sys_oauth_access_token` / `sys_oauth_refresh_token`:`authorization_code_id`(带索引)、`resources`、`requested_user_info_claims`、`confirmation`;access 另加 `revoked`;refresh 另加 `rotated_at`、`rotation_replay_response`、`rotation_replay_expires_at`\n- `sys_oauth_consent`:`resources`、`requested_user_info_claims`\n- `sys_oauth_application`:`jwks`、`jwks_uri`、`backchannel_logout_uri`、`backchannel_logout_session_required`、`dpop_bound_access_tokens`(1.7 的 DCR 会写带默认值的 `dpopBoundAccessTokens`,同类炸点)\n\n**新表(1.7 新增的三个模型):**\n- `sys_oauth_resource` / `sys_oauth_client_resource` — RFC 8707 resource indicators(MCP OAuth track 的 audience 绑定用)\n- `sys_oauth_client_assertion` — RFC 7523 client-assertion jti 防重放\n\n已注册进 auth manifest、`SystemObjectName`、i18n extract config 与 `buildOauthProviderPluginSchema()`;翻译 bundle 重新生成(纯新增,708 insertions / 0 deletions)。\n\n**防漂移门(新测试):** `oauth-provider-schema-parity.test.ts` 遍历 *已安装* 插件声明的 schema(`fieldName ?? key` 与 better-auth adapter 同逻辑解析),任何对象缺列直接红 —— 下次 better-auth bump 新增字段会在测试期失败而不是 prod 500。这个测试就是本 PR 发现三张新表的来源。\n\n## 测试\n\n- `plugin-auth`:19 files / 452 tests 全过(含新 parity 8/8)\n- `platform-objects`:5 files / 197 tests 全过(含 bundle-ownership 门)\n- `spec`:6883 tests 全过\n- `turbo build --filter=@objectstack/plugin-auth`:11/11 成功\n\n## 三仓协调\n\n1. **framework(本 PR)** — schema 修复,先合\n2. **cloud** — `platform-sso.ts` 注册双格式 redirect_uri(新 `/api/v1/auth/callback/<provider>` + 旧 `/oauth2/callback/` 过渡)\n3. **objectui** — OIDC 登录从 `POST /sign-in/oauth2`(1.7 已移除)迁到 `POST /sign-in/social`,带旧路由 fallback\n\n⚠️ cloud 当前 `.framework-sha`(929efdf)**已包含** better-auth 升级点 —— 如果 staging/prod 已滚过含该 pin 的镜像,平台 SSO 现在就是断的;三仓合并后需尽快一起 bump pin 部署。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

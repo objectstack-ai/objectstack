@@ -1,0 +1,30 @@
+{
+  "number": 3171,
+  "kind": "issue",
+  "title": "aggregate() does not mask secret/password fields (bypasses read-path masking)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T06:12:58Z",
+  "updated_at": "2026-07-18T07:30:02Z",
+  "closed_at": "2026-07-18T07:30:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3171",
+  "body": "## Summary\n\n`ObjectQL.aggregate()` does not apply credential-field masking, unlike `find()` / `findOne()`. A query that selects, groups by, or otherwise surfaces a `secret` or `password` field through `aggregate()` can leak the stored value (an opaque `secret:<id>` ref for `secret`; plaintext for `password`) that the normal read path masks to `SECRET_MASK`.\n\nThis is a **pre-existing gap for `secret`**, surfaced while implementing read-path masking for `password` in #2036 / ADR-0100 (PR #3170). It was deliberately left out of that change to keep it focused on the read-contract decision.\n\n## Detail\n\n- `find()` → `maskSecretFields` (engine.ts) and `findOne()` → `maskSecretFields` both mask via `collectMaskedReadFields`.\n- `aggregate()` returns driver rows (or in-memory aggregation output) with **no** masking call.\n- `count()` is unaffected (returns only counts).\n\n## Why post-hoc masking is the wrong fix\n\nBlindly masking aggregate output would corrupt group keys / aggregate values (e.g. `GROUP BY` on a credential field, or `MIN/MAX` over one), producing rows keyed on `••••••••`. The value semantics of an aggregation over a credential field are meaningless anyway.\n\n## Proposed fix\n\n**Reject** aggregations that reference a `secret` or `password` field (in `select`/aggregate expressions, `groupBy`, or `having`) with a clear error, rather than silently masking or leaking. Applies symmetrically to both credential types (reuse `collectMaskedReadFields`). Add unit coverage under `packages/objectql`.\n\n## Acceptance\n\n- `aggregate()` referencing a `secret` or `password` field fails fast with a descriptive error (or is otherwise provably non-leaking).\n- Unit test pins the behavior for both types.\n\nRef: ADR-0100, #2036, PR #3170."
+}

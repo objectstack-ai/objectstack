@@ -1,0 +1,33 @@
+{
+  "number": 2921,
+  "kind": "pull_request",
+  "title": "test(app-showcase): round-3 permission-model retest — issues register with evidence",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-14T14:29:57Z",
+  "updated_at": "2026-07-14T14:50:22Z",
+  "closed_at": "2026-07-14T14:50:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2921",
+  "body": "## 概要\n\n第三轮权限模型全量复测(**只测试、不修改产品代码**):fresh DB 起服务 → REST 49/49 断言 → Playwright 25/25 通过(修复测试环境后)。本 PR 只新增测试文档与截图证据。\n\n## 内容\n\n- 新增 [permission-model-issues.md](https://github.com/objectstack-ai/framework/blob/claude/permission-model-testing-d5a460/examples/app-showcase/docs/test/permission-model-issues.md):全部问题三档分级 + 逐条证据(截图/响应原文)\n- 新增截图 R3-I2a/R3-I2b(cookie-less FLS fail-open 同框对照);L*/N*/O* 系列为复测重跑覆盖\n- 主报告加第三轮小节引用\n\n## 关键发现(详见 issues 文档)\n\n- 🔴 **锚点岗位 everyone 可被数据 API 物理删除**(解除 FK 绑定后 DELETE → 200 success:true;二轮 N6 通过是 FK 假象,`managed_by:system` 无删除保护)\n- 🔴 **无声明式岗位↔权限集绑定**:fresh 部署 7 岗位空壳,20/49 静默降级到 everyone 基线无警告;spec isDefault「never auto-bound」与 boot 自动绑 everyone→member_default 实测矛盾\n- 🟡 启动期种子不物化共享规则(须运行时空触碰)\n- 🟡 无 cookie 时 console FLS 渲染 fail-open(数据面仍强制)\n- 🟡 拒绝语义分层不一致:记录范围层 400+裸 error vs 能力门 403+PERMISSION_DENIED\n- 🟡 showcase_announcement 无 name 字段/无种子;perm-setup.sh 复跑不自足\n\n前序:#2910(第一轮)、#2915(第二轮配置面)。"
+}

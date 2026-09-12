@@ -1,0 +1,35 @@
+{
+  "number": 2994,
+  "kind": "pull_request",
+  "title": "feat(connectors): ADR-0096 — provider-bound declarative connector instances (#2977)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T01:43:43Z",
+  "updated_at": "2026-07-16T02:47:48Z",
+  "closed_at": "2026-07-16T02:47:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-16T02:47:47Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2994",
+  "body": "Implements **ADR-0096** — closes the last mile from `connectors:` stack metadata to a live, dispatchable connector. Tracking: #2977.\n\n## Why\n\nDeclarative `connectors:` entries were **descriptor-only** (#2612): registered as metadata but never reaching the automation connector registry — the platform's one dead metadata surface (plausible, validated, dead). For a platform whose goal is AI-built enterprise systems out of metadata, integrations must be expressible *and executable* as metadata. This adds only the last mile: an entry may name a **`provider`** (an installed generic executor) and the automation service **materializes** it into a live connector at boot, reusing the ADR-0023/0024 generator APIs verbatim.\n\n```ts\nconnectors: [{\n  name: 'billing',\n  provider: 'openapi',                                  // ← materialized at boot\n  providerConfig: { spec: '…', baseUrl: 'https://…' },\n  auth: { type: 'bearer', credentialRef: 'billing_token' },  // reference, never inline\n}]\n```\n\n## What (per the ADR task breakdown D0–D7)\n\n- **D1 — Schema (`@objectstack/spec`).** `ConnectorSchema` gains `provider` / `providerConfig` / `auth`; `authentication` now defaults to `{ type: 'none' }` (loosening, non-breaking). `ConnectorInstanceAuthSchema` is the `credentialRef`-based instance auth — structurally no inline-secret field. `DeclarativeConnectorEntrySchema` (used by `stack.zod.ts`) rejects inline secrets, orphan `providerConfig`/`auth`, and authored `actions`/`triggers` on a provider-bound entry (§5). New `integration/connector-provider.ts` defines the provider-factory contract as pure types.\n- **D2 — Provider registry.** The engine adds `registerConnectorProvider` / `getConnectorProvider`; `registerConnector` is origin-tagged.\n- **D3 — Boot materialization + `credentialRef`.** `service-automation` resolves each provider-bound entry in `start()` (a throw there is fatal to bootstrap under both `LiteKernel` and `ObjectKernel`, unlike a swallowed `kernel:ready` hook). `credentialRef` resolves via a pluggable `CredentialResolver`; the open-tier default reads env vars.\n- **D4 — Conflict rule.** A declarative-vs-plugin name collision throws — no silent precedence.\n- **D5 — Providers.** `connector-rest` / `connector-openapi` / `connector-mcp` each export a `create*ProviderFactory` and register it in `init()`. Plugin options are now optional (provider-only vs. also hand-wired). Adds `ConnectorOpenApiPlugin`.\n- **D6 — Showcase.** `StatusApiConnector` (`provider: 'rest'`) is materialized at boot and dispatched by `ShowcaseDeclarativeConnectorPingFlow`; `coverage.ts` records it.\n- **D7 — ADR + tiering.** ADR flipped Proposed → Accepted with an as-built section. **Open tier:** static auth (`none`/`api-key`/`basic`/`bearer`), `credentialRef` from env vars. **Enterprise (ADR-0015):** managed vaulting + OAuth2 refresh + per-tenant lifecycle (inject a vault-backed `CredentialResolver`, no change to the materialization path).\n\n**Boot fails loudly** for: unknown provider, invalid `providerConfig`, unresolvable `credentialRef`, name conflict.\n\n## Verification\n\n- Full monorepo build green (70/70 tasks) — the `authentication` loosening and new exports break no consumer.\n- Tests: schema **13**, materialization incl. end-to-end `connector_action` dispatch + every hard-fail case **12**, provider factories **15**, real-plugin integration (ConnectorRestPlugin + AutomationServicePlugin → declared instance materialized → dispatched with `credentialRef` resolution) **2**. Full suites for the 5 touched packages pass (spec 253 files, service-automation 26).\n- Showcase `validate` + `typecheck` + coverage test pass (the provider-bound `StatusApiConnector` composes and validates; 22 flows).\n\n> Note: the full-app **live browser boot** was blocked by an environment version-skew in the resolved `objectstack` CLI shim (an older `dev` command), not by this change. The identical runtime path — real `ConnectorRestPlugin` registers the `rest` provider, the automation service materializes a declared instance, and a flow `connector_action` dispatches it — is proven by the integration test, and `objectstack validate` composes the full showcase stack.\n\n## Compatibility\n\nAdditive/loosening only — no removed or renamed authorable keys, so no migration or tombstone. Existing descriptor-only entries (no `provider`) are unaffected; the boot audit warning still applies to them. Changeset included.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Pbmw3pMqNJfPbkvwh9Fkjs\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Pbmw3pMqNJfPbkvwh9Fkjs)_"
+}

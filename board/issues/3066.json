@@ -1,0 +1,33 @@
+{
+  "number": 3066,
+  "kind": "issue",
+  "title": "ADR-0067 Decision-2 unimplemented: package-draft publish is not turn-atomic — a commit CAN half-land",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T14:19:45Z",
+  "updated_at": "2026-07-16T15:34:58Z",
+  "closed_at": "2026-07-16T15:34:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3066",
+  "body": "## Summary\n\nADR-0067 Decision-2 promises *\"all writes of a commit land in ONE `engine.transaction()`; a commit cannot half-land.\"* The 2026-07-16 status audit found this is **not implemented**: `publishPackageDrafts` promotes drafts per-item with catch-and-continue, so a mid-batch failure leaves earlier items live and later ones unpublished — the exact \"Published! but half-landed\" state the ADR exists to kill. For an AI-authoring platform this is a main-path risk: AI turns are batchy, and a partial landing is a metadata state nobody ever reviewed. Today's mitigation (revert the partial commit) is after-the-fact and requires someone to notice.\n\n## Verified current behavior (HEAD 2026-07-16)\n\n- **Per-item catch-and-continue**: `metadata-protocol/src/protocol.ts:4711-4722` — a failing draft is pushed to `failed[]` and the loop continues; earlier `publishMetaItem` calls are already live.\n- **Commit records the partial landing**: `recordPackageCommit` runs after the loop over `publishedKeys` only (`:4760-4774`, insert at `:5180`).\n- **Even a single promote is two transactions**: `repo.promoteDraft` = `put()` (own `withTxn`) + best-effort `delete()` of the draft (second `withTxn`) — `sys-metadata-repository.ts:577-636`.\n- **The test suite locks in the non-atomic contract**: `objectql/src/protocol-publish-package-drafts.test.ts:84-101` (\"collects per-item failures without aborting the rest\") asserts `publishedCount === 2, failedCount === 1`.\n- The namespace pre-check (`protocol.ts:4621-4638`) is the only all-or-nothing step today — the model to extend.\n\n## Design (two-phase publish)\n\n**Phase 1 — transactional metadata writes.** Open ONE `engine.transaction()` (ADR-0034 ambient tx, `objectql/src/engine.ts:2869-2896`) around the whole batch: every draft's `promoteDraft` (put + draft-delete) **and** the `sys_metadata_commit` insert. Any failure → rollback → nothing landed, `success:false`, zero published.\n\n**Phase 2 — post-commit side effects (once, best-effort, in this order):** in-memory registry mutations (`applyObjectRegistryMutation`), DDL (`ensureObjectStorage`/`syncObjectSchema`), batched `applySeedBodies`, publish materializers, mutation projectors (ADR-0094), `emitMetadataMutation`/watch events, build probes. These are exactly the effects that (a) cannot run inside a driver tx — DDL runs on bare knex and **deadlocks SQLite's single-connection pool** (`sql-driver.ts:1429 assertBareKnexSafe`); in-memory registry writes can't roll back — and (b) already have boot-reconciliation healing (the ADR-0094 lesson: side effects may self-heal, half-landed metadata cannot).\n\n## Blockers each requiring a real change\n\n1. **Repo tx threading**: `promoteDraft`/`put`/`delete` accept no ctx and `withTxn` (`sys-metadata-repository.ts:238-243`) always opens a FRESH `engine.transaction` — under an outer batch tx this deadlocks SQLite. Fix: teach `withTxn` to detect and JOIN an already-open ambient tx (preferred — no signature change; the engine's `txStore` already auto-threads ambient tx into engine calls), or thread ctx explicitly.\n2. **`publishMetaItem` side-effect extraction**: split into promote-only (in-tx) and side-effects (post-commit) phases; single-item publish keeps its current order (it is already effectively promote-then-effects).\n3. **Contract flip**: `protocol-publish-package-drafts.test.ts:84-101` changes from \"partial lands\" to \"all-or-nothing: publishedCount 0 on any failure\"; the response shape keeps `failed[]` (now describing why the batch rolled back). Release-notes BREAKING for API consumers relying on partial publishes.\n4. **Bonus fix for free**: promoteDraft's best-effort draft-delete gap closes (put+delete join the same tx).\n\n## Acceptance\n\n- A batch where item N fails leaves items 1..N-1 **absent** from `sys_metadata` active state, no `sys_metadata_commit` row, registry/DDL/projections untouched.\n- Existing revert/rollback suites still green (`protocol-commit-history.test.ts`); memory-driver (no `transaction`) keeps the direct-fallthrough path with documented weaker guarantees.\n- SQLite + PG both covered: an in-tx failure test on driver-sql proves rollback; the ambient-tx join is exercised by `engine-ambient-transaction.test.ts` patterns.\n\n## Refs\n\nADR-0067 (Decision-2 is the unmet load-bearing piece; status line annotated 2026-07-16), ADR-0034 (ambient tx), ADR-0094 (one-authority + side-effect healing precedent). Code: `metadata-protocol/src/protocol.ts:4562-4794`, `metadata-protocol/src/sys-metadata-repository.ts:238-243,577-636`, `objectql/src/engine.ts:2869-2896`, `driver-sql/src/sql-driver.ts:1400-1458`."
+}

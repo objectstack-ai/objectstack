@@ -1,0 +1,37 @@
+{
+  "number": 2918,
+  "kind": "issue",
+  "title": "feat(plugin-security): 内置行写护栏 — sys_position / sys_capability 平台/应用托管行可被删改",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p2",
+    "security",
+    "size/s"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-14T13:41:23Z",
+  "updated_at": "2026-07-14T16:15:22Z",
+  "closed_at": "2026-07-14T16:15:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2918",
+  "body": "## 问题\n\n平台/应用发布的系统行（`sys_position`、`sys_capability` 的 platform / package 托管行）**可以被客户管理员直接删除或改写**，运行时没有内置的写护栏拦截。这与 ADR-0066 的资产归属模型冲突——\"能做什么\"由平台/应用开发者定义，客户管理员只应\"分配给谁\"，不应删改平台发的岗位/能力本身。\n\n现状对比：\n\n- `sys_permission_set` **有**两道门护栏 —— `assertPackageManagedWriteGate`（`packages/plugins/plugin-security/src/security-plugin.ts` ~L1515–1647，data-write hook 在 ~L501 接线）拦截对 package 托管权限集行的写入。\n- `sys_position` / `sys_capability` **没有**对应护栏 —— platform / package 托管行的 delete / update 直达驱动。\n\n后果：管理员误删一个平台岗位（如 `platform_admin`）或应用发的岗位（如 `Sales Rep`），会静默破坏该应用的授权基线，且没有 provenance 保护提示。\n\n## 期望\n\n新增 **`assertSystemRowWriteGate`**（或扩展现有两道门逻辑），对 `sys_position` / `sys_capability` 的 `managed_by ∈ {platform, package}` 行：\n\n- **delete**：拒绝（平台/应用托管行不可删）。\n- **update**：拒绝或限制到安全子集（provenance 字段 `managed_by` / `package_id` 不可改；具体可写子集待定）。\n- **admin 自建行**（`managed_by = admin`）：不受限，管理员完全可管。\n\n错误信息走已有的\"仅业务消息\"沙箱化路径（见 #2893 风格），提示\"此岗位/能力由 <平台|应用包> 提供，不可删除/修改\"。\n\n## 实现指引\n\n- **落点**：`packages/plugins/plugin-security/src/security-plugin.ts`，复用 `assertPackageManagedWriteGate` 的 hook 接线模式（data-write hook ~L501），把 `sys_permission_set` 的护栏泛化到 `sys_position` / `sys_capability`。\n- **provenance 依据**：两对象都已有 `managed_by`（select: platform/package/admin）+ `package_id` 字段可判定托管来源。\n- **delegated-admin 交互**：`delegated-admin-gate.ts` 的 `GOVERNED_OBJECTS`（~L55）目前**不含** `sys_position` / `sys_capability`——确认新护栏与委派管理边界不冲突（委派管理员在自己 subtree 内的自建行仍可管）。\n- **测试**：非 admin/admin × platform/package/admin 行 × delete/update 的矩阵；platform 托管行删除被拒断言；admin 自建行不受影响断言。\n\n## 关联\n\n- 与 #2909（审计 sys_position / sys_sharing_rule / sys_capability 两存储类型，ADR-0094 addendum）同域——那是\"声明式两存储\"审计，本 issue 是其中的**写保护 enforcement** 具体项。\n- ADR-0049（不引入未强制的安全属性）：provenance 字段存在却无强制 = 正是要补的 enforcement gap。\n"
+}

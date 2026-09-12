@@ -1,0 +1,36 @@
+{
+  "number": 3101,
+  "kind": "pull_request",
+  "title": "fix(create-objectstack): scope skill installs to the curated skills/ catalog",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T07:34:00Z",
+  "updated_at": "2026-07-17T11:28:44Z",
+  "closed_at": "2026-07-17T11:28:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T11:28:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3101",
+  "body": "## 问题(15.1 第三方评估 P2 #1)\n\n`create-objectstack` 生成的项目 `.agents/skills/` 里出现了仓库内部 skill `dogfood-verification`(frontmatter 自述 \"NOT a customer-published skill\")。\n\n## 根因\n\n泄漏不在模板或 npm 发布产物,而在脚手架运行时:scaffolder(及文档)执行 `npx skills add objectstack-ai/framework --all`。skills CLI 的 `--all` 隐含 `--skill '*'`([add.ts:1049-1052](https://github.com/vercel-labs/skills/blob/main/src/add.ts)),而任何非空 `--skill` 会把 `includeInternal` 置真 —— 即 **`--all` 连 `metadata.internal` 标记的 skill 也一并安装**。仓库全量发现会走 `.claude/skills/`,于是内部 skill 进入每个新项目。CI 的 scaffold-e2e 两处均 `--skip-skills`,该路径从未被守。\n\n## 修复(双层)\n\n1. **硬边界 = `/skills` 子路径**:scaffolder 与全部文档改为 `npx skills add objectstack-ai/framework/skills --all`,skills CLI 的发现范围被钉死在发布目录(对 `--all` 也有效;已实测远端 GitHub 源 `Found 9 skills`)。\n2. **交互兜底 = `metadata.internal: true`**:`.claude/skills/dogfood-verification` 加标记,裸 `skills add objectstack-ai/framework`(无 `--all`)的交互发现也不再露出(实测 `--list` 只列 9 个)。\n\n## 防线\n\n- `template-consistency.test.ts` 新增 4 个 ratchet:`skills/` 外的 SKILL.md 必须标 internal;curated 条目不得标 internal;scaffolder 必须用子路径源;客户面(docs/skills/create-objectstack)禁止裸根路径安装命令。\n- `scaffold-e2e.yml` 新增步骤:从本 checkout 的 `skills/` 子路径真实安装进全新 scaffold,断言安装集合与 curated 目录**集合相等**;根路径 `--list` 断言恰好 curated 数量且无内部 skill。\n\n## 验证\n\n- `pnpm --filter create-objectstack test` 10/10 通过;build 通过\n- 本地 worktree 实测:子路径安装 → 恰好 9 个 curated;根路径 `--list` → Found 9(internal 隐藏)\n- 远端实测:`npx skills add objectstack-ai/framework/skills --list` → Found 9\n- `check:doc-authoring` / `check:role-word` 通过\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

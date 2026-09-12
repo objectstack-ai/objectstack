@@ -1,0 +1,34 @@
+{
+  "number": 2755,
+  "kind": "issue",
+  "title": "[attachments] v1 follow-ups: sys_file orphan lifecycle + non-admin permission matrix dogfood",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T08:24:22Z",
+  "updated_at": "2026-07-15T15:00:26Z",
+  "closed_at": "2026-07-15T15:00:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2755",
+  "body": "#2727 落地的通用 Attachments 面板(framework #2742 + objectui #2374)的两个已知 v1 边界:\n\n## 1. 删除附件不清理 sys_file 孤儿\n\n`RecordAttachmentsPanel` 删除走 `sys_attachment` join 行删除;底层 `sys_file` 行与存储字节保留。同一 file 可被多处 attach(ContentDocumentLink 模式),所以不能简单级联——需要引用计数或定期 sweep(最后一个 join 行删除后 N 天回收)。归入 ADR-0057 数据生命周期框架(声明式保留契约),建议作为 `sys_file` 的 lifecycle class 声明落地。\n\n## 2. 非 admin 附件权限矩阵未 dogfood\n\nE2E 验证(#2742)用的是 seeded admin。待验:普通 member 对 `sys_attachment`/`sys_stobjectstack_file` 的 create/read/delete 面——预期:能否给自己可读的记录上传附件?能否删除他人上传的附件(uploaded_by ≠ self)?RLS 是否让 member 只见本租户附件?对照 Salesforce 语义(附件继承父记录可见性,`share_type` 字段已建模未强制)。发现的缺口按 enforce-or-remove 处置(`share_type`/`visibility` 字段当前无 runtime 消费者,liveness 待审计——sys_attachment 是 isSystem 对象不在 governed 集内)。\n\n来源:#2727 v1 收尾评估。"
+}

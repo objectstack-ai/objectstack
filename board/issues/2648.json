@@ -1,0 +1,32 @@
+{
+  "number": 2648,
+  "kind": "issue",
+  "title": "ADR-0087 P3: MCP upgrade surface + RC rehearsal discipline",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-07-05T16:35:53Z",
+  "updated_at": "2026-07-15T15:04:25Z",
+  "closed_at": "2026-07-15T15:04:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2648",
+  "body": "Part of #2643 (ADR-0087). The AI-native consumption channel for the D4 artifacts, plus the rehearsal topology (**D6**). Deferred behind P0–P2 and evidence-gated per the ADR (built when there are enough external consumers to justify the surface).\n\nDepends on **P2** (the MCP tools serve the change manifest + migration set).\n\n## Scope\n\n### D4 — MCP upgrade tools (`@objectstack/mcp`)\n\n- [ ] `spec_changes(from, to)` — any version pair, folded across majors from the composable per-major `spec-changes.json`.\n- [ ] `spec_deprecations(stackPath)` — which conversions *my* metadata currently triggers.\n- [ ] `spec_migrate(dryRun)` — preview / apply the chain.\n\nA consumer-side agent asks \"what breaks me between 10 and 14?\" and gets **data, not documentation**.\n\n### D6 — RC rehearsal (topology inverts)\n\n- [ ] Every major is published to the **`next` dist-tag** at least one RC cycle before `latest`.\n- [ ] Document the consumer-pull model: a consumer-side agent subscribes to the RC, runs its own `validate && typecheck && test` (the P0 handshake → P1/P2 migrate → verify loop) in a branch, and opens its own migration PR. The framework only **publishes** the RC + D4 artifacts — it never executes other repos' CI.\n- [ ] The pre-publish **hotcrm smoke stays** (release-blocking, unchanged) as the framework-side floor. A framework-side \"community smoke ring\" is explicitly **rejected** (wrong direction — don't scale framework-side execution when consumers can execute themselves).\n\n## Acceptance criteria\n\n- The three MCP tools answer from `spec-changes.json` for an arbitrary `from`/`to` pair spanning multiple majors, with no separate documentation lookup.\n- A documented, reproducible RC-consumer loop exists (an agent can rehearse an upgrade against `next` before `latest`).\n- The Release workflow publishes `next` before `latest` for a major; hotcrm smoke remains the only release-blocking external gate.\n\n## Boundaries\n\n- The consumer-side autonomous-upgrade agent itself is **out of scope** (consumers / ADR-0033 toolchain own it); P3 makes it possible by exposing the surface.\n- Evidence gate: build the MCP tools + RC step when external-consumer demand justifies the operational surface (ADR-0087 §Boundaries, like ADR-0054 Phase 3).\n\nRefs: #2643, ADR-0087 (D4 tools, D6), ADR-0025, ADR-0033."
+}

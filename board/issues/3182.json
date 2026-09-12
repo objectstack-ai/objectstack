@@ -1,0 +1,35 @@
+{
+  "number": 3182,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0100 — serve-side MCP default wiring; register the MCP tool-execution surface in the authz matrix (#3167)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T06:36:01Z",
+  "updated_at": "2026-07-18T12:24:14Z",
+  "closed_at": "2026-07-18T12:24:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3182",
+  "body": "Decision-issue response to #3167 (*default wiring for the serve-side MCP server — identity admission first*). #3167 makes decision #1 (identity admission) a hard gate: \"nothing else in this issue proceeds before it.\" This PR lands the decision record **and** that gate, with an end-to-end proof.\n\n## Two findings that shaped the response\n\n1. **The issue's premise is stale against `main`.** #3167 says `MCPServerPlugin` is \"wired nowhere by default.\" Verified against `main`, MCP is already a **default-on core capability**: `isMcpServerEnabled()` defaults ON (`packages/types/src/env.ts`), `packages/cli/src/commands/serve.ts` pushes the `mcp` capability into `os serve`/`os dev` unless opted out, and the dispatcher route gate reads the same helper. The HTTP tool surface is also already **fail-closed on identity** — `handleMcp` returns 401 for a principal-less caller (no dev-admin fallback, no fall-open), and `buildMcpBridge` threads the caller `ExecutionContext` into `callData(..., ec)` on every verb (OAuth callers run at the ADR-0090 D10 ceiling∩user intersection).\n\n2. **What was genuinely missing is exactly the gate.** The MCP tool-execution surface had **no row** in the ADR-0096 D4 authz conformance matrix — so \"whose `ExecutionContext` runs a `tools/call`\" lived only in ADR-0096 prose, not as a checked, red-CI-on-regression property.\n\n## What this lands\n\n- **`docs/adr/0100-serve-side-mcp-default-wiring-identity-admission.md`** — the four decisions grounded in the verified state:\n  - **D1** identity admission — caller-principal (`user`) posture, fail-closed, registered as the gate.\n  - **D2** the dev/prod boundary is **identity + the off-switch** (`OS_MCP_SERVER_ENABLED=false` gates registration *and* route), not a code-level default flip (an opt-in-for-prod amendment is documented for ratification).\n  - **D3** HTTP-only default; **stdio stays explicit opt-in** (`os dev` owns the process; the stdio resource path carries the ADR-0096 E1 context-less read).\n  - **D4** bounded default exposure — fixed generic tool set over `apiEnabled` objects, `sys_*` fail-closed, actions only when `ai.exposed`; metadata-declared exposure is the future story.\n- **`authz-conformance.matrix.ts`** — two rows: enforced `mcp-tool-exec-identity` (fail-closed 401 gate + `buildMcpBridge` threading + OAuth scope gate; now carrying a real dogfood `proof` and marked high-risk) and experimental `mcp-stdio-resource-read` classifying the ADR-0096 **E1** context-less stdio resource read (opt-in, never networked) with its admission requirement — registered honestly, **not** patched with a discouraged `{ isSystem: true }` literal (ADR-0096 D2 retires those; the `systemContext(reason)` constructor doesn't exist yet).\n- **`authz-conformance.test.ts`** — three source probes pinning both halves of the HTTP admission and the stdio fall-open, so dropping the gate/threading or networking the stdio read trips CI (STALE / UNCLASSIFIED) instead of surfacing in an adversarial review later.\n- **`showcase-mcp-identity.dogfood.test.ts`** — the end-to-end proof: boots the showcase with `MCPServerPlugin` registered and asserts on the real HTTP stack that anonymous `POST /mcp`→**401** (not 404/501 — the surface is served and the service is registered; the denial is identity), an authenticated member **clears** the gate, and `GET /mcp/skill`→**200** (served default-on while tool-exec is gated).\n\n## Scope / safety\n\nDocs + a **private** test package (`@objectstack/dogfood`) only — **no runtime behavior change**, no changeset. The identity path, OAuth admission (#2698), and `ai.exposed` + capability action gate are pre-existing and unchanged; this PR *registers and proves* them. (`@objectstack/mcp` added to the dogfood dev deps; lockfile updated.)\n\n## Validation\n\nValidated locally: `pnpm --filter @objectstack/dogfood test` for `authz-conformance` + `showcase-mcp-identity` → **10/10 pass** (7 conformance ratchet + 3 dogfood-boot). The three new probes each match their source anchor exactly once and are a clean bijection with the two rows' `covers`; the `proof:`-exists and high-risk assertions pass.\n\n## Open for ratification\n- **D2**: keep default-on-everywhere behind the off-switch (recommended), or adopt the `NODE_ENV`-aware opt-in-for-prod amendment.\n\nCloses #3167 pending ratification of D2.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

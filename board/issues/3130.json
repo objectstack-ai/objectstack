@@ -1,0 +1,33 @@
+{
+  "number": 3130,
+  "kind": "pull_request",
+  "title": "docs(approvals): unbreak the role-word ratchet after the lifecycle walkthrough",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T12:12:27Z",
+  "updated_at": "2026-07-17T13:44:48Z",
+  "closed_at": "2026-07-17T12:23:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T12:23:26Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3130",
+  "body": "## 问题\n\n#3113 合并的审批 walkthrough 把 `approvals.mdx` 的保留词 \"role\"(ADR-0090 D3)从 5 处推到 9 处 → `check-role-word` ratchet 失败。**当前从 main 切出的每个 PR 都因此红**(#3121 就是这么撞上的)。\n\n## 根因其实是重复\n\n细看发现:该页 **80 行之前的 §3 已经有一个更好的 callout** 讲同一件事(position vs better-auth 成员层级,还给出了 `os lint` 规则名 `approval-role-not-membership-tier`)。我在 walkthrough 里等于把它重写了一遍——保留词计数就是这么涨的。\n\n## 修复\n\n删掉重复的 callout,改为一行指针(点名所有 approver kind + 链到原 callout,这也正是读者读到那儿需要的)。计数回到基线原值 5 → **基线零改动**。\n\n本地 `node scripts/check-role-word.mjs` ✅ OK (49 baselined files, no new occurrences)。\n\n## 反思\n\n我上一轮引入的回归:写\"警告某个词是陷阱\"的段落时,自己踩了那个词的闸门,而且还重复了页面已有的内容。ratchet 的设计是对的——它逼出的正解不是\"把基线调高\",而是\"你本来就不该写这段\"。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

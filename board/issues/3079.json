@@ -1,0 +1,33 @@
+{
+  "number": 3079,
+  "kind": "pull_request",
+  "title": "docs(releases): curate the 15.1 line + QA test plan",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T16:22:33Z",
+  "updated_at": "2026-07-16T23:31:31Z",
+  "closed_at": "2026-07-16T23:31:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-16T23:31:29Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3079",
+  "body": "Release-docs prep for **15.1.0** (framework `15.0.0 → 15.1.0`, 87 commits / 65 changesets, no major; + Console objectui `14.0.0 → 14.1.0` bundled at `.objectui-sha b8967495be73`).\n\n## What's in here\n\n- **`content/docs/releases/v15.mdx`** — new **\"What's new in 15.1.0\"** running section, per `docs/releases-maintenance.md` cadence (minors fold into the current major page). Leads with **behavior changes + migrations**, then the **security hardening sweep**, then **new capabilities**, then **notable fixes** and a **Console (Studio)** section, plus a per-release **upgrade checklist**.\n- **`docs/plans/release-15.1-test-plan.md`** — the browser/API/automation test matrix used for release QA (tracking issue #3072).\n\n## Verification done for this release\n\n- `pnpm build` 71/71 green; `check:release-notes` OK; `os validate` (showcase) 3 gates pass.\n- **dogfood suite: 52 files / 285 tests green** (covers the write-path security sweep, attachments permission matrix, declarative connectors, anonymous-deny surfaces, etc.).\n- Browser-verified the marquee 15.1 features against a live showcase stack: dashboard-level filters, record inline-edit, pinyin search, inline-grid attachment upload, B3 cascading select, Studio CEL formula editor with type inference, Access OWD overview + record-grained explain, read-only package lock, spec-driven package create, Create User (translatable params + explicit-password-wins).\n- Found & fixed one real regression surfaced during QA: the B3 cascading `select` never unlocked in the real create form — [objectui#2620](https://github.com/objectstack-ai/objectui/pull/2620) (CI green). **The 15.1 objectui SHA re-pin should include #2620.**\n\n## Notes\n\n- Content is generated-adjacent but hand-curated (the release page is the curated platform-narrative layer; per-package CHANGELOGs remain the generated detail layer).\n- `remove-tenancy-strategy-crosstenant.md` shipped its own release-note wording; folded in as requested by that changeset. FormView `buttons`/`defaults` (#3014) is documented as EXPERIMENTAL/not-yet-enforced.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

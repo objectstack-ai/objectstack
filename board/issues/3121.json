@@ -1,0 +1,33 @@
+{
+  "number": 3121,
+  "kind": "pull_request",
+  "title": "docs(readme): rewrite around the AI-writes-it narrative",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T12:03:09Z",
+  "updated_at": "2026-07-17T13:53:07Z",
+  "closed_at": "2026-07-17T12:43:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T12:43:00Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3121",
+  "body": "## 背景\n\n用户反馈:\"目前开源项目的 docs、readme 我觉得写的很多不是重点\"。README 开头是类目词(\"A metadata protocol and TypeScript toolkit\"),前 100 行讲架构分层与协议理论——都不是访客来这里要看的东西。本 PR 按已定稿的叙事(landing v2 / #3090)重写。\n\n## 新结构(与首页同构)\n\n1. **Hero**:\"AI writes the app. ObjectStack is what it writes.\" + 防错链一拍 + proof strip\n2. **The loop**:① 创建项目(脚手架装 skills + AGENTS.md,agent 开局就带协议规则)② 描述需求给 Claude Code(附真实 prompt 示例)③ `npx os dev --ui` 浏览器预览;**需求变更同一循环**\n3. **What can it actually build?**:12 项元数据能力表 + 差异点论证(agent 对着空仓库写 = 一次性代码库;这里 = 从运行时已认识的**词汇表**里组合)+ 一段真实 object 示例\n4. **Why the mistakes don't ship**:四道闸表 + **为什么 TypeScript 是对的宿主语言**(agent 的错误变成它自己能读能修的定位化文本)+ context window 论证\n5. **Your app is AI-operable, for free**:MCP 三行接入\n6. **This repo / 架构 / ObjectOS 互链**:压到尾部\n\n参考性章节(Package Directory / CLI / Monorepo Scripts)原样保留。\n\n## 顺带\n\n- **删掉失真的版本徽章**:README 写 v4.0.1,实际 CLI 已 15.1.1(漂了三个大版本)\n- Quick Start 里与 loop 重复的脚手架片段合并;贡献者小节精简\n- **修 flows.mdx:155 第三处漏花括号的 decision 表达式**(与 #3113 修的两处同类:缺花括号会退化成字符串比较,不按预期匹配)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

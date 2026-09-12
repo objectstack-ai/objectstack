@@ -1,0 +1,30 @@
+{
+  "number": 3017,
+  "kind": "issue",
+  "title": "feat(connector-mcp): declarative provider — non-fatal / lazy boot for unreachable MCP servers (ADR-0096 follow-up)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T04:53:21Z",
+  "updated_at": "2026-07-16T13:23:32Z",
+  "closed_at": "2026-07-16T13:23:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3017",
+  "body": "Follow-up to #2977 / ADR-0096. Deferred enhancement identified while implementing the declarative provider factories (#2994) and the boot/reload reconcile (#3001).\n\n## Context\n\nADR-0096 boot materialization is intentionally **fail-loud** for *configuration* faults: unknown provider, invalid providerConfig, unresolvable credentialRef, and name conflict all abort startup. That policy is correct for authoring mistakes.\n\nAn `mcp` provider-bound instance, however, must **connect to a remote MCP server** to materialize its action handlers. Today that connection happens synchronously during boot materialization, so a *transient / operational* fault — the MCP server being momentarily unreachable — is indistinguishable from a config fault and **aborts the whole server boot**. This is why the showcase demo ships a `provider: 'rest'` instance (synchronous, no network at boot) rather than `provider: 'mcp'`.\n\n## Ask\n\nDistinguish **config-invalid** (stays fatal) from **remote-temporarily-unreachable** (should degrade, not crash boot):\n\n- **Lazy connect**: materialize the connector's `def` / handler surface from declared metadata without requiring a live connection at boot; establish (and cache) the MCP connection on first dispatch, with reconnect / backoff.\n- **or** boot-time connect with a **non-fatal degrade**: an instance whose connection fails at boot registers in a `degraded` state (dispatch returns a clear error; `GET /connectors` surfaces the state) and re-attempts on the next reconcile / `metadata:reloaded`, rather than aborting startup.\n- Preserve fatal behavior for genuine config faults (malformed providerConfig, unresolvable credentialRef, name conflict).\n- Once resilient, upgrade the showcase to a live `provider: 'mcp'` instance — completing ADR-0096 D6's original intent.\n- Tests: unreachable-at-boot degrades (boot survives), recovery on reconnect / reload, config-fault still fatal.\n\n## Refs\n- ADR-0096 (`docs/adr/0096-declarative-connector-instances.md`), ADR-0024 (MCP adapter)\n- #2994 (declarative provider factories), #3001 (runtime reconcile — signature diffing, `close()` teardown)"
+}

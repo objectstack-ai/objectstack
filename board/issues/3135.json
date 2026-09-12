@@ -1,0 +1,35 @@
+{
+  "number": 3135,
+  "kind": "pull_request",
+  "title": "ci(lint): reject raw NUL bytes in tracked sources",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T12:27:10Z",
+  "updated_at": "2026-07-17T12:42:01Z",
+  "closed_at": "2026-07-17T12:41:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T12:41:59Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3135",
+  "body": "## What\n\nAdds `scripts/check-nul-bytes.mjs` and wires it into the `lint` job, so a raw NUL (0x00) in a tracked source file fails CI.\n\n## Why\n\nA single literal U+0000 byte makes grep/ripgrep classify the **whole file** as binary and silently return **zero matches**. `grep -n saveMetaItem packages/metadata-protocol/src/protocol.ts` reported nothing despite 16 real hits — a core protocol file invisible to code search and to every grep-based lint, with no error to say so.\n\nNothing caught this. git decides binary-ness from the **first 8000 bytes only**, and protocol.ts carried its NUL at offset **147230**, so it kept diffing as ordinary text through review. That blind spot is how six separate files accumulated the same defect before #3127 fixed them. This guard is what keeps them from coming back.\n\n## What it does\n\nScans tracked `.ts/.tsx/.js/.jsx/.mjs/.cjs/.cts/.mts` files (`git ls-files`; generated and vendored output excluded). On a hit it reports `file:line:column` plus the byte offset — the location grep fundamentally cannot give you — and points the author at the `\\u0000` escape form and the existing convention at `packages/rest/src/rest-server.ts:1065`.\n\n## Verification\n\nVerified by **replaying the real defect**, not just a synthetic one. Restoring `protocol.ts` to its pre-#3127 state reproduces the original exactly and shows why it survived:\n\n| | |\n|---|---|\n| `grep -n saveMetaItem` | **0 lines** (16 real hits, `grep -a`) |\n| `git diff --numstat` | **ordinary text**, 1 insertion / 1 deletion — review sees nothing |\n| **this guard** | **red, exit 1** — `protocol.ts:3054:72`, byte offset 147230 |\n\nThe reported `3054:72` was confirmed against an independent oracle, and the offending line is exactly the composite-key separator. Also checked: a NEW file with 2 NULs is caught (plural wording correct); a `.tsx` file is caught; a file using the correct escape form passes; an untracked file is ignored; and a tracked file under an excluded dir stays ignored **even when force-added** — so the exclusion does real work rather than riding on `.gitignore`.\n\nClean tree: green across **2261 files in ~0.2s**. ESLint clean.\n\n## Notes\n\n- Extension list is a superset of the six in the original report: `.jsx`/`.cjs` are the same class of hand-authored source and match zero files today, so including them closes a future gap at no cost.\n- The guard is **in its own scope** and passes its own check — every occurrence of the escape sequence in it is an escape, never the byte.\n- **Authoring hazard, worth knowing:** agent/editor tooling readily materializes a typed `\\u0000` into a real NUL. It happened twice while writing this PR — a `Bash` call was rejected for containing control characters because the sequence in my own *comments* had already become real NULs. Build such strings programmatically (`chr(92) + 'u0000'`) rather than typing them.\n- No changeset: CI tooling only, no user-facing or published-package change (`skip-changeset`).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

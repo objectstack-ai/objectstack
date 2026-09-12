@@ -1,0 +1,34 @@
+{
+  "number": 2763,
+  "kind": "issue",
+  "title": "[spec] Remove tenancy.strategy + tenancy.crossTenantAccess at the next major — no requirement (owner decision)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T09:30:40Z",
+  "updated_at": "2026-07-16T05:25:30Z",
+  "closed_at": "2026-07-16T05:25:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2763",
+  "body": "## Owner 决策(2026-07-10)\n\n对象级 tenancy 隔离策略**没有需求**。平台的多租户模型只有两种,且都不需要对象级配置:\n\n1. **每租户独立数据库** —— 部署/环境级(EnvironmentKernelFactory,每环境自带 database_url),零开发、零对象级配置;\n2. **共享数据库 + 组织行级隔离** —— organization_id 注入 + RLS 谓词,机制旋钮是 `tenancy.enabled`(对象级 org-scope 豁免)与 `tenancy.tenantField`。\n\n因此 `TenancyConfigSchema` 里两个零消费者字段按 enforce-or-remove 处置为 **REMOVE**:\n\n| 字段 | 承诺 | 现实 | 处置 |\n|---|---|---|---|\n| `strategy: 'shared'\\|'isolated'\\|'hybrid'` | 每租户独立 DB / 混合 | 零消费者;对象粒度库隔离在架构上不成立(跨库 join 不存在) | **删除**(下个 spec major) |\n| `crossTenantAccess: boolean` | 允许跨租户访问\"需显式权限\" | 零消费者;跨可见性治理已由 sharing/OWD(ADR-0056)、externalSharingModel(ADR-0090 D11)、access posture 覆盖 | **删除**(下个 spec major) |\n| `enabled` / `tenantField` | 行级隔离开关/列名 | **live**(sql-driver:1577/1586、security-plugin、registry;sys_sso_provider 等平台对象用 `enabled:false` 声明环境级对象) | **保留** |\n\n先例:ADR-0056 D8 —— \"compliance-grade config must never merely look live\",安全形状的假配置整块移除。\n\n## 移除 PR 清单(major 窗口开时)\n\n- [ ] `TenancyConfigSchema` 删 `strategy`/`crossTenantAccess`;补 **no-silent-strip** 防呆(#1535):嵌套键删除后不能被 zod 静默 strip,需在 tenancy 块上加 unknown-key 拒绝或 superRefine tombstone,报错信息指向两种真实模式(\"库隔离=环境级部署;行级隔离=enabled+tenantField\")\n- [ ] liveness ledger 删除两条目;README 计数表再生\n- [ ] `gen:docs` 再生 references(当前文档仍宣传 'isolated (separate DB per tenant)')\n- [ ] 落地前 grep 下游(HotCRM/tianshun/examples)确认无 authored 使用\n- [ ] changeset major\n\n## 过渡期\n\n编译期 authorWarn 已上线(#2750):作者设这两个字段会收到告警+指向真实机制的 hint。无紧迫性,等 major 窗口。\n\n相关但独立:对象 ledger 剩余 dead 主体(`versioning`/`partitioning`/`cdc` aspirational 块)同教义,另行决策。\n\n来源:#2707/#2727/#2750 liveness 收口讨论。"
+}

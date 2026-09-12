@@ -1,0 +1,32 @@
+{
+  "number": 2941,
+  "kind": "pull_request",
+  "title": "fix(objectql,spec,rest): #2922 import automation chain — per-row batch hooks, effective skipAutomations, run-automations default ON",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-15T01:45:29Z",
+  "updated_at": "2026-07-15T02:40:25Z",
+  "closed_at": "2026-07-15T02:40:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-15T02:40:22Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2941",
+  "body": "## Summary\n\nFixes the three platform-level defects in the data-import chain reported in #2922.\n\n### 1. Batch inserts fired hooks once with array-shaped contexts\n`engine.insert(object, records[])` triggered `beforeInsert`/`afterInsert` a single time with `ctx.input.data` / `ctx.result` as arrays, breaking `installFlatInput` (flat proxy reads `undefined`), `pickRecordPayload` (declarative conditions evaluated against an array), plugin-audit's `writeAudit` (`after?.id` undefined, `{...after}` spreads an array), and `trigger-record-change`'s `buildContext`.\n\n**Fix:** `engine.insert` now builds one single-record `HookContext` per row and triggers `beforeInsert`/`afterInsert` per row. Per-row hook mutations (data replacement included) flow through to the driver; autonumber/encryption/normalization/validation run per row; batch driver path (`bulkCreate` or per-row fallback) unchanged in shape. Return value semantics preserved: array for batch, single record otherwise, both boolean-coerced after-views.\n\n### 2. `skipAutomations` was written but never read\nThe import runner (`import-runner.ts`) and the import-undo route wrote `skipAutomations` into the execution context, but the engine ignored it — the \"运行自动化与触发器\" checkbox was a no-op, and undo re-fired automation.\n\n**Fix:**\n- spec: `ExecutionContext.skipAutomations` + `HookContext.session.skipAutomations` (Zod-first, documented).\n- objectql: `buildSession` passes it through and implies `skipTriggers` (reusing the existing flow-dispatch suppression gate in `RecordChangeTrigger`).\n- objectql: `triggerHooks` skips metadata-bound hooks (`HookEntry.meta` present, i.e. registered via `bindHooksToEngine`) when the flag is set. Code-registered system hooks — audit, capability gates, sharing projection — carry no `meta` and **still run**: the flag never bypasses security or audit.\n\n### 3. Default flipped to run automations\n`prepareImportRequest` now defaults `runAutomations = body?.runAutomations !== false`. Automations always ran historically (the engine ignored the flag until this PR), so opt-out must be explicit. Companion objectui PR flips the ImportWizard checkbox default to checked.\n\n## Tests\n- objectql: 66 files / 846 tests pass — new suites for per-row batch hooks (incl. `bulkCreate` pairing) and `skipAutomations` (meta hooks skipped, system hooks run, session gets `skipTriggers`).\n- rest: 14 files / 268 tests pass — new `runAutomations` default suite; required-field pre-check tests updated to opt out explicitly (that path only runs with automations off).\n- Full repo `pnpm test`: 128/129 tasks pass; the one failure (`semantic-roles.dogfood.test.ts`) is a `beforeAll` stack-boot timeout under full-suite parallel load and passes in isolation (3.8s) — unrelated to this change.\n\nChangeset included (patch: spec / objectql / rest).\n\nCloses #2922"
+}

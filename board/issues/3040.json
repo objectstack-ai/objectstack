@@ -1,0 +1,32 @@
+{
+  "number": 3040,
+  "kind": "issue",
+  "title": "[console] date 字段相对时间 humanize 硬编码英文,不随 locale 本地化(zh-CN 显示 Tomorrow/In 3 days)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T09:13:35Z",
+  "updated_at": "2026-07-16T13:11:11Z",
+  "closed_at": "2026-07-16T13:11:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3040",
+  "body": "## 问题 / Summary\n\nConsole 对 `type: 'date'` 字段的\"相对时间\" humanize 输出**硬编码英文**,不随请求 locale(如 `zh-CN`)本地化。在中文环境下,临近今天的日期会显示成 `Tomorrow` / `In 3 days` / `2d ago` 等英文,而不是 `明天` / `3天后` / `2天前`。\n\n下游项目(zh-CN 单语部署)据此被报 i18n 缺陷:steedos-labs/os-project-titanwind-ehr#420(人员资质对象的\"发证日期/有效期至\"列与详情页)。\n\n## 复现 / Reproduction\n\n1. `localization.locale = 'zh-CN'` 的工作区。\n2. 任意对象加一个 `type: 'date'` 字段,建一条记录,日期取 **今天前后 ~7 天内**(如明天、3 天后、昨天)。\n3. 在列表列 / 详情页 header chip / 详情正文查看该字段。\n\n**实际**:渲染成英文相对时间 —— `Today` / `Tomorrow` / `Yesterday` / `In 3 days` / `2d ago` / `Overdue 2d`。\n**期望**:按 `zh-CN` 本地化 —— `今天` / `明天` / `昨天` / `3天后` / `2天前` 等(或直接走 locale 感知的 `Intl.RelativeTimeFormat` / 绝对日期)。\n\n> 注:仅\"临近今天\"窗口(±7 天)触发;更远的日期回落到绝对日期渲染路径 `R9(...)`,该路径已是本地化中文,不受影响。这也是为什么真实业务里\"数年后到期\"的证书显示正常、只有近日期露馅。\n\n## 根因 / Root cause\n\n`packages/console` 的日期 humanize 函数(压缩后见 `dist/assets/ui-components-*.js`)把相对时间字面量写死为英文,未接入 i18n / locale:\n\n```js\n// 反压缩后示意\nconst o = Math.round(diffMs / (1000*60*60*24));\nif (o === 0)  return `Today`;\nif (o === 1)  return `Tomorrow`;\nif (o === -1) return `Yesterday`;\nif (o < -1) { const e = Math.abs(o); return e <= 7 ? (dueLike ? `Overdue ${e}d` : `${e}d ago`) : R9(date); }\nreturn (o > 1 && o <= 7) ? `In ${o} days` : R9(date);\n```\n\n`Today` / `Tomorrow` / `Yesterday` / `In ${o} days` / `${e}d ago` / `Overdue ${e}d` 全为硬编码英文,与请求 locale 无关。\n\n## 期望修复 / Expected\n\n该 humanize 函数应 locale 感知:\n- 优先用 `Intl.RelativeTimeFormat(locale, ...)`,或\n- 从 i18n bundle 取相对时间短语(`messages.relative.*`),按 `ExecutionContext.locale` 解析。\n\n版本:`@objectstack/console@15.0.0`(monorepo `packages/console`)。\n"
+}

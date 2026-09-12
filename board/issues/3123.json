@@ -1,0 +1,33 @@
+{
+  "number": 3123,
+  "kind": "pull_request",
+  "title": "ci: ratchet the role-word baseline for approvals.mdx (5 → 9)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T12:05:29Z",
+  "updated_at": "2026-07-17T12:23:07Z",
+  "closed_at": "2026-07-17T12:23:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3123",
+  "body": "## 问题:main 的 Lint & Type Check 全红\n\n```\n• content/docs/automation/approvals.mdx: role-word count grew 5 → 9.\n  New occurrences are banned (ADR-0090 D3).\n```\n\n自 [#3113](https://github.com/objectstack-ai/framework/pull/3113)(docs P1 wave 2,`25a19be72`)起,main 上**每一个 commit** 的 Lint & Type Check 都因此失败(含之后无辜的 #3111、#3101、#3102、#3108)。该 PR 给 approvals 页加了 4 处 `role` 但没同步 ratchet baseline。\n\n## 为什么是上调 baseline 而不是改文案\n\n这 4 处正是 `scripts/check-role-word.mjs` 自己 docstring 里点名豁免的那一类:\n\n> existing occurrences are frozen in `role-word-baseline.json` (many are legitimate — **the better-auth boundary**, ARIA `role=` in samples, educational \"formerly roles\" mentions)\n\n具体内容:\n\n- `sys_member.role`(`owner`/`admin`/`member`)——better-auth 的**真实字段**,不是 ADR-0090 D3 要消灭的旧词汇\n- `type: 'role'`——审批 approver 的**真实 spec 枚举值**\n\n而且这段文字的用途恰恰是教作者**别**把 position 名写进 `type:'role'`(还配了 `os lint` 规则 `approval-role-not-membership-tier`)。这是边界文档,不是词汇漂移——所以移动 baseline,不动 prose。\n\n## 验证\n\n```\n$ node scripts/check-role-word.mjs\ncheck-role-word: OK (49 baselined file(s), no new occurrences).\n```\n\n## 不在本 PR 范围\n\nmain 另有一处红:**Publish Smoke**。它与本问题无关且**不是回归**——该门由 [#3100](https://github.com/objectstack-ai/framework/pull/3100) 于 4 小时前落地,落地 9 分钟后的第一次运行就失败,在 main 上从未绿过。已另开 issue 记录诊断。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

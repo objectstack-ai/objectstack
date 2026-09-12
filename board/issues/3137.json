@@ -1,0 +1,35 @@
+{
+  "number": 3137,
+  "kind": "pull_request",
+  "title": "feat(approvals)!: rename `role` approver type to `org_membership_level` — and unbreak main",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T12:37:07Z",
+  "updated_at": "2026-07-17T15:41:36Z",
+  "closed_at": "2026-07-17T15:41:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T15:41:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3137",
+  "body": "Closes #3133. **Supersedes #3120 and #3122** (both closed) — they only deleted the duplicated docs callout without touching the name that causes the confusion.\n\n## This also unbreaks `main`\n\n`lint.yml` has been red since #3113 (`approvals.mdx` role-word count 5 → 9), so every open PR inherits it. Fixing the *name* makes the docs stop needing the word at all — the ratchet goes green as a **side effect**, and ratchets **down** (5 → 1) rather than freezing 4 more occurrences in the baseline.\n\n## Why the D3 exception does not cover this enum\n\nADR-0090 D3 reserves \"role\", with one exception:\n\n> the better-auth boundary — `sys_member.role` is third-party schema **we do not own**; it remains, **already relabelled `org_membership_level` in the platform projection (ADR-0057 D7)**, and its UI label is \"organization membership\", **never \"role\"**.\n\nThe exception protects better-auth's **column**, which we cannot rename. `ApproverType` is **ours** — an authoring surface an author types into a flow node, i.e. the *projection*. D3 says the projection is spelled `org_membership_level`.\n\n**And the sentence licensing the leak is false:**\n\n| Claim | Reality |\n|---|---|\n| ADR-0090:203 — \"already relabelled\" | `org_membership_level` appeared **nowhere** in the codebase — one comment in `position.zod.ts:25` |\n| ADR-0057 D7 (`0057-…md:335`) | Lists that relabel under **\"Deferred (evidence-gated, P4)\"** |\n\nThe projection never landed, so the word leaked from the third-party column onto our authoring surface. Every sibling already converged — `sys_role`→`sys_position`, `ShareRecipientType.role`→`position`, `ctx.roles[]`→`positions` — leaving `ApproverType.role` the sole hold-out.\n\n## The name manufactures a silent failure\n\nBecause everything *else* became `position`, `{ type: 'role', value: 'sales_manager' }` reads as a position's legacy spelling. It resolves against the membership tier, finds no member row, falls back to an inert `role:sales_manager` literal, and the request waits forever on an approver that cannot exist. That is the \"hotcrm class\" incident `approval-role-not-membership-tier` was written to catch — a lint rule existing to disambiguate a name is a smell pointing at the name (ADR-0077: make the mistake unwritable, don't lint it after the fact).\n\nRepo-wide, `type: 'role'` had **zero real callers** — only lint tests and the docs warning that undoes the confusion the name creates.\n\n## What changed\n\n- **spec** — `ApproverType` gains `org_membership_level`; `role` kept as a **deprecated alias for one window** so a published 15.x flow keeps loading. `DEPRECATED_APPROVER_TYPES` + `canonicalApproverType()` are the single source for the mapping (runtime *and* lint read it), so removal next major is a one-line edit.\n- **plugin-approvals** — resolves on the canonical type, warns on the deprecated spelling; `expandRoleUsers` → `expandMembershipTierUsers`.\n- **lint** — `approval-role-not-membership-tier` → `approval-approver-not-membership-tier` (the rule id carried the word too) + new `approval-approver-type-deprecated`.\n- **docs / skill / reference** + baseline ratcheted down; api-surface regenerated.\n\n### Two decisions worth reviewing\n\n1. **The fallback literal keeps the AUTHORED spelling.** 15.x wrote `role:<v>` into `sys_approval_approver` and `pending_approvers`; canonicalising it here would orphan every stored slot. Locked by a test.\n2. **The two lint rules are mutually exclusive, and a bad *value* wins.** Telling someone to rewrite `{ type: 'role', value: 'sales_manager' }` as `org_membership_level` would be *wrong advice* — the fix is `position`. Locked by a test.\n\n## Verification\n\n| Gate | Result |\n|---|---|\n| `check:role-word` | OK (ratchets **down** 5→1 and 3→1; baseline diff is exactly those 2 lines) |\n| `check:doc-authoring` / `check:release-notes` | OK |\n| `check:api-surface` | **0 breaking, 2 added** → snapshot regenerated |\n| `spec exec tsc --noEmit` / `pnpm lint` | clean |\n| tests | spec **6892** · lint **227** · plugin-approvals **100** (+4 new) |\n\n`minor`, not major: the enum only *gains* a value, `role` still parses and resolves, and the one removal (`APPROVAL_ROLE_NOT_MEMBERSHIP_TIER`) is a lint const with **zero** consumers in `cloud`/`objectui`. All three packages are in the same 69-package fixed group. The actual removal of `role` is next major.\n\n## Follow-ups (not in this PR)\n\n- ⚠️ **objectui**: Studio still offers \"Role\" in the approver dropdown and its picker calls `client.list('role')` — a metadata type **D3 deleted**, so that picker is already dead and actively walks authors into the trap. objectui hardcodes its own copy of this enum (`flow-node-config.ts`), so it needs its own PR. The xRef map here points both spellings at the new picker kind, which degrades to free text — strictly better than a picker that lists nothing.\n- `content/docs/references/` has **pre-existing** drift from spec (7 unrelated files regenerate dirty, e.g. `allowTransfer` still says \"pending M2\" though #3004 enforced it). Deliberately reverted here to stay focused; nothing in CI catches it.\n- `v14.mdx` still names the old rule id — correct as **history**, left alone.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

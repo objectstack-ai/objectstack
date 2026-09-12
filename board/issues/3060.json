@@ -1,0 +1,32 @@
+{
+  "number": 3060,
+  "kind": "issue",
+  "title": "flaky: plugin-dev \"init with mocked context\" times out (15s) under full-parallel `pnpm test` load",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T12:55:05Z",
+  "updated_at": "2026-07-16T15:56:05Z",
+  "closed_at": "2026-07-16T15:56:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3060",
+  "body": "### 现象\n\n`packages/plugins/plugin-dev/src/dev-plugin.test.ts › DevPlugin › should init with mocked context and handle missing deps gracefully` 在全 monorepo `pnpm test`(turbo 满并行)下**偶发超时**:\n\n```\nFAIL src/dev-plugin.test.ts > DevPlugin > should init with mocked context and handle missing deps gracefully\nError: Test timed out in 15000ms.\n```\n\n### 复现数据(同一工作区、同一提交)\n\n| 运行方式 | 结果 |\n|---|---|\n| 单包运行(`pnpm --filter @objectstack/plugin-dev test`),连续 4 次 | 全绿,该用例 <100ms |\n| 全量 `pnpm test`(130 任务满并行) | 观测到 3 次失败 / 3 次通过(约 50% 偶发) |\n\n与在途分支改动无关:在 `claude/objectql-protocol-layering-s2sn67`(未触及 plugin-dev)与其前置 main 上均可观测。\n\n### 初步分析\n\n该用例的 `plugin.init(ctx)` 走\"真实插件依赖缺失时优雅降级\"路径,内部对多个真实包做动态 `import()` 并逐个捕获失败。满并行时 CPU/IO 争用把这串动态 import 拖过 15s 默认超时。纯 mock 的相邻用例(如 `should register contract-compliant dev stubs`)不受影响。\n\n### 修复方向(任选)\n\n1. 给该用例单独提高 `testTimeout`(最省事,但治标);\n2. 在测试里把动态 import 的目标 mock 掉(`vi.mock`),让\"缺依赖降级\"分支不再真的解析模块——更快也更聚焦被测行为;\n3. 若降级探测本身值得端到端验证,挪进 dogfood/集成层,别在单元层做真实模块解析。\n\nCI 的 Test Core 用 turbo 亲和调度,目前尚未在远端复现,但本地满并行是常态开发路径,值得修。"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 3022,
+  "kind": "issue",
+  "title": "安全:公开表单(publicFormGrant)提交绕过 owner_id 属主守卫 → 匿名可伪造属主",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T05:23:14Z",
+  "updated_at": "2026-07-16T11:02:37Z",
+  "closed_at": "2026-07-16T11:02:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3022",
+  "body": "## 背景\n\n在 #3004 修复(PR #3018)中,`plugin-security` 中间件新增了 step 3.5 的 `owner_id` 属主守卫:非特权写入者不能在 insert 时伪造属主。但该守卫位于中间件后段。\n\n## 问题\n\n`publicFormGrant` 路径在中间件**前段**就 `return next()`(`packages/plugins/plugin-security/src/security-plugin.ts` 约 566–578 行),整段 CRUD/FLS/owner 守卫都不执行。因此匿名的公开表单提交(ADR-0056 Option A)插入记录时**完全不经过** step 3.5 的 `owner_id` 伪造检查。\n\n字段侧的唯一防线是 REST 路由的“已声明字段白名单”,但在 `packages/rest/src/rest-server.ts`(约 4613 行 `Object.assign(filteredData, rawBody)`)存在一条:当表单声明零个 section 字段时会回退为原样合并 `rawBody`。\n\n## 影响\n\n一个 FormView 若未声明 section 字段(或显式声明了 `owner_id`),未认证访客可以 `POST /forms/:slug/submit` 携带 `owner_id=<victim>`,把记录挂到受害者名下——正是 #3004 的 insert-forge,但**无需任何凭证**。\n\n## 期望\n\n公开表单的 create 也应受属主锚点约束:匿名/公开表单上下文没有 transfer 授权,`owner_id` 应被强制回填/剥离而非原样接收。可选方案:\n1. 在 `publicFormGrant` 分支放行前,对目标对象的 `owner_id`(以及其它系统托管锚点)做同样的强制托管;或\n2. 在表单提交路由把 `owner_id` 从可写字段中无条件排除(表单永远不允许客户端指定属主)。\n\n## 关联\n\n- 从 PR #3018(#3004 / #2982)的对抗式代码审查中发现。\n- 与 #3004 同类(owner_id 伪造),但触发面为公开表单路径,属独立入口,单列跟踪。"
+}

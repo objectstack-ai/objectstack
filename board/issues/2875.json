@@ -1,0 +1,32 @@
+{
+  "number": 2875,
+  "kind": "issue",
+  "title": "refactor(plugin-security): make sys_permission_set data record a pure projection (retire the two-store split-brain)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-13T04:48:58Z",
+  "updated_at": "2026-07-14T07:36:17Z",
+  "closed_at": "2026-07-14T07:36:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2875",
+  "body": "## Context\n\n`sys_permission_set` currently has **two stores**:\n\n1. **Authoritative metadata** — the layered metadata overlay (`sys_metadata`), written by Studio env-scope edits (`saveMetaItem` / `client.layered`).\n2. **Queryable data record** — snake_case JSON-string columns that Setup reads for lists and user assignment.\n\nThese were only synced at **boot** and on **publish**. Env-scope metadata edits did **not** project onto the data record, so Setup showed stale facets — the ADR-0056 display-freshness gap (#2857).\n\n## What's already done\n\nframework #2867 (closing #2857) added an `onMetadataMutation` subscriber that projects env-authored permission-set edits onto the data record.\n\n**This is a sync band-aid.** It re-couples two independent sources of truth after the fact.\n\n## The remaining problem\n\nTwo authoritative stores can still **drift**. Any write path that bypasses the subscriber — a bulk import, a future API, a migration, a background job — desyncs metadata from the data record, and the two disagree with **no single winner**. The projection is eventually-consistent glue, not a cure for having two truths.\n\n## Proposed work\n\nMake the data record a **pure read-model**:\n\n- The metadata overlay is the **only** authoritative store.\n- The data record is **projected** from it (read-only) and never independently authoritative — reads that need SQL/query go through the projection; writes always target metadata.\n- Alternatively, evaluate collapsing to a single store if the query needs can be served from metadata directly.\n\nThis needs an **ADR** (follow-up to ADR-0056) to choose the direction and define the migration/backfill path.\n\n## Acceptance criteria\n\n- [ ] One authoritative store; the other is derived and documented as read-only.\n- [ ] No write path can desync the two — enforced **structurally**, not by a subscriber a new path might forget to trigger.\n- [ ] Setup reflects Studio edits with no projection race.\n\n## References\n\n- Projection band-aid: framework #2867 (closed #2857)\n- ADR-0056; objectui pure-model epic objectstack-ai/objectui#2398, ADR objectstack-ai/objectui#2399\n- Two-store split-brain is the root cause behind the display-freshness class of bug.\n\n_Follow-up raised after landing the #2867 projection fix — this issue is the durable root-cause fix._\n"
+}

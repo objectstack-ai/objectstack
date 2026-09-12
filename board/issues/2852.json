@@ -1,0 +1,36 @@
+{
+  "number": 2852,
+  "kind": "issue",
+  "title": "authz(D10): getReadFilter 缺 delegator 交集 — analytics read-scope 对 agent 上下文不与委托人 RLS 求交（原 Gap 2 /analytics/query 无 context 已修复）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-12T08:47:43Z",
+  "updated_at": "2026-07-16T15:51:53Z",
+  "closed_at": "2026-07-16T15:51:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2852",
+  "body": "Found by the ADR-0090 D10 adversarial security review.\n\n> **v2（2026-07-15）重写说明**：原版打包了两个不同严重级别的 gap——活的 RLS 洞（Gap 2）和潜伏的不变量缺口（Gap 1）。Gap 2 已按原 fix direction 修复上线（落点见下），issue 却整体挂 open 造成状态失真。本次重写：① 记录 Gap 2 已解决,避免重复审计;② 把范围收敛到 Gap 1;③ 给修复方向加「单缝实现」硬约束（原文「extend `getReadFilter` (and `computeRlsFilter`)」含糊,分开实现会复制 middleware↔service 漂移——正是本 issue 在修的那类问题）;④ 补与 #2920 B1 的排期协调;⑤ 补 `security` 标签（原版这个真实 RLS 域的 issue 反而没挂）。\n\n## ✅ 已解决（记录,勿重复审计）:Gap 2 — `/analytics/query` 不传 context → 无 RLS\n\n已在 main 修复,与原 fix direction 一致:\n\n- `packages/runtime/src/http-dispatcher.ts` ~L2050-2057:`/analytics/query` 带 `[#2852]` 注释,传 `context?.executionContext` 进 `analyticsService.query`;~L2071 `/analytics/sql`(`generateSql`)同样透传——覆盖了原文「and any other analytics route」。\n- 配套加固:`getReadFilter` 解析失败现在 **fail-closed** 返回 `RLS_DENY_FILTER`(`security-plugin.ts` ~L1697-1704,注释点名 raw-SQL analytics 路径);匿名上下文分支有显式注释说明由 auth 层 401 兜底(~L1686-1691)。\n- read-scope 桥接确认在位:`service-analytics/src/plugin.ts` ~L303 auto-bridge → `security.getReadFilter`(~L461 有启动日志)。\n\n## 🔶 剩余范围:Gap 1 — `getReadFilter` 无 D10 delegator 交集(潜伏)\n\n`SecurityPlugin.getReadFilter`(`security-plugin.ts` ~L1678-1706)解析调用方**自己**的 permission sets 与 RLS,但不处理 `onBehalfOf`/不调用 `resolveDelegatorContext`——整个 plugin 里 delegator 交集只存在于 engine middleware(~L678-679)。`resolvePermissionSetsForContext` 的注释(~L1722-1729)自己写明 delegator 那一侧「resolved from `onBehalfOf` via a context without this flag」——即仅 middleware 有。\n\n后果:**agent** 上下文跑 analytics/report 查询时,read-scope 只受 agent 自身 ceiling 约束(agent floor 是 restricted 集,~L1730-1731),**从不与委托人的 RLS 求交**——正是 D10 在 CRUD 路径上防住的 confused-deputy 放宽,在 analytics/raw-SQL 路径上缺位。\n\n**严重性(维持原判,潜伏)**:OAuth agent 目前只能到 `/mcp`,不暴露 analytics——当前 agent 面**不可利用**。但只要 analytics 被任何 agent 执行上下文驱动(未来 `/mcp` 扩面、内部 agent 调度),缺口即转活。属于「趁现在便宜修掉」的不变量收口,p2 合理。\n\n## 修复方向(v2 修订)\n\n1. **交集下沉,单缝实现(硬约束)**:把 D10 delegator 交集从 middleware(~L678)**下沉到 `computeRlsFilter` 或共享 helper**,让 middleware 与 `getReadFilter` 结构性走同一实现——而不是在 `getReadFilter` 里另写一份手工同步的副本。本 codebase 已刻意让两者共享 `resolvePermissionSetsForContext`,注释四处强调「shared so both enforce identical RLS」(~L392/637/1165/1713);delegator 交集没有理由例外。分开实现 = 复制 #2949 那类 explain-vs-enforcement 分叉。\n2. **与 #2920 B1 协调排期**:B1(租户隔离拆 Layer 0,ADR-0095 D1)将重构 `computeRlsFilter` 同一条缝。本修复应排在 B1 之后、或与 B1 同 PR 设计,避免白做/冲突。若 B1 短期不动,可先落共享 helper 形态(B1 重构时整体搬迁)。\n3. 交集语义对齐 middleware 现状:`permissionSets.length > 0 && context.onBehalfOf?.userId` 时经 `resolveDelegatorContext` 求交;空集语义按 ~L674 注释处理(空集≠无约束)。\n\n## 验收\n\n- [ ] delegator 交集在 `computeRlsFilter`/共享 helper 单点实现;middleware 与 `getReadFilter` 均经该点,无第二份实现。\n- [ ] 回归测试:agent 上下文(`principalKind: 'agent'` + `onBehalfOf`)经 analytics read-scope 查询,结果 = agent ceiling ∩ delegator RLS(现成测试缝:`service-analytics/src/__tests__/dataset-rls-integration.test.ts` ~L103 已有 async read-scope provider 用例)。\n- [ ] 一致性测试:同一 agent 上下文下,engine find 路径与 analytics read-scope 路径产出的 RLS filter 等价(防再分叉)。\n- [ ] 与 #2920 B1 的排期关系在 PR 描述中说明(之后/同 PR/共享 helper 过渡,三选一)。\n\n## Refs\n\n- `packages/plugins/plugin-security/src/security-plugin.ts` ~L1678-1706(getReadFilter)· middleware D10 ~L678 · `resolvePermissionSetsForContext` ~L1716-1740\n- `packages/runtime/src/http-dispatcher.ts` ~L2050-2071(Gap 2 修复落点)\n- `packages/services/service-analytics/src/plugin.ts` ~L279-303、~L461(read-scope 桥接)· `analytics-service.ts` ~L306-340\n- ADR-0090 D10 · #2920 B1 / ADR-0095 D1(computeRlsFilter 重构缝)· #2949(explain-vs-enforcement 分叉先例)\n\n_Rewritten v2 after site-level verification;原版全文见 edit history。_"
+}

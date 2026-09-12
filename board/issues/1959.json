@@ -1,0 +1,32 @@
+{
+  "number": 1959,
+  "kind": "issue",
+  "title": "Retire vestigial feed contracts + protocol surface (ADR-0052 §5 follow-up)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T09:25:18Z",
+  "updated_at": "2026-07-18T08:59:54Z",
+  "closed_at": "2026-07-18T08:59:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1959",
+  "body": "## Goal\n\nComplete the `service-feed` retirement (ADR-0052 §5, service deleted in #1955) by removing the now-vestigial feed **contracts + protocol surface**. `sys_comment`/`sys_activity` is the canonical record-collaboration/timeline backend; the feed REST protocol was never mounted (404) and has no implementation.\n\nThis is a **multi-package refactor** (mapped via build-gating). Do it as a focused PR **when the repo is quiet** — it touches the core `IServerProtocol` and `spec`, which everything depends on.\n\n## ⚠️ Keep — do NOT delete\n\n`packages/spec/src/data/feed.zod.ts` — its `FeedItemType` and `FeedFilterMode` are **live**, consumed by the `record:chatter` UI component (`packages/spec/src/ui/component.zod.ts` → `RecordActivityProps`/`RecordChatterProps`). Only the retired-backend types are dead. (Consider later renaming feed→activity, but keep for now.)\n\n## Scope (blast radius, build-verified)\n\n**spec**\n- Delete `contracts/feed-service.ts` (`IFeedService`), `api/feed-api.zod.ts`, `data/subscription.zod.ts` + their `*.test.ts`.\n- Remove their barrel exports: `contracts/index.ts`, `api/index.ts`, `data/index.ts` (keep `feed.zod`).\n- `api/protocol.zod.ts` — remove the 4 feed regions: (1) the `import type { … } from './feed-api.zod'` block, (2) the `// Feed Operations` `z.function()` stubs, (3) the `// Feed Types` `export type { … }` re-export block, (4) the `// Feed (optional)` methods on the `IServerProtocol` interface.\n\n**objectql**\n- `src/protocol.ts` — remove the `getFeedService?: () => IFeedService` constructor param, `requireFeedService()`, and the feed method implementations; update constructor call sites that pass `getFeedService`.\n- Delete `src/protocol-feed.test.ts`.\n\n**client** (public SDK breaking change — but the methods called the never-mounted feed REST, so already dead)\n- `src/index.ts` — remove the two feed-api type-import blocks (~lines 69-82 and ~3497-3510) and the entire `feed = { … }` accessor (~150 lines, list/create/update/delete/reactions/pin/star/search/changelog/subscribe).\n\n## Verify\n\n`pnpm --filter @objectstack/spec build` → objectql → client → rest, all green. Then `pnpm --filter @objectstack/plugin-audit test` etc.\n\n## Context\n\nSpun out of the platform-activity work (#1948 trackHistory, #1952 milestones, #1954 sys_attachment→storage, #1955 retire service-feed, #1957 ActivityPointer). I attempted this cleanup but backed out cleanly because (a) the ripple was large and (b) the repo was being concurrently branch-switched mid-refactor — unsafe to push then.\n"
+}

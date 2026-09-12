@@ -1,0 +1,35 @@
+{
+  "number": 3119,
+  "kind": "pull_request",
+  "title": "fix(create-objectstack): declare pnpm build approvals so a fresh install works on pnpm 11",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T11:44:27Z",
+  "updated_at": "2026-07-17T11:59:22Z",
+  "closed_at": "2026-07-17T11:59:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T11:59:20Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3119",
+  "body": "## TL;DR\n\n**Publish Smoke was not broken — it was right.** It has been red on `main` since #3100 introduced it because it caught a real, currently-shipping bug on its very first run: `npx create-objectstack && pnpm install` exits 1 for any user on pnpm 11.\n\nThis fixes the **product bug**, not the gate.\n\n## The bug (reproduced against published 15.1.1)\n\n```console\n$ npx create-objectstack@latest myapp --skip-install && cd myapp\n$ pnpm install          # pnpm 11.13.1, what corepack gives a fresh machine\n[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: better-sqlite3@12.11.1, esbuild@0.28.1\n$ echo $?\n1\n```\n\npnpm 11 turned an unapproved dependency build script from a **warning into a hard error**. The blank template declares no approvals — no `packageManager`, no `pnpm-workspace.yaml`, no `.npmrc` — so the first command a new user runs fails.\n\n## Why both approval keys\n\nNeither key alone covers the supported range — measured, not assumed:\n\n| pnpm | `allowBuilds` | `onlyBuiltDependencies` |\n|---|---|---|\n| 10.0 / 10.15 | not recognized | **required** |\n| 10.31 (repo pin) | recognized (→ `only-built-dependencies`) | redundant |\n| 11.13 | **required** — list alone still errors | insufficient |\n\n## The decision this PR makes: the gate stays unpinned\n\nThe suggested quick fix was to stamp `packageManager` into the generated app so it installs with the repo's pinned pnpm 10. That turns the gate green **by silencing a true positive** — it would test a pnpm no downstream user runs, which is the same \"in-repo settings hide the user's real resolution\" mistake as #3091, i.e. precisely the failure class this gate exists to catch.\n\nSo the smoke's pnpm stays unpinned and keeps testing what a fresh machine gets. The tradeoff is real and recorded in the script header: **a new pnpm major can turn this red with no code change here.** That is signal, not noise — it means a fresh install is broken for new users and the template needs updating. Exactly what happened here.\n\n## Why the gate couldn't see its own blind spot\n\n`publish-smoke.sh` hand-wrote the app's entire `pnpm-workspace.yaml`, **declaring `onlyBuiltDependencies` itself**. A locally-authored declaration proves nothing about what the template ships — that is how this bug stayed invisible to a gate designed to find it. The script now **appends** its tarball overrides to the file the template ships, and fails loudly if the scaffold declares no approvals.\n\n## Changes\n\n- **`templates/blank/pnpm-workspace.yaml`** (new) — the actual product fix.\n- **`scripts/publish-smoke.sh`** — append overrides to the template's file; assert approvals exist; record the no-pin rationale.\n- **`template-consistency.test.ts`** — drift ratchet, matching the file's existing purpose.\n- **changeset** — `patch` to `create-objectstack`.\n\n## Verification\n\nRan the real gate locally under **CI-identical pnpm resolution** (corepack shim: 10.31.0 in-repo, **11.13.1** in the app dir — confirmed, since a plain local run uses global pnpm 10.33 and would not reproduce the failure at all):\n\n```\n== Auth probes (the #3091 failure surface)\n  ok — GET /auth/get-session (anonymous) → 200\n  ok — POST /auth/sign-up/email → 200\n  ok — POST /auth/sign-in/email → 200\n== REST CRUD probes (seeded dev admin)\n  ok — POST/GET/PATCH/DELETE /data/smoke_app_note → 201/200/200/200\n== Scanning server log for error-level output\n  ok — no error/fatal log lines\n== Publish smoke passed (pack mode)\n```\n\nControls, so none of this is a tautology:\n- **Strip `allowBuilds`** → reproduces the exact CI error (`exit 1`); restore → clean. The fix is load-bearing.\n- **Ratchet controls** → template deleted fails 3 tests; `allowBuilds` removed while `onlyBuiltDependencies` kept (the exact #3110 shape) fails exactly 1, with an actionable message.\n- Confirmed `pnpm-workspace.yaml` **survives `pnpm pack`**, so the fix actually ships.\n- `eslint` clean, 8/8 tests, `bash -n` clean, `pnpm build` green.\n\n## Found in passing (not fixed here)\n\n`pack` strips `.gitignore` from nested template dirs, so **scaffolded projects ship no `.gitignore`** — `node_modules/` and `.env` are un-ignored for every new user. Real, pre-existing, out of scope; filed separately.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

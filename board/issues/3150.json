@@ -1,0 +1,32 @@
+{
+  "number": 3150,
+  "kind": "issue",
+  "title": "fix(seed,import): 补齐两处漏掉的 transient 重试——自引用种子顺序路径、import 无 createManyData 回退路径",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T14:18:57Z",
+  "updated_at": "2026-07-18T04:34:04Z",
+  "closed_at": "2026-07-18T04:34:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3150",
+  "body": "已在 PR #3161(已合并到 main)中修复:seed-loader 的自引用顺序写路径(`writeRecord`/`resolveDeferredUpdates`)与 import 无 `createManyData` 的回退 create 均已包 `withTransientRetry`;`defaultIsTransientError` 现对约束/校验类特征短路为非 transient。回归测试见 `packages/metadata-protocol/src/seed-loader-retry.test.ts`、`packages/rest/src/import-runner-bulk.test.ts`、`packages/core/src/utils/bulk-write.test.ts`。\n\n—— 原始 issue 内容 ——\n\n## 问题\n\n`withTransientRetry` 在批量写入改造中漏包了两个写点,这两处一次网络抖动即丢行、不重试;同函数内相邻的 update 路径却有重试,行为不对称。"
+}

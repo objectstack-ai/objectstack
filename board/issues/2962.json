@@ -1,0 +1,35 @@
+{
+  "number": 2962,
+  "kind": "pull_request",
+  "title": "feat(spec)!: 删除 tenancy.strategy + tenancy.crossTenantAccess — tenancy 块 strict 化 + tombstone(#2763)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-15T13:27:54Z",
+  "updated_at": "2026-07-15T14:41:39Z",
+  "closed_at": "2026-07-15T14:41:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-15T14:41:37Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2962",
+  "body": "落地 #2763 的 owner 决策(2026-07-10):`TenancyConfigSchema` 的两个零消费者字段按 enforce-or-remove 处置为 REMOVE。\n\n**发版路线(owner 已确认)**:spec 15.0.0 已发布且不含本移除;按 launch-window 政策(CI 门禁原文:破坏性变更随 minor 发、不烧大版本号),本移除**随下一个 15.x minor 发布**,changeset 为 `minor`,tombstone 文案采用版本无关写法 \"removed after v15.0 (#2763)\"。发版时把迁移段落并入 v15 release 页的 \"What's new in 15.x\"。\n\n## 变更内容(对照 #2763 的移除 PR 清单)\n\n- [x] **`TenancyConfigSchema` 删除 `strategy` / `crossTenantAccess`**,只保留 live 的 `enabled` + `tenantField`\n- [x] **no-silent-strip 防呆(#1535)**:tenancy 块改为 `.strict()`,并挂 `strictTenancyError` error map(复用 ADR-0089 D3a `strictVisibilityError` 的模式)。未知键不再被 zod 静默 strip,而是响亮报错;两个 retired 键的报错各带 tombstone 处方,指向两种真实模式:**库隔离 = 环境级部署(每环境自带 database URL);行级隔离 = `enabled` + `tenantField`**。`crossTenantAccess` 的 tombstone 指向 sharing/OWD(ADR-0056)、`externalSharingModel`(ADR-0090 D11)与 access posture\n- [x] **liveness ledger 删除两条目**(#2750 的 authorWarn 随之退役,schema 本身已携带处方);README 计数表按脚本再生(object 37/12/1;顺带修正 field 54→55、position 3→4 的既有漂移)\n- [x] **`gen:schema` + `gen:docs` 再生 references**:`references/data/object.mdx` 不再宣传 “isolated (separate DB per tenant)”。再生同时带出了此前未再生的漂移(Lifecycle、position、execution-context、security explain/misc、ui/action)——references 目录本就是 AUTO-GEN,以再生输出为准\n- [x] **下游 grep**:HotCRM/tianshun 不在本会话仓库范围内,已 grep 本仓库 examples/skills/content、`../objectui`(无使用)与 `../cloud`(3 个 service-tenant 平台对象有使用,companion PR 见下)。仓内清扫:`sys_sso_provider`、plugin-security / driver-sql / driver-sqlite-wasm / spec / cli 测试夹具、`objectstack-data` SKILL.md 配方、手写文档 `data-modeling/objects.mdx` + `protocol/objectql/schema.mdx`\n- [x] **changeset(minor)**:正文含 FROM → TO 迁移映射 + 发版备注\n\n## 迁移(行为无变化 —— 两个键从未被读取)\n\n- `tenancy: { enabled: false, strategy: 'shared' }` → `tenancy: { enabled: false }`\n- `tenancy: { enabled: true, strategy: '…', tenantField: 'x', crossTenantAccess: false }` → `tenancy: { enabled: true, tenantField: 'x' }`\n\n## 验证\n\n- `packages/spec` 全量测试 251 文件 / 6792 用例绿(含 5 个新增 tombstone/strict 用例)\n- 全仓 `pnpm build` 70/70 任务绿;受影响包测试全绿:cli 505、plugin-security 423、driver-sql 275、driver-sqlite-wasm 119、platform-objects 80\n- `check:liveness` 绿(proof-tag 警告为既有、与本 PR 无关)\n- `gen:api-surface` 无 diff(导出面不变,仅 schema 形状收窄)\n\n## 合并顺序\n\n1. 本 PR(framework)先合并\n2. companion PR objectstack-ai/cloud#837(service-tenant 三个对象删 `strategy` 键)后合并——旧 spec 里 `strategy` 是必填,新 spec 里它是 tombstone,两边只能各配各的 spec 版本(cloud#837 当前 CI 红即此原因,属预期)\n\n关联:#2763(决策)、#2750(过渡期 authorWarn)、#1535(no-silent-strip)、#2707/#2727(liveness 收口)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01UQjM9nQiF8DRQ3XhuWktHp"
+}

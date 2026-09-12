@@ -1,0 +1,32 @@
+{
+  "number": 1505,
+  "kind": "issue",
+  "title": "Surface per-iteration / per-region step logs in run observability (ADR-0031 follow-up)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T02:14:01Z",
+  "updated_at": "2026-07-18T15:58:15Z",
+  "closed_at": "2026-07-18T15:58:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1505",
+  "body": "Follow-up to ADR-0031 / #1479 (now complete).\n\n`AutomationEngine.runRegion()` (the executor for the `loop` body, `parallel` branches, and `try_catch` regions) currently runs each region against a **region-local** `StepLogEntry[]` that is **not merged** into the parent run's step log. There's a `TODO(#1479)` marking this in `packages/services/service-automation/src/engine.ts`:\n\n```ts\n// TODO(#1479): merge region step logs into the parent run log so\n// per-iteration body steps surface in run observability.\nconst regionSteps: StepLogEntry[] = [];\n```\n\n### Impact\nRun logs (`listRuns` / `getRun`) show the container node (`loop`/`parallel`/`try_catch`) as a single step, but **not** the body/branch/handler steps that executed inside it, nor per-iteration detail for loops. This is a gap for debugging and audit.\n\n### Scope\n- Thread the parent `steps` array (or a child grouping) into `runRegion` so body steps are recorded.\n- Decide on representation: flat append vs nested/grouped (e.g. `parentNodeId` + iteration index on each entry) so a loop's N iterations are distinguishable.\n- Extend `StepLogEntry` if grouping metadata is needed; update `engine.test.ts` accordingly.\n- Mind concurrency for `parallel` branches (single-threaded JS, but interleaved at `await` points — appends must stay consistent).\n\nExecutors don't currently receive the `steps` array, so this is a deliberate engine-level change."
+}

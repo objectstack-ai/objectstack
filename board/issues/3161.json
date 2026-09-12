@@ -1,0 +1,35 @@
+{
+  "number": 3161,
+  "kind": "pull_request",
+  "title": "fix: harden the bulk-write path — retries, idempotency, contracts, and summary visibility (#3147–#3152)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T04:00:30Z",
+  "updated_at": "2026-07-18T04:29:08Z",
+  "closed_at": "2026-07-18T04:29:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-18T04:29:07Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3161",
+  "body": "## Summary\n\nSix related bugs surfaced by the #2678 bulk-write rework's dedicated test pass. The batched seed/import + `engine.insert(array)` path added at-least-once retry and per-row degradation, but lacked the idempotency, return-value contracts, and failure-visibility that safe retry/degradation requires. Each is fixed in its own commit; the branch is meant to be reviewed commit-by-commit.\n\nFixes #3147, #3148, #3149, #3150, #3151, #3152.\n\n## Commits\n\n| Commit | Issue | Change |\n|---|---|---|\n| `fix(core): validate writeBatch result contract` | **#3151** (core) | `bulkWrite` guards `writeBatch`'s return: a short / long / non-array result now throws `ERR_BULK_RESULT_MISMATCH` → per-row degradation, instead of backfilling `record: undefined` as phantom success. Documents at-least-once delivery. |\n| `fix(seed,rest,core): wrap bare writes in transient retry` | **#3150** | Wraps the two un-retried write points — seed `writeRecord`/`resolveDeferredUpdates`, import's no-`createManyData` fallback — in `withTransientRetry`. `defaultIsTransientError` short-circuits definitive logical signatures (constraint/validation/unique/…) to non-transient. |\n| `fix(rest): import resolveRef flushes pending creates` | **#3148** | A later row can reference an earlier same-file CREATE: on a same-object miss, `resolveRef` flushes the pending-create buffer and retries once. A bare miss is no longer negatively cached. |\n| `fix(objectql): reject short/non-array bulkCreate results` | **#3151** (engine) | `engine.insert(array)` throws `ERR_BULK_RESULT_MISMATCH` if the driver returns the wrong record count, rather than padding afterInsert contexts / caller results with `undefined`. |\n| `fix(core,seed,rest): idempotent batch retry via attempt-aware recheck` | **#3149** | Threads a 1-based `attempt` counter into `writeBatch`/`writeOne`; on `attempt > 1` seed rechecks by `externalId` and import by `matchFields`, inserting only missing rows — so a commit-then-lost-response retry can't duplicate a batch. Pure-insert imports stay at-least-once by documented contract. |\n| `fix(objectql,seed,rest): retry + surface summary recompute failures` | **#3147** | `recomputeSummaries` retries each parent's aggregate+update with backoff and collects failures; on exhaustion, insert/update/delete throw `SummaryRecomputeError` (`ERR_SUMMARY_RECOMPUTE`) carrying the written records. Seed/import recover it to success + warning (no re-write), identified by `code` to avoid an import cycle. |\n| `fix(objectql): assign autonumbers after validation` | **#3152** | Autonumbers move after validation, so a batch that dies in validation (then degrades per-row) consumes no sequence value → no number-range gaps. The remaining beforeInsert double-execution on a degraded batch is documented as at-least-once hook semantics (mitigation, per the issue's allowance). |\n\n## Design notes (cross-issue interactions)\n\n- **#3147 failure signal avoids re-insert.** `recomputeSummaries` fails *after* the records are written; if that threw a plain error, `bulkWrite` would degrade and re-insert already-written rows (a #3149-style duplicate). Instead the error is typed (`ERR_SUMMARY_RECOMPUTE`) and carries the written records; seed/import recognize the `code`, recover to success, and never re-write.\n- **#3149 idempotency lives in the caller closures**, not in a generic `bulkWrite` dedup — `bulkWrite` can't know the natural key. The `attempt` counter is the seam that lets each caller recheck between attempts.\n- **#3151 mismatch → degrade** feeds the #3149 recheck: a degradation triggered by a driver short-return also runs the natural-key recheck (`lastBatchUncertain`), so it can't duplicate either.\n- **#3152** is an explicit mitigation, not a root-fix: fully removing beforeInsert double-execution needs a partial-success engine API, which is out of scope for these issues.\n\n## Tests\n\nNew/extended, all green (`vitest`):\n- **core** `bulk-write.test.ts`: contract-guard (short/long/non-array → degrade), `attempt` propagation, mixed constraint+network → non-transient.\n- **objectql** `engine-bulk-contract.test.ts`, `engine-summary-retry.test.ts`, `engine-autonumber-batch.test.ts` + extended `summary-rollup`.\n- **metadata-protocol** `seed-loader-retry.test.ts`: self-ref retry, commit-then-lost-response no-dup, summary-failure recovery.\n- **rest** `import-runner-selfref.test.ts`, `import-runner-idempotency.test.ts` + extended `import-runner-bulk`.\n\n## Verification\n\n- `pnpm build` — 71/71 (type-checks across all packages).\n- `pnpm test` — 131/131 task suites pass (full monorepo).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01APnSDJneEDRh3Z51KGCLga)_"
+}

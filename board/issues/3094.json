@@ -1,0 +1,30 @@
+{
+  "number": 3094,
+  "kind": "issue",
+  "title": "CI gate: compile-check the TypeScript examples inside skills/ (anti-drift)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T06:59:33Z",
+  "updated_at": "2026-07-18T16:14:47Z",
+  "closed_at": "2026-07-18T16:14:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3094",
+  "body": "## 背景\n\n2026-07-17 第三方评估在 15.1.0 上发现 5 处 skills/docs↔spec 漂移(`defineDataset`→`defineSeed`、已删除的 `unique` 校验类型、kanban 顶层 `groupBy`、平铺 view 容器、README curl 路径),已在修复 PR 中订正。修复过程中还顺带发现同类未被评估点名的漂移(gantt 平铺字段名、`summary: { function }`、rules/validation.md 里虚构的 `async`/`custom` 类型、`format.pattern` 键名、`conditional` 的 `validations[]` 形态)。**这些全部是「skill 示例没有任何编译/校验反馈」造成的静默腐化** —— skills 是 AI-native 卖点的第一入口,AI 按官方 skill 写元数据连续挂,伤害远大于普通文档错误。\n\n## 建议设计(opt-in 抽取 + tsc,不做全量)\n\n全量抽取所有 \\`\\`\\`typescript 块去 tsc 不可行:skill 里大多数代码块是**片段**(配置子树如 `columns: [...]`、`kanban: {...}`),包一层再编译误报率高、维护摩擦大。建议:\n\n1. **fence-meta opt-in**:自包含、应当可编译的示例改用 \\`\\`\\`typescript check 围栏(或 `ts check`)。脚本只抽取带 `check` 标记的块,逐块写成 `skills/.examples-build/<skill>-<n>.ts`,用仓内 `@objectstack/spec` workspace 版本 `tsc --noEmit` 编译。\n2. **schema 派生的 discriminator 扫描**(零标注即可跑):从真实 Zod schema 枚举合法值(如 `ValidationRuleSchema` 的 `type` 集合、`SeedMode`、view `type` 枚举),对 skills/**.md 做 token 级扫描,凡出现 `type: 'X'` 且 X 不在集合内即报错。这一层能抓住本次的 `unique`/`async`/`custom` 类漂移,且随 spec 演进自动收紧。\n3. 挂到 `packages/spec` 的 test/CI(与 `check:skill-docs` 并列),漂移即红。\n\n## 现状锚点\n\n- 生成链已有:`packages/spec/scripts/build-skill-docs.ts`(frontmatter → README/skills-reference,`--check` 模式已在 CI)。本 issue 是把「目录不漂移」扩展到「示例不漂移」。\n- 参考本次修复 PR 的 diff 可以拿到一批「历史上真实发生过的漂移」作为扫描规则的回归样本。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

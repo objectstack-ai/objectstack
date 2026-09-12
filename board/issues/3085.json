@@ -1,0 +1,36 @@
+{
+  "number": 3085,
+  "kind": "pull_request",
+  "title": "fix(plugin-auth): pin better-auth family to 1.7.0-rc.1 — fresh 15.1.0 projects 500 on every auth endpoint",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T04:31:56Z",
+  "updated_at": "2026-07-17T04:39:02Z",
+  "closed_at": "2026-07-17T04:39:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T04:39:00Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3085",
+  "body": "## P0: `npx create-objectstack` (15.1.0) ships with broken auth\n\nEvery fresh project returns **500 on sign-up / sign-in / get-session** with `Cannot set properties of undefined (setting 'modelName')`, thrown from `@better-auth/oauth-provider@1.6.23` during better-auth initialization (`Failed to register OIDC discovery routes` at startup).\n\n## Root cause: overrides don't ship with published packages\n\n602053cf4 pinned the better-auth family to **1.7.0-rc.1** via `pnpm-workspace.yaml` overrides, because [GHSA-j8v8-g9cx-5qf4](https://github.com/advisories/GHSA-j8v8-g9cx-5qf4) (high, account/provider takeover in `@better-auth/scim`) is fixed **only in the 1.7.0 pre-release line** — npm `latest` is still 1.6.23 and no stable 1.7.0 exists, so waiting for stable is not an option.\n\nThat makes the whole framework CI/showcase surface green against 1.7.0-rc.1 — but pnpm overrides apply only inside this workspace. The published `@objectstack/plugin-auth` still declared `^1.6.23` for `better-auth` / `@better-auth/core` / `@better-auth/oauth-provider` / `@better-auth/sso` (only `@better-auth/scim` was pinned). npm's default resolution never selects a prerelease from a caret range, so downstream installs get **scim@1.7.0-rc.1 + everything else @1.6.23** — a combination never tested here, and one that crashes at init: the 1.7 code paths import symbols that only exist in `@better-auth/core` 1.7.x, so the family must move together.\n\n## Fix\n\n- **Pin all four to the exact `1.7.0-rc.1`** (matching `@better-auth/scim`) in `packages/plugins/plugin-auth/package.json`. No `^` on the rc — a caret range on a prerelease is exactly how this drift shipped. Relax to `^1.7.0` the moment a stable better-auth 1.7.0 ships (tracked in the pnpm-workspace.yaml comment block).\n- Workspace lockfile unchanged by the pin (pnpm already resolved these to 1.7.0-rc.1 via the overrides; they stay as belt-and-braces).\n- Changeset: patch on `@objectstack/plugin-auth` (fixed group).\n\n## Prevention: override-consistency CI gate\n\nNew `scripts/check-override-consistency.mjs`, wired into the validate-deps workflow: for every `pnpm-workspace.yaml` override whose package name appears in a publishable package's `dependencies` / `optionalDependencies` / `peerDependencies`, the declared range must resolve to the override target under npm's default (no-prerelease) semantics — i.e. what a downstream install actually gets. Violations fail CI with:\n\n> downstream resolves \"^1.6.23\" WITHOUT the override; update the declared range so it resolves to 1.7.0-rc.1 (or drop the override)\n\nDeclarations the override can never rewrite (range doesn't intersect the override's `pkg@selector` scope, e.g. `create-objectstack`'s `tar ^7.5.20` vs `tar@>=2.0.0 <7.5.11`) are skipped — workspace and downstream already agree there. Negative-tested: reverting one pin to `^1.6.23` fails the check; current tree passes. Needs `semver` (root devDependency; the step runs after `pnpm install`).\n\n## Verification (packed artifact, not workspace)\n\nTwo fresh `create-objectstack@15.1.0` projects, side by side; the fixed one resolves `@objectstack/plugin-auth` to the `pnpm pack` tarball of this branch:\n\n| | broken-app (npm 15.1.0 as-is) | fixed-app (this branch's tarball) |\n|---|---|---|\n| lockfile family resolution | 1.6.23 + scim 1.7.0-rc.1 mix | **all 1.7.0-rc.1** (adapters + telemetry follow) |\n| startup log | `Failed to register OIDC discovery routes` (modelName TypeError) | clean — zero occurrences |\n| POST `/api/v1/auth/sign-up/email` | 500 modelName | **200** (token + user) |\n| POST `/api/v1/auth/sign-in/email` | 500 modelName | **200** (session token) |\n| GET `/api/v1/auth/get-session` | 500 modelName | **200** (user + session) |\n\nRefs: GHSA-j8v8-g9cx-5qf4 · 602053cf4 · aead16803 (validate-deps pipeline)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

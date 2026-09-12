@@ -1,0 +1,30 @@
+{
+  "number": 3136,
+  "kind": "issue",
+  "title": "Re-arm the docs link checker: it has been silently disabled and its config was unparseable",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T12:30:43Z",
+  "updated_at": "2026-07-18T01:05:19Z",
+  "closed_at": "2026-07-18T01:05:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3136",
+  "body": "## 背景\n\n文档审计发现 243 个生成的 reference 页有 90+ 坏链。修生成器时(#3126)顺带查清了**为什么这些坏链能长期躺在 main 上**:\n\n1. `.github/workflows/check-links.yml` 的 `push` / `pull_request` 触发**被注释掉了**,只剩 `workflow_dispatch`。\n2. 而这大概是被迫的:**`lychee.toml` 根本解析不了** —— `follow_redirects` 在 lychee ≥0.24 不是合法键,boolean 形式的 `include_fragments` 也不是(要字符串如 `\"full\"`),`accept` 要字符串数组而非数字。job 一启动就 exit 1,与其天天红不如关掉。\n\n#3126 已修好配置(可加载),但**没有**恢复触发——因为真跑起来发现还差东西。\n\n## 恢复闸门还需要什么\n\n试跑(runs/29580304548)后 lychee 能启动了,报出两类问题:\n\n### 1. 根相对链接无法解析(配置问题,非真坏链)\n\n`Cannot resolve root-relative link '/docs/ai/connect-mcp'` 等大量报错 —— 站内链接写作 `/docs/x/y`,文件在 `content/docs/x/y.mdx`。`remap` 现有写法没生效。需要:\n- workflow 传 `--root-dir ${{ github.workspace }}/content`\n- `lychee.toml` 加 `fallback_extensions = [\"mdx\", \"md\"]`\n- 删掉不生效的 `remap` 段\n\n### 2. 真坏链(闸门装上前要先清)\n\n- `https://docs.objectos.app/docs/ai` → **404**(在 `content/docs/ai/actions-as-tools.mdx`;objectos 文档站已迁移,需要改为正确 URL)\n- `https://github.com/objectstack-ai/framework/blob/main/examples/app-showcase/src/objects/contact.object.ts` → **404**(路径已变)\n- `https://github.com/objectstack-ai/cloud` → 404,但这是**私有仓库,预期**如此 —— 应加进 `exclude`\n- 另有一批 301 重定向(fivetran / salesforce / n8n / zapier 文档),不算错但可顺手更新\n\n## 建议做法\n\n1. 清掉上面 2 的真坏链 + 给私有仓库加 exclude\n2. 按 1 配好 `root_dir` / `fallback_extensions`\n3. 本地或 workflow_dispatch 跑一次确认全绿\n4. **再**恢复 `pull_request` 触发(按 `paths:` 收窄到 `content/**`、`README.md`、`lychee.toml`,免得无关 PR 付出代价)\n\n顺序很重要:闸门修好之前先恢复触发 = 每个 PR 都红,那正是它当初被关掉的原因。"
+}

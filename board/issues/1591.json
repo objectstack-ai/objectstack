@@ -1,0 +1,34 @@
+{
+  "number": 1591,
+  "kind": "issue",
+  "title": "managedBy is not enforced: generic CRUD bypasses better-auth on sys_team (data-integrity / security)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-05T01:53:24Z",
+  "updated_at": "2026-07-18T13:48:10Z",
+  "closed_at": "2026-07-18T13:48:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1591",
+  "body": "## Summary\n`managedBy: 'better-auth'` is documented as \"generic CRUD is suppressed — use the action endpoints\" but **nothing enforces it**. The generic data API will happily `INSERT`/`UPDATE`/`DELETE` against an externally-managed table, bypassing the owning subsystem's invariants, hooks, and authz path.\n\n## Evidence\n`packages/platform-objects/src/identity/sys-team.object.ts`:\n```ts\nmanagedBy: 'better-auth',\n// \"Generic CRUD is suppressed (managedBy: 'better-auth'), so these are\n//  the canonical entry points for create/update/delete.\"\n...\nenable: { apiMethods: ['get','list','create','update','delete'] }  // <- contradicts the comment\n```\n- `packages/objectql/src/engine.ts` — no `managedBy` check in the insert/update/delete path (`assertWriteAllowed()` only gates external datasources).\n- `packages/objectql/src/registry.ts:~189` — `managedBy` is only used to **skip system-field injection** (`if (schema.managedBy === 'better-auth') return schema`), not to block ops.\n- `packages/rest/src/rest-server.ts` create handler calls `p.createData(...)` directly; no metadata/`apiMethods` gate.\n\nResult: a bare `POST /api/v1/data/sys_team` runs a generic INSERT. The canonical path is the `create_team` action → `POST /api/v1/auth/organization/create-team`, which lets better-auth own `id`/`organizationId`, enforce org-membership invariants, and apply its own authz.\n\n## Why this matters (not just an error-message bug)\n- **Integrity**: you can create a `sys_team` row better-auth doesn't know about, or one that violates its team↔org consistency / cascade-on-delete assumptions.\n- **Security surface**: the action routes through better-auth authz; the generic `/data` route uses ObjectQL RLS. These are not guaranteed equivalent.\n\n## Proposed change\nMake `managedBy` (external owner) a real capability gate: for objects whose writes are externally managed, the generic data API should **refuse create/update/delete** with a clear `405`/`409` that names the canonical action (e.g. \"use action `create_team`\"), while leaving **read (get/list) open** (the UI needs it).\n\nAlso reconcile the contradictory metadata: either derive `apiMethods` from `managedBy`, or fail object registration when an externally-managed object advertises generic write verbs.\n\n### Open design points\n- Granularity: refuse all of create/update/delete? (My instinct: yes; reads always open.)\n- Generalize `managedBy: 'better-auth'` into a broader capability (`externallyManaged` / `writeVia: '<action>'`) so third-party-managed objects get the same treatment, not just better-auth.\n- Enforcement layer: REST router (cheap, per-verb) vs. ObjectQL engine (defense-in-depth, covers non-REST callers). Engine-level is more robust.\n\n## Related\n- Provenance issue (system-field skip-by-name) — same `managedBy`/injection boundary (linked below).\n- Error-mapping safety net: branch `fix/rest-map-schema-errors`.\n\n_Found running cloud `LOCAL-E2E-CHECKLIST` B7._"
+}

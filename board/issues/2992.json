@@ -1,0 +1,34 @@
+{
+  "number": 2992,
+  "kind": "issue",
+  "title": "Security (latent): GraphQL and realtime surfaces must satisfy identity admission before a client transport ships — both drop/lack the caller context today",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T01:27:00Z",
+  "updated_at": "2026-07-16T05:12:34Z",
+  "closed_at": "2026-07-16T05:12:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2992",
+  "body": "Surfaced by the ADR-0096 E4 verification. Two execution surfaces are **not exploitable today** (neither is wired to a client), but both would fall open the instant a real transport is added — loaded guns that the ADR-0096 D4 admission test exists to catch. Tracking them so the identity story is fixed *before* wiring, not after an adversarial review.\n\n## Surface 1 — GraphQL (stub today, latent context-drop)\n\n- No GraphQL engine exists: no `graphql` npm dependency anywhere, and `kernel.graphql` is **never assigned** in the monorepo. Every `POST /graphql` throws **501** before any engine call. The only `IGraphQLService` is a dev stub returning `{ data: null, errors: [...] }` (`plugin-dev/src/dev-plugin.ts:99-106`). So: **SAFE now**.\n- **Latent defect:** `handleGraphQL` (`packages/runtime/src/http-dispatcher.ts:1488-1499`) passes only `{ request: context.request }` to `kernel.graphql(...)` — it **drops `context.executionContext`**, unlike the REST `callData` path (`:332`, `:1944-1974`) which threads it as `options.context`. One entry point (`dispatcher-plugin.ts:570-572`) even bypasses `dispatch()` entirely, so `resolveExecutionContext` never runs. The moment anyone implements a real `kernel.graphql` that resolves objects through ObjectQL, it runs **context-less = fall-open (full authority)**.\n- **Pre-wiring fix:** thread `{ request, context: context.executionContext }` at `:1497` and have the resolver forward it as `options.context`; gate `/graphql` behind the same `requireAuth`/`enforceAuth` used by `handleMetadata` (`:1587-1595`). A tiny preemptive patch is cheap and closes the landmine now.\n\n## Surface 2 — realtime/websocket (no transport, no per-recipient authz seam)\n\n- No end-user transport is wired: `handleUpgrade` (WebSocket handshake) is **unimplemented**, there is **no REST subscribe route** (`packages/rest/src` has zero realtime refs), and the client (`packages/client/src/realtime-api.ts`) is an explicit placeholder (`@ts-expect-error … Reserved for future WebSocket/SSE`). Only two **trusted server-internal** plugins subscribe (webhooks auto-enqueuer, knowledge sync). So: **SAFE now**, no external subscriber.\n- **Structural defect:** the delivery path is a pure fan-out with **no seam for per-recipient authorization**. `InMemoryRealtimeAdapter.publish` (`service-realtime/src/in-memory-realtime-adapter.ts:78-89`) delivers to every matching subscription; `matchesSubscription` (`:149-166`) filters **only** by object name + event type. The `Subscription` struct (`:13-18`) carries **no principal** — there is nothing to check a row against. `RealtimeSubscriptionOptions.filter` is declared but never read. Grep for `authorize|canRead|rls|sharing|fls|tenant|userId|owner` across `service-realtime/src`: **no matches**.\n- **Payload is the full record**, not an id: engine emits `created` (`objectql/src/engine.ts:2291-2294`) and `updated` (`:2462-2466`) with the full `after` row. So a future subscriber would receive record bodies directly, cross-tenant, that a normal `find` would hide.\n- **Pre-wiring fix:** before any WebSocket/SSE subscribe path ships, add a per-recipient RLS/FLS/tenant re-check on delivery (subscription must carry a principal), **or** switch the payload to id-only + client re-fetch under its own RLS. Also delete/rewrite `service-realtime/README.md`, which advertises `authorizeChannel`/`broadcastToUser`/presence-auth that **do not exist**.\n\n## Why track rather than fix-now\n\nNeither is a live data path, so there's no active breach and no urgency to patch behavior. But both are exactly the D4 admission-test targets: **register each as a matrix row now** with its posture (\"stub — must thread caller identity / add per-recipient authz before wiring\"), so the CI meta-test blocks anyone from wiring a transport without the identity story. The GraphQL one-line context-thread is cheap enough to do preemptively; the realtime one needs the authz seam designed alongside the transport.\n\n## Relationship to ADR-0096\n\nE4 \"unknown seams\" resolved: both SAFE-now / latent. Seeds two D4 conformance-matrix rows (state `experimental`/`UNKNOWN` → now `stub, pre-wiring`). Refs: ADR-0096 (#2975 / e07645c), #2849."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 3138,
+  "kind": "pull_request",
+  "title": "fix(spec): regenerate drifted skill references + react-blocks contract, and gate them in CI",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/m",
+    "skip-changeset",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T12:49:04Z",
+  "updated_at": "2026-07-17T14:12:13Z",
+  "closed_at": "2026-07-17T13:33:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T13:33:18Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3138",
+  "body": "Two committed generated surfaces under `skills/` were drifted from `packages/spec` and completely unguarded by CI. Same class as #3134, but on surfaces that ship to third parties via `npx skills add objectstack-ai/framework` — so the drift is served straight to consumers' agents.\n\n## The drift was real, and user-facing\n\nAn independent oracle (parses every pointer out of the committed indexes, asserts the file exists — deliberately *not* the generator, so it isn't circular):\n\n| | pointers | broken |\n|---|---|---|\n| main @ `ce468c832` | 113 | **6** |\n| this PR | 126 | **0** |\n\nThe six dangling pointers handed agents paths to files that don't exist:\n\n- `automation/workflow.zod.ts` — deleted by #1398 (\"remove Workflow Rules\"), index never regenerated\n- `system/masking.zod.ts` — deleted from spec\n- `data/dataset.zod.ts` — renamed to `data/seed.zod.ts` by #1620\n\nEvery change in the regenerated diff traces to a spec change; I checked each one. The `encryption.zod.ts` drops are because `field.zod.ts` no longer imports it; the `metadata-protection` / `protection` / `visibility` / `public-auth-features` additions are new spec imports (ADR-0010, ADR-0089, #2874); the `flow.zod.ts` and `manifest.zod.ts` description changes are edited JSDoc. Output is byte-identical across runs.\n\n## Regenerating alone would have shipped a regression\n\n`SKILL_MAP` still named `data/dataset.zod.ts`, and the generator **warned and skipped** the missing file. A plain regen would therefore have quietly dropped seed coverage from `objectstack-data` — whose own SKILL.md advertises `defineSeed()` authoring — and the new gate would have locked that in as \"correct\".\n\nSo: point the map at `data/seed.zod.ts`, and make a dangling entry a **hard failure in both modes**. The map is authored config; a dangling entry is always a bug in it, never a spec change to absorb. That warn-and-continue is the same false-green vector the gate exists to close.\n\n## Gate mechanics\n\nFollows #3134's `build-docs.ts`: every write goes through `emit()`, every wholesale-regenerated folder through `manageDir()`, nothing touches disk until `flush()` — so write and `--check` share **all** generation logic and differ only in disposition. Extracted to `scripts/lib/generated-output.ts` rather than copy-pasted a third time.\n\n`manageDir()` takes an ownership predicate, because a skill's `references/` folder is only *partially* generated: `_index.md` is ours, but `react-blocks.md` (sibling generator) and hand-written notes must survive. Verified they do.\n\nNew scripts: `check:skill-refs`, `check:react-blocks`.\n\n## Proven red before being trusted (13/13)\n\nA gate that cannot fail is worse than no gate. Each was reproduced going red, then green again after restore:\n\n| case | result |\n|---|---|\n| stale content | ✅ exit 1 `~ out of date` |\n| missing file | ✅ exit 1 `+ missing` |\n| **stale untracked leftover** (subfolder + loose `.zod.ts`) | ✅ exit 1 `- stale` |\n| ↳ same state under `git diff --exit-code` | **exit 0 — blind.** This is why `manageDir` exists |\n| dangling `SKILL_MAP` entry (the bug that shipped) | ✅ exit 1, in check **and** write mode |\n| skill dir missing from disk | ✅ exit 1 |\n| spec change the contract hadn't absorbed | ✅ exit 1 `~ out of date` |\n| react-blocks: schemas fail to load (swallowed `z.toJSONSchema` error) | ✅ exit 1 — and write mode refused to clobber the good contract |\n\nThat last guard is why it checks *data-kind* props rather than `props.length`: `mergeProps` puts the hand-authored overlay first, so a block whose schema failed to load still reports props. The data props are what vanish.\n\n## Placement: lint.yml, deliberately\n\nIn lint.yml's **\"TypeScript Type Check\"** (no paths filter + required), not ci.yml's `check-generated`. That job is filter-gated on:\n\n```\nskilldocs:\n  - 'skills/**'\n  - 'content/docs/guides/skills.mdx'\n  - 'packages/spec/scripts/build-skill-docs.ts'\n```\n\n— **not** `packages/spec/src/**`. It would skip exactly the spec-only PRs that cause this drift (the #3076 failure mode), and it isn't a required check, so it could be merged past even when it does run. Required checks confirmed as `[\"TypeScript Type Check\",\"Build Core\",\"Test Core\",\"Dogfood Regression Gate\"]`.\n\nBoth gates need **no `^build`** — verified empirically by removing all 23 workspace `dist/` dirs and re-running (turbo's `^build` on `gen:skill-refs` is vestigial; `pnpm --filter` bypasses turbo anyway). So they run *before* the workspace build and fail in seconds.\n\n## Note on #3134\n\n#3134 is open and touches `lint.yml` + `packages/spec/package.json` too, inserting `check:docs` in the same step gap. Expect a trivial adjacent-block conflict; both blocks coexist. I based on `main` rather than on that branch so this stands alone. Follow-up once it lands: migrate `build-docs.ts` onto `scripts/lib/generated-output.ts`.\n\n`check:react-conformance` was checked for overlap — there is none. It compares spec schemas against the objectui frontend manifest (opt-in via `MANIFEST=`, exits 0 without it) and never checks generator output against committed files.\n\n## Verification\n\n- `check:skill-refs` / `check:react-blocks` green on a clean tree; 13/13 red-proofs pass\n- `tsc --noEmit` clean · spec tests **254 files / 6890 passed**\n- oracle: 126 pointers, 0 broken · generators deterministic across 3 runs\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

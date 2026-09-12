@@ -1,0 +1,35 @@
+{
+  "number": 3108,
+  "kind": "pull_request",
+  "title": "fix(dev-dx): hot-reload new objects end to end, persistent dev-admin hint, doctor container/nav refs",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T09:43:32Z",
+  "updated_at": "2026-07-17T11:28:55Z",
+  "closed_at": "2026-07-17T11:28:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T11:28:53Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3108",
+  "body": "## 问题(15.1 第三方评估 P2 #3/#4/#5,合并修复)\n\n三项 dev-loop DX 毛刺,全部在真实 create-objectstack 脚手架项目上复现,并用本分支 runtime 在同一项目上实测修复。\n\n### 3. dev 热重载对新增对象不建表不跑 seed\n\nwatch 模式新增 `*.object.ts` 后终端「✓ recompiled — server will auto-reload」全绿,但对象完全不可用直到手动重启。排查发现比评估报告还深一层:**`MetadataManager.register()` 根本不通知 `subscribe()` 订阅者**——artifact 热重载后 ObjectQL 的注册表桥接从未触发,新对象连 SchemaRegistry 都进不去(REST 报 `not registered`);建表只在 boot 跑;seed 只读 boot 时的 bundle(且 seed 无 `name`,从不进 MetadataManager)。修复(各层各归其位):\n\n- **metadata**:`metadata:reloaded` 事件载荷携带解析后的 artifact 集合(seeds 只有这条通道)\n- **objectql**:reload hook 从载荷 ingest 对象定义进 SchemaRegistry(镜像 subscribe handler,保留 `_packageId` 溯源)+ 重跑幂等 schema sync(尊重 `skipSchemaSync`,串行化防 DDL 竞争)\n- **runtime**:dev-gated、单租户的热重载 seeder,**只**给首次出现的对象跑 seed——已加载(可能被用户改过)的数据集绝不 mid-run 重放\n- **cli**:recompile 行显式列出新对象:`✚ new object(s): eval_app_tag — table & seeds sync on reload`\n\n实测:server 运行中新增对象+seed → 3 秒内 REST 查询返回 3 行 seed 数据,零重启。kernel hook 按注册顺序串行(objectql 建表先于 runtime seed)。\n\n### 4. dev 默认管理员账号不可见\n\n终端凭据提示其实已存在,但只在「真正 seed 的那次 boot」显示——`os dev` 默认持久化 DB,第二次启动起就消失;登录页则完全无信号。修复:\n\n- `maybeSeedDevAdmin` 在「已有用户」分支追加探测:seed 账号仍存在**且仍是默认密码**(better-auth 原生 `password.verify` 对 `sys_account` 存储 hash 校验)→ 重新点亮 `devSeedResult`,startup banner 每次 dev boot 都显示\n- `getPublicConfig()` 新增 dev-gated `devSeedAdmin` 字段(`NODE_ENV==='development'` 双重门,生产由构造保证绝不出现),登录页横幅数据源(objectui PR 另发)\n\n实测三态:seed 首启显示 ✓ / 重启(不再 seed)仍显示 ✓ / 改密后重启消失 + config 字段消失 ✓。新增 3 个门控单测。\n\n### 5. os doctor 引用分析误报\n\n收集器读的几乎全是死字段(`view.object`/`nav.object`/`agent.objects` 在现行 spec 均不存在)。重写:defineView 容器全路径(`list`/`listViews`/`form`/`formViews` 的 `data.object`、subform `childObject`、lookup 表单字段)、app 导航(`objectName` + 嵌套 `children` + `areas`,含 `requiresObject`)、flow 节点 `config.object/objectName`;删除死的 `agent.objects` 读取(消息同步改为 \"view, flow, app, or lookup field\");`findOrphanViews` 同步下钻容器。\n\n实测对照(同一项目:task 仅容器视图绑定、tag 仅导航挂载、note 真孤儿):发布版 doctor 误报 **3/3**;本分支只报 note **1/3**。\n\n## 测试\n\ncli 524 / plugin-auth 460 / objectql 905(含新增 reload-ingest 集成测试)/ runtime 544 / metadata 260(含 payload 契约测试)全绿;`pnpm build` 干净。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

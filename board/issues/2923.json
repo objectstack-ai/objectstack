@@ -1,0 +1,34 @@
+{
+  "number": 2923,
+  "kind": "pull_request",
+  "title": "chore(app-showcase): remove test-evidence artifacts from docs/test",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-14T14:56:17Z",
+  "updated_at": "2026-07-14T15:04:49Z",
+  "closed_at": "2026-07-14T15:04:47Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-07-14T15:04:47Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2923",
+  "body": "## 背景\n\n平台仓库不应包含项目 issue 式的实测证据产物(截图、测试报告、实测清单)。这些证据应留在对应 GitHub issue 的评论里,不入库。\n\n## 变更\n\n删除 `examples/app-showcase/docs/test/` 全部内容(40 个文件,约 1.7MB):\n\n- `console-list-form-capability-report-2026-07.md`\n- `framework-objectui-changes-2026-07-03_05.md`\n- `showcase-console-capability-test-report.docx`\n- `screenshots/` 下 38 张 UI 实测截图\n\n注:任务最初提到的 `permission-model-test-checklist.md`、`permission-model-test-report.md`、`scripts/` 等已随 #2910/#2915 的 revert(0c4c56833、a5f53d448)先行移出 main,本 PR 清理的是剩余部分。\n\n## 引用检查\n\n- 全仓 grep 确认无文档/ADR 以相对路径引用被删文件(`CHANGELOG.md` 中 \"docs/tests/CI\" 为字面误匹配)。\n- `docs/screenshots/`(README 首页配图,#2290)为正当文档资产,**未触碰**。\n\n## 相关分支处置说明(不在本 PR 内操作)\n\n- `origin/assets/issue-2916-screenshots`:**保留**。issue #2916 评论以该分支 raw 链接嵌入 3 张截图(分支为孤儿提交,不进 main),删分支会导致 issue 图片失效;GitHub 无 API 可程序化转为 issue 附件。\n- `origin/claude/permission-model-testing-d5a460`:对应 PR #2921 已 CLOSED 不合并,且无任何 issue/代码引用该分支;其 round-3 报告内容经由已关闭 PR 的 `refs/pull/2921/head` 仍可追溯,分支可安全删除(留待维护者执行)。"
+}

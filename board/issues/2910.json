@@ -1,0 +1,35 @@
+{
+  "number": 2910,
+  "kind": "pull_request",
+  "title": "fix(plugin-security,plugin-hono-server): ADR-0090 live-test fixes + permission-model test suite",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-14T10:49:24Z",
+  "updated_at": "2026-07-14T10:55:41Z",
+  "closed_at": "2026-07-14T10:55:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-14T10:55:39Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2910",
+  "body": "## Summary\n\nLive-tested [docs/design/permission-model.md](https://github.com/objectstack-ai/framework/blob/main/docs/design/permission-model.md) (ADR-0090) end-to-end against `examples/app-showcase` — 49 REST assertions + 11 Playwright cases including real console UI runs with evidence screenshots. Testing surfaced **two engine defects**, both fixed here with regression tests.\n\n## Engine fixes\n\n### 1. plugin-security — write-time `check` policies dropped position applicability (checklist G4)\n`computeWriteCheckFilter` called `collectRLSPolicies` **without the caller's held positions**, so a `check` policy declaring a `positions` domain never fired for its holders — an owner transfer that ADR-0058 D4 post-image validation should reject was silently allowed, diverging from the read path (`using`). Fixed by passing `context.positions`; +3 regression tests.\n\n### 2. plugin-hono-server — `/auth/me/permissions` identity-resolution drift → console fake read-only (checklist L5)\n`resolveCtx` hand-rolled identity resolution and skipped `sys_user_position` / `sys_position_permission_set`, violating the invariant documented in `packages/core/src/security/resolve-authz-context.ts` (every HTTP entry point must use the shared resolver). Position-granted capability never reached `GET /api/v1/auth/me/permissions`: the console rendered **fully read-only forms** for users whose writes the data plane (which uses the shared resolver) accepted. Fixed by delegating to `resolveAuthzContext`, return shape aligned with `@objectstack/rest`; +2 regression tests.\n\n## Test artifacts (kept, repeatable)\n\n| Artifact | Path |\n|---|---|\n| Test checklist (A–M vs design doc) | `examples/app-showcase/docs/test/permission-model-test-checklist.md` |\n| Test report (findings + evidence index + rerun steps) | `examples/app-showcase/docs/test/permission-model-test-report.md` |\n| 49-assertion REST suite + env setup | `examples/app-showcase/docs/test/scripts/perm-{setup,test}.sh` |\n| Playwright suite (REST representative + console UI w/ screenshots) | `examples/app-showcase/e2e/permission-model.spec.ts` |\n| Opt-in Playwright config (excluded from default smoke via `testIgnore`) | `examples/app-showcase/playwright.permission.config.ts` |\n| Console UI evidence (L1–L5) | `examples/app-showcase/docs/test/screenshots/L*.png` |\n\n## UI evidence highlights\n\n- **L1/L2** — RLS narrows ada's task/invoice lists to her own rows.\n- **L3** — audrey (`viewAllRecords`) sees all inquiries and foreign private notes.\n- **L4** — newbie (baseline only) sees an empty inquiry list (private OWD).\n- **L5** — ada's edit dialog: `budget`/`spent` disabled by FLS while `status`/dates stay editable — this is the case that exposed fix #2 (before the fix the whole form was disabled).\n\n## Verification\n\n- `pnpm -C packages/plugins/plugin-security test` → 329/329 ✅\n- `pnpm -C packages/plugins/plugin-hono-server test` → 66/66 ✅ (incl. 5 new regression tests across both packages)\n- REST suite 49/49 ✅ and Playwright 11/11 ✅ against a live :3777 dev server **after** the fixes (report §2)\n\nChangeset included (patch × 2)."
+}

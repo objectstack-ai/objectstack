@@ -1,0 +1,32 @@
+{
+  "number": 3184,
+  "kind": "issue",
+  "title": "Validation `events: ['delete']` is a silent no-op — trim it from the spec",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T06:39:11Z",
+  "updated_at": "2026-07-18T07:23:41Z",
+  "closed_at": "2026-07-18T07:23:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3184",
+  "body": "## Summary\n\n`BaseValidationSchema` admits `events: ['insert', 'update', 'delete']` (`packages/spec/src/data/validation.zod.ts:88`), but the rule evaluator's runtime `Mode` is `'insert' | 'update'` (`packages/objectql/src/validation/rule-validator.ts:72`) and `engine.delete` never invokes `evaluateValidationRules`. The events filter (`rule-validator.ts:526`) can therefore never match `'delete'` — a validation rule declaring `events: ['delete']` **silently never runs**.\n\nThis is the `declared ≠ enforced` tail split out of #3106 / PR #3160 (which fixed the multi-row-update call-site gap and left this one explicitly for a follow-up). It was also independently flagged by the June liveness audit.\n\n## Evidence\n\n- `packages/spec/src/data/validation.zod.ts:88` — `events: z.array(z.enum(['insert', 'update', 'delete'])).default(['insert', 'update'])`.\n- `packages/objectql/src/validation/rule-validator.ts:72` — `type Mode = 'insert' | 'update'`; `:526` — `const events = r.events ?? ['insert', 'update']; return events.includes(mode);` (`mode` is never `'delete'`).\n- `docs/audits/2026-06-validationschema-property-liveness.md:10-21` — \"🔴 `events: ['delete']` is a silent no-op … Remove `delete` from the events enum (dead).\"\n- The published skill `skills/objectstack-data/rules/validation.md:268` actively teaches `events: ['delete']` (\"Only on delete\"), so AI-authored metadata following the skill gets a delete guard that never fires.\n\n## Blast radius\n\nZero in practice. No example app, seed, template, fixture, or test declares a validation rule with `'delete'` in `events` — the only repo-wide occurrences are documentation/skill text. Any hypothetical off-spec metadata fails loudly (ZodError at `registry.validate` / `os validate`), never silently.\n\n## Decision: trim (not enforce)\n\nRemove `'delete'` from the `events` enum (contract-first, AGENTS.md PD #12). Delete-time guards belong in `beforeDelete` lifecycle hooks, which the skills already teach correctly (`skills/objectstack-data/references/data-hooks.md:448-464`). Enforcement (wiring the evaluator into `engine.delete`) was considered and rejected: only `script`/`cross_field` would be meaningful on delete, and hooks already cover that need.\n\n## Scope\n\n- Narrow the enum + its three hand-written mirrors (`validation.zod.ts:226` type, `rule-validator.ts:79` `BaseRule`, `packages/metadata-protocol/src/protocol.ts:231-235` JSON-schema mirror).\n- Fix the skill line and the hand-written doc table (`content/docs/data-modeling/validation.mdx:72`); regenerate `content/docs/references/data/validation.mdx`.\n- Correct the doc comments that framed the delete gap as a known exclusion.\n- Changeset + a negative test asserting `events: ['delete']` is now rejected.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

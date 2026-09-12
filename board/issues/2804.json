@@ -1,0 +1,30 @@
+{
+  "number": 2804,
+  "kind": "issue",
+  "title": "错误（种子）：自引用种子数据遇到暂时性写入错误后不会重试",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T23:47:49Z",
+  "updated_at": "2026-07-16T11:00:18Z",
+  "closed_at": "2026-07-16T11:00:18Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2804",
+  "body": "## 重现规则\n\n故障注入规则：\n\n```text\n第一次写入：抛出 fetch failed\n第二次写入：如果被调用，则返回成功\n```\n\n### 自引用种子数据\n\n输入对象：`employee`\n\n输入数据（按 CSV 形式展示）：\n\n```csv\nname,manager_id\nAlice,\nBob,Alice\n```\n\n执行规则：\n\n1. 写入 `Alice`，返回成功。\n2. 将 `Bob.manager_id` 从自然键 `Alice` 解析为 `id_Alice`。\n3. 第一次写入 `Bob` 时抛出 `fetch failed`。\n4. 如果第二次写入 `Bob`，则返回成功。\n5. 记录实际调用次数和最终入库结果。\n\n实际结果：\n\n```text\nAlice 写入次数 = 1\nBob 写入次数 = 1\nBob 写入时的 manager_id = id_Alice\n已解析引用数 = 1\n成功写入 = 1\n失败 = 1\n已入库 = Alice\n未入库 = Bob\n```\n\n"
+}

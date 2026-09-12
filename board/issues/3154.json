@@ -1,0 +1,33 @@
+{
+  "number": 3154,
+  "kind": "pull_request",
+  "title": "docs: replace the unmeasured ~1% claim with the measurement we can actually make",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T14:25:27Z",
+  "updated_at": "2026-07-17T15:02:26Z",
+  "closed_at": "2026-07-17T15:02:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T15:02:24Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3154",
+  "body": "## 为什么现在做\n\n#3141 的 blog **刻意没用 \"~1% code surface\"** —— 它要对比的传统实现不存在,比值是个反事实。结果站上出现了自相矛盾:**blog 说这个数字没法引用,首页和 README 还在拿它打头**。\n\n而且核实时发现一处更硬的问题:`concepts/metadata-driven.mdx` 标题写 **\"~100× Less Code\"**,两行之后它自己给的证据是 **~300 行 → ~30 行**。**标题是自己例子的 10 倍。**\n\n## 换成能测的\n\n`examples/app-crm`(6 对象 + 视图 + 仪表盘 + 转换流程 + 权限集 + 动作 + 翻译)= **31 文件 / 1,792 行 / ~16k tokens** —— 整个业务系统,占 200k 窗口的 **8%**。它就在仓库里,两个文档页都给了复算命令:\n\n```bash\nfind examples/app-crm/src -name '*.ts' -not -name '*.test.ts' | xargs cat | wc -l\n```\n\n## 这是更强的主张,不是更弱的\n\n\"写得少\"是**效率论证**,竞品能抄;\"agent 能把整个依赖图握在手里,所以能回答*改这个会坏什么*\"是**能力论证**,前提是系统真的那么小 —— 抄不走。\n\n而且两个文档页**本来就有** \"The point isn't lines of code — it's fit in an agent's context window\" 这句正确论证,只是**被前面那个编造的倍数盖住了**。现在让它站到前台。\n\n## 改动\n\n- **首页**:lead 的\"~1% of a traditional codebase\" → \"a complete CRM is under 2,000 lines, so the whole app fits in the agent's context\";proof chip `~1% code surface` → `Fits in an agent's context`\n- **README**:同上 + CRM 实测表 + 复算命令\n- **metadata-driven.mdx**:标题脱离倍数;单 feature 的 300→30 降为旁注,应用级实测升为主证\n- **how-ai-development-works.mdx**:\"two orders of magnitude\" → 实测\n\n四处残留检查 = 0。数字已复算(1,792 行 / 31 文件)。`types:check` ✅ · `build` ✅\n\n## 没动的\n\n**www.objectos.ai 仍在 8 个语言里用 ~1% / ~100x** —— 那是姊妹站的口径,不该单方面改。要不要同步,是维护者的决定(两站 hero 镜像句不受影响,proof strip 本来就不完全相同)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 3195,
+  "kind": "issue",
+  "title": "Hook event taxonomy is over-specified: collapse 18 events → 8, make findOne fire find hooks, formalize bulk semantics",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T07:41:44Z",
+  "updated_at": "2026-07-18T11:38:41Z",
+  "closed_at": "2026-07-18T11:38:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3195",
+  "body": "## Summary (rewritten after design review)\n\nOriginally filed as \"10 of 18 declared `HookEvent` values never dispatch.\" Investigation confirmed the gap, but the design review concluded the **contract is wrong, not the runtime** — the fix is to collapse the event taxonomy, not to implement the missing dispatch.\n\n## What investigation established\n\n**The dead 10** (`beforeFindOne`/`afterFindOne`, `beforeCount`/`afterCount`, `beforeAggregate`/`afterAggregate`, `beforeUpdateMany`/`afterUpdateMany`, `beforeDeleteMany`/`afterDeleteMany`): registered fine (`engine.registerHook` accepts any string, `engine.ts:419`; no registration-time dispatchability check anywhere), then silently never fire — only 8 literal `triggerHooks()` call sites exist (`engine.ts:2094/2110/2231/2286/2403/2500/2697/2735`).\n\n**Severity is lower than originally claimed** — the platform has no security hole:\n- Platform security (RLS / permissions / aggregate gating) runs as **middleware**, which explicitly covers `find`/`findOne`/`count`/`aggregate` (`security-plugin.ts:834`, `rls-compiler.ts:314`, aggregate gate `:1034`). Hooks are not the security boundary.\n- External HTTP single-record reads go through `ql.find(..., { where: { id }, limit: 1 })` (`http-dispatcher.ts:378`), **not** `findOne` — so `beforeFind`/`afterFind` hooks DO fire for external reads. The `findOne` hook bypass affects only in-process callers (sandbox script API, automation nodes, internal services).\n- Bulk writes do **not** bypass hooks: `beforeUpdate`/`beforeDelete`/`afterUpdate`/`afterDelete` fire outside the single/multi branch (`engine.ts:2403/2697`). The `*Many` events name a code path that doesn't exist (the engine has no `updateMany`/`deleteMany` methods).\n- **Zero real usage**: no hook or authored metadata anywhere subscribes to any of the 10. But the skills teach 6 of them, including a copy-pasteable data-masking example subscribing to `['afterFind', 'afterFindOne']` (`skills/objectstack-data/references/data-hooks.md:632`) — the first user to follow it gets a silently no-op hook.\n\n## Design review: the taxonomy mirrors Mongoose's footgun, not Salesforce's lesson\n\nSurveying how peers design data-layer interception:\n- **Salesforce** (our stated inspiration): triggers only on DML (before/after insert/update/delete/undelete), **no read triggers** (read side is declarative: sharing/FLS), and **bulk-first** — one event set, contexts are always collections; no single/bulk split.\n- **PostgreSQL / Hasura**: write triggers only; reads are RLS/permissions.\n- **Rails**: one `after_find` attached to record materialization — fires for every read shape, so one subscription covers all reads.\n- **Django**: write signals only; bulk explicitly documented as not firing.\n- **Mongoose**: per-query-method hooks (`pre('find')` vs `pre('findOne')` vs `pre('updateMany')` …) — a notorious FAQ generator (\"why doesn't my find hook fire on findOne?\"), mitigated upstream with regex subscriptions.\n\nOur 18-value enum copies the Mongoose shape: it leaks the **engine method table** into the authoring contract instead of exposing **domain events** (\"records are being read/written\"). Consequence: any cross-cutting requirement must be authored N times (the skill example literally subscribes twice for one masking concern), and every extra event is an extra silent-mistake class for AI authors on a platform whose pitch is AI-safe metadata authoring.\n\nThe dead events' intended responsibilities all already have a correct home in our architecture:\n\n| Dead event's intended job | Correct existing mechanism |\n|---|---|\n| `beforeFindOne` read authorization | middleware + RLS (covers findOne) |\n| `afterFindOne` field masking | field-level metadata (`maskSecretFields` is built into the read path) |\n| `beforeCount`/`beforeAggregate` leakage guards | security middleware aggregate gate |\n| `*Many` bulk interception | singular hooks already fire on bulk (context carries the predicate) |\n\n## Decision\n\n1. **Collapse the enum 18 → 8**: keep `before/after × insert/update/delete` + `beforeFind`/`afterFind`. Trim the 10 dead members (same contract-first treatment as the validation `events: ['delete']` trim, #3184; zero real usage ⇒ zero migration).\n2. **Make `findOne` fire `beforeFind`/`afterFind`** (Rails-style: the read event attaches to record materialization, not to the method name). One subscription then covers every read; the \"write it twice\" problem disappears. Purely fail-closed-direction behavior change; no existing hook is negatively affected.\n3. **Formalize bulk semantics in the contract**: document that the singular write events fire on `multi: true` operations with the row-scoping predicate in context (promote existing behavior to a promise, instead of inventing `*Many` twin events).\n4. **Registration guard**: warn when a hook subscribes to an event the engine never dispatches, so enum-vs-dispatch drift can't recur silently.\n5. **Align skills/docs**: teach the 8 events + a responsibility table (read filtering → RLS, masking → field metadata, delete guards → `beforeDelete`); fix the double-subscription masking example.\n\n## Prior-art gap\n\nThe 2026-06 HookSchema property-liveness audit checked property liveness, not enum-value liveness, and a docs-accuracy follow-up treated the dead values as real — this issue is the first treatment of the enum-vs-dispatch gap as a defect. Found during the PD #10 events-enum sweep after #3106/#3184; sibling findings: #3196 (webhook `undelete`/`api`), #3197 (schema-only event surfaces).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

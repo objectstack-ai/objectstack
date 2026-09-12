@@ -1,0 +1,33 @@
+{
+  "number": 3127,
+  "kind": "pull_request",
+  "title": "fix(repo): escape raw NUL bytes that hid six source files from grep",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T12:08:25Z",
+  "updated_at": "2026-07-17T12:17:21Z",
+  "closed_at": "2026-07-17T12:17:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T12:17:19Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3127",
+  "body": "## What\n\nSix source files embedded a **literal U+0000 byte** as a composite-key separator instead of the `\\u0000` escape. `grep`/`ripgrep` scan the whole buffer, classify such a file as binary, and **silently return no matches**:\n\n```\n$ grep -n saveMetaItem packages/metadata-protocol/src/protocol.ts\n$ echo $?\n1\n```\n\n...despite 16 real hits. A core protocol file was invisible to code search and to any grep-based lint tooling.\n\n| File | Role of the NUL |\n|---|---|\n| `metadata-protocol/src/protocol.ts:3054` | ETag locale separator |\n| `cli/src/utils/lint-view-refs.ts:148` | dedupe key |\n| `lint/src/build-access-matrix.ts:90` | access-matrix key |\n| `plugins/plugin-security/src/suggested-audience-bindings.ts:108` | suggestion key (x2) |\n| `services/service-storage/src/attachment-access-hooks.ts:179` | cache key |\n| `services/service-analytics/src/__tests__/objectql-strategy-boolean-filter.test.ts:63` | join separator |\n\n## Why it survived review\n\ngit only scans the **first 8000 bytes** for a NUL. `protocol.ts` carried its NUL at offset **147230** — past that window — so git kept diffing it as ordinary text while grep had already given up on it. The defect was invisible from both directions.\n\n## Fix\n\nReplace each raw NUL with `\\u0000`, matching the existing convention at `rest-server.ts:1065` (`'\\u0000default'`), which uses the escape for exactly this kind of key sentinel. Chosen over `\\0`, which degrades into a legacy-octal escape error if ever followed by a digit.\n\n## Verification\n\nThe changed line in `protocol.ts` lives in `getMetaItemCached`, which **no test executes** — it is only ever mocked. So a green suite would not have proven anything here. Verified directly instead, by driving the real method and comparing against an independent oracle that reproduces the pre-fix raw-NUL expression:\n\n| locale | pre-fix ETag | post-fix ETag | match |\n|---|---|---|---|\n| `en-US` | `68f978ed` | `68f978ed` | yes |\n| `zh-CN` | `50289f3b` | `50289f3b` | yes |\n| (none) | `75dad1ef` | `75dad1ef` | yes |\n\nByte-identical. Locale-varying ETags still hold (issue #1319): same-locale match returns 304, cross-locale correctly does **not**.\n\nAlso: zero raw NULs repo-wide; `grep -c saveMetaItem protocol.ts` now returns 16; emitted `dist/` contains zero NULs; **1383 tests green** across all six affected packages (metadata-protocol 34, lint 225, service-analytics 164, service-storage 99, plugin-security 481, cli 380); builds green.\n\nNo changeset — pure fix, no user-facing behaviour change (AGENTS.md post-task checklist #3).\n\n## Follow-up\n\nNothing prevents this from recurring; six files accumulated it silently. A CI guard rejecting raw NULs in source files would close it — happy to add in a separate PR.\n\nGenerated with [Claude Code](https://claude.com/claude-code)\n"
+}

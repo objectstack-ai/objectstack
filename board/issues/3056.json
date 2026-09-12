@@ -1,0 +1,32 @@
+{
+  "number": 3056,
+  "kind": "issue",
+  "title": "feat: default preset includes the three generic connector executors (rest / openapi / mcp) — blocked by #3055",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T12:33:43Z",
+  "updated_at": "2026-07-17T09:25:31Z",
+  "closed_at": "2026-07-17T09:25:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3056",
+  "body": "Closes the last authoring gap in the ADR-0097 promise that integrations are \"expressible **and executable** as pure metadata\".\n\n## Problem\n\nAn AI (or Studio author) can write a complete, valid provider-bound `connectors:` entry today — but it only materializes if a human has *also* edited `objectstack.config.ts` to add the matching connector plugin to `plugins:`. The metadata layer is complete; the host layer keeps a code-editing step, parked exactly where an AI author can't help itself. The boot error even names the missing package (good), but the fix is still manual code.\n\nCurrent reality:\n- `examples/app-showcase` installs `ConnectorOpenApiPlugin` / `ConnectorRestPlugin` / `ConnectorSlackPlugin` — **not** `ConnectorMcpPlugin`.\n- The `create-objectstack` scaffold ships none of them.\n\n## Why these three (and only these three)\n\n`rest` / `openapi` / `mcp` are **generic executors** (ADR-0022/0023/0024) — protocol-level infrastructure, the analogue of Salesforce External Services being a platform capability. Brand connectors (`slack`, `salesforce`, …) stay marketplace/opt-in. The runtime cost of an installed-but-unused executor is ~zero: factory registration is one map entry, and the MCP SDK is lazily imported only when a connection is actually made.\n\nThis deliberately does **NOT** move anything into the engine/kernel: ADR-0018 §Addendum's layering stands (built-in = the `connector_action` node + the empty registry; transports = plugins). \"Default\" means the **preset layer**: scaffold template + showcase + docs.\n\n## Blocked by #3055\n\nMaking `connector-mcp` default-present without the stdio policy gate widens the metadata→child-process surface (Studio publish → reconcile → spawn). #3055's default-deny (PR #3059) must land first.\n\n## Ask\n\n- `create-objectstack` template: `plugins:` includes `new ConnectorRestPlugin()`, `new ConnectorOpenApiPlugin()`, `new ConnectorMcpPlugin()` (zero-arg = contribute the provider factory only).\n- `examples/app-showcase`: add `new ConnectorMcpPlugin()` for parity.\n- Docs: getting-started / integration pages state which providers are available by default and how to add/remove them.\n- Changesets for the touched packages.\n\n## Also owned by this issue: the deferred live-mcp showcase demo (from #3017, now closed)\n\nThe demo's remaining half is an **in-repo MCP target** the declarative `provider: 'mcp'` instance can point at deterministically in CI — either a tiny MCP fixture server, or `@objectstack/mcp` (the platform's own endpoint; note it currently has **no default wiring anywhere**) with a boot-ordering story, since the automation plugin's `start()` runs before the HTTP server listens — the #3049 degrade+retry makes that self-connection heal seconds after boot, but the Dogfood gate must not become timing-sensitive.\n\n## Refs\n- #3055 / PR #3059 (stdio gate — hard blocker), #3017 (closed — mechanism in #3049), #2977 / ADR-0097, ADR-0015 (all three executors are open-tier), ADR-0018 §Addendum (layering unchanged)"
+}

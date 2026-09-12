@@ -1,0 +1,35 @@
+{
+  "number": 2905,
+  "kind": "pull_request",
+  "title": "feat(plugin-security): ADR-0094 follow-ups — package sets customize via env overlay (D5 revised) + projection dogfood proof + Setup UI alignment",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-14T07:59:42Z",
+  "updated_at": "2026-07-14T10:01:07Z",
+  "closed_at": "2026-07-14T10:01:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-14T10:01:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2905",
+  "body": "ADR-0094 的收尾(承接已合并的 #2901),Closes #2898 —— **以\"支持\"而非\"拒绝\"的方式解决**(维护者 2026-07-14 确认方向反转)。\n\n## 1. 包集定制走标准元数据覆盖(ADR-0094 D5 修订版)\n\n#2898 最初提议在授权时点**拒绝**对包持有权限集的环境 overlay。方向反转的理由:拒绝会让 `permission` 成为唯一一个声明了 `allowOrgOverride: true` 却说谎的类型;而\"克隆再改\"是 **fork**——克隆体永远收不到 vendor 后续的基线更新(含安全收紧),也丢失分层 diff。现在:\n\n- **投影器**:包持有记录的 facets 跟随 **effective(overlay-wins)体**,`managed_by:'package'` + `package_id` provenance 保留——包仍拥有该行,overlay 是对它的定制。\n- **写穿**:数据门编辑包集 → 翻译为 env overlay(不再 403);数据门\"删除\" → 移除 overlay,记录**重置**为发布基线(行保留)。无元数据层的单店内核保留旧版 two-doors 拒绝(由写穿自身断言)。\n- **two-doors 门收窄**到仍然结构性成立的部分:禁止伪造包 provenance(insert/update、单条/数组),`transfer`/`restore`/`purge` 在包行上仍拒绝(无 overlay 翻译)。\n- **跨包组合走岗位**(并集做加法),overlay 做收窄;package-first authoring(ADR-0070)让运行时新建集有归属包——`managed_by:'user'` 游离类别可逐步退役。\n- `registerAuthoringGate` seam 随拒绝方向一并移除(无消费者的 seam 正是 ADR-0049 禁止的 inert 面)。\n\n**如实记录的取舍**(已写入 ADR-0094 D5 修订版):ADR-0005 overlay 是整文档替换——overlay 钉住期间,vendor 的后续基线变更(含收紧)不生效,直到重置或重新编辑;缓解:Studio 分层 diff、升级时提示已定制的包集、ADR-0091 再认证覆盖。这是所有可覆盖类型共同的取舍,权限集不再被特殊化。\n\n## 2. Projection dogfood proof + liveness ledger 绑定\n\n`showcase-permission-projection.dogfood.test.ts` 在真实 showcase 栈证明全部不变量(7 项全绿):数据门 create→元数据+awaited 投影;edit→锁步;声明集编辑→可强制执行 overlay;runtime-only 删除→退役 / artifact-backed 删除→重置;**包集 overlay 定制+重置全生命周期**(`showcase_contributor` 实测)。`two-doors-permission.dogfood` 同步翻转为新语义(5 项全绿)。已注册进 ADR-0054 proof registry(`bound:false` + 如实 `blockedReason`)。`check:liveness` exit 0。\n\n## 3. Setup UI 对齐(框架对象元数据,objectui 原生 honor)\n\n- `sys_permission_set.name` 加 `readonlyWhen: record.id != null`——create 可填、edit 锁定,匹配数据门 400 改名拒绝(实测 meta API 返回该 CEL 谓词)。\n- `permission-sets.mdx` / `authorization.mdx` 更新为 one-authoritative-store + overlay 定制模型。\n- 已克隆 objectui 核实其 SDUI 表单原生消费 `readonlyWhen`(`ObjectForm`→`fieldRules`),无需 objectui 侧改动。\n\n## 附带\n\n- ADR-0094 新增泛化附录:把\"单一权威店\"升级为全部 declared↔record 两店类型的分类规则(`sys_sharing_rule` 记录权威勿投影、`sys_position` 待判定),跟进 #2909。\n\n## 验证\n\n- 单测:plugin-security 332、metadata-protocol 23(seam 移除后回到 #2901 基线)、liveness proof-registry 21,全通过。\n- dogfood:projection 7 + two-doors 5 + permission-seeding/declarative-rbac 7,共 19 项全通过。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01SXjD7g2JkEsdqhZFZgAo1Q"
+}

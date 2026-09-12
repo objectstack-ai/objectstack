@@ -1,0 +1,35 @@
+{
+  "number": 3033,
+  "kind": "pull_request",
+  "title": "fix(auth)+feat(cli): Create User dialog — translatable action params (#3030) and explicit-password-wins semantics (#3031)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T08:04:46Z",
+  "updated_at": "2026-07-16T13:09:02Z",
+  "closed_at": "2026-07-16T13:08:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-16T13:08:59Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3033",
+  "body": "Closes #3030, closes #3031.\n\nTwo fixes for the Setup app **Create User** flow (and every other action param dialog), split into one commit each:\n\n## 1. feat(cli): extract action param i18n keys + fill translations (#3030)\n\n`os i18n extract` never walked `actions[].params`, so the `o.<object>._actions.<action>.params.*` keys the console client already resolves were absent from generated bundles — the dialog rendered raw English under `zh-CN`/`ja-JP`/`es-ES`.\n\n- `collectExpectedEntries` (packages/cli/src/utils/i18n-extract.ts) now emits inline-param `label` / `helpText` / `placeholder` / `options.<value>` — for object actions **and** top-level actions. Field-backed params (`{ field: '…' }`) are skipped unless they carry a literal override, since field translations cover them at runtime.\n- Regenerated the 8 platform-objects bundles (en/zh-CN/ja-JP/es-ES × objects/metadata-forms) and filled the ~26 new key groups per locale (user admin actions, sys_jwks alg/curve fields, page `variables.*` form keys). A second `--merge` pass is idempotent (zero diff).\n- Changeset: `@objectstack/cli` minor, `@objectstack/platform-objects` patch.\n\nVerified in the showcase: with `zh-CN` active the Create User dialog renders fully in Chinese.\n\n## 2. fix(auth): explicit password overrides `generatePassword` (#3031)\n\nThe dialog defaults `generatePassword: true` and labels the password input *\"Password (leave empty to generate)\"* — so typing a password sent both flags and the endpoint 400'd (\"Provide either password or generatePassword, not both\"): the most natural flow always failed. The param `visible` CEL scope can't reference other params' live values, so this can't be fixed client-side.\n\n`resolvePassword` (packages/plugins/plugin-auth/src/admin-user-endpoints.ts) now treats an explicit **non-empty** password as an unambiguous override:\n\n- explicit password → used (complexity-checked as before), `temporaryPassword` **not** returned;\n- empty/absent password + `generatePassword: true` → temporary password generated (unchanged);\n- neither → 400 (unchanged).\n\nApplies to both `create-user` and `set-password` (`newPassword`). Backward compatible — the only change is that a previously-rejected request now succeeds with the intent the label promised. Pure bug fix, no changeset.\n\n## Testing\n\n- `plugin-auth` unit tests: 32/32 (new: explicit-password-wins, empty-password-still-generates).\n- `cli` i18n-extract tests extended for param extraction (inline vs field-backed, global actions).\n- Live-verified on the showcase: the exact previously-failing request body now returns 200; the created user signs in with the explicit password; response carries no `temporaryPassword`.\n\nRelated client-side crash on this 400 (error envelope → `toast.error` → React #31) is fixed separately in objectstack-ai/objectui#2579."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 3141,
+  "kind": "pull_request",
+  "title": "blog: the context-window argument, grounded in a real measurement",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T13:06:49Z",
+  "updated_at": "2026-07-17T14:20:02Z",
+  "closed_at": "2026-07-17T13:17:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T13:17:33Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3141",
+  "body": "## 背景\n\nblog 只有两篇 2024-01 的旧文,都是旧定位。本 PR 补上新叙事真正需要的那篇,并修掉 blog 一直带着的两个渲染 bug。\n\n## 为什么不写 \"~1% 代码面\"\n\n写之前先核实素材,结论是**这个数字没法诚实地引用**:\n- 它要对比的\"传统实现\"**不存在** —— 比值是个反事实,谁也没测过;\n- 仓库里最硬的现存数据是 `metadata-driven.mdx` 的 ~300 → ~30 行(单个 CRUD feature,**10×**),与\"~1%/100×\"差一个数量级;\n- 首页与 objectos.ai 现有措辞沿用不动(两站口径一致),但**新写的东西不该再叠加未经测量的主张**。\n\n与维护者确认后,改走**\"能装进 agent 上下文窗口\"**这条 —— 它不依赖任何未实测的数字,而且是更强的主张:**从效率论证(写得少)变成能力论证(agent 能不能把整个依赖图握在手里)**。\n\n## 改用可测量的事实\n\n不说\"1% of 一个不存在的对照\",直接测**已经存在的东西**:\n\n| examples/app-crm(6 对象 + 视图 + 仪表盘 + 转换流程 + 权限 + 动作 + 翻译) | |\n| :--- | :--- |\n| 文件 | 31 |\n| 行数 | 1,792 |\n| 约 token | ~16,000 |\n\n**整个业务系统**,占 200k 窗口的 8%。Todo ~14.5k;刻意穷举每种元数据类型的 showcase(83 文件)~101k —— 极大值也还剩半个窗口。读者能自己复算,文中给了命令。\n\n文章结构:六周后的变更请求(第二审批人)→ 系统装不进脑子才是真瓶颈 → 可测量的数字 → 为什么\"装得下\"是能力论证而非效率论证 → 系统为什么会小(那 99% 本来就不是你的业务)→ **诚实的代价**:小系统只有在正确时才有用,而这类错误大多不崩溃(谓词写错 → 按钮静默不渲染,TS 抓不到,因为那是个合法字符串)→ 所以有 gate,所以宿主语言是 TS。\n\n## 顺带修的两个真 bug\n\n- **每篇文章标题渲染两次**:详情页已从 frontmatter 渲染 `<h1>`,而两篇旧文正文又都以重复的 `# H1` 开头。\n- **列表页不排序**(`blog.getPages()` 是源码顺序)—— 新文可能沉到任意位置。改为按日期倒序,无日期的排最后。\n\n## 关于两篇旧文\n\n内容**没有错**(protocol-vs-platform 那篇恰好与 ontology 开放协议叙事同源),只是框架旧、日期老。本 PR 只修渲染 bug,不动内容 —— 是否重写/归档留给单独决定。\n\n`types:check` ✅ · `build` ✅\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

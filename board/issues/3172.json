@@ -1,0 +1,30 @@
+{
+  "number": 3172,
+  "kind": "issue",
+  "title": "objectql: 批插入部分成功 API——根治降级重写下 beforeInsert 钩子 at-least-once(#3152 跟进)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-07-18T06:13:10Z",
+  "updated_at": "2026-07-18T08:05:22Z",
+  "closed_at": "2026-07-18T08:05:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3172",
+  "body": "## 背景\n\n#3152 在 PR #3161 中按\"缓解而非根治\"落地:\n\n- ✅ autonumber 移到校验之后——注定失败的批尝试不再消耗号段;\n- ✅ `engine.insert` JSDoc 明确 beforeInsert 为 **at-least-once** 语义(钩子需幂等);\n- ❌ **未根治**:批中一行校验失败 → 整个 `engine.insert(array)` 抛错 → `bulkWrite` 降级逐行重跑完整 insert → 好行的 beforeInsert 钩子仍执行 2 次(副作用型钩子:发通知、计数器、外部 API 调用等重复执行)。\n\n当时的结论(见 #3161 PR 描述):根治需要**引擎级部分成功 API**,超出 #3152 范围。本 issue 跟踪该根治。\n\n## 方向\n\n给批插入路径一个\"部分成功\"形态,让 `bulkWrite` 不再需要\"整批失败 → 重跑整个 insert\"这种放大钩子副作用的降级:\n\n- 候选 A:`engine.insert(array, { partial: true })` 返回 per-row 结果(`{ok, record | error}[]`),校验失败的行不再让整批抛错;好行只走一遍 hooks → 校验 → 驱动写入。\n- 候选 B:新增独立入口(如 `engine.insertMany`),旧的 `insert(array)` 语义保持不变(仍整批原子抛错),调用方(seed/import 的 `writeBatch` 闭包)切到新入口。\n- 无论哪种,坏行需在 beforeInsert **之后**、驱动写入之前被剔除并报告,好行的钩子恰好执行 1 次;afterInsert / record-change 流程触发器行为保持不变(仍恰 1 次)。\n\n需要评估的点:\n- 与事务语义的交互(批插入当前在调用方 exec context 中可能共享事务);\n- `bulkWrite` 侧的适配:有部分成功 API 后,逐行降级路径(`writeOne`)的适用面收窄为\"驱动层批写失败\"场景;\n- 与 #3149 幂等回查(`attempt` 上下文)、#3147 `SummaryRecomputeError` 的组合行为。\n\n## 验收标准\n\n- #3152 探针场景(`[{name:'good1'},{slug:'no-name'},{name:'good2'}]`)中好行 beforeInsert 执行次数为 **1**;\n- afterInsert / 流程触发器仍恰 1 次;\n- autonumber 无空洞(维持 #3161 已达成的行为);\n- seed / import 切换到新形态后,现有回归(`engine-autonumber-batch`、`seed-loader-retry`、`import-runner-idempotency`)全绿。\n\n—— #3152 的根治跟进;缓解措施已随 PR #3161 合入。"
+}

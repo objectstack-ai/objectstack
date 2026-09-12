@@ -1,0 +1,30 @@
+{
+  "number": 2951,
+  "kind": "issue",
+  "title": "对象列表视图 userFilters 值胶囊丢失字段标签 —— fields[].label 编译/下发被剥离 + console 未回退字段标签 (14.7.0)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-15T05:22:35Z",
+  "updated_at": "2026-07-15T05:57:40Z",
+  "closed_at": "2026-07-15T05:57:40Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2951",
+  "body": "### 环境\n- `@objectstack/spec` **14.7.0**\n- `console` 14.7.0\n- 单租户自建对象列表视图（`defineView` 的 `list`）\n\n### 概述\n对象列表视图配置 `userFilters`（ADR-0047 值胶囊，`element: 'dropdown'`）后，**顶部胶囊快筛功能完全正常**（能选值、能驱动 `/api/v1/data` 过滤、lookup 字段渲染关联搜索选择器），但**每个胶囊的标签显示为原始字段 key（如 `project_type`），而非配置的 `label` 或字段自身的中文标签**。经核对，`fields[].label` 在编译/下发环节被剥离，尽管 schema 明确声明其合法。\n\n### 复现\n对象列表视图配置：\n```ts\nlist: {\n  type: 'grid',\n  data: { provider: 'object', object: 'os_tianshun_ehr_project' },\n  userFilters: {\n    element: 'dropdown',\n    fields: [\n      { field: 'project_type', label: '项目类型' },   // select 字段\n      { field: 'project_phase', label: '项目阶段' },  // select 字段\n      { field: 'status',        label: '状态' },       // select 字段\n      { field: 'manager',       label: '管理责任人' }, // lookup(sys_user)\n    ],\n  },\n}\n```\n1. `objectstack validate` → **通过**（label 是合法字段）。\n2. 起 console → 打开该对象列表 → 顶部胶囊标签显示 `project_type` / `project_phase` / `status` / `manager`（英文 key）。\n\n### 期望 vs 实际\n| | 结果 |\n|---|---|\n| **期望** | 胶囊标签显示配置的 `label`（中文）；即使未配 `label`，也应回退到字段的对象级 `label`。 |\n| **实际** | 胶囊标签显示原始 snake_case 字段 key。 |\n\n### 证据 / 根因定位\n**① Schema 明确允许 `label`** — `ObjectListViewSchema.userFilters.fields[]`（`dist/view.zod-*.d.ts`，14.7.0）内联声明：\n```ts\nuserFilters: z.ZodOptional<z.ZodObject<{\n  fields: z.ZodOptional<z.ZodArray<z.ZodObject<{\n    field: z.ZodString;\n    label: z.ZodOptional<z.ZodString>;   // ← label 合法\n    type: z.ZodOptional<...>;\n    options: z.ZodOptional<...>;\n    showCount: z.ZodOptional<z.ZodBoolean>;\n    defaultValues: z.ZodOptional<...>;\n  }, z.core.$strip>>>;\n  ...\n}>>\n```\n（`ObjectUserFiltersSchema` 亦同，均用 `$strip`——只剥未知键，`label` 是已知键，parse 后应保留。）\n\n**② 下发元数据却丢了 `label`** — 经鉴权请求 `/api/v1/meta/view`，同一视图的 `userFilters` 实际下发为：\n```json\n\"userFilters\": {\n  \"element\": \"dropdown\",\n  \"fields\": [\n    { \"field\": \"project_type\" },\n    { \"field\": \"project_phase\" },\n    { \"field\": \"status\" },\n    { \"field\": \"manager\" }\n  ]\n}\n```\n`label`（推测连同 `type` / `options` / `showCount` / `defaultValues`）在编译/下发管线被剥离，只剩 `field`。\n\n**③ console 未回退字段标签** — 缺 `label` 时，console 胶囊直接渲染原始 `field` key，而非该字段的对象级 `label`。\n\n### 建议\n1. **编译/下发保留** `userFilters.fields[].label`（及其余已声明字段），使 schema 声明与实际下发一致；\n2. **console 兜底**：`fields[].label` 缺失时回退显示字段的对象级 `label`，而非 snake_case key。\n\n### 影响\n中文 / 多语言部署下，所有使用胶囊快筛的对象列表，筛选条标签都露出英文字段名，终端不可读。目前无 workaround（配 `label` 被剥、字段级 label 不回退）。\n"
+}

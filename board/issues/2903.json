@@ -1,0 +1,30 @@
+{
+  "number": 2903,
+  "kind": "issue",
+  "title": "ADR-0089 D3b: `@objectstack/lint` rule for deprecated visibility aliases + mismatched binding root",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-14T07:47:18Z",
+  "updated_at": "2026-07-15T02:43:50Z",
+  "closed_at": "2026-07-15T02:43:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2903",
+  "body": "Follow-up to #2642 / #2900 (ADR-0089). D1 + D2 have landed; this tracks **D3b**.\n\n## Goal\n\nAdd a `@objectstack/lint` rule that flags, in freshly authored source:\n\n1. **Deprecated alias usage** — a `visibleOn` (view form) or `visibility` (page component) key → **autofix to `visibleWhen`**.\n2. **Mismatched binding root** — a predicate whose root doesn't match its layer:\n   - `data.` in a **runtime** form/page predicate (should be `record.` / `current_user` / `page.<var>`), or\n   - `record.` in a **metadata-editing** form (`*.form.ts`, should be `data.`).\n\n## Notes\n\n- The alias autofix (1) is mechanical and high-confidence.\n- The binding-root check (2) needs the rule to know which layer a file/predicate belongs to (runtime `*.view.ts` / `*.page.ts` vs metadata `*.form.ts`). See the per-layer table documented in `content/docs/protocol/objectui/layout-dsl.mdx` (updated in #2900).\n\n## Tasks\n\n- [ ] Rule + autofix for deprecated aliases → `visibleWhen`.\n- [ ] Rule for binding-root/layer mismatch.\n- [ ] Tests; wire into the lint ruleset; run across `packages/` + `examples/`.\n\n## References\n- ADR-0089 D3b (`docs/adr/0089-unify-visibility-predicate-naming.md`)\n- Parent: #2642"
+}

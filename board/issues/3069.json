@@ -1,0 +1,35 @@
+{
+  "number": 3069,
+  "kind": "pull_request",
+  "title": "fix(rest): make async import-job cancellation actually stop the worker (#2824)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T14:44:02Z",
+  "updated_at": "2026-07-16T14:59:34Z",
+  "closed_at": "2026-07-16T14:59:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-16T14:59:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3069",
+  "body": "## Summary\n\nFixes #2824 — cancelling a running async CSV import had no effect: the job kept writing all rows and finished `succeeded`.\n\n**Root cause**: with a synchronous storage driver (better-sqlite3 / wasm fallback), every `await` in the import row loop resolves as a microtask, so a 50k-row import monopolizes the Node event loop for its whole duration. The cancel route's HTTP handler (and every progress poll) never gets to run, so the in-memory flag that `shouldCancel` polls is never set.\n\n**Three-part fix**:\n\n- **`runImport` yields one macrotask (`setImmediate`) at every progress boundary** (every `progressEvery` rows), so pending I/O — the cancel request, progress polls — gets serviced during a large import. Root-cause fix; also unblocks live progress for the wizard.\n- **The worker's `shouldCancel` falls back to reading the durable job row**: a cancel accepted by another process (or after a restart dropped the in-memory flag) still stops the worker.\n- **A late cancel wins the terminal state**: the final patch never overwrites the cancel route's durable `cancelled` with `succeeded`, and a job cancelled while still `pending` doesn't start at all.\n\n## Testing\n\n- 3 new unit tests (`import-runner-cancel.test.ts`): mid-loop cancel stops at the next checkpoint with truthful counts; no-cancel path unaffected; yield happens even without `shouldCancel`.\n- 3 new integration tests (`import-job-integration.test.ts`): mid-flight cancel via the route; out-of-band durable cancel (no in-memory flag); late-cancel terminal-state guard.\n- Negative verification: 4 of the 5 new tests fail on pre-fix code.\n- Full `@objectstack/rest` suite green (288 tests), build + DTS clean.\n- End-to-end showcase UI run on the rebuilt dist: live progress renders during a 50k import (dead at 0% before), clicking 取消导入 stops the worker mid-run (job `cancelled` at 17600/50000, row count stable afterwards), and an uncancelled control import still succeeds 50000/50000.\n\nKnown remaining (out of scope): the wizard shows 「已导入 0 条」 after cancel instead of the actual partial count — objectui frontend issue (objectui#2393).\n\nCo-Authored-By: Claude <noreply@anthropic.com>"
+}

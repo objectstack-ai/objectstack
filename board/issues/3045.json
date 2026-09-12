@@ -1,0 +1,35 @@
+{
+  "number": 3045,
+  "kind": "pull_request",
+  "title": "fix(plugin-audit): localize activity summaries to the workspace locale (#3039)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T10:18:10Z",
+  "updated_at": "2026-07-16T13:09:36Z",
+  "closed_at": "2026-07-16T13:09:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-16T13:09:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3045",
+  "body": "Closes #3039\n\n## Problem\n\n`installAuditWriters` hardcoded English verbs and the object **API name** into every activity summary — `Created person_qualification \"OC-00001\"` — regardless of the workspace `localization.locale` setting (ADR-0053). The summary is baked into the `sys_activity` row at write time, so no UI-side fix is possible.\n\n## Fix\n\n- `writeAudit` resolves the workspace default locale per write through a new lazy `getLocale` seam (`resolveLocalizationContext`), memoized per tenant/user scope with a 30s TTL so audit logging adds no settings query to the CRUD hot path.\n- Create/delete and the *generic* update fallback render through new `messages.activityCreated/Updated/Deleted` i18n templates; en / zh-CN / ja-JP / es-ES ship in the plugin bundle. zh-CN yields the issue's expected `创建了 人员资质 \"OC-00001\"`.\n- The object is named by its localized label (`objects.{name}.label`) → authored def label → API name.\n- i18n resolves through a structural `AuditI18nSurface` seam (mirroring `MessagingEmitSurface`); missing i18n/settings services or bundle keys degrade to the previous English summaries, so existing deployments are unaffected.\n- Message keys are single-segment (`activityCreated`) because both i18n implementations (memory fallback + FileI18nAdapter) resolve dot-paths by walking nested objects — a flat dotted record key would never resolve.\n- Author-owned milestone and tracked-change summaries are intentionally untouched (their wording belongs to the app author).\n\n## Tests\n\n`pnpm --filter @objectstack/plugin-audit test` — 38/38 (6 new: zh-CN create/delete/update summaries via the real `createMemoryI18n` + shipped bundle, def-label fallback, no-i18n degradation, locale memoization). Build + DTS green. Patch changeset included.\n\nRelated UI-side fix (list/detail relative-date humanize, #3040): objectstack-ai/objectui PR from branch `claude/framework-issues-3040-3039-b413f4`."
+}

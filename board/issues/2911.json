@@ -1,0 +1,35 @@
+{
+  "number": 2911,
+  "kind": "pull_request",
+  "title": "feat(rest,spec): 导出文件名本地化 + 系统字段标签内置多语言回退",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-14T10:49:50Z",
+  "updated_at": "2026-07-14T14:11:13Z",
+  "closed_at": "2026-07-14T14:11:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-14T14:11:10Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2911",
+  "body": "## 背景\n\n用户反馈两处问题:\n1. **导出功能(CSV/Excel)文件名**:直接下载得到 `contracts.csv` 这种裸 API 名,希望优化为「对象显示名-时间戳」。\n2. **导入模板仍有英文**:下载模板的 CSV 里,注入的系统字段表头是英文(如 \"Owner\"),示例行是 ASCII slug(如 `prepare`)。\n\n前端配套 PR:objectui(导出文件名前端兜底、导入模板示例值取显示标签、模板文件名本地化)。\n\n## 变更\n\n### `@objectstack/rest` — 导出下载文件名\n- `GET /data/:object/export` 的 `Content-Disposition` 改为「对象显示名-时间戳」,按 RFC 5987/6266 双写:`filename=\"task-20260714-153045.xlsx\"`(ASCII 兜底)+ `filename*=UTF-8''任务-20260714-153045.xlsx`(本地化标签)。\n- 新增 `exportContentDisposition(objectName, label, ext, now?)`。\n\n### `@objectstack/spec` — 系统字段标签内置回退\n- ObjectQL 注册表注入的系统字段(`owner_id`/`created_at`/`created_by`/`updated_at`/`updated_by`)只有英文标签,自定义对象没有对应翻译条目,导致中文界面漏出 \"Owner\"/\"Created At\"。\n- `translateObject` 内置这五个字段的 en/zh-CN/ja-JP/es-ES 标签表(措辞与平台翻译包一致),**仅当字段标签仍是注入的英文默认值时**套用,作者自定义标签绝不覆盖;无翻译包时也生效。\n- REST 元数据翻译路径同步放宽(不再因缺 bundle 提前返回);缓存 ETag 本就按 locale 分键,无串味风险。\n\n### `@objectstack/plugin-reports` — 附件文件名\n- 定时报表附件文件名清洗从「非 ASCII 全替换 `_`」改为按 Unicode 字母/数字保留(`\\p{L}\\p{N}`),中文计划名不再变成下划线串。\n\n### showcase\n- 任务对象 In Progress 视图开启 `exportOptions: ['csv','xlsx','json']`,示例应用可直接演示/实测导出。\n\n## 测试\n\n- 单测:spec 6756 通过、rest 260 通过(含 `exportContentDisposition` 5 例、系统字段回退 6 例)、plugin-reports 29 通过。\n- **真机实测**(showcase dev 栈 + objectui console,中文界面):\n  - `curl -H 'Accept-Language: zh-CN' …/export?format=xlsx` → `content-disposition: attachment; filename=\"showcase_task-20260714-063010.xlsx\"; filename*=UTF-8''%E4%BB%BB%E5%8A%A1-…`(即 `任务-….xlsx`);en-US → `Task-….csv`。\n  - 控制台 UI 导出 CSV/XLSX,浏览器实际落盘名:`任务-20260714-064550.csv`、`任务-20260714-064607.xlsx`。\n  - 导入向导「下载模板」:模板首列表头由 \"Owner\" 变为「所有者」,`created_at` 显示「创建时间」。\n\n## 追加(6ab3e7c20):导出↔导入选项标签闭环\n\n第二轮实测发现平台级缺陷:导出/模板写出的是**翻译后**的选项标签(如 `待规划`),但导入 coercion 只认作者原始标签——用户把自己刚导出的中文文件原样导回,select 字段全报 `invalid_option`。\n\n- `prepareImportRequest` 新增 `localizeSchema` 钩子;REST 两处导入路由传 `translateMetaItem`,把翻译标签并入选项匹配同义词(`mergeLocalizedOptionSynonyms`)。\n- 作者标签、选项 code 照常接受;非法值照常报 `invalid_option`;钩子抛错时静默降级为原 schema。\n- showcase 补全 `showcase_task` en/zh-CN 翻译包(status/priority/done/labels/sync_status/sync_error),消除模板残留英文。\n- 单测 rest 265/265(+5 例 `import-prepare.test.ts`);真机 dry-run:中文标签导回 `ok:1`、英文标签不回归、非法值仍拦截(详见 PR 评论实测报告)。\n\nCloses #2916\n"
+}

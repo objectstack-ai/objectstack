@@ -1,0 +1,30 @@
+{
+  "number": 3110,
+  "kind": "issue",
+  "title": "ObjectLogger file destination silently no-ops in ESM builds",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T09:58:33Z",
+  "updated_at": "2026-07-17T11:57:25Z",
+  "closed_at": "2026-07-17T11:57:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3110",
+  "body": "## Symptom\n\n`createLogger({ file: '/path/to.log' })` never creates or writes the log file when `@objectstack/core/logger` is consumed from an **ESM** entrypoint (which is what `os serve` / `os dev` run — the workspace is `type: module`). The same config works from a CJS consumer.\n\n## Repro (against built dist, Node v25)\n\n```js\n// probe.mjs\nimport { createLogger } from '@objectstack/core/logger';\nimport fs from 'node:fs';\nconst l = createLogger({ format: 'pretty', file: '/tmp/probe.log' });\nl.info('esm file probe');\nawait l.destroy();\nconsole.log('file exists:', fs.existsSync('/tmp/probe.log')); // → false\n```\n\n## Root cause\n\n`openFileStream()` in `packages/core/src/logger.ts` does a lazy `require('fs')` (\"Lazy require to avoid bundling issues\" — the module is deliberately browser-safe for `@objectstack/client`). tsup/esbuild compiles that to the `__require` shim in the ESM output (`dist/logger.js`), which **throws** `Dynamic require of \"fs\" is not supported` at runtime; the surrounding `try { … } catch { /* ignore — file logging is optional */ }` swallows it, so file logging silently never activates. The CJS output (`dist/logger.cjs`) is unaffected because real `require` exists there.\n\n## Suggested fix\n\nKeep the module browser-safe but stop relying on bundled `require`:\n\n- `process.getBuiltinModule?.('node:fs')` (Node ≥22.3, sync, already behind the existing `typeof process !== 'undefined'` guard and try/catch for older runtimes), or\n- `createRequire(import.meta.url)` via a tsup `shims`-style banner, or an async `import('node:fs')`.\n\nAlso consider logging a one-line warning instead of the bare `catch {}` when a `file` destination was explicitly configured but could not be opened — the current silence is exactly how this went unnoticed.\n\nFound while fixing NO_COLOR/TTY handling in the same file (the fix PR keeps the file path plain-text but does not touch this)."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 2778,
+  "kind": "issue",
+  "title": "[objectui] Studio flow designer: implement the 'position' xRef picker kind for approval approvers / escalateTo",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-07-10T11:32:59Z",
+  "updated_at": "2026-07-16T15:47:21Z",
+  "closed_at": "2026-07-16T15:47:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2778",
+  "body": "#2738 给 `ApprovalNodeApproverSchema.value` 的 xRef 多态 map 增加了 `position: 'position'`,#2767 把 `escalateTo` 的 xRef kind 从 `role` 改成了 `position`。spec 侧契约已就位,但 Studio 流程设计器(`../objectui`)是否实现了 `'position'` 这个 picker kind 未验证——未实现时属性面板会退化成自由文本(功能可用,体验不完整,且岗位名拼错无提示)。\n\n## 待办(在 objectui 仓库执行)\n\n- [ ] 确认设计器 xRef picker 注册表是否已有 `'position'` kind(ADR-0090 D3 已把 sharing recipient `'role'` 改名 `'position'`,大概率有现成 picker 可复用)\n- [ ] 若无:实现 position picker——数据源 `sys_position`(展示 label,写入 machine `name`),接入 Approval 节点属性面板的 approver `value` 列(`kindFrom: 'type'` 多态)与 `escalation.escalateTo`\n- [ ] 顺带确认 `role` kind 的 picker 在审批语境下展示的是 membership tier(owner/admin/member),而不是 sys_position 列表——否则会把用户重新引回 #2738 修掉的坑\n\n## 验收\n\nStudio 里给 Approval 节点选 `position` 类型的 approver 时出现岗位选择器;`escalateTo` 同样;选中后落盘的是岗位 machine name。\n\nRefs: #2738, #2767, ADR-0090 D3, ADR-0018 §configSchema(xRef 注解)。"
+}

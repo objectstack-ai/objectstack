@@ -1,0 +1,35 @@
+{
+  "number": 3096,
+  "kind": "pull_request",
+  "title": "fix(skills,docs): align skills/docs with published spec; guard flat view containers",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T07:00:37Z",
+  "updated_at": "2026-07-17T07:10:26Z",
+  "closed_at": "2026-07-17T07:10:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T07:10:24Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3096",
+  "body": "## 背景\n\n2026-07-17 第三方评估(15.1.0 发布包实测)发现 5 处 skills/docs 与发布 spec 的漂移。这些直接伤害 AI-native 卖点:AI 按官方 skill 写元数据会连续挂。本 PR 全部修复,并把最重的一条(平铺 view 静默不渲染)的根因堵上。\n\n## 修复清单(评估 5 项)\n\n1. **`defineDataset` → `defineSeed`**(skills/objectstack-data 整节 + platform skill 的 `os data seed` 描述):实际导出是 `defineSeed(objectDef, {externalId, mode, env, records})`(`seed.zod.ts`);`dataset` 名字保留给 ADR-0021 分析语义层。skill 正文新增两者辨析提示。\n2. **`type: 'unique'` 校验类型已不存在**(#1475 删除):SKILL.md 类型列表改为完整 6 个 discriminator(`script`/`state_machine`/`format`/`cross_field`/`json_schema`/`conditional`),显式教 `indexes: [{ fields, unique: true }]`;rules/relationships.md 的 junction 组合唯一示例同步改 indexes。\n3. **kanban 配置形态**(skills/objectstack-ui):顶层 `groupBy` → 嵌套 `kanban: { groupByField, summarizeField, columns }`,顶层 `columns` 仍必填;对照 `KanbanConfigSchema` 与 `examples/app-showcase/src/ui/views/task.view.ts`。\n4. **docs ui/views 整页重写为 `defineView` 容器写法**:原页面教的平铺 view 对象(`{ name, label, type, columns }` 顶层)`os validate` 通过但 Console 静默不渲染。新页面以 `defineView({ list, listViews, formViews })` + `defineStack({ views: [...] })` 注册为主线,并加 Callout 警示平铺写法;属性表订正(`columns` 实际必填、`name`/`label` 实际 optional、`span` 优先于 legacy `colSpan`、`visibleWhen` 为 record 根的 CEL)。\n5. **README quickstart curl 路径**:`/api/v1/todo_task` → `/api/v1/data/todo_task`(rest 包路由实证;脚手架模板本已正确)。\n\n## 顺带修复的同类漂移(修复中实证发现)\n\n- **gantt 示例同病**(UI skill):顶层 `startField`/`endField`/`dependencyField`(键名也是错的)→ 嵌套 `gantt: { startDateField, endDateField, titleField, progressField, dependenciesField, parentField }`;`timeSegments` 示例移入 `gantt:` 块(objectui 运行时从 `ganttConfig.timeSegments` 读取)。\n- **列 `summary` 形态**(UI skill):`summary: { function: 'min' }` → 平枚举 `summary: 'min'`(`ColumnSummarySchema`)。\n- **rules/validation.md 深度订正**:删虚构的 `async`/`custom` 类型(外呼/自定义校验 → lifecycle hook);`format` 的键是 `regex` 非 `pattern`、内建无 `uuid`;`conditional` 实为 `when`/`then`/`otherwise`(无 `validations[]` 数组);所有谓词改 record 根 CEL(`P` 标签),并按运行时 `rule-validator.ts` 明确 **`cross_field` 与 `script` 同为反转语义**(谓词=失败条件)——原文档的 cross_field 示例全部写反。\n- UI skill 新增 `defineView` 容器 primer(此前整个 skill 从未出现容器概念)。\n\n## 根因加固(第 4 条的\"为什么 validate 放行\")\n\n根因:`ViewSchema` 四槽全 optional + Zod strip 未知键 → 平铺 view 被剥成**合法空容器 `{}`**,schema 门通过、loader 零展开、Console 零视图。\n\n- `defineView()` 现在对零视图容器**抛错**(带 wrap-it 提示)。\n- `@objectstack/lint` 新增 `validateViewContainers`(rule `view-container-shape`),`os validate` 接线(与 ADR-0053 检查同样跑在 **normalizeStackInput 之后、schema parse 之前**,否则平铺键已被剥掉);平铺/空容器条目报错并给修复提示,独立 ViewItem(`viewKind`)条目放行。\n- **刻意不动**运行时 `view` type-schema 映射:运行时要同时容纳容器/ViewItem/#2555 个性化三形态,直接收紧会把 Console 个性化保存打挂 → 独立跟进 #3095。\n\n## 验证\n\n- `@objectstack/spec` 全量 254 files / **6890 tests 通过**(含新增 defineView 空容器/平铺抛错用例);`@objectstack/lint` **216 tests 通过**(新规则 7 用例);`@objectstack/cli` tsc 构建通过。\n- 端到端 dogfood:app-todo 注入平铺 view 探针 → `os validate` 以 `view-container-shape` 拦截、exit 1;还原后 app-todo / app-crm / app-showcase(4 容器 21 对象)全部干净通过,无误报。\n- `gen:skill-docs` 重跑,`check:skill-docs` 同步 ✓;docs 站点 `pnpm docs:build` 通过,`/docs/ui/views` 已在浏览器实测渲染(容器主线、Callout、TOC 正常)。\n\n## Follow-ups\n\n- #3094 — skills 内 TS 示例的可编译性 CI 门(opt-in 抽取 + schema 派生 discriminator 扫描,设计已写入 issue)。\n- #3095 — 运行时 `view` type-schema 对 ViewItem/个性化形态空转(strip-to-`{}` 全放行)的收紧。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

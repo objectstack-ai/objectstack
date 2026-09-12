@@ -1,0 +1,32 @@
+{
+  "number": 2644,
+  "kind": "issue",
+  "title": "ADR-0087 P0: enforce the protocol handshake (make `engines.protocol` real)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-07-05T16:35:02Z",
+  "updated_at": "2026-07-15T15:00:46Z",
+  "closed_at": "2026-07-06T00:28:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2644",
+  "body": "Part of #2643 (ADR-0087). **First phase — smallest change, highest value/cost.** Turns a protocol/consumer version mismatch from an arbitrary downstream crash into a structured, machine-actionable **load-time refusal**, and pays down a standing **ADR-0078** violation (a declarable field the runtime ignores).\n\n**Status:** core enforcement + install seam shipped in **#2650** (draft). Remaining items (load-path handshake, lint nudge, scaffold stamping) tracked below — this issue stays open until they land.\n\n## The bug this fixes\n\n`PluginEnginesSchema.protocol` (`packages/spec/src/kernel/manifest.zod.ts`, ADR-0025 §3.2, protocol-first per §3.10 #3) is declared, documented, and **checked by no loader, installer, or CLI command** (repo-wide grep: the only non-test hit is the schema's own `.describe()`). A package built against protocol N and loaded by an incompatible runtime therefore fails deep inside a `.parse()` or a renderer contract instead of at the boundary.\n\n## Scope (D1)\n\n- [x] **`PROTOCOL_VERSION` / `PROTOCOL_MAJOR` constant** exported from `@objectstack/spec/kernel` (drift-tested against the package major). — #2650\n- [x] **Pure handshake core** in `@objectstack/metadata-core`: `checkProtocolCompat()`, `assertProtocolCompat()`, structured `ProtocolIncompatibleError` (`OS_PROTOCOL_INCOMPATIBLE`) carrying both versions + the `migrate meta --from N` command; refuses only on a positive mismatch, grandfathers absent ranges, never false-rejects an unparsed range. — #2650\n- [x] **Install seam**: `installPackage` runs the handshake before the registry write. — #2650\n- [ ] **Load seam**: run the handshake on the boot-time durable-package rehydration path and `AppPlugin.start()` for code-defined stacks (the same `assertProtocolCompat` call).\n- [ ] **`objectstack lint`** flags a package with no `engines.protocol` range (nudge toward declaring it).\n- [ ] **Scaffold stamping**: `create-objectstack` and the `defineStack` templates emit `engines: { protocol: '^<current major>' }` by default — the ratchet that closes grandfathering.\n\n## Acceptance criteria\n\n- [x] A fixture package declaring an incompatible `engines.protocol` is **rejected at install** with the structured diagnostic (error code + both versions + migrate command asserted); it does **not** reach the registry write. — #2650\n- [x] A compatible range installs unchanged; a package with **no** range installs with exactly one warning. — #2650\n- [x] `@objectstack/downstream-contract` + the api-surface snapshot stay green (2 added, 0 breaking; snapshot regenerated). — #2650\n- [x] The diagnostic is identical in shape whether the consumer is one major behind or five. — #2650\n- [ ] The same guarantees hold on the **load** path, not just install.\n\n## Boundaries\n\n- No source rewriting here — this phase only **refuses**; the migration that resolves the refusal is P1 (conversion) / P2 (`migrate meta`).\n- The error must name the chain/command, not a doc the consumer \"should have read\" — see ADR-0087 D1.\n\nRefs: #2643, #2650, ADR-0087 (D1), ADR-0078, ADR-0025 §3.2/§3.10."
+}

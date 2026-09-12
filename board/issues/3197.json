@@ -1,0 +1,32 @@
+{
+  "number": 3197,
+  "kind": "issue",
+  "title": "Audit: several event/subscription/connector enums are schema-only (declared, no runtime consumer)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T07:42:24Z",
+  "updated_at": "2026-07-18T13:41:30Z",
+  "closed_at": "2026-07-18T13:41:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3197",
+  "body": "## Summary\n\nUmbrella tracking issue from the PD #10 `events`-enum audit (following #3106 / #3184). Beyond the two confirmed subtle bugs — data hooks (#3195) and webhook `undelete`/`api` (#3196) — the audit flagged a cluster of schemas that parse externally-authored metadata but have **no runtime consumer**: the declared surface is real, the enforcement is absent. These are \"declared, not yet implemented\" rather than reachability bugs, so they're lower-urgency, but each silently no-ops on off-spec input and should be either wired, trimmed, or explicitly documented as not-yet-implemented so authors aren't misled.\n\n**These need per-surface confirmation before action** — the traces below are from the audit and should be verified when each is picked up.\n\n## Flagged surfaces\n\n| Surface | Schema (file:line) | Audit finding to confirm |\n|---|---|---|\n| GraphQL subscriptions | `api/graphql.zod.ts:340` (`GraphQLSubscriptionConfigSchema`, `events: created/updated/deleted/custom`) | Schema has no runtime importer; the GraphQL HTTP entry (`runtime/src/http-dispatcher.ts:1723`) accepts only query/mutation and 501s (`kernel.graphql` unassigned); no subscription transport. Whole feature schema-only. |\n| Connector webhooks | `integration/connector.zod.ts:236` (`WebhookConfigSchema.events`, 8 values) | `AutomationEngine.registerConnector` (`service-automation/src/engine.ts:854-872`) reads only `def.actions`, never `def.webhooks` — events parse and are ignored. |\n| Connector triggers | `integration/connector.zod.ts:546` + `automation/trigger-registry.zod.ts:367` (`type: webhook/polling/stream`) | `def.triggers` never read; `stream` lives only in an unimported schema. |\n| Realtime event type | `api/realtime.zod.ts:27` (`RealtimeEventType`, incl. `field.changed`) | Enum has zero runtime importers; `field.changed` has no emitter (engine emits `data.record.*` string literals directly). |\n| Record subscriptions | `data/subscription.zod.ts:10,24` (`SubscriptionEventType`: comment/mention/field_change/task/approval/all; `NotificationChannel`: in_app/email/push/slack) | Imported only by interface contracts; no runtime reads a subscription's `events` to filter notifications; implemented channels are email/inbox/sms (no `push`/`slack`). |\n| WebSocket protocol | `api/websocket.zod.ts:28` (`WebSocketMessageType`, 9 values) | No WS server mounted; protocol enum unconsumed. |\n\n## Confirmed-ENFORCED (ruled out, for the record)\n\n- GitHub connector `triggers` (`integration/connector/github.zod.ts:204`) — emitted verbatim into a GitHub Actions `on:` block; dispatched by GitHub, correct as-is.\n- Automation FlowTrigger registry (`automation/trigger-registry.zod.ts`) — a generic `Map<type, trigger>` registry, not a fixed enum; registered types (`record_change`, `schedule`, `api`) work by design.\n\n## Suggested handling\n\nFor each row: confirm the trace, then pick one of — (a) implement the consumer, (b) trim the schema/enum until there's a runtime (contract-first, #3184), or (c) if intentionally roadmapped, add an explicit \"not yet enforced\" note to the schema's `.describe()`/doc so authoring metadata against it isn't silently swallowed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

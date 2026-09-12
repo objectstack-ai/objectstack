@@ -1,0 +1,30 @@
+{
+  "number": 3180,
+  "kind": "issue",
+  "title": "Retire residual feed discovery/dispatcher surface (ADR-0052 §5, follow-up to #1959)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T06:35:00Z",
+  "updated_at": "2026-07-18T11:11:27Z",
+  "closed_at": "2026-07-18T11:11:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3180",
+  "body": "## Background\n\n#1959 retired the vestigial feed **contracts + protocol + client** surface (ADR-0052 §5): `IFeedService`, `feed-api.zod`, `data/subscription.zod`, the `FeedProtocol` slice of `protocol.zod`, the `getFeedService` plumbing in `metadata-protocol`, and the `client.feed.*` accessor. `service-feed`'s runtime was already deleted in #1955.\n\nA small **discovery/dispatcher** feed surface was deliberately left out of #1959 to keep that PR focused, because it is entangled with the `comments` capability. This issue tracks finishing it.\n\n## Scope\n\n- `packages/spec/src/api/discovery.zod.ts`\n  - `routes.feed` (`ApiRoutes`) — the `feed: '/api/v1/feed'` route hint. Removing it also lets `packages/client/src/index.ts` drop the `feed` route constant it currently keeps **only** to satisfy the `Record<ApiRouteType, string>` type (see the NOTE comment added there in #1959).\n  - `WellKnownCapabilitiesSchema.feed` — the boolean capability. **Blocker to untangle:** `comments` currently derives from the same deleted service.\n- `packages/spec/src/api/dispatcher.zod.ts`\n  - the `{ prefix: '/api/v1/feed', service: 'data' }` dispatcher entry.\n- `packages/metadata-protocol/src/protocol.ts` `getDiscovery()`\n  - `feed: registeredServices.has('feed')` — since `service-feed` no longer exists this is **permanently `false`**; and\n  - `comments: registeredServices.has('feed')` — **this also keys off the deleted `'feed'` service**, so `comments` is now permanently `false` too. That is a real bug: `sys_comment` is the canonical comments backend, so the `comments` capability should reflect *that*, not the retired feed service. Decide where `comments` should hang (e.g. always-on, or keyed off the data/`sys_comment` availability) as part of this cleanup.\n- Tests to update: `packages/spec/src/api/discovery.test.ts`, `packages/spec/src/api/dispatcher.test.ts`, `packages/client/src/client.test.ts` (`capabilities.feed`).\n\n## Notes\n\n- Removing `WellKnownCapabilities.feed` is a breaking change to the discovery response shape → needs a changeset with a FROM → TO note (`capabilities.feed` → `capabilities.comments` / the `services` registry).\n- Regenerate spec artifacts (`gen:schema` may need a manifest key removal for the discovery schema, `gen:api-surface`, `gen:docs`) as in #1959.\n"
+}

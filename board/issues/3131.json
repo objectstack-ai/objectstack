@@ -1,0 +1,35 @@
+{
+  "number": 3131,
+  "kind": "pull_request",
+  "title": "fix(metadata): register()/unregister() announce to subscribe() watchers (#3112)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T12:12:42Z",
+  "updated_at": "2026-07-17T13:34:53Z",
+  "closed_at": "2026-07-17T13:05:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T13:05:54Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3131",
+  "body": "Fixes #3112.\n\n## The trap\n\n`MetadataManager.register()` updated the in-memory registry, persisted to writable loaders and published to the realtime service — but never called `notifyWatchers()`. `unregister()` had the same gap. `subscribe()` looked like it covered every write, and covered almost none of them.\n\nOne correction to the issue's framing, verified while investigating: watchers never fired \"from the `saveMetaItem` path\" directly — `saveMetaItem` never touches the MetadataManager at all. It writes `sys_metadata`, the repository's in-memory broadcaster emits, and `applyRepoEvent` (metadata-manager.ts:1590) translates that into the watch event. Same conclusion, different mechanism.\n\nThe consumer that pays for this is ObjectQL's SchemaRegistry bridge — the component that decides what is queryable. #3108 worked around it for the `metadata:reloaded` seam; the asymmetry remained everywhere else.\n\n## Decision: option 1, with an explicit opt-out\n\nAnnouncing is now the **default**, so a new call site (e.g. a cloud artifact-api mid-run refresh) is correct without knowing this contract exists. The five bulk/boot sites opt out explicitly via the new `MetadataWriteOptions` — `{ notify: false }` — so the silent path is deliberate and visible at the call site instead of a global trap.\n\nNaive \"just call notifyWatchers()\" was not viable, for a reason beyond the flood the issue anticipated:\n\n- **Boot ordering.** ObjectQL subscribes at `plugin.ts:367`; the bulk `bridgeObjectsToMetadataService` runs at `:492`. The subscriber is already attached, so the flood is real.\n- **Provenance corruption (not in the issue).** The bridge copies objects *out of* the SchemaRegistry. Announcing feeds them straight back into ObjectQL's handler, which re-registers under `_packageId ?? 'metadata-service'` — silently overwriting the true package provenance of every bridged object whose body carries no `_packageId`. That site must stay silent on correctness grounds, not just cost.\n\n## What actually changes at runtime\n\nThis is a **contract fix, not a bug-fix bundle** — being precise after auditing every consumer:\n\n- **Live:** runtime datasource writes (`datasource-admin-plugin.ts:254/383`) now reach the HMR SSE stream, which subscribes to every registered type. The \"future mid-run `register()` call site\" the issue predicted already exists today, and was silent.\n- **Latent:** `unregisterPackage()` / `bulkUnregister()` now announce their deletes. Correct, and regression-tested — but neither has a production caller in framework or cloud today, so nothing was observably broken. Called out so the changeset doesn't oversell it.\n- **Unchanged:** the `object` type sees no new events at runtime — both of its `register()` sites are deliberately silenced.\n\n## Call-site posture\n\n| Site | Posture | Why |\n|---|---|---|\n| `objectql` boot bridge | silent | copies *out of* the registry; announcing corrupts provenance |\n| `metadata` artifact ingest (×3) | silent | reload announces the whole batch once via `metadata:reloaded` |\n| `metadata` FS boot priming | silent | pre-consumer; later edits flow through FileSystemRepository |\n| `datasource-admin` register/unregister | **announces** | genuine mid-run write (was the silent bug) |\n| `unregisterPackage` / `bulkUnregister` | **announces** | genuine runtime delete (was the silent bug) |\n\n## Verification\n\n- New `register-notifies-watchers.test.ts` (15 tests) pins both halves: announce by default, silence only on request. **Verified non-vacuous** — 8 fail against the pre-change manager, and the 6 asserting silence correctly still pass.\n- New no-flood guard on the reload path. **Verified non-vacuous** — fails with `expected [{ type: 'added', … }] to deeply equal []` when the `{ notify: false }` opt-out is dropped.\n- Green: spec 6890, objectql 905 (the sole registry subscriber), metadata 274, service-datasource 93, downstream-contract 14 + tsc, plus plugin-dev/plugin-security/metadata-protocol/rest/runtime.\n- **api-surface ratchet: 0 breaking, 1 added** (`MetadataWriteOptions`); snapshot regenerated. The 3-arg forms keep working — implementors with fewer params stay structurally compatible.\n\n## Downstream (`cloud`) — audited, follow-up filed\n\n`cloud` consumes framework via `link:` to this checkout, so this lands there on merge with no version bump. Audit result: **5 call sites, all boot-time bulk** (`service-ai` agent bridge, `ai-studio` tools/agents/skills, legacy-agent cleanup), **no `agent`/`tool`/`skill` subscriber**, and no `IMetadataService` implementor — so no correctness break. They should still take `{ notify: false }` for the same reason this PR's bridge does: `notifyWatchers()` publishes to the cluster **unconditionally** whenever pubsub is attached, and `apps/objectos-ee` runs service-cluster + redis — so each node boot would otherwise emit ~50 needless `metadata.changed` broadcasts carrying full definition bodies. Sequenced after this PR, since `MetadataWriteOptions` does not exist until it merges.\n\n## Reviewer notes\n\n- `notifyWatchers()` also does cluster fan-out, so runtime `register()` now broadcasts on `metadata.changed`. That is the intended peer-invalidation design (see the field comment at metadata-manager.ts:132). No new secret egress: `StoredDatasource` carries `external.credentialsRef` (a reference — \"cleartext secret is transient, never stored\"), and `register()` already published the same body to the realtime service.\n- `registerInMemory()` stays silent by design (GitOps-owned artefacts) — now documented on the method rather than left as folklore.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

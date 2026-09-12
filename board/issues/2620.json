@@ -1,0 +1,30 @@
+{
+  "number": 2620,
+  "kind": "issue",
+  "title": "objectui 跟进项(源自 #2616 Showcase 全链路 UX 测试)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-05T03:35:05Z",
+  "updated_at": "2026-07-15T13:23:48Z",
+  "closed_at": "2026-07-15T13:23:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2620",
+  "body": "来自 #2616 的发现,根因定位到 sibling `objectui` 仓库(pinned `.objectui-sha`),本会话的 GitHub 访问范围仅限 `objectstack-ai/framework`,无法直接在 `objectui` 建 issue,先在本仓汇总跟踪,便于换成 objectui 会话时认领。框架侧可修的部分已在 #2616 的修复 PR 中处理;以下均需要在 `objectui` 侧改动。\n\n## A1. UnifiedSidebar 用 i18n 对象标签覆盖导航项显式 label\n`UnifiedSidebar` 把导航项自己的 `label` 仅作为 fallback 传入 `useObjectLabel().objectLabel`,只要翻译包定义了同名 `objects.<name>.label`,翻译永远赢,导致应用配置里显式写的复数 label(`'Projects'`/`'Tasks'`/...)在侧边栏被单数对象标签覆盖。\n**修复方向**:导航项显式 `label` 应优先于对象标签;对象类导航兜底时应取 `pluralLabel` 而非 `label`。\n\n## A3(残留). ActionEngine 的 `visible` 表达式求值失败时 fail-open,且 toast 时序早于写库确认\n`packages/formula/src/cel-engine.ts` 的 `celEngine.evaluate()` 返回 `{ok:false,error}` 而非抛出,由调用方(objectui 的 SchemaRenderer/ActionEngine)决定失败时的默认可见性——当前在**无绑定记录**的上下文(如页头/工具栏)下默认 fail-open(显示),而在有绑定记录的行/详情上下文下 fail-closed(隐藏),不一致。此外 script action 的成功 toast 出现时机早于服务端真正确认写库结果。\n框架侧已通过移除 `showcase_review_queue` 的无绑定工具栏按钮规避了具体复现场景(#2616 修复 PR),但 ActionEngine 本身的 fail-open 默认值和 toast 时序问题仍在。\n\n## B1(待核实). `formType:'wizard'` 的 `<ObjectForm>` 是否真的处理 `submitBehavior`\n`submitBehavior` 是 spec 里合法的 `<ObjectForm>` prop(`packages/spec/src/ui/view.zod.ts`,`react-blocks.ts` 的 `dataProps`),`showcase_new_project_wizard` 之前从未设置它,已在修复 PR 里补上 `{kind:'thank-you',...}`。但 objectui 的 wizard 分步渲染器是否真的读取并执行 `submitBehavior`(而不仅仅是非 wizard 的简单表单)需要在 objectui 侧核实。\n\n## B2. 详情页 \"Overdue Nd\" 相对日期格式化器不区分字段语义\nTask Detail 的 START DATE 套用了逾期相对时间格式化器,渲染成 \"Overdue 6d\"。框架侧 `Field.date()` 和 `RecordDetailsProps` 都没有任何\"这是开始日期/截止日期\"的语义区分或按字段覆盖格式化器的能力——这个格式化器完全实现在 objectui 的日期单元格渲染器里,需要按字段角色(due vs. start/end)区分,而不是简单地对\"日期 &lt; 今天\"一律套用 \"Overdue\"。\n\n## C2. Work Map 默认 MapLibre style 指向 `demotiles.maplibre.org`,无降级态\n框架侧(`examples/app-showcase`、`packages/spec/src/ui/view.zod.ts`)完全没有 map style/tile server 的配置项——默认 style URL 和加载失败降级态都在 objectui 的地图渲染组件里硬编码。建议:objectui 侧加载失败时显示明确降级提示;可选地在 framework 侧的 `MapViewSchema` 加一个 `style`/`tileServer` 配置项,让上层能传入自定义 style。\n\n## C3. console bundle 内置的 Sentry 上报离线时持续重试,无开关\n框架自身运行时(`@objectstack/runtime` 的 `ErrorReporter`)对遥测完全是可选注入、默认 no-op。重试的 Sentry 调用编译在 vendored `@object-ui/console` SPA 里,这个仓库里甚至没有构建产物(`packages/console` 只有 stub package.json)。需要在 objectui 侧的 Sentry 初始化加一个默认关闭的开关(OSS/dev 模式下默认不上报,或至少不无限重试)。\n\n## D(残留). Command Center 图表在 1440px 下被挤到 ~130px 宽;坐标轴/图例显示原始字段名与原始枚举值\n`examples/app-showcase/src/pages/command-center.page.ts` 的 SDUI 布局本身用的是标准 `display:grid, gridTemplateColumns:'repeat(3, minmax(0,1fr))'`,看起来是正确的;数据集 label(`chart-gallery.dataset.ts`)和选项 label(`project.object.ts` 的 health 选项)也都已经是人类可读文案,后端 `AnalyticsService.resolveDimensionLabels()` 也已把维度值解析成显示文本并附带 `fields[].label`(有单测覆盖)。如果实际渲染仍然出现窄图表和原始字段名/枚举值,问题出在 objectui 的 SDUI `type:'flex'` 组件渲染(可能是内联 `display:'flex'` 覆盖了 responsiveStyles 编译出的 `display:grid` 规则)和图表组件未读取已解析的 `fields[].label`/行数据,而不是这个页面的配置。\n框架侧已加上 `showcase_command_center` 的 e2e 冒烟覆盖(#2616 修复 PR 的 `showcase-smoke.spec.ts`),并把图表宽度断言从 `>0` 收紧到 `>200`,后续如果这个渲染 bug 还在,CI 会失败并指向这里。\n\n## E(残留). AuthProvider 加载 organizations 失败告警 + useAgents 每次导航重复请求 + 组件注册表 bare-name fallback 告警\n- `GET /api/v1/auth/organization/list` 服务端早已默认启用 organization 插件(`packages/plugins/plugin-auth/src/auth-manager.ts`,避免 404),但 `[AuthProvider] Failed to load organizations` 字符串和该 fetch 的 abort/取消逻辑完全不在本仓——在 objectui 的 `AuthProvider`(可能是 effect cleanup 或路由切换取消了 fetch)。\n- `useAgents` 在 objectui 的 `@object-ui/plugin-chatbot` 里,每次导航重复请求 `/ai/agents`,缺少缓存/去重(framework 侧已把该端点在未配置 AI 服务时的响应从 404 改成 200 `{agents:[]}`,见 #2616 修复 PR,但重复请求本身是客户端缓存问题)。\n- `field:time` / `field:address` / `view:calendar` / `view:timeline` / `plugin-charts:chart` 的 \"bare-name fallback\" 告警来自 objectui 的 `@object-ui/core` `ComponentRegistry`(`packages/core/src/registry/Registry.ts`),本仓完全没有这个注册表的实现,只有 ADR-0026 描述的 `registerFieldType`/`registerViewType`/`registerWidget` 契约。\n\n---\n关联:#2616(本 issue 汇总了该 issue 里判定为 objectui 归属、本仓无法直接修复的部分)。"
+}

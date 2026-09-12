@@ -1,0 +1,33 @@
+{
+  "number": 2959,
+  "kind": "pull_request",
+  "title": "Update README.md",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-15T12:31:44Z",
+  "updated_at": "2026-07-15T12:32:02Z",
+  "closed_at": "2026-07-15T12:31:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-15T12:31:55Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2959",
+  "body": null
+}

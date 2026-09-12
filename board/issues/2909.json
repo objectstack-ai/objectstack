@@ -1,0 +1,34 @@
+{
+  "number": 2909,
+  "kind": "issue",
+  "title": "Audit sibling declared-metadata↔record two-store types (sys_position, sys_sharing_rule, sys_capability) per ADR-0094 addendum",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-14T08:19:38Z",
+  "updated_at": "2026-07-16T01:23:07Z",
+  "closed_at": "2026-07-16T01:23:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2909",
+  "body": "## 背景\n\nADR-0094 把 `sys_permission_set` 做成 metadata 层的纯投影，并在 **2026-07-14 addendum** 里把该决策提升为一条适用于所有「declared-metadata ↔ queryable-record 两存储类型」的**分类规则**。三个 sibling 以同样方式 seed（声明 metadata → `sys_*` 记录，仅 boot/publish 时同步），需要套用该分类：\n\n- `sys_position`（`bootstrapDeclaredPositions`）\n- `sys_sharing_rule`（`bootstrapDeclaredSharingRules`）\n- `sys_capability`（`bootstrapSystemCapabilities`）\n\n> **v2（2026-07-15）重写说明**：原版是纯审计任务。经落点级核实后重写为「审计 + 一个前置小 feature」——`sys_sharing_rule` 完全没有 provenance 字段，「seed-not-clobber」在它身上**当前不可实现**，必须先补 provenance（见 P0）。同时把各 checkbox 从「待查」更新为已核实的结论，并新增一条「须记录的设计取舍」。\n\n## 分类判据（ADR-0094 addendum，不变）\n\n**enforcement 在请求时读哪个 store？**\n\n- **Metadata-authoritative** → 记录是纯投影（复用 ADR-0094 机制：data-door write-through + awaited `registerMutationProjector` + `registerAuthoringGate` + boot reconciliation）。\n- **Record-authoritative** → 记录是权威，声明 metadata 只是 **boot SEED**；要做的是 seed-not-clobber 纪律（不覆盖被环境编辑过的行；不把声明体当 live override 读）。**不要**套投影机制。\n\n## 已核实现状（2026-07-15，落点级）\n\n| 类型 | enforcement 读哪里 | 分类 | seed 现状 |\n|---|---|---|---|\n| `sys_sharing_rule` | 记录，live（`sharing-rule-service.ts` ~L100 `engine.find('sys_sharing_rule', …)`；`sharing-plugin.ts` 规则评估同路径） | **record-authoritative** | ❌ **每次 boot 都 clobber**：`bootstrapDeclaredSharingRules` 按 name 走 `defineRule`，对已存在行覆盖 `label`/`criteria_json`/`recipient_*`/`access_level`/`active`（`sharing-rule-service.ts` ~L105-115）。且整个 `plugin-sharing` **没有任何 `managed_by`/`customized` provenance 字段**，无从判定「环境编辑过」。 |\n| `sys_position` | 混合：position→permission-set 解析对 *sets* 是 metadata-first；但 `sys_position` 记录的 bindings、`delegatable`/admin gating 由 anchor gate 与 `DelegatedAdminGate` **live 读记录** | **record-authoritative**（定义字段 metadata 只作 seed 身份） | 🔶 事实安全但未收口：seed 只刷新 `label`/`description`（`bootstrap-declared-positions.ts` ~L82-85），不碰权威字段；但无测试锁定该行为，也未文档化为 seed-only。 |\n| `sys_capability` | 记录（curated registry 存在性读取） | **record-authoritative**（registry） | ✅ 基本达标：显式 don't-clobber（`bootstrap-system-capabilities.ts` ~L103-105，仅刷 `label`/`description`/`scope`）。剩余：`scope` 若属 admin 可编辑面则也在被刷，需确认；行为无测试锁定。 |\n\n**安全动机（为什么 sharing rule 的 clobber 不是洁癖）**：sharing rule 是**授予访问**的对象。管理员发现某条声明规则过宽而将其 `active:false` 停用后，下一次 deploy/boot 会**静默复活**这条过度共享（over-sharing resurrection）。这与 ADR-0049「不引入未强制的安全属性」同向：管理员的收窄操作必须可持久。\n\n## P0 前置：给 `sys_sharing_rule` 补 provenance（seed-not-clobber 的判定依据）\n\n「never overwrite an env-edited row」隐含前提是**能判定一行是否被环境编辑过**。没有 provenance 时只剩两个坏选项：朴素 skip-if-exists（包升级永远送不下去）或逐字段 diff seed 快照（复杂度不匹配）。因此：\n\n- [ ] `sys_sharing_rule` 增加 `managed_by`（platform/package/admin）+ `customized` 字段,对齐 sibling 词表（参照 #2920 A4 的三态统一）。\n- [ ] 复用 ADR-0094 D5 已落地的 `customized` 机制作范本：`permission-set-projection.ts` ~L208-244（仅对 package-owned 行盖 `customized` 章）。\n- [ ] 管理员经 data door 修改 seeded 行时置 `customized: true`（或等效的编辑痕迹判定）。\n\n## 任务分解\n\n- [ ] **T1 — `sys_sharing_rule` seed-not-clobber**（依赖 P0）：`bootstrapDeclaredSharingRules`/`defineRule` 对 `customized` 行**不覆盖**（保留管理员编辑，尤其 `active:false`）；未编辑的 pristine 行继续接受声明更新（包升级可达）。管理员自建行（name 不冲突）不受影响。测试矩阵：pristine 行升级可达 × customized 行不被复活 × 自建行不动。\n- [ ] **T2 — `sys_position` 收口**：确认 seed 永不触碰权威字段（`permissions`/bindings/`delegatable` 等）,用测试锁定「seed 只刷 label/description」；在对象定义/文档标注 declared position 为 seed-only（身份 + 展示字段）。\n- [ ] **T3 — `sys_capability` 收尾**：确认 `scope` 的归属（若 admin 可编辑则移出刷新集或以 `customized` 门控）；测试锁定 don't-clobber 行为。\n- [ ] **T4 — ADR-0094 addendum 表定稿**：把表中「Audit that…」待办语气改写为 resolved 分类结论（含本 issue 的落点引用），并记录下方的设计取舍。\n\n## 须记录进 ADR 的设计取舍\n\n**为什么 sharing rule 选 seed-only 而不是「写护栏 + 覆盖」（projection-lite）？** 存在一个自洽的替代方案：像 #2918 那样对 package 托管行上写护栏（管理员不可改），boot 覆盖即无害。**不选它**的理由：`sys_sharing_rule` 与 permission set 不同,它本来就是 Setup 里一等的管理员创作/调整面（含对 seeded 规则的收窄），禁编辑会砍掉产品能力；分类判据（enforcement 读记录）也指向 record-authoritative。此取舍须写入 addendum 表,避免后来者重开争论。\n\n## 验收\n\n- [ ] P0：`sys_sharing_rule` 具备 provenance（`managed_by` + `customized`），词表与 sibling 一致。\n- [ ] 三类型各自的 seed-not-clobber 行为有测试锁定（T1-T3 的矩阵）。\n- [ ] 「管理员停用的声明规则不被 boot 复活」有专属回归测试。\n- [ ] ADR-0094 addendum 表更新为 resolved 分类 + 取舍记录（T4）。\n\n## 关联\n\n- ADR-0094 + 2026-07-14 addendum（`docs/adr/0094-sys-permission-set-pure-projection.md` ~L255-318,表在 ~L303-306）。\n- 先例机制：`packages/plugins/plugin-security/src/permission-set-projection.ts`；协议缝 `registerMutationProjector` / `registerAuthoringGate`（本 issue 三类型均**不**使用——record-authoritative）。\n- #2918（sys_position / sys_capability 平台/应用托管行写护栏,已完成——**不含** sys_sharing_rule）· #2920 A4（`managed_by` 三态词表统一,P0 与其对齐）· ADR-0049。\n\n_Filed as the scoped follow-up named in the ADR-0094 addendum (Prime Directive #10). Rewritten v2 after site-level verification._"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 2975,
+  "kind": "pull_request",
+  "title": "ADR-0096 (execution-surface identity admission) + fixes for the 3 confirmed-exploitable holes it surfaced (#2980, #2981, #2982)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-15T15:06:55Z",
+  "updated_at": "2026-07-15T16:32:19Z",
+  "closed_at": "2026-07-15T16:32:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-15T16:32:17Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2975",
+  "body": "Follow-up to #2964 / #2849. Two parts: the **decision record** (ADR-0096) and the **three confirmed-exploitable fixes** its evidence sweep surfaced. See the branch/PR note at the bottom — these can be split if a separate fast-merge PR is preferred.\n\n## Part 1 — ADR-0096: Execution-Surface Identity Admission (docs)\n\nNames the failure class behind #2849 and #2308: a metadata-driven execution surface reaches the data engine without an `ExecutionContext`, and the SecurityPlugin's empty-principal fall-open rewards the omission with full authority — silently. Decisions:\n\n- **D1 invariant**: every engine call carries a real principal or an explicit, reasoned, audited `SystemGrant`. \"No context\" is a defect, never an authorization.\n- **D2** one elevation door `systemContext(reason)` (grep-able, audited); **D3** compiler-enforced required `CallIdentity` (the #2849 facade bug becomes a compile error); **D4** execution-surface admission test wired into the ADR-0056 D10 conformance matrix + CI meta-test; **D5** staged fail-closed strict mode; **D6** re-bases #2849 Phase 2/3 (action `runAs` in ADR-0073's `user`/`automation`/`system` vocabulary).\n- **Evidence** section enumerates the class from a four-axis sweep (E1 replicated fall-open predicate, E2 the three exploitable surfaces below, E3 middleware-bypass paths, E4 unknown seams, E5 the ~300-site D2 migration sizing).\n\n## Part 2 — the three confirmed-exploitable fixes\n\nEach fixed at its own enforcement point; no behaviour change for correctly-scoped callers. Tests added; `plugin-reports` 38, `service-knowledge` 22, `plugin-sharing` 85 green; eslint + doc-authoring guard clean; changeset added.\n\n- **#2980 reports** — `getReport`/`deleteReport`/`saveReport`/`listReports` were caller-identity-blind (read/wrote `sys_saved_report` with a system context) → any authenticated user could read/delete/overwrite/enumerate any report (cross-owner, cross-tenant). Now owner-scoped (system read of the protection-locked metadata object, authorization by owner match; create/overwrite can't spoof ownership). Scheduled dispatch no longer runs `isSystem` (which emailed the target object's whole table past the owner's RLS): it resolves the owner via a new `resolveOwnerContext` seam and **fails closed** when unresolved (the reports-surface consumer of ADR-0073's user-less identity resolution — wiring that resolver re-enables scheduled runs under owner RLS).\n- **#2981 knowledge/RAG** — `applyPermissionFilter` returned all hits on missing *or* system context. Missing identity now fails closed (drops object-backed hits, keeps ACL-less file/http); only an **explicit** system context passes through. Closes the agent path where an omitted `ToolExecutionContext.actor` yielded unfiltered semantic search over the whole corpus.\n- **#2982 sharing** — bulk `update({multi:true})`/`deleteMany` had no single id to `canEdit`-gate, skipping owner scoping on private (and public_read) objects. New `SharingService.buildWriteFilter` (edit-set analogue of `buildReadFilter`) is AND-ed into the multi-write AST, incl. the on-behalf-of delegator intersection.\n\n> **Scheduled-reports behavior change (#2980).** Correctly fixing the exfiltration requires running the report under the owner's resolved RLS, which needs the ADR-0073 M2 principal resolver (not available to the reports plugin today). Until it's wired, scheduled reports **fail closed** (skipped + marked failed) rather than run elevated. Interactive `run`/`runAdHoc` are unaffected. Flagged for reviewer sign-off.\n\n> **Branch/PR note.** These fixes and the ADR share the designated task branch, so they landed on one PR. If you'd prefer the three P1/P2 fixes as a separate fast-merge PR decoupled from the ADR's architectural review, say so and I'll split them out.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_0155bjzJZxZaZTKSMSvg6Aum"
+}

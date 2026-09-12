@@ -1,0 +1,32 @@
+{
+  "number": 2936,
+  "kind": "issue",
+  "title": "RLS field-existence / tenancy-disabled net is inert for canonical `==` policies (extractTargetField only parses `=`/`IN`)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-14T16:43:24Z",
+  "updated_at": "2026-07-15T02:13:29Z",
+  "closed_at": "2026-07-15T02:13:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2936",
+  "body": "## 根因\n\n`plugin-security/src/security-plugin.ts` 的 `extractTargetField`（用于 field-existence 安全网与 tenancy-disabled 跳过判定）正则只识别 legacy 单 `=` / `IN` 形，**无法解析** canonical CEL 的 `==`：\n\n```ts\nconst m = using.match(/^\\s*([a-z_][a-z0-9_]*)\\s*(?:=|IN|in)(?=\\s|\\()/);\n```\n\n对 `organization_id == current_user.organization_id`：字段后是 ` == `，第一个 `=` 后紧跟第二个 `=`（不满足 `(?=\\s|\\()`），正则不匹配 → 返回 `null`。\n\n## 后果\n\n`computeRlsFilter` 的 field-existence 安全网对 `targetField === null` 的策略走 `return true`（保留、照编译），于是：\n\n- **tenancy-disabled 跳过失效**：对 `tenancy.enabled:false` 的对象，`==` 形的 wildcard `organization_id` 策略不会被跳过 → 编译成 `{organization_id: ...}` 施加到一个**没有该列**的对象上。这正是 ADR-0095 delta (c) 的来源（成员读全局目录被幻影 org 过滤器挡住）。\n- **deny-哨兵 fail-closed 网对 `==` 形基本失效**：只有 legacy `=` 形策略才会触发 “缺列 → deny 哨兵”。\n\n现有单测（`security-plugin.test.ts` L217 “tenancy.enabled=false 跳过”）用的是 `=` 形 fixture，所以是绿的；**生产种子用 `==`**，走的是另一条（未被覆盖的）路径。\n\n## B1（ADR-0095 D1）已如何绕开\n\n租户墙已抽为 Layer 0（`tenant-layer.ts`），Layer 0 **不依赖** `extractTargetField`——它直接从对象字段集 + tenancy posture 判定“是否租户对象”。因此租户维度的这个盲区在 D1 已从结构上消除（delta c 得到修正）。\n\n## 仍待评估（本 issue 跟踪）\n\n`extractTargetField` 仍服务于 **Layer 1 业务策略** 的 field-existence / deny-哨兵网。任何用 `==` 书写、目标列在某对象上缺失的业务 wildcard 策略，其 “缺列 → fail-closed” 保护当前是失效的（会照常编译，行为取决于驱动）。需要决定：\n\n- 修 `extractTargetField` 使其识别 `==`（会给现存 `==` 业务策略带来 field-existence/deny 行为变化——**需单独评审**，勿夹带进 B1）；或\n- 用 formula 编译器的真实字段引用抽取替换这段正则启发式（更根本）。\n\n**不要**在 ADR-0095 D1 的 PR 里全仓修它——那会引入未评审的新 delta。这里单独跟踪。\n\n相关：ADR-0095（#2920 B1）、PR #2933。"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 3114,
+  "kind": "issue",
+  "title": "Documented `pnpm dev -- --fresh -p <port>` is broken: pnpm-forwarded `--` is rejected by the oclif dev command",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T10:03:30Z",
+  "updated_at": "2026-07-17T12:11:20Z",
+  "closed_at": "2026-07-17T12:11:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3114",
+  "body": "## Symptom\n\nThe AGENTS.md-documented backend-debug flow fails at the repo root (pnpm 10.31.0):\n\n```\n$ pnpm dev -- --fresh -p 44637\n…\nERR_PNPM_RECURSIVE_RUN_FIRST_FAIL @objectstack/example-showcase@0.3.11 dev: `objectstack dev --seed-admin -- --fresh -p 44637`\nExit status 2   # oclif prints the dev command's help\n```\n\nRoot `dev` script is `pnpm check:console-sha && pnpm --filter @objectstack/example-showcase dev`; the filtered run forwards extra args with a literal `--` separator, and the oclif `dev` command (strict parsing, no positionals) rejects `-- --fresh -p 44637` as unexpected arguments and exits 2.\n\n## Workaround\n\nRun the bin directly in the example dir: `cd examples/app-showcase && ./node_modules/.bin/objectstack dev --seed-admin --fresh -p <port>`.\n\n## Fix options\n\n- Teach the oclif commands to accept a leading `--` end-of-flags separator (POSIX convention; oclif supports `'--': true` passthrough), or\n- change the root `dev`/`dev:crm` scripts so forwarding survives the pnpm-filter hop, and\n- re-verify the AGENTS.md “Backend-only debug” row actually works as written (it is the canonical multi-agent flow, so every agent following the doc hits this).\n\nFound while smoke-testing the NO_COLOR logger fix (#3111) — not addressed there."
+}

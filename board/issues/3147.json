@@ -1,0 +1,32 @@
+{
+  "number": 3147,
+  "kind": "issue",
+  "title": "bug(objectql): 汇总重算失败仅 warn——子记录批量插入报成功,父 summary 静默过期且无重试",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T14:18:51Z",
+  "updated_at": "2026-07-18T04:29:08Z",
+  "closed_at": "2026-07-18T04:29:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3147",
+  "body": "## 问题\n\n`recomputeSummaries` 在子记录写入成功后重算父对象的 summary 汇总字段时,把每个父记录的 aggregate + update 包在 try/catch 里,失败**只打一条 warn 日志**——不抛出、不重试、不计入任何面向调用方的结果。\n\n位置:[packages/objectql/src/engine.ts(recomputeSummaries,catch 分支)](https://github.com/objectstack-ai/framework/blob/021ba4caf/packages/objectql/src/engine.ts#L1827-L1833)\n\n后果:子记录批量插入返回**全部成功**,但父记录的汇总值(如发票 `total`)静默保持过期/缺失。远程 DB(turso)一次网络抖动落在\"父汇总 update\"上,就得到一笔明细正确、总额错误、无人知晓的数据。seed / import 层的 `withTransientRetry` 罩不到这里,因为它发生在 `engine.insert` 内部。\n\n## 复现(探针测试,可直接作为回归用例)\n\n用 mock 驱动让 `update('inv', ...)` 第一次抛 `fetch failed`:\n\n```ts\n// inv.line_total = summary SUM(inv_line.amount);驱动 update(inv) 首次抛 'fetch failed'\nconst a = await engine.insert('inv', { name: 'A' });\nconst res = await engine.insert('inv_line', [\n  { name: 'l1', amount: 10, inv: a.id },\n  { name: 'l2', amount: 7,  inv: a.id },\n]);\n// 实测:res.length === 2(全部报成功),而父记录 line_total === undefined(汇总永远没写上)\n// 日志仅出现:WARN Roll-up summary recompute failed\n```\n\n## 建议修法\n\n1. `recomputeSummaries` 内部对 aggregate + 父 update 加 transient 退避重试(与 `@objectstack/core` 的 `withTransientRetry` 同语义)。\n2. 重试耗尽仍失败时,失败必须对调用方可见:抛出,或至少在返回结果/操作上下文中带出\"汇总重算失败\"信号,不能只 warn。\n\n## 验收标准\n\n- 父汇总 update 首次抛 transient 错误 → 重试后汇总值正确落库。\n- 重试耗尽仍失败 → 调用方能从返回值或异常中感知,不再是静默成功。\n- 上述探针场景由红转绿并入正式测试套件。\n\n—— 发现于 #2678 批量写入路径专项测试(测试报告见该 issue 评论)。\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 3149,
+  "kind": "issue",
+  "title": "bug(core/bulkWrite): 批量重试无幂等——驱动已提交但响应丢失时,重试导致整批重复插入",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T14:18:55Z",
+  "updated_at": "2026-07-18T04:33:58Z",
+  "closed_at": "2026-07-18T04:33:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3149",
+  "body": "已在 PR #3161(已合并到 main)中修复:`bulkWrite` 向 `writeBatch`/`writeOne` 传入 `attempt` 计数;seed 按 `externalId`、import 按 `matchFields` 在 `attempt > 1` 时回查已存在行、只补插缺失行——commit 后响应丢失的重试不再整批重复插入。纯 insert 模式(无自然键)按文档保持 at-least-once。回归测试见 `packages/metadata-protocol/src/seed-loader-retry.test.ts`、`packages/rest/src/import-runner-idempotency.test.ts`。\n\n—— 原始 issue 内容 ——\n\n## 问题\n\n`bulkWrite` 的 transient 重试是 **at-least-once 且无幂等手段**:当驱动实际已提交、但成功响应在网络上丢失(turso 类 HTTP 驱动的真实故障形态——错误发生在 commit 之后)时,重试会把**整批再插一遍**。"
+}

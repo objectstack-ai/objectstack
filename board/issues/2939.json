@@ -1,0 +1,35 @@
+{
+  "number": 2939,
+  "kind": "pull_request",
+  "title": "feat(plugin-security): C2-β — explain 引擎 record 粒度行级归因 (#2920)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-15T00:40:26Z",
+  "updated_at": "2026-07-15T01:11:01Z",
+  "closed_at": "2026-07-15T01:11:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-15T01:11:00Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2939",
+  "body": "## C2-β — explain 引擎 record 粒度行级归因\n\n引擎侧实现,基于已合并的 **C2-α 契约**(`explain.zod.ts` 的 `recordId` / `ExplainMatchedRule` / `ExplainRecordAttribution` / `ExplainDecision.record` / `ExplainLayer.kernelTier` / `AuthzPosture` / `tenant_isolation` 层)。tracking issue #2920。\n\nUI 侧对端 PR:objectstack-ai/objectui#2502(同分支名)。\n\n### 实现结构\n`explain(principal, object, operation, recordId?)`:透传 `recordId`;缺省时对象级行为**完全不变**。带 `recordId` 时叠加行级归因,全部复用 enforcement 同一批函数(explained-by-construction):\n\n- **`tenant_isolation` Layer 0**:作为永远最先的层 prepend;每层打 `kernelTier`(`layer_0_tenant` vs `layer_1_business`),区分「租户墙挡」还是「业务 RLS 挡」。\n- **每层 `record` 归因**(tenant / owd_baseline / sharing / rls):`outcome`(admitted/excluded/not_evaluated)、有效 `rowFilter`、`matchesRecord`(用 `@objectstack/formula` 的 `matchesFilterCondition` 对同一条 FilterCondition 求值——第三个 canonical backend,与查询/SQL 一致)、命中 `rules[]`(kind ∈ tenant_filter/owd_baseline/ownership/record_share/sharing_rule/team/rls_policy,含 grants/via/effect)。\n- **顶层 `record` 判定**:`visible` + `decidedBy` 决定性层。读走复合行过滤匹配,写走 sharing service 的 `canEdit`(均为 enforcement 原语)。\n- **`principal.posture`**:ADR-0095 D2 档位的 B2 stand-in 派生(复用 `resolveAuthzContext` 已投影的 `platform_admin` / org-admin 角色证据)。**B2 未合并**,标注 `TODO(B2)` 待换成正式 posture resolver;当前四档能填满(PLATFORM_ADMIN/TENANT_ADMIN/MEMBER/EXTERNAL)。\n\n### explained-by-construction / 无漂移\n- `computeRlsFilter` 重构为 `computeLayeredRlsFilter`(暴露 `{ layer0, layer1 }` 拆分)+ 薄 `andComposeLayers` 包装 —— **单一代码路径**,行级归因取自与有效过滤同源的 layer0/layer1。\n- 行级匹配用 `matchesFilterCondition`;写用 sharing service `canEdit`;shares 来自 `listShares`。不另写第二套判定。\n- 记录级 deps 全部 **optional**:无 plugin-sharing 的部署 sharing 层报 `not_evaluated`,record 路径仍工作。\n\n### REST\n`security.explain`(GET/POST)接受可选 `recordId`(经 `ExplainRequestSchema` 校验)。\n\n### 向后兼容\n无 `recordId` 的对象级请求输出 **byte-identical**:9 层不变、无 `tenant_isolation`、无 `kernelTier`、无 `posture`、无 `record`。已有对象级测试无改动全绿。\n\n### 验证\n- `explain-engine.test.ts`:14 原测(对象级向后兼容)+ 10 新测(带/不带 recordId、Layer 0 vs Layer 1 归因、共享准入/排除、记录不存在、写走 canEdit、无 deps 降级)= **24 全绿**。\n- `pnpm --filter @objectstack/plugin-security test` = **376 全绿**。\n- `plugin-security` / `rest` 包 build(含 DTS tsc)通过。\n\n### 存疑点\n- posture 依赖 B2 未合并 → 用派生 stand-in(有 TODO),档位值已稳定。\n- group/role/unit 收件人的 share 未做展开 → `rules[]` 中标 `neutral`(诚实,不臆断);顶层 `visible` 仍由 sharing 复合过滤/canEdit 决定,不受影响。\n\nCloses part of #2920.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_019QRUvVfpvSycAHMMF2xTxs"
+}

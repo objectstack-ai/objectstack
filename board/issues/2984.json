@@ -1,0 +1,35 @@
+{
+  "number": 2984,
+  "kind": "pull_request",
+  "title": "feat(attachments): v2 follow-ups — read visibility, authed downloads, edit-on-parent, lifecycle, enforce-or-remove (#2970)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-15T15:30:24Z",
+  "updated_at": "2026-07-16T01:09:15Z",
+  "closed_at": "2026-07-16T01:09:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-16T01:09:13Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2984",
+  "body": "Completes **all** of the #2970 tracking issue (follow-up to #2755 / merged #2969). Six items, verified by unit + dogfood + a real-browser pass.\n\n## 1. Read visibility inheritance\n`sys_attachment` reads (find/list/count/aggregate) now inherit the parent record's visibility, via a `sys_attachment`-scoped engine **middleware** (not a find-hook — so list `total`, which comes from `engine.count()`, is filtered identically and can't leak the hidden-row count). Generalizes ADR-0055 `controlled_by_parent` to the polymorphic parent: resolves visible parent ids per `parent_object` through the caller-scoped engine, ANDs a `$or` of `{parent_object, parent_id:{$in}}`; deny-all when none; fail-closed on error.\n\n## 2. Authenticated, parent-scoped downloads\n`GET /storage/files/:fileId(/url)` were anonymous capability URLs. For `scope==='attachments'`, non-`public_read` files they now gate on `authorizeFileRead`: `401 AUTH_REQUIRED` without a session, `403 ATTACHMENT_DOWNLOAD_DENIED` when the caller is neither the owner nor able to read a parent record (full caller context via `resolveAuthzContext`), else a short-lived (`downloadTtl`, 300s) signed URL. Non-attachments files (avatars, field images embedded in `<img src>`) keep the stable anonymous URL.\n\n## 3. Edit-on-parent for attach (Salesforce parity)\nCreating a `sys_attachment` now requires EDIT on the parent (sharing `canEdit`), not merely read — public parents unchanged, private/owner-scoped require own/edit.\n\n## 4. `sys_upload_session` lifecycle\nAn ADR-0057 `transient` lifecycle (TTL 1d past `expires_at`; retention 7d for terminal statuses) reaps abandoned/terminal chunked-upload sessions. Row reap only; a backend multipart-abort guard is a filed follow-up.\n\n## 5. `sys_attachment.enable.trash` → `false` (ADR-0049)\nThe flag is `dead` in the liveness ledger and deletes are hard (the reap guard reclaims bytes), so a restore would dangle — declare the honest state.\n\n## 6. Showcase files-enabled object\n`showcase_project` opts into `enable.files` so the Attachments panel renders for browser dogfooding.\n\n## Verification\n- **Unit**: `@objectstack/service-storage` 93 ✓ (read-visibility middleware, download gate, edit-on-parent, access hooks), `platform-objects` 197 ✓, `objectql`/`rest` unchanged-green.\n- **Dogfood**: the attachments matrix is now 15 cases (read-visibility denial, download gate anon/cross-user/owner/parent-inherited, edit-on-parent read-but-not-edit, session reap); full suite **256 ✓ / 3 skipped**.\n- **Real-server E2E** (booted `objectstack dev` showcase): **15/15** — admin create/upload/attach/list, FILES_DISABLED, anon download 401, admin signed URL 200, signed URL serves the bytes, member RBAC-denied attach (grant-needed finding), member parent-inherited download 200.\n- **Browser** (objectui HMR console + booted server, both with these changes): the Attachments panel renders on a `showcase_project` detail page, lists the file, and the Download button fetches the authenticated `/storage/files/:id/url` signed-URL endpoint. Screenshot in the session.\n- Gates: `check:liveness` ✓, `check:api-surface` ✓.\n\n> ℹ️ The red `Validate Dependencies` check is the repo-wide retired-npm `pnpm audit` endpoint (`410`), unrelated to this diff.\n\nCompanion objectui PR: objectstack-ai/objectui#2538 (panel download via signed URL). Closes #2970.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

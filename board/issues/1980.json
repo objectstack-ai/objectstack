@@ -1,0 +1,35 @@
+{
+  "number": 1980,
+  "kind": "issue",
+  "title": "ADR-0053 Phase 2 · Slice 3: timezone-aware today()/daysFromNow()/daysAgo()",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-16T16:00:23Z",
+  "updated_at": "2026-07-18T06:39:05Z",
+  "closed_at": "2026-07-18T06:39:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1980",
+  "body": "**Part of ADR-0053 Phase 2.** Design: #1975 · Parent: #1928.\n\n**Slice 3 of 6 — compute-tz core.** Make the time functions timezone-aware. Gated behind \"reference tz unset → UTC\".\n\n### Decision D1 (see #1975)\n`today()`/`daysFromNow()`/`daysAgo()` return a `Date` at **UTC-midnight of the reference-tz calendar day** — `new Date(Date.UTC(y, m, d))` with `(y,m,d)` computed in the reference tz. **Not** a date-only string; **not** local-midnight-as-instant (that trap re-introduces the silent-miss bug — cel-js's `hydrateOverloadStrings` rehydrates the field's date-only string to UTC midnight, so `today()` must match that).\n\n### Scope\n- Add `timezone?: string` to `EvalContext` — `packages/formula/src/types.ts`.\n- `registerStdLib(env, now)` → `registerStdLib(env, now, timezone)`; `buildEnv(now)` → `buildEnv(now, ctx.timezone)` — `packages/formula/src/stdlib.ts:40-57`, `packages/formula/src/cel-engine.ts:35-42` and `:189-191`.\n- Replace `startOfDayUtc`/`addDaysUtc` (`stdlib.ts:18-29`) with tz-aware equivalents built on a **shared `partsInTz`/`calendarDayUtc` util** extracted from the proven `Intl.formatToParts` pattern in `packages/services/service-messaging/src/preference-resolver.ts:347`. No hand-rolled offset math (DST).\n- Side-effect: also fixes the \"keeps wall-clock time\" defect of `daysFromNow`/`daysAgo`.\n\n### Acceptance criteria\n- [ ] With reference tz `America/Los_Angeles`, at `2026-06-16T02:00Z`, `today()` == the UTC-midnight Date of `2026-06-15`.\n- [ ] `record.due_date == today()` and `== daysFromNow(n)` match the right calendar day across DST boundaries.\n- [ ] tz unset / `'UTC'` → byte-for-byte today's behavior.\n\n### Prerequisite\nConfirm cel-js supports `duration()` + Timestamp arithmetic (the documented `now() + duration(\"Nh\")` escape hatch). No `duration` usage exists in the formula package today.\n\n### Depends on\nSlice 1 (timezone value); produces the shared `partsInTz` util reused by slice 5.\n"
+}

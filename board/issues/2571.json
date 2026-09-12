@@ -1,0 +1,30 @@
+{
+  "number": 2571,
+  "kind": "issue",
+  "title": "[security][P2] Per-org / per-user IP allow-list (record-level `allowed_ip_ranges`) — ADR-0069 D5",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T09:53:01Z",
+  "updated_at": "2026-07-15T13:29:41Z",
+  "closed_at": "2026-07-15T13:29:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2571",
+  "body": "Remaining ADR-0069 D5 gap (P2, defense-in-depth — not a launch blocker). Surfaced by the 2026-07-04 enterprise-auth evaluation.\n\n## Current state (already landed)\n\n- **Global** IP allow-list: `auth.allowed_ip_ranges` setting (global scope) → `AuthManager.isClientIpAllowed` → enforced in the auth-route middleware (`auth-plugin.ts`), rejecting sign-in/session from an outside IP with `IP_NOT_ALLOWED`. Fails **open** when the client IP can't be determined (missing proxy header ≠ lockout).\n- IPv4 CIDR + exact IPv4/IPv6 matching via `ipMatchesRange`.\n\n## Gap\n\nADR-0069 D5/D7 also specify **record-level** ranges so different tenants/users can have their own IP fence:\n\n- `sys_organization.allowed_ip_ranges` (CIDR[]) — per-org.\n- `sys_user.allowed_ip_ranges` (CIDR[], optional override) — per-user.\n\nNeither field exists today; only the one global setting.\n\n## ⚠️ Design decision to lock before implementing: **tighten-only, not replace**\n\nADR-0069 D5 phrases the per-user range as \"evaluated **before** org\" — which reads like *replacement* (most-specific wins). **That is a privilege-escalation surface:** an org admin (who can edit `sys_organization`) or a user could set a record-level range that admits an IP the **global** floor forbids, bypassing the platform's network fence.\n\n**Recommendation (aligns with ADR-0007's \"an org can only tighten, never loosen, the global floor\"):** the effective allow decision is the **intersection (AND)** down the chain, not replace:\n\n```\nallowed(ip) = matchesGlobal(ip)                         // platform floor (if set)\n           AND (orgRanges  ? matchesOrg(ip)  : true)    // org may only narrow\n           AND (userRanges ? matchesUser(ip) : true)    // user may only narrow\n```\n\ni.e. a record-level range can only **remove** IPs, never **add** one the level above rejected. Keep the existing fail-open when the IP is undetermined. This must be decided (and stated in the ADR) before writing code — it's a correctness/security call, not a detail.\n\n## Scope\n\n- Add `sys_organization.allowed_ip_ranges` + `sys_user.allowed_ip_ranges` (CIDR[] text) fields.\n- Extend the IP gate: resolve the caller's org (active org / membership) + user, evaluate the intersection chain above. The org/user resolution seam already exists (the middleware runs before better-auth; `customSession` knows the active org).\n- Tests: global-only (unchanged), org narrows, user narrows, a record-level range that tries to *widen* beyond the floor is **not** honored, undetermined-IP fail-open.\n- Update ADR-0069 D5 with the chosen semantics.\n\n## Relation\n\n- ADR-0069 D5/D7 · #2561 P2 (企业认证 P2) · sibling shared-rate-limit-store work (ADR-0069 D2).\n- Deferred here because the 2026-07-04 launch is **multi-node but not per-tenant-IP-scoped**; global allow-list + shared rate-limit store cover that shape. Do this when a multi-tenant B2B customer needs per-company IP fencing.\n"
+}

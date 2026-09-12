@@ -1,0 +1,33 @@
+{
+  "number": 3042,
+  "kind": "issue",
+  "title": "安全:readonlyWhen 服务端剥离仅覆盖单条 update 路径,多行 updateMany 不强制(条件只读可被批量绕过)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T09:36:52Z",
+  "updated_at": "2026-07-16T10:39:45Z",
+  "closed_at": "2026-07-16T10:39:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3042",
+  "body": "## 概述\n\n`readonlyWhen`(条件只读)的服务端剥离 **只在单条 by-id update 路径上运行**;`options.multi` 的 **多行 `updateMany` 路径不做 `readonlyWhen` 剥离**。因此一个命中 `readonlyWhen` 条件、本应被锁的字段,可以用一次多行更新绕过——例如「invoice 变 paid 后锁 `tax_rate` / 锁行项」这类条件锁,`PATCH … /updateMany` 就能改写。\n\n这是 #3003 / #2948 的同族问题:静态 `readonly: true` 的剥离(#2957)已同时覆盖单条 + 多行两条路径,但 `readonlyWhen` 的剥离只补了单条路径,两者不对称。\n\n## 定位\n\n`packages/objectql/src/engine.ts`,`update()`:\n\n- **单条 by-id 路径**(`hookContext.input.id` 分支):\n  - L2416 `stripReadonlyWhenFields(...)` ✅\n  - L2423 `stripReadonlyFields(...)`(静态 readonly,非 system)✅\n- **多行 `options.multi && driver.updateMany` 路径**(L2427 起):\n  - L2442 `stripReadonlyFields(...)`(静态 readonly)✅\n  - **缺** `stripReadonlyWhenFields(...)` ❌\n\nREST 侧多行入口存在且默认开启:`packages/rest/src/rest-server.ts` L6075 `POST /data/:object/updateMany`(`operations.updateMany` 默认 true,L1646),所以该路径对外可达。\n\n## 根因\n\n`stripReadonlyWhenFields` 需要 prior record 求值合并态 `{...previous, ...data}`;多行路径出于成本考虑不逐行 fetch prior record(现有代码对 `state_machine`/`cross_field` 规则同样只 `logger.warn` 跳过,见 L2434-2436),`readonlyWhen` 顺势没接上剥离。\n\n## 期望行为\n\n多行 update 也应强制 `readonlyWhen`,与单条路径及静态 `readonly` 的多行覆盖对称。需要决策实现方式:\n\n- **方案 A(简单、可能过严)**:多行路径对任何声明了 `readonlyWhen` 的字段,若出现在载荷里就无条件剥离(不看 per-row prior,等价「宁可锁死」)。对「锁字段」语义通常可接受,但对少数 `readonlyWhen` 依赖行间差异的场景会误剥。\n- **方案 B(精确、成本高)**:多行路径按匹配集逐行拉 prior、逐行求值剥离——与 `state_machine`/`cross_field` 多行强制是同一笔账,可一并解决(去掉那处 warn 跳过)。\n- **方案 C(收口)**:若判定多行路径无法安全强制条件规则,则对「声明了 `readonlyWhen` 或 object-level 转换规则的对象」在多行 update 上 fail-closed 拒绝,把 warn 升级为 error。\n\n倾向 A 或 C 作为短期封堵(和「剥离优先、兼容性好」的既有取向一致),B 作为长期精确解。\n\n## 关联\n\n- #3003 / #2948(静态 readonly UPDATE 强制,已修 · PR #2957 / #3015)—— 本 issue 是其 `readonlyWhen` 对称缺口 + 多行路径面\n- `engine.ts` L2434-2436 多行 `state_machine`/`cross_field` 跳过的 warn —— 同一笔「多行路径不强制转换类规则」的账"
+}

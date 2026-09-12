@@ -1,0 +1,32 @@
+{
+  "number": 2805,
+  "kind": "issue",
+  "title": "bug（种子）：延迟引用更新失败可能导致关系不完整，但报告却显示成功",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T23:47:51Z",
+  "updated_at": "2026-07-18T14:32:52Z",
+  "closed_at": "2026-07-18T14:32:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2805",
+  "body": "## 问题\n\n一次 Seed 加载可能在循环引用缺失的情况下结束，却仍然报告成功。\n\n当最终的引用更新失败一次后，ObjectStack 不会进行第二次尝试。引用仍为 null，但结果依然显示 **success: true**、**errors: []** 和 **totalErrored: 0**。\n\n## 复现\n\n### 测试数据\n\n测试只插入以下两条记录。为了更直观地展示数据内容，可等价表示为两个 CSV：\n\n`audit_department`：\n\n```csv\nname,head_id\nEngineering,Alice\n```\n\n`audit_worker`：\n\n```csv\nname,department_id\nAlice,Engineering\n```\n\n说明：以上 CSV 仅用于直观展示测试数据。实际复现仍通过 `SeedLoaderService` 的 `records` 数组加载，并不是从 CSV 文件执行导入。\n\n这两条记录互相引用。Engineering 首先插入，此时 Alice 尚不存在，因此 `Engineering.head_id → Alice` 必须稍后补充。Alice 随后插入，此时 Engineering 已经存在，因此可以立即保存 `Alice.department_id → Engineering`。\n\n两条记录都存在后，ObjectStack 应使用 Alice 生成的员工 ID 更新 `Engineering.head_id`。\n\n\n### 复现步骤\n\n1. 使用默认配置，在全新的 SQLite 数据库中加载上述两条 Seed 记录。\n2. 在测试中拦截 `engine.update`，仅让第一次更新 `audit_department.head_id` 时抛出 `Error(\"fetch failed\")`，后续调用正常执行。\n3. 加载结束后查询记录并检查 Loader 返回结果。\n"
+}

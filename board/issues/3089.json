@@ -1,0 +1,33 @@
+{
+  "number": 3089,
+  "kind": "pull_request",
+  "title": "docs: point site links at canonical objectstack.ai",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T05:28:33Z",
+  "updated_at": "2026-07-17T05:35:41Z",
+  "closed_at": "2026-07-17T05:35:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T05:35:39Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3089",
+  "body": "## 背景\n\n域名整合已完成:apex `objectstack.ai` 为主域(直出 docs 站 landing),`www` 与 `docs.objectstack.ai` 均 path-preserving 30x 过去。本 PR 把仓库内显著链接改指主域,不再经过跳转。\n\n## 改动\n\n- README.md:Full documentation 与 Self-Hosted Deployment 链接 → `objectstack.ai/docs*`\n- docker/README.md:同上\n- content/docs.site.json:navbar Website 链接 `www.objectstack.ai` → `objectstack.ai`\n\n旧地址有 30x 兜底,本改动纯链接卫生,无行为变化。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

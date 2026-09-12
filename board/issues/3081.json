@@ -1,0 +1,33 @@
+{
+  "number": 3081,
+  "kind": "pull_request",
+  "title": "docs(releases): drop reserved word \"role\" from v15 kanban note",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T00:13:25Z",
+  "updated_at": "2026-07-17T00:14:50Z",
+  "closed_at": "2026-07-17T00:14:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T00:14:48Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3081",
+  "body": "## Problem\n\nThe `check:role-word` ratchet (ADR-0090 D3) is failing on `main` — [run 29542732386](https://github.com/objectstack-ai/framework/actions/runs/29542732386/job/87768128168):\n\n> `content/docs/releases/v15.mdx`: NEW use of the reserved word \"role\" (1 occurrence(s)).\n\n## Root cause\n\n#3079 (\"curate the 15.1 line\") added a generic-English *\"lanes honor the ADR-0085 `stageField` role\"* to `content/docs/releases/v15.mdx`. That file isn't in `scripts/role-word-baseline.json`, so the ratchet flags it as a new occurrence and fails the ESLint job on every subsequent push.\n\n## Fix\n\nReword to *\"the `stageField` **setting**\"*. The sentence is about which field drives kanban lanes — not the authz concept — so this is a plain reword, not a genuine boundary; no baseline entry needed.\n\nVerified locally: `node scripts/check-role-word.mjs` → `OK (49 baselined file(s), no new occurrences)`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

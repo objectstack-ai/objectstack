@@ -1,0 +1,35 @@
+{
+  "number": 3004,
+  "kind": "issue",
+  "title": "安全:owner_id(属主锚点)客户端可写、服务端无守卫 → 非属主可伪造/转移记录属主",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T03:37:59Z",
+  "updated_at": "2026-07-16T09:03:56Z",
+  "closed_at": "2026-07-16T09:03:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3004",
+  "body": "## 概述\n\n`owner_id` 是行级属主的锚点(OWD 行级作用域据此判定 update/delete 是否属主)。但 `owner_id` 在 **insert 和 update** 时都被原样接收自客户端,服务端没有任何守卫把它绑定到创建人。\n\n- 框架版本:**15.0.0**\n- 对象共享模型:`public_read_write`\n\n## 复现(真机,非管理员 worker,isSystem=false)\n\n1. **insert 伪造属主**——worker 用 `{ owner_id: 'some_other_user_id' }` 建记录 → HTTP 201,原样入库。平台**不会**把 `owner_id` 回填为已认证的创建人。\n2. **update 转移属主**——worker 把自己的记录更新为 `{ owner_id: 'admin_id' }` → HTTP 200,属主被转移。\n\n## 影响\n\n- 用户可以弃权自己创建的记录(规避行级属主门 / 甩锅),或者植入一条挂在他人名下的记录。\n- 在 `public_read_write` 下,行级属主门是**唯一**强制 update/delete 的机制;掌控 `owner_id` 就等于掌控谁能改 / 删这条记录。\n\n## 期望行为\n\n对非特权写入者,`owner_id` 应当由系统托管:insert 时回填为已认证用户,update 时拒绝(或剥离),除非调用者具备显式的转移 / 重新指派能力。系统上下文(`ctx.isSystem`)须保持豁免——某些流程合法地创建 `owner_id = null` 的记录(导入 / 复制 / OAuth 登录 / cron 快照)。\n\n## 相关\n\n与 #2918(针对平台 / 包托管的 `sys_position` / `sys_capability` 行的行写护栏)相邻,但那道护栏不覆盖普通业务对象上的 `owner_id`。\n"
+}

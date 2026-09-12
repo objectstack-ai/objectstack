@@ -1,0 +1,32 @@
+{
+  "number": 2978,
+  "kind": "issue",
+  "title": "gen:schema silently drops PageTabsProps since #2967 — references regen would delete real docs",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-15T15:18:24Z",
+  "updated_at": "2026-07-16T05:09:03Z",
+  "closed_at": "2026-07-16T05:09:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2978",
+  "body": "## 现象\n\n`pnpm --filter @objectstack/spec build`(gen:schema)日志:\n\n```\n⊘ UI.PageTabsProps: Transforms cannot be represented in JSON Schema (skipped)\n```\n\n#2967(conditional tabs,#2606 的 `visibleWhen` CEL 谓词)给 `PageTabsProps` 引入了 `.transform`,zod-to-json-schema 无法表示,`build-schemas.ts` 按既有策略**静默跳过**。后果链:\n\n1. `json-schema/ui/PageTabsProps.json` 消失(下游任何依赖 JSON Schema 校验/IDE 提示的场景失去该 schema);\n2. `gen:docs` 以 json-schema/ 为输入 → 全量重新生成 `content/docs/references/` 会**删除** `ui/component.mdx` 里整个 PageTabsProps 章节及其 import 列表条目——一个真实存在、刚发布的 schema 从公开参考文档消失;\n3. 已提交的 references 目前仍含 PageTabsProps(#2967 合并时未 regen),处于「文档比管线正确」的倒挂状态——**在修复前请勿全量 regen references**。\n\n## 建议\n\n- **修复**:把 transform 改为 JSON-Schema 可表示的形态(`z.preprocess`/pipe 外移、或为文档/JSON-Schema 提供无 transform 的 source-shape 变体);\n- **加固**:`build-schemas.ts` 对「上一次存在、本次消失」的 schema 应**响亮失败**(棘轮),静默跳过只适用于从未支持过的类型——否则任何人加一个 transform 都会无声地从 JSON Schema 面上撤下一个公开契约,违反 Prime Directive #10(declared ≠ delivered 不宣传的反面:delivered 却悄悄不再 declared)。\n\n## 复现\n\n```bash\npnpm --filter @objectstack/spec build 2>&1 | grep \"PageTabsProps\"\nls packages/spec/json-schema/ui/ | grep -i tabs   # 空\npnpm --filter @objectstack/spec gen:docs\ngit diff content/docs/references/ui/component.mdx  # PageTabsProps 章节被删\n```\n\n发现于品牌命名清理的 references 漂移排查(#2963 后续)。当前 references 与 spec 的其余漂移(ADR-0091/0095 时期 7 个文件)已被 #2965/#2967 等合并顺带修复,唯一剩余差异就是本回归。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_0162o68e5w3bpUBEVRQboUGG"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 3164,
+  "kind": "issue",
+  "title": "bug/security: #2948 的 UPDATE readonly 剥离误伤 better-auth adapter 写入 → change-email / ban 等对 readonly sys_user 列的写入被静默丢弃",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T06:07:45Z",
+  "updated_at": "2026-07-18T06:38:53Z",
+  "closed_at": "2026-07-18T06:38:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3164",
+  "body": "## 概述\n\n#2948/#3003 的**引擎级 UPDATE readonly 剥离**(`engine.ts` update 路径,`!ctx.isSystem` 时对 caller 提交的 `readonly: true` 字段剥离)会**误伤 better-auth adapter 的写入**。better-auth 的 adapter(`plugin-auth/src/objectql-adapter.ts` 的 `withSystemReadContext`)对**读**注入了 `isSystem: true`,但**写**(`update`/`delete`)是无上下文透传:\n\n```ts\n// withSystemReadContext\ninsert: (m, d) => e.insert(m, d),   // 无 context\nupdate: (m, d) => e.update(m, d),   // 无 context ← 关键\n...\nfind/findOne/count: e.find(m, asSystem(q)),  // 有 isSystem\n```\n\n无 context 的 update 在引擎里命中 `!opCtx.context?.isSystem`(`!undefined?.isSystem` === `true`)→ 剥离生效。而 `sys_user` 的多个列声明为 `readonly: true`:`email`(line 499「change flows through better-auth change-email verification」)、`banned`/`ban_reason`/`ban_expires`(ADR-0092「written by the Ban User action」)等。因此 **better-auth 经 adapter 对这些 readonly 列的写入会被静默剥离**(HTTP 200 / 无报错,值不变——正是 #3003 式最难发现的静默形态)。\n\n`identity-write-guard.ts`(ADR-0092 D2)会让 adapter 路径「passes untouched(其 engine 调用不带 caller context)」通过它自己的 guard,但**紧接着**引擎的 #2948 剥离仍会跑(它在 beforeUpdate hook 之后、按 `suppliedKeys` 剥离)——guard 放行 ≠ 剥离放行。\n\n## 复现(机制级,已实证)\n\n用真实引擎(`ObjectQLPlugin`,#2948 剥离在其 update 路径生效)+ capture 驱动,按 adapter 的**确切调用形态** `engine.update(model, { id, ...patch })`(无第三参 / 无 context)更新 readonly 列:\n\n```ts\nql.registry.registerObject({ name: 'ba_user', datasource: 'p', fields: {\n  name:   { type: 'text' },\n  email:  { type: 'text',    readonly: true },\n  banned: { type: 'boolean', readonly: true },\n}}, 'test', 'test');\n\nawait ql.update('ba_user', { id: 'rec-1', email: 'new@x.test', banned: true }); // 无 context = adapter 形态\n// 驱动实际收到的 update payload:\n//   { id: 'rec-1', updated_at: '…' }      ← email / banned 都被剥离\n//   email present?  false\n//   banned present? false\n```\n\n> dogfood HTTP 层未能直接触发用户可见症状:`/auth/change-email` 在 dev harness 返回 `CHANGE_EMAIL_DISABLED`,`/auth/admin/ban-user` 未挂载(404)。即在**这些 better-auth 功能启用的部署**里症状才会显现;机制在引擎层已确证。\n\n## 影响\n\n任何经 better-auth adapter 写入 `sys_user`(及其它 `managedBy: 'better-auth'` 表)**readonly 列**的运行时流程:change-email(验证通过后写 `email`)、admin ban/unban(`banned`/`ban_reason`/`ban_expires`)、以及未来任何 admin-plugin 对 readonly 列的写入。表现为「操作返回成功但数据没变」。\n\n## 备选修复\n\n1. **adapter 写入按对象走 system 上下文**(推荐,最小):`withSystemReadContext` 的 `update`/`delete` 也注入 `isSystem`(与其 `find/findOne/count` 已有的处理对称)。理由:better-auth 是身份权威,它对自管表的写入本就是 system 写入;`identity-write-guard` 已把 user-context 写入拦在门外,adapter 路径只有 better-auth 自身的写入。\n   - 需评估:使 adapter update 变 system 会同时绕过 FLS/owner-transfer 等——但对身份表的 better-auth 自写而言这是期望行为。\n2. **字段级 update 白名单扩展**:复用 `registerManagedUpdateWhitelist` 思路,但那是给 **user** 写入开口的;adapter 是另一条路径,方案 1 更贴切。\n\n## 判据 / 需核实\n\n- 在 `change-email` / admin `ban` 启用的配置下补一条端到端证明(操作后 `email`/`banned` 实际落库)。\n- 与 #3043(INSERT 面,已修,PR #3162)对称:#3043 因同样发现「adapter/内部写入不带 isSystem」而最终把 INSERT 剥离改到了**外部入口**;本 issue 是 **UPDATE 面**的对偶——UPDATE 剥离在引擎级,故 adapter 写入直接撞上。\n\n## 关联\n\n- #2948 / #3003(静态 readonly UPDATE 强制,PR #2957 / #3015)—— 本 issue 是其对 better-auth adapter 的**回归**面\n- #3043(INSERT 面,PR #3162)—— 探索本问题时发现\n- ADR-0092(identity write guard)"
+}

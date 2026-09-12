@@ -1,0 +1,30 @@
+{
+  "number": 2678,
+  "kind": "issue",
+  "title": "perf/reliability: seed + data-import bypass the engine's bulk-insert path → N round-trips, N summary recomputes, no transient retry",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-07T14:44:06Z",
+  "updated_at": "2026-07-17T14:19:28Z",
+  "closed_at": "2026-07-08T05:57:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2678",
+  "body": "## Summary\n\nThe two bulk-write paths — the **seed loader** (`defineDataset` replay) and the user-facing **data import** (CSV / bulk records) — write records **one at a time** through the single-record engine path, even though ObjectQL's engine **already has an efficient batched branch** (`driver.bulkCreate` + parent-deduplicated summary recompute). Over a remote DB (turso) this makes both:\n\n- **slow** — N round-trips + N summary recomputes instead of ~N/batch, and\n- **fragile** — each round-trip can hit a transient network error that is caught → the row is dropped → **no retry**.\n\nSurfaced while debugging the 2026-07-06 HotCRM first-boot incident: a HotCRM seed's `crm_contact` inserts intermittently dropped rows on transient turso errors → the seed reported errors → the runtime's seed-once stamp never landed → per-env kernel churn (re-seed every boot). Non-deterministic (network-sensitive): the same seed inserted 5/5 contacts on one env and 1/5 on another.\n\n## Evidence\n\n### Seed loader — per record\n`packages/metadata-protocol/src/seed-loader.ts` — `loadDataset()` loops per record calling `this.engine.insert(objectName, record, opts)` with a **single record**. No array / bulk form is ever constructed.\n\n### Data import — per record\nEntry points (`packages/rest/src/rest-server.ts`):\n- `POST /data/:object/import` (sync, ≤5k rows) — ~L3524\n- `POST /data/:object/import/jobs` (async, 5k–50k, persists `sys_import_job`) — ~L3598\n- `POST /data/:object/createMany` (optional bulk endpoint, may be unwired) — ~L5749\n\nBoth sync + async delegate to `packages/rest/src/import-runner.ts` `runImport()`, which loops per row calling `p.createData({...})` / `p.updateData({...})` with a **single record** (~L201–274). It does **not** construct arrays or use the engine's bulk branch.\n\n### The engine ALREADY has the efficient bulk primitive\n`packages/objectql/src/engine.ts`:\n- `insert(object, data: any | any[])` — the `Array.isArray(hookContext.input.data)` branch (~L2158) routes to `driver.bulkCreate(...)` — **one round-trip per batch**.\n- `recomputeSummaries()` (~L1746–1782) **deduplicates parent ids across the whole array** and recomputes **once per unique parent** (1000 children of the same parent = 1 rollup recompute, not 1000). Called once per `insert()` call (~L2206).\n\nBecause neither seed nor import passes arrays, both get **N single-record `insert()` calls → N round-trips + N `recomputeSummaries()` invocations**.\n\n### No transient-error retry (silent row loss)\n- `import-runner.ts` ~L260: `catch → results.push({ ok:false, action:'failed', ... })` → continue. No retry.\n- `seed-loader.ts` ~L413: `catch → errors.push(...)` → continue. No retry.\n\nA transient driver/network blip (`fetch failed` / timeout / connection reset) on one row silently drops that row. Import returns a per-row report, so it's visible, but there's no automatic recovery.\n\n## Impact\n\nImport 1000 rows into an object with a rollup summary, over a remote turso DB (~100ms/round-trip):\n- 1000 inserts + up to 1000 summary recomputes = **2000+ round-trips ≈ 3+ minutes**, plus a handful of transient failures that drop rows.\n- With K rollup parents: 1000 inserts + K×1000 aggregate queries.\n\nThe seed variant additionally triggered **kernel churn** in the HotCRM incident (dropped seed rows → `errs>0` → the cloud seed-once stamp never lands → re-seed every cold boot).\n\n## Proposed fix\n\nA **shared batched-write helper** used by BOTH `seed-loader` and `import-runner`:\n\n1. **Batch** rows (e.g. 100–500/batch) and call the engine's array/bulk `insert` → `driver.bulkCreate` (one round-trip per batch). The engine already dedups summary recomputes for arrays.\n2. **Retry TRANSIENT driver errors** (network / timeout / connection reset) per batch with backoff. Do **not** retry logical errors (validation / constraint).\n3. On a batch that fails on a **logical** error, **degrade to per-row within that batch** so one bad row doesn't drop the whole batch (bad row reported, others succeed).\n4. (Optional) collapse summary recompute to once per parent at the end of the whole load.\n\nRelated runtime-side follow-up (cloud, tracked separately): the seed-once stamp guard is `errs===0` — a single transient error blocks the stamp forever → churn; relax to stamp-on-progress + surface residual errors via `reportObserved`.\n\n## Acceptance criteria\n\n- Seed + import route through the shared bulk helper; a 1000-row load over a `bulkCreate`-capable driver issues **~ceil(N/batch)** writes, not N.\n- Summary-recompute count is bounded by **unique parents**, not row count.\n- A transient driver error is **retried** and does not drop the row; a logical error is reported per-row **without failing the batch**.\n- Tests: bulk-path write-count assertion, transient-retry, logical-error per-row degradation, summary-dedup.\n\n## Refs\n- HotCRM new-workspace \"打开环境一直失败\" incident — cloud#752 / #754 / #756, framework#2661.\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 3134,
+  "kind": "pull_request",
+  "title": "fix(spec): regenerate drifted reference docs and gate them in CI",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "skip-changeset",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T12:25:42Z",
+  "updated_at": "2026-07-17T12:51:20Z",
+  "closed_at": "2026-07-17T12:51:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T12:51:18Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3134",
+  "body": "## The bug\n\n`content/docs/references/**` is generated from `packages/spec` and committed, but **no CI job ever regenerated and diffed it**:\n\n```\n$ grep -rlE \"gen:docs|gen:schema\" .github/workflows/\n(nothing)\n```\n\nSo the public reference docs drift silently while `main` stays green. They have been drifting since #3014 (2026-07-16).\n\nThe clearest symptom: **`RowCrudActionOverride` is entirely missing from the docs.** It is a real exported type (`@objectstack/spec/data`, added by #3076 on 2026-07-17), but it appears in neither the TypeScript-usage import line nor as its own properties section — users cannot discover it at all.\n\n## 1. Regenerate (`2b5ced2c9`)\n\n`gen:schema && gen:docs` dirties 7 files. Every change traces to a spec change that shipped without re-running the generator:\n\n| File | Drift |\n| :--- | :--- |\n| `data/object.mdx` | `RowCrudActionOverride` missing entirely (#3076) |\n| `api/discovery.mdx` | `ServiceSelfInfo` missing entirely |\n| `ui/dashboard.mdx` | `ChartWidget.filterBindings`, `DashboardFilter.name` missing |\n| `data/field.mdx` | `readonly` — now server-enforced on UPDATE (#2948/#3003) |\n| `security/permission.mdx` | `allowTransfer` — enforced now, docs still said \"pending M2\" (#3004) |\n| `integration/{connector,misc}.mdx` | connector ADR-0096 → **ADR-0097**; expanded `providerConfig` prose |\n\nThe ADR renumber is a **correctness fix, not churn**: ADR-0096 is execution-surface identity admission, ADR-0097 is declarative connector instances (#2977). Both ADRs exist and are distinct — the published docs have been pointing readers at the wrong one.\n\nNo hand edits. **Verified deterministic**: two consecutive runs produce byte-identical output, so the drift is real rather than generator noise (a nondeterministic generator would have made the gate below unusable).\n\n## 2. Gate it (`5a4667236`)\n\n`build-docs.ts --check`, following the sibling convention (`check:skill-docs`, `check:api-surface`, …).\n\nEvery write now goes through `emit()` and every wiped folder through `manageDir()`, so **write and check run identical generation logic and differ only in the final disposition** — write to disk, or compare against it. That shared path is what makes the gate trustworthy: it cannot pass on output a real run would not produce. Verified **output-identical** to the previous generator, byte-for-byte across all 258 files.\n\n### Proven to fail before being trusted\n\nA gate that cannot go red is worse than no gate, so each drift class was reproduced:\n\n| Scenario | Result |\n| :--- | :--- |\n| Stale content (**the #3076 case**, replayed) | ✅ exit 1 — `~ data/object.mdx (out of date)` |\n| Missing page (spec adds a type) | ✅ exit 1 — `+ data/field.mdx (missing — spec adds it)` |\n| Stale page (type removed from spec) | ✅ exit 1 — `- data/ghost-type.mdx (stale — …)` |\n| `json-schema/` absent | ✅ exit 1, not a vacuous pass |\n| In-sync tree | ✅ exit 0 — 258 files |\n\nThe last two are why this is **not** `git diff --exit-code` as originally suggested: that misses **untracked** files, so a brand-new page would slip through. `json-schema/` is gitignored, so `check:docs` runs `gen:schema` first, and a run that finds no schemas errors rather than passing vacuously.\n\n### Placement matters\n\nIn **lint.yml's \"TypeScript Type Check\"**, *not* ci.yml's \"Build Docs\":\n\n- \"Build Docs\" is gated on a `docs` paths-filter that **excludes `packages/spec/**`** — it skips exactly the spec-only PRs that cause this drift (#3076 was one). Putting the gate there leaves it dormant.\n- The typecheck job has **no paths filter** and is one of only four **required status checks** (`TypeScript Type Check`, `Build Core`, `Test Core`, `Dogfood Regression Gate`) — so the gate both always fires and actually blocks merge. A new standalone job would not be required, and would be advisory only.\n- It needs no build (reads `src/` + `json-schema/` via tsx), so it runs before the workspace build and fails in **~2s**.\n\n## 3. Same hole in the sibling job\n\nBoth artifacts are **currently in sync**, but were unguarded on the PRs that can break them:\n\n- **`check:spec-changes` / `check:upgrade-guide`** read the ADR-0087 registries and protocol version, but ran under a filter listing only `skills/**` — **a protocol bump or new migration could not trigger the job that verifies them.**\n- The filter watched **`content/docs/guides/skills.mdx`, a path #2584 moved.** Hand-edits to the real generated block in `content/docs/ai/skills-reference.mdx` went unchecked from then until now.\n\nJob renamed `check-skill-docs` → `check-generated` (safe — not a required check, referenced only within ci.yml): it has guarded the protocol artifacts for a while, and a name that hid them is part of why their paths went missing from the filter.\n\n`check:api-surface` was audited and is **fine** — lint.yml has no paths filter, so it already runs on every PR.\n\n## Verification\n\n- `tsc --noEmit`, `check:docs`, and eslint all green locally\n- The `generated` paths-filter block was parsed as YAML exactly the way `dorny/paths-filter` parses it, to confirm all 12 paths land\n- This PR touches `packages/spec`, so the new step exercises itself — see \"TypeScript Type Check\" below\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 2970,
+  "kind": "issue",
+  "title": "[attachments] v2 tracking: parent-visibility inheritance, authed downloads, remaining enforce-or-remove",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-15T14:49:49Z",
+  "updated_at": "2026-07-16T03:12:39Z",
+  "closed_at": "2026-07-16T01:09:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2970",
+  "body": "Tracking issue for the follow-ups surfaced while landing #2755 (PR #2969). **All items complete.**\n\n## Read / visibility\n- [x] **Attachment read visibility inherits parent-record visibility.** ✅ #2984 — `sys_attachment`-scoped engine middleware (filters find/findOne/count/aggregate, so list `total` can't leak the hidden count).\n- [x] **Authenticated downloads.** ✅ #2984 — `GET /storage/files/:fileId(/url)` gate attachments-scope files: 401 without a session, 403 `ATTACHMENT_DOWNLOAD_DENIED` without owner/parent-read, else a short-lived signed URL. objectui #2538 switches the panel to fetch the signed URL with auth.\n\n## Enforcement strength\n- [x] **Edit-on-parent for attach.** ✅ #2984 — create requires `sharing.canEdit` on the parent, not merely read.\n\n## Lifecycle\n- [x] **`sys_upload_session` lifecycle.** ✅ #2984 — ADR-0057 `transient` (TTL 1d past `expires_at`; retention 7d terminal statuses).\n\n## Enforce-or-remove (ADR-0049)\n- [x] **`sys_attachment.enable.trash`.** ✅ #2984 — set to `false` (dead flag, hard deletes).\n\n## Dogfood\n- [x] **Showcase browser dogfood.** ✅ #2984 — `showcase_project` opts into `enable.files`; browser-verified end-to-end.\n\n## Sub-follow-up\n- [x] **`sys_upload_session` multipart-abort reap guard.** ✅ #2999 — a `LifecycleReapGuard` aborts the backend multipart upload (S3 `AbortMultipartUpload` / local parts dir) before an abandoned/terminal session row is reaped, so its already-uploaded parts don't leak. Skips `completed` sessions, re-seeds the S3 key for cold sweeps, vetoes on abort failure. Dogfood drives a real chunked upload → part on disk → sweep → row gone + parts aborted.\n\nSource: #2755 v1 follow-ups. All landed across #2984 (six items) + #2999 (sub-item); shipped to tenants via cloud #838.\n\nEverything is done — closing."
+}

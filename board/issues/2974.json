@@ -1,0 +1,32 @@
+{
+  "number": 2974,
+  "kind": "issue",
+  "title": "CI: validate-deps 的 `pnpm audit` 因 npm audit 端点退役(410)全线失败",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-15T15:03:56Z",
+  "updated_at": "2026-07-16T01:05:05Z",
+  "closed_at": "2026-07-16T01:05:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2974",
+  "body": "**现象**:`Validate Package Dependencies` workflow 的 `pnpm audit --audit-level=high` 步骤自 2026-07-13 之后开始失败,所有分支/PR 一致:\n\n```\nERR_PNPM_AUDIT_BAD_RESPONSE  The audit endpoint (at https://registry.npmjs.org/-/npm/v1/security/audits/quick) responded with 410:\n{\"error\":\"This endpoint is being retired. Use the bulk advisory endpoint instead. See the following docs for more info: https://api-docs.npmjs.com/#tag/Audit\"}\n```\n\n**确认**:\n- main 上最后一次成功的 scheduled run 是 2026-07-13;npm 在此之后退役了 quick/full audit 端点(410),fallback 端点同样 410。\n- 与任何 PR 的 diff 无关(本地干净环境同样复现);最先在 #2972 的 checks 里被注意到。\n- **pnpm@11.13.0(latest)仍未迁移到 bulk advisory 端点**——已实测同样 410,所以\"升级 pnpm\"目前不是修复。\n\n**候选方案**(需要维护者拍板,均涉及安全合规 gate 的形态):\n1. 暂时将该步骤设为非阻塞(`continue-on-error: true` + 明显的 warning),等 pnpm 上游迁移后恢复——最小改动,但窗口期内 audit 不再拦截合并。\n2. 换用支持 pnpm-lock 的扫描器(如 `osv-scanner --lockfile pnpm-lock.yaml`)作为阻塞 gate——保住合规,但引入新工具链。\n3. 等 pnpm 上游修复(跟踪 pnpm 仓库对应 issue)期间直接跳过该步骤。\n\n在解决之前,所有 PR 的 `Validate Package Dependencies` check 都会是红的(包括 #2972)。"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 2946,
+  "kind": "pull_request",
+  "title": "fix(plugin-security): 堵跨租户 UPDATE 写 + org_admin private 对象越墙（security）",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-15T03:56:39Z",
+  "updated_at": "2026-07-15T04:06:52Z",
+  "closed_at": "2026-07-15T04:06:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-15T04:06:50Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2946",
+  "body": "修复 security review 确认的**两个租户墙授权漏洞**（其一是发布 blocker）。两者同在 `security-plugin.ts` / `tenant-layer.ts` 的写侧授权热路径，同批修。多组织模式（`tenancy.mode='multi'` + `@objectstack/organizations`）下生效。关联 objectstack-ai/framework#2920。\n\n---\n\n## Finding 1 [BLOCKER] — 经 UPDATE 重指 `organization_id` 的跨租户写\n\n**漏洞：** #2937 的 Layer 0 insert post-image 检查（中间件 step 3.7）只管 insert。对称的 **update** 路径无人管：成员拥有 org A 的记录 R，对 R 发 by-id 或 bulk `update` 带 `{organization_id: 受害者 org B}`，即可把行**移动进任意租户**。所有既有防线全漏过：\n- auto-stamp — insert-only，不碰 update；\n- FLS — 不保护 `organization_id`；\n- `readonly` — 服务端 update 未强制（`record-validator.ts` 仅跳过、`engine.ts` 只剥 `readonlyWhen`）；\n- Layer 0 pre-image（step 2.7）— 只校验**旧** org=A 放行，看不到新值；\n- RLS check — 仅对显式声明 `check` 的策略生效。\n\n行落到 org B、对受害租户可见 —— **任意成员可把行注入任意租户。**\n\n**修法（Option B — 与 insert 对称、最小面）：** 把 step 3.7 的 Layer 0 post-image 检查从 `insert` 扩到 `insert || update`，复用**同一套** Layer 0 决策（`computeInsertTenantCheckFilter` 泛化为 `computeWriteTenantCheckFilter(…, operation, …)` → `computeLayeredRlsFilter` 的 `layer0`，单一真相源，绝不与读侧漂移）。一个**显式提供**的 `organization_id` 必须过 Layer 0（== 调用者活动组织），否则 fail-closed 拒。因 pre-image 已把目标行锁在活动组织内，唯一能过的新值就是活动组织本身 → **重指到任何其他租户被拒**，即 `organization_id` 在非平台用户上下文里**事实不可变**。\n\n**为何选 B 而非 A（immutability via pre-image 比对）：** B 复用与 insert 完全相同的 Layer 0 机器（符合 ADR-0095 D1「一处决策」的精神）、无需额外 pre-image 读、platform-admin 豁免与 system 直通**免费继承**，且天然覆盖 **bulk update**（只看 change-set 里的 org_id 值，无需重建 per-row post-image；A 的 pre-image 方案对 bulk 只能放弃）。\n\n## Finding 2 [HIGH] — org_admin 在 private 租户对象上越租户墙\n\n**漏洞：** Layer 0 跨租户豁免门（`tenant-layer.ts`：`isPlatformAdmin && posturePermitsCrossTenant`）此前用「持有 `viewAllRecords`/`modifyAllRecords`」判定。`organization_admin`（`default-permission-sets.ts` 的 `'*': {viewAllRecords, modifyAllRecords}`，自动授给每个 org owner/admin）经通配持有这两个超级位。于是在 `access.default:'private'` 的**租户业务对象**上，org admin 触发豁免 → `computeTenantLayer0Filter` 返回 `null` + Layer 1 短路 → **零过滤** → 读写所有租户的行。豁免门分不清**平台**管理员与**租户** org admin。\n\n**修法：** 把 Layer 0 豁免门从「持有超级位」收窄为**真正的平台管理员判定** —— 新增 `hasPlatformAdminPosture(permissionSets)`：持有平台**专属**能力（`manage_metadata` / `manage_platform_settings` / `studio.access` / `manage_users` —— `admin_full_access` 携带而 `organization_admin` 刻意不给的那组）。超级位（`viewAllRecords`/`modifyAllRecords`）继续**只**驱动 Layer 1 业务 RLS 短路（TENANT_ADMIN 组织内见全行、无所有权/depth/sharing 收窄）。因新豁免（超级位 **AND** 平台能力）是旧门（仅超级位）的**严格子集**，只会**收窄**、绝不放宽（fail-safe）。\n\n**为何不用 `ctx.posture === PLATFORM_ADMIN` 作豁免门：** B2 已把 `PLATFORM_ADMIN` posture 落进 `resolve-authz-context.ts` 的 `ctx.posture`，但实测确认该字段**未被 plumb 进** enforcement 中间件收到的 `ExecutionContext`——`rest-server.ts`（L1197-1215）与 `runtime/resolve-execution-context.ts`（L143-204）构建执行上下文时**都丢弃了 `authz.posture`**。直接在插件里读 `context.posture` 会静默 no-op（永远 undefined → 永不豁免），对真·平台管理员是功能回归。改用平台专属能力探针：读的是 enforcement 已用的**同一套** permission sets，覆盖所有入口（REST/runtime/MCP），无需跨传输层 plumbing，且天然 fail-safe。这是最小 blast radius 的正确落点。\n\n---\n\n## 行为收窄（预期的安全收窄）\n\n- **org admin 不再越墙**：在 private / platform-global / better-auth 的**租户**对象上，org admin 现被 Layer 0 墙到自己的 org（此前零过滤）。\n- 真·平台管理员（`admin_full_access` + 平台 systemPermissions）在 private/platform-global/better-auth 对象上**仍豁免**。\n- **better-auth 托管身份表 carve-out 不受影响**（无 `organization_id` 列，Layer 0 本就 inert）。\n- **系统上下文**（`isSystem`，含 import 引擎 / 迁移 / seed replay 的 `SYSTEM_CTX`，以及合法的跨组织记录迁移）在中间件入口即短路，**完全不受影响**。\n\n## 测试矩阵（实测，全绿）\n\n`authz-matrix-gate.test.ts`（真 SecurityPlugin 中间件 + 真 seeded 权限集，27 格全绿）：\n\n| 用例 | 结果 |\n|---|---|\n| 更新的 `private_obj.org_admin` 主矩阵格 | read `null` → `{organization_id:'org-1'}`；write `BYPASS` → `[{organization_id:'org-1'}]` |\n| **Finding 1**：member 重指异租户 update | DENY |\n| Finding 1：member 同租户 / 不碰 org_id | 通过 / `<<absent>>` |\n| Finding 1：无活动组织 member 供任意 org_id | fail-closed DENY |\n| Finding 1：org_admin 重指异租户 | DENY（非平台管理员） |\n| Finding 1：platform-admin 在 private 对象重指 | 放行（豁免） |\n| Finding 1：platform-admin 在 public 业务对象重指 | DENY |\n| Finding 1：单组织模式 | 不检查 |\n| **Finding 2**：org_admin private 租户对象 read/write | 墙到本租户（只见 org-1） |\n| Finding 2：真平台管理员 private 对象 | 仍豁免（read null） |\n| Finding 2：org_admin public 租户对象（回归） | 仍墙住 |\n| Finding 2：better-auth 表 org_admin | 仅 self，无 org 过滤（carve-out 不受影响） |\n\n- `pnpm --filter @objectstack/plugin-security test` — **405 全绿**\n- `tsc --noEmit`（plugin-security）— **通过**\n- `pnpm build` — **70/70 通过**\n- dogfood authz-conformance ledger — **绿**（`multi-tenant-write-postimage` 覆盖 insert+update、新增 `multi-tenant-exemption-posture`）\n\n## Reviewer checklist\n\n- [ ] Finding 1：确认 update 的 `organization_id` immutability 不误伤合法的用户上下文 org 变更路径（已核查：无此路径，跨组织迁移走 `isSystem` 短路）；缺省 update 不受影响；bulk update 跨租户 change-set 被堵。\n- [ ] Finding 2：确认平台专属能力集（`manage_metadata`/`manage_platform_settings`/`studio.access`/`manage_users`）确为 platform-only（org_admin 只有 `manage_org_users`/`setup.access`/`setup.write`）；`setup.access` 虽 spec scope=`platform` 但 org_admin 持有，故**刻意排除**。\n- [ ] 确认收窄符合预期：org_admin 越 private 租户对象的墙被堵是**预期安全收窄**，非回归。\n- [ ] 确认 `hasPlatformAdminPosture` 是唯一新增消费「平台管理员判定」的 enforcement 点（未做更大范围 enforcement 重写）。\n- [ ] Layer 1 业务 RLS 短路仍由超级位驱动（TENANT_ADMIN 语义未变）。\n\n## 存疑点 / 后续\n\n- `ctx.posture` 未被 plumb 进 enforcement context 是一个更广的架构缺口（posture 已算出却被传输层丢弃）；本 PR 用能力探针绕开，未做 plumbing。若后续要让 enforcement 真正消费 posture，需在 rest-server + runtime dispatcher 两处补 `posture: authz.posture`（out of scope，可另开 issue）。\n- 服务端 `readonly` 字段更新未被强制是一个比 org_id 更广的洞（本 PR 只堵了 org_id 的跨租户面）；其余 readonly 字段仍可被 update 覆盖 —— 建议另开 issue 跟踪。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_019QRUvVfpvSycAHMMF2xTxs\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019QRUvVfpvSycAHMMF2xTxs)_"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 2998,
+  "kind": "issue",
+  "title": "spec: structured form button/defaults config on FormViewSchema + enroll `view` in the liveness ledger",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T03:06:06Z",
+  "updated_at": "2026-07-16T11:44:44Z",
+  "closed_at": "2026-07-16T11:44:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2998",
+  "body": "Follow-up to the viewschema property-liveness audit (`docs/audits/2026-06-viewschema-property-liveness.md`, the `framework#1890` line) and its objectui-side resolution (objectstack-ai/objectui#1763 → #2545, PR objectstack-ai/objectui#2552).\n\nThe objectui work reconciled the renderer-side key drift (`bulkActions`/`batchActions`, `groups`→`sections`) and classified every `ObjectFormSchema` key as `[spec-aligned]` / `[ObjectUI extension]` / `[runtime-only]`. That surfaced a residue that can only be closed **here**, in the spec.\n\n## Problem\n\n`ObjectView`/`ObjectForm` in objectui read a family of form keys that **do not exist in `FormViewSchema`** (`packages/spec/src/ui/view.zod.ts`, `FormViewSchema` L832-929): `showSubmit`, `submitText`, `showCancel`, `cancelText`, `showReset`, `initialValues` (plus renderer-only `className`, `fields`, `customFields`). This repo's own audit already diagnosed it verbatim (`docs/audits/2026-06-viewschema-property-liveness.md:25`). These are renderer-invented surface with no spec backing — serializable form config that belongs in the protocol but isn't in it.\n\n`FormViewSchema` is **strip-mode** (not `.strict()` — unlike the leaf `FormFieldSchema`/`FormSectionSchema` which are `.strict()` per ADR-0089 D3a, view.zod.ts L773/L810). So today these keys are **silently stripped** by a spec `.parse()` — the \"parsed → silently inert\" shape ADR-0078 prohibits.\n\n## Proposal — two tracks\n\n### Track A: add structured `buttons` + `defaults` to `FormViewSchema` (additive, non-breaking)\n\nA new optional top-level key alongside `submitBehavior` (view.zod.ts L912-925). Sketch:\n\n```ts\nbuttons: z.object({\n  submit: z.object({ show: z.boolean().optional(), label: I18nLabelSchema.optional() }).optional(),\n  cancel: z.object({ show: z.boolean().optional(), label: I18nLabelSchema.optional() }).optional(),\n  reset:  z.object({ show: z.boolean().optional(), label: I18nLabelSchema.optional() }).optional(),\n}).optional().describe('Form action-button visibility & labels'),\n\ndefaults: z.record(z.string(), z.unknown()).optional()\n  .describe('Initial field values for create-mode forms'),  // absorbs objectui `initialValues`\n```\n\nBecause the container is strip-mode, this is purely additive (minor/patch changeset, no tombstone). The wizard `nextText`/`prevText` pair and `showStepIndicator` (already in spec) can be folded into `buttons` or left as-is — open question.\n\n**⚠️ ADR-0078 constraint (must be resolved before merge):** the framework itself has **no runtime consumer** of `FormViewSchema` — it's the protocol contract objectui renders. Adding an authorable `buttons` block that no code reads is itself *parsed-but-inert*, i.e. the exact thing ADR-0078 forbids. So Track A must land in one of two shapes:\n- **(preferred)** co-landed with the objectui renderer wiring — objectui's `ObjectForm` reads `schema.buttons.*` / `schema.defaults` instead of its invented `showSubmit`/`submitText`/`initialValues`. Cross-repo, two worktrees.\n- **(fallback)** marked `[EXPERIMENTAL — not enforced]` in the `.describe()` until the objectui side lands, per ADR-0078's escape hatch.\n\nNote `submitBehavior` itself is currently classified **dead** (no renderer consumer) in the audit (L20) — worth wiring alongside, or the new block sits next to already-inert surface.\n\n### Track B: enroll `view` in the liveness ledger (separate, larger)\n\n`view` **is** a governed-eligible metadata type (`view: ViewSchema` in `BUILTIN_METADATA_TYPE_SCHEMAS`, `packages/spec/src/kernel/metadata-type-schemas.ts:78`) — it round-trips through `/api/v1/meta/types/:type` and Studio admin forms. It is simply **not yet in the `GOVERNED` rollout** (`packages/spec/scripts/liveness/check-liveness.mts:56`; README lists it as rollout-pending, `liveness/README.md:208`). That rollout gap is the systemic reason the #1763/#2545 class of drift survived undetected.\n\nEnrolling it: add `'view'` to `GOVERNED`, `--dump view`, and author `packages/spec/liveness/view.json` classifying **every** top-level prop of `ViewSchema` (`list`/`form`/`listViews`/`formViews`/`protection`; the gate drills one level via `children`, so `FormViewSchema`'s props — including a new `buttons` — classify under `form.children.*`). The existing audit already pre-computed much of the live/dead split and would seed `view.json`. This is a **standalone effort**, not a same-PR adjunct to Track A — flagging so it's scoped as its own PR.\n\n## Suggested sequencing\n\n1. **objectui PR** (independent, ready now): bump `@objectstack/spec` pin to ^15 + fix the `/ui` zod-schema value-export erasure (tracked in objectstack-ai/objectui#2545).\n2. **Track A** as a cross-repo pair: spec `buttons`/`defaults` + objectui `ObjectForm` wiring, so neither side is inert.\n3. **Track B** as a dedicated liveness-enrollment PR seeded by the 2026-06 audit.\n\nGrounding ADRs: `0078-no-silently-inert-metadata`, `0049-no-unenforced-security-properties`, `0050-form-layout-vs-presentation`, `0089-unify-visibility-predicate-naming`. Refs objectstack-ai/objectui#2545, objectstack-ai/objectui#1763."
+}

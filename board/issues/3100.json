@@ -1,0 +1,34 @@
+{
+  "number": 3100,
+  "kind": "pull_request",
+  "title": "ci: publish-artifact smoke — install the release candidate like a user would",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "size/l",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T07:33:13Z",
+  "updated_at": "2026-07-17T07:39:31Z",
+  "closed_at": "2026-07-17T07:39:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T07:39:29Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3100",
+  "body": "## Problem — the 15.1.0 blind spot (#3091)\n\nWorkspace `pnpm-workspace.yaml` overrides kept every in-repo CI job on better-auth 1.7.0-rc.1, but **overrides don't ship with published packages** — every fresh `npx create-objectstack` project resolved plugin-auth's own declared ranges to an untested mix that 500'd all auth endpoints. Nothing in CI ever installed the combination users actually get.\n\n#3085 added the **static** gate (`check-override-consistency.mjs`: override targets must be reflected in published manifests). This PR adds the **dynamic** gate: really install the about-to-publish artifacts into a clean project and drive the first-run flow.\n\n## What's in the box\n\n**`scripts/publish-smoke.sh`** — one driver, two modes, same probe set (locally reproducible: `pnpm build && bash scripts/publish-smoke.sh`):\n\n- **pack** (default): `pnpm pack` all 67 publishable packages (pack applies the *same manifest rewrites as publish*, incl. `workspace:*` → concrete versions), scaffold a fresh project **outside the workspace** with the repo-built `create-objectstack`, and pin every `@objectstack/*` to the tarballs via the project's **own** `pnpm-workspace.yaml` overrides — the project inherits *nothing* from the repo's workspace file, so better-auth & friends resolve exactly as they would for a downstream user. A lockfile assertion fails the run if any `@objectstack/*` leaked to the registry (i.e. the override map ever grows a hole).\n- **registry**: `npx create-objectstack@latest` + `npm install` against the real registry — catches ^-range ecosystem drift breaking *already-published* versions after the fact.\n\nProbes (both modes): anonymous `get-session` 200 → `sign-up/email` 200 → `sign-in/email` 200 → session carries the user → REST CRUD round on the scaffolded object (`POST`/`GET`/`PATCH`/`DELETE` `/api/v1/data/<obj>`, 201/200/200/200) as the `--fresh`-seeded dev admin → **zero error/fatal log lines** (ANSI-stripped; three logger formats covered, incl. the #3091 signature `Failed to register OIDC discovery routes`).\n\n**`.github/workflows/publish-smoke.yml`**\n\n- `pack-smoke` runs on `workflow_run` after each **Release** run. Why not `on: pull_request`/`push`: the changesets release PR is pushed with `GITHUB_TOKEN`, and GITHUB_TOKEN events never trigger other workflows — the release PR literally has **no Actions checks** today (see #3086: only Vercel). So the smoke fires when Release completes (the moment changesets refreshes the branch), checks out the release-branch **head SHA** iff an open release PR exists, and reports the verdict back as a **commit status on that SHA** — visible on the release PR like any check. Skips cleanly when no release PR is open. Deliberately **not** on normal PR CI: full build + pack + clean install is inner-loop-hostile (~25–35 min).\n- `registry-canary` weekly (Mon 04:47 UTC) + on dispatch; on scheduled failure it opens (or refreshes, deduped) an issue.\n- `workflow_dispatch` runs both modes on any ref for manual verification.\n\n## Verification\n\n| scenario | result |\n|---|---|\n| pack mode, current tree | ✅ green — all 12 probes, 0 error lines, 108 tarball-resolved lockfile entries, 0 registry leaks |\n| pack mode, **negative**: plugin-auth declarations reverted to the exact 15.1.0 mix (`^1.6.23` + scim `1.7.0-rc.1`) | ✅ red — clean project resolves `core@1.6.23 + scim@1.7.0-rc.1`, OIDC provider init throws the incident's `modelName` TypeError, **log scan fails the run**. (Core sign-in stays 200 thanks to the #3087 isolation — the gate still catches the broken init via the error-line scan. Pre-#3087 this would also have red-failed the sign-up/sign-in probes directly.) |\n| registry mode against published 15.1.1 | ✅ green |\n\nThe negative run also flushed out two real gate-hardening fixes during development: a 403 `INVALID_ORIGIN` on `127.0.0.1` (probes now use `localhost`, matching the default trustedOrigins wildcard) and a **colorized** `ERROR` line slipping past the scan (now `NO_COLOR=1` + ANSI-strip before grep).\n\n## Notes\n\n- `better-sqlite3` stays an optionalDependency of driver-sql: if the runner can't build the native addon, install still succeeds and the runtime falls back to WASM sqlite (#2229) — the smoke never blocks on node-gyp.\n- `workflow_run` only fires for workflow files on the default branch, so the release-PR path can't be exercised from this PR; after merge it can be validated via `workflow_dispatch` and the next real release PR.\n- Relationship to `scaffold-e2e.yml`: that gate exercises the scaffolder against the *registry* and only probes `/health`; this one exercises the **unpublished release candidate** and probes the auth + CRUD surface where 15.1.0 actually broke.\n\nRefs: #3091 · #3085 · #3087\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

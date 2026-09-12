@@ -1,0 +1,32 @@
+{
+  "number": 2801,
+  "kind": "issue",
+  "title": "文档（开发）：文档中的全新后端启动命令多了一个 --",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T23:47:44Z",
+  "updated_at": "2026-07-17T12:42:14Z",
+  "closed_at": "2026-07-17T12:42:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2801",
+  "body": "## 概述\n\n文档中用于启动全新本地后端的命令不正确：\n\n```bash\npnpm dev -- --fresh -p <port>\n```\n\n多余的 `--` 会导致参数转发失败，因此服务无法启动。正确的命令是：\n\n```bash\npnpm dev --fresh -p <port>\n```\n\n## 复现\n\n已在 `98874656ffc50ce1531af52346228ffcdda73fba` 上验证。使用空闲端口运行文档中的命令：\n\n```bash\npnpm dev -- --fresh -p 38421\n```\n\n产生以下输出：\n\n```text\nobjectstack dev --seed-admin -- --fresh -p 38421\nUnexpected arguments: -p, 38421\n```\n\n结果：2/2 次尝试都在绑定端口或创建数据库之前以退出码 2 结束。修正后的命令能够在指定端口启动全新后端：\n\n```bash\npnpm dev --fresh -p 38421\n```\n\n## 范围\n\n这是在为 #2678/#2680 QA 准备本地环境时发现的既有文档错误。问题发生在服务或数据库启动之前，与批量写入行为无关，也不是由 #2680 引入。处理范围仅限于修正文档命令，不需要修改 CLI 或运行时行为。\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 2968,
+  "kind": "pull_request",
+  "title": "feat(spec): page variable source renders as a component picker (objectui#2328)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-15T14:25:18Z",
+  "updated_at": "2026-07-15T14:53:19Z",
+  "closed_at": "2026-07-15T14:53:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-15T14:53:17Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2968",
+  "body": "## What\n\nThe page metadata form's `variables` repeater now declares explicit sub-fields and pins `{ field: 'source', widget: 'ref:component' }`.\n\nA page variable's `source` names the component (by `id`) that *writes* it. Previously the form rendered `source` as a plain text input, forcing authors to type a component id by hand. This pins the `ref:component` widget so Studio offers a dropdown of the components actually placed on the page — mirroring how the sibling `object` field uses `ref:object`.\n\nThis is the **form-spec trigger**; the `ref:component` widget itself lives in objectui (app-shell metadata-admin) — see objectui#2328 companion PR.\n\n## Details\n- `variables` sub-fields are now explicit (`name`, `type`, `defaultValue`, `source`), kept in sync with `PageVariableSchema`.\n- `widget: z.string()` already accepts arbitrary widget names, and nested repeater `fields` are already supported — no schema change needed.\n\n## Testing\n- `packages/spec` `page.test.ts` — 73/73 pass.\n- Verified `pageForm` parses with the new `ref:component` sub-field (defineForm Zod validation at import).\n\nResolves the framework half of objectui#2328.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 3167,
+  "kind": "issue",
+  "title": "decision: default wiring for the serve-side MCP server (@objectstack/mcp) in dev — identity admission first",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T06:09:04Z",
+  "updated_at": "2026-07-18T16:32:01Z",
+  "closed_at": "2026-07-18T16:32:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3167",
+  "body": "**Decision issue** — direction first, implementation split later. Counterpart of the consume-side work that closed #2977/#3056: those made ObjectStack *call* external MCP servers; this is about ObjectStack *being* one.\n\n## Current state (verified against main)\n\nAn odd half-wired shape:\n\n- The runtime dispatcher already serves an MCP **HTTP surface per-request at `/api/v1/mcp`, default-ON** (`OS_MCP_SERVER_ENABLED=false` opts out), plus the public `GET /api/v1/mcp/skill` SKILL.md download and a connect UI (`packages/mcp/src/connect-ui.ts`).\n- But the service behind it — **`MCPServerPlugin`** (registers the `'mcp'` service; bridges ToolRegistry, MetadataService, DataEngine, and Agents; optionally starts a long-lived **stdio** transport via `autoStart` / `OS_MCP_SERVER_ENABLED=true`) — **is wired nowhere by default**: not in `os dev`/`serve`, not in the showcase, not in the scaffold. Its only in-repo consumer is an `app-todo` e2e.\n\nNet effect: an AI-native platform whose official \"let AI operate the running app\" channel is a route that answers but a capability that is never registered. Discoverability is zero exactly where the platform's pitch is strongest — the dev loop, where a coding agent (Claude Code, Cursor, any MCP client) could read the schema, inspect seed data, and exercise actions of the app it is building.\n\n## Proposed direction (to be ratified or amended)\n\n**Dev default-on, prod explicit.** `os dev` registers `MCPServerPlugin` by default (escape hatch: `OS_MCP_SERVER_ENABLED=false`); `os serve`/production keeps today's explicit opt-in. The value asymmetry is stark: in dev the MCP endpoint completes the AI-builds-apps loop; in prod it is a high-authority execution surface that must be a deliberate choice.\n\n## The four decisions to make (in order)\n\n### 1. Identity admission — hard precondition (ADR-0096)\n\nMCP **tool execution is an execution surface**, the same class as GraphQL and realtime, which ADR-0096 registered in the authz conformance matrix (`packages/qa/dogfood/test/authz-conformance.matrix.ts`) with CI tripwires. Today the matrix covers MCP only incidentally (the data-write ingress readonly strip names the MCP dispatcher as one funneled caller); **there is no row for the MCP tool-execution principal**: when an MCP client calls `tools/call`, *whose* `ExecutionContext` runs it? Dev-admin? A token-resolved user? An explicit guest? Fall-open on a missing principal = full authority — the exact failure mode ADR-0096 exists to prevent. Registering the row (and the answer) is the gate for any default-on wiring; nothing else in this issue proceeds before it.\n\n### 2. The dev/prod boundary definition\n\nWhat *is* \"dev\" for this purpose — the `os dev` command itself (recommended: wiring follows the command, not the env), `NODE_ENV`, or a config flag? And the off-switch semantics (`OS_MCP_SERVER_ENABLED=false` today disables the HTTP surface — should it also gate the plugin registration?).\n\n### 3. Transport & mount shape\n\nThe per-request HTTP surface already exists; the open questions are (a) whether dev auto-start should also cover the **stdio** transport (local AI tools spawning the process directly — likely no: `os dev` owns the process), and (b) whether the connect UI / skill download need dev-specific affordances (e.g. printing the MCP URL + connect instructions on dev boot, which the dispatcher's skill/connect-ui pieces suggest was the intent).\n\n### 4. Default exposure scope\n\nAuto-generating tools for *every* object's CRUD explodes the tool list on real apps (hundreds of tools makes MCP clients unusable) and widens the misuse surface. Decide the default: e.g. only `apiEnabled` objects + explicitly marked actions/flows, with a metadata-declared exposure config as the future story (consistent with the ADR-0097 metadata-first philosophy — what is exposed should itself be authorable).\n\n## Optional extension (after the above)\n\nWith a stable in-repo serve-side endpoint, the showcase's declarative `provider: 'mcp'` connector gains a second demo target: **the platform connecting to itself**. Previously rejected for boot-ordering (automation `start()` runs before HTTP listens); the #3049 degrade+retry makes the self-connection heal seconds after boot, but the dogfood gate must not become timing-sensitive — treat as a separate, carefully-gated follow-up.\n\n## Refs\n- ADR-0096 (execution-surface identity admission — the matrix + tripwire mechanism this must register with)\n- ADR-0097 / #2977 / #3056 (consume side, closed), ADR-0024 §4 (trust model)\n- `packages/mcp` (`MCPServerPlugin`, `MCPServerRuntime`, connect-ui, skill), `packages/runtime/src/http-dispatcher.ts` (`/mcp` routes)"
+}

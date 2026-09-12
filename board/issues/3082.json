@@ -1,0 +1,33 @@
+{
+  "number": 3082,
+  "kind": "pull_request",
+  "title": "docs(releases): expand v15 page to full 14.8→15.0→15.1 backend + Console coverage",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T00:17:56Z",
+  "updated_at": "2026-07-17T01:04:29Z",
+  "closed_at": "2026-07-17T01:04:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T01:04:27Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3082",
+  "body": "Follow-up to #3079 (merged): the first curated pass under-covered the v15 line in three structural ways, called out in release review. This expands `content/docs/releases/v15.mdx` from ~465 to ~1010 lines:\n\n## 1. 15.0.0 backend was missing everything outside ADR-0095\n\nFrom the `14.8.0..15.0.0` range (23 commits), now added:\n- **BREAKING — strict view/page schemas** (ADR-0089 D3a, #2943): `FormFieldSchema`/`FormSectionSchema`/`PageComponentSchema` are `.strict()`; mis-layered/typo'd visibility keys are loud parse errors, with migration guidance. This was a real spec-15.0.0 breaking change absent from the page.\n- **Behavior changes:** per-row import automation chain + `skipAutomations` + REST import `runAutomations` default ON (#2922); `sys_position`/`sys_capability` system-row write guardrail (#2930); bidirectional visibility-root lint (#2931); explain posture-label alignment (#2949).\n\n## 2. 15.0.0 had no Console section at all\n\n15.0.0 bundled the **objectui 14.0 major** (13.2.0 → 14.0.0, ~73 commits) — never disclosed on any release page (much of it rode unversioned in the 14.8.0 pin). New section covers:\n- ADR-0057 ChatDock consolidation, **including its breaking cleanup** (#2475: `features.chatDock` removed, `ConsoleFloatingChatbot`/`StudioAiCopilot` deleted, sessions re-keyed to `(user, app, product)`), with migrations\n- The Gantt batch (API datasource write-back, dependency validation, lock loop), lists/grids, sharing-rule form pickers, phone sign-in, Studio deep links, i18n, and two security fixes (chat-cache clearing on logout #2485, MetadataClient Bearer auth #2410)\n- The six early-14.1 commits the 15.0.0 pin picked up (record-grained explain panel, provenance badges, AI usage indicator…)\n\n## 3. 15.1.0 sections were over-compressed\n\nEvery domain expanded to full changeset detail; the Console 14.1 section now covers all eight areas of the 94-commit range (record inline-edit line, CEL editor family, dashboard filters, Access pillar, flow designer, kanban, Studio misc, fixes) instead of seven bullets.\n\n## Checks\n\n- `check:release-notes` OK\n- `check:role-word` OK (rebased over #3081; the two new generic-English \"role\" usages reworded — ADR-0090 D3 ratchet)\n- Facts sourced from consumed changesets + commit bodies on both repos (framework `14.8.0..15.1-pending`, objectui `13.2.0..b8967495`), assembled via two range-analysis passes\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 2849,
+  "kind": "issue",
+  "title": "Security: MCP action surface must gate on `ai.exposed` — action bodies run trusted (unbounded RLS/FLS), so invoke-time is the only agent boundary (#2849)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-12T08:46:44Z",
+  "updated_at": "2026-07-16T15:51:18Z",
+  "closed_at": "2026-07-16T15:51:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2849",
+  "body": "Found by the ADR-0090 D10 adversarial security review. Direction decided (option **c**); invoke-time hardening + framing correction shipped in #2964. Longer-term `runAs` convergence tracked below.\n\n## What\n\nBusiness-action bodies (`type: script` / `body`) are dispatched via `invokeBusinessAction` with an engine facade — `buildActionEngineFacade(ql)` — whose `insert/update/delete/find` call the engine **with no `ExecutionContext`**:\n\n```ts\nasync insert(object, data) { const res = await ql.insert(object, data); … }        // no context\nasync update(object, id, data) { await ql.update(object, data, { where: { id } }); } // no context\n```\n\nA context-less engine call hits the SecurityPlugin's empty-principal fall-open → **all RLS / FLS / CRUD / tenant scoping and the D10 agent intersection are skipped**. An action body therefore reads/writes with ambient unrestricted authority (the SECURITY-DEFINER / trusted-code model). The same context-less facade exists on the REST action route.\n\n**This trusted-action model is intentional and defensible.** Many actions legitimately need elevated authority — convert-lead creates records across objects, close-ticket cascades. Running bodies under the caller's RLS would break them. The problem is not *that* trusted code exists — it's that it was **implicit, invisible, and (for agents) ungated by author intent**.\n\n## Why it matters (agent angle)\n\nWith the D10 agent feature (#2843 / #2845), an MCP **agent** can invoke actions via `run_action`. Because the body runs context-less, **the agent's data ceiling does NOT bound what an invoked action reads or writes** — contradicting the #2845 framing (\"a `data:read` agent invoking a writing action is blocked at the write\"). The real agent boundary is invoke-time only.\n\n**Verified gap (was the open question in the first analysis comment):** the runtime `run_action` / `list_actions` bridge did **not** read the spec's `ai.exposed` governance gate (ADR-0011) at all. `ai.exposed` is fully defined in `packages/spec/src/ui/action.zod.ts` (default `false`, requires a ≥40-char description, documented as a \"deliberate governance gate\"), but `listActions` / `invokeBusinessAction` filtered only on `isHeadlessInvokableAction` + the capability gate. So an agent could **enumerate and invoke any headless action the author never intended for AI**, and the body then ran trusted. That is the substantive hole — not just a docs wording issue.\n\nTwo smaller related gaps:\n- The flow-dispatch branch passed a `triggerData` envelope the flow engine never reads, **and omitted the caller's identity**, so a `runAs: 'user'` flow invoked from MCP fell into the user-less UNSCOPED (fail-open) path (ADR-0049 / #1888).\n- Trusted-body elevation was entirely silent — no audit trail of who invoked which action.\n\n## Decision (chosen: option c)\n\nOf the three original options —\n1. Accept the trusted model + correct the framing only.\n2. Thread the caller's `ExecutionContext` into the facade (bounded bodies) — correct but a large breaking change to the trusted-action model many actions rely on.\n3. Hybrid: action-level `runAs: 'user' | 'system'`, mirroring what flows already do (ADR-0049).\n\n— we take **(c): accept the trusted model, put the boundary where it belongs (author authorization via `ai.exposed`), correct the framing, and add audit.** This is the honest, small, genuinely-tightening step. It is *not* the terminal state: option (3)'s `runAs` convergence is the long-term direction (below), because the platform already proved that model on flows and script actions should not remain the inconsistent exception.\n\n## Shipped in #2964 (Phase 1)\n\n- **`ai.exposed` fail-closed gate** on `list_actions` (hidden) and `run_action` (rejected) — only author-opted-in actions are enumerable/invokable via MCP. New single-sourced `actionAiExposureError` helper.\n- **Flow actions receive a proper `AutomationContext`** (`record` / `object` / `userId` / `positions` / `permissions` / `tenantId` / `params`), so `runAs: 'user'` flows enforce RLS as the invoker instead of running unscoped.\n- **Audit logging** of trusted body dispatch on both the MCP and REST paths.\n- **Framing corrected** everywhere it claimed bodies run under the caller's RLS: `run_action`/`list_actions` tool descriptions, generated `SKILL.md`, `packages/mcp/README.md`, `content/docs/ai/agents.mdx`. The agent-facing action boundary is now stated honestly = `ai.exposed` + `actions:execute` + capability intersection — **not** the data ceiling.\n- Tests (runtime + app-todo MCP e2e) covering the gate end-to-end; changeset added.\n\n## Remaining work (follow-up — the option-3 convergence)\n\nKept open for the larger, correct-but-bigger change:\n\n- **Phase 2 (minor):** add `runAs?: 'user' | 'system'` to the action spec, semantics aligned with ADR-0049. Default temporarily `'system'` (preserves today's trusted behavior) with a build-time lint nudging authors to declare it explicitly; `runAs: 'user'` actions thread the caller's `ExecutionContext` into the facade (agents → ceiling∩user). Add a lint warning for `ai.exposed: true` + `runAs: 'system'` so authors consciously acknowledge handing a trusted action to AI.\n- **Phase 3 (major):** flip the default to `'user'` (flow parity) and tighten the SecurityPlugin empty-principal fall-open so a non-`isSystem` context-less call fails closed (or is loudly audited) rather than silently elevating.\n\n## Refs\n- Facade + `invokeBusinessAction` + REST action route in `packages/runtime/src/http-dispatcher.ts`\n- `ai.exposed` spec: `packages/spec/src/ui/action.zod.ts`\n- Related: #2843, #2845; ADR-0011 (AI exposure), ADR-0049 / #1888 (`runAs`), ADR-0090 D10 (agent intersection)\n- PR: #2964"
+}

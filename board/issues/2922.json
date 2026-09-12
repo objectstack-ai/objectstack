@@ -1,0 +1,30 @@
+{
+  "number": 2922,
+  "kind": "issue",
+  "title": "数据导入:批量 insert 给 Hook 的输入形状与单条不一致(installFlatInput 失效);「运行自动化与触发器」开关是摆设且默认值应为选中",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-14T14:49:47Z",
+  "updated_at": "2026-07-15T02:40:23Z",
+  "closed_at": "2026-07-15T02:40:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2922",
+  "body": "## 背景\n\n数据导入(`POST /data/:object/import` 及异步 import job)链路上存在两个平台级缺陷,导致**项目侧 Hook 在导入场景下行为错乱**:\n\n## 缺陷 1:批量与单条给 Hook 的输入形状不一致(`installFlatInput` 不支持批量)\n\n导入的 CREATE 行经 `import-runner` 批量走 `protocol.createManyData` → `engine.insert(object, records[])`。此时引擎只触发**一次** `beforeInsert`/`afterInsert`,且 `ctx.input.data` / `ctx.result` 是**数组**:\n\n- `packages/objectql/src/engine.ts` `insert()`:批量分支把整个数组塞进一个 hookContext(单条则是单行对象);\n- `packages/objectql/src/hook-wrappers.ts` `installFlatInput()`:平铺代理只对单行对象有意义 —— `data` 是数组时 `ctx.input.<field>` 全部读到 `undefined`,写 `ctx.input.<field> = x` 落在数组对象的具名属性上被下游忽略(静默丢弃);\n- `pickRecordPayload()`:声明式 hook 的 `condition` 拿到数组去当 record 求值,必然失配;\n- `plugin-audit` 的 `writeAudit`:`ctx.result` 是数组时 `after?.id` 为 undefined、`{...after}` 展开数组,批量插入的审计日志实际是坏的;\n- `trigger-record-change` 的 `buildContext`:`input.data` 是数组时 flow 拿到的 record 也是错的。\n\n**结果:同一个 Hook,单条录入正常,批量导入静默失效/错乱。这是把项目 Hook 坑进去的根源。**\n\n### 修复方向\n\n引擎在 `insert()` 收到数组时,**按行**触发 `beforeInsert`/`afterInsert`(每行一个单条形状的 hookContext,`input.data` = 该行、`result` = 对应返回记录),保证 Hook 输入形状与单条完全一致。审计、flow 触发、declarative condition 随之全部恢复正常。\n\n## 缺陷 2:「运行自动化与触发器」开关是摆设(引擎不读 `skipAutomations`)\n\n- `packages/rest/src/import-runner.ts:224` 写入 `writeCtx.skipAutomations = !runAutomations`;undo 路由(rest-server.ts:3799)同样写 `skipAutomations: true`;\n- 但 **objectql 引擎对 `skipAutomations` 零引用** —— `triggerHooks` / `buildSession` 都不认识它,Hook 永远照跑;\n- 即:导入界面不勾「运行自动化与触发器」也照样跑 Hook;导入撤销(undo)也会再次触发自动化。\n\n平台已有半套同类机制:种子回放用 `context.skipTriggers` → `buildSession` → `RecordChangeTrigger` 跳过 flow 派发,但只覆盖 flow,不覆盖 metadata hooks,且和 rest 写的 `skipAutomations` 字段名对不上。\n\n### 修复方向\n\n1. spec:`ExecutionContext` 与 `HookContext.session` 增加 `skipAutomations`;\n2. 引擎 `buildSession`:透传 `skipAutomations`(并隐含 `skipTriggers`,flow 抑制复用现有机制);\n3. 引擎 `triggerHooks`:`session.skipAutomations` 为真时跳过 **metadata 绑定的自动化 hook**(`HookEntry.meta` 存在,即 `bindHooksToEngine` 注册的);**系统 hook 照跑**(审计、能力校验、共享规则等由插件 `registerHook` 直接注册、无 `meta`)—— 绝不能一刀切跳过所有 hook,否则安全/审计被绕过。\n\n## 缺陷 2b:默认值应为「运行自动化」\n\n- objectui `ImportWizard.tsx`:`useState(false)` → 默认**不勾**;\n- rest `import-prepare.ts:255`:`runAutomations = body?.runAutomations === true` → 服务端默认 false。\n\n由于引擎至今根本不读该标志,**事实行为一直是\"自动化照跑\"**;修好缺陷 2 后如果保持默认 false,等于静默改变所有现有导入调用的行为。因此默认值应翻转为 **true(默认运行自动化与触发器)**,与事实行为、与 Salesforce 等平台惯例一致,不勾选才是显式 opt-out:\n\n- objectui:`useState(true)`(默认勾选);\n- rest:`runAutomations = body?.runAutomations !== false`。\n\n## 影响面\n\n- 任何带 beforeInsert/afterInsert Hook 的对象走 UI 批量导入:Hook 静默失效(缺陷 1);\n- 批量导入的审计日志损坏(缺陷 1 连带);\n- 「运行自动化与触发器」开关完全无效(缺陷 2);\n- 导入撤销会再次触发自动化(缺陷 2 连带)。\n\n修复 PR:framework(engine/spec/rest)+ objectui(默认勾选)随后关联。\n"
+}

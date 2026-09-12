@@ -1,0 +1,30 @@
+{
+  "number": 2904,
+  "kind": "issue",
+  "title": "ADR-0089: ObjectUI form + page renderers must read canonical `visibleWhen` (sibling repo)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-14T07:47:25Z",
+  "updated_at": "2026-07-14T15:39:29Z",
+  "closed_at": "2026-07-14T15:39:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2904",
+  "body": "Follow-up to #2642 / #2900 (ADR-0089), for the sibling **`objectui`** repo.\n\n## Why\n\n#2900 makes `visibleWhen` the canonical conditional-visibility key and normalizes the deprecated `visibleOn` (view form) / `visibility` (page component) aliases into `visibleWhen` **at the spec parse boundary** (a zod `.transform()`). Any metadata parsed through the spec schemas now exposes only `visibleWhen`.\n\nThe form + page renderers live in `objectui` (not in this backend repo) and currently read `visibleOn` / `visibility`. They must be updated to read **`visibleWhen`** so runtime conditional visibility keeps working once metadata is normalized. This is the \"Renderer reads\" checkbox in #2642.\n\n## Tasks (in `objectui`)\n\n- [ ] Form renderer: read `visibleWhen` on form sections/fields (was `visibleOn`).\n- [ ] Page renderer: read `visibleWhen` on page components (was `visibility`).\n- [ ] Keep a defensive `visibleWhen ?? visibleOn ?? visibility` read only if raw (un-parsed) metadata can reach the renderer; otherwise read `visibleWhen` directly.\n- [ ] After `pnpm objectui:refresh`, verify visibility rules in the showcase (contact-form / page-variables pages, task form `notes` field).\n\n## References\n- ADR-0089 D1/D2 (`docs/adr/0089-unify-visibility-predicate-naming.md`)\n- Spec change: #2900 · Parent: #2642"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 3106,
+  "kind": "issue",
+  "title": "Validation rules, requiredWhen and option visibleWhen are silently skipped on multi-row updates (options.multi)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T09:25:02Z",
+  "updated_at": "2026-07-18T03:22:35Z",
+  "closed_at": "2026-07-18T03:22:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3106",
+  "body": "## Summary\n\n`evaluateValidationRules()` is the single gate for object-level validation rules, field-level `requiredWhen`, and per-option `visibleWhen` authorization. It is wired into **insert** and **single-id update** — but **not** into the multi-row update branch. Every one of those checks is a silent no-op on `update(..., { multi: true })`.\n\nThis is a `declared ≠ enforced` gap one layer below the one #1475 closed: #1475 fixed the *switch* (all 6 declared rule types now have real handlers); this is about the *call site*.\n\n## Evidence\n\nRepo-wide, `evaluateValidationRules` has exactly two call sites (`packages/objectql/src/engine.ts`):\n\n| Path | Line | Evaluator runs? |\n|---|---|---|\n| insert | `engine.ts:2265` | ✅ |\n| update by id | `engine.ts:2440` | ✅ |\n| `options.multi` → `driver.updateMany` | `engine.ts:2442-2487` | ❌ **never called** |\n\nThe bulk branch runs `validateRecord` (field *shape*), `stripReadonlyWhenFieldsMulti`, and `stripReadonlyFields`, then goes straight to `driver.updateMany` at `engine.ts:2487`.\n\n## What silently doesn't run on `multi`\n\nEverything inside `evaluateValidationRules`, not just the rules:\n\n1. **All 6 rule types** — `script`, `state_machine`, `format`, `cross_field`, `json_schema`, `conditional`.\n2. **Field-level `requiredWhen`** (`rule-validator.ts:501-516`) — whose own comment says *\"enforced server-side so the rule can't be bypassed.\"*\n3. **Per-option `visibleWhen`** (`rule-validator.ts:517-521` → `evaluateOptionVisibility`) — described as *\"Per-option authorization / cascade gating (objectui#2284)\"*, explicitly *\"Complements the client-side hiding, which is not a security boundary.\"* On the bulk path the server-side half is absent, so the client-side half is the only thing left — which the comment says is not a boundary. Hence the `security` label.\n\n## The warning doesn't cover the gap\n\n`engine.ts:2449-2452` warns — but only `if (needsPriorRecord(updateSchema))`:\n\n```\nif (needsPriorRecord(updateSchema as any)) {\n    this.logger.warn('Object-level validation rules (state_machine/cross_field/script) are not enforced on multi-row updates', { object });\n}\n```\n\n`ruleNeedsPrior` (`rule-validator.ts:331-344`) returns **false** for `format` and `json_schema` — correctly, since they only inspect the incoming value and genuinely don't need prior state. Consequences:\n\n- An object carrying **only** `format` / `json_schema` rules gets **no enforcement and no warning**. Fully silent.\n- The warning's text names only `state_machine/cross_field/script`, so even when it does fire it under-reports: `format`, `json_schema`, `conditional`, `requiredWhen` and `visibleWhen` are skipped too.\n\nNote the irony: `format` and `json_schema` are the two types that need *nothing* from the prior record, so they are the two that could be enforced on the bulk path today at zero cost — and they're the two that fail most quietly.\n\n## Repro\n\nGive an object a `format` rule, then bulk-update through it:\n\n```ts\nawait ql.object('acct').update(undefined, { email: 'not-an-email' }, { multi: true, filter: [...] });\n// → writes. No ValidationError, no warning.\n// Same payload via update(id, ...) → throws ValidationError (invalid_format).\n```\n\n## Blast radius\n\nBounded but real. Neither `packages/rest` nor GraphQL surfaces `multi`, so this is not reachable from an untrusted external caller today. In-process callers do hit it (`lifecycle-service.ts`, `settings-service-plugin.ts:361`, `sql-outbox.ts`), and the ceiling is \"any future caller that passes `multi: true`\" — the checks fail open with no signal.\n\n## Two docs currently overstate this\n\nBoth are accurate about the switch and inaccurate about the system:\n\n- `packages/spec/src/data/validation.zod.ts:17-18` — *\"Everything advertised here runs on the write path ...; nothing is a silent no-op.\"*\n- `packages/objectql/src/validation/rule-validator.ts:35-38` — *\"Every variant declared by `ValidationRuleSchema` is enforced here ... there are no silent no-ops.\"*\n\n## Decision needed (enforce / trim / document)\n\nNot proposing an implementation — flagging for a call:\n\n1. **Enforce what's free now.** `format` / `json_schema` / non-prior `conditional` / `requiredWhen` / `visibleWhen` need no prior row and could evaluate against the bulk payload immediately. This closes the silent half.\n2. **Prior-dependent rules** (`state_machine` / `cross_field` / `script`) genuinely can't run per row from one bulk payload without an N-row fetch. Options: fetch the row-scoped set (the `readonlyWhen` bulk path at `engine.ts:2470-2474` already does exactly this, with the same AST, and is the natural precedent) — or fail **closed** and reject `multi` on objects carrying them, rather than warn-and-proceed.\n3. **At minimum**, widen the warning to fire on *any* rule presence (not just `needsPriorRecord`) and correct its wording, and fix the two doc comments above.\n\n## Related\n\nSeparately: `BaseValidationSchema` allows `events: ['insert','update','delete']` (`validation.zod.ts:88`), but `Mode = 'insert' | 'update'` (`rule-validator.ts:72`) and `engine.delete` never invokes the evaluator — so a rule declaring `events: ['delete']` never runs. The evaluator's own docs concede this; the spec's enum does not. Worth folding into the same decision or splitting out.\n\n---\n\nFound while refreshing the `declared ≠ enforced` example in AGENTS.md Prime Directive #10 (#3105) — the directive's own example turned out to still be true, just one layer down. Filed per PD #10 rather than fixed in that docs PR.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

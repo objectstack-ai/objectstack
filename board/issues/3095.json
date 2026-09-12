@@ -1,0 +1,32 @@
+{
+  "number": 3095,
+  "kind": "issue",
+  "title": "view metadata type-schema is a no-op for runtime shapes: ViewItem/personalization bodies strip to {} under ViewSchema",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T06:59:55Z",
+  "updated_at": "2026-07-18T02:29:45Z",
+  "closed_at": "2026-07-18T02:29:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3095",
+  "body": "## 问题\n\n`metadata-type-schemas.ts` 把 `view` 映射到 **容器** `ViewSchema`(`{ list, form, listViews, formViews }`,四槽全 optional,Zod 默认 strip 未知键)。但 `view` 类型在运行时实际承载**三种形态**:\n\n1. `defineView` 聚合容器(裸 `<object>` 键,back-compat 保留);\n2. 展开/运行时创建的独立 **ViewItem**(`name`/`object`/`viewKind`/`config`,`metadata-create-seeds.ts` 的 create seed 就是这个形态);\n3. #2555 个性化 overlay(裸 view config + `viewIdentityPatch` 补的 `viewKind`/`object`/`label` identity)。\n\n形态 2/3 经 `ViewSchema.safeParse` 会被**剥成 `{}` 然后通过** —— 即:\n\n- `saveMetaItem` 的 422 校验对 ViewItem/个性化写入**形同虚设**(任意坏 config 都过);\n- `computeMetadataDiagnostics` 对枚举出的每个 ViewItem 返回 `valid: true`(空转);\n- `metadata-create-seeds.test` 里 view seed「通过」type schema 校验也是同一空转的假绿。\n\n## 为什么没在 #3096(flat-view 修复 PR)一并收\n\n作者侧已经堵住(`defineView()` 零视图抛错 + `os validate` 新增 `view-container-shape` 检查)。运行时侧若直接给 `ViewSchema` 加 refine,会把上面 2/3 两种合法形态全部打红/422(Console 个性化保存直接回归);正确修法需要:\n\n- map 改 `z.union([ViewItemSchema, 非空容器])`,并给 #2555 形态定去向(补 `config` 嵌套归一化,或第三个显式 schema);\n- 核对 `/api/v1/meta/types/view` 的 JSON Schema 输出(union→anyOf)对 Studio SchemaForm/create seed 的影响(view `allowRuntimeCreate: true`);\n- 用 #2555 的真实 PUT 载荷做回归测试。\n\n这需要独立的 runtime 测试面,不适合塞进 docs/skills 修复 PR。\n\n## 验收\n\n- ViewItem 坏 `config`(如 kanban 缺 `groupByField`)在 save 时 422、在 diagnostics 里报错;\n- 个性化 PUT(#2555 形态)保存与徽标不回归;\n- create seed 测试对 view 走真实(非空转)校验。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

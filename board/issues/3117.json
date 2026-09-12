@@ -1,0 +1,32 @@
+{
+  "number": 3117,
+  "kind": "pull_request",
+  "title": "fix(cli): inline `label:` is the default-locale source for i18n coverage (#3103)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T11:43:06Z",
+  "updated_at": "2026-07-17T11:58:32Z",
+  "closed_at": "2026-07-17T11:58:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T11:58:29Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3117",
+  "body": "Closes #3103.\n\nTakes **option 2** from the issue — and it turned out to be more than \"the better long-term semantics\": the old rule was a **false positive**, contradicting a contract the rest of the framework already documents.\n\n## Why option 2, not option 1\n\nA fresh scaffold's 4 errors are all for strings the template *does* author inline:\n\n```\n✗ Object \"demo_note\" label missing translation for locale \"en\"       # label: 'Note'\n✗ Object \"demo_note\" pluralLabel missing translation for locale \"en\" # pluralLabel: 'Notes'\n✗ Field demo_note.title label missing translation for locale \"en\"    # label: 'Title'\n✗ Field demo_note.body label missing translation for locale \"en\"     # label: 'Body'\n```\n\nThe inline `label:` **is** the default-locale text, and the framework says so everywhere except in the coverage rule:\n\n- **The runtime resolver falls back to it.** `i18n-resolver.ts` `translateObject`: `lookupObjectField(bundle, objectName, 'label', opts) ?? doc.label`. Its docstring states the order: *requested locale → fallbackChain → literal `label` from the metadata*. Nothing renders broken or empty.\n- **`os i18n extract` generates bundles from it** — `pushEntry(..., obj.label ?? objectName, ...)`.\n\nSo coverage was demanding an `en` bundle that mechanically restates data the linter already holds, for text that renders correctly. Option 1 would have shipped that duplicate into the template and **frozen the ritual for every user**: the errors return the moment someone adds their own object.\n\nIt's also not only about the template. An object with a `label` but no `pluralLabel` was told its `pluralLabel` was *\"missing translation\"* — a demand to translate a string that doesn't exist, unfixable by authoring anything except a bundle entry.\n\n## The change\n\nAn inline label satisfies the **default locale**; a bundle is what **other locales** need. A key with no source string anywhere is no longer an i18n gap — a missing label is already `required/label`'s finding (lint.ts:155-225).\n\nThis also removes an inconsistency rather than adding a special case: `collectExpectedKeys` *already* only expected `confirmText` / `successMessage` / `description` **when authored**. `label` / `pluralLabel` were the outliers.\n\nPlatform form fields keep their key: they omit `label` by design and let the renderer humanize the path (`name` → `Name`), so that derived text is a real source string other locales still owe a translation for. This mirrors the extractor's seed value — which the coverage walker's docstring already promises it does. (My own new test caught that I'd otherwise have silently dropped ~800 platform keys from non-default-locale coverage.)\n\n## Verification\n\nThe issue's repro, end to end — `create-objectstack` → `os lint`:\n\n```\nBefore:  4 error(s)                     After:  ✓ All checks passed   (exit 0)\n```\n\nAnd against a real multi-locale project, **the non-default-locale signal is preserved exactly**:\n\n| `examples/app-todo` | before | after |\n|---|---|---|\n| `os lint` | 39 errors, **79 warnings** | 0 errors, **79 warnings** |\n| `os i18n check` | 856 errors, **1712 warnings** | 0 errors, **1712 warnings** |\n\nWarnings are byte-identical — no real gap was dropped; only the default-locale duplicates are gone. `os i18n check` now reports the truth: *\"Non-default locales have gaps but the default locale is fully covered.\"*\n\nThe platform baseline drops 2451 → 1634 hidden issues — a delta of exactly **817**, its `en` third (817×3 locales → 817×2) — because the platform ships English labels inline too. That arithmetic is what confirms only the `en` share vanished.\n\nFull CLI suite green: **548 tests / 52 files**. Two existing tests asserted the old behaviour and were rewritten to test the real intent (a genuine default-locale gap = a string in another locale with no source text for the default one), plus 7 new tests pinning the scaffold shape, the zh-CN-first case, and the bundle-only case.\n\n## Follow-ups (not in scope)\n\n- `os lint` ignores a project's declared `i18n.defaultLocale` and always lints against `'en'` (the oclif flag's `default: 'en'` makes \"declared\" indistinguishable from \"defaulted\"). This change reduces the blast radius but doesn't fix it.\n- Coverage skips array-form `options: [{value, label}]` entirely; the extractor handles both.\n- The scaffold's `AGENTS.md` documents an `src/i18n/` directory it never creates, while real examples use `src/translations/`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

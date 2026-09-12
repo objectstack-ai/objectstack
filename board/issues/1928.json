@@ -1,0 +1,32 @@
+{
+  "number": 1928,
+  "kind": "issue",
+  "title": "Formula guardrail: cel-js arithmetic silently returns null (double × int + bare identifiers)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T17:30:31Z",
+  "updated_at": "2026-07-18T07:28:45Z",
+  "closed_at": "2026-07-18T07:28:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1928",
+  "body": "## Summary\n\nTwo formula-authoring footguns let an AI write a reasonable-looking `Field.formula` that **passes `objectstack build` but silently evaluates to `null` at runtime** — the failure class our guardrails are meant to eliminate. Both were found during 9.5.x release-prep testing of `example-crm` (fixed there in #1927; this issue tracks the *systemic* prevention).\n\n## 1. No `double × int` arithmetic overload (primary)\n\ncel-js (`@marcbachmann/cel-js`) types a record field number as `double` and a bare integer literal as `int`, and has **no mixed arithmetic overload**:\n\n```\nrecord.amount / 100              → ERR  no such overload: dyn<double> / int   → null\nrecord.amount * 2                → ERR  no such overload: dyn<double> * int    → null\nrecord.amount * record.probability / 100.0   → OK  (float literal)\nrecord.amount >= 4               → OK   (cel-js DOES have mixed *comparison* overloads)\n```\n\nSo `amount / 100`, `price * 2`, `total - fee` (int literal) all silently null. Only float literals (`100.0`, `2.0`) work. Integer literals in arithmetic are ubiquitous → high-frequency footgun.\n\n**Constraint:** cel-js **rejects** registering operator overloads — `env.registerFunction('_/_(double, int): double', …)` → `Invalid signature`. So there is no trivial overload-registration fix.\n\n### Options\n- **(a) Build-time lint** — in `validate-expressions.ts` (ADR-0032), flag a number-typed field used as an arithmetic operand against an `int` literal; message: \"use a float literal (e.g. `/ 100.0`)\". Cheapest, matches the advisory-warning guardrail strategy.\n- **(b) Engine AST promotion** — in the CEL engine, walk the parsed AST and promote `int` literals that are **arithmetic operands** to `double`. Must NOT touch `int`-typed function args (e.g. `daysFromNow(30)`). More robust (fixes silently), more invasive, needs tests.\n- (a) and (b) are complementary.\n\n## 2. Bare identifiers in formula expressions (secondary)\n\nFormula scope exposes only `{record, previous, input, os}` (see `buildScope`, `packages/formula/src/stdlib.ts`) — **no field flattening**. So:\n\n```\ncel`status == \"converted\"`        → null   (bare `status`)\ncel`record.status == \"converted\"` → OK\n```\n\n`validate-expressions.ts` doesn't flag bare identifiers that fail to resolve. A lint that requires `record.`/`input.`/`os.`-qualified references in formula expressions would catch it at build.\n\n## Acceptance\n- An AI-authored `expected_revenue = amount * probability / 100` is either rejected at build with an actionable message, or compiles to a working `double` formula.\n- Bare-identifier formula references are flagged at build.\n\nRefs: #1927 (example-crm fixes), ADR-0032. Same \"build-green / runtime-silent\" family as #1877 / #1870 / #1876."
+}

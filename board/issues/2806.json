@@ -1,0 +1,30 @@
+{
+  "number": 2806,
+  "kind": "issue",
+  "title": "错误（导入）：缓冲操作导致同一文件查找引用中断  ",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T23:47:52Z",
+  "updated_at": "2026-07-16T09:38:39Z",
+  "closed_at": "2026-07-12T03:00:58Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2806",
+  "body": "## 界面重现\n\n使用真实的 `showcase_category` 对象。\n\n开始导入前，先在数据库中创建以下记录：\n\n| 字段 | 值 |\n|---|---|\n| `name` | `QA-2806-Existing-Parent` |\n| `parent` | 为空 |\n\n导入以下 CSV：\n\n```csv\nname,parent\nQA-2806-Control-Child,QA-2806-Existing-Parent\nQA-2806-New-Parent,\nQA-2806-New-Child,QA-2806-New-Parent\n```\n\nCSV 中的三行数据分别是：\n\n| CSV 行 | `name` | `parent` | 内容 |\n|---|---|---|---|\n| 1 | `QA-2806-Control-Child` | `QA-2806-Existing-Parent` | 引用数据库中已经存在的父记录 |\n| 2 | `QA-2806-New-Parent` | 为空 | 在本次导入中创建新父记录 |\n| 3 | `QA-2806-New-Child` | `QA-2806-New-Parent` | 引用第 2 行创建的父记录 |\n\n## 实际结果\n\n**创建 2 行，跳过 1 行。**\n\n- 第 1 行创建成功，并解析到数据库中已有的父记录。\n- 第 2 行成功创建 `QA-2806-New-Parent`。\n- 第 3 行被跳过，并返回 `no showcase_category matches`。\n- 接口和 SQLite 核对结果确认，第 1、2 行已经写入，第 3 行没有写入。\n\n![同一文件中的引用未找到](https://raw.githubusercontent.com/yinlianghui/objectstack-backup/82dd18a60b6120644945c107acb9ef9a15b8b0bf/framework/issue-2678/2026-07-11/screenshots/ui-04-same-file-lookup-reference-not-found.png)\n\n使用新的唯一名称重复执行了两次界面场景，两次结果相同。\n\n## 判定依据\n\n- Import 的公开行为是按对象字段元数据解析每一行，其中 lookup 名称会转换为关联记录 ID。\n- `createManyData` 是服务端内部的可选批量写入能力，不是用户可选择的 Import 语义。同一份导入数据不应因该内部能力是否存在而得到不同结果。\n- 在 PR #2680 之前，每一行完成 lookup 解析后会立即写入，因此排在后面的行可以查询到前面已经成功创建的记录。\n- PR #2680 的目标是优化写入次数，并明确保持逐行的 lookup/reference-resolution 读取逻辑；该 PR 没有声明取消同文件引用能力或引入相关破坏性变更。\n- PR #2680 增加创建缓冲后，后续行会在前面记录尚未写入数据库时解析 lookup。相同数据在顺序兼容路径中成功，在批量路径中失败，说明结果差异由内部缓冲机制引入。\n- 该行为已通过全新 SQLite、Showcase HTTP 和 UI 重复确认。\n\n因此，这是写入性能优化改变既有 Import 可观察语义所造成的确定性回归，应当作为 Bug 处理。\n"
+}

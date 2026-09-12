@@ -1,0 +1,33 @@
+{
+  "number": 3133,
+  "kind": "issue",
+  "title": "ApproverType.role is the last surface projecting the reserved word — the ADR-0090 D3 exception it relies on has a false premise",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T12:16:47Z",
+  "updated_at": "2026-07-17T15:41:35Z",
+  "closed_at": "2026-07-17T15:41:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3133",
+  "body": "Recording a finding surfaced while fixing the `check:role-word` ratchet failure on `main` (#3120). **No code change proposed here — this is a decision record for later.**\n\n## TL;DR\n\n`ApproverType.role` (`packages/spec/src/automation/approval.zod.ts`) is the **last place the platform projects better-auth's org-membership tier under the reserved word \"role\"**. It is not covered by ADR-0090 D3's exception — and the sentence that would cover it asserts something that never happened.\n\n## The D3 exception has a false premise\n\nADR-0090 D3 (`docs/adr/0090-permission-model-v2-concept-convergence.md:202-204`):\n\n> Single documented exception: the better-auth boundary — `sys_member.role` is third-party schema we do not own; it remains, **already relabelled `org_membership_level` in the platform projection (ADR-0057 D7)**, and its UI label is \"organization membership\", **never \"role\"**.\n\nThe exception's logic is: *the third-party column is stuck with the word, but everything the platform surfaces is `org_membership_level` — the word never reaches an author.* That premise does not hold:\n\n| Claim | Reality |\n|---|---|\n| ADR-0090:203 — \"**already relabelled**\" | `org_membership_level` appears **once in the whole repo**, as a *comment* in `packages/spec/src/identity/position.zod.ts:25`. Zero implementation. |\n| ADR-0057 D7 (`0057-...md:335`) | Explicitly lists it under **\"Deferred (evidence-gated, P4)\"**: `sys_member.role`→`org_membership_level` relabel |\n\nADR-0090 states as complete a relabel that ADR-0057 deferred and that no code implements. Because the projection never landed, the word leaked from the third-party column up onto our own authoring surface.\n\n## Why `ApproverType.role` isn't covered by the exception\n\nThe exception protects **better-auth's column** (`sys_member.role`) — a thing we cannot rename. `ApproverType` is **our own enum, in our own spec**, that an author types into a flow node. It is the *projection* of that concept onto our authoring surface, and per the ADRs the projection is named `org_membership_level`, labelled \"organization membership\", **never \"role\"**.\n\nEvery other surface already converged (ADR-0090 D3):\n\n- `sys_role` / `sys_user_role` → `sys_position` / `sys_user_position` ✅\n- `ShareRecipientType.role` → `position` ✅ (enum is now `['user','group','position','unit_and_subordinates','guest']`)\n- `ctx.roles[]` / `current_user.role` → `positions` / `position` ✅\n- **`ApproverType.role` → still `role`** ❌ — the sole hold-out\n\n## It has no real users, and it costs us a lint rule\n\nRepo-wide scan for `type: 'role'`: only lint tests, docs warnings, and CHANGELOG entries. **Zero examples, zero showcase, zero real callers.**\n\nMeanwhile it is a proven trap with a real incident behind it — `packages/lint/src/validate-approval-approvers.ts` exists specifically to catch it, and its rule table marks the origin **\"hotcrm class\"**:\n\n> After ADR-0090 D3 renamed `sys_role` → `sys_position`, downstream apps that authored `{ type: 'role', value: 'sales_manager' }` silently route the approval to nobody\n\nThe failure is silent: expansion finds no `sys_member` row → falls back to the `role:sales_manager` literal (`expandApprovers` pushes `` `${a.type}:${a.value}` `` for every type) → the request waits forever on an approver that cannot exist.\n\nAnecdotally, this mental model (\"role was deprecated, replaced by position — so `ApproverType.role` must be the legacy half\") is exactly what a maintainer reached for unprompted while reviewing #3120. The name manufactures the confusion.\n\nPer ADR-0077's principle — the authoring surface should make the mistake *unwritable* rather than lint it after the fact — a lint rule that exists to disambiguate a name is a smell pointing at the name.\n\n## Suggested shape (for whoever picks this up)\n\n**Rename, don't remove:** `role` → `org_membership_level`, matching the projection label the ADRs already mandate.\n\n- Removing would drop a legitimate (if rare) capability: routing to `owner`/`admin`/`member`.\n- Renaming kills the trap dead — nobody accidentally writes `{ type: 'org_membership_level', value: 'sales_manager' }`; the name refuses the mistake, and `approval-role-not-membership-tier` can be deleted.\n- It closes out the deferred ADR-0057 P4 relabel and corrects ADR-0090:203's false statement in the same pass.\n\n**Cost:** breaking change to a published spec enum (15.1 is out), so unlike D3's \"one-step renames, no aliases\" this needs a deprecation window + a major.\n\n## Refs\n\n- ADR-0090 D3 tracking epic: #2696 (closed)\n- ADR-0057 D7 deferred list: `docs/adr/0057-erp-authorization-core-business-units-and-scope-depth.md:335`\n- The `position` approver type that was added *beside* `role` (not replacing it): 216fa9ad2 / #2738\n- Ratchet failure that surfaced this: #3120\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

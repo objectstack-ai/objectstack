@@ -1,0 +1,33 @@
+{
+  "number": 3071,
+  "kind": "issue",
+  "title": "CI: plugin-audit#test 在托管 runner 上确定性静默挂起(零输出 exit 1)——始于 #3045 落地后,main 侧问题",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T14:59:10Z",
+  "updated_at": "2026-07-16T15:56:04Z",
+  "closed_at": "2026-07-16T15:56:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3071",
+  "body": "### 现象\n\n`Test Core` 中 `@objectstack/plugin-audit#test` 仅在 GitHub 托管 runner 上失败,已三次完全一致地复现:\n\n- main `4f8c2d1`(#3049 合入后首次真实执行,2026-07-16 13:15)\n- PR #3037 `781c3e5`(首跑)与同 head 的 job 重跑(14:01)\n- PR #3037 `674ac0d`(14:23,已带 `--concurrency=4` 上限)\n\n**签名**:vitest 连 `RUN` 头都未输出(整个任务组零输出),进程疑似挂起约 5 分钟、待任务图其余部分全部完成后才 exit 1(其 pnpm 的 `ELIFECYCLE Test failed` 散落在最后一秒的相邻日志组里)。turbo 汇总仅 `Failed: @objectstack/plugin-audit#test`。\n\n⚠️ **main 当前的\"绿\"是假象**:`90f0a56`/`330ceba` 等后续提交是纯文档/资产变更,被 `filter` job 的路径过滤跳过——main 的 Test Core 自 `4f8c2d1` 起实际处于未验证状态,任何触碰代码的 PR 都会撞上本问题(#3037 为等它绿灯耗费了 4 轮诊断,最终由维护者管理员合并)。\n\n### 已排除(全部在 #3037 分支的合并树上验证)\n\n| 假设 | 实验 | 结果 |\n|---|---|---|\n| 分支代码问题 | main `4f8c2d1` 独立复现;PR 未触及 plugin-audit | 排除 |\n| Node 版本 | 本地 Node 20.20.2 与 22.22.2 各跑 38/38 | 排除 |\n| 时区/locale/CI env | `TZ=UTC LANG=C.UTF-8 CI=true GITHUB_ACTIONS=true` 38/38 | 排除 |\n| 并发 OOM | `--concurrency=4` 上限后同签名失败(该上限已随 #3037 保留,无害) | 排除 |\n| 命令差异 | 本地精确复现 `TURBO_SCM_BASE=330ceba turbo run test --affected --concurrency=4`:129/129 全过 | 排除 |\n| vitest 配置/依赖缺失 | vitest devDep + .bin 均在;裸 `vitest run --passWithNoTests` 正常 | 排除 |\n| 未 unref 定时器挂事件循环 | #3045 的 TTL memo 是时间戳比较,无定时器 | 排除 |\n\n### 时间线关联\n\n问题首现于 #3045(plugin-audit 本地化摘要 + 新增 102 行测试)落地后的首次真实 CI 执行。其自身 CI 被后续推送取代(cancelled),从未绿过。\n\n### 建议的下一步(一轮 CI 即可拿到真凭据)\n\n在任一分支加临时诊断步骤单独执行:\n```\npnpm --filter @objectstack/plugin-audit exec vitest run --reporter=verbose --no-file-parallelism\n```\n配合 `timeout -s QUIT 120`(SIGQUIT 触发 Node 打印各线程堆栈)可直接看到挂起点。怀疑方向:vitest forks 池在受限 cgroup 上的 worker 启动挂起,或 #3045 引入的模块图在 runner 环境的导入期死锁。\n\n相关:#3060(plugin-dev 满负载偶发超时,另一个 CI 专属问题)。"
+}

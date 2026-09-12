@@ -1,0 +1,36 @@
+{
+  "number": 3144,
+  "kind": "pull_request",
+  "title": "fix(spec): repair 25 dead PROTOCOL_MAP links + gate them in CI",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T13:56:49Z",
+  "updated_at": "2026-07-17T14:31:40Z",
+  "closed_at": "2026-07-17T14:31:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T14:31:37Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3144",
+  "body": "## What\n\n`packages/spec/PROTOCOL_MAP.md` is hand-written and nothing regenerates it, so renames orphan rows silently. **25 of its 132 `src/…` links** pointed at files that no longer exist.\n\n## The reported row was misdiagnosed\n\nThe issue suspected a half-update: path left on the old seed file, prose rewritten for the new analytics type. The history says otherwise — the prose *\"Virtual capabilities for analytics datasets\"* has been there **verbatim since the map was created** (`ced379b9e`), back when `data/dataset.zod.ts` held the **seed** schema (`object`/`externalId`/`mode`/`records`). It never described that file. #1620 didn't half-update the row; the row was wrong from day one.\n\nSo it's **one wrong row + one absent row**, and the fix is both:\n\n- `data/dataset.zod.ts` → **`data/seed.zod.ts`**, described as seed fixtures (#1620 renamed it to free `dataset` for analytics, ADR-0021).\n- The analytics dataset the old prose was reaching for is a real, unlisted schema → added as **`ui/dataset.zod.ts`** (the ADR-0021 semantic layer that `report`/`dashboard` bind to).\n\n## The sweep found the same rot everywhere\n\nAll from deliberate refactors that left the map behind:\n\n| Rows | Fate |\n|---|---|\n| `src/hub/**` (9) | Directory deleted (`142703d54`). Survivors rehomed: license/registry-config/tenant → `src/system`, plugin-registry/plugin-security → `src/kernel`. composer/marketplace/space/hub-federation/`api/hub` deleted outright. **Section 9 removed**, Kernel renumbered 10→9. |\n| `src/ai` (10) | Narrowed by `629a7168e`. Repointed where a successor exists: agent-action→`tool`, cost→`usage`, rag-pipeline→`knowledge-source`. Dropped nlq/orchestration/predictive/devops-agent/feedback-loop/plugin-development/runtime-ops. |\n| `identity/role` | → `identity/position` (ADR-0090 D3 renamed `sys_role`→`sys_position`). |\n| `security/policy`, `system/compliance`, `system/masking` | Removed as dead (#2387, ADR-0056 D8) — rows dropped. |\n\nRepoint vs. drop was decided per row from the deleting commit, not guessed.\n\n## The gate\n\n`scripts/protocol-map.test.ts` asserts every link resolves. **Proven to go red first** — it listed exactly the 25 dead links before the fix, then went green.\n\nPlacement reasoning, since a gate that can't block is theatre:\n- It rides **Test Core** (one of main's 4 required checks). `core: packages/**` covers the file, and turbo's `$TURBO_DEFAULT$` inputs include it — so a map-only edit re-runs the test instead of cache-hitting to a false green.\n- A **new workflow job would not have blocked merges** (main requires only 4 checks), and `check-links.yml` is dormant (`workflow_dispatch` only) and doesn't cover `packages/spec`.\n- It asserts **links only, not completeness** — the map is a curated digest, not a generated index. Proportional to a hand-written internal file.\n\n## Relationship to #3138\n\nSibling, not duplicate. One #1620 rename had **two victims**:\n\n- **#3138 (merged)** fixed the identical stale `data/dataset.zod.ts` pointer in `build-skill-references.ts`'s SKILL_MAP — its gate comment even names this bug. It guards **generated** artifacts that ship to third parties, so it's a regenerate-and-diff check in `lint.yml`.\n- **This PR** covers `PROTOCOL_MAP.md`: hand-written, repo-internal, **not in the package's npm `files`** (never ships). #3138 deliberately left it alone to stay scoped, and its gate can't reach it.\n\nA plain assertion is the whole job here, so this needs no script or workflow step — and Test Core's `packages/**` filter has no blind spot for spec changes.\n\n## Verification\n\n- Gate red before fix (25 links), green after.\n- Independent shell oracle (different implementation) confirms 0 dead links across 125.\n- Full spec suite: 255 files / 6892 tests pass. `tsc --noEmit` clean.\n\nDocs-only → `skip-changeset`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

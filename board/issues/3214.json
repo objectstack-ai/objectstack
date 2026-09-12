@@ -1,0 +1,32 @@
+{
+  "number": 3214,
+  "kind": "issue",
+  "title": "Analytics: totals/subtotal rows have no raw-value drill sidecar (drillRawRows covers result.rows only)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T13:26:59Z",
+  "updated_at": "2026-07-18T14:10:12Z",
+  "closed_at": "2026-07-18T14:10:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3214",
+  "body": "## Context\n\nFollow-up from the #1750 re-evaluation (closed as completed).\n\nADR-0021 D2 drill metadata (#2080) snapshots each row's raw grouped values into a parallel `drillRawRows` array **before** `resolveDimensionLabels` overwrites `row[dim]` with the display label — so a report drill on a data row filters by the stored value (FK id, select option value).\n\nBut the snapshot only covers `result.rows`. The totals/subtotal rows added in #1753 also carry dimension values (a row subtotal is keyed by its row bucket), and they DO go through label resolution — `analytics-service.ts` resolves each grouping's subset right after the main rows (see the `for (const total of result.totals ?? [])` loop) — yet no raw values are captured for them.\n\nNet effect: a subtotal row ends up in exactly the pre-#1750 state — display label only, raw value lost. If a host ever drills from a subtotal row (e.g. clicking the \"Q2 · Backlog\" subtotal in a matrix report to open its records), a lookup/select dimension can't be exact-match filtered:\n\n- **select** — would need the fragile label→value reverse-map again;\n- **lookup / master_detail** — the label is a record name, not the FK id, so the dimension gets skipped and the drill lands on a superset.\n\n## Current state\n\n- objectui's `ReportView.handleDatasetDrill` consumes `drillRawRows` for data rows only; subtotal drill is not wired up today, so this is **latent**, not user-visible.\n- Blocking nothing; filed so the gap is on record instead of rediscovered.\n\n## Proposal\n\nWhen drill metadata is attached, snapshot raw values for totals rows too — e.g. a parallel `drillRawTotals` aligned to `result.totals[i].rows` (same shape as `drillRawRows`, restricted to each grouping's drillable dims), captured in the same pre-label-resolution pass. Purely additive extra props on the result, same as #2080 (no spec-contract change).\n\n## Affected\n\n- framework: `packages/services/service-analytics/src/analytics-service.ts` (the ADR-0021 D2 block + the totals label-resolution loop), `query-dataset.test.ts`\n- objectui (consumer, only if/when subtotal drill ships): `ReportView.handleDatasetDrill`\n\n## Refs\n\n- #1750 (raw-value drill sidecar for data rows — shipped in #2080, released in `@objectstack/service-analytics@9.12.0`)\n- #1753 (totals rows)\n- #1752 (date-granularity range drill — unaffected; date dims are excluded from drill metadata either way)"
+}

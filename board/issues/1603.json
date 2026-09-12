@@ -1,0 +1,30 @@
+{
+  "number": 1603,
+  "kind": "issue",
+  "title": "DB-native autonumber sequence (multi-instance correctness)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-06T01:48:31Z",
+  "updated_at": "2026-07-18T14:59:10Z",
+  "closed_at": "2026-07-18T14:59:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1603",
+  "body": "## Context\nFollow-up from the autonumber generation fix in `objectql` (engine `applyAutonumbers`). Today, empty `autonumber` fields are generated before required-validation as `max(existing)+1`, seeded per `object.field` and incremented in memory.\n\n## Gap\n- The in-memory counter is correct for a **single instance** (re-seeds from max on restart; monotonic in-process), but **two instances can collide**.\n- The seed currently loads up to 5000 rows to compute max.\n\n## Proposal\nBack autonumber with a **persistent, atomically-incremented sequence** at the driver layer (e.g. a `sys_sequence` row with `UPDATE ... RETURNING value+1`, or native DB sequences), so values are correct across instances. Replace the row-scan seed with a `max()` aggregate as an interim improvement.\n\n## Notes\n- Touches `packages/objectql/src/engine.ts` + drivers — hot files; dedicated, reviewed change."
+}

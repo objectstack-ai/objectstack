@@ -1,0 +1,30 @@
+{
+  "number": 2807,
+  "kind": "issue",
+  "title": "设计（导入）：最终映射到同一字段的 CSV 列会静默使用后一个值",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T23:47:54Z",
+  "updated_at": "2026-07-16T09:38:41Z",
+  "closed_at": "2026-07-12T03:01:02Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2807",
+  "body": "## 问题\n\nCSV 导入中，两个源列可能最终写入同一个目标字段。当前处理会静默保留后一个值、丢弃前一个值，但导入仍报告成功。\n\n## 复现规则\n\n使用真实的 `POST /api/v1/data/:object/import` 路由测试。目标对象包含 `id` 和 `title` 字段；每个场景使用全新的 SQLite 数据库。导入完成后，再通过 API 读取 `id=dup` 的记录并检查 `title`。\n\n### 场景 1：CSV 包含重复表头\n\n固定输入：\n\n```csv\nID,标题,标题\ndup,first,second\n```\n\n字段映射：\n\n```json\n{\n  \"ID\": \"id\",\n  \"标题\": \"title\"\n}\n```\n\n### 场景 2：不同源列映射到同一个目标字段\n\n固定输入：\n\n```csv\nID,标题A,标题B\ndup,first,second\n```\n\n字段映射：\n\n```json\n{\n  \"ID\": \"id\",\n  \"标题A\": \"title\",\n  \"标题B\": \"title\"\n}\n```\n\n两个场景都只改变 CSV 表头和字段映射；导入路由、目标对象和记录内容保持一致。\n\n## 实际结果\n\n| 场景 | 导入响应 | 持久化记录 |\n|---|---|---|\n| CSV 包含重复表头 | HTTP 200；`total=1`、`ok=1`、`errors=0`、`created=1` | `id=dup`、`title=second` |\n| 不同源列映射到同一个目标字段 | HTTP 200；`total=1`、`ok=1`、`errors=0`、`created=1` | `id=dup`、`title=second` |\n\n## 实际现象\n\n- CSV 表头重复时，前一个 `title` 值被后一个值覆盖。\n- 两个不同源列映射到同一个目标字段时，前一个映射值同样被后一个值覆盖。\n- 两个场景都没有警告或行级错误，导入均报告成功。\n- 原 QA 中两类输入各 2/2 次得到相同结果；独立审计又对每类执行 1 次，累计每类 3/3 次结果一致。\n\n## 判定依据\n\n- 测试版本的 [CSV 处理协议](https://github.com/objectstack-ai/framework/blob/98874656ffc50ce1531af52346228ffcdda73fba/packages/rest/src/import-prepare.ts#L35-L43) 只规定第一条非空记录作为表头，并允许通过 `mapping` 将表头映射为目标字段；没有规定 CSV 表头必须唯一，也没有定义重复表头的冲突处理方式。\n- [Field Mapping 协议](https://github.com/objectstack-ai/framework/blob/98874656ffc50ce1531af52346228ffcdda73fba/packages/spec/src/data/mapping.zod.ts#L22-L31) 定义了源列和目标字段，但没有规定多个源列能否指向同一个目标字段；[Mapping Schema](https://github.com/objectstack-ai/framework/blob/98874656ffc50ce1531af52346228ffcdda73fba/packages/spec/src/data/mapping.zod.ts#L70-L91) 也没有设置唯一性或冲突校验。\n- Import 的 [内联 mapping 归一化协议](https://github.com/objectstack-ai/framework/blob/98874656ffc50ce1531af52346228ffcdda73fba/packages/rest/src/import-prepare.ts#L257-L270) 接受 `sourceColumn → targetField` 映射，但没有定义多个源列映射到同一目标字段时应拒绝、警告还是覆盖。\n- 当前 [CSV 行构造逻辑](https://github.com/objectstack-ai/framework/blob/98874656ffc50ce1531af52346228ffcdda73fba/packages/rest/src/import-prepare.ts#L82-L93) 按列顺序向同一个记录对象赋值，因此后一个同名目标字段会覆盖前一个值，这与实际结果一致。\n\n以上证据确认了静默覆盖和数据丢失现象，但现有协议没有定义冲突时的正确行为，无法据此判定为对既有契约的违反。因此，该项属于设计或校验缺口，需要先由产品确定拒绝、警告或允许覆盖的规则，不归类为已确认 Bug。\n\n## 影响\n\n存在列冲突的 CSV 仍可能被报告为成功，但前一个源列的值不会保存。用户如果没有重新读取记录，可能无法发现数据已被静默覆盖。\n\n## 证据边界\n\n两类输入均已通过真实 Import 路由和持久化回读验证。独立审计使用的临时 harness 已按 QA 清理要求删除，因此现有材料不再包含一条可直接复制执行的完整命令；本 Issue 只保留已核验的输入、映射、响应和持久化结果，不补写未经当时执行验证的新命令。\n\n这些结果只能证明当前行为和协议缺口，不能替代产品对冲突处理方式的决定。\n"
+}

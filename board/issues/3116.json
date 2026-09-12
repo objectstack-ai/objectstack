@@ -1,0 +1,36 @@
+{
+  "number": 3116,
+  "kind": "pull_request",
+  "title": "fix(core): ObjectLogger file destination silently no-ops in ESM builds (#3110)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T11:42:18Z",
+  "updated_at": "2026-07-17T11:57:27Z",
+  "closed_at": "2026-07-17T11:57:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T11:57:24Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3116",
+  "body": "Fixes #3110.\n\n## What was broken\n\n`createLogger({ file })` never wrote the file from an ESM entrypoint. `openFileStream` loaded `fs` with a lazy `require()` to keep `fs` out of the browser bundle graph (the entry is deliberately browser-safe — `@objectstack/client` bundles it). esbuild rewrites that to its `__require` shim in the ESM output, which throws `Dynamic require of \"fs\" is not supported`, and the surrounding bare `catch {}` swallowed it.\n\nThe workspace is `type: module`, so this hit **every Node ESM consumer — `os serve`, `os dev`** — while the CJS build kept working. File logging has effectively never run in production.\n\n## The fix\n\n- **Load the builtin via `process.getBuiltinModule`** — a plain method call, so bundlers can't see it, working in both module systems, still behind the existing `typeof process` guard. `require` stays as a fallback for Node < 20.16, which predates it (`engines` allows `>=18`, so CJS on old Node must not regress).\n- **A `file` destination that can't be opened now says so on stderr.** The silence is precisely what kept this hidden, per the issue. It deliberately bypasses `level` filtering: this reports that the logger cannot honour its own config, which isn't an application log event.\n\n## Three faults this un-hid\n\nOpening the destination for the first time made latent code reachable. Each is verified load-bearing by reverting it alone and watching the matching test go red:\n\n| | Before | Consequence |\n|---|---|---|\n| `child()` | passed `file` into the eager-opening constructor, then overwrote the stream | a second stream opened and orphaned **per child** — despite the `no double-open` comment |\n| child `destroy()` | ended the shared stream | parent + siblings lose file logging from a child's teardown |\n| async open failure | no `'error'` listener | **uncaught exception — an unwritable log path takes the host down** |\n\nThe third is the reason this isn't a one-line change: shipping only the `require` fix would have turned a silent no-op into a crash on a bad `file` path.\n\n## Verification\n\nThe issue's repro, against the built ESM dist:\n\n```\n$ node probe.mjs      # before\n2026-07-17T11:27:18.312Z INFO esm file probe\nfile exists: false\n\n$ node probe.mjs      # after\n2026-07-17T11:41:36.072Z INFO esm file probe\nfile exists: true\ncontents: \"2026-07-17T11:41:36.072Z INFO esm file probe\\n\"\n```\n\nUnwritable path — warns, keeps console logging, exits 0:\n\n```\n2026-07-17T11:41:36.099Z | INFO | console still alive\nlogger: file logging disabled — cannot write to /private/tmp/…: EISDIR: illegal operation on a directory\nprocess survived, exit 0\n```\n\nAlso checked: browser safety holds (no static `fs`/`path` import in the ESM dist; `createLogger({file})` with no `process` global doesn't throw), `@objectstack/client` builds, `@objectstack/core` 24/24 test files pass with `--force`, eslint clean.\n\n## Note on the test\n\n`logger-esm-file.test.ts` bundles the entry with esbuild and **spawns a real `node`**. That indirection is load-bearing: under vitest the source runs through vite-node where `require` **is** defined, so an in-process test of this code passes against the broken version. It fails on all 4 assertions at `origin/main`. It bundles rather than reading `dist/` because `turbo`'s `test` only `dependsOn: [\"^build\"]` (not its own build) and excludes `dist/**` from its inputs — a `dist`-reading test would be both unbuilt and mis-cached. This adds `esbuild` to core's devDeps (already in the lockfile via tsup; pnpm's strict linking wouldn't resolve it otherwise).\n\nRebased onto #3111, which landed on the same file and already makes the file destination plain-text — so no ANSI codes reach the now-working log file.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

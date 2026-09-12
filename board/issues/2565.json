@@ -1,0 +1,30 @@
+{
+  "number": 2565,
+  "kind": "issue",
+  "title": "[security][observability] resolvePermissionSets swallows dbLoader failures silently — custom permission sets vanish with no log",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T07:01:05Z",
+  "updated_at": "2026-07-15T13:32:10Z",
+  "closed_at": "2026-07-15T13:32:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2565",
+  "body": "From the 2026-07 pre-launch authorization architecture assessment (context: #2561, PR #2562).\n\n## Problem\n\n`permission-evaluator.ts` → `resolvePermissionSets` resolves permission-set names through three sources: metadata service → bootstrap defaults → `dbLoader` (user-defined sets persisted in `sys_permission_set`). The `dbLoader` call swallows all failures:\n\n```ts\ntry {\n  const dbRows = await dbLoader(unresolved);\n  ...\n} catch {\n  // Swallow — the request shouldn't fail just because the DB\n  // lookup is unavailable.\n}\n```\n\nThe metadata-service `list()` call at the top of the function has the same shape (`catch { allPermSets = []; }`).\n\n**Failure direction is correct** (fail-closed: unresolvable sets grant nothing, the user gets 403 rather than an open door). The problem is observability: a transient DB error makes every custom permission set silently disappear for the affected requests — users are denied, admins see nothing in the logs, and the symptom (\"permissions randomly stop working\") points nowhere near the cause.\n\n## Fix\n\nSurface the swallow: emit a `warn` with the unresolved names and the error when `dbLoader` (or the metadata `list()`) throws. `PermissionEvaluator` has no logger today — either accept an optional logger (constructor or method param), or move the try/catch responsibility to the caller (`security-plugin.ts`, which has `ctx.logger`). Keep the fail-closed behavior unchanged; this is logging only.\n\n## Acceptance\n\n- dbLoader throwing produces exactly one `warn` per request naming the unresolved permission sets; enforcement behavior is byte-identical.\n- Same for the metadata `list()` failure path.\n- Unit test: stub a throwing dbLoader, assert the warn fires and resolution still returns the metadata/bootstrap results.\n"
+}

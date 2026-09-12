@@ -1,0 +1,33 @@
+{
+  "number": 1901,
+  "kind": "issue",
+  "title": "[P2][security] Enforce agent `visibility` (organization/private) — context now has tenant (ADR-0095); needs owner/org anchor on the agent",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T08:16:10Z",
+  "updated_at": "2026-07-18T14:11:41Z",
+  "closed_at": "2026-07-18T14:11:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1901",
+  "body": "Follow-up from #1884 (closed) / #1878 / ADR-0049.\n\n> **Re-evaluated 2026-07-18.** The original blocker has partially cleared and the remaining work changed shape; body rewritten (original framing preserved below under \"History\").\n\n## Status: still open, re-scoped\n\nAgent `visibility` (`global`/`organization`/`private`) is still **not enforced** — deliberately, per ADR-0049 / ADR-0056 D8 it is carried as `[EXPERIMENTAL]` with banners at every authoring surface (all pointing at this issue):\n\n- schema: `packages/spec/src/ai/agent.zod.ts` (EXPERIMENTAL banner on `visibility`)\n- authoring form: `packages/spec/src/ai/agent.form.ts` (helpText: setting `private` does not hide the agent)\n- liveness registry: `packages/spec/liveness/agent.json` (`visibility: experimental`)\n- QA conformance matrix: `packages/qa/dogfood/test/authz-conformance.matrix.ts` (`agent-visibility: experimental`)\n\n`access` + `permissions` remain the **enforced** gates at the chat route (#1884, `evaluateAgentAccess()` in service-ai `agent-access.ts`).\n\n## What changed since filing (2026-06-15)\n\n**✅ Original blocker resolved — tenant is now in the request context.** ADR-0095 (accepted 2026-07-14, implemented): `resolveAuthzContext` (`packages/core/src/security/resolve-authz-context.ts`) is the single transport-agnostic authz resolver and carries `tenantId` (session `activeOrganizationId` or API-key principal), `org_user_ids`, and a monotonic posture rung `PLATFORM_ADMIN > TENANT_ADMIN > MEMBER > EXTERNAL` derived from capability grants. Tenant isolation is Layer 0 (`plugin-security/src/tenant-layer.ts`).\n\n**❌ New blocker — the agent-side anchor was removed.** `agent.tenantId` was deleted from the spec (#2377, ADR-0049: it had no runtime reader and did not actually scope the agent), and the agent schema has no owner/creator field. The originally proposed gate — `organization` → caller tenant must match `agent.tenantId` — is therefore **no longer implementable as written**.\n\n## Remaining design decisions\n\nAgents are metadata artifacts, so the anchor question is now:\n\n- **`organization`**: with no per-agent tenant id, the meaningful reading is \"authenticated members only\" (posture ≥ `MEMBER`), vs `global` = also anonymous/`EXTERNAL`. Note the `EXTERNAL` rung is defined but never derived yet (no external principal type — `posture-ladder.ts`), so `organization` vs `global` is currently indistinguishable at runtime; enforcement becomes meaningful once external principals exist.\n- **`private`**: needs an owner. Studio-authored agents have `created_by` on their `sys_metadata` row; file-authored agents have no owner. Either restrict `private` to DB-stored agents, or define it as \"requires an explicit `access` list\".\n\n## Work plan (when scheduled)\n\n1. Decide the semantics above (small ADR, or amendment to ADR-0049/0095).\n2. Enforce in service-ai: extend `evaluateAgentAccess()` for the chat route **and** filter the `GET /ai/agents` list route by visibility (both surfaces, or `private` still leaks by listing).\n3. Add conformance coverage in the authz matrix.\n4. Flip liveness `experimental → live` and remove the EXPERIMENTAL banners in `agent.zod.ts` / `agent.form.ts` / `liveness/agent.json` / `authz-conformance.matrix.ts`.\n\n## Priority: P1 → P2\n\nThe P1 rationale was a *silent* false-security gap. Since the 2026-07 ADR-0056 D8 sweep, `visibility` is loudly marked EXPERIMENTAL / NOT ENFORCED at every authoring surface, and real gating (`access`/`permissions`) is enforced — this is now a documented unimplemented feature, not a silent hole.\n\n---\n\n<details>\n<summary>History — original issue body (2026-06-15)</summary>\n\n#1884 enforced agent `access` + `permissions` in the chat route, but **`visibility` (`global`/`organization`/`private`) is still not enforced**. The route's `RouteUserContext` carries `userId`/`roles`/`permissions` but **no tenant id**, and the agent has no owner field — so a correct gate (organization = same tenant; private = owner only) can't be decided at the route layer today.\n\n### Needed\n- Add tenant id (and, for `private`, an agent owner/creator) to the authenticated request context via the auth middleware.\n- Then gate the chat route: `global` → open; `organization` → caller tenant must match `agent.tenantId`; `private` → owner only.\n\nUntil then, enforcing a partial/guessed version was intentionally avoided (would risk both lock-out and false security). See `agent-access.ts` for the documented gap.\n\n</details>"
+}

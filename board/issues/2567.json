@@ -1,0 +1,32 @@
+{
+  "number": 2567,
+  "kind": "issue",
+  "title": "[security] Anonymous posture inconsistent across surfaces: dispatcher /graphql and raw hono /data bypass requireAuth (/meta now gated)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T07:54:33Z",
+  "updated_at": "2026-07-15T15:25:57Z",
+  "closed_at": "2026-07-15T15:25:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2567",
+  "body": "Surfaced by the self-review of PR #2562 (the ADR-0056 D2 `requireAuth` default flip). The flip makes REST `/data/*` deny-anonymous by default, but sibling HTTP surfaces never consult `requireAuth` / `enforceAuth`, so the platform's anonymous posture is **inconsistent by surface** rather than uniform. An attacker doesn't care which door is locked — until every entry point honors the same posture, the D2 flip's security promise is not actually delivered. None of these gaps was introduced by #2562 (they are pre-existing), but the flip makes them newly load-bearing.\n\n## Status of the three original surfaces\n\n| # | Surface | Status |\n|---|---------|--------|\n| 1 | **Metadata `/meta/*`** — `RestServer.registerMetadataEndpoints` | ✅ **Fixed** — the route registrar is now wrapped for the duration of metadata registration (`packages/rest/src/rest-server.ts` `registerMetadataEndpoints`), so every present and future `/meta` route inherits `enforceAuth`. Keep as the reference pattern for Phase 1. |\n| 2 | **Dispatcher GraphQL** — `packages/runtime/src/dispatcher-plugin.ts` (~570) mounts `POST {prefix}/graphql` → `dispatcher.handleGraphQL(...)` with no auth check; the security middleware falls open for an anonymous context (no roles/permissions/userId → `next()`) | ❌ Open — an anonymous GraphQL query reads object data that the sibling `/data/*` 401 denies |\n| 3 | **Raw hono CRUD** — `HonoServerPlugin.registerStandardEndpoints` (defaults **on**, `packages/plugins/plugin-hono-server/src/hono-plugin.ts` ~179) registers `/api/v1/data/:object` routes that delegate straight to ObjectQL and never consult `requireAuth` | ❌ Open — routes are only shadowed when the REST plugin registers the same paths *first*, so secure-by-default currently depends on **plugin registration order**. A load-order change silently reopens the hole and no test fails. |\n\n## Root cause\n\nAll gaps share one shape: **`requireAuth` is enforced at exactly one gate (`RestServer.enforceAuth`) while other HTTP entry points reach ObjectQL without passing through it.** The `/meta` fix proves the diagnosis — per-route hand-added gates always miss one; the gate must be a property of the registration/request pipeline. But that fix is itself still per-plugin: three surfaces, three different fix shapes, is exactly the anti-pattern this issue exists to end.\n\n## Plan — two phases, don't big-bang the refactor\n\n### Phase 1 — close the holes now (small patches)\n\n- Gate dispatcher `POST /graphql` behind the same `requireAuth` decision, reusing the `/meta` wrapper pattern. This is behavior-changing for deployments relying on anonymous GraphQL (e.g. public dashboards) — reuse the D2 **warn-then-enforce** migration path (release note + one-release warning), not a hard cut.\n- Gate the raw-hono standard data endpoints. Additionally evaluate whether `registerStandardEndpoints` should default **off** when the REST plugin is present — removing a duplicate surface is cheaper than gating it, and it eliminates the registration-order dependency outright.\n- Dogfood proofs per surface: anonymous `POST /graphql` and anonymous raw-hono `/data` both 401 under the default posture; each remains reachable when the deployment explicitly opts out (`requireAuth: false`).\n- Conformance-ledger rows (ADR-0060, `packages/verify/src/conformance.ts`) for **all three** surfaces — including a row documenting the already-landed `/meta` gate — each `enforced` with its runtime enforcement site and proof. No new mechanism needed; the ledger exists for exactly this.\n\n### Phase 2 — converge on a single mechanism (follow-on refactor)\n\n- Lift the anonymous-deny decision into a shared middleware / request-pipeline property that every HTTP surface mounts, with an **explicit, documented exemption list** (auth routes, health checks, `publicSharing`-opted-in resources, share-link tokens).\n- Migrate the `/meta` wrapper and the Phase 1 patches into it, so there is one gate with one exemption list instead of N per-plugin copies.\n- Wire the conformance ledger's `discover()` **ratchet** to enumerate HTTP entry points from source, so a new ungated surface fails CI as *unclassified* instead of shipping open.\n\n## Acceptance\n\n- Anonymous `POST /graphql` and anonymous raw-hono `/data` 401 under the default posture; explicit opt-out keeps them reachable. (Anonymous `/meta` already proven.)\n- No surface's security depends on plugin registration order.\n- Conformance rows for all three surfaces, plus the ratchet so new HTTP entry points cannot silently ship ungated.\n- GraphQL gating ships via warn-then-enforce with a release note.\n\nContext: #2561 (authorization gap map), #2562 (the flip), ADR-0056 D2, ADR-0060 (conformance ledger)."
+}

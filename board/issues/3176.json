@@ -1,0 +1,35 @@
+{
+  "number": 3176,
+  "kind": "pull_request",
+  "title": "feat(spec)!: remove dead author-facing metadata properties (#2377, A2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T06:24:25Z",
+  "updated_at": "2026-07-18T07:22:49Z",
+  "closed_at": "2026-07-18T07:22:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-18T07:22:47Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3176",
+  "body": "Re-evaluation + next slice of #2377 (ADR-0049 enforce-or-remove). Follow-up to the merged #2402. Removes spec properties that **parse but have no runtime consumer** — a false affordance, especially for AI-authored metadata. Each was verified `dead` against `packages/spec/liveness/*.json` and a repo-wide reader grep.\n\n## Removed (each dead, no reader anywhere)\n\n- **field** (`field.zod.ts`): `vectorConfig` (+`VectorConfigSchema`+types), `fileAttachmentConfig` (+`FileAttachmentConfigSchema`+types), `dependencies`. Vector fields keep the live flat `dimensions`; file/image fields keep the live flat `multiple`/`accept`/`maxSize`.\n- **object** (`object.zod.ts`): `versioning` (+`VersioningConfigSchema`), `softDelete` (+`SoftDeleteConfigSchema`), `search` (+`SearchConfigSchema`), `recordName`, `keyPrefix` — each is now a **rejecting tombstone** in `UNKNOWN_KEY_GUIDANCE` carrying the upgrade prescription (matching the `defaultDetailForm`/`compactLayout` precedent).\n- **action** (`action.zod.ts`): `timeout` (server uses `body.timeoutMs`; no action-level timeout is enforced).\n- **agent** (`agent.zod.ts`): `planning.strategy`, `planning.allowReplan` (runtime reads only `planning.maxIterations`).\n- **dataset** (`dataset.zod.ts`): `measures.certified` (declared-but-unenforced governance flag; never compiled into the Cube).\n\n## Bookkeeping\n- Liveness ledgers (field/object/action/agent/dataset) + the ledger README count table updated.\n- `api-surface.json` regenerated (drops exactly the removed public exports); removed sub-schema keys dropped from `json-schema.manifest.json`.\n- **Generated reference docs** (`content/docs/references/`) regenerated via `gen:schema && gen:docs`.\n- Spec tests updated (removed vector/file/recordName blocks; trimmed agent planning tests; added an object tombstone-rejection test). Fixtures migrated in `service-analytics` (×4), `rest`, `lint`, `cli`.\n\n## Deliberately NOT removed (dead, but entangled — scoped follow-up)\nThese are dead but **surfaced in the Studio metadata-authoring forms** (`*.form.ts`), so removing them cascades into i18n-bundle regeneration:\n- field `index` / `columnName` / `referenceFilters`\n- object `tags` / `active` / `isSystem` / `abstract` / `enable.searchable` / `enable.trash` / `enable.mru`\n- agent `tenantId`\n\nPlus `action.type:'form'` (has a dedicated build-time lint `lint-view-refs.ts` + a first-party showcase action → needs a UX decision) and `field.columnName` (also has an ADR-0062 D7 lint). All stay `dead` + `authorWarn` in the ledgers.\n\n## Migration\n- **field/agent/dataset/action props**: authoring them is now silently stripped (they never did anything) — remove them. Vector → flat `dimensions`; file/image → flat `multiple`/`accept`/`maxSize`.\n- **object props**: `ObjectSchema.create()` now throws a located error naming the replacement — `versioning`/`softDelete` → hard deletes + `Field.trackHistory` / `lifecycle`; `search` → `searchableFields`; `recordName` → an `autonumber` `Field` designated as `nameField`; `keyPrefix` → remove.\n\n## Versioning\nBreaking spec-surface change, but versioned as a **`minor`** changeset per the launch-window policy — the whole publishable set is in the Changesets fixed group, so a `major` would promote the entire monorepo. Breaking cleanups ride the minor line (precedent: #2402 → 11.1.0).\n\n## Verification\n- Spec suite **6875 passed** (256 files); `check:api-surface` ✓; `check:docs` ✓ (256 generated files in sync); **spec-liveness gate ✓** (all governed props classified).\n- DTS typecheck of `@objectstack/spec` clean.\n- Migrated fixtures green: service-analytics (dataset-compiler/executor/query/rls, 51), rest analytics-routes (6), lint validate-widget-bindings (33), cli lint-liveness-properties (16).\n\n## Also in this task\nRe-evaluated **#2378** (IDataEngine) — no code work remains: the scope-corrected removal of the deprecated `DriverInterface` alias already landed in #2384 (`IDataEngine` is the live engine contract, not deprecated). Closed #2378 with that note.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

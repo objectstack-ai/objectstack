@@ -1,0 +1,37 @@
+{
+  "number": 3143,
+  "kind": "pull_request",
+  "title": "fix(spec): regenerate drifted skills output and gate it in CI",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/m",
+    "skip-changeset",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T13:20:33Z",
+  "updated_at": "2026-07-17T14:30:18Z",
+  "closed_at": "2026-07-17T13:42:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3143",
+  "body": "`skills/` is generated from the spec by `gen:skill-refs` and `gen:react-blocks` and committed, but **neither generator had a `check:` sibling and nothing in CI regenerated them**. Both existing gates miss this surface:\n\n- `check:docs` (#3134) covers only `content/docs/references/`\n- `check:skill-docs` covers only SKILL.md frontmatter → README + `skills-reference.mdx`\n\nSo it drifted: **8 committed files were stale on main** (verified on `c22e2c3fc`).\n\nThis bites harder than the content/docs case — `skills/` is **published to third parties** via `npx skills add objectstack-ai/framework --all`, so stale output ships to users.\n\n## 1. A real bug, not just drift\n\nTwo published skills pointed agents at `data/dataset.zod.ts` — renamed to `data/seed.zod.ts` by #1620 (\"complete Dataset->Seed rename\"). The generator **warned and skipped, staying green**, so `objectstack-data` and `objectstack-platform` silently lost their seed schema pointer and told agents to `Read` a path that does not exist.\n\nFixed at the source (`SKILL_MAP`), not in the output. A missing mapped file is now a **hard error** rather than a warning — warn-and-skip is exactly what let this half-rename hide.\n\nThe rest of the diff is legitimate spec drift: a `drawerWidth` deprecation, a new `relationshipValueField` prop, `columns` becoming optional.\n\n## 2. `--check` on both generators\n\nFollows the convention #3134 established in `build-docs.ts`: every write goes through `emit()`, every regenerated folder through `manageDir()`, and nothing touches the tree until `flush()` — so check and write run **byte-for-byte identical generation logic** and differ only in final disposition. Not `git diff --exit-code`, which only sees tracked files and would miss a new or leftover page.\n\nThe sink is extracted to `scripts/lib/generated-output.ts` since both generators need it. `manageDir()` takes a predicate because a skill's `references/` folder is a **selective** wipe, not a wholesale one — hand-written siblings (`data-hooks.md`, `plugin-hooks.md`) and the *other* generator's `react-blocks.md` live there and must survive. `build-docs.ts` keeps its own inline copy for now; it predates the extraction and is under active change (#3126), so migrating it belongs in its own PR.\n\n## 3. Wired into \"TypeScript Type Check\", not ESLint\n\n`main` requires exactly 4 status checks (TypeScript Type Check, Build Core, Test Core, Dogfood Regression Gate). **ESLint is not one of them**, so a gate placed there runs but cannot block a merge. (Re-verified: the one ruleset is `enforcement: disabled` and adds no checks.) Same job as `check:docs`, same reason: no paths filter, required, and both read `src/` via tsx with no build — they fail in ~2s.\n\n### Why not the existing \"Check Generated Artifacts\" job?\n\nThat job in `ci.yml` looks like the natural home — it already runs `check:skill-docs`. But it is the wrong place twice over, and its own filter comments document this class of bug biting twice before:\n\n- **It is paths-filtered.** The `generated` filter watches `skills/**` and `build-skill-docs.ts`, but **not `packages/spec/src/**`**. Every file in this PR's drift traces to a `packages/spec/src/**` change (the `seed.zod.ts` rename, `view.zod.ts`'s `drawerWidth` deprecation, the new `relationshipValueField`). A spec-only PR changes the generated output without touching `skills/`, so the filter would not match and **the job would skip — which is exactly how this drift shipped.**\n- **It is not a required check.** Only the 4 checks above are, so even when it does run it cannot block a merge.\n\n`check:docs` landed in the typecheck job for precisely this reason (#3134), and its comment says so. These gates follow it.\n\n## Proving the gate can go red\n\nA gate that cannot fail is theatre, so each failure mode was exercised — all 14 as expected:\n\n| case | expect | got |\n|---|---|---|\n| clean tree (both gates) | 0 | ✅ |\n| tampered content | 1 | ✅ |\n| deleted generated file | 1 | ✅ |\n| leftover file in `references/` | 1 | ✅ |\n| leftover file in a sub-folder | 1 | ✅ |\n| `SKILL_MAP` → missing skill dir | 1 | ✅ |\n| `SKILL_MAP` → renamed/missing zod file | 1 | ✅ |\n| **vacuous:** empty `SKILL_MAP` | 1 | ✅ |\n| **vacuous:** empty `REACT_BLOCKS` | 1 | ✅ |\n| tampered contract json | 1 | ✅ |\n| deleted `react-blocks.md` | 1 | ✅ |\n| leftover file in `contracts/` | 1 | ✅ |\n| **negative control:** hand-written `.md` in `references/` | **0** | ✅ |\n\nThe vacuous guards matter because a run that finds no input emits nothing, and \"nothing differs\" would read as success — the gate would pass while checking nothing at all. Both now fail loudly instead of greenly. The negative control proves the selective-wipe predicate is not over-broad.\n\nAlso verified: the original repro (`gen:skill-refs && gen:react-blocks && git status skills/`) now produces zero drift; `check:docs`, `check:role-word` (bidirectional ratchet, scopes `skills/`), `check:doc-authoring`, and `check:nul-bytes` all stay green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

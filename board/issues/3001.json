@@ -1,0 +1,35 @@
+{
+  "number": 3001,
+  "kind": "pull_request",
+  "title": "feat(automation): ADR-0096 follow-ups — runtime re-materialization + connector origin (#2977)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T03:25:07Z",
+  "updated_at": "2026-07-16T04:31:27Z",
+  "closed_at": "2026-07-16T04:31:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-16T04:31:25Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3001",
+  "body": "Follow-ups to the merged ADR-0096 (#2994). Tracking: #2977. Two cohesive additions to `@objectstack/service-automation`:\n\n## 1. Runtime re-materialization\n\nProvider-bound declarative `connectors:` instances (ADR-0096) materialized **only at boot** — a connector published from Studio, or introduced by a dev reload, did not become dispatchable until a full restart. `materializeDeclaredConnectors` is now a **reconcile** against the declared set, run both at boot and on `metadata:reloaded` (the Studio-publish / dev-reload hook that already re-syncs flows):\n\n- **Add** newly-declared instances; **tear down** removed / newly-`enabled:false` ones (calling their `close`, e.g. an MCP connection); **re-materialize** only instances whose **signature** — a stable hash of `provider` + `providerConfig` + `auth` + identity — changed. An unchanged MCP instance is **not** reconnected on an unrelated metadata reload.\n- **Boot stays fatal** (\"fail loudly\", unchanged): unknown provider / invalid `providerConfig` / unresolvable `credentialRef` / name conflict aborts startup.\n- **Reload is soft**: the same problems are logged and the offending entry skipped, so a bad publish never crashes a running server. A changed instance's **old connector keeps serving** until its replacement materializes successfully.\n\nTracking moved from a `materializedConnectorClosers` array to a `materializedConnectors` Map (name → `{ signature, close }`).\n\n## 2. Connector `origin` on the descriptor\n\n`ConnectorDescriptor` (served by `GET /api/v1/automation/connectors`) now carries `origin: 'plugin' | 'declarative'`, so the flow designer can distinguish a materialized declarative instance from a plugin-registered connector. Additive — the field is always present; existing consumers ignore it. (Enables the Studio picker to label declarative connectors; that UI change lands separately in `objectui`.)\n\n## Verification\n\n- Reload reconcile: 6 tests (publish-after-boot / remove / newly-disabled / unchanged-untouched / changed-re-materialized / soft-failure-survives). `origin`: asserted on the descriptor.\n- `service-automation` green (26 files, **285 tests**); `runtime` dispatcher green (**523 tests**) — the new required descriptor field breaks no consumer. Full DTS build clean; ESLint clean; changeset included.\n- ADR-0096 updated: \"boot-time only\" scope note replaced with a \"Runtime reconcile (landed)\" section.\n\n## Compatibility\n\nAdditive — boot behavior is byte-for-byte unchanged (same `fatal: true` path); the descriptor gains a field. No schema or authorable-key changes.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Pbmw3pMqNJfPbkvwh9Fkjs"
+}

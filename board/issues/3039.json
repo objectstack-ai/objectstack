@@ -1,0 +1,32 @@
+{
+  "number": 3039,
+  "kind": "issue",
+  "title": "[plugin-audit] 活动 summary 硬编码英文动词 + 用对象 API 名(非 label),无 i18n(zh-CN 显示 Created os_xxx)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T09:13:13Z",
+  "updated_at": "2026-07-16T13:09:35Z",
+  "closed_at": "2026-07-16T13:09:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3039",
+  "body": "## 问题 / Summary\n\n`@objectstack/plugin-audit` 写入活动记录(sys_activity)的 `summary` 字段时,**硬编码英文动词**且用**对象 API 名(`ctx.object`)而非对象 label**,且不接入 i18n。因此详情页\"动态/活动\"区在中文环境下显示成:\n\n```\nCreated os_tianshun_ehr_operator_certificate \"OC-00001\"\n```\n\n期望是中文 + 对象显示名,如:`创建了 人员资质 \"OC-00001\"`。\n\n下游 zh-CN 部署据此被报 i18n 缺陷:steedos-labs/os-project-titanwind-ehr#420。\n\n## 复现 / Reproduction\n\n1. `localization.locale = 'zh-CN'` 的工作区。\n2. 任意开启 activities 的对象(label 为中文,API 名为英文,如 label=`人员资质` / name=`os_tianshun_ehr_operator_certificate`)。\n3. 新建 / 更新 / 删除一条记录。\n4. 打开该记录详情页的活动(动态)时间线。\n\n**实际**:`Created os_tianshun_ehr_operator_certificate \"OC-00001\"`(英文动词 + 英文 API 名)。\n**期望**:`创建了 人员资质 \"OC-00001\"`(本地化动词 + 对象 label)。\n\n## 根因 / Root cause\n\n`packages/plugins/plugin-audit`,`dist/index.mjs`(约 1669 行起)在写入时定死 summary:\n\n```js\nconst label = recordLabel(after ?? before, recordId ?? \"\");\nlet summary;\nif (action === \"create\") {\n  summary = `Created ${ctx.object} \"${label}\"`;           // 1669\n} else if (action === \"delete\") {\n  summary = `Deleted ${ctx.object} \"${label}\"`;           // 1671\n} else {\n  const milestone = matchMilestone(...);\n  if (milestone) { summary = milestone.summary; }\n  else { summary = renderTrackedChangeSummary(...) ?? `Updated ${ctx.object} \"${label}\"`; }  // 1678\n}\n// ...\nobject_name: ctx.object,   // 1652 / 1689 —— 存的是 API 名\n```\n\n两个问题:\n1. **动词硬编码英文**(`Created` / `Updated` / `Deleted`),不随 locale。\n2. **`ctx.object` 是对象 API 名**,不是 `getObjectDef(ctx.object)?.label`,面向用户不友好。\n\nsummary 在写入时即定死存库,应用层**无任何入口**覆盖(不像 UI 渲染可拦截)。\n\n## 期望修复 / Expected\n\n- summary 的动词走 i18n(按写入/渲染时的 locale),或将\"动词\"与\"对象名/记录名\"结构化存储、渲染时再本地化拼装;\n- 对象名用 `label`(本地化后)而非 API 名。\n\n版本:`@objectstack/plugin-audit@15.0.0`(monorepo `packages/plugins/plugin-audit`)。\n"
+}

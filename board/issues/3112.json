@@ -1,0 +1,30 @@
+{
+  "number": 3112,
+  "kind": "issue",
+  "title": "MetadataManager.register() never notifies subscribe() watchers — runtime consumers go stale on every non-saveMetaItem write",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T10:00:14Z",
+  "updated_at": "2026-07-17T13:05:55Z",
+  "closed_at": "2026-07-17T13:05:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3112",
+  "body": "Found while fixing the 15.1 third-party eval P2 \"hot-added object never becomes queryable\" (framework#3108).\n\n`MetadataManager.register()` (packages/metadata/src/metadata-manager.ts:280) updates the in-memory registry, persists to writable loaders, and publishes to the realtime service — but it never calls `notifyWatchers()`, so `subscribe(type, cb)` consumers are silent. Watchers only fire from the `saveMetaItem` path (metadata-manager.ts:1590) and NodeMetadataManager's file watcher.\n\nConcretely: ObjectQL's registry bridge (`subscribeToMetadataEvents`, packages/objectql/src/plugin.ts) — the component that keeps the SchemaRegistry in sync — never hears about anything registered through `register()`, which is exactly what the artifact reload path (`_parseAndRegisterArtifact`) uses. #3108 works around this for the `metadata:reloaded` seam by carrying the parsed artifact on the event payload and ingesting from there, but the asymmetry remains for any other `register()` call site (e.g. a future cloud artifact-api mid-run refresh) and for any other `subscribe()` consumer.\n\nOptions:\n1. Make `register()` emit the same `MetadataWatchEvent` as `saveMetaItem` (blast radius: boot-time registration would flood subscribers with N events — needs either a bulk/quiet mode for boot or subscribers that tolerate the flood).\n2. Keep `register()` silent by design, document it loudly on the method, and require every bulk-ingest path to announce (as `metadata:reloaded` now does).\n\nEither way the contract should be explicit — today it's a trap: `subscribe()` looks like it covers all writes, and it doesn't.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 2754,
+  "kind": "issue",
+  "title": "Multi-org (enterprise) will re-hit #2734: tenant_isolation RLS strict equality still hides NULL-org platform rows once org-scoping is active",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T08:20:44Z",
+  "updated_at": "2026-07-15T13:09:00Z",
+  "closed_at": "2026-07-15T13:09:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2754",
+  "body": "## Context\n\n#2745 fixed the open-edition half of #2734 at the DRIVER layer: `applyTenantScope` now treats `organization_id IS NULL` as a global/platform row. But in true multi-org mode (`OS_MULTI_ORG_ENABLED=true` + the enterprise `@objectstack/organizations` registering the `org-scoping` service), SecurityPlugin STOPS stripping the wildcard `tenant_isolation` RLS (`organization_id == current_user.organization_id`, from `organization_admin`/`member_default` in default-permission-sets.ts) — and that RLS layer still uses strict equality.\n\n## Consequence (predicted, not yet reproduced — needs an enterprise-mode repro)\n\nAn enterprise deployment's org admins will see ZERO rows in the org-less platform RBAC tables (`sys_position`, `sys_permission_set`, `sys_business_unit`) over REST — Setup → Access Control empty — the same symptom #2734 had in the open edition, resurfacing one layer up.\n\n## Fix directions (pick one, enterprise track)\n\n1. Enterprise per-org seed replay stamps the platform RBAC rows per organization (matches ADR-0081's per-org bootstrap), or\n2. `tenant_isolation` gains per-table global-row carve-outs for platform tables (`organization_id == current_user.organization_id OR organization_id == null` — mirrors the driver-layer semantics of #2745), or\n3. platform tables opt out of tenancy (`tenancy.enabled: false`) and rely on RBAC/managed_by gates alone.\n\nOption 2 keeps one coherent \"NULL = global\" semantic across both layers.\n\nRelated: #2734, #2745, ADR-0081, ADR-0057 (BU tree), ADR-0090."
+}

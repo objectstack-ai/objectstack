@@ -1,0 +1,33 @@
+{
+  "number": 2937,
+  "kind": "issue",
+  "title": "security(authz): 多组织下伪造 organization_id 的 insert 可越租户墙 — Layer 0 未门控 insert post-image",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-14T18:02:29Z",
+  "updated_at": "2026-07-15T01:46:04Z",
+  "closed_at": "2026-07-15T01:46:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2937",
+  "body": "## 背景\n\n在 B1（ADR-0095 D1，PR #2933）落地 Layer 0 期间核实写路径时发现一处**既有**（非 B1 引入）的跨租户写缺口。B1 的 Layer 0 门控读 + update/delete 的 pre-image，但**不门控 insert 的 post-image**，因此没有顺带堵上它。单独立项跟踪，避免夹带进行为保持的 B1。\n\n## 缺口\n\n多组织模式（`tenancy.mode='multi'` + `@objectstack/organizations`）下，一个普通用户可以 `insert` 一条**伪造 `organization_id`**（指向别的租户）的业务记录，使其落进受害租户的数据里。三个条件叠加：\n\n1. **`organization_id` 是普通可写 lookup 字段**（`Field.lookup('sys_organization', …)`），用户 insert 时可直接提供，未被系统字段守卫剥离。\n2. **企业版 auto-stamp 只在缺省时填充、不覆盖**：`cloud/packages/organizations/src/organizations-plugin.ts:147`\n   ```ts\n   if (data.organization_id == null || data.organization_id === '') {\n     data.organization_id = opCtx.context.tenantId;\n   }\n   ```\n   用户提供了伪造值 → 非空 → auto-stamp 不覆盖。\n3. **写侧从无租户 post-image 检查**：`computeWriteCheckFilter`（`plugin-security/src/security-plugin.ts:1981`）只纳入**显式带非空 `check` 子句**的策略；种子 `tenant_isolation` 只有 `using` 无 `check`，故从不参与写检查。\n\n结果：伪造 `organization_id` 的 insert 既不被 auto-stamp 纠正，也不被任何租户写检查拒绝。Layer 0 的 AND 过滤器作用于读和 update/delete 的 pre-image 匹配，但 insert 无 pre-image，未被门控。\n\n## 影响\n\n- 仅多组织（企业版）部署受影响；单组织/物理隔离（env-per-DB, ADR-0002）不受影响。\n- 攻击者可向别的租户注入行（数据污染 / 潜在的钓鱼或配额攻击）；注入的行对攻击者自己反而不可见（Layer 0 读过滤会隐藏它）。\n- open-core dogfood 跑不到多组织路径（需企业版 `@objectstack/organizations`），故自动化回归门未覆盖——需在企业版环境验证。\n\n## 建议修法（是 net-new delta，需独立评审）\n\n两处配合，任一单独都不足：\n\n1. **Layer 0 增加 insert post-image 租户检查**：insert 时校验 `organization_id == ctx.organization_id`（platform-admin 姿态 + 对象 posture 允许时豁免，与 D1 读侧同规则）。落点 `plugin-security/src/tenant-layer.ts` + `computeWriteCheckFilter` 接线。\n2. **企业版 auto-stamp 改为权威覆盖**（或在 stamp 后校验）：`organizations-plugin.ts` Middleware A 对租户对象**始终**用 `ctx.tenantId` 覆盖 `organization_id`，而非仅填充缺省。需确认是否有合法「代客设置 org_id」的 insert 场景（import/admin 工具、跨组织迁移）——若有，这些走 system context 或专用端点，不受用户上下文的覆盖影响。\n\n**注意这会引入一处新的行为 delta**（此前能成功的「带 org_id 的用户 insert」会被拒正或被覆盖），需像 ADR-0095 的四处 delta 一样进 `role×object×insert` 矩阵门并写 release-notes callout。\n\n## 关联\n\n- ADR-0095 D1 / PR #2933（Layer 0；本缺口是其读侧 W1 的写侧未竟部分）\n- #2936（`extractTargetField` 只认 `=` 不认 `==` 的盲区，同属租户写路径 hardening）\n- ADR-0002（物理隔离拓扑不受影响）· ADR-0093（多组织 tenancy 模式）\n\n发现于 tracking #2920 的 B 组内核链开发过程中。"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 1828,
+  "kind": "issue",
+  "title": "ADR-0048 follow-up: unscoped metadata list dedupes by bare name (collapses same-name collisions across packages)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-14T01:37:40Z",
+  "updated_at": "2026-07-18T16:29:29Z",
+  "closed_at": "2026-07-18T16:29:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1828",
+  "body": "## Context\n\nADR-0048 (#1810, #1816, #1819, #1822, #1827) made same-name cross-package metadata resolve correctly through the **single-item** (`?package=`) and **Studio editor/layered** paths. The remaining gap is the **unscoped list**.\n\n## Problem\n\n`protocol.getMetaItems` (`packages/objectql/src/protocol.ts`) merges registry items, `sys_metadata` overlay rows, draft-preview rows, and `MetadataService` items into the result using **`Map`s keyed by bare `name`** (three sites):\n\n- DB-overlay merge — `byName.set(entry.name, entry)` (~L1204-1243)\n- draft-preview merge — `byName.set(data.name, data)` (~L1277-1291)\n- MetadataService merge — `itemMap.set(entry.name, entry)` (~L1313-1336)\n\nSo when two installed packages ship an item of the same `type`/`name`, an unscoped `GET /meta/:type` (no `?package=`) **collapses them to one** (last-write-wins by name).\n\n### Where it bites\n- **Pure-artifact** collisions list correctly *today* (after #1822) because no DB/MetadataService merge runs — the two composite registry entries survive.\n- **With overlays** (#1827): as soon as either package has a `sys_metadata` overlay, the DB-overlay merge runs and the `byName` collapse drops one package's row. Verified: two `page/showcase_task_workbench` overlays coexist in the DB and resolve fine via `?package=`, but the unscoped `/meta/page` returns only one.\n- The frontend **prefer-local** resolution for `dashboard`/`report`/`page` (`preferLocal(list, name, app._packageId)` in objectui `app-shell`) reads the **unscoped** list, so a collapsed list makes it pick the surviving row regardless of package.\n\n### Secondary: provenance pollution\nThe DB-row hydration at ~L1234-1240 registers overlay rows under the **bare** registry key via `mergeArtifactProtection(data, lookupArtifactItem(type, name))` — a *first-match* (non-package-scoped) artifact lookup. On a collision this grafts the first package's `_packageId` onto the row, mislabeling provenance even when content is correct.\n\n## Proposed direction\n\nMake the list merge package-aware:\n\n- Key the dedup `Map`s by `(name, package_id)` (or `${_packageId ?? ''}:${name}`) instead of bare `name`, so a `package_id=A` overlay merges onto package A's artifact and `package_id=B` onto B's — no cross-package collapse.\n- Scope the bare-key hydration / `lookupArtifactItem` graft (~L1234-1240) to the row's own `package_id` (mirror the `getMetaItem`/`getMetaItems` fix from #1822) so provenance stays correct.\n- Decide env-wide (package-less, `package_id IS NULL`) overlay semantics in the list: it has no package to attribute to. Options: apply to the first/all same-name entries, or surface as its own row. (Same inherent ambiguity noted in #1824.)\n\n### Open questions\n- Does any consumer rely on the current bare-name dedup (e.g. expecting exactly one entry per name)? Audit the Studio metadata list + sidebar.\n- Interaction with the ADR-0005 org-overlay-wins precedence (the merge currently also encodes that).\n\n## Acceptance\n- Unscoped `GET /meta/page` with two installed packages each shipping `page/home` (with or without overlays) returns **both** rows, each with its own correct `_packageId`.\n- Frontend prefer-local resolves each `/apps/<pkg>/page/home` to its own package — verified in the browser with a real collision (as #1822/#1827 were).\n- Existing single-package list behavior and ADR-0005 overlay precedence unchanged.\n\nRelated: #1822 (single-item/list provenance), #1827 / #1824 (package-scoped overlays)."
+}

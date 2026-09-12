@@ -1,0 +1,34 @@
+{
+  "number": 2915,
+  "kind": "pull_request",
+  "title": "test(app-showcase): ADR-0090 configuration-surface test round — positions UI, mapping, developer authoring chain",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-14T12:37:49Z",
+  "updated_at": "2026-07-14T14:11:35Z",
+  "closed_at": "2026-07-14T14:11:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-14T14:11:33Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2915",
+  "body": "## Summary\n\nSecond round of ADR-0090 permission-model testing (follow-up to #2910), covering the **configuration surfaces** the first round didn't touch:\n\n1. **How an admin configures positions** — Setup app → Access Control → Positions: list, create form, position detail related lists (Holders / Permission Sets), non-admin denial, built-in anchor (`everyone`) delete protection. *(checklist section N, 6 cases)*\n2. **How positions map to permission sets** — end-to-end: bind a set to a position via the junction related list / REST, assign a holder, and observe the grant become effective and the revoke take effect immediately from the assignee's own session. *(section O, 9 cases)*\n3. **How a developer authors permission sets** — `definePermissionSet` → `objectstack build` → boot reprojection; FLS change verified end-to-end with before/after screenshots; access-matrix snapshot gate (drift fails the build with a precise message, `--update-access-matrix` regenerates); package-set edits via env gate rejected with 403 (ADR-0086/0094); runtime-set full lifecycle; seed idempotency. *(section P, 7 cases)*\n\n## What's in this PR\n\n- `e2e/permission-model-admin.spec.ts` — new spec, 14 tests, all green (full permission suite now **25/25**)\n- `playwright.permission.config.ts` / `playwright.config.ts` — glob widened to `permission-model*.spec.ts`\n- `docs/test/permission-model-test-checklist.md` — sections N/O/P added\n- `docs/test/permission-model-test-report.md` — §4 configuration-surface details, §5 two new observations, §6 screenshot index\n- 11 evidence screenshots under `docs/test/screenshots/`\n\n## Notable observations (documented in the report)\n\n- **Cookie-less sessions render FLS fail-open in the console**: injecting only the localStorage auth token (no better-auth cookie) leaves FLS-locked fields editable in the UI; the data plane still enforces. UI tests must inject cookies into storageState.\n- **Lookup grid columns show the target record's `name` (API name)**, e.g. `showcase_auditor` instead of its display label.\n\nDestructive cases (P3 source edit + rebuild, P4 matrix drift) are documented as manual-replay steps in the report rather than committed as spec code.\n\n## Test plan\n\n- [x] `PERM_BASE_URL=http://localhost:3777 pnpm exec playwright test --config playwright.permission.config.ts` — 25/25 passed\n- [x] Sources restored after destructive cases (`src/security/permission-sets.ts`, `access-matrix.json` match main)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 2982,
+  "kind": "issue",
+  "title": "Security: bulk (multi) update/delete skips OWD owner scoping on private objects — members can modify others' rows",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-15T15:27:16Z",
+  "updated_at": "2026-07-16T09:03:56Z",
+  "closed_at": "2026-07-16T09:03:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2982",
+  "body": "Surfaced by the ADR-0096 execution-surface audit. A verb-coverage gap on the sharing axis: bulk writes are not owner-scoped on objects that rely on `sharingModel:'private'` (OWD) rather than an authored RLS policy.\n\n## Detail\n\nFor single-id writes, the sharing plugin runs `canEdit` and the security plugin does a pre-image row-level RLS check. Both are keyed off a single inferrable id:\n\n- `packages/plugins/plugin-sharing/src/sharing-plugin.ts:387-412` — the write gate runs `canEdit` only `if (id != null)` (`:391`).\n- `packages/plugins/plugin-security/src/security-plugin.ts:811-821` — the pre-image RLS check fires only for a single `extractSingleId` (`:821 if (targetId != null)`).\n\nA `update({ multi: true })` / `deleteMany` still routes through the `update`/`delete` middleware, and **authored RLS `where`-policies are injected into the AST operation-agnostically** (`security-plugin.ts:1167`) — so objects protected by an explicit RLS policy are fine. But objects whose protection is **OWD `private` (owner-only) with no authored RLS policy** get their owner scoping **only** from the sharing plugin's `canEdit` path, which never injects an owner `where` filter for writes and is skipped for multi-writes.\n\n**Impact:** on a pure-`private` object, a member can `update`/`delete` with `multi:true` and affect **other users' rows** — the owner boundary that holds for single-row writes is absent for bulk writes.\n\n## Suggested fix\n\nFor `multi` writes on objects whose effective sharing model is owner-scoped, inject the owner (and share/hierarchy) predicate as a `where` filter into the bulk operation — the write analogue of the read filter `sharing-service.ts buildReadFilter` already produces — so bulk writes are constrained to rows the caller may edit, or deny multi-writes on such objects. Add a dogfood proof (a member bulk-updating a peer's private-object rows must fail).\n\n## Relationship to ADR-0096\n\nClass B (a verb outside a check's coverage, not a missing-identity fall-open), but same theme — an execution/verb surface whose authorization story wasn't enumerated. Candidate row for the ADR-0096 D4 conformance matrix (bulk-write × sharing axis). Tracking under the ADR-0096 evidence base.\n\nRefs: ADR-0096 (PR #2975)."
+}

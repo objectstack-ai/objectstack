@@ -1,0 +1,35 @@
+{
+  "number": 3099,
+  "kind": "pull_request",
+  "title": "fix(automation): kill the four-layer silence around record-change flows that never fire",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T07:27:27Z",
+  "updated_at": "2026-07-17T09:17:55Z",
+  "closed_at": "2026-07-17T09:17:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T09:17:53Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3099",
+  "body": "## 背景\n\n2026-07-17 第三方评估(15.1.x 发布包、全新 `create-objectstack` 项目):autolaunched record-after-update flow 配置齐全(插件已加载、`/meta/flow` status=active、triggerType 正确),REST PATCH 满足条件后 flow 不执行,且**日志零输出**——无注册、无绑定、无跳过、无错误。同样逻辑写成 lifecycle hook 正常。\n\n## 调查结论\n\n在 15.1.1(本地构建 + npm 发布包逐字节一致)上完整复刻评估者场景:**正确配置的 flow 在 `os start` / `os dev` / 重启后 / 发布包脚手架项目上端到端全部正常触发**。评估者遇到的\"不触发\"来自某个作者层失配(最可能:start 节点 `objectName` 与对象注册名不一致——实验证实该失配零日志、静默永不触发),而框架在每一层都沉默:\n\n1. **serve 的 boot 静默窗口吞掉整个 stdout**(`serve.ts` bootQuiet),而 `ObjectLogger` 的 debug/info/**warn** 全走 stdout——flow 注册/trigger 绑定恰好全部发生在该窗口内,`OS_LOG_LEVEL=debug` 也救不回来;只有 error/fatal(stderr)幸存。连\"绑定成功\"都不可见,失败更不可见。\n2. 触发驱动的 execute() 失败只写 run-history 行,`AutomationResult` 被绑定回调丢弃——logger 层面零信号。\n3. `objectName` 失配 → hook 订阅一个没人写的对象名,永不触发,零信号。\n4. `requires` 缺 `automation`/`triggers` → flow 元数据照常注册(`/meta/flow` 可见),但引擎/触发器不存在,零信号。\n\n附带发现:**draft 状态的 flow 仍会触发**(engine 只对 obsolete/invalid 禁用)——与直觉相反,已实验证实并纳入提示语义。\n\n## 修复(按层)\n\n- **启动摘要 `Flows:` 一节**(stdout 恢复后打印,不受静默窗口影响):flow 数、绑定数、已注册 trigger 类型、draft 数;外加 ⚠ 行:引擎未启用(附 `requires` 修复指引)、声明了 trigger 但未绑定、绑定了但对象未知(死绑定)。\n- **触发驱动的运行失败升为 ERROR**(stderr,始终可见):engine 绑定回调不再丢弃执行结果;condition 求值异常/节点失败带 flow 名落日志。condition 不满足的跳过保持 debug(高频,有意)。\n- **`RecordChangeTrigger` 绑定时探测对象存在性**(feature-detect `getObject`),失配即 warn 点名。\n- **`kernel:bootstrapped` 绑定审计**(automation plugin):每个 enabled-but-unbound 的触发 flow 一条 warn(附原因),新增 `AutomationEngine.getTriggerBindingAudit()`、扩展 `getFlowRuntimeStates()`(status/triggerType/object)。\n- **`os validate` 新增 flow 接线检查**(`@objectstack/lint` `validateFlowTriggerReadiness`):record 触发 flow 指向本 stack 未定义对象 → warning(sys_* 豁免);自动触发 flow status 为 draft(显式或缺省)→ warning(明确\"draft 仍会触发,声明 active/obsolete\")。showcase 16 个自动触发 flow 补显式 `status: 'active'`。\n- **清理 5 月遗留的 boot 调试残留**(`registerApp`/`AppPlugin:init`/`StandaloneStack`/`AuditPlugin` 共 8 处 stderr 直写)——它们正是前人被同一个静默窗口坑过后的手工探针。\n\n## 验证\n\n- 新增失败复现测试先红后绿:trigger 未知对象 warn ×3、触发失败 ERROR ×2、bootstrapped 审计 ×1、lint 规则 ×9、CLI 摘要 ×6。\n- 修改包全量 `turbo build+test`:60 tasks 全绿(service-automation 306、trigger-record-change 25 等)。\n- 真实项目端到端(worktree 包 + npm 发布包两套):正确 flow 在 PATCH 后照常 stamp;三种作者失配各自出现显式信号(banner ⚠ / stderr ERROR / validate ⚠)。\n- `examples/app-showcase` `os validate` 干净通过。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

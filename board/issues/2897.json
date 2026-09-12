@@ -1,0 +1,35 @@
+{
+  "number": 2897,
+  "kind": "pull_request",
+  "title": "feat(spec,cli): ADR-0087 P1+P2 — conversion layer, migration chain & change manifest",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-14T06:14:32Z",
+  "updated_at": "2026-07-14T08:51:56Z",
+  "closed_at": "2026-07-14T08:51:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-14T08:51:54Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2897",
+  "body": "Implements **P1 and P2** of the ADR-0087 epic (#2643) on top of the merged P0 handshake (#2650). Two stacked commits:\n\n- **P1 — conversion layer (D2, #2645):** break *invisibly*.\n- **P2 — migration chain + change manifest (D3/D4, #2647):** break *executably* + machine-readable release record.\n\n---\n\n## P1 — Conversion layer (D2)\n\nA versioned, declarative, **lossless** table (`packages/spec/src/conversions/`) that rewrites old (N−1) metadata shapes to canonical protocol-N shapes **at load** — the same `normalizeStackInput` seam `defineStack`/`validate`/`lint`/`info`/`doctor` share. Old-shape authoring keeps loading with **zero action**; each rewrite emits a structured `OS_METADATA_CONVERTED` notice, surfaced by `objectstack validate`.\n\nSeed table (retroactive protocol-11 renames):\n\n| id | surface | transform |\n|---|---|---|\n| `flow-node-http-callout-rename` | `flow.node.type` | `http_request`/`http_call`/`webhook` → `http` |\n| `page-kind-jsx-to-html` | `page.kind` | `'jsx'` → `'html'` (ADR-0080) |\n| `flow-node-crud-filter-alias` | `flow.node.config.filter` | CRUD node `config.filters` → `config.filter` |\n\n**PD #12 retirement demonstrated:** the `filters`→`filter` alias is removed from the service-automation executor's `readAliasedConfig` fallback and promoted into the declared/loud/tested/expiring conversion above; executors now read canonical `cfg.filter`.\n\n## P2 — Migration chain (D3) + change manifest (D4)\n\n**D3 (`packages/spec/src/migrations/`):** a permanent, ordered, per-major chain. Each major's step composes two feeders — the **graduated D2 conversions** (referenced by id, reusing transform + fixture) as mechanical transforms, and **semantic changes** with no lossless mapping surfaced as structured TODOs (surface · reason · acceptance criteria — never silence). `applyMetaMigrations(stack, fromMajor, toMajor?)` folds `fromMajor+1..current` and carries any past major to current in one run — cross-major is the designed-for case; each hop is checkpointed for per-hop verify / bisection. `MIGRATION_SUPPORT_FLOOR` is an explicit release-policy knob. Seeded protocol-11 step: three graduated conversions (mechanical) + the two non-lossless live windows (`titleFormat` composite → `nameField`; SQL-ish RLS predicate → CEL) as semantic TODOs. **CI replays each conversion fixture through the full chain** — a composability break is a release blocker.\n\n**D4:** `spec-changes.json` — a Zod-defined `{ from, to, added, converted, migrated, removed }` record. `composeSpecChanges` folds the conversion table (D2) and migration set (D3) across majors and joins the release-time api-surface diff; per-major manifests **compose** into one `from→to` view (the generated guide and P3's MCP `spec_changes` are projections of it).\n\n**CLI — `objectstack migrate meta --from N`** (the command the P0 handshake error already names): replays the chain and prints a generated, `ObjectStackDefinition`-validated mechanical diff (`path: old → new`) plus the semantic TODOs; `--to` / `--step` (per-hop checkpoints) / `--out <file.json>` (canonical JSON snapshot) / `--json`. It does **not** silently rewrite TS config source (that AST rewrite is unsafe/lossy) — it emits a reviewable artifact for the consumer agent. `normalizeStackInput` gains an optional `convert: false` (map→array only) so `migrate meta` replays the conversions itself against the raw authored source, attributing each rewrite to a chain hop.\n\n## Verification\n\n- `@objectstack/spec` — **6748 passed** (32 new: 15 conversion + 17 migration/spec-changes), `tsc --noEmit` clean, `check:api-surface` green (additions purely additive, 0 breaking).\n- `@objectstack/service-automation` — **255 passed** (CRUD-alias test rewritten for the executor-shim vs. load-time-conversion split, incl. an end-to-end `filters`→`filter` conversion-then-run case).\n- `@objectstack/downstream-contract` — **14 passed**.\n- **End-to-end proven:** a protocol-10 stack authored with all three deprecated shapes migrates via `applyMetaMigrations(…, 10)` to a **schema-valid** canonical stack (3 mechanical rewrites + 2 semantic TODOs).\n\n## Scope / boundaries\n\n- Conversions run **at load**; migrations rewrite in-memory and report — neither silently rewrites consumer source.\n- P3 (#2648 — MCP upgrade tools + RC discipline) is deferred and evidence-gated per the ADR; this PR makes it possible.\n\nRefs #2643, #2645, #2647 · ADR-0087 (D2/D3/D4) · AGENTS.md Prime Directive #12.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01YA9vjVpDrKLuaK6nbm1s37"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 2995,
+  "kind": "pull_request",
+  "title": "fix(packages): register PATCH /packages/:id so edit-manifest reaches the handler",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T01:47:50Z",
+  "updated_at": "2026-07-16T01:56:14Z",
+  "closed_at": "2026-07-16T01:56:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-16T01:56:12Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2995",
+  "body": "## Problem\n`handlePackages` has handled `PATCH /packages/:id` (edit a package's **name / description / version**) since the edit-manifest feature landed, but the **route was never mounted** in `dispatcher-plugin`. Only `GET`/`DELETE /packages/:id` and `PATCH /packages/:id/enable|disable` were registered.\n\nResult: `PATCH /packages/:id` returns **405 Method Not Allowed** (`Allowed: DELETE, GET, HEAD`) over HTTP, so the Studio **\"edit package\" form silently fails** end-to-end. Found while dogfooding the Studio builder header-refresh (objectui).\n\n## Fix\nRegister `server.patch('/packages/:id')` mirroring the existing GET/DELETE `/:id` handlers, forwarding `req.body`/`req.query` to `handlePackages(..., 'PATCH', ...)`. `/:id` is a single path segment so it does **not** shadow the `/:id/enable|disable` routes.\n\n## Test\nAdds a route-registration regression test in `dispatcher-plugin.routes.test.ts` (same harness/class as the `/ready` seam bug #2217): asserts `PATCH /api/v1/packages/:id` is mounted. `dispatcher-plugin.routes.test.ts` passes (6 tests).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

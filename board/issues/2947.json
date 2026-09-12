@@ -1,0 +1,33 @@
+{
+  "number": 2947,
+  "kind": "issue",
+  "title": "authz: ctx.posture（B2 已算出）未 plumb 进 enforcement 的 ExecutionContext",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-15T04:07:44Z",
+  "updated_at": "2026-07-15T15:56:57Z",
+  "closed_at": "2026-07-15T12:05:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2947",
+  "body": "## 背景\n\nB2/B4（ADR-0095 D2/D3，#2938）在 `resolve-authz-context.ts` 算出并携带了显式 `ctx.posture`（`PLATFORM_ADMIN > TENANT_ADMIN > MEMBER > EXTERNAL`）。但在修复租户墙 org_admin 越墙（#2946 / Finding 2）时实测确认：**该字段没有被 plumb 进 enforcement 中间件收到的 `ExecutionContext`**——`rest-server.ts`（~L1197-1215）与 `runtime/resolve-execution-context.ts`（~L143-204）构建执行上下文时**都丢弃了 `authz.posture`**。\n\n后果：任何 enforcement 侧插件若直接读 `context.posture` 会永远 undefined → 静默 no-op。#2946 因此改用「平台专属能力探针」（`hasPlatformAdminPosture`）绕开，而非用 posture 作豁免门。\n\n## 缺口\n\nposture 目前是一个「算出来但传输层丢弃、enforcement 拿不到」的半成品字段。它已被 explain 引擎消费（report 侧），但 enforcement 侧不可用。这也是 security review 发现的 explain-vs-enforcement posture 分叉的根因之一。\n\n## 建议\n\n若要让 enforcement 真正按 posture 裁决（ADR-0095 D2/D3 的完整意图），需在两处补 plumbing：\n- `packages/rest/src/rest-server.ts` 构建 ExecutionContext 时带上 `posture: authz.posture`\n- `packages/runtime/src/security/resolve-execution-context.ts` 同上（覆盖 runtime/MCP 入口）\n\n并把 `ExecutionContext` 类型加上可选 `posture` 字段。之后 #2946 的 `hasPlatformAdminPosture` 能力探针可考虑收敛为读 `ctx.posture`（单一真相）。\n\n**注意**：这是「posture 透传进 enforcement」的一部分——B2 刻意止步于解析器层。是否让 enforcement 全面按 posture 重写是更大的 ADR 级决策；本 issue 只跟踪「把已算出的 posture 传下去」这一具体 plumbing 缺口。\n\n## 关联\nADR-0095 D2/D3 · #2938（B2/B4）· #2946（租户墙修复，用能力探针绕开）· tracking #2920\n\n发现于 #2920 的安全审查。"
+}

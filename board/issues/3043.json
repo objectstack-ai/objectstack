@@ -1,0 +1,35 @@
+{
+  "number": 3043,
+  "kind": "issue",
+  "title": "安全/设计:静态 readonly 的 INSERT 豁免让审批/状态字段可在创建时被直接播种(比 #3003 少一步)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T09:37:17Z",
+  "updated_at": "2026-07-18T05:52:04Z",
+  "closed_at": "2026-07-18T05:52:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3043",
+  "body": "## 概述\n\n#2948 / #3003 修复后,静态 `readonly: true` 字段在**非 system 的 UPDATE** 上被服务端剥离——但 **INSERT 被有意豁免**(与 `readonlyWhen` 对称:创建时可播种 readonly 列,服务于 `defaultValue` / 导入 / 迁移)。\n\n对**审批 / 状态 / 判定**类字段,这个豁免意味着:与其像 #3003 那样先建 draft 再 PATCH 提权,攻击者可以**直接 POST 一条已经 `approval_status: 'approved'` 的新记录**——比原复现还少一步,且 update 剥离完全拦不到(它只作用于 UPDATE)。\n\n本 issue 请求 **决策该豁免是否收紧**(设计级,先定方向再实现)。\n\n## 定位\n\n`packages/objectql/src/engine.ts` `insert()`(L2185 起):\n- L2206-2212 `applyFieldDefaults` 只填 `undefined` 字段,**不剥离** caller 提交的 readonly 列;\n- 全 insert 路径无 `stripReadonlyFields` 调用(该函数只在 `update()` 里被调,见 L2423 / L2442)。\n\n对照 UPDATE 侧:`stripReadonlyFields`(`rule-validator.ts`)显式只在 update 调用,注释也写明「INSERT 豁免,symmetric with readonlyWhen」。\n\n## 备选方向\n\n1. **维持现状 + 硬性文档指引(最省)**:承认 insert 可播种 readonly,把「审批/状态/金额/判定字段必须叠 `state_machine` 验证规则(强制初始状态)或 `requiredPermissions` FLS 兜底」写成 skill / 文档硬性约束。缺点:仍是「declared ≠ enforced」的认知负担,和 #3003 同类误读风险。\n2. **收紧 insert:非 system 的 insert,readonly 列只允许取 `defaultValue`,caller 显式提交的值剥离**。保留导入/迁移(走 `isSystem`)与默认值播种,堵掉「直接 POST approved」。需评估对现有依赖「创建时带 readonly 初值」的应用侧写法的兼容影响。\n3. **字段级 opt-in**:给 `readonly` 增加一个 `readonlyOnInsert`(或 `immutable`)维度,让作者显式声明「连创建都不可由用户设」,审批/状态字段声明它。最精确,但扩了 spec 面。\n\n## 判据 / 需核实\n\n- 现有多少对象**合法依赖** insert 时由用户上下文写入 readonly 列(而非 system / defaultValue)?这决定方案 2 的 blast radius。\n- 与 FLS `requiredPermissions`(ADR-0066 D3,写拒绝)的关系:是否已能覆盖一部分,从而只需文档而非引擎改动?\n- 若走方案 2/3,需配套 dogfood 证明(POST 伪造 readonly → 剥离 / 拒绝)+ authz 矩阵行,与 #3015 的 update 侧证明对称。\n\n## 关联\n\n- #3003 / #2948(静态 readonly UPDATE 强制,已修 · PR #2957 / #3015)—— 本 issue 是其 **INSERT 面**\n- ADR-0066 D3(`requiredPermissions` 字段级写拒绝)—— 可能的纵深兜底\n- 同批开的 `readonlyWhen` 多行路径缺口 issue —— 同属「readonly 家族强制一致性」"
+}

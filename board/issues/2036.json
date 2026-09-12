@@ -1,0 +1,32 @@
+{
+  "number": 2036,
+  "kind": "issue",
+  "title": "password-typed field on non-auth objects returns plaintext (no hash, no mask)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-18T12:34:48Z",
+  "updated_at": "2026-07-18T06:40:52Z",
+  "closed_at": "2026-07-18T06:40:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2036",
+  "body": "## Summary\n\nA `password`-typed field declared on a **non-auth** object (e.g. `showcase_field_zoo.f_password`) is stored by the generic CRUD path **as-is** — it is neither one-way hashed nor masked-on-read the way `secret` is. So writing a `password` field and reading the record back over the data API returns the **plaintext** value.\n\nSurfaced while completing the dogfood field-zoo round-trip matrix (#2033). Not a regression — this is the current behavior; filing for a deliberate decision rather than fixing inline.\n\n## Why it matters\n\nThis is a low-code platform where field types are author-driven (often by an AI). Someone modeling a `password` field on a custom object reasonably expects credential-grade handling. Today they silently get plaintext storage + plaintext reads, with no warning — a runtime/security trap the static gates don't catch.\n\n## Current behavior (verified)\n\n- `secret` (`type==='secret'`): encrypt-on-write into `sys_secret`, opaque ref on the row, **masked to `SECRET_MASK` (`••••••••`) on read**. See `packages/objectql/src/secret-fields.ts` + `engine.ts` mask path.\n- `password`: the generic engine has **no** hashing/masking for it. Hashing lives only in the auth subsystem's dedicated CRUD pipeline (`packages/plugins/plugin-security/.../default-permission-sets.ts` comment: \"password hashing … rather than the generic CRUD pipeline\"). The record validator treats `password` like `text` (`record-validator.ts`). So on a generic object it round-trips plaintext.\n- Dogfood proof: `field-zoo-roundtrip` asserts `f_password` only `present` (persists) precisely because asserting a plaintext-equality contract would be undesirable to lock in.\n\n## Options to decide between\n\n1. **Mask-on-read everywhere** — treat `password` like `secret` in the generic read path (return `SECRET_MASK`), so plaintext never leaves the engine outside the auth subsystem. Lowest-surprise.\n2. **Hash-on-write** in the generic path — but one-way hashing only makes sense for credential verification, which non-auth objects don't do; likely wrong fit.\n3. **Author-time guard** — `build`/lint error (or warn) when a `password` field is declared on a non-auth object, steering authors to `secret` or the auth user object.\n4. **Document as intended** — `password` is auth-subsystem-only by contract; generic use is unsupported. Weakest (silent trap remains).\n\nLeaning 1 (+ maybe 3 as a guardrail). Needs a deliberate call.\n\n## Acceptance\n\n- Decision recorded (ADR if it changes the read contract).\n- A dogfood/unit test pins the chosen behavior for `password` on a generic object.\n\nFound via #2025 / #2028 / #2033 (field-type round-trip fidelity work)."
+}

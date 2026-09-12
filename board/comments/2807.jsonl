@@ -1,0 +1,1 @@
+{"id":4971014435,"author":{"login":"yinlianghui","id":6219465,"type":"User"},"created_at":"2026-07-14T15:35:15Z","updated_at":"2026-07-16T09:38:41Z","html_url":"https://github.com/objectstack-ai/objectstack/issues/2807#issuecomment-4971014435","body":"多个源列映射到同一个目标字段、CSV 表头重复这两种场景均已复现，都会静默保留后面的值。当前契约未定义冲突处理方式，属于设计和校验缺口，尚不能认定为契约违反。\n\n建议：需要产品决策。"}

@@ -1,0 +1,32 @@
+{
+  "number": 3165,
+  "kind": "issue",
+  "title": "enhancement: `state_machine` 校验规则在 INSERT 上是 no-op —— 无法强制记录的初始状态(declared ≠ enforced)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T06:08:09Z",
+  "updated_at": "2026-07-18T07:19:34Z",
+  "closed_at": "2026-07-18T07:19:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3165",
+  "body": "## 概述\n\n`state_machine` 验证规则(ADR-0020)在 **insert 模式下直接 no-op**,因此**无法强制记录的初始状态**——例如「新建的审批单必须以 `draft` 开始,不能直接建成 `approved`」这类约束今天并不生效。\n\n`packages/objectql/src/validation/rule-validator.ts` `checkStateMachine`:\n\n```ts\nfunction checkStateMachine(rule, mode, data, previous) {\n  // Insert has no prior state — the field-level select check already\n  // constrains the initial value to a declared option.\n  if (mode === 'insert' || !previous) return null;   // ← insert 直接放过\n  ...\n}\n```\n\n注释的理由是「field-level select 校验已把初始值约束在声明的选项内」——但 select 只保证「值是合法枚举之一」,**不保证「是合法的初始状态」**。一个 4 级审批 FSM 的 `approved` 也是合法枚举值,select 校验拦不住「初始即 approved」。\n\n## 为什么现在提\n\n这是在 #3043(静态 readonly INSERT 剥离)探索中浮现的:#3043 备选方案 1 曾设想「审批/状态字段叠 `state_machine` 强制初始状态」作为缓解,但该能力今天不存在。属于 ADR-0049「enforce-or-remove」精神下的 **declared ≠ enforced** 候选,也呼应 AGENTS.md Prime Directive #10。\n\n## 备选方向\n\n1. **实现 insert 时的初始态强制**:给 `state_machine` 规则一个可选的 `initial`(或 `initialStates`)声明;insert 时校验状态字段值 ∈ 允许的初始态集合。未声明则维持现状(向后兼容)。\n2. **仅文档化**:在 spec `describe` / 文档里明确 `state_machine` 只约束 UPDATE 的 transition,不管初始态;让作者改用 `defaultValue` + `readonly`(+ 现已修复的 #3043 INSERT 剥离)来固定初始态。\n3. 维持现状但把注释里「select 已约束」这一不成立的理由更正,避免误导后来者。\n\n## 关联\n\n- ADR-0020(state_machine converge and enforce)\n- ADR-0049(no unenforced security properties)\n- #3043 / PR #3162(探索来源;README 式缓解设想的落空点)"
+}

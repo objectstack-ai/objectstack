@@ -1,0 +1,34 @@
+{
+  "number": 2501,
+  "kind": "issue",
+  "title": "Dashboard-level filters (date / region) driving multiple charts",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-01T01:05:32Z",
+  "updated_at": "2026-07-16T11:36:08Z",
+  "closed_at": "2026-07-16T11:36:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2501",
+  "body": "## Need\n\nA dashboard has a top-level filter — a date range, a region select — that must drive **several charts at once** (e.g. 6 charts on one dashboard all re-scope to the selected date + region). This is a common, real requirement for any analytics dashboard.\n\n## Design (agreed in design discussion)\n\nThe filter is a **dashboard-level parameter**, not a shared dataset. Charts stay **inline / self-contained**.\n\n- **The filter control + its value live on the dashboard** — a dashboard-level variable (reuse the existing page/dashboard variables primitive; cf. the showcase `Page Variables` page / `PageSchema.variables`).\n- **Each chart declares which of its own fields the filter binds to** — a small binding, not a copied query. e.g. the invoice chart maps `date → created_at`, the account chart maps `date → signed_at`; region maps per-object similarly.\n- **At render, the dashboard broadcasts `{ dateRange, region }` into each chart's inline query** (merged into its `WHERE`).\n\nResult: one shared parameter (owned by the dashboard), explicit per-chart binding, charts remain inline. No hidden entity, no shared dataset — keeps it flat/explicit/local, which is also what keeps AI authoring safe (one place owns the filter; each chart edit stays local).\n\n## Scope\n\n- Dashboard filter controls (date range, select/multiselect) + dashboard-level variables holding their values.\n- Per-chart **field binding** so a chart declares which field(s) a given dashboard filter targets.\n- Runtime broadcast: dashboard injects filter values into each bound chart's query.\n- Sensible defaults (a chart auto-binds an obvious date/status field) with an explicit override.\n\n## Explicitly NOT this issue\n\nA shared **dataset** is only needed when the parameter **reshapes the query** (rolling window, grain change, a join) or the filtered slice is a **governed metric definition** — not for the simple filter-broadcast case. Those are separate concerns; this issue is the common \"filter drives N inline charts\" path.\n\n## Acceptance\n\nA dashboard with a date + region filter drives ≥2 charts over **different** objects; each chart maps the filter to its own field; changing the filter live re-scopes all bound charts."
+}

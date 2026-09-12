@@ -1,0 +1,33 @@
+{
+  "number": 3128,
+  "kind": "pull_request",
+  "title": "docs(ai): connect-mcp — `api` actions have no headless dispatch either",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T12:09:26Z",
+  "updated_at": "2026-07-17T13:18:55Z",
+  "closed_at": "2026-07-17T12:42:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T12:42:57Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3128",
+  "body": "自查发现 #3093 新增的 `ai/connect-mcp.mdx` 有一处不完整:暴露规则与排错表把\"永远不出现在 `list_actions`\"的类型列为 `url`/`modal`/`form`,**漏了 `api`**。\n\n源码 `packages/runtime/src/http-dispatcher.ts:895-901` `isHeadlessInvokableAction` 只放行两种:`script`(需 `target` 或 `body`)与 `flow`(需 `target` + automation 服务),**其余一律 false**——注释也明写 \"UI-only types (`url`, `modal`, `form`) and `api` have no server dispatch here\"。\n\n(`api` 的 HTTP 派发只存在于 ObjectOS 的 bridge,`actions-as-tools.mdx:110` 已正确标注为 \"**ObjectOS** runtime only\",无需改。)\n\n现改为正面表述:开源框架里恰好两种类型可 headless 调用,并列全不可调用的四种。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

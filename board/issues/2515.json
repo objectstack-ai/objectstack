@@ -1,0 +1,30 @@
+{
+  "number": 2515,
+  "kind": "issue",
+  "title": "console(11.5.0): 录入表单 type:'simple' 未按 spec 声明的 section.columns 渲染多列(分组内字段始终单列)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-02T09:13:24Z",
+  "updated_at": "2026-07-14T15:15:52Z",
+  "closed_at": "2026-07-14T15:15:52Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2515",
+  "body": "## 现象\n\n`type: \"simple\"` 的录入表单视图(formViews),给分组 section 设 `columns: 2`(或 3/4),新建/编辑弹窗里分组标题正常显示,但**分组内的字段全部单列全宽堆叠,`columns` 不生效**,始终一行一个字段。\n\n## section.columns 是 spec 正式声明并带官方示例的属性\n\n`@objectstack/spec@11.5.0` `FormViewSchema`(`dist/view.zod-*.d.ts`):\n\n- section 的 `columns` 字段:`ZodDefault<ZodEnum<{ \"1\",\"2\",\"3\",\"4\" }>>`,默认 1。\n- schema 的官方 `@example` 直接给了范例:\n\n```ts\n{\n  type: \"simple\",\n  sections: [\n    { label: \"General Info\", columns: 2, fields: [\"name\", \"status\"] },\n    { label: \"Details\",      fields: [\"description\", { field: \"priority\", widget: \"rating\" }] },\n  ],\n}\n```\n\n即 schema 承认该属性、编译通过、产物 `dist/objectstack.json` 也原样带着每个 section 的 `\"columns\": 2`。\n\n## 期望\n\n`@objectstack/console` 渲染 `type: \"simple\"` 时,按 `section.columns` 把分组内字段排成对应列数;`columns` 为 1/undefined 时单列。目前 console 11.5.0 未按此渲染。\n\n## 环境\n\n@objectstack/console 11.5.0 / @objectstack/spec 11.5.0 / cli 11.5.0\n"
+}

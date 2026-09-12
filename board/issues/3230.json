@@ -1,0 +1,35 @@
+{
+  "number": 3230,
+  "kind": "pull_request",
+  "title": "feat(triggers): declarative time-relative trigger (#1874)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T15:44:10Z",
+  "updated_at": "2026-07-18T16:15:06Z",
+  "closed_at": "2026-07-18T16:15:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-18T16:15:03Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3230",
+  "body": "## Problem (#1874)\n\nTime-relative business rules (\"alert 60 days before a contract's `end_date`\") could only be expressed as a `record_change` flow gated on a date-equality condition like `end_date == daysFromNow(60)`. That predicate is evaluated **only when the record happens to change**, so it fires only if a record is edited on exactly the threshold day — i.e. almost never, unattended. The robust alternative was a hand-written cron + range query that every author re-implemented (contracts `renewal_alert` T-60/30/7, hr `document_expiring_soon`, procurement `po_overdue`, …).\n\n## What this adds\n\nA flow's start node can now declare a **`timeRelative`** descriptor instead:\n\n```ts\nconfig: {\n  timeRelative: {\n    object: 'contracts',\n    dateField: 'end_date',\n    offsetDays: [60, 30, 7],       // T-minus reminders — fires on each threshold day\n    // — or — withinDays: 30       // \"expiring soon\" range; negative = overdue lookback\n    filter: { status: 'active' },  // optional, ANDed with the date window\n    maxRecords: 1000,              // optional per-sweep cap (default 1000)\n  },\n  schedule: { type: 'cron', expression: '0 8 * * *' }, // optional; defaults to daily 08:00 UTC\n  condition: '...',                // optional per-record start-condition gate\n}\n```\n\nThe new **`time_relative`** trigger (`TimeRelativeTriggerPlugin`, shipped in `@objectstack/trigger-schedule`) sweeps the object on that schedule and launches the flow **once per matching record**, with the record on the automation context — so the start-node `condition` gate and `{record.<field>}` interpolation work exactly as for a record-change flow. Because the window is evaluated **every day**, a threshold is never missed regardless of when the record last changed.\n\n| Mode | Semantics (day-granular, UTC, always includes today) |\n|---|---|\n| `withinDays: N` | `dateField ∈ [today, today + N]` (upcoming). `N < 0` = overdue lookback. |\n| `offsetDays: [a, b, …]` | one single-day match per offset (`today + a`, `today + b`, …). |\n\n## Changes by package\n\n- **`@objectstack/spec`** — new `TimeRelativeTriggerSchema` (`@objectstack/spec/automation`), the Zod source of truth. Exactly one of `withinDays` \\| `offsetDays` is required; `object`/`dateField` are snake_case (contract-first).\n- **`@objectstack/service-automation`** — `resolveTriggerBinding` routes a start node carrying `config.timeRelative` to the `time_relative` trigger, **ahead of** the plain `schedule` trigger (whose behavior is unchanged) since such a flow also carries a `schedule` cadence. Binding-audit hint mentions the new type.\n- **`@objectstack/trigger-schedule`** — `TimeRelativeTrigger` + `TimeRelativeTriggerPlugin`. Composes the schedule trigger's job service (sweep cadence) with the ObjectQL engine (date-window query, the canonical `{ dateField: { $gte, $lte } }` map form with concrete ISO bounds). The discovery query runs as a **system operation** (RLS-bypassing — a background sweep sees all rows), is **capped** at `maxRecords`/tick, and **isolates per-record failures** so one bad row never aborts the sweep.\n- **`@objectstack/lint`** — `os validate` gains readiness checks for the new descriptor (unknown swept object; ambiguous draft status).\n- **`@objectstack/cli`** — `serve.ts` arms `TimeRelativeTriggerPlugin` in the `triggers` group.\n\n## Design notes\n\n- **Separate plugin, same package.** The plain `ScheduleTriggerPlugin` keeps its exact dependency surface (job service only); `TimeRelativeTriggerPlugin` adds the ObjectQL dependency it needs for the sweep query. Both ship in `@objectstack/trigger-schedule` (the affected package named in the issue).\n- **No new `Flow.type`.** Time-relative flows stay `type: 'schedule'`; the trigger is selected by the presence of `config.timeRelative`, so the flow-trigger conformance ledger (keyed on the `Flow.type` enum) is unaffected.\n- **Not a raw-engine date-macro.** The sweep computes concrete ISO window bounds itself (date macros like `{today}` are only resolved upstream, never by `IDataEngine.find`), mirroring the platform's own `LifecycleService` retention sweep.\n\n## Testing\n\n- `TimeRelativeTriggerSchema` — validation (mutual exclusivity, snake_case, bounds). ✅\n- `TimeRelativeTrigger` — window math, `where` building, per-record fan-out, offset dedup, `maxRecords` cap, per-record + query error isolation, schedule default, unknown-object warning, `stop()`/idempotency, plugin wiring. ✅\n- Engine — `time_relative` binding resolution + precedence over the schedule trigger. ✅\n- Lint — time-relative auto-triggered + unknown-object checks. ✅\n\n`@objectstack/trigger-schedule` (42), `service-automation` engine (121), `spec` automation (316), `lint` (11) suites pass; the full `@objectstack/cli` build closure (54 packages) typechecks green. Changeset included.\n\nCloses #1874\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01AHzW68suiFuu6GdJyea8U4)_"
+}

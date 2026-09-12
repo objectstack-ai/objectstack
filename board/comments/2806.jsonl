@@ -1,0 +1,1 @@
+{"id":4971013794,"author":{"login":"yinlianghui","id":6219465,"type":"User"},"created_at":"2026-07-14T15:35:11Z","updated_at":"2026-07-16T09:38:39Z","html_url":"https://github.com/objectstack-ai/objectstack/issues/2806#issuecomment-4971013794","body":"同一文件中前面创建的父记录仍处于缓冲区时，后续 Import 数据行无法解析对该记录的 lookup 引用。该问题可稳定复现，并由全新的 SQLite、Showcase HTTP 和 UI 证据共同确认，属于确定性后端回归。\n\n建议：重新打开。"}

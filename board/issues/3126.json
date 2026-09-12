@@ -1,0 +1,35 @@
+{
+  "number": 3126,
+  "kind": "pull_request",
+  "title": "docs(generator): fix reference $ref links and opaque Object types",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "documentation",
+    "size/xl",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T12:08:25Z",
+  "updated_at": "2026-07-17T13:17:10Z",
+  "closed_at": "2026-07-17T13:17:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T13:17:08Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3126",
+  "body": "## 背景\n\n文档审计发现 243 个自动生成的 reference 页有系统性缺陷:92 处指向不存在页面的 `[__schema0](./__schema0)`、6 处 `(./#)` 自链、大量 `Object | Object`。根因全在 `packages/spec/scripts/build-docs.ts`。\n\n## 根因与修复\n\n1. **所有 `$ref` 链接其实都是坏的**(不只匿名的显眼):`formatType` 把 `$ref` 转成 `./<schemaName>`,但页面是按 **zod 文件**命名的(`data/object.mdx`),ref 指向的是 **schema 名**(`Field`)——两套命名空间从未打通。现在具名 ref 走 `scanCategories()` 早就建好、却**从未被读取的** `schemaCategoryMap`/`schemaZodFileMap` 解析成站内路由;查不到页面则降级为纯文本而不是吐 404。\n2. **`__schemaN`** 是 Zod 把复用的内联 schema 提升进 `$defs` 时合成的名字,根本没有对应页面 → **就地展开结构**,并加**环路保护**(这些 schema 是递归的——节点含节点——朴素内联会爆栈,第一版就爆了)。\n3. **`$ref: \"#\"`** 自引用 → 链到本节锚点。\n4. **`Object | Object`**:内联对象展开一层形状(`{ label: string; value: string; color?: string; … }`);const 变体渲染字面量,判别式联合读作 `'a' | 'b'`。\n5. **JSDoc `{@link ../automation/sync.zod.ts}`** 链到仓库路径(站上 404)→ 重写为站内路由;裸 `@see` 渲染成 \"See also:\"。\n\n**重新生成后**:`__schemaN` 链接 92 → **0**,`(./#)` 6 → **0**,zod.ts 坏链 → **0**。\n\n## 附带:修好 lychee.toml(但不恢复触发)\n\n查\"为什么坏链能长期躺在 main 上\"时发现:`check-links.yml` 的触发**被注释掉了**,而原因很可能是**配置本身坏了** —— `follow_redirects` 与 boolean 形式的 `include_fragments` 在 lychee ≥0.24 都不是合法键,`accept` 要字符串数组。job 一启动就死。\n\n本 PR 修好配置使其**可加载**,但**不恢复触发**:试跑后发现还需要 `root_dir`/`fallback_extensions` 才能解析根相对链接,且站内确有几处真 404 要先清。完整恢复路径与已发现的真坏链清单记录在 **#3136**。先修闸门再上锁,顺序反了就是每个 PR 都红——那正是它当初被关掉的原因。\n\n## 验证\n\n`pnpm --filter @objectstack/spec gen:docs` ✅ · `pnpm --filter @objectstack/docs build` ✅ (exit 0)。diff 含 186 个重新生成的 mdx(生成产物)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

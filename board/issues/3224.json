@@ -1,0 +1,37 @@
+{
+  "number": 3224,
+  "kind": "pull_request",
+  "title": "feat(spec): compile-check skills/ TypeScript examples (anti-drift, #3094)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/m",
+    "skip-changeset",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T14:51:05Z",
+  "updated_at": "2026-07-19T05:26:20Z",
+  "closed_at": "2026-07-18T16:14:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-18T16:14:46Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3224",
+  "body": "Closes #3094.\n\n## What\n\nAdds `check:skill-examples` — a CI gate that **type-checks the TypeScript examples inside `skills/`** against the built `@objectstack/spec`, so a renamed export or tightened union fails here instead of in a third party's editor. This is the \"示例不漂移\" layer; the existing `check:skill-refs` / `check:skill-docs` only cover the \"目录不漂移\" (generated reference indexes).\n\n## Design\n\n- **Opt-in by marker, not fence-meta.** A self-contained, should-compile block is tagged with an inert `<!-- os:check -->` HTML comment on the line directly above its fence. Full extraction of every ` ```ts ` block is infeasible — most are *fragments* (a `columns: [...]` subtree) that need a hand-authored wrapper and produce false-positive noise.\n  - Deliberately **not** a ` ```ts check ` fence-meta: that would leave the fence info-string non-standard and punch a hole in the existing `check:doc-authoring` scanner (which keys on `^\\`\\`\\`(ts|typescript|tsx)$`). The comment keeps the fence a bare ` ```ts `, so every existing scanner still sees the block.\n- **Consumer-faithful resolution.** Extracted blocks compile against the built `dist/*.d.ts` via a tsconfig `paths` map **derived from the spec's own `exports` field** — the exact surface `import { … } from '@objectstack/spec'` resolves to for a consumer, and it self-updates as subpath exports change.\n- **Placement.** Reads the built dist, so it runs in the required **`TypeScript Type Check`** job *after* the build step, next to its fellow \"real consumer\" gates (`check:api-surface`, `downstream-contract`, example-app typecheck) — not before the build like `check:skill-refs`.\n- **Error mapping.** tsc diagnostics are remapped from the throwaway build file back to `skills/**/SKILL.md:<real line>`.\n\n## Proven-red (門必先证明能红)\n\n| Failure mode | Result |\n|---|---|\n| Type error in a tagged block | ✗ (caught the 8 real drifts below) |\n| Spec not built (no `dist/*.d.ts`) | ✗ loud guard, never vacuous |\n| Zero marked blocks (marker stripped/renamed) | ✗ vacuous-green guard |\n| Orphan marker (not directly above a ts fence) | ✗ misplaced-marker guard |\n\n## Drift the gate immediately surfaced (fixed here)\n\nTagging 19 self-contained examples turned up real, shipping drift:\n\n- **objectstack-data** — `ObjectSchema` imported from the package root; it's only exported from `/data` (×2).\n- **objectstack-platform** — the removed `Data` namespace (`import { Data } … ; const { Field } = Data`) → `import { Field } from '@objectstack/spec/data'` (×2).\n- **objectstack-ui** — a `defineAction` example using `` P`…` `` without `import { P }`.\n\nNon-self-contained fragments (local-module imports like `./apps/crm/objectstack.config`, external object refs like `Opportunity`) are **left untagged by design** — they can't compile standalone and aren't meant to.\n\n## Deferred (documented, not silently dropped)\n\nThe platform **feature-flags** example uses a top-level `featureFlags` key that isn't in `ObjectStackDefinitionInput` — feature flags live in the kernel capability config (`features: FeatureFlagSchema[]`, nested), and `environment` is a single enum (`dev|staging|prod|all`), not an array. Correcting it is a non-trivial rewrite of that section, so the block is **left exactly as authored and untagged**, to be fixed in a follow-up rather than shipping a guessed correction.\n\n## Growing coverage\n\nNew self-contained examples opt in by adding `<!-- os:check -->` above their fence. A misplaced marker errors (orphan guard), so under-coverage can't hide."
+}

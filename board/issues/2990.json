@@ -1,0 +1,32 @@
+{
+  "number": 2990,
+  "kind": "issue",
+  "title": "Security: attachment blob download has no record-level RLS — bytes served by fileId with only a committed-status check (IDOR)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T01:26:21Z",
+  "updated_at": "2026-07-16T02:38:48Z",
+  "closed_at": "2026-07-16T02:38:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2990",
+  "body": "Surfaced by the ADR-0096 E4 execution-surface verification (the one **live** unaudited surface). Attachment blob bytes are served under a bearer-capability model keyed only by `sys_file.id` — there is **no record-level RLS re-check** tying the download to the caller's ability to read the owning `sys_attachment` row or its parent record.\n\n## The hole\n\n`GET /api/v1/storage/files/:fileId` — `packages/services/service-storage/src/storage-routes.ts:409-432` (and the JSON twin `/files/:fileId/url`, `:373-396`):\n- The **only** gate is `file.status === 'committed'`. No caller identity, no `ExecutionContext`, no `sys_attachment` lookup, no parent-record visibility check.\n- `store.getFile(fileId)` (`metadata-store.ts:82-92`) uses `engine.findOne('sys_file', { where: { id } })`. `IDataEngine.findOne` (`packages/spec/src/contracts/data-engine.ts:30`) takes **no ExecutionContext** — it's the raw system-level engine, so the lookup is inherently un-RLS'd.\n\n**Signed URLs are not caller-scoped either.** `LocalStorageAdapter.getPresignedDownload` (`local-storage-adapter.ts:271-278`) signs a token whose payload (`:48-53`) is `{ k: key, exp, op }` — storage key + expiry only, **no user/tenant binding**. The redeem route `GET /api/v1/storage/_local/raw/:token` (`storage-routes.ts:468-487`) verifies only HMAC + expiry, then streams raw bytes. Pure bearer capability; minting is gated by nothing more than knowing the `fileId`.\n\n**The parent-record link is bypassed entirely.** `sys_attachment` (`packages/platform-objects/src/audit/sys-attachment.object.ts`) is the RLS-bearing polymorphic link (`parent_object`/`parent_id`/`visibility`/`share_type`) and it rides normal CRUD/RLS — but nothing in the download path consults it. Revoking a `sys_attachment` share does **not** revoke access to the bytes.\n\n## Repro\n\n1. User A uploads a file (`fileId` = v4 UUID) and attaches it to record R via a `sys_attachment` row. R (and thus the attachment row) is invisible to User B under RLS.\n2. B obtains the `fileId` via any channel that surfaces `file_id` without gating the blob (a later-revoked grant, an API/audit payload, a forwarded link, a denormalized field).\n3. `GET /api/v1/storage/files/<fileId>` → 302 → signed `/_local/raw/<token>` → **full file bytes**, with zero re-check that B may read the attachment or its parent. Access survives revocation of the share.\n\n## Severity nuance\n\n- `fileId` is a v4 UUID → **not brute-force enumerable**. This is a capability-leak / IDOR-on-known-id, not blind enumeration — lowers likelihood, does not close the hole (the byte-access model is \"possession of the id,\" not RLS).\n- **Open sub-question (needs verification):** are `/api/v1/storage/*` routes behind global authentication? They're registered directly on `IHttpServer` in `storage-service-plugin.ts:204`, **not** through `RestServer.enforceAuth` (which only guards `/api/v1/data`). If storage routes are outside the auth middleware, the exposure widens to **unauthenticated** callers. Either way, even a fully authenticated caller gets no record-level authorization on the bytes.\n\n## Fix direction\n\nBefore minting/redirecting, the download handlers (`storage-routes.ts:373`, `:409`) must resolve the caller's `ExecutionContext` and load the owning `sys_attachment` (and/or `sys_file`) through the **RLS-enforcing object-CRUD layer** (not raw `engine.findOne`), returning 404 if not visible; and/or bind the signed token to the caller identity so `/_local/raw/:token` cannot be replayed cross-user. Resolve the auth-gate sub-question as part of this.\n\n## Relationship to ADR-0096\n\nE2/E3-class instance found by the E4 sweep: a surface serving data with no caller-scoped authorization. Exactly what the ADR-0096 D4 conformance matrix (a `caller-scoped?` proof for the storage surface) would have required. Refs: ADR-0096 (#2975 / commit e07645c), #2849, #2980 (the reports analogue)."
+}

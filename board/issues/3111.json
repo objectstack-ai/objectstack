@@ -1,0 +1,35 @@
+{
+  "number": 3111,
+  "kind": "pull_request",
+  "title": "fix(core): ObjectLogger honors NO_COLOR and TTY detection before emitting ANSI colors",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T09:59:48Z",
+  "updated_at": "2026-07-17T10:11:06Z",
+  "closed_at": "2026-07-17T10:11:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T10:11:04Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3111",
+  "body": "## 问题\n\n`os serve` / `os dev` 接线的内核插件日志(`ctx.logger` = `ObjectLogger`,默认 `pretty` 格式)**无条件**给 level 标签着色,`NO_COLOR=1` 也不例外:\n\n```\n\\x1b[31m2026-07-17T07:27:53.363Z ERROR\\x1b[0m OIDC provider is configured but…\n```\n\n违反 [no-color.org](https://no-color.org) 约定,且 CI 里纯文本 grep 会漏掉 ERROR 行 —— scripts/publish-smoke.sh(#3100)就是因此被迫先 strip ANSI 再扫日志(该兜底保留不动)。\n\n## 修复(只动 `packages/core/src/logger.ts`,不动调用点/spec)\n\n按 no-color.org 约定,`pretty` 格式仅在满足以下两个条件时才输出 ANSI 色码:\n\n1. 目标流是交互式 TTY(error/fatal 走 stderr、其余走 stdout,按各自流判定);\n2. `NO_COLOR` 未设置或为空 —— **任何非空值**(含 `0`)都禁用颜色。\n\n交互式终端默认行为不变(仍着色);管道/重定向/CI 输出恒为纯文本;可选的 `file` 目的地现在恒写纯文本(此前会把色码写进日志文件)。`json`/`text` 格式不受影响。浏览器 bundle(`@objectstack/client` 复用此模块)无 `process`/TTY → 纯文本,保持 browser-safe。\n\n## 验证\n\n- 单测:`logger.test.ts` 新增 \"Color emission (no-color.org)\" 7 例(TTY 默认着色 / 非空 NO_COLOR 禁用含 `'0'` / 空串视为未设 / 非 TTY 无色 / stderr 门控 error 色 / 文件目的地无 ANSI)。`@objectstack/core` 356 测试全绿。\n- dist 探针:ESM + CJS 产物三态实测(管道→无色、NO_COLOR=1+TTY→无色、TTY→着色,红色 `ERROR` 头与原报告字节一致)。\n- showcase `pnpm dev -- --fresh` + `NO_COLOR=1` 冒烟,启动日志零 ESC。\n\n## 相关\n\n- 顺带发现的既有 bug 已另开 issue:#3110(ESM 产物下 `logger.file` 静默失效,`__require('fs')` 抛错被 `catch {}` 吞掉)—— 本 PR 不处理。\n- changeset:`@objectstack/core` patch。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

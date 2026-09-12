@@ -1,0 +1,32 @@
+{
+  "number": 3148,
+  "kind": "issue",
+  "title": "bug(rest/import): 同文件内后行无法引用前行创建的记录——批量缓冲未落库 + refCache 负缓存",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T14:18:53Z",
+  "updated_at": "2026-07-18T04:33:51Z",
+  "closed_at": "2026-07-18T04:33:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3148",
+  "body": "已在 PR #3161(已合并到 main)中修复:`resolveRef` 在同对象未命中且缓冲非空时先 `flushPendingCreates()` 再查一次,后行可引用前行创建的记录;`refCache` 不再负缓存空匹配。回归测试见 `packages/rest/src/import-runner-selfref.test.ts`。\n\n—— 原始 issue 内容 ——\n\n## 问题\n\n数据导入(`runImport`)中,同一个文件里**后面的行无法引用前面的行刚创建的记录**:CREATE 行被缓冲进 `pendingCreates` 延迟批量落库,而 lookup 引用解析(`resolveRef`)只查数据库——前行还躺在缓冲区,后行解析必然 `reference_not_found`,整行被丢。\n\n叠加缺陷:`refCache` 会把\"没查到\"**负缓存**(缓存空匹配 `{}`)。即使中途进度检查点已把缓冲 flush 落库,同名引用也永远命中缓存里的 miss,再也解析不到。"
+}

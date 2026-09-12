@@ -1,0 +1,32 @@
+{
+  "number": 3124,
+  "kind": "issue",
+  "title": "Publish Smoke has never passed on main — app install dies on ERR_PNPM_IGNORED_BUILDS despite the allowlist",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T12:05:55Z",
+  "updated_at": "2026-07-18T02:58:18Z",
+  "closed_at": "2026-07-18T02:58:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3124",
+  "body": "The `Publish Smoke` gate added by #3100 has **failed on every main run since it landed** — the first failure is its own landing commit (`89467f50b`, 15:39 +08:00), 9 minutes later. It has never been green on main (`{\"failure\": 9, \"cancelled\": 1, \"success\": 1}` — the one success predates the main runs).\n\nThis is not a regression from any later commit; every subsequent main commit simply inherits the red. Filing rather than fixing since it is #3100's own stabilization and nobody has an in-flight branch for it.\n\n## Failure\n\nThe gate reaches the smoke app's install and dies there:\n\n```\n== Pinning @objectstack/* to local tarballs via project-local overrides\n  wrote /tmp/objectstack-publish-smoke.sV84SA/smoke-app/pnpm-workspace.yaml (67 overrides)\n== Installing (pnpm, tarball-pinned)\n...\n+ @objectstack/cli 15.2.0\n+ typescript 6.0.3 (7.0.2 is available)\n[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: better-sqlite3@12.11.1, esbuild@0.28.1\nRun \"pnpm approve-builds\" to pick which dependencies should be allowed to run scripts.\n##[error]Process completed with exit code 1.\n```\n\nRun: https://github.com/objectstack-ai/framework/actions/runs/29576978349\n\nThis is puzzling on two counts:\n1. `scripts/publish-smoke.sh:129-131` **does** write `onlyBuiltDependencies: [better-sqlite3, esbuild]` into the app's `pnpm-workspace.yaml` (and the log confirms the file was written) — so those two builds should be allowed, not ignored.\n2. `ERR_PNPM_IGNORED_BUILDS` is an **error**, not the usual warning — implying strict dep-builds is on somewhere.\n\n## Hypotheses ruled out (local repro, same allowlist + a standalone `pnpm-workspace.yaml`)\n\n| Hypothesis | Result |\n|:--|:--|\n| pnpm version drift (CI runs 10.31.0) | ❌ ruled out — `pnpm@10.31.0` honors the allowlist locally, exit 0. (The 10.28.1→10.31.0 bump is also from March, unrelated to today.) |\n| Newer pnpm being stricter | ❌ ruled out — 10.33.0 behaves the same |\n| `CI=true` making ignored builds fatal | ❌ ruled out — with `CI=true` **and the allowlist removed entirely**, pnpm 10.31.0 still only warns (exit 0) |\n| Repo-level `strictDepBuilds` leaking in | ❌ not present in `pnpm-workspace.yaml`, `.npmrc`, `package.json`, or the workflow |\n\nSo the strictness is **CI-environment-specific** and does not reproduce locally. Remaining leads for whoever picks this up:\n\n- The smoke app (`/tmp/objectstack-publish-smoke.*/smoke-app`) has **no `packageManager` field**, while the repo pins `pnpm@10.31.0`. With `corepack enable` (publish-smoke.yml:126), the `pnpm` that runs *inside the /tmp app* may resolve differently from the repo's pinned one — worth printing `pnpm --version` from inside `$APP_DIR` as the first diagnostic.\n- A runner-level `~/.npmrc` / `NPM_CONFIG_*` / `PNPM_*` setting.\n\nCheap instrumentation to land first: `cd \"$APP_DIR\" && pnpm --version && pnpm config list` before the install, and `cat pnpm-workspace.yaml`, so the next red run answers this directly.\n\nNote the gate's value is high (it exists to prevent a repeat of the #3091 P0), which is exactly why a permanently-red gate is worse than none — it trains everyone to ignore it.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

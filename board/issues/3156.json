@@ -1,0 +1,35 @@
+{
+  "number": 3156,
+  "kind": "pull_request",
+  "title": "fix(metadata): publish/discard package drafts in the draft's own org scope (#3115)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T01:15:50Z",
+  "updated_at": "2026-07-18T02:22:27Z",
+  "closed_at": "2026-07-18T02:22:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-18T02:22:25Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3156",
+  "body": "## Problem — #3115\n\nSaving a new object (with fields) in a package via Studio, then clicking **Publish**, returns `no_draft` even though the draft was just saved:\n\n```json\n{ \"success\": false, \"publishedCount\": 0, \"failedCount\": 1,\n  \"failed\": [{ \"type\": \"object\", \"name\": \"…\",\n    \"error\": \"[no_draft] No pending draft exists for object/… — nothing to publish.\",\n    \"code\": \"no_draft\" }] }\n```\n\n## Root cause — a cross-layer org-scope asymmetry\n\n| Step | Endpoint | Org scope |\n|---|---|---|\n| **Save Draft** | REST `PUT /meta/:type/:name?mode=draft&package=…` (`rest-server.ts`) | **never threads `activeOrganizationId`** → draft written **env-wide** (`organization_id = NULL`) |\n| **Publish** | `POST /packages/:id/publish-drafts` (`http-dispatcher.ts`) | resolves `session.activeOrganizationId` → **non-null** once a default org is stamped on the session |\n\nPR #1852 taught `listDrafts` to surface env-wide drafts to a non-null active org via `$or [{org}, {org IS NULL}]` — so the Publish CTA appears — but the **publish path was never updated to match**: `promoteDraft` still looks the draft up with a strict `organization_id = <org>` equality and 404s (`no_draft`) on the env-wide row it can never match. `discardPackageDrafts` had the identical latent gap (delete under the request org silently no-ops on env-wide rows).\n\nSame \"orphaned draft\" bug as #1852, one layer deeper: the pending-changes list was fixed, the publish/discard action wasn't.\n\n## Fix\n\n- `SysMetadataRepository.listDrafts()` now projects each draft's own `organizationId`.\n- `publishPackageDrafts` / `discardPackageDrafts` promote / delete each listed draft **in the scope it actually lives in** (env-wide stays env-wide, per-org stays per-org) instead of forcing the caller's active org. Seed-body capture and the ADR-0067 revert-plan pre-state read are scoped the same way.\n\nPackage-owned metadata is env-level, so keeping it env-wide on publish is the correct provenance — the bug was purely that publish couldn't *reach* the env-wide draft.\n\n## Tests\n\n- `protocol-publish-drafts-org-scope.test.ts` (new) — reproduces the exact `[no_draft] … nothing to publish.` error against the **real** `listDrafts`+`promoteDraft` interaction (faithful stub engine honouring `$or` / `IS NULL`), then asserts publish succeeds env-wide; plus a no-regression case for a genuinely org-scoped draft.\n- `sys-metadata-repository-list-drafts.test.ts` — asserts the new `organizationId` projection.\n- Full `metadata-protocol` (37) + `objectql` (905) suites green.\n\n## Verification\n\nTraced end-to-end: objectui Studio calls `metadataClient.save(type, name, body, { mode: 'draft' })` → env-wide `PUT /meta?mode=draft`; publish via `usePublishAllDrafts` → `POST /packages/:id/publish-drafts`. The reported error string is only reachable with an env-wide draft + non-null publish org, which this fix resolves.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

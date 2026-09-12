@@ -1,0 +1,33 @@
+{
+  "number": 2971,
+  "kind": "pull_request",
+  "title": "fix(packages): reject duplicate package id on POST /packages with 409",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-15T14:53:06Z",
+  "updated_at": "2026-07-15T15:28:29Z",
+  "closed_at": "2026-07-15T15:28:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-15T15:28:27Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2971",
+  "body": "## Problem\n`POST /api/v1/packages` was an **upsert**: creating a package whose id already exists silently overwrote its manifest (name/version/…) with no warning — a data-loss footgun surfaced during Studio package-create dogfooding (create a package with an existing id → 201, the existing manifest is clobbered).\n\n## Change\n`handlePackages` now, on `POST /packages`:\n- returns **409 Conflict** when a package with that id already exists;\n- returns **400** when the id is missing;\n- accepts an explicit `overwrite: true` (body) or `?overwrite=true` escape hatch so intentional **upgrade / re-install** flows still work.\n\nThe registry-level same-id reinstall path (`installPackage`, used by programmatic reload/upgrade) is left untouched — only the REST create path gains the guard.\n\n## Tests\nAdds 4 `handlePackages` tests: create (id free → 201), duplicate → 409 (no overwrite), `?overwrite=true` → 201, missing id → 400. Two pre-existing install tests had their mock registry completed with `getPackage` (the real registry always has it).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

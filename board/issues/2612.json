@@ -1,0 +1,30 @@
+{
+  "number": 2612,
+  "kind": "issue",
+  "title": "Declarative `connectors:` stack entries are inert — bridge them to the automation connector registry or document as descriptor-only",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-05T02:44:44Z",
+  "updated_at": "2026-07-15T16:03:19Z",
+  "closed_at": "2026-07-15T16:03:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2612",
+  "body": "The live connector registry behind `GET /connectors` and the `connector_action` flow node is populated **only** by plugins calling `automationService.registerConnector(def, handlers)` (`packages/services/service-automation/src/engine.ts` — registration requires a handler per action). Declarative `connectors:` entries in an app stack are registered as metadata but never reach that registry, so they cannot be dispatched: a declared connector with no plugin behind it is a descriptor with no behavior.\n\nFound while upgrading the showcase to a registry-driven coverage manifest. The showcase demonstrates **live** connectors the delivered way — `ConnectorRestPlugin` / `ConnectorSlackPlugin` instances in `objectstack.config.ts` `plugins:`, exercised by the connector flows. Per Prime Directive #10 the declarative `connectors:` collection is recorded as an explicit **waiver** in `STACK_COLLECTION_COVERAGE` (`examples/app-showcase/src/coverage.ts`) pointing here. (app-crm ships declarative connector examples — `examples/app-crm/src/connectors/crm-connectors.ts` — which today are declared-but-inert.)\n\nResolution options:\n1. **Bridge**: at boot, resolve declarative connector entries against installed connector plugins/handlers and register them (declared connector without a matching handler ⇒ loud validation error, not a silent no-op), or\n2. **Document as descriptor-only**: make the schema's contract explicit (catalog/marketplace descriptor, not runtime wiring) and keep runtime registration plugin-only.\n\nOnce either lands, flip the showcase waiver to `demonstrated`."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 3068,
+  "kind": "pull_request",
+  "title": "fix(rest): split multi-value fields on import so multiple:true columns resolve per-token (#3063)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T14:33:20Z",
+  "updated_at": "2026-07-16T15:23:07Z",
+  "closed_at": "2026-07-16T15:23:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-16T15:23:04Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3068",
+  "body": "Closes #3063.\n\n## Problem\n\nThe bulk-import coercion (`packages/rest/src/import-coerce.ts`) resolved a reference cell as a **single** value regardless of the field's `multiple` flag. A `multiple: true` lookup/user cell like `张焊工;李质检` was handed whole to name resolution and always failed with `no <object> matches \"张焊工;李质检\"` — so every multi-value association had to be back-filled by hand in the record UI after import. Single-value lookups imported fine.\n\n## Fix\n\nCoercion now mirrors objectql's `isMultiValueField` predicate (source of truth in `record-validator.ts`; the spec — `field.zod.ts:392` — allows `multiple` on **select / lookup / file / image**, with `radio` sharing select's branch and `user` sharing lookup's). A field whose stored value is an array — an inherently-multi type (multiselect/checkboxes/tags) or a multi-capable type flagged `multiple: true` — has its cell split on the export separator (`, ` / `;` / `、` / newline) and each token coerced individually:\n\n- **lookup / user (`multiple: true`)** → resolve each name token to an id, store the id array; an unmatched/ambiguous token reports the **specific token** (`no sys_user matches \"查无此人\"`), not the whole string.\n- **select / radio (`multiple: true`)** → match each token against the options, store the option-value array.\n- **file / image (`multiple: true`)** → split into an id/url array.\n\nNon-multi-capable reference types (master_detail / reference / tree) and all single-value fields are unchanged — a stray `multiple: true` on them stays a single resolved value, matching the engine. This is the exact inverse of `export-format.ts`'s `formatReference` array join.\n\n## Tests\n\n- `import-coerce.test.ts` — multi-value lookup split + per-token failure naming; select+multiple; file/image+multiple; master_detail `multiple` ignored (engine parity).\n- `import-integration.test.ts` — end-to-end through the real engine: CSV `张三;李四` → `['u1','u2']` on insert; select+multiple → option-value array; per-token not-found.\n\n## Manual verification (showcase, real engine + schema)\n\nRan the showcase backend and hit `POST /api/v1/data/showcase_field_zoo/import` against `f_users` (`Field.user({ multiple: true })`):\n\n| Input cell | Result |\n|---|---|\n| `张焊工;李质检` (issue's exact case) | stored as id array `[\"TK3hh…\",\"csQj…\"]` |\n| `张焊工,李质检` (comma) | resolved, no error |\n| `张焊工;查无此人` | `f_users: no sys_user matches \"查无此人\"` — names the bad token only |"
+}

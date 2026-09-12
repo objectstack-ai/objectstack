@@ -1,0 +1,30 @@
+{
+  "number": 2977,
+  "kind": "issue",
+  "title": "Implement ADR-0096: declarative connector instances (`provider`-bound `connectors:` materialized by generic executors)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-15T15:15:44Z",
+  "updated_at": "2026-07-16T04:54:20Z",
+  "closed_at": "2026-07-16T04:54:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2977",
+  "body": "**Development tracking issue for ADR-0096.** The ADR (`docs/adr/0096-declarative-connector-instances.md`, Status: Proposed) landed with the #2612 interim PR (#2985, merged). This issue tracks moving it from Proposed → Accepted → implemented.\n\n## Why\n\n#2612 established that declarative `connectors:` stack entries never reach the automation connector registry — they are catalog descriptors with no behavior. The interim fix (#2985) stops the silent trap (descriptor-only contract + boot audit warning + `enabled: false` marker). But for a metadata platform whose goal is **AI-built enterprise core systems**, integrations must be expressible *and executable* as pure metadata:\n\n- AI generates metadata, not plugin code; a schema collection the AI can author but the runtime ignores is the worst failure mode (plausible, validated, dead).\n- Every comparable platform treats declarative connectors as table stakes: Salesforce External Services (OpenAPI → invocable Flow actions, zero code), Power Platform custom connectors (the connector *is* an OpenAPI document; connections carry credentials per environment), ServiceNow IntegrationHub spokes.\n- The runtime substrate already exists: `connector-openapi` (ADR-0023) and `connector-mcp` (ADR-0024) are generic executors that materialize `{ def, handlers }` from declarative inputs. What's missing is the last mile from **stack metadata** to those factories.\n\n## Approach (per ADR-0096)\n\nType/instance separation, mirroring the datasource pattern (declared in stack, adapter in code):\n\n```ts\nconnectors: [{\n  name: 'billing',\n  provider: 'openapi',            // ← which installed executor materializes this\n  providerConfig: { spec: './billing-openapi.json', baseUrl: 'https://billing.example.com' },\n  auth: { type: 'bearer', credentialRef: 'billing_api_token' },  // reference, never inline secrets\n}]\n```\n\nAt boot, the plugin registered for `provider` acts as a factory: materializes action handlers from the declarative config and calls `engine.registerConnector(def, handlers)`. Declared `provider` with no installed factory ⇒ **hard boot error** (upgrade of the #2985 audit warning).\n\n## Task breakdown\n\n- [ ] **D0 — ADR review & acceptance.** Circulate ADR-0096; resolve open questions (credential-resolution degraded story without a secrets service; provider-key namespace). Flip Status: Proposed → Accepted.\n- [ ] **D1 — Schema evolution (`@objectstack/spec`).** Add `provider`, `providerConfig`, and `credentialRef` (on the auth shapes) to the connector schema; reject inline secrets at authoring/publish; changeset + `.describe()` for AI authoring. No execution bindings on `ConnectorActionSchema` (ADR-0023 non-goal).\n- [ ] **D2 — Provider factory registration surface.** Define how a connector plugin registers a `provider` factory `(providerConfig, resolvedAuth) => { def, handlers }`; wire the registry into the automation engine.\n- [ ] **D3 — Boot materialization + credentialRef resolution.** In service-automation, resolve each provider-bound instance at `kernel:ready`, resolve `credentialRef` via the secrets layer, register the materialized connector. Upgrade `findInertDeclaredConnectors` warning → hard error for provider-bound entries; keep the warning for plain descriptors.\n- [ ] **D4 — Conflict rule.** Provider-bound instance name-colliding with a plugin-registered connector ⇒ loud boot failure (no silent precedence). Tests.\n- [ ] **D5 — Provider implementations.** `connector-openapi` and `connector-mcp` (and `connector-rest`) expose provider factories reusing their existing generator/adapter APIs (ADR-0023/0024).\n- [ ] **D6 — Showcase upgrade.** Add a live provider-bound declarative connector (e.g. `provider: 'mcp'`) dispatched by a flow `connector_action`; `GET /connectors` lists the materialized instance. (Complements the descriptor-only demo shipped in #2985.)\n- [ ] **D7 — Open/enterprise line.** Static credentials open-source; managed vault + OAuth2 refresh + per-tenant connection lifecycle enterprise (per ADR-0015). Document the boundary.\n\n## Acceptance\n\nAn AI-generated app declares a connector instance (e.g. pointing at an MCP server) as pure metadata and a flow `connector_action` dispatches one of its actions end-to-end; boot fails loudly for unknown provider / invalid providerConfig / unresolvable credentialRef / name conflict.\n\n## Refs\n\n- ADR-0096: `docs/adr/0096-declarative-connector-instances.md`\n- #2612 (gap + interim contract), #2985 (interim PR, merged)\n- ADR-0018 §Addendum (registry), ADR-0022 (connector = transport), ADR-0023 (OpenAPI generator), ADR-0024 (MCP adapter), ADR-0015 (open/enterprise line)"
+}

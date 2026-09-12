@@ -1,0 +1,32 @@
+{
+  "number": 1750,
+  "kind": "issue",
+  "title": "Analytics: preserve raw dimension values so report drill-down can filter lookup/select dims precisely",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T02:48:55Z",
+  "updated_at": "2026-07-18T12:41:40Z",
+  "closed_at": "2026-07-18T12:41:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1750",
+  "body": "## Context\n\nADR-0021 report drill-down shipped in [objectui#1649](https://github.com/objectstack-ai/objectui/pull/1649): clicking an aggregated row/cell in a dataset-bound report navigates to the object list scoped by the clicked dimension bucket (`?filter[field]=value`).\n\nThe analytics service (`packages/services/service-analytics/src/dimension-labels.ts`) resolves dimension bucket values to **display labels in place** (select option label, lookup record name) — `resolveDimensionLabels` overwrites `row[dimension.name]` with the human label. This is correct for rendering, but it means the **raw stored value is lost** by the time a drill click happens.\n\nobjectui's drill handler (`ReportView.handleDatasetDrill`) currently works around this per field kind:\n- **select** — reverse-maps the label back to the stored option value via the object's field `options`. Works, but fragile (depends on objectui re-deriving the mapping).\n- **lookup / master_detail** — the resolved label is a record *name*, not the FK id; objectui **skips the dimension** entirely, so the drill lands on a superset (all records, not the clicked account/owner).\n- **date-granularity** — see sibling issue.\n\n## Proposal\n\nHave the analytics response carry the raw grouped value alongside the display label, e.g. a parallel `__raw` map or `{ value, label }` cells, so the dataset query result is self-describing. Then the drill consumer can filter on the exact stored value (FK id, option value) without re-deriving anything — and lookup drill-down becomes precise instead of a superset.\n\n## Affected\n- framework: `packages/services/service-analytics/src/{analytics-service,dimension-labels}.ts`\n- objectui (consumer): `packages/app-shell/src/views/ReportView.tsx` `handleDatasetDrill` — drop the label→value reverse-map once raw values arrive.\n\nFound during the ADR-0021 report epic; browser-verified the select-field workaround against app-showcase."
+}

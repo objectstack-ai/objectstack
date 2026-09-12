@@ -1,0 +1,32 @@
+{
+  "number": 3006,
+  "kind": "pull_request",
+  "title": "test(app-showcase): B3 cascading-select fixture — server-enforced dynamic options (#2559)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T04:07:39Z",
+  "updated_at": "2026-07-16T04:22:41Z",
+  "closed_at": "2026-07-16T04:22:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-16T04:22:39Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3006",
+  "body": "## Context\n\nThe remaining **framework** half of **B3** (dynamic field options / cascading selects — objectui#1583). The objectui client (per-option `visibleWhen` + `dependsOn`, #2284 / #2215) and the build-time guardrail + ADR-0058 + browser e2e (objectui#2547) already shipped. This PR delivers the **served showcase fixture** that exercises the server-side enforcement, per objectui#2559 item 2.\n\n> The server-side option-value enforcement itself already landed on `main` in **#2915** — `@objectstack/objectql` `evaluateOptionVisibility` in the rule-validator, wired into `engine.createData`/`update` with `buildEvalUser`, and unit-tested in `rule-validator.option-visibility.test.ts`. This PR does **not** re-implement it; it adds the fixture that demonstrates and end-to-end-verifies it.\n\n## What's added\n\nA new showcase object **`showcase_cascade`** (`examples/app-showcase/src/data/objects/cascading-select.object.ts`), registered in `objects/index.ts` and wired into the Showcase app's *Data Model* nav:\n\n- **`country` → `province` cascade** — `province` declares `dependsOn: ['country']` and each option gates itself with a per-option `visibleWhen` CEL predicate (`record.country == 'cn'` …). The client narrows the offered set; the objectql rule-validator re-evaluates the **submitted** value and rejects an out-of-set one (`{ field, code: 'invalid_option' }`).\n- **role-gated `tier.restricted`** — `visibleWhen: \"'admin' in current_user.positions\"`, enforced server-side the same way.\n\n`public_read_write` so the seeded admin (and the live e2e) can create against it without a bespoke permission set; belonging to no permission set, it stays out of the ADR-0090 `access-matrix.json` snapshot. Predicates use the `P` (CEL) tag — same authoring shape as `showcase_invoice`'s field-level `visibleWhen`.\n\n## Verification\n\n- `pnpm --filter @objectstack/example-showcase test` — **55/55 green** (coverage, seed, gap-fill, …); `tsc --noEmit` clean.\n- `@objectstack/objectql` `rule-validator.option-visibility.test.ts` — **15/15** (the server verdict).\n- **Live** against a fresh backend (`objectstack dev --seed-admin --fresh`):\n  - `POST /api/v1/data/showcase_cascade` `{country:'us',province:'zj'}` → **400** `VALIDATION_FAILED` / `invalid_option`.\n  - `{country:'cn',province:'zj'}` → **201**.\n  - `{tier:'restricted'}` (seeded admin, no `admin` position) → **400** `invalid_option` — role gating works.\n  - `GET /api/v1/meta/object/showcase_cascade` serves the per-option `visibleWhen` to the client.\n\n## Related\n\n- Delivers item 2 of objectstack-ai/objectui#2559 (framework half of objectui#1583).\n- Server enforcement: #2915. Client + ADR-0058 + guardrail: objectui#2547 / #2284 / #2215.\n- Paired live e2e (item 3): objectstack-ai/objectui#2562 (`e2e/live/cascading-options.spec.ts`).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01S91NyYJURiQTKmF9q3AXxg"
+}

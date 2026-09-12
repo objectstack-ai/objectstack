@@ -1,0 +1,35 @@
+{
+  "number": 2896,
+  "kind": "pull_request",
+  "title": "fix: clean up wasm SQLite driver corruption + federated-object boot errors in `pnpm dev`",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-14T05:56:11Z",
+  "updated_at": "2026-07-14T10:54:03Z",
+  "closed_at": "2026-07-14T10:54:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-14T10:54:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2896",
+  "body": "## Background\n\n`pnpm dev` was spamming database errors at startup. Most trace back to the **wasm SQLite driver** — the dev fallback that kicks in whenever native `better-sqlite3` has an ABI mismatch (`NODE_MODULE_VERSION` after a Node upgrade, or never built). In that mode a persistent dev DB runs with `persist: 'on-write'`, so background dispatchers (notification / http) flush on every tick, which surfaced several latent bugs:\n\n1. `update ... - database disk image is malformed` (repeated forever)\n2. `Insert operation failed {\"0\":\"W\",\"1\":\"r\",...}` — a garbled char-indexed log\n3. `Wrong API use : tried to bind a value of an unknown type (undefined)`\n4. `Find operation failed … no such table: customers / orders` (federated showcase objects)\n\n## Root causes & fixes\n\n**1. Non-atomic flush → torn file → `malformed`.** `flush()` persisted via a plain `writeFile(filename, bytes)`, which truncates the target and streams new bytes in place. A process killed mid-write (dev-server restart, Ctrl-C, crash — probable under per-tick `on-write` flushing) left a half-written file that sql.js rejects on the next boot. Now flushes write to a sibling temp file, `fsync` it, and atomically `rename()` over the target, so a reader always sees a complete image.\n\n**2. No recovery from an already-corrupt image.** A malformed file made every query fail forever with no way out (deleting the DB by hand was the only escape — which the reporter tried). `open()` now runs `PRAGMA quick_check` on the loaded bytes, and on corruption quarantines the file to `<db>.corrupt-<timestamp>` (bytes preserved for post-mortem) and boots on a fresh database with a loud warning.\n\n**3. `undefined` binding crash + garbled log.** sql.js's binder `throw`s a *raw string* (not an `Error`) for an `undefined` value — that string aborts the write and logs as `{\"0\":\"W\",\"1\":\"r\",...}` because it has no `.message`/`.stack`. `formatBindings` now coerces `undefined` → `null`, matching the driver's `useNullAsDefault` config and the native better-sqlite3 path.\n\n**4. Seed-ownership backfill hit federated tables.** `claimSeedOwnership` (plugin-security) walks every registered object exposing an `owner_id` column and re-owns unowned rows to the first admin. `owner_id` is auto-injected into **external** (ADR-0015 federated) object schemas, so `showcase_ext_customer` / `showcase_ext_order` passed the filter and the backfill ran `select id from <remote_table> where owner_id is null` against a read-only remote datasource whose table isn't provisioned that early in boot → `no such table`. External objects are read-only (DDL forbidden, writes double-opt-in) and their ownership isn't the platform's to reassign, so they're now skipped alongside `managedBy` / `sys_*`.\n\n## Changes\n\n- `driver-sqlite-wasm/src/wasm-connection.ts` — atomic `atomicWriteFile()` (temp + fsync + rename); `assertReadable()` / `quarantineCorruptFile()` self-heal in `open()`.\n- `driver-sqlite-wasm/src/knex-wasm-dialect.ts` — `formatBindings` maps `undefined` → `null`.\n- `plugin-security/src/claim-seed-ownership.ts` — skip objects with an `external` binding.\n- Tests: `driver-sqlite-wasm/src/sqlite-wasm-driver-durability.test.ts` (atomic write leaves no temp file & round-trips; corrupt image quarantined + boots fresh; `undefined` persists as `NULL`); `plugin-security/src/claim-seed-ownership.test.ts` (external objects are not scanned).\n\n## Testing\n\n- `pnpm --filter @objectstack/driver-sqlite-wasm test` → **119 passed** (incl. 3 new).\n- `pnpm --filter @objectstack/plugin-security test` → **309 passed** (incl. 1 new).\n- Package builds (incl. DTS type-check) succeed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 3037,
+  "kind": "pull_request",
+  "title": "ADR-0076 D11 前置验证:HTTP 端口一致性门(packages/qa/http-conformance)+ OQ#9/10 结论 (#2462)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T08:27:14Z",
+  "updated_at": "2026-07-16T15:06:16Z",
+  "closed_at": "2026-07-16T14:58:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-16T14:58:06Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3037",
+  "body": "继续 #2462:落地 D11 的两个前置项(均为 framework 单仓库、不动现有行为),为跨仓库窗口的 transport 拆解扫清前提。\n\n## OQ#10 — 多适配器验证(本 PR 的代码部分)\n\nADR-0076 D11 的警告是\"multi-adapter 未经验证,normalized context 有 Hono 痕迹\"。本 PR 给出验证:\n\n- **新私有 QA 门 `@objectstack/http-conformance`**(`packages/qa/http-conformance`,`private: true` 不发布):在裸 `node:http` 上实现 `IHttpServer` 端口的**参照实现**,除 `@objectstack/core` 外零依赖——没有框架替端口补路由/补解析,消费方一旦依赖任何 Hono 特有能力,套件立即失败。定位是**验证仪器,不是产品服务器**(生产继续用 plugin-hono-server;面向用户的 Express/Workers 适配器留到窗口期作为产品决策单独做,届时插进本套件的 `ADAPTERS` 数组即可免费获得同套验证)。\n- **跨适配器一致性测试套件**:在参照实现与 `plugin-hono-server` 上分别拉起真实栈(dispatcher 桥 + REST 生成器 + ObjectQL + 内存驱动,真实 socket),断言行为一致——`/data` CRUD 全流程、`/meta` 读取、`/ready` `/health`、discovery、`:param` 路由、404/405+`Allow`、SSE,外加逐探针的响应形状对比矩阵。**41 条断言全绿。**\n\n**结论:端口没有硬性 Hono 依赖。** Hono 适配器里的 Host 头回填是 Fetch API 的产物、属适配器本地行为而非端口泄漏;剩余 Hono 耦合全部锁定在 `getRawApp()` 逃生舱(metadata HMR、cloud-connection 路由、static/SPA + CORS + Server-Timing),消费方均做了特性探测、可优雅降级。窗口期跟进项:把消费方已依赖的两个软扩展(`res.write`/`end`、`getPort()`)和 404/405 语义正式写进 `IHttpServer` 契约。\n\n**目录组织**:`packages/qa/` 作为不发布验证门的统一位置(新 workspace glob);现有同类包 `packages/dogfood`、`packages/downstream-contract` 建议后续迁入对齐(单独 PR,涉及 spec-liveness-check.yml 的路径触发更新)。\n\n## OQ#9 — dispatcher vs rest-server 重叠审计(结论已记入 ADR)\n\n**判定:划清边界,不要合并。** 二者在实际运行中按域瓜分 API 面而非互为冗余:标准启动下 REST 独占 data/meta/batch/导入导出/search/email/forms/sharing/reports/approvals/security,dispatcher 桥独占 mcp/ai/graphql/keys/automation/actions/storage/i18n/analytics/health/ready。真正双挂载的只有 **discovery** 和 **packages** 两处(注册序先到先得——正是 D11 要消除的味道);dispatcher 的 `/data`/`/meta`/`/ui` 等 `dispatch()` 分支在标准启动中**并未挂载**(仅当 `HttpDispatcher` 被树外适配器当 callable 直调时才活)。据此得出 D11 工作清单:①处理死的 callable 分支;②packages + discovery 各归一主;③按域抽取 handler;④环境解析统一到注入的 `KernelResolver` 缝。\n\n## 变更内容\n\n- `packages/qa/http-conformance/`(新私有 QA 门:参照适配器 + 41 条一致性测试;不发布、无 changeset)\n- `pnpm-workspace.yaml`:新增 `packages/qa/*` glob\n- `docs/adr/0076-objectql-core-tiering.md`:OQ#9/OQ#10/OQ#11 标注 Resolved 并记录证据\n\n## 验证\n\n- 一致性套件 41/41(含 CodeQL 修复后的原型污染回归测试);全 monorepo `pnpm test` 130/130 任务通过\n- changeset 守卫(no-major / fixed-group,69 个公开包)通过\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01A1BtxNeUaGmvUYr8FwtUNu"
+}

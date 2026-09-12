@@ -1,0 +1,35 @@
+{
+  "number": 3041,
+  "kind": "issue",
+  "title": "security(objectql): `readonlyWhen` 在多行 UPDATE(options.multi / REST updateMany)路径上服务端不强制——与静态 readonly 不一致",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T09:36:15Z",
+  "updated_at": "2026-07-17T08:33:41Z",
+  "closed_at": "2026-07-17T08:33:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3041",
+  "body": "## 背景\n\n#3003 排查过程中发现的同族残留:#2948/#2957 把**静态** `readonly` 的剥离补到了单条与多行两条 UPDATE 路径,但**条件只读 `readonlyWhen` 从一开始就只在单条路径强制**——多行路径完全不评估、不剥离。\n\n## 定位(以当前 main 为准)\n\n`packages/objectql/src/engine.ts` `update`:\n\n- **单条 id 路径**(`engine.ts:2405-2426`):fetch `priorRecord` → `stripReadonlyWhenFields` 基于合并的 `{...previous, ...data}` 求值并剥离(`:2416`)→ 强制 ✅\n- **多行路径**(`engine.ts:2427-2445`,`options.multi && driver.updateMany`):不 fetch per-row prior(逐行查询无上界),只跑静态 `stripReadonlyFields`(`:2442`,#2948);`readonlyWhen` **不求值、不剥离** ❌\n\n## 暴露面\n\nREST 直接暴露 `POST /data/:object/updateMany`(`packages/rest/src/rest-server.ts:6076` → `updateManyData` → 引擎多行路径)。\n\n攻击示意(按代码路径判断成立,待复现坐实):`showcase_invoice.tax_rate` 声明 `readonlyWhen: record.status == 'paid'`(paid 后锁税率)。单条 `PATCH { tax_rate: 0 }` 会被剥离;换成 `POST /data/showcase_invoice/updateMany`、`where` 精确命中同一条已 paid 记录、载荷 `{ tax_rate: 0 }` → 写"
+}

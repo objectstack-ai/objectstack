@@ -1,0 +1,30 @@
+{
+  "number": 2777,
+  "kind": "issue",
+  "title": "[downstream/hotcrm] Migrate approval approvers from { type: 'role' } to { type: 'position' } (ADR-0090 D3)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-07-10T11:32:41Z",
+  "updated_at": "2026-07-15T13:07:32Z",
+  "closed_at": "2026-07-15T13:07:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2777",
+  "body": "#2738 / #2767 之后,审批的正确路由方式已经存在,但下游应用(hotcrm 等)存量元数据还没迁移——`{ type: 'role', value: 'sales_manager' }` 仍然静默匹配不到任何人(`role` = better-auth 成员级别 owner/admin/member,不是岗位)。\n\n## 待办(在 hotcrm 等下游仓库执行,等含 #2738/#2767 的版本发布后)\n\n- [ ] 升级 `@objectstack/spec` / `@objectstack/plugin-approvals` / `@objectstack/lint` 到含 `position` approver type 的版本\n- [ ] 全局排查审批 flow:`{ type: 'role', value: '<非 owner/admin/member/guest>' }` → 改为 `{ type: 'position', value: '<岗位名>' }`;`escalation.escalateTo` 同样按岗位语义复查(#2767)\n- [ ] 确认租户内 `sys_user_position` 有对应岗位的分配行——岗位没人时会回退成 `position:<名>` 字面量,审批照样卡住\n- [ ] 跑 `os lint`:`approval-role-not-membership-tier` / `approval-approver-type-unknown` / `approval-escalation-reassign-no-target` 三条规则会把漏网项直接列出并给出 fix-it\n- [ ] 端到端验证一条审批流(开请求 → pending_approvers 是真实 user id → 决策/升级)\n\n## 完成后\n\n回到 framework 把 `approval-role-not-membership-tier` 从 warning 升为 error(见配套 issue)。\n\nRefs: #2738, #2767, ADR-0090 D3, ADR-0057 D4。"
+}

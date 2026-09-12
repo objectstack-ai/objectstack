@@ -1,0 +1,33 @@
+{
+  "number": 3093,
+  "kind": "pull_request",
+  "title": "docs: add Connect-MCP and Actions guides — the two missing landing-promise pages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T06:58:30Z",
+  "updated_at": "2026-07-17T07:04:50Z",
+  "closed_at": "2026-07-17T07:04:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T07:04:47Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3093",
+  "body": "## 背景\n\n文档审计定位出两个最严重的功能点缺口,本 PR 补齐(P1 第一批):\n\n1. **MCP 接入无落点页**——官网核心承诺\"每个对象和动作自动成为受治理的 MCP 工具\",但站内没有一页能让客户 10 分钟接通并验证,接入片段埋在 agents.mdx(页名不相关,没人会点)。\n2. **action 无实战页**——12 个功能点里覆盖最差:全站只有两处表格行 + forms 一个小节;\"注册 handler\"这步没有文档,已经导致过 AI 生成的按钮在生产环境点了没反应。\n\n## 内容\n\n**`ai/connect-mcp.mdx`**:一条命令接 Claude Code(localhost + 生产)/ Claude Desktop 与 claude.ai / `.mcp.json` / API key(铸造 + 三种 header 形式)/ 10 个生成工具清单 / 安全模型(调用者身份与 RLS、OAuth scopes 收窄工具族、action body 受信边界、TLS 规则)/ 验证一问 / 404-501-401-403 对症排错表。\n\n**`ui/actions.mdx`**:诚实的类型表(script/flow/url/modal;`api`/`form` 标注\"schema 有但 runtime 未接线\",不教死属性)/ 定义 → 两条服务端路径(inline body 沙箱 vs onEnable 注册 handler,含\"死按钮\"陷阱 callout)/ locations 七值表 + 按名绑定(rowActions/quick_actions/导航)/ params/confirmText/resultDialog / requiredPermissions 双面闸门 / visible CEL fail-closed 陷阱 / REST 调用 / `ai.exposed` 暴露 / 排错表。\n\n## 事实依据\n\n两页均基于源码级调研(端点/认证/暴露规则/工具名/失败模式在 packages/runtime、packages/mcp、packages/spec 中逐条核实,调研清单带 文件:行号),示例原样摘自 examples/app-todo、app-showcase、app-crm 的真实可跑代码——不含任何杜撰 API。\n\n导航:两个 meta.json 收录;agents.mdx 与 views.mdx 加了指向链接。与 #3092(P0 矛盾修正)无文件交集。\n\n## 验证\n\n`pnpm --filter @objectstack/docs build` ✅(MDX 全量编译含新页)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

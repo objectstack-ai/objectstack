@@ -1,0 +1,32 @@
+{
+  "number": 3175,
+  "kind": "issue",
+  "title": "Bug: `ownership` 是一个未声明却被引擎依赖的对象属性 —— 四处对同名 key 的语义不一致(引擎读 / 校验拒 / 脚手架发 / CLI 误显)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T06:21:21Z",
+  "updated_at": "2026-07-18T06:53:31Z",
+  "closed_at": "2026-07-18T06:53:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3175",
+  "body": "来源:PR #3168(#3058 的右尺寸落地)对抗式核查时发现。原计划想把对象级记录归属模型 `ownership` 声明进 `ObjectSchema`,核查后发现这么做会撞上一个真实的、多面的契约冲突,故**未在 #3168 中改动**,单开此 issue。\n\n## 现象:一个 `ownership` key,四处互不一致的处理\n\n对象 schema 上的 `ownership` 属性同时被四处以**不同语义**对待:\n\n1. **引擎读它当「记录归属模型」`'user' | 'org' | 'none'`**\n   `packages/objectql/src/registry.ts:272` — `applySystemFields` 里:\n   ```ts\n   const ownership = (schema as any).ownership as 'user' | 'org' | 'none' | undefined;\n   const wantOwner = ownership !== 'org' && ownership !== 'none' && !managedBy && !name.startsWith('sys_');\n   ```\n   `ownership: 'org' | 'none'` 用于**opt-out `owner_id` 注入**(Dataverse 风格 catalog/junction 表)。这是有单测的行为:`packages/objectql/src/registry.test.ts:695`(`respects ownership: \"org\" / \"none\" opt-out`)。注意读取用的是 `(schema as any)` —— 因为该属性**未在 `ObjectSchema` 声明**。\n\n2. **`ObjectSchema.create()` 把它当未知 key 直接拒绝(报错)**\n   `packages/spec/src/data/object.zod.ts`:`ownership` 不在 `ObjectSchemaBase`(:595)中;顶层未知 key 由 `unknownKeyError`(:1162)按 ADR-0032「no silent failure」/ #1535 **抛错**,并有编译期 `NoExcessObjectKeys`(:1186)兜底。也就是说,作者若在 `ObjectSchema.create({ ..., ownership: 'org' })` 里设它,会拿到构建错误 —— 引擎依赖的这个 opt-out,作者**无法经受支持的 `create()` 路径合法设置**。\n\n3. **脚手架仍在生成 `ownership: 'own'`**\n   `packages/cli/src/commands/generate.ts:28` 的 object 模板仍输出 `ownership: 'own',`。作者把它塞进 `ObjectSchema.create()` 就会命中上面的拒绝(正是 `packages/cli/CHANGELOG.md:3876` 描述、并声称已对 app/plugin 脚手架修掉的那个迁移陷阱 —— 但 `generate.ts` 的 object 脚手架未清理)。而 `'own'` 对引擎(facet 1)来说 `!== 'org' && !== 'none'`,等价于「user 归属」,语义也不对味。\n\n4. **CLI 把它当「贡献者归属」`'own' | 'extend'` 显示**\n   `packages/cli/src/commands/info.ts:77` — `const ownership = obj.ownership || 'own';`,再打印 `(N fields, {ownership})`。这是**第三种语义**:`'own' | 'extend'`(`ObjectOwnershipEnum`,`object.zod.ts:1459`)其实是 `ObjectContributor.ownership`(`registry.ts:29`)—— 描述某个包是 own 还是 extend 一个对象,经 `registerObject(..., ownership='own')`(`registry.ts:581`)设置在**贡献者记录**上,而非作者的对象 schema。CLI 读错了源,并用 `'own'` 兜底。\n\n## 为什么是债\n\n- **契约漏洞**:一个 opt-out(记录归属)被引擎依赖且有测试,却对应一个校验器主动拒绝、作者无法合法声明的 key。测试之所以绿,是因为 `registry.test.ts:695` 传的是**未经 `ObjectSchema.create()` 校验的裸对象**;经校验的作者路径与被测路径不一致。\n- **命名撞车**:`ownership` 同时承载「记录归属模型 `user/org/none`」与「贡献者归属 `own/extend`」两个正交概念,`registry.ts` 与 `cli/info.ts` 各取一义。\n- **脚手架回归**:`generate.ts` 仍发一个会被 `create()` 拒绝、且语义错位的 `ownership: 'own'`。\n\n## 可选解法(需定契约方向,勿盲改)\n\n- **A. 把记录归属模型立为一等字段**:在 `ObjectSchemaBase` 声明 `ownership: z.enum(['user','org','none']).optional()`,同步:`generate.ts` 脚手架值改 `'user'`、`info.ts` 按记录模型显示、`registry.ts:272` 去掉 `as any`。让被测的引擎 opt-out 变为可合法声明。代价:`ownership` 之名仍与贡献者 `own/extend` 概念在语义上重叠。\n- **B. 给记录归属模型换个无歧义的名**(如 `recordOwnership` / `ownershipModel`):声明它、迁移引擎读取、修脚手架+CLI,`own/extend` 之名留给贡献者概念。命名更干净,但要迁移。\n- **C. 判定记录归属 opt-out 不应由作者在 schema 上设**,改由别的机制驱动,并移除 `registry.ts` 对 `schema.ownership` 的读取。\n\n三条都触及 ADR-0032(严格 key)与归属模型,建议先定方向再落地。\n\n## 关联\n\n- 发现来源:PR #3168 / #3058\n- ADR-0032(no silent failure)/ #1535(未知 key 拒绝)\n- `packages/cli/CHANGELOG.md:3876`(app/plugin 脚手架的同类迁移陷阱记录)"
+}

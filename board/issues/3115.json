@@ -1,0 +1,32 @@
+{
+  "number": 3115,
+  "kind": "issue",
+  "title": "[BUG] publish-drafts fails with no_draft after saving draft via Studio UI",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hsaifee1103",
+    "id": 42268165,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T10:26:09Z",
+  "updated_at": "2026-07-18T13:42:00Z",
+  "closed_at": "2026-07-18T13:42:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3115",
+  "body": "## Description\n\nWhen creating objects with fields inside a package via Studio UI, saving as draft, and then clicking \"Publish\", the publish API returns `no_draft` — claiming no pending draft exists — even though the object and fields were just saved as draft moments earlier.\n\n## Steps to Reproduce\n\n1. Open ObjectStack Studio\n2. Create a new writable package with a namespace\n3. Inside the package, create a new object\n4. Add fields to the object\n5. Click \"Save Draft\"\n6. Click \"Publish\"\n\n## Expected Behavior\n\nThe object (with its fields) should be published successfully.\n\n## Actual Behavior\n\nThe publish endpoint `POST /api/v1/packages/:namespace/publish-drafts` returns:\n\n```json\n{\n    \"success\": true,\n    \"data\": {\n        \"success\": false,\n        \"publishedCount\": 0,\n        \"failedCount\": 1,\n        \"published\": [],\n        \"failed\": [\n            {\n                \"type\": \"object\",\n                \"name\": \".....\",\n                \"error\": \"[no_draft] No pending draft exists for object/..... — nothing to publish.\",\n                \"code\": \"no_draft\"\n            }\n        ]\n    }\n}\n```\n\n## Root Cause Trace\n\nThe error originates from `packages/metadata-protocol/src/protocol.ts` line 1930-1936:\n\n```ts\nif (item === undefined) {\n    const err: any = new Error(\n        `[no_draft] No pending draft exists for ${request.type}/${request.name}.`,\n    );\n    err.code = 'no_draft';\n    err.status = 404;\n    throw err;\n}\n```\n\nThe `getMetaItem` function with `state: 'draft'` returns `undefined`, meaning the draft row saved by Studio UI is not being found by the publish flow.\n\n## Environment\n\n- Framework dev server (`pnpm dev:showcase`)\n- Clean database (`dev.db` deleted before start)\n- The save draft step completes without errors, but the draft row is not found by the publish flow\n- This may be a disconnect between Studio UI draft persistence and how the publish flow queries for draft rows"
+}

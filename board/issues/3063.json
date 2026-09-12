@@ -1,0 +1,32 @@
+{
+  "number": 3063,
+  "kind": "issue",
+  "title": "导入向导：多值 lookup 字段(multiple:true)不按分隔符拆分，整串按名匹配必失败",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T14:06:57Z",
+  "updated_at": "2026-07-16T15:23:06Z",
+  "closed_at": "2026-07-16T15:23:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3063",
+  "body": "## 概述\n\nConsole 数据导入向导对 **多值 lookup 字段（`multiple: true` 的 lookup / master_detail）** 不做分隔符拆分：无论单元格用 `;` 还是 `,` 分隔多个显示名，向导都把**整串当作单个引用值**去按名匹配一条目标记录，从而必然匹配失败，报 `no <object> matches \"<整串>\"`。结果是：多值关联字段在导入时完全无法录入，只能导入后到 UI 记录页手动补录。\n\n单值 lookup 字段（同样按显示名解析）导入完全正常。\n\n## 环境\n\n- @objectstack 15.0.0（runtime / objectql / spec，lockfile 锁定 15.0.0）\n- Console UI 导入向导（上传 → 字段映射 → 预览 → 导入），勾选「运行自动化与触发器」，匹配策略「始终新建」\n- 单租户自建业务对象\n\n## 复现\n\n对象 `os_tianshun_ehr_team`（班组），其中 `members` 为多值 lookup（`type: lookup, reference: sys_user, multiple: true`）。\n\nCSV（`张焊工`、`李质检` 均为库中真实 sys_user 的显示名，单独单值导入均可解析成功）：\n\n```csv\nbranch,team_name,division,team_leader,members\nJG,结构一班,结构一分部,王班长,张焊工;李质检\n```\n\n- **实际**：预览/导入报 `no sys_user matches \"张焊工;李质检\"`，该行失败。\n- 换成逗号并加引号 `\"张焊工,李质检\"`，同样报 `no sys_user matches \"张焊工,李质检\"`。\n- 把 `members` 改为单个值 `张焊工` → 成功解析入库。\n\n即：向导把整个单元格文本作为一个引用去解析，从未按分隔符拆分成多值。\n\n## 期望\n\n对 `multiple: true` 的 lookup / master_detail 字段，导入向导应：\n\n1. 按分隔符（`;` 或 `,`，或提供可配置分隔符）把单元格拆成多个 token；\n2. 逐 token 按显示名解析引用；\n3. 全部命中则写入 ID 数组，任一 token 无匹配时报出**具体是哪个 token** 未匹配（而非整串）。\n\n## 影响 / 现有规避\n\n- 影响：所有含多值关联字段的对象无法通过导入完整建数据，多值字段一律需要导入后 UI 手动补录，批量导入价值受损。\n- 规避：先导入其余字段，再到 UI 记录页手动逐个添加多值关联。\n\n## 定位线索\n\n服务端按名解析引用时抛出 `no <object> matches \"<value>\"`；多值字段（`multiple: true`）在解析前未做 split，直接把整个单元格字符串作为单一引用值传入 name 解析。建议在导入引用解析入口对 `multiple` 字段先拆分再逐值解析。\n"
+}

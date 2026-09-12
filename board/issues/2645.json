@@ -1,0 +1,32 @@
+{
+  "number": 2645,
+  "kind": "issue",
+  "title": "ADR-0087 P1: the conversion layer — most breaks require zero consumer action",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-07-05T16:35:18Z",
+  "updated_at": "2026-07-15T15:25:54Z",
+  "closed_at": "2026-07-15T15:25:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2645",
+  "body": "Part of #2643 (ADR-0087). **Highest-leverage phase.** A versioned, declarative **load-time conversion layer** so that lossless breaks (renames, moves, alias removals) require **no action** from a consumer for one full major — the Kubernetes storage-version / conversion model applied to metadata.\n\nDepends on **P0** (needs `PROTOCOL_VERSION` + the loader handshake seam).\n\n## Scope (D2)\n\n- [ ] For each protocol major N, a versioned table `conversions/N.ts` in `@objectstack/spec`: per renamed/moved/re-shaped surface, a transform **N−1 shape → N shape**, applied **centrally at load** (the same seam `objectstack validate` uses), emitting a structured deprecation notice per applied conversion.\n- [ ] **Scope guard: losslessly mappable changes only** — renames, alias removals, field moves, enum re-spellings. A change with no lossless mapping is out of scope (→ P2 migration).\n- [ ] **Window**: the loader applies a conversion for **one major** (N accepts N−1 shapes), then retires it from the load path in N+1 — but **never deletes** it: a retired conversion **graduates into the P2 migration chain** as that major's mechanical step.\n- [ ] **Seed with the shipped 11.0 renames as the first (retroactive) table** — `http_request`/`http_call`/`webhook` → `http`, and the client-react alias set — proving that, had this existed, protocol 11 would have needed zero consumer action.\n- [ ] **Prove the PD #12 retirement path**: promote **one** existing consumer-side executor fallback (e.g. `cfg.filter ?? cfg.filters`) into a declared, expiring conversion entry, then delete the `??`.\n\n## Why this does NOT violate Prime Directive #12\n\nPD #12 bans *scattered, unowned* consumer-side dialect fallbacks. The conversion table is the opposite on every axis PD #12 cares about: **one** central table (not N `??`s), **versioned + declared in the spec** (owns its history), **loud** (a deprecation notice per application), **tested** (old→new fixture pair per entry), **expiring** (dropped on schedule). It is the explicit version history of one contract, not a second de-facto dialect. See ADR-0087 §\"Why the conversion layer does not violate PD #12\".\n\n## Acceptance criteria\n\n- A metadata file authored with a 10.x shape covered by a conversion entry loads clean under 11.x, emits exactly one structured deprecation notice, and the runtime sees only the canonical shape.\n- Each conversion entry ships with an old-shape → new-shape fixture pair; a CI check runs every entry's fixture through the load path.\n- The retroactive 11.0 table converts the flow-node aliases and client-react aliases end-to-end.\n- One executor `??` fallback is retired through a conversion entry and deleted (PD #12 debt paydown demonstrated).\n- Removing a conversion from the **load path** in N+1 does not delete its history — it must appear as a P2 chain step (guarded once P2 exists; until then, tracked).\n\n## Boundaries\n\n- Converts **at load** only; never rewrites the consumer's source files (that is P2's explicit `migrate meta`).\n- Semantic (non-lossless) changes are explicitly excluded and belong to P2.\n\nRefs: #2643, ADR-0087 (D2), AGENTS.md Prime Directive #12, ADR-0059."
+}

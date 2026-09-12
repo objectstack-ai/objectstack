@@ -1,0 +1,30 @@
+{
+  "number": 2610,
+  "kind": "issue",
+  "title": "Showcase: AI-domain examples (agent/tool/skill) deferred — cloud/MCP-only per ADR-0063",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-05T02:44:16Z",
+  "updated_at": "2026-07-15T13:20:50Z",
+  "closed_at": "2026-07-15T13:20:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2610",
+  "body": "The showcase README previously **claimed** an AI capability chain (\"an agent wired to a tool and a skill\", with a `src/agents/` directory in the layout diagram) that was never implemented. The showcase-redesign PR removes the false claims (Prime Directive #10: never advertise a capability the runtime doesn't deliver) and records the AI metadata kinds as explicit waivers in the registry-driven coverage manifest (`src/coverage.ts` → `KIND_COVERAGE`).\n\nWhy waived rather than demonstrated now:\n\n- **`agent`** — per ADR-0063, agents are platform-owned; the kernel ships exactly two (`ask` / `build`) and third parties never author `*.agent.ts`. Additionally, cloud ADR-0025 moved the in-UI AI runtime (`service-ai`) to the cloud/Enterprise distribution — the open framework exposes AI only via `@objectstack/mcp` (BYO-AI). An agent example in this repo would demo something the open runtime cannot execute.\n- **`tool` / `skill`** — these ARE the third-party AI extension primitives (ADR-0063), so the showcase *should* eventually demonstrate them, consumed through the MCP surface. That needs a worked-out BYO-AI verification story (what a CI-checkable \"demonstrated\" looks like without an in-product chat runtime) before it can honor the showcase's coverage bar.\n\nDone means: `tool` + `skill` examples on the showcase backbone, exercised via `@objectstack/mcp` with a test proving registration/exposure, and the `KIND_COVERAGE` entries flipped from `waived` to `demonstrated`. `agent` stays waived permanently (platform-owned) with this issue as the paper trail."
+}

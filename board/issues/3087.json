@@ -1,0 +1,32 @@
+{
+  "number": 3087,
+  "kind": "pull_request",
+  "title": "fix(plugin-auth): isolate optional better-auth plugin init failures — one broken federation feature must not 500 all of auth",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T04:55:32Z",
+  "updated_at": "2026-07-17T05:01:45Z",
+  "closed_at": "2026-07-17T05:01:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T05:01:41Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3087",
+  "body": "## Blast-radius follow-up to #3085\n\nIn the 15.1.0 incident, `@better-auth/oauth-provider` threw `Cannot set properties of undefined (setting 'modelName')` during **plugin construction**. Because the better-auth instance is lazily (re)built per request, that one optional IdP feature failed the whole instance and turned **every** auth endpoint — sign-up, sign-in, get-session — into a 500. #3085 fixed that specific version mix; this PR fixes the disproportionate failure mode itself.\n\n## Two explicit tiers in `AuthManager.buildPluginList`\n\n**OPTIONAL — degrade gracefully** via a new `addOptionalPlugin()` wrapper: `organization`, `admin`, `phoneNumber`, `magicLink`, `genericOAuth`, `jwt`+`oauthProvider` (one atomic unit — on failure neither lands), `sso`, `scim`, `deviceAuthorization`. On construction failure the feature is skipped with one loud, actionable `console.error`, recorded in a new `getDegradedAuthFeatures()`, and its endpoints 404 — while core email/password + session auth keeps serving. The degraded set resets on every rebuild (`applyConfigPatch` → healthy restart clears it).\n\n**CORE — still fail hard** (better a hard 500 than fail-open security):\n- `bearer` — token auth for every non-cookie API client;\n- `twoFactor` — skipping it would let 2FA-enrolled accounts sign in on password alone;\n- `haveIBeenPwned` — operator explicitly opted into breached-password rejection; dropping it silently relaxes policy;\n- `customSession` — carries `positions[]`/`isPlatformAdmin` and the ADR-0069 authGate (password expiry, enforced MFA).\n\nThe rationale table lives in the `buildPluginList` docstring so the tier of any future plugin is a deliberate decision.\n\n## OIDC discovery mount is degrade-aware\n\n`registerOidcDiscoveryRoutes` (the \"Failed to register OIDC discovery routes\" path from the incident log) now checks the degraded set after `getAuthInstance()`: if `oidcProvider` is degraded it logs why and skips mounting `/.well-known/{oauth-authorization-server,openid-configuration}`, instead of advertising an IdP whose endpoints would all 404.\n\n## Regression tests (real pipeline, not mocks)\n\nNew `auth-manager.optional-plugin-isolation.test.ts` — unlike the existing suite it does **not** mock `better-auth`: the real handler runs against a minimal in-memory `IDataEngine` behind the genuine ObjectQL adapter, and only the two plugin factories get controllable failure switches (via `importOriginal` passthrough):\n\n- byte-for-byte incident TypeError injected into `oauthProvider` → **sign-up 200**, `get-session 200`, degraded set `[{feature: 'oidcProvider', error: …modelName…}]`, loud `console.error` asserted;\n- healthy control → 200 with the real `oauthProvider` constructed, degraded set empty (proves the harness doesn't bypass the plugin);\n- throwing **core** plugin (`bearer`) → request rejects, nothing recorded as degraded (fail-hard semantics pinned);\n- degraded state clears when the instance rebuilds after the fault is gone.\n\nFull plugin-auth suite: **457/457 pass** (20 files). Repo-wide `pnpm lint` (CI-identical `--no-inline-config`) clean.\n\nRefs: #3085 · GHSA-j8v8-g9cx-5qf4 (why the family pin exists at all)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

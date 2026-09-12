@@ -1,0 +1,32 @@
+{
+  "number": 1597,
+  "kind": "issue",
+  "title": "Make optional-plugin loading intent-driven: fail-fast on declared-but-missing, drop presence-based auto-enable",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-05T09:09:37Z",
+  "updated_at": "2026-07-18T16:08:29Z",
+  "closed_at": "2026-07-18T16:08:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1597",
+  "body": "Follow-up to [#1595](https://github.com/objectstack-ai/framework/pull/1595) (which fixed the `Cannot find package` false alarm) and tracking issue [objectstack-ai/cloud#107](https://github.com/objectstack-ai/cloud/issues/107). That PR was a minimal, behavior-preserving bug fix. This issue captures the deeper design problem it exposed.\n\n## Problem\n\n`os serve` (`packages/cli/src/commands/serve.ts`) auto-loads optional service plugins (`@objectstack/service-ai`, `@objectstack/service-ai-studio`) by **speculatively importing the package and swallowing the error** when it's absent:\n\n```ts\nif (!hasAIPlugin && tierEnabled('ai')) {\n  try {\n    const { AIServicePlugin } = await importFromHost('@objectstack/service-ai');\n    await kernel.use(new AIServicePlugin());\n  } catch (err) {\n    // silently skip if the package isn't installed\n  }\n}\n```\n\nTwo distinct things are conflated:\n\n1. **\"is the package installed?\"** — presence detection via try-import\n2. **\"does this app actually want AI?\"** — intent\n\nThe trigger today is `tierEnabled('ai')` (does the license *tier allow* AI) plus package presence — **not** an explicit declaration that this app *requires* AI. Consequences:\n\n- **Presence ≠ intent.** Installing a dependency silently auto-enables a runtime feature. The decision to enable AI should be explicit and resolved deterministically by the platform at startup, not be a side effect of which packages happen to be bundled.\n- **Nothing ever fails loud.** Even the explicit `requires: [...]` capability path only `console.warn`s on a missing package (`serve.ts:1657`), it does not throw. So an app that genuinely *requires* AI but ships without the package boots \"successfully\" in a broken state.\n- **The single catch can't distinguish** \"intentionally not installed\" (expected, skip) from \"plugin actually crashed at startup\" (should error). String-matching on the error message is exactly what caused the false-alarm bug in #1595.\n\n## Constraint that must be preserved\n\n`apps/cloud` (control-plane host) **intentionally** does not ship AI Studio and **must boot clean**. So we cannot globally flip \"missing package → error\" — that would break the very host #107 was fixing. The current code can't tell \"intentionally absent\" from \"required but absent\", which is why #1595 had to keep silent-skip.\n\n## Proposed design — intent-driven, three states\n\nIntroduce an explicit intent declaration (e.g. per-app config `ai: 'required' | 'auto' | 'off'`, or via the existing `requires: [...]` capability spec), and resolve at startup:\n\n| app declares | package present | platform behavior |\n|---|---|---|\n| required | yes | load |\n| **required** | **no** | **throw — fail startup (fail-fast)** |\n| auto / unset | yes | load (opt-in convenience) |\n| auto / unset | no | skip silently — **no speculative import** |\n| off | — | never load |\n\nKey changes:\n\n- Add an explicit \"required\" notion so declared-but-missing **fails loud** instead of warning/swallowing.\n- Stop using \"package happens to be installed\" as the enable signal; drive enablement from declared intent (tier gating remains an orthogonal *deny* check).\n- For the not-declared case, skip without an optimistic import-and-catch, removing the whole class of \"message-matching to tell missing from crashed\" bugs.\n\n## Scope / risk\n\n- Touches the plugin-loading contract in `serve.ts` and interacts with multi-tenant tier logic — larger and riskier than the #1595 string-match fix, hence a separate issue.\n- Must keep `apps/cloud` booting clean (AI Studio simply not declared → skipped, no error).\n- Applies to both the AIService and AIStudio guards, and should reconcile the `requires: [...]` capability path (`serve.ts:1652-1658`) so a declared-required capability also fails fast."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 3160,
+  "kind": "pull_request",
+  "title": "fix(objectql): enforce validation rules, requiredWhen and option visibleWhen on multi-row updates",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T02:36:27Z",
+  "updated_at": "2026-07-18T03:22:35Z",
+  "closed_at": "2026-07-18T03:22:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-18T03:22:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3160",
+  "body": "## Summary\n\nCloses #3106.\n\n`evaluateValidationRules()` is the single gate for object-level validation rules (`script`, `state_machine`, `format`, `cross_field`, `json_schema`, `conditional`), field-level `requiredWhen`, and per-option `visibleWhen` authorization. It ran on insert and single-id update but was never called in the bulk branch of `engine.update` (`options.multi` → `driver.updateMany`) — every one of those checks was a silent no-op there, with only a narrow warning that skipped `format`/`json_schema`-only schemas entirely.\n\nPer the decision on the issue, this is the **full enforcement** option:\n\n- The multi branch now reads the row-scoped match set **once** — the same middleware-composed AST the write binds, with the fetch shared with the #3042 `readonlyWhen` bulk strip (`needsPriorRecord` subsumes `hasReadonlyWhenInPayload`, so there is never a second query).\n- The stripped payload is evaluated against **each matched row's prior state**, mirroring the single-id branch's ordering (strips first, then rules). Any error-severity violation throws `ValidationError` — annotated with the failing record id — before `updateMany` writes anything (all-or-nothing, like the strip's locked-in-any-row rule).\n- Schemas with no prior-dependent rules (`format` / `json_schema` / non-prior `conditional` only) are evaluated once against the payload with **no fetch**.\n- Rule-free schemas hit the evaluator's early return: the internal `multi: true` callers (messaging outboxes, settings rows) see zero behavior change and no extra query — covered by a regression test.\n\n**Deliberate behavior change:** bulk writes that previously slipped past declared rules now throw. Neither REST nor GraphQL surfaces `multi`, so this is unreachable from untrusted external callers; in-process callers with rule-bearing schemas are the affected surface.\n\nAlso fixes the two doc comments that overstated coverage (`rule-validator.ts` \"no silent no-ops\", `validation.zod.ts` \"nothing is a silent no-op\") — both now describe the per-row bulk enforcement and name the remaining `events: ['delete']` gap, which stays split out per the issue decision — and refreshes the AGENTS.md PD #10 example that described the pre-fix state.\n\n## Changes\n\n- `packages/objectql/src/engine.ts` — per-row rule evaluation in the multi branch; single shared prior-row fetch; obsolete warning removed; `ValidationError` imported for the row-annotated rethrow.\n- `packages/objectql/src/validation/rule-validator.ts`, `packages/spec/src/data/validation.zod.ts` — doc comments corrected (no logic change).\n- `AGENTS.md` — PD #10 example updated to past tense with the same \"check the call site\" moral.\n- `.changeset/bulk-update-validation-rules.md` — patch changeset for `@objectstack/objectql` + `@objectstack/spec`.\n\n## Tests\n\n- `engine.test.ts` — new \"Bulk update validation enforcement (#3106)\" describe: format rule rejects with no fetch / passes when valid; `state_machine` evaluated per row (one illegal row rejects the batch, message carries the record id); rule-free schema does no fetch (outbox regression guard); `requiredWhen` and option `visibleWhen` enforced per row; strip + validation share exactly one `driver.find`.\n- `plugin.integration.test.ts` — new describe mirroring the #3042 bulk harness through a real kernel: format reject (nothing written, no fetch), state_machine reject/accept pair, single shared fetch.\n\nVerified: objectql suite 67 files / 917 tests green, spec suite 255 files / 6895 tests green, objectql build green, eslint clean on changed files.\n\n## Known gaps (out of scope, tracked separately)\n\n- Rules declaring `events: ['delete']` are still never evaluated (`engine.delete` doesn't call the evaluator) — named explicitly in both corrected doc comments, per the issue's \"split out\" decision.\n- The bulk prior-row fetch is unbounded (no limit/projection), matching the existing #3042 strip fetch — a future optimization could project only the fields the predicates reference.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01VCUSMJBsX14C3RQdWFw7N7\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01VCUSMJBsX14C3RQdWFw7N7)_"
+}

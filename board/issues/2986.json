@@ -1,0 +1,36 @@
+{
+  "number": 2986,
+  "kind": "pull_request",
+  "title": "ci(validate-deps): replace retired pnpm audit with OSV-Scanner",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-15T15:37:20Z",
+  "updated_at": "2026-07-16T01:05:06Z",
+  "closed_at": "2026-07-16T01:05:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-16T01:05:03Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2986",
+  "body": "## Problem\n\n`pnpm audit --audit-level=high` in the **Validate Package Dependencies** workflow fails on every branch/PR since 2026-07-13. npm retired the audit endpoint:\n\n```\nERR_PNPM_AUDIT_BAD_RESPONSE  The audit endpoint (at\nhttps://registry.npmjs.org/-/npm/v1/security/audits/quick) responded with 410:\n{\"error\":\"This endpoint is being retired. Use the bulk advisory endpoint\ninstead. ...\"}\n```\n\npnpm (incl. latest) hasn't migrated to the bulk advisory endpoint, so upgrading pnpm is not a fix. The check is permanently red for all PRs. Fixes #2974.\n\n## Changes\n\n**1. Replace the retired `pnpm audit` step with OSV-Scanner** (`.github/workflows/validate-deps.yml`) — the SHA-pinned `google/osv-scanner-action/osv-scanner-action@…v2.3.8` scans `pnpm-lock.yaml` against the [OSV database](https://osv.dev) and exits non-zero on any advisory match. A blocking gate with no dependency on the retired npm endpoint. Verified working in CI (**Validate Dependencies** is green).\n\n**2. Trigger the workflow on changes to its own file** so gate edits are exercised on the PR that introduces them.\n\n**3. Remediate the 9 pre-existing advisories the new gate surfaced** (`pnpm-workspace.yaml` overrides + lockfile). OSV-Scanner blocks on any severity and flagged real vulns already in the lockfile (the old high-only gate would also be red — `uuid` is High):\n\n| Package | Was | Now | Advisory |\n|---|---|---|---|\n| `uuid` | 8.3.2 | `^11.1.1` | GHSA-w5hq-g745-h8pq (High) |\n| `postcss` | 8.4.31 | `^8.5.10` | GHSA-qx2v-qp2m-jg93 |\n| `cookie` | 0.6.0 | `0.7.0` | GHSA-pxg6-pf52-xh8x |\n| `svelte` | 5.55.3 | `^5.55.7` | GHSA-9rmh-mm8f-r9h6 + 3 |\n| `@tootallnate/once` | 1.1.2 | `2.0.1` | GHSA-vpq2-c234-7xj6 (Low) |\n| `@better-auth/oauth-provider` | 1.6.23 | `1.7.0-rc.1` | GHSA-p2fr-6hmx-4528 |\n\n`uuid` pins to the conservative `^11.1.1` LTS line. `svelte` is an *optional* peer-of-a-peer that `overrides` can't re-resolve alone, so it's additionally pinned via a root (private) `svelte` devDependency — documented in `pnpm-workspace.yaml`.\n\n**4. Align the whole better-auth family to `1.7.0-rc.1` + implement two new adapter methods** (`plugin-auth`). The oauth-provider fix only ships in the 1.7 line, whose plugins import `CLIENT_ASSERTION_TYPE` (and more) from `@better-auth/core` **1.7.x** — so pinning just the plugin against 1.6.23 core 500'd sign-in and failed the dogfood gates. Fix: pin `better-auth` + `@better-auth/core` + all `@better-auth/*` to `1.7.0-rc.1` (consistent stack; matches the pre-existing `@better-auth/scim` rc.1 pin). better-auth 1.7 also extends its `CustomAdapter` with `consumeOne` (atomic single-row consume — verification tokens on sign-in) and `incrementOne` (guarded counter mutation); the ObjectQL adapter now implements both as find-then-write mirrors of its existing `delete`/`update` methods.\n\n**5. Update the release hardening checklist** (`docs/HARDENING.md`) to use `osv-scanner`.\n\n## Verification\n\n- No vulnerable version remains in `pnpm-lock.yaml`; `pnpm install --frozen-lockfile` is in sync.\n- **Validate Dependencies (OSV gate): green.**\n- `@better-auth/core@1.7.0-rc.1` confirmed to export `CLIENT_ASSERTION_TYPE`; plugin-auth builds (types included); **all 440 plugin-auth unit tests pass**; plugin-auth is the only better-auth consumer. The dogfood gates (`Test Core`, `Dogfood Regression Gate`) validate the full sign-in path in CI.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_015JoYhorCUhGc8bgFYsErfE"
+}

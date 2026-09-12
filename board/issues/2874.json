@@ -1,0 +1,34 @@
+{
+  "number": 2874,
+  "kind": "issue",
+  "title": "feat(spec,auth): guard that every feature-gated capability is UI-gated (generalize the create-user phone fix)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-13T04:48:56Z",
+  "updated_at": "2026-07-15T15:06:47Z",
+  "closed_at": "2026-07-15T15:06:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2874",
+  "body": "## 背景\n\ncreate-user **phone** bug（objectui #2406 + framework #2871 已修）是一个更广 bug 类的实例：\n\n> **UI 宣传了一个 runtime 没有的能力,因为背后的插件没开。**\n\n`create_user` 表单提供 `phoneNumber` 字段,但默认后端在 `phoneNumber` auth 插件未加载时拒绝它。修复用既有谓词模式 gated：`visible: 'features.phoneNumber == true'`（`sys-user.object.ts` ~L160）。邻居字段本来就 gated 对了（`create_user` 本身 `features.admin == true` ~L143,org 字段 `features.organization != false` ~L66）,唯独 phone 漏掉——说明 **per-site 手工 gating 纪律必然出静默缺口**。\n\n> **v2（2026-07-15）重写说明**：原版把「CI 守卫」列为必做、把声明式 `requiresFeature` 列为可选——**依赖方向反了**：没有声明载体,「input 依赖哪个 feature」这一知识只存在于插件运行时行为里,静态检查没有 ground truth,原验收「fails if a capability-dependent input ships ungated」不可实现。另外原版的 flag 清单（8 个）在开出当天就已过时（实际 13 个,见下）——恰好自证了手工清单必漂移的论点。本次重写：修正清单、按消费面拆分审计范围、把工作重排为 P0 注册表 → P1 声明式标注 → P2 审计,验收改为**可机械判定**的两条守卫。标签去掉 `security`（后端本来就 fail-closed 拒绝,这是可用性/诚实宣传问题,不是权限提升;反向类「UI 隐藏但后端接受」才是安全面,不在本 issue 范围）。\n\n## 已核实现状（2026-07-15,落点级）\n\n`getPublicConfig().features`（`auth-manager.ts` ~L2663-2701）实际暴露 **13 个布尔 flag**（另有 `termsUrl`/`privacyUrl` 两个非布尔,豁免）,按**消费面**分两类:\n\n**① Admin/CRUD 面**（action params / object fields,经 objectui `filterVisibleParams` 渲染链）——本 issue 的主审计面:\n\n| flag | 默认 | 现有 gating |\n|---|---|---|\n| `admin` | false（SCIM 强制开,ADR-0071/#2766） | `sys-user.object.ts:143` |\n| `organization` | **true** | `sys-user/team/member/invitation` 多处 `!= false` |\n| `multiOrgEnabled` | false（`OS_MULTI_ORG_ENABLED`） | `sys-organization.object.ts` ×6 处 `!= false` |\n| `phoneNumber` | false | `sys-user.object.ts:160`（本次修复） |\n\n**② 登录面**（objectui 登录 UI 直接消费 `/auth/config`,不走 param 渲染链）——`twoFactor / passkeys / magicLink / sso / ssoEnforced / phoneNumberOtp / oidcProvider / deviceAuthorization`。这条链已有刻意设计：`phoneNumberOtp` 仅在 SMS 可投递时 advertised（~L2698,#2780）,`sso` 经 `isSsoUsable()` 细化以隐藏死按钮（~L2678-2682）。审计预期以**核对**为主而非补漏。\n\n**③ 状态旗**——`degradedTenancy`（ADR-0093 D5 降级横幅）:不是输入门,豁免并注明。\n\n原版清单漏掉的 5 个:`multiOrgEnabled`（已被 6 处谓词消费!）、`degradedTenancy`、`oidcProvider`、`ssoEnforced`、`deviceAuthorization`。\n\n## 任务（按依赖排序）\n\n- [ ] **P0 — flag 分类注册表 + 清单漂移守卫**（~1 PD,立即可做,抓最大漂移类）\n  spec 侧建单一注册表:每个 flag 记录 `{消费面: crud|login|status, 默认语义: == true | != false, 映射的 spec inputs 或豁免理由}`。测试断言 `getPublicConfig().features` 的 key 集合 ≡ 注册表 key 集合——**新增 flag 未分类即 CI 红**（正是本 issue 自己漏 5 个 flag 的那类漂移）。\n- [ ] **P1 — 声明式 `requiresFeature` 语法糖**（~1-2 PD,依赖 P0 的语义表）\n  param/field schema 支持 `requiresFeature: 'phoneNumber'`,**spec 加载期**查 P0 语义表 lower 成 `visible: 'features.phoneNumber == true'`（或 `!= false`）——objectui 渲染链（`filterVisibleParams`）**零改动**。既有手写 CEL 门迁移为标注（行为等价,矩阵锁定）。\n- [ ] **P2 — 双面审计 + 注册表完整性守卫**（~1-2 PD,依赖 P0）\n  ① CRUD 面:枚举 `platform-objects` 全部 action params / object fields,凡后端路径依赖注册表 flag 者补 `requiresFeature`;② 登录面:核对 objectui 登录 UI 对 8 个登录 flag 的消费,缺口记录或修复;③ 守卫:注册表中「需 gating」flag 映射的每个 input 必带匹配谓词,CI 断言。\n\n## 显式非目标\n\n- **「任意新 input 忘了标注必被 CI 抓住」不承诺**——「这个 input 依赖 feature X」的 ground truth 只在插件运行时行为里,静态不可判定。声明式标注把纪律成本降到最低,注册表守卫抓 flag 级漂移;运行时兜底属于 dogfood 矩阵(插件关闭 → advertised 表单逐项探测),如需要另立 issue。\n- 反向安全类(UI 隐藏但后端接受)不在范围。\n\n## 验收\n\n- [ ] P0 注册表存在,13 flag 全部分类(gated / 豁免+理由);清单漂移测试在,故意加一个未分类 flag 会红。\n- [ ] P1 `requiresFeature` 在 spec 支持并 lower 正确(两种默认语义各有测试);objectui 无改动即生效;既有手写门迁移后行为矩阵无 delta。\n- [ ] P2 审计结论落在注册表里;完整性守卫在,故意去掉一个已注册 input 的谓词会红。\n\n## 参考\n\n- Phone 修复:framework #2871(spec + `create_user` 门)、objectui #2406(`filterVisibleParams`)\n- 现有 gating:`packages/platform-objects/src/identity/sys-user.object.ts`(create_user params);features 组装:`packages/plugins/plugin-auth/src/auth-manager.ts` ~L2663-2701\n- 渲染:objectui `packages/app-shell/src/views/ActionParamDialog.tsx` → `filterVisibleParams`\n- 相关先例:#2766 V1/V1.5(admin/phoneNumber 旗与实际 wiring 对齐)、#2780(phoneNumberOtp 可投递性)、ADR-0071(SCIM 强制 admin)、ADR-0093 D5(degradedTenancy)\n\n_Surfaced during go-live UAT while confirming the phone-field fix. Rewritten v2 after site-level verification._"
+}

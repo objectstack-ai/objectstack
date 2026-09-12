@@ -1,0 +1,35 @@
+{
+  "number": 3178,
+  "kind": "pull_request",
+  "title": "feat(formula,lint): advisory type-soundness warnings for expressions (#1928 tier 4)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T06:28:16Z",
+  "updated_at": "2026-07-18T07:13:22Z",
+  "closed_at": "2026-07-18T07:13:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-18T07:13:20Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3178",
+  "body": "## What\n\nCloses the last open guardrail from #1928. A `Field.formula`, record-scoped predicate, **or flow/automation condition** that uses a **text or boolean field with an arithmetic (`+ - * / %`) or ordering (`< > <= >=`) operator against a number** faults the runtime overload and silently evaluates to `null` (e.g. `record.title * 2`, `record.is_active + 1`, a flow condition `status - 1 > 0`). The build now surfaces this as a **non-blocking warning** naming the offending field and the fix.\n\nThis is **Tier 4** from the issue's staged plan — deferred by the maintainer until a warning channel existed. It now does (shipped for tier 3 in #1933), so this lands as advisory warnings.\n\n## Soundness (the ADR-0032 design law — flag only what the runtime would also fail)\n\nThe build checker's type map deliberately **mirrors runtime**, verified empirically against the pinned cel-js (8.0.0):\n\n- **Number / currency / percent / date / datetime → `dyn`**, so the cases the runtime rescues never warn:\n  - `record.amount / 100` — the #1930 `registerOperator` (`double`×`int`) fix.\n  - `record.due == today()` and numeric-string / ISO-date values — the string-hydration retry.\n  - numeric-coded `select` option values (e.g. `priority >= 3`).\n- **Equality (`==` / `!=`) is excluded** — a heterogeneous equality is runtime-safe (evaluates to `false`), never a fault. The real `example-crm` formula `record.status == \"converted\" || …` is correctly not flagged.\n- In flow/automation conditions, **flow variables stay `dyn`** (unlisted → dyn) and are never flagged — only a typed field misused is.\n- Only genuinely free-text scalar types (`text, textarea, email, url, phone, markdown, html, richtext`) → `string`, and `boolean/toggle` → `bool`.\n\n## Changes\n\n- **`@objectstack/formula`** — new `firstTypeMismatch(source, fieldCelTypes, scope)` (builds a typed cel-js env — a `record` struct for record scope, bare top-level variables for flattened flow conditions — and reports arithmetic/ordering overload faults), plus an optional `fieldTypes` hint on `validateExpression`. A narrow spec-type → CEL-type map keeps false positives near-zero.\n- **`@objectstack/lint`** — `validateStackExpressions` threads each object's field types into **every** checked site:\n  - record-scoped (`record.<field>`) — formula fields, validation rules, action / hook / sharing predicates;\n  - flattened flow / automation conditions (bare `field`).\n  Warnings are advisory in `objectstack build` / `validate` (fatal only under `--strict`), matching the tier-3 channel.\n\n## Acceptance (#1928)\n\n- [x] A text/boolean field misused in arithmetic/comparison is flagged at build with an actionable, field-named message.\n- [x] The cases the runtime now handles (`amount / 100`, date-vs-`today()`, equality, string concat, null-guards, flow variables) are **not** flagged.\n- [x] Covers both `Field.formula` / predicates and flow conditions.\n\n## Testing\n\n- `@objectstack/formula` — **219** green (+13: record + flattened cases; number/date/select/equality/concat/null-guard/flow-variable no-warn; scope gating).\n- `@objectstack/lint` — **232** green (+5 integration cases, incl. flow conditions).\n- Both suites green on the cel-js `7.6.1 → 8.0.0` bump; DTS builds type-check clean.\n\n## Not done (needs a decision, out of scope)\n\nThe issue also floated wiring this into an **agent-callable `validate_expression` tool** for authoring-time feedback. That tool does not exist in the codebase today, and the only runtime hook (`validateFlowExpressions` at `registerFlow`) has no object-schema access and only raises errors — so bringing tier-4 there is a runtime change (object-registry injection + a warning channel), not a small follow-up. Left for a separate, sign-off-gated PR.\n\nRefs: #1928, ADR-0032. Runtime arithmetic fix #1930, tier-1 #1931, tier-3 #1933.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Hnji7EEYR2mGt6pY53a8Bm"
+}

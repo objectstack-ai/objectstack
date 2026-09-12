@@ -1,0 +1,32 @@
+{
+  "number": 3010,
+  "kind": "issue",
+  "title": "Standalone authored `action` rows execute but are invisible to MCP list_actions/run_action (declaration-surfacing gap)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T04:37:06Z",
+  "updated_at": "2026-07-16T05:20:26Z",
+  "closed_at": "2026-07-16T05:20:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3010",
+  "body": "## Summary\n\nThe last residual from the #2605 \"declared-but-not-wired\" family, split out so the umbrella can close. This is a **declaration-surfacing** gap, not an execution gap: since #2608, a standalone authored `action` metadata row is registered into the engine by `resyncAuthoredActions` and its body **executes** via the REST `/actions/...` route — but the MCP action surface never sees it, because both MCP resolution paths read declarations exclusively from `object.actions`:\n\n- `listActions` — `packages/runtime/src/http-dispatcher.ts:813` iterates `meta.listObjects()` and collects `obj.actions` only.\n- `resolveActionByName` (backing `run_action`) — `packages/runtime/src/http-dispatcher.ts:1174` — same source.\n\nSo an AI agent calling `list_actions` will never discover a standalone authored action, and `run_action` on its name returns \"Action not found\", even when the row carries `ai: { exposed: true }`. Actions embedded in an authored **object** row are fine on both surfaces (they appear in `obj.actions` via the metadata service).\n\n## Scope notes\n\n- Same declaration-surfacing family as the Studio-rail listing work (`task_8dd7c8a0`): the execution layer (engine registry via `resyncAuthoredActions`, `packages/objectql/src/plugin.ts:1330`) already merges standalone rows + object-embedded rows with artifact-wins semantics — only the *declaration* consumers (MCP bridge) don't.\n- Any fix must preserve the MCP invoke-time gates as-is: `ai.exposed` fail-closed (#2849 / ADR-0011), the ADR-0066 D4 capability gate, and `isHeadlessInvokableAction`.\n- Sketch: have the bridge's declaration source union `meta.listObjects().actions` with standalone `action` items (`metadata.loadMany('action')`), keyed the same way the engine registry keys them (object-scoped vs global), dedup artifact-wins — mirroring `resyncAuthoredActionsNow`'s merge.\n\n## Origin\n\nNoted as \"Residual (not chased here)\" in the #2605 wrap-up comment (https://github.com/objectstack-ai/framework/issues/2605#issuecomment-4884626633); re-confirmed still present on `main` @ `93fd58e` (2026-07-16)."
+}

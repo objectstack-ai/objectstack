@@ -1,0 +1,30 @@
+{
+  "number": 3173,
+  "kind": "issue",
+  "title": "rest/import: 纯 insert 模式(无 matchFields)的重试幂等——importBatchId 方案(#3149 跟进)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-07-18T06:13:38Z",
+  "updated_at": "2026-07-18T08:05:43Z",
+  "closed_at": "2026-07-18T08:05:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3173",
+  "body": "已在 PR #3191(已合并到 main)中修复。采用了候选 C 的精确化变体:**flush 时给每个缓冲 CREATE 行预分配 client 生成的 id**(跨重试稳定;显式用户 id 被尊重),重试按 `id $in` 精确回查、只补插未落库的行。严格优于原三个候选——无 schema 迁移(候选 A)、无\"落账与写入非原子\"问题(候选 B),且合法重复行(纯 insert 同文件两条相同数据)也能正确处理,这是候选 C 原始的行内容指纹方案做不到的(每份副本有独立 id)。原\"钉住 at-least-once\"的用例已翻转为\"零重复\"。真机 better-sqlite3 回归见 `packages/runtime/src/bulk-write-real-driver.integration.test.ts`。\n\n—— #3149 的 insert 模式跟进,随 PR #3191 关闭。"
+}

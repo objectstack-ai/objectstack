@@ -1,0 +1,34 @@
+{
+  "number": 2834,
+  "kind": "issue",
+  "title": "ADR-0057 data lifecycle follow-ups: retire per-plugin sweepers, dev telemetry datasource + db:clean, Studio surface, PG rotation (tracking)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-11T08:10:49Z",
+  "updated_at": "2026-07-15T13:11:04Z",
+  "closed_at": "2026-07-15T13:11:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2834",
+  "body": "Follow-up tracking for **ADR-0057 (system data lifecycle &amp; retention)** after P1–P4 shipped in #2791 (docs/skills in #2818, tracking issue #2786 closed). Each item is independently shippable.\n\n## Items\n\n- [x] **① Retire the per-plugin retention sweepers** — shipped in #2835. `JobRunRetention` / `NotificationRetention` (+ `retentionDays`/`retentionSweepMs` options) removed; the LifecycleService is the one sweeper. Included a fix: the blanket 30d lifecycle retention on `sys_automation_run` (from #2791) could strand suspended approval runs — removed at the time because the declarative contract had no status predicate. That gap was closed in #2837: `retention.onlyWhen` landed, `sys_automation_run` now declares `retention: { maxAge: '30d', onlyWhen: { status: { $in: ['completed', 'failed'] } } }`, and the automation store's bespoke age sweep (`pruneHistory` + `runHistoryRetentionDays`/`runHistorySweepMs`) is retired too — the LifecycleService is now genuinely the one sweeper.\n- [x] **② Dev telemetry datasource + `db:clean`** — shipped in #2835. `objectstack dev` provisions `<primary>.telemetry.<ext>` as the `telemetry` datasource for file-backed SQLite primaries (`OS_TELEMETRY_DB=0` opts out, `<path>` opts in anywhere); new `os db clean` runs the one-time `VACUUM` (smoke-verified 48.9 MB → 0.01 MB, `auto_vacuum=2` adopted).\n- [x] **③ Studio surface for `lifecycle`** — shipped in #2835. `object.form.ts` exposes the full lifecycle block; metadata-forms i18n bundles regenerated with curated zh-CN. The objects-bundle drift this uncovered became item ⑤.\n- ~~**④ PostgreSQL native-partition Rotator**~~ — **dropped (2026-07-15)**. Current PG behavior is correct: rotation falls back to an equivalent age-based reap and the declared bound holds — native `PARTITION BY RANGE` would only make reclamation O(1) instead of row-wise, a pure optimization not worth carrying as an open item while CI has no PostgreSQL service to verify the DDL. The design sketch is preserved in the comments below should it ever be revisited.\n- [x] **⑤ (found during ③) i18n extract-config drift for `*.objects.generated.ts`** — shipped in #2837. Resolved by moving ownership rather than widening the config: the stray sys_* translation copies (`sys_audit_log` / `sys_activity` / `sys_comment` / `sys_presence`) were pruned from the platform-objects bundles and live in their owning packages' bundles (plugin-audit / service-realtime, per ADR-0029 D8) — verified line-by-line, zero translation loss. A new `bundle-ownership.test.ts` guard turns any future stray (in either direction) into a red build, so a plain re-run of `os i18n extract` is safe again.\n\n## References\n\n- ADR: `docs/adr/0057-system-data-lifecycle-and-retention.md` (P0–P4 implemented)\n- P1–P4: #2791 · docs/skills: #2818 · follow-ups ①–③: #2835 · ⑤ + `retention.onlyWhen`: #2837 · original tracking: #2786\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

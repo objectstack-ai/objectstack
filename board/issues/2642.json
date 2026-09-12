@@ -1,0 +1,32 @@
+{
+  "number": 2642,
+  "kind": "issue",
+  "title": "Implement ADR-0089: unify conditional-visibility predicate under `visibleWhen`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-07-05T16:34:35Z",
+  "updated_at": "2026-07-15T13:18:27Z",
+  "closed_at": "2026-07-15T13:18:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2642",
+  "body": "Follow-up to implement the decision in **ADR-0089** (`docs/adr/0089-unify-visibility-predicate-naming.md`), merged in #2641. The ADR is the design decision only — no code has changed yet. This issue tracks the implementation.\n\n## Problem (recap)\n\nThe same *\"show only when the CEL predicate is TRUE\"* concept is spelled three ways by layer, and zod's default strip mode makes a mis-layered key vanish silently:\n\n| Layer | Key today | Location |\n|---|---|---|\n| Data field / field option | `visibleWhen` | `packages/spec/src/data/field.zod.ts:592, 108` |\n| View form section / field | `visibleOn` | `packages/spec/src/ui/view.zod.ts:762, 781` |\n| Page component | `visibility` | `packages/spec/src/ui/page.zod.ts:109` |\n\nCanonical target is **`visibleWhen`** (aligns with the existing `readonlyWhen`/`requiredWhen` family and the `conditionalRequired → requiredWhen` precedent).\n\n## Tasks\n\n- [ ] **D1 — canonical `visibleWhen`.** Accept `visibleWhen` on view form sections/fields (`view.zod.ts`) and page components (`page.zod.ts`), matching the data-field semantics. Document the per-layer binding root (runtime surfaces bind `record` + `current_user`; metadata-editing forms bind `data`).\n- [ ] **D2 — alias + parse-time normalization.** Mark `visibleOn` / `visibility` `@deprecated`; normalize to `visibleWhen` in `parse()` (fold `visibleOn ?? visibility` into `visibleWhen` when the canonical key is absent), mirroring the `conditionalRequired`/`requiredWhen` pattern in `field.zod.ts:594-598`. Register the rename in the deprecation / `spec-changes.json` registry per ADR-0087.\n- [ ] **D3a — `.strict()`.** Tighten the relevant object schemas so a mis-layered / stale-alias visibility key is a parse error, not a silent strip (ADR-0049 enforce-or-remove, ADR-0078 no-silently-inert). Sweep the monorepo + example apps before flipping strict on.\n- [ ] **D3b — lint rule.** Add a `@objectstack/lint` rule flagging (a) a deprecated alias in freshly authored source (autofix → `visibleWhen`), and (b) a predicate whose binding root mismatches its layer (`data.` in a runtime form predicate, or `record.` in a metadata form predicate).\n- [ ] **Codemod first-party sources.** `packages/` + `examples/`: `visibleOn` (~13 files) / `visibility` (~34 files) → `visibleWhen`. Update `content/docs/**` and the `objectstack-ui` / `objectstack-data` skills (including the layer→binding-root table).\n- [ ] **Renderer reads.** Confirm ObjectUI form + page renderers read the normalized `visibleWhen`.\n- [ ] **Deprecation window then removal.** Keep aliases for the standard window; remove in a future major.\n\n## Out of scope\n\n- Boolean `visible` (Tab on/off, `view.zod.ts:276`) — a static flag, not a predicate; keeps its name and type per ADR-0089 D4.\n- `hidden` (field boolean) and `visibleFields` (gallery card array) — unrelated.\n\n## References\n\n- ADR-0089 (this repo, `docs/adr/0089-unify-visibility-predicate-naming.md`) · merged in #2641\n- Precedent: `conditionalRequired → requiredWhen` resolution in `field.zod.ts` + coalesce in `packages/objectql/src/validation/rule-validator.ts:378`\n- Related ADRs: 0087 (conversion-over-notification), 0049 (enforce-or-remove), 0078 (no-silently-inert), 0085 (already removed a consumer-less `visibleOn`)"
+}

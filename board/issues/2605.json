@@ -1,0 +1,34 @@
+{
+  "number": 2605,
+  "kind": "issue",
+  "title": "Tracking: Studio-authored metadata that's declared but never wired at runtime (the 'silently does nothing' family)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-05T00:40:33Z",
+  "updated_at": "2026-07-16T04:52:13Z",
+  "closed_at": "2026-07-16T04:52:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2605",
+  "body": "## The pattern (tracking / umbrella)\n\nA recurring, high-severity class surfaced by the online-authoring push and the publish-rebind consumer audit: a business user **authors metadata in the Studio, publishes it, and it's stored + shown as live — but the runtime never actually WIRES it, so it silently does nothing** (often not even after a restart). Code-reading and mocked unit tests pass; only a real-runtime probe reveals it (the #2560 lesson). This is the same silent-failure theme as the just-shipped #4 (inline validation) and #6 (enable/disable) work — \"you authorized it, it quietly doesn't take effect.\"\n\nThis issue consolidates the remaining members of that family into one place, now that the **first fix has landed and established the pattern**.\n\n## ✅ Fixed — the template\n\n- **Authored hooks never executed their body** — #2588, fixed by #2596 (`2d567cbc7`): wired the engine's default `bodyRunner` (+ `functions`) into the `metadata-service` hook-bind path and rebinds live on publish. **This is the reference implementation for the rest below.**\n\n## 🔴 Open — same \"declared-but-not-wired\" family\n\n1. **Authored actions' handler may never run** — **UNVERIFIED, untracked (the reason for this issue).**\n   `executeAction` reads a boot-populated `this.actions` Map filled **only from the app manifest** via `registerAction`; objectql does **not** load `action` metadata at boot. So a Studio-authored action (a script/`body` action) is likely dead at runtime — the exact parallel of the hooks gap, and **not** covered by the hooks fix (#2596 touched the hook-bind path only). Next step: **runtime-probe it** (author a script action into a writable base, publish, invoke via `run_action` / a flow action node, check before/after/restart). If broken, fix by reusing the #2596 bodyRunner wiring for the action path.\n\n2. **Authored translations never reach the i18n runtime** — #2591. `loadTranslations` is called only with static bundles (app `bundle.translations`, plugin `translations/`); **nothing reads `translation` metadata items** into service-i18n (`getMetaItems({type:'translation'})` → 0). `translation` is `allowRuntimeCreate:true` but unwired → a Studio-authored translation is a dead-end on publish AND after restart.\n\n3. **Sharing rules created at runtime don't bind until restart** — #2592. Enforcement reads `sys_sharing_rule` rows live, but the **hook binding** (`bindRuleHooks`, `sharing-plugin.ts:201`) is boot-only. Different trigger from the rest: authoring a rule is a **data insert**, so `metadata:reloaded` never fires → needs a `sys_sharing_rule` data-change rebind.\n\n## ✅ Proven-fine — do NOT chase (audit, runtime-verified)\n\n`validation` rules, `object` definition edits, action **schema**, `report_schedule`, and permission-sets / RLS / FLS all go **live on publish without restart** (read live per-request, not boot-cached). Confirmed by adding a field to an already-cached object and publishing → the new field was accepted without a restart.\n\n## Related but distinct (cross-reference — separate work, already tracked)\n\n- Automation **run-history observability** follow-ups (retention / discoverable Runs surface / durable run detail) — #2585.\n- Studio rail **doesn't list published metadata for writable-base packages** — `task_8dd7c8a0` (in progress).\n- App-nav item authoring is **off-spec** (`kind`/`path` not in the discriminated-union spec; runtime `resolveHref` ignores it) — objectui #2245.\n\n## Reusable runtime-verify harness\n\nThe decisive method for any \"authored X takes effect at runtime\" claim: `com.example.ops` (an unregistered writable-base package) + a probe object/hook/action + `POST /packages/:id/publish-drafts` + a **before / after / restart** check. Code-reading and mocked tests pass while the real runtime is broken — always probe the running server.\n\n## Suggested sequencing\n\n1. **Verify + (if broken) fix authored actions' handler** — most likely the biggest remaining hole, and reuses the #2596 bodyRunner wiring.\n2. **i18n translations** (#2591).\n3. **Sharing-rule data-change rebind** (#2592).\n\nEach is a real feature-fix with its own design surface (e.g. \"should authored actions/hooks run sandboxed JS?\" — a security gate), not a generic `metadata:reloaded` subscription.\n"
+}

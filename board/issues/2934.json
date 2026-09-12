@@ -1,0 +1,35 @@
+{
+  "number": 2934,
+  "kind": "pull_request",
+  "title": "feat(plugin-security): A4 — managed_by 三态统一 + listView 露出 (#2920)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-14T16:05:01Z",
+  "updated_at": "2026-07-15T00:20:35Z",
+  "closed_at": "2026-07-15T00:20:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-15T00:20:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2934",
+  "body": "## A4 — 权限来源三态统一 + 露出（framework 侧）\n\nTracking: objectstack-ai/framework#2920. 跨仓配对 PR：objectstack-ai/objectui#2501。\n\n管理员现在能用**同一套词表**分清权限集/岗位/能力是「平台发的 / 应用发的 / 自己建的」。三个 RBAC 目录对象的 `managed_by` 此前各说各话，本 PR 统一为 **platform / package / admin**（以 `sys_capability` 为准）。\n\n### 改动\n- **`sys_permission_set.managed_by` / `sys_position.managed_by`**：`text` → 约束 `select`，选项 `platform` / `package` / `admin`，`defaultValue: 'admin'`，`readonly` —— 与 `sys_capability` 完全一致。\n- **写入端收敛到规范词表**：\n  - 内置身份/受众锚点岗位（`bootstrapBuiltinRoles`）：`managed_by: 'system'` → **`'platform'`**。\n  - 环境/Studio 自建权限集（`upsertEnvPermissionSet` 创建路径）：`'user'` → **`'admin'`**。\n  - 声明式包权限集（`'package'`）与平台能力（`'platform'`）本就是规范值，未动。\n- **`sys_position` 四个 listView**（`active` / `default_positions` / `custom` / `all_positions`）补上 `managed_by` 列，与 capability/permission-set 视图对齐；并加入 `highlightFields`。\n- **i18n**：`managed_by` 字段 + 选项标签（platform/package/admin），三对象 × 四语言（en / zh-CN / ja-JP / es-ES）补齐；顺带补 `sys_capability` 的 scope 选项标签。\n\n### 历史数据兼容策略（无破坏性 migration）\n关键取舍：**没有一处运行时逻辑对分歧的旧值分支**——所有访问决策只读 `'package'` / `'platform'`（两者跨三对象本就一致、未改），因此这次是**纯展示词表重命名，永不改变任何鉴权结果**。\n\n- 内置岗位、声明式包权限集在下次 `bootstrap` upsert 时自愈到规范值。\n- 残留旧值（环境自建集的 `'user'`、旧岗位的 `system`/`config`/`user`）由新增的幂等 `kernel:ready` 协调器 **`normalizeManagedByVocab`** 重写（`system→platform`、`config→package`、`user→admin`）。字段为 `readonly`，故以 `isSystem` 上下文写入。\n- 之所以选协调器而非一次性 migration 脚本：本 kernel 的既定约定就是「幂等 bootstrap 即 migration」（`bootstrapBuiltinRoles` / `bootstrapDeclaredPermissions` 等皆如此），与之保持一致。\n\n### 验证\n- `pnpm --filter @objectstack/plugin-security test` —— **341 passed（16 files）**。\n- `pnpm --filter @objectstack/plugin-security build` —— ESM/CJS/DTS 均通过。\n- 新增 `normalize-managed-by.test.ts`（重写正确性 + 幂等 + 空 ql 容错）；`rbac-objects.test.ts` 新增三对象词表一致性 + 岗位视图列断言；projection/anchor 测试的创建路径断言随写入端更新（`user`→`admin`、`system`→`platform`）。\n\n### 存疑点\n- `managed_by` 由 `text`→`select`。`select` 只在写入时校验选项、读取不校验，故残留旧值行仅在协调器跑到前展示原始字符串，无硬失败。\n- 未改 `security-plugin` 的 package 伪造闸（仍只认 `'package'`），亦未改对象级 `managedBy: 'config'`（那是 schema 保护级别，与记录级 `managed_by` 字段无关）。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_019QRUvVfpvSycAHMMF2xTxs"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 3191,
+  "kind": "pull_request",
+  "title": "feat: partial-success batch insert + exact import-retry idempotency (#3172, #3173)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/l",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T07:10:29Z",
+  "updated_at": "2026-07-18T08:19:10Z",
+  "closed_at": "2026-07-18T08:05:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-18T08:05:21Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3191",
+  "body": "## Summary\n\nFollow-ups to the #3161 bulk-write hardening, closing the two gaps it left documented. Two commits, one per issue.\n\nFixes #3172, #3173.\n\n## #3172 — partial-success batch insert (root fix for the #3152 leftover)\n\nA batch that died in validation forced `bulkWrite`'s whole-batch degradation, which re-ran the entire `engine.insert` — firing beforeInsert hooks a second time on the good rows.\n\n- **`engine.insertMany(object, rows, options)`** (new, objectql): bad rows are culled per-row *after* beforeInsert (encryption / validation / autonumber failures each captured per row), survivors are written in **one** driver batch, and the return is one outcome per input row in input order (`{ok, record}` / `{ok: false, error}`). afterInsert, summary recompute, and realtime fire only for written rows; dead rows consume no autonumber sequence value. Plain `insert(array)` semantics are untouched (still all-or-abort), so no existing caller changes behavior. Implemented as a flag inside the existing batch path — no code duplication.\n- **`bulkWrite.writeBatchPartial`** (optional, core): per-row failures from it are final verdicts — no `writeOne` degradation for them (that would re-fire the hooks). Only a *thrown* error (transient, `ERR_BULK_RESULT_MISMATCH`) still degrades, with the same retry semantics as `writeBatch`.\n- **Adoption**: seed loader's `flushPendingInserts` and the import runner (via the protocol's new `insertManyData`, same readonly ingress strip as `createManyData`) switch over with feature detection — a legacy engine/protocol keeps the previous whole-array + degradation behavior.\n- `SummaryRecomputeError` (#3147) composes: in partial mode its `written` payload is the outcome array, and the existing seed/import recovery handles it unchanged.\n\nAcceptance (pinned by tests): the #3152 probe `[{good1},{no-name},{good2}]` now runs beforeInsert **exactly once** per row, afterInsert only for written rows, autonumbers stay contiguous.\n\n## #3173 — exact import-retry idempotency via pre-assigned row ids\n\nPure-insert imports (no `matchFields`) had no natural key to recheck on a commit-then-lost-response retry, so #3161 left them documented as at-least-once (a retry duplicated the batch).\n\n- Every buffered CREATE row gets a **client-generated id at flush time** (stable across retry attempts; an explicit user-supplied id is respected). Both the SQL driver's `create`/`bulkCreate` honor caller-provided ids, and the protocol's readonly strip does not touch `id`, so this needs **no schema migration**.\n- On `attempt > 1` (or after an uncertain batch outcome) the runner rechecks by **id `$in`** and re-inserts only rows that truly did not land. This replaces the previous `matchFields` approximation and is exact for *every* write mode — including files with legitimate duplicate rows in insert mode, which no natural-key or fingerprint recheck could distinguish (each copy has its own id).\n- The design alternatives from the issue (system `sys_import_job_id` column, job-side accounting, `created_at`-window fingerprinting) were evaluated and rejected: the column needs a migration; fingerprinting has a real data-loss edge for back-to-back identical imports plus DB-vs-app clock skew on Postgres/MySQL.\n- The previously pinned at-least-once test is flipped: pure-insert retry after commit now expects **zero duplicates**.\n\n## Tests\n\n- core `bulk-write.test.ts`: `writeBatchPartial` verdict/degradation/mismatch cases (24 total in file).\n- objectql `engine-insert-many.test.ts`: the #3152 probe (hooks once), single-driver-batch + contiguous autonumbers, all-bad batch, plain-insert regression.\n- metadata-protocol `seed-loader-retry.test.ts`: partial-success engine → bad row is per-row verdict, no re-run.\n- rest `import-runner-idempotency.test.ts`: pure-insert exactly-once, legitimate-duplicate-rows survival, `insertManyData` partial path, plus existing #3147/#3149 regressions.\n\n## Verification\n\n- `pnpm build` — 71/71 (type-checks across all packages).\n- `pnpm test --concurrency=2` — **131/131** task suites pass. (Unbounded concurrency OOM-kills random vitest workers in this container; the failures reproduced on untouched packages and each passed standalone.)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01APnSDJneEDRh3Z51KGCLga\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01APnSDJneEDRh3Z51KGCLga)_"
+}

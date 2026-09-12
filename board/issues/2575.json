@@ -1,0 +1,30 @@
+{
+  "number": 2575,
+  "kind": "issue",
+  "title": "主表记录详情页默认显示子表时，应该支持增删改查，支持查看记录详情，支持显示子表对象的action。",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-04T12:29:51Z",
+  "updated_at": "2026-07-15T13:29:06Z",
+  "closed_at": "2026-07-15T13:29:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2575",
+  "body": null
+}

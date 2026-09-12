@@ -1,0 +1,32 @@
+{
+  "number": 3005,
+  "kind": "issue",
+  "title": "澄清:viewAllRecords / modifyAllRecords 在 public_read_write 下失效,是否为开源版有意设计?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T03:38:05Z",
+  "updated_at": "2026-07-16T04:53:14Z",
+  "closed_at": "2026-07-16T04:53:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3005",
+  "body": "## 背景\n\n框架 **15.0.0**,对象采用默认 OWD `public_read_write`。\n\n我们观察到(真机,11 用户 × 51 对象):\n\n- **读跨属主全开**——任意已认证用户可读每个对象的每条记录,包括机密行;权限集是否授予 `viewAllRecords` 没有任何区别。\n- **无法授予跨属主写**——即使权限集带 `modifyAllRecords: true`,行级属主门仍拦非属主的 update/delete。因此在 `public_read_write` 下,「属主可编辑 + 主管可编辑任意记录」通过 RBAC 无法实现。\n\n## 问题\n\n这在开源版里是有意设计吗?我们把 #2920 理解为:开源版**fail-closed 到 owner-only**,而层级 / all-records 提权是**企业版**能力、不随开源框架发布。若如此,则 `viewAllRecords` / `modifyAllRecords` 在 `public_read_write` 下失效属于**有意设计**,我们会把「主管看 / 改全部」当作企业版 / admin / Hook 层面的事,而不是 bug。\n\n能否确认?如果确属设计,建议在 sharing 文档里加一行说明(「`*AllRecords` 为企业版能力;开源版在 `public_read_write` 下为 owner-only」),可以省掉后来者的同样排查。\n\n如果这些开关本应在开源版生效,我们再另开 bug 附复现。\n"
+}

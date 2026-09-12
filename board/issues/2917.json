@@ -1,0 +1,37 @@
+{
+  "number": 2917,
+  "kind": "issue",
+  "title": "docs(permissions): 系统管理员操作手册（面向客户管理员的 onboard 任务手册）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "enhancement",
+    "priority:p2",
+    "size/m"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-14T13:41:21Z",
+  "updated_at": "2026-07-14T16:19:09Z",
+  "closed_at": "2026-07-14T16:19:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2917",
+  "body": "## 背景\n\n系统管理员第一次打开 Setup，面对几十个「岗位 / 权限集」时不知道从哪里下手。当前文档从平台 / 应用开发者视角写，没有一份**面向客户系统管理员**、以任务为主线的操作手册（\"我是管理员，第一步做什么\"）。\n\n这直接对应我们要服务的三类角色之一——**客户系统管理员**（负责管理用户、配置部门、配置权限），而这一角色的入门文档目前是缺口。\n\n## 目标\n\n在权限文档门户新增一篇 **Administrator Guide（系统管理员操作手册）**，以「onboard 一个租户」的真实任务为主线，把散落在各处的能力串成一条可照做的路径。核心信息：**日常 90% 就是给人分配岗位，其余基本都已内置好了。**\n\n## 内容大纲（已成稿草案）\n\n草案已写好（`administrator-guide.mdx`，英文 MDX，~213 行），结构：\n\n1. **四个概念，只有一个每天用** —— capability / permission set / position / user 的分工表 + 「90% 规则」（平台/应用发的岗位别自己从零搭）。\n2. **一眼看懂的流程** —— onboard = 建组织 → 加人 → 给角色 → 验证，四步有序。\n3. **Step 1 建组织**（Business Units 树，附 department / team / organization 区分说明）。\n4. **Step 2 管理用户**（Invite / Create / Import，停用/解锁/改密/impersonate 生命周期）。\n5. **Step 3 给角色**（分配 position + 放进 business unit；标注当前粗糙点：BU 成员/直接授权还没收进用户页单面板）。\n6. **Step 4 验证**（Impersonate + Studio Access Explain）。\n7. **Step 5 配置权限（仅当发好的岗位不合适）** —— 一句话立规矩：**权限在 Studio 设计、在 Setup 分配**；矩阵编辑器是结构化电子表格式，不手写 JSON。\n8. **Quick paths / 常见问题 / 「东西在哪」速查表**。\n\n草案已如实标注若干「今天的粗糙点」：自助改密未接线（cloud#580）、BU 成员/直接授权入口分散、BU 树是只读展开网格（靠 New/Edit 选父节点重挂而非拖拽）。\n\n## 落地\n\n- **落点**：`content/docs/permissions/`，`meta.json` 在 `index` 后插入 `administrator-guide`。\n- **前置修正**：`delegated-administration.mdx` 的 frontmatter `description` 是重复垃圾串，一并修。\n- **验证**：docs 门户浏览器实测渲染（标题/表格/链接），别只读 MDX 推断（见 memory「verify UI in browser」教训）。\n\n## 备注\n\n草案此前随一个 draft PR 落到 worktree（因本地 git 环境损坏，需在干净环境复核该 PR 是否已合并、内容是否完整；若丢失则以本 issue 的大纲重建）。本 issue 作为该操作手册的跟踪单。\n"
+}

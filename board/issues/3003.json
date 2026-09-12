@@ -1,0 +1,35 @@
+{
+  "number": 3003,
+  "kind": "issue",
+  "title": "安全:静态字段 readonly: true 仅 UI 层生效、服务端不强制 → 审批/状态/金额字段可被直接 PATCH 绕过写入(FLS 缺口)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T03:35:44Z",
+  "updated_at": "2026-07-16T05:13:26Z",
+  "closed_at": "2026-07-16T05:13:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3003",
+  "body": "## 概述\n\n字段声明为**静态** `readonly: true` 时,该限制**只在 UI 层生效**,服务端**不会**从更新载荷里剥离该字段。因此任何能 `update` 该记录的用户,都可以用一次直接的 REST `PATCH` 写入这个字段。凡是依赖 `readonly: true` 来保护「审批状态 / 审批节点 / 金额」等字段完整性的对象,都会被绕过。\n\n对比:`readonlyWhen: <CEL>` 是**服务端强制**的——命中条件的字段在更新时被静默剥离(HTTP 200,值不变)。两者不一致。\n\n- 框架版本:**15.0.0**\n- 受影响对象的共享模型:`public_read_write`(默认 OWD)\n\n## 影响(真机复现)\n\n对象 `sporadic_application`(零星派工申请单)带 4 级审批流。`approval_status`、`approval_stage` 声明为 `readonly: true`;`confirmed_total` 是金额字段。\n\n通过 **Console UI + 同一登录会话内的浏览器 fetch**(同一个已登录 worker 的 cookie,非管理员,`isSystem=false`)端到端复现:\n\n1. worker 在 Console UI 新建草稿。创建表单**根本不渲染** `approval_status` / `confirmed_total`——UI 层看起来受保护,唯一合法动作是「提交审批」按钮。记录停在 `draft`。\n2. 在同一登录会话的浏览器里直接发:\n   ```\n   PATCH /api/v1/data/sporadic_application/<id>\n   { \"approval_status\": \"approved\", \"approval_stage\": \"approved\",\n     \"confirmed_total\": 99999 }\n   → HTTP 200\n   ```\n3. 刷新详情页:状态显示**审批通过**,流水线跳到终节点,`confirmed_total = 99,999.00`,并冒出下游「派工」动作按钮。\n\n最终效果:申请人**自我批准、完全跳过 4 级审批**,并自定结算金额。\n\n**系统性**——在**第二个对象**上用同样手法坐实:`assessment`(考核单,3 级签核,`assessment_status` 同样是 `readonly: true`)——`PATCH { assessment_status:'approved', approval_stage:'approved' }` → 200,dept_head → gm → finance 三级全跳过。凡是依赖 `readonly: true` 保护审批 / 状态 / 金额 / 判定字段的对象,一律中招。\n\n补充:`RECORD_LOCKED` 只在审批流**活动态(pending)**时拦直接 PATCH。记录仍在 `draft`(流从未启动)时不会被锁,而 `readonly: true` 又只是 UI 层——所以 draft → approved 是一步直跳。\n\n## 期望行为\n\n`readonly: true` 的字段级写入应当服务端强制,和 `readonlyWhen` 字段在更新时被剥离的方式一致(insert 豁免)。即:对非特权写入者,静态 `readonly: true` 字段应在更新载荷里被静默丢弃。\n\n## 线索 / 指引\n\n- `readonlyWhen` 已有服务端剥离路径(在 `beforeUpdate` 之后、基于合并的 `{...previous, ...data}` 求值,insert 豁免)。不一致点在于:静态 `readonly: true` 没有走同一条剥离路径。\n- 我们应用侧的临时绕行:把 `readonly: true` 改成 `readonlyWhen`,或加一个高优先级 `beforeUpdate` 守卫,在 `!ctx.isSystem` 时剥离这些受保护字段。\n"
+}

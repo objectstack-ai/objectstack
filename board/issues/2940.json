@@ -1,0 +1,34 @@
+{
+  "number": 2940,
+  "kind": "pull_request",
+  "title": "fix(plugin-security): #2937 — Layer 0 insert post-image 租户检查",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-15T01:34:34Z",
+  "updated_at": "2026-07-15T01:46:03Z",
+  "closed_at": "2026-07-15T01:46:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-15T01:46:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2940",
+  "body": "## 背景\n\n`Closes #2937`（安全修复 + 行为变更）。多组织模式（`tenancy.mode='multi'` + `@objectstack/organizations`）下，一个普通用户此前可以 `insert` 一条**伪造 `organization_id`**（指向别的租户）的业务记录并使其落进受害租户。ADR-0095 D1 的 Layer 0 租户墙 AND-composed 到读 + update/delete 的 **pre-image**，但 insert 没有 pre-image、也不带 AST，从未被门控（是 D1 读侧 W1 的写侧未竟部分）。\n\n配套 cloud PR：**objectstack-ai/cloud#829**（auto-stamp 权威覆盖，纵深防御）。两处任一被绕过，另一处仍堵住跨租户落地。\n\n## 改动\n\n- **`security-plugin.ts` 新增中间件步骤 3.7**：对 insert 的 **post-image** 复用读侧同一套 Layer 0 决策（`computeInsertTenantCheckFilter` → `computeLayeredRlsFilter` 的 `layer0`）做校验 —— 一个**显式提供**的 `organization_id` 必须等于调用者的活动组织，否则 **fail-closed** 拒绝（`PermissionDeniedError`）。\n  - 规则与读侧完全一致：单组织/隔离未激活、非租户对象（无 `organization_id` 列或 `tenancy.enabled:false`）、platform-admin 姿态豁免的对象 → 不适用；无活动组织的用户提供任意 org_id → 拒（deny sentinel）。\n  - **只校验显式提供的值**：缺省（不带 `organization_id`）的 insert 由 `@objectstack/organizations` 的 auto-stamp 补全 —— 职责分离，因此本检查**与 auto-stamp 中间件的注册顺序无关**。\n- **`authz-matrix-gate.test.ts`**：新增 `describe('[#2937] Layer 0 insert post-image tenant guard')` 八格。\n- **`authz-conformance.matrix.ts`**：新增 `multi-tenant-insert-postimage` ledger 行（单元证明；多组织为企业版，不进 open-core dogfood boot）。\n\n## 行为 delta（release-notes callout）\n\n此前能成功的「带跨租户 `organization_id` 的用户级 insert」现被**拒绝**。缺省 insert、system-context 写、platform-admin 豁免对象、单组织模式 **均不受影响**。\n\n## 验证（实测）\n\n- `pnpm --filter @objectstack/plugin-security test` → **391 passed（18 files）**，含新增 8 格 insert 测试。\n- `authz-conformance.test.ts`（ledger）→ **1 passed**。\n- `tsc --noEmit`（plugin-security）→ **clean**。\n- `rls-multitenant.dogfood.test.ts` → skipped（企业版 `@objectstack/organizations` 才激活多组织路径 —— 与 issue 说明一致，故以 unit 矩阵门覆盖）。\n\n## Reviewer checklist（重点：合法代客设 org_id 不受影响）\n\n- [ ] **系统上下文豁免**：`isSystem` 在 `security-plugin.ts` 中间件入口（L513）即 `return next()`，本检查不触及。已确认 cloud 的每-org seed replay / `clone-org-seed-data.ts` / `claim-orphan-org-rows.ts` 全部走 `SYSTEM_CTX = { isSystem: true }`，它们**故意**为新 org 设置 explicit（跨 org）`organization_id` —— 这些合法写路径保持原样。\n- [ ] **缺省 insert 不被误伤**：`suppliedOrg != null && suppliedOrg !== ''` 门控，缺省值放行（矩阵门 `member inserting with NO organization_id passes the wall`）。\n- [ ] **platform-admin 姿态**：public 业务对象上 admin 仍被拒（无豁免），private/tenancy-disabled 对象上豁免 —— 与读侧 D1 同规则。\n- [ ] 与 cloud auto-stamp 覆盖为纵深防御，非重复；确认注册顺序无关的论证成立。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_019QRUvVfpvSycAHMMF2xTxs"
+}

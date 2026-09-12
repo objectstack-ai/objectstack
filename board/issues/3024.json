@@ -1,0 +1,36 @@
+{
+  "number": 3024,
+  "kind": "pull_request",
+  "title": "feat(connector-openapi): resolve providerConfig.spec from a package-relative file path (#3016)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T05:27:19Z",
+  "updated_at": "2026-07-16T07:48:57Z",
+  "closed_at": "2026-07-16T07:48:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-16T07:48:55Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3024",
+  "body": "Closes #3016(ADR-0096 后续项,承接 #2977 / #2994 / #3001)\n\n## 背景\n\nADR-0096 的典型示例把 OpenAPI 实例写成 `providerConfig: { spec: './billing-openapi.json' }`,但已落地的 `openapi` provider 工厂只接受内联文档对象或 http(s) URL,文件路径会被直接拒绝。本 PR 补全 spec 联合形态:**内联对象 | 文件路径 | 远程 URL**。\n\n## 设计\n\n文件系统访问不放进 connector 包,而是由宿主注入能力(与 ADR-0096「provider 工厂只依赖 `@objectstack/spec` 纯类型」的结构保持一致):\n\n- **`@objectstack/spec`** — `ConnectorProviderContext` 新增可选的 `loadPackageFile(relativePath)` 能力(纯类型,Prime Directive #2):按声明该 connector 的 stack/package 根目录解析相对路径并读取 UTF-8 文本;无文件系统的宿主(edge/browser)为 `undefined`。另更新 `providerConfig` 的 describe/TSDoc,自动生成的 references 文档会带上 spec 三种形态。\n- **`@objectstack/service-automation`** — 新增 `packageRoot` 插件选项(相对文件引用的解析基准,默认 `process.cwd()`)与导出的 `createPackageFileLoader(packageRoot)`:实现**根目录约束**(拒绝绝对路径与 `..` 逃逸路径,含 Windows 盘符形式);`node:fs`/`node:path` 在闭包内懒加载,非 Node 宿主只有真正解引用文件时才会失败。`materializeDeclaredConnectors` 将该能力注入每个 provider 工厂的 ctx。读取/解析失败沿用既有 reconcile 策略:**启动时 fatal,reload 时跳过该条目**(旧连接器继续服务)。\n- **`@objectstack/connector-openapi`** — 非 URL 的字符串 `spec` 现在经 `ctx.loadPackageFile` 读取并按 OpenAPI JSON 解析;文件缺失/不可读、JSON 不可解析、宿主无文件访问能力各有清晰报错。\n- **`@objectstack/cli`** — `serve`/`dev` 把项目目录(`objectstack.config.ts` 所在目录)作为 automation 服务的 `packageRoot` 传入,与 standalone sqlite 默认库的锚定方式一致。\n\n## Showcase 示例(第二个提交)\n\n新增 `StatusOpenApiConnector`:`provider: 'openapi'` 声明式实例,OpenAPI 文档以包相对路径引用(`src/system/connectors/status-openapi.json`),由无参 `ConnectorOpenApiPlugin`(只贡献 provider 工厂)在启动时物化;`getHealth` 指向运行中的服务器自身 `GET /api/v1/health`,零外部依赖。与既有 `rest` 内联实例(`StatusApiConnector`)互补,并同步修正了 `connectors:` 集合还是「纯 descriptor」时代的过期注释与 coverage 说明。\n\n**实机验证**:`--fresh` 随机端口启动 showcase,`GET /api/v1/automation/connectors` 列出 `showcase_status_openapi`(origin: declarative,action `getHealth`)。\n\n## 测试\n\n- `connector-openapi/openapi-provider.test.ts`:文件路径 happy path(经注入的 loader)、loader 失败透传、JSON 不可解析、宿主无文件访问;既有内联/URL 用例不变。\n- `service-automation/connector-materialization.test.ts`:`createPackageFileLoader` 单测(happy path、绝对路径拒绝、`..` 逃逸拒绝、缺失文件报错含解析后路径);物化策略集成测试(工厂收到可用的 `loadPackageFile`、缺失文件启动 fatal、逃逸路径启动 fatal、reload 软失败且旧连接器继续服务)。\n- `pnpm turbo test`(spec / service-automation / connector-openapi / example-showcase)全绿;`@objectstack/cli` build 通过。\n\n## 其他\n\n- 更新 ADR-0096「Deliberate scope boundaries」中原先声明的 non-goal,记录本次交付方式。\n- 已按要求添加 changeset(4 个包 minor)。\n- 已知边界:file-path spec 的**文件内容**变化不会触发 reload 重物化(签名只覆盖条目本身,与 URL spec 行为一致)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016eY7byWABTUPtJG7R2AEFU"
+}

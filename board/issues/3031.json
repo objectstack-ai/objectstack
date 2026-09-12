@@ -1,0 +1,32 @@
+{
+  "number": 3031,
+  "kind": "issue",
+  "title": "auth: create-user 400s when a password is typed while `generatePassword` keeps its default (true)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T08:01:55Z",
+  "updated_at": "2026-07-16T13:09:01Z",
+  "closed_at": "2026-07-16T13:09:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3031",
+  "body": "## Problem\n\nIn the console Setup app, the **Create User** dialog defaults `generatePassword: true` (checked). If the admin also types a password — which the field label explicitly invites: *\"Password (leave empty to generate)\"* — the request carries both:\n\n```json\n{\n  \"generatePassword\": true,\n  \"mustChangePassword\": true,\n  \"email\": \"user@example.com\",\n  \"name\": \"T1\",\n  \"password\": \"A123456\"\n}\n```\n\nand `POST /api/v1/auth/admin/create-user` rejects it:\n\n```json\n{\"success\": false, \"error\": {\"code\": \"invalid_request\", \"message\": \"Provide either password or generatePassword, not both\"}}\n```\n\nSo the most natural flow — open dialog, type a password, submit — **always fails**. (The failure then also crashes the console page; that's a separate objectui bug: objectstack-ai/objectui#2579.)\n\n## Why the client can't fix this\n\nThe action-param `visible` CEL predicate (see `packages/spec/src/ui/action.zod.ts`) is evaluated once when the dialog opens and its scope is `current_user / app / data / features` — it **cannot reference other params' live values**, so the dialog can't hide/uncheck the checkbox when the admin starts typing a password.\n\n## Fix (server-side semantics)\n\n`resolvePassword` in `packages/plugins/plugin-auth/src/admin-user-endpoints.ts` now treats an explicit **non-empty** password as an unambiguous override of `generatePassword`:\n\n- explicit password present → use it (complexity-checked as before), `temporaryPassword` is **not** returned;\n- password empty/absent + `generatePassword: true` → generate a temporary password (unchanged);\n- neither → 400 (unchanged).\n\nApplies to both `create-user` and `set-password` (`newPassword`). Backward compatible: the only behavior change is that a previously-rejected request now succeeds with the intent the label promised.\n"
+}

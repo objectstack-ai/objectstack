@@ -1,0 +1,30 @@
+{
+  "number": 2802,
+  "kind": "issue",
+  "title": "调查（核心）：评估“服务不可用”的重试语义",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T23:47:46Z",
+  "updated_at": "2026-07-16T10:38:05Z",
+  "closed_at": "2026-07-12T03:00:41Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2802",
+  "body": "## 观察到的行为\n\n在本地框架代码中进行手工验证后，默认暂时性错误分类器得到以下结果：\n\n- `Error('service unavailable')` 被分类为非暂时性错误。\n- `Error('server unavailable')` 被分类为暂时性错误。\n\n<details>\n<summary>手工复现命令及输出</summary>\n\n在框架仓库根目录执行：\n\n```bash\npnpm exec tsx -e \"import { defaultIsTransientError } from './packages/core/src/utils/bulk-write.ts'; console.log('classifiedTransient=' + defaultIsTransientError(new Error('service unavailable')))\"\n```\n\n```text\nclassifiedTransient=false\n```\n\n对照用例：\n\n```bash\npnpm exec tsx -e \"import { defaultIsTransientError } from './packages/core/src/utils/bulk-write.ts'; console.log('serverUnavailable=' + defaultIsTransientError(new Error('server unavailable')))\"\n```\n\n```text\nserverUnavailable=true\n```\n\n</details>\n\n## 判定依据\n\n- 默认暂时性错误分类器由 #2680 引入。\n- 重试函数只有在分类结果为 `true` 时才会继续重试。\n- 本地手工验证确认：\n  - `service unavailable` 的分类结果为 `false`；\n  - `server unavailable` 的分类结果为 `true`。\n- 尚未测试真实的 Turso/libSQL 错误对象和错误信息。\n- SQLite 无法自然复现远程服务不可用故障。\n- 尚未验证远程写入已经提交但响应丢失时的重复写入风险。\n\n已经确认本地分类器存在上述行为，但它**目前不是已确认的生产环境错误**。在获得具有生产代表性的证据之前，该问题保持关闭。\n\n建议：需要产品决策。\n"
+}

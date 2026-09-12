@@ -1,0 +1,36 @@
+{
+  "number": 3118,
+  "kind": "pull_request",
+  "title": "fix(cli): tolerate the `--` separator pnpm injects when forwarding script args (#3114)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T11:43:29Z",
+  "updated_at": "2026-07-17T12:11:21Z",
+  "closed_at": "2026-07-17T12:11:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-17T12:11:19Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3118",
+  "body": "Fixes #3114.\n\n## The bug\n\nThe AGENTS.md-documented backend-debug flow fails at the repo root:\n\n```\n$ pnpm dev -- --fresh -p 44637\n ›   Error: Unexpected arguments: -p, 44637\nExit status 2   # + a help dump\n```\n\nThis is the canonical multi-agent flow, so **every agent following AGENTS.md hits it**.\n\n## Root cause\n\npnpm appends forwarded args to a script **verbatim, including the `--`**, and each nested `pnpm --filter` hop preserves it. Confirmed by isolating each hop:\n\n| invocation | script receives |\n|:---|:---|\n| `pnpm run x -- --fresh -p N` | `-- --fresh -p N` ← **pnpm keeps the `--`** |\n| `pnpm run x --fresh -p N` | `--fresh -p N` |\n| `pnpm --filter c dev --fresh -p N` | clean — the filter hop is not the culprit |\n| `pnpm --filter c dev -- --fresh -p N` | `--` preserved verbatim |\n\nSo the showcase's `objectstack dev --seed-admin` runs as:\n\n```\nobjectstack dev --seed-admin -- --fresh -p 44637\n```\n\noclif reads `--` as POSIX end-of-flags, so everything after it becomes **positional**. The failure is worse than the issue reports: `--fresh` is *silently swallowed as the `package` arg* (note the error only names `-p, 44637`), so even the flags oclif accepts are dropped. It's opaque precisely because the `--` looks inert.\n\n## Fix\n\nA `preparse` hook drops `--` separators before oclif parses argv — a single choke point covering **every command and both bins** (`run.js`, `run-dev.js`), including future commands.\n\nNo `os` command takes passthrough args (none sets `strict = false`, none reads raw argv), so a `--` carries no meaning here and is always a package-manager artifact.\n\n### Why not the fix suggested in the issue\n\nThe issue proposed oclif's `'--'` passthrough option. **I tested it against the real parser — it does not work**, it just trades one error for another:\n\n```\npnpm-injected --  | default        => ERR  Unexpected arguments: -p, 44637\npnpm-injected --  | '--': false    => ERR  Unexpected argument: --      ← still broken\npnpm-injected --  | preparse-strip => OK   fresh=true port=44637 package=all\n```\n\n`'--': false` keeps flag-parsing on past the separator but then re-appends the `--` into argv ([parse.js#L188](https://github.com/oclif/core/blob/main/src/parser/parse.ts)), so strict commands fail on it instead.\n\nThe docs need no change — this makes the documented row true. Keeping the `--` form is also the *safer* pnpm form: it guarantees pnpm forwards flags verbatim rather than eating ones that collide with its own.\n\n### Tradeoff\n\nA `-`-prefixed token can no longer be forced to parse as a positional value. Every `os` positional is a config path, a metadata/datasource/package name, or an id — none start with `-`. Noted in the hook for whoever adds a passthrough command later.\n\n## Verification\n\nRan the exact documented command end-to-end. It is still **invoked with the `--` present** (`objectstack dev --seed-admin -- --fresh -p 44639`), yet all three flags now take effect:\n\n```\n  ✓ Server is ready\n  ➜  API:       http://localhost:44639/          ← -p applied\n  🔑  Dev admin: admin@objectos.ai / admin123     ← --seed-admin applied\n  Driver:  SqlDriver(sqlite) → file:/var/.../T/objectstack-dev-do0JMm/data/dev.db   ← --fresh ephemeral tempdir\n```\n\nLive probe returned HTTP 401 from `/api/v1/meta/object` (server up, auth enforced); server torn down after.\n\n- 5 new tests, asserted against the **real `Dev` command's flags** through oclif's actual parser — including a regression test proving the failure without the hook.\n- `@objectstack/cli`: build/typecheck ✅ · lint ✅ · 538 tests ✅\n- `dev:crm` / `dev:todo` use the same `objectstack dev` path and are fixed by the same change.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

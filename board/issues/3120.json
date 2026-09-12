@@ -1,0 +1,33 @@
+{
+  "number": 3120,
+  "kind": "pull_request",
+  "title": "docs(approvals): unblock main — drop duplicated role warning, generalize approver literal",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T12:02:07Z",
+  "updated_at": "2026-07-17T12:22:18Z",
+  "closed_at": "2026-07-17T12:22:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3120",
+  "body": "## Why\n\n`lint.yml` has been **red on `main`** since #3113 — the *Reserved-word (\"role\") docs ratchet* step fails, so **every open PR inherits it** (e.g. #3116). Reproduces from a clean `origin/main`:\n\n```\ncheck-role-word: 1 problem(s)\n  • content/docs/automation/approvals.mdx: role-word count grew 5 → 9. New occurrences are banned (ADR-0090 D3).\n```\n\n#3113 added four occurrences to `content/docs/automation/approvals.mdx` without ratcheting the baseline.\n\n## The decision: reword, not a baseline bump\n\nBoth obvious framings turned out to be wrong, so the evidence is worth stating.\n\n**\"`role` is deprecated, so reword it away\" — false.** `role` is live and load-bearing:\n\n- `packages/spec/src/automation/approval.zod.ts` still enumerates `'role'` **alongside** `'position'` in `ApproverType` — they coexist and mean different things; neither is a migration half.\n- `packages/spec/src/automation/approval.test.ts` explicitly asserts `'role'` parses.\n- `expandRoleUsers` resolves it against `sys_member.role` at runtime.\n- No deprecation marker anywhere on it.\n\n`role` here is the **better-auth org-membership tier** (`sys_member.role`: `owner`/`admin`/`member`) — precisely ADR-0090 D3's *single documented exception* (\"third-party schema we do not own\"). #2738 (216fa9ad2) did not deprecate it; it **added** `position` beside it and documented `role` as \"the membership tier it actually is\".\n\n**\"They're legitimate, so bump the baseline 5 → 9\" — legitimate, but not necessary.** Three of the four are a near-verbatim **duplicate** of the callout 80 lines earlier, and that earlier one is *better* (it names the `approval-role-not-membership-tier` lint rule). The fourth was an over-narrow API description. The baseline is for occurrences that can't be removed **without losing accuracy** — these can.\n\n## What changed\n\n- **Removed the duplicated warning** in the lifecycle Steps. Kept the fact that section actually needs (an approver entry resolving to nobody parks the run forever — the *consequence*) and cross-referenced the authoritative warning under *3. The approval node*.\n- **Generalized `approverId`**: it was documented as accepting `role:<r>`. The runtime falls back to a generic `` `${a.type}:${a.value}` `` literal for **every** approver type (`expandApprovers`), and `rest-server.ts` only splits on commas — it never validates the prefix. `<type>:<value>` is the real contract; `role:<r>` described one arbitrary instance of it.\n\nNet: same information, one authoritative home, **no accuracy lost**, and the reserved-word surface shrinks back to 5 instead of freezing 4 avoidable occurrences. The surviving 5 are the one better-auth boundary callout — deliberately untouched, since renaming a third-party identifier we don't own would make the docs wrong.\n\n## Verification\n\n```\n$ node scripts/check-role-word.mjs\ncheck-role-word: OK (49 baselined file(s), no new occurrences).\n```\n\n`scripts/role-word-baseline.json` is **unmodified** — the diff is one file. The sibling `lint.yml` doc gates also pass locally:\n\n- `check:doc-authoring` → `199 files clean`\n- `check:release-notes` → `OK`\n\n## Notes for the reviewer\n\n- Docs-only → `skip-changeset`.\n- ⚠️ There is an **uncommitted, unpushed** draft of the same fix in a sibling worktree on branch `fix/role-word-approvals` (no PR opened). It reaches a similar conclusion but cross-references a broken anchor (`#the-approval-node`; the heading is `### 3. The approval node`). If that agent is still active, close whichever of these lands second.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

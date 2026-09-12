@@ -1,0 +1,32 @@
+{
+  "number": 3151,
+  "kind": "issue",
+  "title": "bug(core,objectql): 批量写入返回值零契约校验——少返/多返/乱序/非数组均被当成功",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T14:19:08Z",
+  "updated_at": "2026-07-18T04:34:08Z",
+  "closed_at": "2026-07-18T04:34:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3151",
+  "body": "已在 PR #3161(已合并到 main)中修复:`bulkWrite` 校验 `writeBatch` 返回为数组且长度等于批长,不符抛 `ERR_BULK_RESULT_MISMATCH` → 走逐行降级;`engine.insert(array)` 校验驱动 `bulkCreate` 返回数量,不符抛 `ERR_BULK_RESULT_MISMATCH`,不再用 `undefined` 补位喂给 afterInsert。回归测试见 `packages/core/src/utils/bulk-write.test.ts`、`packages/objectql/src/engine-bulk-contract.test.ts`。\n\n—— 原始 issue 内容 ——\n\n## 问题\n\n批量插入链路对\"写入函数的成功返回值\"**零契约校验**:`bulkWrite` 对 `writeBatch`、`engine.insert(array)` 对驱动 `bulkCreate` 的少返/多返/乱序/非数组均被当成功。"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 2452,
+  "kind": "issue",
+  "title": "feat(spec):detail 块补 typed stageField 键(record:path 自动进度条开关的发现性)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-29T04:11:51Z",
+  "updated_at": "2026-07-14T15:14:53Z",
+  "closed_at": "2026-07-14T15:14:53Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2452",
+  "body": "## 问题描述\n\nobjectui 详情页 synth(`@object-ui/plugin-detail` 的 `buildDefaultPageSchema` / `detectStatusField`)在**没有手写 record page** 时会自动合成详情页,自动探测一个状态字段,在记录顶部渲染有序状态进度条(Lightning Path 风格的 `record:path`)。\n\n很多对象的 `status` 是**非线性 picklist**(正常 / 暂停 / 作废),被强行画成有序进度条不合适。objectui PR objectstack-ai/objectui#2066 已支持用 `detail: { stageField: false }` 关闭(synth 读 `def.detail?.stageField`)。\n\n**痛点:发现性。** `detail.stageField` 目前只靠 spec `object.zod.ts` 那个 `.passthrough()` 的 `detail` 块放行——**没有 typed 键**,所以作者(及 AI)写 `detail: { stageField: false }` 时**没有任何类型提示 / 自动补全**,也无从知道这个开关存在。\n\n## 方案描述\n\n在 `packages/spec/src/data/object.zod.ts` 的 `detail` 块里,与 `renderViaSchema` / `hideReferenceRail` / `hideRelatedTab` 并列,补一个 typed `stageField` 键(带 `.describe()`),保留 `.passthrough()`:\n\n```ts\nstageField: z.union([z.string(), z.literal(false), z.null()]).optional()\n  .describe('record:path 状态字段名;false / null 关闭自动状态进度条'),\n```\n\n类型与 synth 读取的 `string | false | null` 一致。作者写 `ObjectSchema.create({ detail: { stageField: false } })` 即得类型 + 自动补全。**不走 skill 文档**(原方案一次加太多,已放弃)。仅 spec 一处改动 + changeset。"
+}

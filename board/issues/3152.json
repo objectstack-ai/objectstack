@@ -1,0 +1,32 @@
+{
+  "number": 3152,
+  "kind": "issue",
+  "title": "bug(objectql): 批降级重写时 beforeInsert 钩子对好行执行两次,autonumber 双消耗",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T14:19:09Z",
+  "updated_at": "2026-07-18T04:34:22Z",
+  "closed_at": "2026-07-18T04:34:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3152",
+  "body": "已在 PR #3161(已合并到 main)中修复:autonumber 分配移到逐行校验**之后**,注定失败的批尝试不再消耗号段(消除 autonumber 双消耗/号段空洞);校验通过前不再分配序号。beforeInsert 钩子在降级重写下的重复执行按 issue 允许的\"缓解而非根治\"处理——在 `engine.insert` JSDoc 中明确 at-least-once 钩子语义(钩子需幂等),根治需引擎部分成功 API,超出本 issue 范围。回归测试见 `packages/objectql/src/engine-autonumber-batch.test.ts`。\n\n—— 原始 issue 内容 ——\n\n## 问题\n\n批量插入中一行未过校验时,整个 `engine.insert(array)` 在驱动写入前抛错,`bulkWrite` 随即降级逐行重写。但失败的那次批尝试里,所有行的 beforeInsert 钩子、autonumber 分配已经执行过了——降级重写会对好行再执行一次(beforeInsert 双跑、autonumber 双消耗)。"
+}

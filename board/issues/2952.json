@@ -1,0 +1,35 @@
+{
+  "number": 2952,
+  "kind": "pull_request",
+  "title": "feat(docker): publish official runtime image ghcr.io/objectstack-ai/objectstack",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-15T05:28:44Z",
+  "updated_at": "2026-07-15T07:41:25Z",
+  "closed_at": "2026-07-15T07:41:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-15T07:41:23Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2952",
+  "body": "## 背景\n\nObjectStack 此前只提供 `examples/docker` 里的\"复制进你项目\"参考 Dockerfile,没有官方镜像。本 PR 发布官方 runtime 镜像 **`ghcr.io/objectstack-ai/objectstack`**:面向开发商的通用生产运行时(Node 22 + 锁版本 `@objectstack/cli` + `os start`),开发商 `FROM` 它 + `COPY` 自己的 artifact 即完成生产部署,甚至可以直接挂载 artifact `docker run`,主机无需任何 Node 工具链。\n\n## 变更内容\n\n### 官方镜像\n- **`docker/Dockerfile`**:app 无关的 runtime — 非 root `node` 用户、`/api/v1/health` HEALTHCHECK、预置 `OS_ARTIFACT_PATH` / `OS_PORT=8080`、OCI source labels;CLI 版本由 CI 通过 `OS_CLI_VERSION` build-arg 锁定。\n- **`docker/README.md`**:tag 策略(`X.Y.Z` / `X.Y` / `X` / `latest`,与 `@objectstack/cli` 版本一一对应)、两种用法(extend / 直接挂载运行)、运行时必须注入的三个密钥变量(`OS_DATABASE_URL` / `OS_AUTH_SECRET` / `OS_SECRET_KEY`)。\n\n### 发布流水线\n- **`.github/workflows/docker-publish.yml`**:reusable workflow(`workflow_call` + `workflow_dispatch`),buildx 多架构(amd64/arm64)推送 ghcr,推送后 `os --version` 冒烟。`workflow_dispatch` 路径用于两次发版之间的基础镜像 CVE 重建。\n- **`.github/workflows/release.yml`**:changesets 发布成功后提取 `@objectstack/cli` 版本并调用 docker-publish。不用 `on: push: tags` 触发——release 工作流用 `GITHUB_TOKEN` 推 tag,GitHub 会抑制由此产生的 workflow 触发,tag 触发器永远不会点火。\n\n### 文档与示例\n- **`examples/docker/Dockerfile`**:runtime 阶段改为 `FROM ghcr.io/objectstack-ai/objectstack`(健康检查、env、非 root 均继承),最终镜像只叠加编译产物;README 说明 tag 钉版与免构建路径。\n- **`content/docs/deployment/self-hosting.mdx`**:Docker 章节改为以官方镜像为主路径(挂载直跑 + extend 两种),保留自建等价 Dockerfile 供 air-gapped 场景。\n\n## 验证\n\n- 两个 workflow YAML 通过语法校验;job 拓扑 `release → docker` 正确,caller 授予 callee 所需的 `packages: write`。\n- 本环境无 Docker daemon,镜像构建无法本地验证——**首次发版(或手动 `workflow_dispatch` 一个已发布版本,如 `14.8.0`)时需确认 ghcr 推送与冒烟步骤通过**。\n- 不含 changeset:未改动任何 npm 包,fixed group 不应因 CI/文档变更整体 bump 版本。\n\n## 备注\n\n- 镜像 tag 与 CLI 版本严格一致,生产环境应钉精确版本(文档已强调)。\n- 后续(不在本 PR 范围):`create-objectstack` 脚手架模板可默认带上 examples/docker 三件套;README 增加 docker 快速开始入口。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_0162o68e5w3bpUBEVRQboUGG"
+}

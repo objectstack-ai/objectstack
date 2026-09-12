@@ -1,0 +1,35 @@
+{
+  "number": 3231,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): unscoped metadata list dedupes package-aware, not by bare name (ADR-0048 #1828)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T15:48:20Z",
+  "updated_at": "2026-07-18T16:29:30Z",
+  "closed_at": "2026-07-18T16:29:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-18T16:29:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3231",
+  "body": "Closes #1828.\n\n## Problem\n\nThe unscoped `getMetaItems` (`packages/metadata-protocol/src/protocol.ts`) merges registry items, `sys_metadata` overlay rows, draft-preview rows, and MetadataService items into `Map`s keyed by **bare `name`** (four sites). When two installed packages ship the same `type/name` (e.g. `page/home`) and either has a `sys_metadata` overlay, the DB-overlay merge collapses them to one row (last-write-wins), so an unscoped `GET /meta/:type` returns only one. The frontend prefer-local resolution (`preferLocal(list, name, app._packageId)` in objectui `app-shell`) reads that unscoped list, so a collapsed list makes it pick the surviving row regardless of package.\n\nThe single-item (`?package=`) and Studio/layered paths were already fixed by ADR-0048's earlier issues (#1810/#1816/#1819/#1822/#1827); the unscoped list was the remaining gap.\n\n## Fix\n\nKey the merge by `(package, name)` via a shared `mergePackageAwareOverlay` helper whose per-package resolution **mirrors `getMetaItem(name, packageId=P)`** — a package-scoped row wins for its own package, else the package-less (\"global\", `package_id IS NULL`) row is the fallback — so the list and single-item paths agree. Applied to all four dedup sites: env/org `mergedMap`, DB-overlay active merge, draft-preview merge, MetadataService merge.\n\nTwo provenance fixes so a collision no longer mislabels `_packageId`:\n- scope the registry-hydration artifact graft to each row's own `package_id`;\n- `SchemaRegistry.getArtifactItem(type, name, packageId)` no longer returns a bare-key overlay owned by a **different** package. The bare slot holds a single row (last hydrate wins); once the list stopped collapsing, the list-decorate step (`lookupArtifactItem(type, name, <row's own package>)`) would otherwise graft that one package's id onto every same-name row. **This second bug was invisible to unit tests and only surfaced by dogfooding a real collision against the running server** (see below).\n\n### Behaviour\n\n- **Collision:** two packages' same-name rows stay distinct, each with its own correct `_packageId`.\n- **Single package, unchanged:** a package-less (env-wide) overlay still *wins* over the single artifact it customizes (ADR-0005 precedence preserved).\n- **Legacy attribution mismatch:** a package-less active row + its `package_id`-bearing draft still collapse to one slot (draft wins), matching the single-item path.\n\n## Acceptance (from #1828)\n\n- [x] Unscoped `GET /meta/page` with two packages each shipping the same page returns **both** rows, each with its own correct `_packageId`.\n- [x] Existing single-package list behaviour and ADR-0005 overlay precedence unchanged.\n- [x] Verified end-to-end on the **running server** with a real two-package collision (see below). The frontend `preferLocal` (pre-existing objectui code) filters this now-correct list by `_packageId`; the backend contract it depends on is proven. *The objectui console UI itself was not driven — the console is a vendored bundle (`.objectui-sha`) not built in this framework worktree.*\n\n## Live verification (dogfood)\n\nBooted the showcase example app (`objectstack dev --ui --seed-admin`, SQLite, isolated port) and created a real collision — two packages each with a package-scoped `page/dogfood_collision` overlay:\n\n| Read | Result |\n| :--- | :--- |\n| `GET /meta/page` (unscoped) | **2 rows** — `com.dogfood.alpha` → \"Home from ALPHA\", `com.dogfood.beta` → \"Home from BETA\" |\n| `GET /meta/page?package=com.dogfood.alpha` | 1 row — alpha only |\n| `GET /meta/page?package=com.dogfood.beta` | 1 row — beta only |\n\nBoth rows survive with the **correct `_packageId`**; scoped reads isolate. Pre-fix, the unscoped `byName` dedup collapsed these to a single row. (This live run is what exposed and drove the `getArtifactItem` provenance fix above.)\n\n## Tests\n\nNew unit tests:\n- `protocol-meta.test.ts` — two-package same-name overlays both survive with correct `_packageId`; single-package env-wide overlay still overlays (one row); MetadataService same-name collision keeps both.\n- `registry-prefer-local-resolution.test.ts` — `getArtifactItem` rejects a foreign-package bare entry.\n\nVerified locally: `@objectstack/objectql` suite (71 files, **956 tests**) green — including view-identity-overlay, registry-shadow, layered-overlay, and cross-package-collision regressions; `@objectstack/runtime` (556) and `@objectstack/rest` green; changed files typecheck clean; `check:nul-bytes` + `eslint --no-inline-config` pass.\n\nRelated: #1822 (single-item/list provenance), #1827 / #1824 (package-scoped overlays).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01DKFjwN2EVXPB2CJwNzPs8c"
+}

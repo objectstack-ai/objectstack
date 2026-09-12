@@ -1,0 +1,35 @@
+{
+  "number": 3021,
+  "kind": "pull_request",
+  "title": "fix(spec): keep lazySchema proxies identity-compatible with z.toJSONSchema (objectui#2561)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T05:21:22Z",
+  "updated_at": "2026-07-16T09:33:04Z",
+  "closed_at": "2026-07-16T09:33:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-16T09:33:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3021",
+  "body": "## Problem\n\n`z.toJSONSchema` crashes with `TypeError: Cannot set properties of undefined (setting 'ref')` on **spec 15** `PageSchema` / `ViewSchema` / `PageComponentSchema` / `FormFieldSchema` (default lazy mode; `OS_EAGER_SCHEMAS=1` converts fine). This breaks ObjectUI Studio's spec-derived Page/View inspector JSONSchema derivation (`page-schema.ts` / `view-schema.ts` in objectui app-shell) and currently blocks objectui's spec ^15 adoption (objectstack-ai/objectui#2561).\n\n## Root cause\n\nzod's `toJSONSchema` keys its `seen` map on the node object it traverses — the `lazySchema` **Proxy**, wherever a schema is referenced lazily (`z.lazy(() => X)` recursion getters, direct conversion roots). But zod's per-type hooks close over the **real** instance at construction time (`inst._zod.processJSONSchema = (ctx, …) => pipeProcessor(inst, ctx, …)`), and the wrapper-type processors (pipe/lazy/optional/default/…) then resolve `ctx.seen.get(inst)` — a miss when the entry was keyed on the Proxy.\n\nLatent until now: plain-object schemas never look themselves up (`objectProcessor` doesn't touch `seen.get(self)`), so the proxies were harmless while every lazy-referenced schema was a bare `z.object`. **ADR-0089 D3a** turned `PageComponentSchema` / `FormFieldSchema` into `.strict().transform(normalizeVisibleWhen)` **pipes** — a wrapper type — detonating the identity mismatch. (zod 4.4.3 is current latest; no zod-side fix available.)\n\n## Fix\n\n`lazySchema`'s proxy now serves a **memoised `_zod` facade**: prototype-delegates every read to the real internals, wrapping only `processJSONSchema` to alias the proxy's `seen` entry onto the real instance (alias, never clobber) before delegating. Parse hot path unchanged (facade built once per proxy); `OS_EAGER_SCHEMAS=1` bypass unchanged.\n\n## Tests\n\n- `lazy-schema.test.ts`: D3a pipe shape, recursion through `z.lazy(() => proxy)` (FormFieldSchema shape), mixed proxy+real traversal in both orders, facade memoisation. **Verified the 3 new conversion tests fail without the fix.**\n- `page.test.ts` / `view.test.ts`: pin the exact Studio derivation calls (`z.toJSONSchema(PageSchema/ViewSchema, { io: 'input', unrepresentable: 'any' })`).\n- Full `@objectstack/spec` suite: 253 files / 6863 tests green.\n\nChangeset: **patch** `@objectstack/spec`. Once released, objectui rides it in the #2561 types-package PR (spec ^15 pin bump).\n\nRefs objectstack-ai/objectui#2561, ADR-0089 D3a.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}
