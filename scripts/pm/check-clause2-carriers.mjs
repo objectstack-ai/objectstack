@@ -672,8 +672,17 @@ export const CLAUSE2_VALUES = Object.freeze(['yes', 'no']);
  * full-width colon, or the space-separated prose form `Clause ②:` that two of
  * the three measured cards actually wrote. Those are near misses and are
  * reported as such below; they are not declarations.
+ *
+ * ⭐ Three capture groups, and the first two exist for #17098: whether the key
+ * was OPENED with a backtick, and whether that backtick CLOSED before the
+ * colon. The pattern has always tolerated both ticks; what it could not say is
+ * WHICH of them it consumed — and a span closed around the key (a declaration,
+ * merely backticked) differs from a span still open at the colon (the VALUE is
+ * inside quoted text, and the line is a quotation of the spelling) by nothing
+ * else on the line. ⛔ The tolerated decoration is byte-identical to what it
+ * was: the groups report the match, they do not widen it.
  */
-const CLAUSE2_KEY_LINE = /^[ \t]*(?:>[ \t]*)?(?:[-*][ \t]+)?(?:\*\*)?`?Clause-②`?(?:\*\*)?[ \t]*:(.*)$/;
+const CLAUSE2_KEY_LINE = /^[ \t]*(?:>[ \t]*)?(?:[-*][ \t]+)?(?:\*\*)?(`?)Clause-②(`?)(?:\*\*)?[ \t]*:(.*)$/;
 
 /**
  * A line that MENTIONS the clause without being the machine declaration — used
@@ -756,14 +765,108 @@ function hasInlineClause2Key(line) {
  * `Clause-②: YES`, `Clause-②: nope` and an empty value all stay MALFORMED,
  * because none of them opens with the token. The boundary is a character
  * class, not a judgement.
+ *
+ * ⭐ One more shape joins them for #17098: a token followed by an
+ * ALTERNATION. The class above ends at `[A-Za-z0-9_]` and `|` is not in it,
+ * so `yes|no` opened with a valid token and returned `yes` — a MENU read as
+ * a CHOICE, which is how a seat's own spelling instruction became its card's
+ * judgement. It is refused HERE, alongside `Clause-②: <yes|no>` and every
+ * other unfilled template, because it is the same fact about the same slot:
+ * the value was never chosen. `clause2LineDescribes` states the four axes
+ * behind putting it here rather than beside the describing tells.
+ *
+ * ⛔ The refusal is ADJACENCY, never a scan: only a `|` that is the next
+ * non-blank character after the token. The reasoning #13914's control shape
+ * allows may contain a pipe anywhere later — a table column, a shell
+ * pipeline — and is untouched.
  */
 function readValueToken(raw) {
   const rest = String(raw ?? '').replace(/^[ \t]+/, '');
   // Built from CLAUSE2_VALUES so the closed set is declared once: adding a
   // third reading would have to be a deliberate edit to that constant.
-  const token = new RegExp(`^(?:\\*\\*)?(?:\`)?[ \\t]*(${CLAUSE2_VALUES.join('|')})(?![A-Za-z0-9_])`);
+  const token = new RegExp(`^(?:\\*\\*)?(?:\`)?[ \\t]*(${CLAUSE2_VALUES.join('|')})(?![A-Za-z0-9_])(?![ \\t]*\\|)`);
   const m = token.exec(rest);
   return m ? m[1] : null;
+}
+
+/**
+ * Does this MATCHING line describe the declaration instead of making one?
+ * (#17098)
+ *
+ * ## The defect, in one line
+ *
+ * `CLAUSE2_KEY_LINE` decides "is this a declaration?" by POSITION, and a bullet
+ * teaching the spelling puts the key in exactly the position a declaration
+ * does. So a standing-rules bullet quoting both spellings read `declared`, and
+ * on a claim comment whose only key-initial line was that bullet, the
+ * EXPLANATION became the card's declaration — measured fail-closed on #16454
+ * (a true `no` that hung `needs:contract-review` on both carriers) and measured
+ * fail-OPEN on #17277 / #17290, where the declaration limb read `yes` from the
+ * dispatching seat's own boilerplate and `--pair` exited 0, which is a landing
+ * pre-check's precondition ②. ⭐ The seat that documents the spelling is the
+ * seat that defeats the check.
+ *
+ * ## Two STRUCTURAL tells, and neither is a reading of prose
+ *
+ * ⛔ Loosening or tightening the POSITION rule was never available: the header
+ * one section up states why, and the reporter below it fires only where the key
+ * is not line-initial. So both tells below are facts about the line's markdown
+ * STRUCTURE, decided without reading a word of what the seat wrote:
+ *
+ *   TWICE-NAMED — the fixed key appears more than once on the line. A
+ *     declaration names the key once; a line naming it twice is showing both
+ *     spellings, which is the measured shape of the card's own specimen.
+ *   QUOTED-AND-CONTINUED — the key's inline-code span was opened before the
+ *     key, was NOT closed before the colon, closes later on the line, and the
+ *     line then CONTINUES outside that span. The value is inside a quotation
+ *     and the seat is talking about it. ⭐ The continuation is load-bearing in
+ *     both directions: a line that is only the quoted declaration
+ *     (`` `Clause-②: yes` ``, optionally bolded) is a DECLARATION and stays one
+ *     — that spelling is what this file's own remedy sentence teaches, so
+ *     refusing it would make the gate reject the shape it prescribes.
+ *
+ * ## What is NOT a tell here — the alternation, and why
+ *
+ * ⚠️ `readValueToken`'s token class ends at `[A-Za-z0-9_]`, so `Clause-②:
+ * yes|no` opens with a valid token and returned `yes`: a MENU read as a CHOICE.
+ * That is the same defect, and it is repaired one function down — as
+ * `malformed`, ⛔ not as a describing near miss, and the four axes agree:
+ *
+ *   业务需求 — measured: the live specimen (a bulleted, bolded, backticked
+ *     instruction) already fires QUOTED-AND-CONTINUED, so routing the
+ *     alternation to `malformed` costs nothing on any occurrence on the board.
+ *     The only line where the alternation is the SOLE tell is an undecorated
+ *     `Clause-②: yes|no` — a seat that pasted the template and did not choose.
+ *   长远合理性 — one state per fact. "The value slot holds a menu" is one fact
+ *     and it already has a state: `Clause-②: <yes|no>` reads `malformed`
+ *     today, as do `YES`, `nope` and an empty value. A second state for the
+ *     same fact is the dialect direction.
+ *   防 AI 写错 — the two remedies are not interchangeable. `malformed` names
+ *     the two spellings and says CHOOSE; the describing remedy says ADD a line
+ *     above. For an unfilled template the act that exists is choosing, and
+ *     "add a line above" invites a second, duplicate declaration. Strictness
+ *     is identical either way — both are a C2 row at exit 4.
+ *   不扩散 — three near-miss reasons where two structural ones carry every
+ *     measured shape is a widened surface with no pull behind it.
+ *
+ * @param {string} line — the whole line, for the twice-named count.
+ * @param {RegExpExecArray} m — this line's `CLAUSE2_KEY_LINE` match.
+ * @returns {boolean}
+ */
+function clause2LineDescribes(line, m) {
+  const s = String(line ?? '');
+  // TWICE-NAMED. `indexOf` from the last hit, so an overlap cannot double-count.
+  let seen = 0;
+  for (let at = s.indexOf(CLAUSE2_KEY_TEXT); at >= 0; at = s.indexOf(CLAUSE2_KEY_TEXT, at + CLAUSE2_KEY_TEXT.length)) {
+    if (++seen > 1) return true;
+  }
+  // QUOTED-AND-CONTINUED. The span is open at the colon exactly when the key's
+  // leading tick was consumed and its trailing one was not.
+  if (m[1] !== '`' || m[2] === '`') return false;
+  const closesAt = String(m[3] ?? '').indexOf('`');
+  if (closesAt < 0) return false;
+  // Trailing bold and whitespace close the line; anything else continues it.
+  return !/^[ \t]*(?:\*\*)?[ \t]*$/.test(String(m[3]).slice(closesAt + 1));
 }
 
 /** A quoted line for a finding row — capped, because a claim comment can be long. */
@@ -778,36 +881,65 @@ function quoteLine(line, cap = 160) {
  * @param {string} text
  * @returns {{ kind: 'declared', value: 'yes'|'no', line: string }
  *          | { kind: 'malformed', value: string, line: string }
- *          | { kind: 'near-miss', reason: 'inline-key'|'spelling', line: string }
+ *          | { kind: 'near-miss', reason: 'describing'|'inline-key'|'spelling', line: string }
  *          | null}
  *
  * Four-valued on purpose. `declared` and `malformed` are different facts about
  * a line that IS the key; `near-miss` is a fact about a line that is not. Any
  * collapse of these into "no" is the defect #13914 filed.
  *
- * The near miss carries a REASON because the two shapes owe opposite remedies:
- * `spelling` is a line that does not carry the fixed key at all, and `inline-key`
- * is a line that carries it exactly right but not at the start of a line. ⛔ The
- * reason changes the sentence, never the state — both are near misses, and a
- * near miss is not a declaration in either case.
+ * The near miss carries a REASON because the shapes owe different remedies:
+ * `spelling` is a line that does not carry the fixed key at all; `inline-key`
+ * is a line that carries it exactly right but not at the start of a line; and
+ * `describing` (#17098) is a line that carries it exactly right, at the start
+ * of a line, and is QUOTING the spelling rather than declaring a value —
+ * `clause2LineDescribes` holds the two structural tells. ⛔ The reason changes
+ * the sentence, never the state — all three are near misses, and a near miss
+ * is not a declaration in any of the three cases.
+ *
+ * ⭐ A describing line is SKIPPED, not returned: the scan continues past it.
+ * That is the half of #17098 the fixture could not see. `readClause2Line`
+ * returns on the first line that IS a declaration attempt, and a quotation is
+ * not one — so a claim comment whose real declaration sits BELOW its
+ * standing-rules bullet is now read from the declaration, where first-match
+ * previously stopped at the bullet. The describing line is kept only as the
+ * residue to quote back when nothing else on the body reads.
  */
 export function readClause2Line(text) {
   const lines = String(text ?? '').split(/\r?\n/);
+  let read = null;
+  let describing = null;
   let nearMiss = null;
   let inlineKey = null;
   for (const line of lines) {
     const m = CLAUSE2_KEY_LINE.exec(line);
     if (m) {
-      const value = readValueToken(m[1]);
-      if (value !== null) return { kind: 'declared', value, line: quoteLine(line) };
-      return { kind: 'malformed', value: quoteLine(m[1], 60), line: quoteLine(line) };
+      // #17098: a line that QUOTES the spelling is not a declaration attempt,
+      // so it neither answers nor stops the scan. ⛔ It is not `malformed`
+      // either — that state sends the seat to fix a value on a line that was
+      // never making a claim about one.
+      if (clause2LineDescribes(line, m)) {
+        if (describing === null) describing = quoteLine(line);
+        continue;
+      }
+      if (read !== null) continue;
+      const value = readValueToken(m[3]);
+      read = value !== null
+        ? { kind: 'declared', value, line: quoteLine(line) }
+        : { kind: 'malformed', value: quoteLine(m[3], 60), line: quoteLine(line) };
+      continue;
     }
     if (inlineKey === null && hasInlineClause2Key(line)) inlineKey = quoteLine(line);
     if (nearMiss === null && CLAUSE2_NEAR_MISS_LINE.test(line)) nearMiss = quoteLine(line);
   }
+  if (read !== null) return read;
   // The correctly-spelled key wins over a vocabulary near miss wherever the two
   // land in the body: it is the more actionable of the two residues, and reading
-  // order is not a fact about which one the seat should be sent to.
+  // order is not a fact about which one the seat should be sent to. By the same
+  // rule a DESCRIBING line outranks both: it carries the key in the fixed
+  // spelling AND at the start of a line, so of the three it is the one whose
+  // remedy is a single line the seat can write without moving anything.
+  if (describing !== null) return { kind: 'near-miss', reason: 'describing', line: describing };
   if (inlineKey !== null) return { kind: 'near-miss', reason: 'inline-key', line: inlineKey };
   return nearMiss === null ? null : { kind: 'near-miss', reason: 'spelling', line: nearMiss };
 }
@@ -1072,7 +1204,7 @@ const CLAUSE2_CORRECTION_KEY_TEXT = 'Clause-②-correction';
  *   comment rows, or `null` when the thread could NOT be read.
  * @returns {{ state: 'declared'|'malformed'|'misplaced'|'missing'|'absent'|'unreadable'
  *   |'claim-branch-unparsed',
- *   value?: 'yes'|'no', detail?: string, nearMissReason?: 'inline-key'|'spelling',
+ *   value?: 'yes'|'no', detail?: string, nearMissReason?: 'describing'|'inline-key'|'spelling',
  *   correctionNote?: string, malformedClaim?: object, governingClaim?: object }} —
  *   `correctionNote` rides alongside for exactly one purpose, the same way
  *   `nearMissReason` does: the rows below print it. ⛔ It is not part of the state
@@ -1369,6 +1501,27 @@ function c2Sentence(d, head, fixed, notADecision) {
         `${CORRECTION_REMEDY} ${NEVER_WRITES}`
       );
     case 'missing':
+      // #17098: the key is at the start of a line, spelled exactly right, and
+      // the line is QUOTING the spelling rather than declaring a value. The
+      // state is `missing` and exits 4 exactly as it always did; what changes
+      // is that this line USED TO BE READ as the card's declaration, so the
+      // remedy has to say what the seat is looking at. ⛔ It never tells the
+      // seat to edit the quoted line: an explanation of the protocol is a
+      // correct thing to have written.
+      if (d.nearMissReason === 'describing') {
+        return (
+          `${head} — NO READING on the declaration limb: the thread carries the key in the ` +
+          `fixed spelling and at the START of a line, on ${JSON.stringify(d.detail)}, but that ` +
+          'line QUOTES the spelling rather than declaring a value — it names the key twice, or ' +
+          'holds the key inside an inline-code span the line goes on talking outside of. ⛔ A ' +
+          'quotation of the protocol is not a judgement about this diff, and the two are told ' +
+          'apart by the line\'s markdown structure, never by reading its words. ⛔ There is ' +
+          'nothing to fix on the quoted line — it is a correct thing to have written. What is ' +
+          'owed is a declaration of its OWN, ABOVE it: this limb reads the first line that IS ' +
+          `a declaration attempt, so position is the whole remedy — ${fixed}. ` +
+          `${CORRECTION_REMEDY} ${notADecision} ${NEVER_WRITES}`
+        );
+      }
       // The key is on the thread, spelled exactly right, and simply not at the
       // start of a line. The state is unchanged — it was not read, so it is
       // still `missing` and still exits 4 — but the remedy that ships with the
@@ -4205,18 +4358,22 @@ export function selfTest() {
   t('⭐ criterion 1: the template\'s key with `no` substituted reads DECLARED', readClause2Line('Clause-②: no')?.value === 'no');
   t('⭐ …and with `yes` substituted', readClause2Line('Clause-②: yes')?.value === 'yes');
   t('…and the template line the seat copies is exactly the fixed key, so the two cannot drift', TEMPLATE_LINE.startsWith('Clause-②:'));
-  // ⚠️ CONTROL, measured and NOT endorsed: the template line copied WITHOUT
-  // choosing reads `yes`, because `readValueToken` takes the first token after
-  // the colon and treats the rest as the seat's argument. That calibration is
-  // #13914's and is untouched here.
+  // ⭐ FLIPPED, as the pre-registration above this line required: the template
+  // line copied WITHOUT choosing used to read `yes`, because `readValueToken`
+  // took the first token after the colon and treated the rest as the seat's
+  // argument — so an UNFILLED template read as a judgement. #17098 refuses the
+  // alternation in `readValueToken`, and the case is kept rather than deleted,
+  // with its expectation moved: the before-state it recorded is the thing the
+  // assertion below is now measuring the absence of.
   //
-  // ⭐ FLIP TRIGGER, pre-registered: this is a key-INITIAL DESCRIBING line, which
-  // is exactly the population #17098 is open against. When #17098 lands, this
-  // reading becomes `kind !== 'declared'` and this case flips WITH it — change
-  // the expectation in THAT PR and keep the case. ⛔ Do not delete it, and ⛔ do
-  // not read its green today as an endorsement: it records what the reader does
-  // now, so that the sibling fix has a measured before-state to move.
-  t('⚠️ CONTROL (flips with #17098): the UNFILLED template line reads `yes` today — the token is first, the alternative is trailing prose', readClause2Line(TEMPLATE_LINE)?.value === 'yes');
+  // ⚠️ It is `malformed` and ⛔ NOT a describing near miss: the line is an
+  // unfilled TEMPLATE — one key, no inline-code span — so the fact about it is
+  // that its value slot holds a menu, which is the fact `Clause-②: <yes|no>`
+  // has always carried. `clause2LineDescribes` holds the four axes.
+  t('⭐ the UNFILLED template line is NOT a declaration — a menu is not a choice (#17098)', readClause2Line(TEMPLATE_LINE)?.kind !== 'declared');
+  t('…and it carries NO value: ⛔ the first alternative is never taken as the answer', readClause2Line(TEMPLATE_LINE)?.value !== 'yes' && readClause2Line(TEMPLATE_LINE)?.value !== 'no');
+  t('…reading MALFORMED, the same state the angle-bracket placeholder has always read', readClause2Line(TEMPLATE_LINE)?.kind === 'malformed' && readClause2Line('Clause-②: <yes|no>')?.kind === 'malformed');
+  t('…and the row quotes the unfilled slot back, so the seat sees what it copied', says(readClause2Line(TEMPLATE_LINE)?.line, 'yes | no'));
   t('⭐ the C2 rows point at the TEMPLATE rather than at a regex', says(missingLine, '〈模板与表〉') && says(noClaim, '〈模板与表〉'));
   t('…and tell the seat to COPY it rather than compose one', says(missingLine, 'COPY the template'));
   t('⛔ and the pointer prescribes no VALUE — the declaration is still the judgement', says(missingLine, 'Do not fill the line in'));
