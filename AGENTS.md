@@ -153,11 +153,11 @@ pull its build into `packages/console/`.
 Other scripts: `objectui:bump` (pull only), `objectui:build`, `objectui:clean`. ⛔ Never hand-edit
 `packages/console/dist/` or `.cache/objectui-*/` — regenerated.
 
-**Moving the pin has a second half: `pnpm sdui:manifest`.** ADR-0082 D4's spec↔registry declaration-parity ratchet
-reads objectui's `sdui.manifest.json`, which changes only when `.objectui-sha` moves — so the pin bump is the
-ratchet's trigger, and its only one. It is an **on-demand gate by decision**, never a CI job; `objectui:bump` and
-`objectui:refresh` both print the reminder. Needs Playwright chromium. Full procedure: `docs/releases-maintenance.md`
-→ "After the pin moves".
+**Moving the pin has a second half: regenerate the committed manifest** — `node scripts/gen-sdui-manifest-node.mjs
+--objectui-version {the @object-ui version the new pin ships}`; `scripts/check-sdui-manifest.mjs` reds until you do.
+ADR-0082 D4's spec↔registry declaration-parity ratchet reads that tracked artefact, so it gates **every PR**, not a
+pin bump alone. `pnpm sdui:manifest` is the separate browser dump of objectui's own registry (needs Playwright
+chromium); `objectui:bump` and `objectui:refresh` print it. Full procedure: `docs/releases-maintenance.md`.
 
 **Fast iteration on `../objectui` src (no commit/refresh loop):** run objectui's own console dev server —
 `cd ../objectui && pnpm --filter @object-ui/console dev` (Vite on **:5180**, HMR). Its `/api` proxy targets
@@ -748,14 +748,14 @@ Principles the wrapper encodes (its own output is the authority on detail):
 an implementation** — the props the spec zod schema declares vs the inputs the objectui
 registry config declares. A prop both sides declare and no renderer reads is, to this
 gate, perfect agreement. Its `spec-only` / `registry-only` / `missing` signals are real;
-just don't read it as proof anything renders. It is also the one gate `check:generated`
-cannot run at all (`EXTERNAL_INPUT_REQUIRED`): its right-hand side is objectui's
-`sdui.manifest.json`, produced only by `pnpm sdui:manifest` driving a real browser over
-objectui built at `.objectui-sha`, and it **exits 1** with no usable manifest — "could not
-run" is a failure, not a skip (Route & surface ownership §3). The manifest comes **not
-from CI**: it is an on-demand gate whose trigger is the **objectui pin bump**
-(`docs/releases-maintenance.md` carries the procedure). ⛔ Do not "fix" the red by
-re-adding a skip, and do not wire the gate into a workflow either.
+just don't read it as proof anything renders. Its right-hand side is the **tracked
+repo-root `sdui.manifest.json`**, written by `node scripts/gen-sdui-manifest-node.mjs`
+beside `scripts/sdui-manifest.record.json` and held honest in the required lint job by
+`scripts/check-sdui-manifest.mjs` (shape, sha256 vs that record, record pin ==
+`.objectui-sha`) — so `lint.yml` runs this gate `--strict` against it on every PR. It
+still **exits 1** with no usable manifest — "could not run" is a failure, not a skip
+(Route & surface ownership §3) — and `check:generated` files it `EXTERNAL_INPUT_REQUIRED`
+because that aggregate hands it none. ⛔ Do not "fix" a red by re-adding a skip.
 
 Two generators have **no** gate at all — `gen:openapi` and `gen:sbom`. Nothing verifies
 their output is current; the wrapper reports that each run rather than staying silent.

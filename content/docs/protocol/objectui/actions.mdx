@@ -435,6 +435,12 @@ resultDialog:
 
 Each `fields[].path` is a dot path into `result.data`. The per-field `format` (`qrcode`, `code-list`, `secret`, `text`, `json`) controls rendering.
 
+#### ⚠️ That `target` is not interchangeable with the SDK's registration door
+
+`POST /api/v1/auth/sys-oauth-application/register` is an **ObjectStack mount written for this form**, and it is what keeps the YAML above this short. It accepts the application's display name as a plain `name` body key — the spelling an author writes as a param — and it splits a newline-separated redirect-URL **textarea** into the `redirect_uris` array the underlying provider schema requires. Both are form-shaped conveniences the mount performs on the action's behalf; the route ledger carries it as `disposition: server-only` (`packages/plugins/plugin-auth/src/auth-route-ledger.ts`) for exactly that reason, and [#17210](https://github.com/objectstack-ai/objectstack/issues/17210) ruled that it stays that way — no SDK method builds this URL.
+
+So do **not** re-point this `target` at the provider's own registration route, `/api/v1/auth/oauth2/create-client` (what `@objectstack/client`'s `oauth.applications.register` posts). Driven on a real socket, the two doors answer the same body differently: the mount above returned **200**, mapped `name` onto `client_name`, and set the `sys_oauth_application` row's `name`; the provider route returned **201** with the value **stripped** — absent from the response, from `oauth.applications.get`, from `oauth.applications.list`, and `null` in that column. An action retargeted there needs its name param renamed to `client_name`, and its redirect URLs split into an array before the post — the textarea param would arrive as one unsplit string.
+
 ## Action Parameters
 
 `params` declares inputs collected from the user before execution. Each entry is an `ActionParam` with two modes:
