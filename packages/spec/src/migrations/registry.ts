@@ -7209,6 +7209,42 @@ const step18: MigrationStep = {
         + '"three shapes" note narrows — objectui cards filed by the seat, not blocked on here.',
     },
     {
+      id: 'element-filter-and-form-node-refused',
+      surface:
+        'page.component.element:filter / page.component.element:form — the bare component '
+        + 'node itself, left standing by the `element-filter-removed` and '
+        + '`element-form-removed` conversions after they strip its properties',
+      replacement:
+        'Delete the component node. `element:filter` → a list surface owns its own '
+        + "filtering: use a view's `userFilters` quick-filter bar or the list toolbar's "
+        + 'filter builder. `element:form` → the object-bound `object-form` block, which is '
+        + 'rendered, designer-publishable and carries the same intent (`objectName`, '
+        + '`fields`, `mode`, `submitText`). Nothing is placed where the node was unless the '
+        + 'page needs it — which region keeps its layout is the judgment this step delegates',
+      reason:
+        'Both elements were retired whole at element grain (ADR-0049 enforce-or-remove): no '
+        + 'renderer for either ever shipped in objectui, framework or cloud, so every '
+        + 'authorable key was a capability claim nothing kept. The conversions are mechanical '
+        + 'where they can be — they strip all twelve keys losslessly — and stop at the node, '
+        + 'because removing an authored page node changes the LAYOUT of a page the author '
+        + 'composed, and a conversion cannot know whether the region should close up, hold a '
+        + 'replacement, or keep its slot. That residue is no longer inert: both names are '
+        + 'members of `RETIRED_PAGE_COMPONENT_TYPES`, so `PageComponentSchema.type` refuses '
+        + 'them by name, and a stack that replays the chain and stops there is schema-INVALID. '
+        + 'Mechanical where it can be, delegated where it cannot — this entry is the '
+        + 'delegation, in writing',
+      acceptanceCriteria:
+        'No `element:filter` and no `element:form` component remains in any page — regions, '
+        + 'named slots and nested containers alike (the conversions walk all three, so every '
+        + 'place they stripped properties is a place a bare node can be sitting). `os validate` '
+        + 'is clean: the refusal is reported at the node\'s `type` path with '
+        + '`params.retiredComponentType` naming the element, so a remaining node is named '
+        + 'individually rather than as one page-level failure. Replaying the same 17 → 18 chain '
+        + 'over the edited source then reports the migrated stack schema-valid — '
+        + '`schemaValid: true` in `--json`, and the run closes with the schema-valid line '
+        + 'rather than the manual-changes warning',
+    },
+    {
       id: 'element-number-filter-rule-array',
       surface:
         "`element:number` component props — `filter` (the FORM: the MongoDB-style "

@@ -211,6 +211,99 @@ describe('migration chain (ADR-0087 D3)', () => {
     });
   });
 
+  // The D3 half of a node-level refusal, and the one class of entry whose
+  // ABSENCE is invisible to every other gate in this family: `check:spec-changes`
+  // and `check:upgrade-guide` pin the registry to its PROJECTIONS, so an entry
+  // that was never written leaves them perfectly consistent. What made the gap
+  // reachable is that the two D2 conversions below are deliberately partial —
+  // they strip the props and leave the node, because deleting an authored page
+  // node is a layout decision a mechanical conversion must not make — while
+  // `RETIRED_PAGE_COMPONENT_TYPES` now refuses that same node BY NAME. Between
+  // the two, a 17 → 18 replay ended `schemaValid: false` and `os migrate meta`
+  // closed with "resolve the manual changes above" over a list that named
+  // neither element. This block pins the instruction back into the list.
+  describe('protocol-18 #17594 entry — the chain NAMES the bare node it leaves standing', () => {
+    /** A page authored against 17, carrying both retired elements. */
+    const authored = () => ({
+      pages: [
+        {
+          name: 'order_board',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                { type: 'element:filter', properties: { object: 'order', fields: ['status'] } },
+                { type: 'element:form', properties: { object: 'order', fields: ['status'] } },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    const entry = () =>
+      MIGRATIONS_BY_MAJOR[18]!.semantic.find((s) => s.id === 'element-filter-and-form-node-refused');
+
+    it('finds the entry (anti-vacuity: every assertion below reads through this `find`)', () => {
+      expect(entry()).toBeDefined();
+      expect(entry()!.surface).toMatch(/element:filter/);
+      expect(entry()!.surface).toMatch(/element:form/);
+    });
+
+    it('the replay really does leave the bare nodes — the residue this TODO is about', () => {
+      const result = applyMetaMigrations(authored(), 17, 18);
+      const ids = new Set(result.applied.map((a) => a.conversionId));
+      expect(ids.has('element-filter-removed')).toBe(true);
+      expect(ids.has('element-form-removed')).toBe(true);
+
+      // Both nodes survive the chain, stripped bare. If a conversion ever starts
+      // deleting them this line fails, and this entry's premise is what should be
+      // revisited — not this expectation.
+      const components = (result.stack.pages as any[])[0].regions[0].components;
+      expect(components.map((c: any) => c.type)).toEqual(['element:filter', 'element:form']);
+      expect(components[0].properties).toEqual({});
+      expect(components[1].properties).toEqual({});
+    });
+
+    it('a 17 → 18 run emits exactly one todo naming BOTH node types (ADR-0087 D3)', () => {
+      const result = applyMetaMigrations(authored(), 17, 18);
+      const naming = result.todos.filter(
+        (t) => /element:filter/.test(t.surface) && /element:form/.test(t.surface),
+      );
+      expect(naming).toHaveLength(1);
+      expect(naming[0]!.id).toBe('element-filter-and-form-node-refused');
+      expect(naming[0]!.toMajor).toBe(18);
+    });
+
+    it('prescribes DELETING the node, and names each element\'s replacement', () => {
+      // The two replacements are the ones `RETIRED_PAGE_COMPONENT_TYPES` already
+      // sends an author to at the parse; pinned here so the two doors cannot
+      // drift into prescribing different things.
+      const r = entry()!.replacement;
+      expect(r).toMatch(/Delete the component node/);
+      expect(r).toMatch(/userFilters/);
+      expect(r).toMatch(/object-form/);
+    });
+
+    it('⛔ does not prescribe an automatic delete — the conversions must not make it', () => {
+      const text = `${entry()!.replacement} ${entry()!.reason}`;
+      expect(text).toMatch(/layout/i);
+      expect(text).not.toMatch(/the conversion (deletes|removes) the node/i);
+    });
+
+    it('the acceptance criterion is checkable, and names `os validate` (the card\'s bar)', () => {
+      const a = entry()!.acceptanceCriteria;
+      expect(a).toMatch(/os validate/);
+      // Named at the node's own path, so a remaining node is reported
+      // individually rather than as one page-level failure.
+      expect(a).toMatch(/retiredComponentType/);
+      // Regions, slots and nested containers — the three places the conversions
+      // walk, and therefore the three places a bare node can be left.
+      expect(a).toMatch(/slots/);
+      expect(a).toMatch(/nested containers/);
+    });
+  });
+
   describe('composition (cross-major is the designed-for case)', () => {
     it('composes only the steps in (from, to]', () => {
       const chain = composeMigrationChain(10, 11);
