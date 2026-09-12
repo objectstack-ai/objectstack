@@ -3912,16 +3912,17 @@ describe("ListViewSchema — the RETIRED `page` view type (#17063)", () => {
    * Walk `invalid_union` wrappers and return every issue, nested arms included
    * — the same helper the calendar block below needs, for the same reason.
    *
-   * ⚠️ The flatten is load-bearing at the OVERLAY door and nowhere else: on
-   * `ViewMetadataSchema` a shape-level refusal is raised inside a union BRANCH,
-   * so the top-level message is zod's "Invalid input" and the prescription sits
-   * one level down. Measured to be the pre-existing behaviour of EVERY
-   * `retiredKey()` tombstone on this shape (`virtualScroll`, `striped`,
-   * `bordered` all read identically), so it is the house behaviour of the door
-   * rather than anything this retirement introduces — the union-level dispatch
-   * that lifts such a message to the top (`exportOptionsPdfUnionError`, this
-   * file) is a per-case decision, and widening it to the whole tombstone family
-   * is its own question with its own measurement.
+   * ⚠️ The flatten still reaches the ISSUE wherever it is raised, which is why
+   * it stays: on `ViewMetadataSchema` a shape-level refusal is raised inside a
+   * union BRANCH, so the tombstone issue itself is one level down and a pin
+   * that walks only `issues[]` would miss it. What has changed since #17299 is
+   * the top-level MESSAGE, which used to be zod's bare "Invalid input" for
+   * every tombstone on this shape (`virtualScroll`, `striped`, `bordered` all
+   * read identically) and is now the prescription itself. That question — per
+   * case, as `exportOptionsPdfUnionError` answered it for one retired enum
+   * VALUE, or family-wide for the whole tombstone class — was opened here and
+   * is settled in `view-union-retirement-prescription.test.ts`, family-wide,
+   * with the catchall control that permitted it.
    */
   const flatten = (issues: z.ZodIssue[]): z.ZodIssue[] =>
     issues.flatMap((i) => {
@@ -3952,9 +3953,17 @@ describe("ListViewSchema — the RETIRED `page` view type (#17063)", () => {
     it('REFUSES `pageName` with the tombstone prescription, not a bare unknown-key report', () => {
       const r = parse({ type: 'grid', pageName: 'sales_dashboard', columns: ['name'] });
       expect(r.success).toBe(false);
+      // Select the TOMBSTONE issue by the shape `retiredKey()` raises rather
+      // than by its text. Since #17299 the overlay door also carries that text
+      // on the union WRAPPER (path `[]`), lifted verbatim from the issue below,
+      // so a text-only find is satisfied by either and this pin's subject —
+      // that the refusal is raised at the key the author wrote — needs the one
+      // that has a path. The two are asserted equal in
+      // `view-union-retirement-prescription.test.ts`.
       const issue = flatten((r as { error: z.ZodError }).error.issues)
-        .find((i) => i.message.includes('`view.pageName` was removed'));
+        .find((i) => (i as { expected?: string }).expected === 'never');
       expect(issue, JSON.stringify((r as { error: z.ZodError }).error.issues)).toBeDefined();
+      expect(issue!.message).toContain('`view.pageName` was removed');
       expect(issue!.path.join('.')).toBe('pageName');
     });
 
