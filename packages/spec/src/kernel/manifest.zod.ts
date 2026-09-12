@@ -317,7 +317,7 @@ export const ManifestSchema = strictObject({
    * Package version following semantic versioning (major.minor.patch).
    *
    * @example "1.0.0"
-   * @example "2.1.0-beta.1"
+   * @example "2.1.0"
    */
   version: z.string().regex(/^\d+\.\d+\.\d+$/).describe('Package version (semantic versioning)'),
   
