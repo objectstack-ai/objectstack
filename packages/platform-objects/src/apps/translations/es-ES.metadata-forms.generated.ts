@@ -880,10 +880,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Modo",
         helpText: "Modo de anulación de página: full o slotted (para páginas record)"
       },
-      assignedProfiles: {
-        label: "Perfiles asignados",
-        helpText: "Perfiles que pueden acceder a esta página"
-      },
       aria: {
         label: "Accesibilidad",
         helpText: "Atributos de accesibilidad (etiquetas ARIA, roles)"

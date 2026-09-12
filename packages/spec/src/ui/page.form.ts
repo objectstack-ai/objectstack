@@ -153,7 +153,10 @@ export const pageForm = defineForm({
       fields: [
         { field: 'isDefault', helpText: 'Set as default page for this page type' },
         { field: 'kind', helpText: 'Page override mode: full or slotted (for record pages)' },
-        { field: 'assignedProfiles', widget: 'string-tags', helpText: 'Profiles that can access this page' },
+        // `assignedProfiles` input removed with the key (ADR-0090 D2 / ADR-0049): a form
+        // input for an unwritable key is the false-compliant UI half of a retirement, and
+        // its helpText shipped translated into four locale bundles. Page audience is the
+        // permission set's; there is nothing to author here.
         { field: 'aria', type: 'composite', helpText: 'Accessibility attributes (ARIA labels, roles)' },
       ],
     },

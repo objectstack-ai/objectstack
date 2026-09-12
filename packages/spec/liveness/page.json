@@ -52,13 +52,14 @@
       "evidence": "objectui: packages/components/src/renderers/layout/page.tsx:290 branches on schema.regions, :197-204 resolves the named slots (header/sidebar/main/aside/footer) and appends the remainder below main at :211, and :157 flattens their components for the JSX-source path — measured objectui @11c1e71e",
       "note": "region → component tree rendering (header/main/sidebar/footer). RE-CITED 2026-08-10 (#7133/#7142): same split-citation pruning as `template` — at objectui @11c1e71e the containers.tsx half names `regions` only in a comment (:798, 'page:section — thin wrapper used inside regions'). Verdict unchanged: LIVE. Component-level liveness stays unclassified (undrilled container, #4956); one component key carries a verdict OUTSIDE this file: `components[].responsive` is a retiredKey tombstone (#11027, ADR-0049 D2 — dead on a two-repo measurement; see the file _note)."
     },
+    "assignedProfiles": {
+      "status": "dead",
+      "verifiedAt": "2026-09-12",
+      "note": "REMOVED 2026-09-12 (ADR-0090 D2 + ADR-0049 enforce-or-remove; maintainer ruling 2026-09-12, decision batch #121 item 2, verbatim \u300c\u540c\u610f\u300d) \u2014 tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-18 page-assigned-profiles-removed conversion. BOTH halves of the prior `live` row were false: the objectui bridge it cited, react/src/spec-bridge/bridges/page.ts, does not exist in that repo and neither does any spec-bridge directory (lit control: two sibling objectui citations in this same file resolve), and the key had zero readers in either repo \u2014 no renderer, route or metadata read door \u2014 so a page that assigned profiles was open to every caller who could reach it. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); page audience is the permission set\u2019s \u2014 gate the DATA with the object\u2019s permission sets and bind those sets to people through positions."
+    },
     "isDefault": {
       "status": "live",
       "note": "default-page selection for an object/page-type — objectui page resolution."
-    },
-    "assignedProfiles": {
-      "status": "live",
-      "note": "profile-scoped page audience; objectui bridges it (react/src/spec-bridge/bridges/page.ts) to PageLayout.assignedProfiles. End-to-end enforcement not independently verified (necessary-not-sufficient, ADR-0054)."
     },
     "interfaceConfig": {
       "status": "live",

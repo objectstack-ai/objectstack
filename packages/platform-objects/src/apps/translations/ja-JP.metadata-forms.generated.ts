@@ -880,10 +880,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "モード",
         helpText: "ページ上書きモード: full または slotted（record ページ用）"
       },
-      assignedProfiles: {
-        label: "割り当てプロファイル",
-        helpText: "このページにアクセス可能なプロファイル"
-      },
       aria: {
         label: "アクセシビリティ",
         helpText: "アクセシビリティ属性（ARIA ラベル、ロール）"
