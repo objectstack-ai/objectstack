@@ -6254,9 +6254,28 @@ export class ObjectStackClient {
    *
    * `service-ai` is a **Cloud/EE package in the `cloud` repo**. This repo's
    * dispatcher only proxies `/api/v1/ai/**` to whatever `buildAIRoutes()`
-   * mounted, and 404s `AI service is not configured` when the service is
-   * absent (the open-source default) — so treat every method here as
-   * plugin-provided and check `discovery.services` first.
+   * mounted. When the service is absent (the open-source default) those
+   * routes are still mounted, so a request reaches a handler with nothing
+   * behind it and the answer is **501**, not 404 — 404 would mean the path
+   * does not exist, which for `/ai/*` is false.
+   *
+   * Two arms are narrower than that, and a caller branching on status needs
+   * both:
+   *
+   * - An **anonymous** caller is refused **401** first. The 501 and the
+   *   `/ai/agents` courtesy below are both capability disclosures, and
+   *   neither is owed to a caller who has not authenticated.
+   * - **`GET /ai/agents` answers `200`** with an empty list (`{ agents: [] }`
+   *   under the envelope's `data`), not 501. It is a deliberate courtesy: a
+   *   console polls it on every navigation to decide whether to show AI
+   *   affordances, and an empty catalog conveys "no AI service here" without
+   *   looking like a fault.
+   *
+   * The 501 body is not a local string — it comes from the shared
+   * `serviceUnavailableMessage`, the same sentence `discovery.services.ai`
+   * reports for the slot, so the two cannot drift into naming different
+   * remedies. Treat every method here as plugin-provided and check
+   * `discovery.services` first.
    *
    * That split is also why the guard for these URLs lives on the other side of
    * the repo boundary: `cloud`'s `packages/service-ai/src/ai-route-ledger.ts`
