@@ -211,6 +211,70 @@ describe('migration chain (ADR-0087 D3)', () => {
     });
   });
 
+  // Fourth of the #5781 class, on the `replacement` field: a projected ledger
+  // string that asserted a runtime capability the tree does not deliver. The
+  // entry told an author displaced by the ETL layer's retirement that
+  // connector-attached sync "IS parsed and executed" — parsed is true
+  // (`AutomationEngine.registerConnector` runs `ConnectorSchema.parse`),
+  // executed never was: `syncConfig` has no reader outside `packages/spec`, the
+  // same measurement that retired `syncConfig.schedule` under ADR-0049. Because
+  // `replacement` is projected verbatim into `spec-changes.json` (which ships in
+  // the `@objectstack/spec` tarball) and into `docs/protocol-upgrade-guide.md`,
+  // the claim was published advice, not a code comment. ⚠️ Nothing in this repo
+  // cross-checks a projected ledger string against the tree it describes — the
+  // mechanism is a per-entry pin like this one, added after each defect is
+  // found. That gap is the recurring cause; this pin only closes THIS entry.
+  describe('protocol-17 `etl-pipeline-layer-retired` — states what happens to `syncConfig`, not a sync that never ran', () => {
+    const entry = () =>
+      MIGRATIONS_BY_MAJOR[17]!.semantic.find((s) => s.id === 'etl-pipeline-layer-retired');
+
+    it('finds the entry, and it still routes the author layer by layer (anti-vacuity)', () => {
+      // Guards every negative below against passing on `undefined`, which is
+      // exactly how a `.find()` that stops matching reads as green.
+      expect(entry()).toBeDefined();
+      expect(entry()!.replacement).toMatch(/Layer by layer/);
+      expect(entry()!.replacement).toMatch(/ConnectorSchema\.syncConfig/);
+    });
+
+    it('⛔ never claims connector-attached sync is executed', () => {
+      // Pinned on the CLAIM, not on the words: the entry may still name the
+      // execution question in order to answer it, which is what the corrected
+      // sentence does — going quiet would leave a reader who remembers the
+      // published guide still expecting a sync to run.
+      const r = entry()!.replacement;
+      expect(r).not.toMatch(/IS parsed and executed/);
+      expect(r).not.toMatch(/syncConfig[^.]{0,80}\bis executed\b/i);
+    });
+
+    it('says what `syncConfig` IS and what actually happens to it', () => {
+      // A false promise replaced by a vague one would be the same defect wearing
+      // a fix's clothes: the author has to come away knowing the block is a
+      // declared shape, and knowing where the parse happens.
+      const r = entry()!.replacement;
+      expect(r).toMatch(/PARSED AND VALIDATED but NOT\s+EXECUTED/);
+      expect(r).toMatch(/declared shape/);
+      expect(r).toMatch(/AutomationEngine\.registerConnector/);
+      expect(r).toMatch(/no\s+reader outside `packages\/spec`/);
+    });
+
+    it('names the surface that IS executed, so the author has somewhere to go', () => {
+      // The measurement behind this line: `connector_action`
+      // (`service-automation/src/builtin/connector-nodes.ts`) resolves the
+      // registered handler and awaits it. Without this the correction would
+      // leave the ETL-displaced author with no route at all.
+      const r = entry()!.replacement;
+      expect(r).toMatch(/`actions`/);
+      expect(r).toMatch(/connector_action/);
+    });
+
+    it('the retirement itself still stands — this is a correction to the advice', () => {
+      // ⛔ Correcting a projected sentence is not an un-retirement.
+      const r = entry()!.replacement;
+      expect(r).toMatch(/removed — no protocol surface replaces it/);
+      expect(entry()!.acceptanceCriteria).toMatch(/No source imports `ETLPipeline`/);
+    });
+  });
+
   // The D3 half of a node-level refusal, and the one class of entry whose
   // ABSENCE is invisible to every other gate in this family: `check:spec-changes`
   // and `check:upgrade-guide` pin the registry to its PROJECTIONS, so an entry
