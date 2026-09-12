@@ -73,6 +73,13 @@ describe('SqliteWasmDriver (in-memory)', () => {
 
   it('should update an object', async () => {
     const [bob] = await driver.find('users', { where: { name: 'Bob' } });
+    // [#17690] `SqliteWasmDriver` overrides none of these doors, so it reaches
+    // its consumers through `@objectstack/driver-sql`'s `.d.ts` — this is the
+    // same narrowing the base class's own suite now does.
+    assert(
+      typeof bob.id === 'string' || typeof bob.id === 'number',
+      'the seeded Bob row carries no usable id',
+    );
     await driver.update('users', bob.id, { age: 18 });
     const updated = await driver.findOne('users', { where: { id: bob.id } });
     assert(updated !== null, 'findOne answered the not-found arm for a seeded id');
@@ -81,6 +88,10 @@ describe('SqliteWasmDriver (in-memory)', () => {
 
   it('should delete an object', async () => {
     const [charlie] = await driver.find('users', { where: { name: 'Charlie' } });
+    assert(
+      typeof charlie.id === 'string' || typeof charlie.id === 'number',
+      'the seeded Charlie row carries no usable id',
+    );
     await driver.delete('users', charlie.id);
     const deleted = await driver.findOne('users', { where: { id: charlie.id } });
     expect(deleted).toBeNull();

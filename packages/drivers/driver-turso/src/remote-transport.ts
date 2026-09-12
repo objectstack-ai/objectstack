@@ -1832,7 +1832,12 @@ export class RemoteTransport {
   // Transactions
   // ===================================
 
-  async beginTransaction(): Promise<any> {
+  // [#17690] The contract's own type. It was `Promise<any>` — the one door of
+  // this family on `RemoteTransport`, whose `find`/`upsert`/`bulkUpdate` were
+  // already honest and are the counter-control showing the census that found
+  // this discriminates rather than flagging everything. Pinned both halves in
+  // `turso-driver-doors-declared-types.test.ts`.
+  async beginTransaction(): Promise<unknown> {
     await this.ensureConnected();
     return this.client!.transaction();
   }

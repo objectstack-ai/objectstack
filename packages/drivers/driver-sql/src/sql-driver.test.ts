@@ -100,6 +100,12 @@ describe('SqlDriver (SQLite Integration)', () => {
 
   it('should update an object', async () => {
     const [bob] = await driver.find('users', { where: { name: 'Bob' } });
+    // [#17690] `find()` publishes the contract's `Record<string, unknown>[]`
+    // now, so an id read off a row is narrowed before it is passed as one.
+    assert(
+      typeof bob.id === 'string' || typeof bob.id === 'number',
+      'the seeded Bob row carries no usable id',
+    );
     await driver.update('users', bob.id, { age: 18 });
 
     const updated = await driver.findOne('users', { where: { id: bob.id } });
@@ -109,6 +115,10 @@ describe('SqlDriver (SQLite Integration)', () => {
 
   it('should delete an object', async () => {
     const [charlie] = await driver.find('users', { where: { name: 'Charlie' } });
+    assert(
+      typeof charlie.id === 'string' || typeof charlie.id === 'number',
+      'the seeded Charlie row carries no usable id',
+    );
     await driver.delete('users', charlie.id);
 
     const deleted = await driver.findOne('users', { where: { id: charlie.id } });

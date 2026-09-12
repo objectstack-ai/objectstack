@@ -16,7 +16,7 @@
  * though no DDL ran for the external object.
  */
 
-import { describe, it, expect, afterAll } from 'vitest';
+import { describe, it, expect, afterAll, assert } from 'vitest';
 import { rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -89,8 +89,12 @@ describe('SqlDriver external read path — remoteName resolution (ADR-0015)', ()
       const rows = await ext.find('ext_customer', {});
       expect(rows).toHaveLength(2);
 
-      const acme = rows.find((r: any) => r.name === 'Acme');
-      expect(acme).toBeTruthy();
+      const acme = rows.find((r) => r.name === 'Acme');
+      // [#17690] `find()` publishes `Record<string, unknown>[]`, so
+      // `Array.prototype.find` answers `… | undefined` and the absent arm is
+      // narrowed away before any field is read. Through the old
+      // `Promise<any[]>` the four reads below compiled against nothing.
+      assert(acme !== undefined, 'the external read returned no Acme row');
       // Coercion populated despite no DDL having run for the external object:
       expect(acme.flag).toBe(true);                    // boolean (stored 1/0)
       expect(acme.meta).toEqual({ tier: 'gold' });     // json (stored as text)
