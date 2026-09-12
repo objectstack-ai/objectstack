@@ -3065,12 +3065,17 @@ function renderPair(pair, repo, pairs = null) {
     // a second note kind must not put the first one's sentence in its mouth.
     const sibling = notes.some((n) => n.code === 'C2-SIBLING');
     const record = notes.some((n) => n.code === 'C6-RECORD');
+    const corrected = notes.some((n) => n.code === 'C2-CORRECTION');
     console.log(
       `✓ check-clause2-carriers: PR #${pair.pr} / card #${pair.card} — the clause-② declaration is ` +
         (sibling
           ? 'readable in the fixed spelling on a SIBLING card this same PR delivers rather than on ' +
             'this card (the reading above names which, and what it says), and both carriers agree'
-          : 'readable in the fixed spelling and both carriers agree') +
+          : corrected
+            ? 'readable in the fixed spelling on a CORRECTION comment superseding the claim\'s own ' +
+              'line (the reading above names which comment, and says the claim was not edited), and ' +
+              'both carriers agree'
+            : 'readable in the fixed spelling and both carriers agree') +
         (record
           ? ', and a review of record names this head (the note above says which comment to cite; ' +
             'existence, not the verdict)'
