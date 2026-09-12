@@ -5,10 +5,17 @@
  * ENGINE's side — the ruling on #15041 step 2, as amended by the director
  * ruling (decision batch #120 item 1).
  *
- * The driver accepts `SqlDriverConfig.fileColumnsMoved` and has since PR
- * #17403. Nothing supplied it: the column was declared, the driver accepted
- * it, and no code anywhere read the one and handed it to the other. That gap
- * is what this file closes and what it pins.
+ * The driver has accepted `SqlDriverConfig.fileColumnsMoved` since PR #17403,
+ * and until this change nothing outside `driver-sql` supplied it.
+ *
+ * ⛔ That absence is NOT what makes the wiring owed, and reading it that way is
+ * a mistake worth naming here rather than repeating. Asked identically of
+ * `SqlDriverConfig`'s other own keys — the same corpus, the same path shape,
+ * the same package boundary — `sqliteJournalMode` reads zero too, and it is a
+ * perfectly ordinary optional key that no host happens to set. A zero proves
+ * only that there is no supplier today. What makes THIS one owed is the
+ * director ruling on the card (decision batch #120 item 2), which puts the
+ * kernel→driver wiring inside this dispatch rather than after it.
  *
  * ## The one fact the arm may be keyed on
  *

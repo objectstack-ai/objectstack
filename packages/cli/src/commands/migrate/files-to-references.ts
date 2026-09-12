@@ -23,7 +23,7 @@ import {
   describeFileColumnMoveRefusal,
   runFileColumnMove,
   type FileColumnMoveResult,
-} from './file-column-move.js';
+} from '../../utils/file-column-move.js';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import type { SqlDriverLike } from '../../utils/schema-migrate.js';
 import type { MediaColumnMoveScan, SqlDialectName } from '@objectstack/driver-sql';

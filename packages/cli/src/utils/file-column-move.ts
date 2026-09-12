@@ -29,6 +29,15 @@
  *
  * ## ⛔ The statements are the DRIVER's, imported at the point of use
  *
+ * ## ⛔ It lives in `src/utils/`, NOT beside the command it serves
+ *
+ * oclif's command table is `"glob": "**\/*.js"` under `dist/commands`, so EVERY
+ * module there is a command. A helper placed beside `files-to-references.ts`
+ * has no default-exported `Command`, and oclif then emits a `findCommand … not
+ * found` warning to **stderr on every single CLI invocation** — measured, and
+ * it is not cosmetic: it broke `os validate --json` for a consumer that reads
+ * stdout and stderr together, by appending non-JSON after the payload.
+ *
  * `@objectstack/driver-sql` owns the dialects and MEASURED these clauses, and
  * the one thing this step must never do is carry its own copy: the copy that
  * matters here is the abort pre-check, which exists precisely because the
