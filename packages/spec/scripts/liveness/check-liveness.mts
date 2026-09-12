@@ -15,9 +15,17 @@
 //
 // Governed types must declare every authorable property's liveness status with
 // evidence in packages/spec/liveness/<type>.json, or CI fails (the ratchet — no new
-// undeclared surface). Property granularity is one level: a container property
+// undeclared surface). Property granularity follows the LEDGER: a container property
 // (object / record / array-of-object) may be drilled into via `"children"` so e.g.
-// `permission.objects.allowCreate` stays distinguishable from a blanket `objects`.
+// `permission.objects.allowCreate` stays distinguishable from a blanket `objects`,
+// and a child that is itself a container may be drilled again, to any depth the
+// ledger actually declares. The walk used to stop after ONE level: a `children`
+// map written at depth two parsed, was accepted by the file format, and was then
+// ignored in silence — no evidence resolved, no key reported unclassified, no
+// container reconcile, and nothing printed to say so. Since a `dead` verdict from
+// this gate is what the enforce-or-remove channel acts on, a silently skipped
+// subtree could retire a key that was alive. See `drillChildren` and
+// `MAX_DRILL_DEPTH` for the depth rule and for why its boundary is never silent.
 //
 // A container that is NOT drilled inherits its parent's single verdict for every
 // key beneath it, and that inheritance must be DECLARED, not assumed: it is
@@ -904,6 +912,90 @@ function scanOrphanProofs() {
 // the shrink-only baseline after the walk (drill.mts).
 const observedContainers: ContainerCoverage[] = [];
 
+// ── HOW DEEP THE DRILL GOES ──
+//
+// The walk descends exactly as far as the LEDGER declares `children`, so the
+// working depth limit is the ledger's own nesting, not a number written here.
+// That is a real bound: a ledger file is finite acyclic JSON, so the descent
+// terminates on data the author can see, rather than on a constant they cannot.
+//
+// `MAX_DRILL_DEPTH` is therefore a TRIPWIRE, not the working limit — and the
+// only reason it exists is that a limit must not be able to hide anything.
+// Truncating there silently would rebuild, one level lower, exactly the defect
+// this recursion removes: before it, a `children` map written at depth two was
+// accepted by the file format and then ignored — no evidence resolved, no
+// container reconcile, and no line of output saying any of that was missing.
+// So every key below the cut is reported UNCLASSIFIED, which FAILS the gate.
+// A depth limit the instrument does not announce is prose wearing the shape of
+// data (#4956), and the boundary of a check is the last place that is affordable.
+const MAX_DRILL_DEPTH = 8;
+
+/**
+ * Record a blanket verdict that stands in for a subtree, at ANY depth.
+ *
+ * Hoisted out of the walk because the reconcile is no longer a top-level-only
+ * question: a DRILLED child can itself be a container, and before the walk
+ * recursed, such a child was classified and its own children were never counted
+ * as covered by anything. That is #4956's silence at depth two — the child keys
+ * were neither drilled, nor deferred, nor recorded as debt, and no run said so.
+ */
+function recordContainerCoverage(type: string, propPath: string, node: any): void {
+  const cs = childShape(node);
+  const childKeys = cs ? Object.keys(cs) : [];
+  if (childKeys.length > 0) observedContainers.push({ key: `${type}/${propPath}`, childKeys });
+}
+
+/**
+ * Classify one drilled container's children, recursing wherever the ledger
+ * declares a nested `children` map.
+ *
+ * `depth` is the level being drilled INTO: 1 for a top-level property's own
+ * children. Every exit from this function either classifies a key, reports it
+ * UNCLASSIFIED, or hands it to a deeper call — there is deliberately no branch
+ * that returns without accounting for the keys it saw.
+ */
+function drillChildren(
+  type: string,
+  propPath: string,
+  node: any,
+  led: any,
+  cat: { classified: number; unclassified: number; byStatus: Record<string, number> },
+  depth: number,
+): void {
+  const cs = childShape(node);
+  if (!cs) {
+    cat.unclassified++;
+    report.unclassified.push(`${type}/${propPath} (declared children but property is not a container)`);
+    return;
+  }
+  if (depth > MAX_DRILL_DEPTH) {
+    // The tripwire. Report every key it covers rather than dropping the subtree:
+    // an unwalked entry that says nothing is the failure mode, not the depth.
+    for (const ck of Object.keys(cs)) {
+      cat.unclassified++;
+      report.unclassified.push(
+        `${type}/${propPath}.${ck} (nested past the ${MAX_DRILL_DEPTH}-level drill ceiling — NOT walked, so nothing here is classified)`,
+      );
+    }
+    return;
+  }
+  for (const ck of Object.keys(cs)) {
+    const cled = led.children[ck];
+    const childPath = `${propPath}.${ck}`;
+    if (cled?.children) {
+      drillChildren(type, childPath, cs[ck], cled, cat, depth + 1);
+      continue;
+    }
+    const status = cled?.status || markerStatus(descOf(cs[ck])) || led.childrenDefault;
+    if (!status) { cat.unclassified++; report.unclassified.push(`${type}/${childPath}`); continue; }
+    // A drilled child that is ITSELF a container carries a blanket verdict over
+    // its own subtree, exactly as a top-level one does — so it owes the same
+    // declared disposition (drill / defer / record).
+    recordContainerCoverage(type, childPath, cs[ck]);
+    classify(type, childPath, status, cled, cat);
+  }
+}
+
 for (const type of GOVERNED) {
   const ledger = loadLedger(type);
   const props = ledger.props || {};
@@ -912,14 +1004,23 @@ for (const type of GOVERNED) {
 
   // ── reverse direction: a row whose property is gone (see orphans.mts) ──
   // Runs off the SAME walk the forward pass classifies against, so the two
-  // directions can never disagree about what the schema contains.
+  // directions can never disagree about what the schema contains — including
+  // how deep it goes, which is why the resolver takes a PATH and not a key.
   const nodeOf = new Map(walked.map((p) => [p.key, p.node]));
   const orphans: Orphan[] = findOrphanEntries({
     type,
     props,
     shapeKeys: walked.map((p) => p.key),
-    childKeysOf: (key) => {
-      const cs = childShape(nodeOf.get(key));
+    childKeysOf: (segments) => {
+      let node = nodeOf.get(segments[0]);
+      if (node === undefined) return null;
+      let cs = childShape(node);
+      for (let i = 1; i < segments.length; i++) {
+        if (!cs) return null;
+        node = cs[segments[i]];
+        if (node === undefined) return null;
+        cs = childShape(node);
+      }
       return cs ? Object.keys(cs) : null;
     },
   });
@@ -929,24 +1030,14 @@ for (const type of GOVERNED) {
     if (FRAMEWORK_FIELDS.has(key)) { classify(type, key, 'live', null, cat); continue; }
     const led = props[key];
     if (led?.children) {
-      // drill one level
-      const cs = childShape(node);
-      if (!cs) { cat.unclassified++; report.unclassified.push(`${type}/${key} (declared children but property is not a container)`); continue; }
-      for (const ck of Object.keys(cs)) {
-        const cled = led.children[ck];
-        const status = cled?.status || markerStatus(descOf(cs[ck])) || led.childrenDefault;
-        if (!status) { cat.unclassified++; report.unclassified.push(`${type}/${key}.${ck}`); continue; }
-        classify(type, `${key}.${ck}`, status, cled, cat);
-      }
+      drillChildren(type, key, node, led, cat, 1);
     } else {
       const status = led?.status || markerStatus(description);
       if (!status) { cat.unclassified++; report.unclassified.push(`${type}/${key}`); continue; }
       // One verdict standing in for a whole subtree. Legal, but it must be
       // declared rather than inherited by default — record it for the
       // post-walk reconcile (drill.mts, #4956).
-      const cs = childShape(node);
-      const childKeys = cs ? Object.keys(cs) : [];
-      if (childKeys.length > 0) observedContainers.push({ key: `${type}/${key}`, childKeys });
+      recordContainerCoverage(type, key, node);
       classify(type, key, status, led, cat);
     }
   }
@@ -970,6 +1061,10 @@ const undrilledBaseline = parseUndrilledBaseline(
  *   `field`      — a governed type root; its walked top-level keys all carry a
  *                  verdict (the type is governed, so the forward pass proved it).
  *   `view/list`  — a drilled ledger coordinate; its `children` keys are verdicts.
+ *                  Dotted (`dashboard/widgets.chartConfig`) for a coordinate the
+ *                  walk reaches by recursion — a deferral must be expressible at
+ *                  every depth the walk can classify, or the deeper containers
+ *                  would have only two of the three dispositions available.
  * Anything else dangles, which is the failure this resolution exists to produce.
  */
 function classifiedKeysAt(target: string): readonly string[] | null {
@@ -981,7 +1076,10 @@ function classifiedKeysAt(target: string): readonly string[] | null {
   }
   const [type, prop] = target.split('/');
   if (!GOVERNED.includes(type)) return null;
-  const children = loadLedger(type).props?.[prop]?.children;
+  const segments = prop.split('.');
+  let entry: any = loadLedger(type).props?.[segments[0]];
+  for (let i = 1; i < segments.length; i++) entry = entry?.children?.[segments[i]];
+  const children = entry?.children;
   return children ? Object.keys(children) : null;
 }
 

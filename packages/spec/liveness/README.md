@@ -561,14 +561,29 @@ and their fields walk bespoke nesting; flows/actions/agents/tools/skills/dataset
 permissions/hooks/pages are checked as flat stack collections, and container
 properties fan out over arrays (each flow node, each dataset measure).
 
-## Granularity — drill one level
+## Granularity — drill as deep as the ledger declares
 
 A property is classified at the top level by default. A **container** property (object /
-record / array-of-object) may be drilled one level via `"children"` to keep sub-properties
+record / array-of-object) may be drilled via `"children"` to keep sub-properties
 distinguishable — e.g. `permission.objects.allowCreate` (live) vs `allowTransfer` (experimental),
 or `flow.errorHandling.fallbackNodeId` (dead) vs the rest (live). Drill where the
-audit gives divergent sub-statuses; otherwise the top-level entry covers the whole subtree —
+audit gives divergent sub-statuses; otherwise the entry covers the whole subtree —
 but that inheritance must now be **declared**, not assumed (below).
+
+A child that is **itself** a container may be drilled again, by nesting a `children` map
+inside it, to whatever depth the ledger actually declares. The depth limit is therefore the
+ledger's own nesting, which is a bound the author can read — not a constant in the gate.
+
+> **This used to stop after one level, in silence (#17424).** A `children` map written at
+> depth two parsed, was accepted by the file format, and was then ignored: no evidence path
+> resolved, no key reported unclassified, no container reconcile, and **no line of output
+> saying any of it was missing**. Because the enforce-or-remove channel acts on this gate's
+> `dead` verdicts, a silently skipped subtree could retire a key that was alive. Two fixes
+> landed together, and the second matters as much as the first — the walk recurses, *and*
+> its boundary can no longer be quiet: `MAX_DRILL_DEPTH` in `check-liveness.mts` is a
+> tripwire rather than the working limit, and every key below it is reported
+> **UNCLASSIFIED**, which fails the gate. A depth limit the instrument does not announce is
+> prose wearing the shape of data — #4956, at the one place a check can least afford it.
 
 ```jsonc
 // packages/spec/liveness/permission.json
@@ -591,7 +606,7 @@ worse than an honest coarse one. What is *not* acceptable is inheriting that cov
 > `dashboard.widgets` carried `{"status": "live"}` and a `note` saying the per-widget
 > props were *"classified in the DashboardWidgetSchema subtree"*. **No such subtree has
 > ever existed** — `DashboardWidget` appeared in exactly two files, this README and that
-> claim. The walk drills one level and only through an explicit `children`, so all 22 keys
+> claim. The walk drilled one level, and only through an explicit `children`, so all 22 keys
 > of the strict `DashboardWidgetSchema` were never asked about, the `unclassified` count
 > never mentioned them, and the run printed *"all governed-type properties are
 > classified"*. That is how `widgets[].responsive` survived the #3896 sweep that removed
@@ -636,7 +651,14 @@ that grows a key its target never classifies is #4956 one level down. Pointing a
 ```
 
 At landing: **58 containers / 292 child keys classified nowhere**, plus 6 resolved
-deferrals covering 248. Adding a row is a visible edit to a file named for the debt it
+deferrals covering 248. Since #17424 taught the walk to recurse, the same census reads
+**109 containers / 555 child keys**, plus 10 resolved deferrals covering 331 — and the jump
+is not new debt. Every one of the 54 coordinates it added was already riding on a blanket
+verdict *below a drilled container*, where a one-level walk could not see it and therefore
+never counted it. The denominator grew to match the surface it had always covered; three of
+the 54 turned out to be genuinely classified elsewhere (`app/navigation`'s NavigationItem
+keys) and became resolved deferrals rather than recorded debt, because recording them would
+have been this file's own false claim in the other direction. Adding a row is a visible edit to a file named for the debt it
 records — the point, since the thing it replaced (a reassuring sentence in a `note`) cost
 nothing to write and could not be checked. Logic and rationale live in
 `../scripts/liveness/drill.mts`; it is pure and unit-tested, because a tree that is fully
