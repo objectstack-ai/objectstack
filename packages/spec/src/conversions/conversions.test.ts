@@ -391,6 +391,43 @@ describe('conversion layer (ADR-0087 D2)', () => {
       expect(flows[0].name).toBe('my_flow'); // map key injected
       expect(flows[0].nodes[0].type).toBe('http'); // converted
     });
+
+    /**
+     * The jurisdiction pin for `retiredFromLoadPath` (#16864).
+     *
+     * `apply.ts` and `types.ts` now declare that retirement is an AUTHORING
+     * surface event: the flag keeps an entry off `normalizeStackInput`, while
+     * data-at-rest seams replay it on purpose. Both halves are asserted here,
+     * through the real doors rather than through `applyConversions` directly
+     * — the cases elsewhere in this file drive the primitive, so they would
+     * all stay green if `normalizeStackInput` ever started passing
+     * `includeRetired`, and the declaration would go stale unnoticed. This is
+     * the test that fails first when either half moves.
+     */
+    it('⛔ does NOT replay a RETIRED entry, while the stored-row door does', () => {
+      const entry = ALL_CONVERSIONS.find((c) => c.id === 'app-hidden-to-unpublished');
+      // Premise: without this the assertions below would pass vacuously.
+      expect(entry?.retiredFromLoadPath, 'premise: the entry under test is retired').toBe(true);
+
+      const authored = { name: 'account', label: 'Account', hidden: true, navigation: [] };
+
+      // Authoring funnel: the old shape survives verbatim, nothing is reported.
+      const notices: ConversionNotice[] = [];
+      const out = normalizeStackInput(
+        { apps: [structuredClone(authored)] },
+        { onConversionNotice: (n) => notices.push(n) },
+      );
+      expect((out.apps as any[])[0]).toEqual(authored);
+      expect(notices).toEqual([]);
+
+      // Data at rest: the SAME bytes through the stored-row door DO convert.
+      const stored = applyConversionsToStoredItem('app', structuredClone(authored)) as Record<
+        string,
+        unknown
+      >;
+      expect(stored.hidden).toBeUndefined();
+      expect(stored._unpublished).toBe(true);
+    });
   });
 
   describe('flow-node-wait-timeout-keys-removed (#4158)', () => {
