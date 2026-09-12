@@ -3961,6 +3961,15 @@ export function h18RetriageAged(issue, nowMs = Date.now()) {
 // in a comment, so a body-only H19 would have seen exactly half of the
 // evidence this row was filed on.
 //
+// ⚠️ DISCOVERING from both channels and JUDGING from both are two different
+// claims, and only the first one survived measurement. A body is rewritten in
+// place and a comment is an archive, so a target a seat superseded by
+// refreshing the body line keeps living in the thread and kept being counted
+// (#17564). The union is therefore still what is discovered and resolved, and
+// the BODY's set is what the row judges whenever the body states one — which
+// leaves the comment-channel fixture above judged exactly as before, its body
+// carrying no line at all. `h19BlockOutlivedBlocker` carries the whole of it.
+//
 // ## Report-only, and pointedly so
 //
 // The release is a protocol procedure with two mechanical double-checks the
@@ -4015,6 +4024,13 @@ export function blockerTargetKey(ref, ownerRepo = OWNER_REPO) {
  * Dedup is by canonical key, so a card that states one target in both channels
  * (the natural shape when a seat backfills the body line later) is resolved
  * once and listed once.
+ *
+ * ⛔ The union here is DISCOVERY and stays a union — every consumer of this
+ * list (the resolver and its cache, H26, H28) reads every target a card names
+ * in either channel. Carrier precedence is a JUDGEMENT rule and lives in
+ * `h19BlockOutlivedBlocker` alone (#17564): narrowing the discovered set
+ * instead would blind the resolutions H26 and H28 share, which ask questions
+ * to which a comment-borne target is a perfectly good answer.
  *
  * Self-references are dropped, as in the index: a card cannot be its own
  * blocker, and resolving one would always answer `open` (the card is in the
@@ -4210,19 +4226,133 @@ function namedTargets(rows) {
  * means the row must not go quiet on a half-expired block, because "one of
  * your two blockers landed" is exactly the state a seat cannot see by looking.
  *
+ * ## DISCOVERY unions the channels; JUDGEMENT gives the BODY precedence (#17564)
+ *
+ * The two carriers are not equal in authority, and reading them as equal is
+ * what produced this row's one measured false positive. **A body is rewritten
+ * in place; a comment is an archive.** When a seat spends a body line and
+ * refreshes it, the superseded target keeps living in the historic comment
+ * forever — so a union-judging row keeps counting a blocker that the card's
+ * own canonical statement stopped naming, and reports 「the block has outlived
+ * its blocker」 on a card whose authoritative blockers are all open.
+ *
+ * Measured, and the reason this is mechanised rather than dispositioned again:
+ * #11333 (open, `pm:blocked`) carries `Blocked-by: #13457` and `#13458` in its
+ * BODY — both open — while two 2026-08 comments carry `Blocked-by: #12400`,
+ * closed 2026-08-29. The union row fired 「1 of 3 … is CLOSED」 on every sweep
+ * from 2026-08-31 to 2026-09-12 and was hand-dispositioned FOUR times by three
+ * different seats, each of which re-derived the same three readings and
+ * discarded the same answer. ⭐ And the archive being read is the record of an
+ * EARLIER H19 row being repaired: the repair is what manufactures the next
+ * false positive, so no amount of hygiene on the card can ever clear the row.
+ *
+ * So: `blockerTargetsFor` still unions both channels — ⛔ discovery is
+ * unchanged, and must be, because a blocker stated only in a comment is still
+ * a blocker (one of this row's own two founding fixtures is exactly that card)
+ * — and the JUDGED set is chosen by carrier:
+ *
+ *   body carries any `Blocked-by:` line  -> judge the BODY's targets
+ *   body carries none                    -> judge the comment-borne targets
+ *
+ * The founding comment-channel fixture is untouched by that rule: its body
+ * carries no line at all, so it judges from comments exactly as it always did.
+ * The row text NAMES the carrier it judged, so a reader never has to re-derive
+ * which set the count was taken over.
+ *
+ * ## ⚠️ Precedence governs the evidence of EXPIRY, never the evidence of a WAIT
+ *
+ * Applied flatly — "drop every comment-borne target, count what is left" — the
+ * rule fixes this card's false positive by re-creating a worse one that was
+ * already measured and already paid for. #11747's shape is the MIRROR of this
+ * card's: a RE-PARK leaves the SPENT blocker in the body and the LIVE one in a
+ * comment, and a body-only count then publishes 「every target it names is
+ * closed: nothing this card declared a wait on is still running」 — a card was
+ * released to `pm:queue` on that sentence while its real blocker was open and
+ * dispatched. The two carriers each hold the live blocker in one of the two
+ * shapes, so neither channel alone can be trusted to say a wait has ENDED.
+ *
+ * What IS asymmetric is what each reading can do:
+ *
+ *   CLOSED, body-borne (or comment-borne on a body-less card) -> can MAKE a row
+ *   CLOSED, comment-only beside a body set  -> a spent line; makes nothing
+ *   OPEN, either channel                    -> can only WITHHOLD a row
+ *   UNRESOLVED, either channel              -> can only WITHHOLD, and says so
+ *
+ * So precedence decides which CLOSED target may found a finding, and nothing
+ * else. Every reading that says the wait might still be running is counted
+ * whichever channel carried it. Both false positives die and the error that
+ * remains possible is the harmless one: a row withheld on a card that really
+ * had finished waiting, which the very next sweep re-asks.
+ *
+ * That is the same posture #4690 already fixed for the third target state —
+ * ⛔ never resolve an ambiguity in the direction of release — applied to the
+ * carrier question instead of the readability one. It is also why an
+ * UNRESOLVED target is not silenced by precedence: it is by this file's own
+ * vocabulary *not judged*, it only ever withholds, and dropping it would
+ * re-create the silence the three-state split exists to end.
+ *
+ * ## The superseded-closed clause rides the row; it never becomes one (shape 3)
+ *
+ * A CLOSED target reachable only through the comment archive, beside a body
+ * that names its own targets, is a HYGIENE reading — a spent line left behind
+ * in the thread — ⛔ never an unlock candidate. Where the row already fires it
+ * is named in one appended sentence, which costs no second predicate: the
+ * channel split is `blockerChannelKeys`, the set H28 already computes from
+ * bodies this sweep has read, and every resolution not in it is comment-borne
+ * by construction.
+ *
+ * ⛔ Where the row does NOT otherwise fire it emits NOTHING — no hygiene row
+ * of its own. That was deliberate and is the whole point of the card: the
+ * remedy such a row would prescribe is unreachable (the body is already
+ * correct, and the comment belongs to another account and is history either
+ * way), and 「a row no reader can ever clear trains readers to skip the
+ * family」. Trading a false unlock row for an unclearable hygiene row would
+ * have bought nothing.
+ *
  * @param {object} issue — an OPEN issue.
  * @param {{ key: string, number: number, local: boolean,
  *   state: 'open'|'closed'|'unresolved', closedAt?: string|null,
  *   detail?: string|null }[]} resolutions — this card's targets, resolved.
+ * @param {string} [ownerRepo] — `owner/repo`, defaulting to the swept one. It
+ *   must be the SAME repo the resolutions were keyed against, because the
+ *   carrier split compares canonical keys.
  */
-export function h19BlockOutlivedBlocker(issue, resolutions) {
+export function h19BlockOutlivedBlocker(issue, resolutions, ownerRepo = OWNER_REPO) {
   if (!needsBlockerLiveness(issue)) return null;
   const rows = resolutions ?? [];
   if (rows.length === 0) return null;
-  const closed = rows.filter((r) => r.state === 'closed');
+  // The carrier split — the same keys H28 reads, so a target the union
+  // resolved and a target the split recognises are always the same set.
+  const bodyKeys = blockerChannelKeys(issue?.body, issue, ownerRepo);
+  const judgedFrom = bodyKeys.size > 0 ? 'body' : 'comments';
+  const carries = (r) => judgedFrom === 'comments' || bodyKeys.has(r.key);
+  // Precedence applies to the evidence that a block has ENDED and to nothing
+  // else. A CLOSED target reachable only through the comment archive is a
+  // spent line, so it cannot MAKE a finding; an OPEN or UNRESOLVED one is
+  // evidence the wait may still be running, so it is counted whichever
+  // channel carries it and can only ever WITHHOLD one.
+  const closed = rows.filter((r) => r.state === 'closed' && carries(r));
+  const superseded = rows.filter((r) => r.state === 'closed' && !carries(r));
   const unresolved = rows.filter((r) => r.state === 'unresolved');
   const open = rows.filter((r) => r.state === 'open');
   if (closed.length === 0 && unresolved.length === 0) return null;
+  const judgedCount = closed.length + open.length + unresolved.length;
+  const carrier =
+    judgedFrom === 'body'
+      ? 'judged against the BODY\'s `Blocked-by:` set, the authoritative carrier whenever the body ' +
+        'states one (a body is rewritten in place, a comment is an archive)'
+      : 'judged against the COMMENT-borne set, this card\'s body carrying no `Blocked-by:` line';
+  const supersededNote =
+    superseded.length === 0
+      ? ''
+      : ` ⚠️ A further ${superseded.length} CLOSED target(s) (${namedTargets(superseded)}) reach this ` +
+        'card ONLY through the comment archive and are deliberately NOT counted above: the body ' +
+        'states its own `Blocked-by:` set, so that set is what this row judges. A closed ' +
+        'comment-borne target beside a body line is a HYGIENE reading — a line spent when the body ' +
+        'was refreshed, left behind in a thread that is history by design — ⛔ never an unlock ' +
+        'candidate and ⛔ never a reason to release. ⛔ Nothing to repair on the card either: the ' +
+        'body is already correct and the comment is not rewritable, which is exactly why this is a ' +
+        'clause on a row that fired for another reason rather than a row of its own.';
 
   const release =
     ' Report-only, and the release is NOT this script\'s to make: the state model gives it two ' +
@@ -4253,14 +4383,15 @@ export function h19BlockOutlivedBlocker(issue, resolutions) {
         : ` A further ${unresolved.length} target(s) could not be resolved this sweep ` +
           `(${namedTargets(unresolved)}) and are unjudged, not open (#4690).`;
     return (
-      `\`pm:blocked\` while ${closed.length} of ${rows.length} \`Blocked-by:\` target(s) — read from body ` +
-      `OR comment — ${closed.length === 1 ? 'is' : 'are'} CLOSED (${namedTargets(closed)}): the block has ` +
+      `\`pm:blocked\` while ${closed.length} of ${judgedCount} \`Blocked-by:\` target(s) — ${carrier} — ` +
+      `${closed.length === 1 ? 'is' : 'are'} CLOSED (${namedTargets(closed)}): the block has ` +
       'outlived its blocker. Nothing else here asks this question — H4 asks whether the line EXISTS, H14 ' +
       'asks the REVERSE index — so an expired block sits with a well-formed line, a correct label and no ' +
       'row anywhere: one measured card sat ~4.5h past its blocker\'s close and was found only by a human ' +
       'walking the graph, another was released only by a manual triage pass.' +
       rest +
       alsoUnresolved +
+      supersededNote +
       release
     );
   }
@@ -4278,9 +4409,9 @@ export function h19BlockOutlivedBlocker(issue, resolutions) {
         'these. ⛔ Do not "fix" it on the card — judge the target BY HAND, or take a credential ' +
         'change to routing/security, whose call it is.';
   return (
-    `\`pm:blocked\` and ${unresolved.length} of ${rows.length} \`Blocked-by:\` target(s) could NOT be ` +
-    `resolved this sweep (${namedTargets(unresolved)}) — so whether this block has outlived its blocker ` +
-    'is UNJUDGED, not confirmed. Unread is not still-open (#4690): a target dropped in silence reads as ' +
+    `\`pm:blocked\` and ${unresolved.length} of ${judgedCount} \`Blocked-by:\` target(s) could NOT be ` +
+    `resolved this sweep (${namedTargets(unresolved)}) — the set ${carrier} — so whether this block has ` +
+    'outlived its blocker is UNJUDGED, not confirmed. Unread is not still-open (#4690): a target dropped in silence reads as ' +
     'a healthy block forever, which is the exact failure this item exists to end, so it is named here ' +
     'instead. ⚠️ UNJUDGED is not a quiet row and must not be skimmed as one: this card\'s block is ' +
     'exactly as unverified as if nothing had been read at all.' +
@@ -4288,6 +4419,7 @@ export function h19BlockOutlivedBlocker(issue, resolutions) {
     (open.length > 0
       ? ` The card's other ${open.length} target(s) did resolve, and are still open.`
       : '') +
+    supersededNote +
     release
   );
 }
@@ -20963,6 +21095,12 @@ async function selfTest() {
   // backtick-decorated BODY line. A body-only reader would have caught one of
   // the two, which is why the target list unions both channels.
   const keyOf = (ref) => blockerTargetKey(ref, 'objectstack-ai/objectstack').key;
+  // ⚠️ Pinned, and handed to every H19 call whose FIXTURE BODY carries a
+  // `Blocked-by:` line. H19's carrier split re-reads that body and compares
+  // canonical keys, so it must be told the same repo the fixture keys were
+  // built against — `OWNER_REPO` is read from the environment and the ported
+  // copy of this file runs its self-test under a DIFFERENT `GITHUB_REPOSITORY`.
+  const REPO_OS = 'objectstack-ai/objectstack';
 
   // The canonical key — three spellings, one issue, therefore one request.
   t('H19 key: a bare local ref qualifies against the swept repo', keyOf({ repo: null, number: 10126 }), 'objectstack-ai/objectstack#10126');
@@ -21153,13 +21291,93 @@ async function selfTest() {
   t('H19 measured ②: the decorated body line yields the target', keysOf(blockedCard(10063, liveDecoratedBody)), 'objectstack-ai/objectstack#9612');
   t(
     'H19 measured ②: …and the card fires once its target is resolved closed',
-    h19row(blockedCard(10063, liveDecoratedBody), [target(9612, 'closed', { closedAt: '2026-08-20T07:58:08Z' })]).includes('closed 2026-08-20T07:58:08Z'),
+    h19row(blockedCard(10063, liveDecoratedBody), [target(9612, 'closed', { closedAt: '2026-08-20T07:58:08Z' })], REPO_OS).includes('closed 2026-08-20T07:58:08Z'),
     true,
   );
   // The prose around the line names #9612 four more times; only the DIRECTIVE
   // line is a target. Reading the prose would manufacture duplicates and, on
   // other cards, blockers that were only ever context.
   t('H19 measured ②: prose mentions of the same number are not extra targets', blockerTargetsFor(blockedCard(10063, liveDecoratedBody), undefined, 'objectstack-ai/objectstack').length, 1);
+
+  // -- H19 CARRIER PRECEDENCE: the body judges, the comment archive does not --
+  //
+  // The measured card is #11333 (open, `pm:blocked`), byte-shaped below. Its
+  // BODY names two open blockers; two 2026-08 comments name `#12400`, closed
+  // 2026-08-29. The union row read 「1 of 3 … is CLOSED … the block has
+  // outlived its blocker」 on every sweep from 2026-08-31 to 2026-09-12 and was
+  // hand-dispositioned FOUR times by three different seats, each re-deriving
+  // the same three readings and discarding the same answer. ⭐ The archive it
+  // read is the record of an EARLIER H19 row being repaired, so the repair
+  // manufactures the next false positive and no work on the card can ever
+  // clear the row.
+  //
+  // ⚠️ Every direction is pinned in BOTH senses, because the flat reading of
+  // this rule ("drop comment-borne targets") re-creates #11747's mirror defect
+  // — see the re-park cases in the H28 block, which are the other half of this
+  // battery and are asserted there against the same predicate.
+  const LIVE_11333_BODY =
+    'Tracking card for the two-phase `manifest.permissions` work.\n\n' +
+    'Blocked-by: #13457\n' +
+    'Blocked-by: #13458\n\n' +
+    'Parent closes when both phases close.';
+  // The comment that parked the now-superseded target, in its recorded shape.
+  const LIVE_11333_COMMENT =
+    'Unlock-edge rewrite (spec seat R7): the recorded `Blocked-by: #10812` target closed, so the ' +
+    'edge is re-pointed at the live prerequisite.\n\nBlocked-by: #12400';
+  const live11333 = blockedCard(11333, LIVE_11333_BODY);
+  const live11333Targets = [target(13457, 'open'), target(13458, 'open'), target(12400, 'closed', { closedAt: '2026-08-29T15:16:12Z' })];
+  // DISCOVERY is untouched: all three targets are still found and resolved.
+  t('H19 precedence: discovery still unions both channels', keysOf(live11333, [LIVE_11333_COMMENT]).split(' ').length, 3);
+  t('H19 precedence: …and the comment-borne target is among them', keysOf(live11333, [LIVE_11333_COMMENT]).includes('objectstack-ai/objectstack#12400'), true);
+  // (a) The defect itself: a CLOSED comment-borne target beside OPEN body
+  // targets founds nothing — ⛔ not an unlock row, and ⛔ not a hygiene row of
+  // its own either. A row whose remedy is unreachable (the body is already
+  // correct; the comment belongs to another account and is history by design)
+  // would train readers to skip the family, which is the harm this card filed.
+  t('H19 precedence (a): the live #11333 shape emits NO row', h19BlockOutlivedBlocker(live11333, live11333Targets, REPO_OS), null);
+  t('H19 precedence (a): …⛔ and no hygiene row is invented in its place', h19row(live11333, live11333Targets, REPO_OS), '');
+  t('H19 precedence (a): …the same shape with ONE body target still emits nothing', h19BlockOutlivedBlocker(blockedCard(1, 'Blocked-by: #2'), [target(2, 'open'), target(3, 'closed')], REPO_OS), null);
+  // (b) A closed BODY target reads exactly as it always did.
+  const bodyClosed = h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'closed', { closedAt: '2026-08-20T07:58:08Z' })], REPO_OS);
+  t('H19 precedence (b): a closed BODY target still fires', bodyClosed.includes('outlived its blocker'), true);
+  t('H19 precedence (b): …counted over the body set', bodyClosed.includes('1 of 1 `Blocked-by:` target(s)'), true);
+  t('H19 precedence (b): …and the row names the carrier it judged', bodyClosed.includes("judged against the BODY's `Blocked-by:` set"), true);
+  t('H19 precedence (b): …giving the reason the two carriers differ in authority', bodyClosed.includes('a body is rewritten in place, a comment is an archive'), true);
+  // (c) A comment-only card is judged from comments, exactly as today — the
+  // founding fixture of this whole row is one of those.
+  const commentOnly = h19row(blockedCard(10112, 'body carries no line'), [target(10126, 'closed', { closedAt: '2026-08-20T09:03:37Z' })], REPO_OS);
+  t('H19 precedence (c): a comment-only card still fires', commentOnly.includes('outlived its blocker'), true);
+  t('H19 precedence (c): …and says the comment-borne set is what it judged', commentOnly.includes('judged against the COMMENT-borne set'), true);
+  t('H19 precedence (c): …naming the body\'s silence as the reason', commentOnly.includes('body carrying no `Blocked-by:` line'), true);
+  t('H19 precedence (c): …⛔ and does not claim to have judged the body', commentOnly.includes("judged against the BODY's"), false);
+  // (d) The body governs when the body's own target is the closed one: the row
+  // fires, and the OPEN comment-borne target still withholds the full
+  // discharge (this is #11747's shape — see the H28 block for its live bytes).
+  const bodyGoverns = h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'closed'), target(3, 'open')], REPO_OS);
+  t('H19 precedence (d): a closed body target fires even beside a comment-borne one', bodyGoverns.includes('outlived its blocker'), true);
+  t('H19 precedence (d): …and an OPEN comment-borne target still withholds the full discharge', bodyGoverns.includes('PARTIAL'), true);
+  t('H19 precedence (d): …⛔ never claiming every target is closed', bodyGoverns.includes('Every target it names is closed'), false);
+  // The asymmetry, stated as its own pin: precedence selects which CLOSED
+  // target may FOUND a row; every reading that says the wait may still be
+  // running counts whichever channel carried it (#4690's posture, applied to
+  // the carrier question).
+  t('H19 precedence: an UNRESOLVED comment-borne target is NOT silenced by the body', h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'open'), foreign('objectstack-ai/cloud', 88, 'unresolved', { detail: 'HTTP 404' })], REPO_OS).includes('UNJUDGED, not confirmed'), true);
+  t('H19 precedence: …and an OPEN comment-borne target is counted in the denominator', h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'closed'), target(3, 'open')], REPO_OS).includes('1 of 2 `Blocked-by:` target(s)'), true);
+  // The shape-3 sentence RIDES a row that fired for another reason. It never
+  // becomes a row, so it is only ever readable beside an actionable finding.
+  const withSuperseded = h19row(blockedCard(1, 'Blocked-by: #2'), [target(2, 'closed'), target(3, 'closed')], REPO_OS);
+  t('H19 superseded: the comment-borne closed target is excluded from the count', withSuperseded.includes('1 of 1 `Blocked-by:` target(s)'), true);
+  t('H19 superseded: …and named in its own clause', withSuperseded.includes('A further 1 CLOSED target(s) (`#3` (closed))'), true);
+  t('H19 superseded: …as HYGIENE, ⛔ never an unlock candidate', withSuperseded.includes('HYGIENE reading') && withSuperseded.includes('never an unlock'), true);
+  t('H19 superseded: …and says there is nothing on the card to repair', withSuperseded.includes('Nothing to repair on the card either'), true);
+  t('H19 superseded: ⛔ the clause is absent when nothing was superseded', bodyClosed.includes('A further 1 CLOSED target(s)'), false);
+  t('H19 superseded: ⛔ and absent on a comment-judged card, where nothing can be', commentOnly.includes('reach this card ONLY through the comment archive'), false);
+  // It rides the UNJUDGED branch too — one carrier rule, both branches.
+  t('H19 superseded: the clause rides the UNJUDGED branch as well', h19row(blockedCard(1, 'Blocked-by: #2'), [foreign('objectstack-ai/cloud', 88, 'unresolved', { detail: 'HTTP 404' }), target(3, 'closed')], REPO_OS).includes('HYGIENE reading'), true);
+  // ⛔ The precedence rule must not reach the DISCOVERY union that H26 and H28
+  // read: both still see the comment-borne target on the live #11333 shape.
+  t('H19 precedence: ⛔ H28 is unaffected on the live shape (no spent body line)', h28StaleBodyBlockerLine(live11333, live11333Targets, [LIVE_11333_COMMENT], REPO_OS), null);
+  t('H19 precedence: ⛔ and H26 still reads the full union', typeof h26BlockOnIndefiniteTarget(live11333, [target(13457, 'open', { labels: ['pm:blocking'] }), target(13458, 'open', { labels: ['pm:blocked'] })]), 'string');
 
   // The summary line's fourth `read X of Y` pair. Unlike the other three a
   // shortfall here suspends nothing — the unresolved targets fire their own
@@ -23582,8 +23800,13 @@ async function selfTest() {
     body: 'Blocked-by: #987',
     title: '',
   });
+  // ⚠️ The key must be the canonical one for a LOCAL target — `local: true`
+  // and an `objectstack-ai/cloud#N` key cannot both be true of one row, and
+  // H19's carrier split compares canonical keys against the card's own body
+  // line (`Blocked-by: #987` above), so an incoherent fixture would exercise
+  // the precedence rule against a target the card never names.
   const tgt = (number, labels, extra = {}) => ({
-    key: `objectstack-ai/cloud#${number}`,
+    key: `objectstack-ai/objectstack#${number}`,
     number,
     local: true,
     state: 'open',
@@ -23604,11 +23827,11 @@ async function selfTest() {
   // A CLOSED target is H19's row, never this one: it closed, so the unlock CAN
   // fire — the two items must not double-report one target.
   t('H26: a CLOSED target is H19\'s row, not this one', h26BlockOnIndefiniteTarget(waiting(), [{ ...tgt(987, ['pm:on-hold']), state: 'closed' }]), null);
-  t('H26: …and H19 does fire on it', typeof h19BlockOutlivedBlocker(waiting(), [{ ...tgt(987, ['pm:on-hold']), state: 'closed' }]), 'string');
+  t('H26: …and H19 does fire on it', typeof h19BlockOutlivedBlocker(waiting(), [{ ...tgt(987, ['pm:on-hold']), state: 'closed' }], REPO_OS), 'string');
   // An unresolved target is silent HERE and loud in H19 — one gap, one row.
   t('H26: an unresolved target is silent (H19 owns the unjudged sentence)', h26BlockOnIndefiniteTarget(waiting(), [{ ...tgt(987, null), state: 'unresolved', detail: 'HTTP 404' }]), null);
   t('H26: …and a labels-less open row cannot be judged either', h26BlockOnIndefiniteTarget(waiting(), [{ ...tgt(987, undefined) }]), null);
-  t('H26: …while H19 states that gap', h19row(waiting(), [{ ...tgt(987, null), state: 'unresolved', detail: 'HTTP 404' }]).includes('UNJUDGED'), true);
+  t('H26: …while H19 states that gap', h19row(waiting(), [{ ...tgt(987, null), state: 'unresolved', detail: 'HTTP 404' }], REPO_OS).includes('UNJUDGED'), true);
   // The chain leg.
   t('H26: a target that is itself pm:blocked -> the transitive row', typeof h26BlockOnIndefiniteTarget(waiting(1395), [tgt(10101, ['pm:blocked'])]), 'string');
   t('H26: …and it says to look one level further', h26row(waiting(1395), [tgt(10101, ['pm:blocked'])]).includes('TRANSITIVE'), true);
@@ -23632,7 +23855,11 @@ async function selfTest() {
   t('H26: a cross-repo target is named owner/repo#N', h26row(waiting(), [{ ...tgt(68, ['needs-user-decision']), local: false, key: 'objectstack-ai/objectos#68' }]).includes('`objectstack-ai/objectos#68`'), true);
   // Both rows can fire on ONE card — different halves of one wait.
   const expiredAndIndefinite = [{ ...tgt(900, ['pm:queue']), state: 'closed' }, tgt(987, ['pm:on-hold'])];
-  t('H26 + H19: a partially expired, partially indefinite block fires both', Boolean(h19BlockOutlivedBlocker(waiting(), expiredAndIndefinite)) && Boolean(h26BlockOnIndefiniteTarget(waiting(), expiredAndIndefinite)), true);
+  // The card declares BOTH targets in its body, because H19 now asks which
+  // carrier named the closed one: a resolution the card states nowhere is a
+  // comment-borne one, and a spent comment-borne line founds no row (#17564).
+  const waitingBoth = { ...waiting(), body: 'Blocked-by: #900\nBlocked-by: #987' };
+  t('H26 + H19: a partially expired, partially indefinite block fires both', Boolean(h19BlockOutlivedBlocker(waitingBoth, expiredAndIndefinite, REPO_OS)) && Boolean(h26BlockOnIndefiniteTarget(waitingBoth, expiredAndIndefinite)), true);
 
   // -- The UNGATED liveness read + H28: the stale body line (#11747) ----------
   //
@@ -23664,14 +23891,14 @@ async function selfTest() {
   // the liveness read, so the card resolved ONE target and it was closed.
   const asSwept = reparkKeys(undefined);
   t('H28 repro (OLD, gated): only the stale body target is resolved', asSwept, 'objectstack-ai/objectstack#9255');
-  const falseCandidate = String(h19BlockOutlivedBlocker(reparked, [target(9255, 'closed', { closedAt: '2026-08-19T11:28:26Z' })]) ?? '');
+  const falseCandidate = String(h19BlockOutlivedBlocker(reparked, [target(9255, 'closed', { closedAt: '2026-08-19T11:28:26Z' })], REPO_OS) ?? '');
   t('H28 repro (OLD, gated): H19 publishes 1 of 1 CLOSED', falseCandidate.includes('1 of 1 `Blocked-by:` target(s)'), true);
   t('H28 repro (OLD, gated): …as a FULL discharge — the false unlock candidate', falseCandidate.includes('Every target it names is closed'), true);
   t('H28 repro (OLD, gated): …and never says PARTIAL', falseCandidate.includes('PARTIAL'), false);
   // NEW behaviour = ungated: both channels, so the live blocker is resolved too.
   const ungated = [target(9255, 'closed', { closedAt: '2026-08-19T11:28:26Z' }), target(11501, 'open')];
   t('H28 repro (NEW, ungated): both channels are unioned', reparkKeys([REPARK_COMMENT]), 'objectstack-ai/objectstack#9255 objectstack-ai/objectstack#11501');
-  const partialNow = String(h19BlockOutlivedBlocker(reparked, ungated) ?? '');
+  const partialNow = String(h19BlockOutlivedBlocker(reparked, ungated, REPO_OS) ?? '');
   t('H28 repro (NEW, ungated): H19 reads 1 of 2', partialNow.includes('1 of 2 `Blocked-by:` target(s)'), true);
   t('H28 repro (NEW, ungated): …and calls it a PARTIAL discharge', partialNow.includes('PARTIAL'), true);
   t('H28 repro (NEW, ungated): …naming the live blocker as still open', partialNow.includes('`#11501`'), true);
@@ -23693,7 +23920,7 @@ async function selfTest() {
 
   // NEGATIVES — each half of the conjunction alone is a different state.
   t('H28: a closed body target with NO live comment target is H19\'s row alone', h28StaleBodyBlockerLine(reparked, [target(9255, 'closed')], ['no line in this comment'], 'objectstack-ai/objectstack'), null);
-  t('H28: …and H19 does fire on it', typeof h19BlockOutlivedBlocker(reparked, [target(9255, 'closed')]), 'string');
+  t('H28: …and H19 does fire on it', typeof h19BlockOutlivedBlocker(reparked, [target(9255, 'closed')], REPO_OS), 'string');
   t('H28: an OPEN body target beside an open comment target -> no row', h28StaleBodyBlockerLine(reparked, [target(9255, 'open'), target(11501, 'open')], [REPARK_COMMENT], 'objectstack-ai/objectstack'), null);
   // A target named in BOTH channels is already in the canonical home: there is
   // nothing to migrate, so the closed-body half alone must not fire.

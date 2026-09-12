@@ -3183,6 +3183,66 @@ describe('ObjectKanbanPropsSchema limit — the row cap four objectui faces alre
   });
 });
 
+// #17260 — the board's per-column quick-add switch, retired by the
+// objectui#8285 director-seat ruling (comment 5583979207, decision batch #91,
+// 2026-09-08; ruled option B: `quickAdd` leaves `object-kanban` and stays only
+// on the React-host `kanban-ui` block). Unlike `limit` above — a key four
+// objectui faces already implemented, so the spec was the half that was wrong
+// — `quickAdd` was FORWARDED and never read: at the pin this repo builds
+// against (`.objectui-sha` = `53ded82bf`) `ObjectKanban.tsx:931` spreads the
+// authored bag into `KanbanRenderer` and `KanbanImpl` gates the affordance on
+// `quickAdd && onQuickAdd` (`:355`, `:368`), while `onQuickAdd` is a
+// host-supplied FUNCTION no producer puts on an `object-kanban` node
+// (`ObjectKanban.tsx` names neither half: 0 each, against 6 for the sibling
+// `onCardClick` in the same file).
+describe('ObjectKanbanPropsSchema quickAdd is retired (#17260)', () => {
+  const kanban = ComponentPropsMap['object-kanban'];
+
+  it('rejects the retired `quickAdd` with the prescription, not a bare unknown-key verdict', () => {
+    // The prescription IS the payload: the author who hits this got
+    // `unknown-prop` from objectui's html tier before — the same message a
+    // typo gets — so the refusal has to say where the control still works.
+    expect(() => kanban.parse({ objectName: 'showcase_task', quickAdd: true }))
+      .toThrow(/`quickAdd`.*removed.*`kanban-ui`/s);
+  });
+
+  it('does not materialize the retired `quickAdd` on a clean parse', () => {
+    expect(kanban.parse({ objectName: 'showcase_task' })).not.toHaveProperty('quickAdd');
+  });
+
+  it('refuses the key by the TOMBSTONE, not by the strict unknown-key arm — the two are different answers', () => {
+    // The control that makes the assertion above a reading: an undeclared
+    // sibling on the same node comes back as `unrecognized_keys`, while the
+    // tombstoned key does not — it is declared, and rejected with its own
+    // guidance. Without this pair a shape that had simply DROPPED the key
+    // would pass the first test on the strict arm's generic message.
+    const retired = kanban.safeParse({ objectName: 'showcase_task', quickAdd: true });
+    expect(retired.success).toBe(false);
+    expect((retired.error?.issues ?? []).map((i) => i.code)).not.toContain('unrecognized_keys');
+
+    const undeclared = kanban.safeParse({ objectName: 'showcase_task', bogusProp: true });
+    expect(undeclared.success).toBe(false);
+    const issue = undeclared.error?.issues.find((i) => i.code === 'unrecognized_keys') as
+      | { keys?: string[] }
+      | undefined;
+    expect(issue?.keys).toEqual(['bogusProp']);
+  });
+
+  it('keeps the neighbouring forwarded keys that ARE read on this path', () => {
+    // The retirement is one key wide. `coverImageField` and
+    // `conditionalFormatting` travel the same forward and ARE read
+    // (`KanbanRenderer` / `bucketCardsIntoColumns` at the same pin), so a
+    // sweep that took the whole forwarded list would be over-wide — this is
+    // the pin that would catch it.
+    const parsed = kanban.safeParse({
+      objectName: 'showcase_task',
+      coverImageField: 'cover',
+      conditionalFormatting: [{ field: 'priority', value: 'high' }],
+    });
+    expect(parsed.success).toBe(true);
+  });
+});
+
 // #10053 — the accept-pins for the last two `icon` slots in this file whose
 // describes stated only the VOCABULARY. "Icon name (Lucide)" is equally true of
 // the `page:header` `icon` retired in #6946 *because nothing reads it*, so the

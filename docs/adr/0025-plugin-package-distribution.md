@@ -1,6 +1,6 @@
 # ADR-0025: Plugin Package Distribution (Code + Dependencies)
 
-**Status**: Proposed — partially implemented (2026-07-16 audit): the `.osplugin` artifact format and `os plugin build`/`sign`/`publish` CLI landed; the install flow (§3.5), `sys_plugin`/`sys_plugin_version`/`sys_plugin_installation` registry (§3.8), and install-time consent remain unimplemented.
+**Status**: Proposed — partially implemented (2026-09-12 audit, superseding 2026-07-16): the `.osplugin` artifact format and `os plugin build`/`sign`/`publish` CLI landed. **Install-time permission consent landed for PACKAGE installs** — the console disclosure panel, `sys_package_installation.granted_permissions`, re-consent on a widening upgrade, `EnvironmentArtifactSchema.grantedPermissions`, and `PluginPermissionEnforcer.registerGrantedPermissions` at load — but it is **registered-only and enforces nothing** (§3.7, #17147). The code-plugin half of the install flow (§3.5 steps 4–7: download / verify / materialize / load) and the `sys_plugin`/`sys_plugin_version`/`sys_plugin_installation` registry (§3.8) remain unimplemented: measured on `9bd4344e4` there is no `os plugin install` command, no `.osplugin` loader, and no runtime path on which a distributed plugin's code executes — an environment artifact carries `sys_package_version.manifest_json` and never the blob.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0003](./0003-package-as-first-class-citizen.md) (package + versioned releases), [ADR-0004](./0004-cloud-multi-kernel.md) (cloud multi-kernel), [ADR-0010](./0010-metadata-protection-model.md) (L1/L2/L3 protection), [ADR-0016](./0016-studio-package-authoring-and-publish.md) (package authoring & publish, local export/import)
 **Consumers**: `@objectstack/core` (kernel, plugin-loader, security), `@objectstack/runtime` (sandbox, marketplace install), `@objectstack/cli`, `@objectstack/spec/system` (ObjectStackManifest), `@objectstack/spec/cloud`, `../objectui` (Studio)
@@ -277,9 +277,34 @@ enforces this at publish time (an unverified publisher cannot ship `runtime:
   counter-signs on approval. Host ships trusted root keys; verify the chain at
   install (§3.5 step 4) **and** at load (§3.5 step 7).
 - **Permissions.** New manifest `permissions` block → install-time consent →
-  granted set → `PluginPermissionEnforcer` (service/hook/file/network already
-  enforced). Principle of least privilege; all denials logged (existing
-  behavior).
+  granted set → `PluginPermissionEnforcer`. Principle of least privilege; all
+  denials logged.
+
+  > **Landed as far as REGISTRATION, and no further (2026-09-12, #17147).** The
+  > parenthetical here used to read *"(service/hook/file/network already
+  > enforced)"*. It was never true of the granted set, and two of the four
+  > classes have no enforcement surface at all. Measured on `9bd4344e4`:
+  >
+  > - the consent record is persisted by the control plane
+  >   (`sys_package_installation.granted_permissions`) and re-consent is forced
+  >   on a widening upgrade — **live**, §3.8 as written;
+  > - it reaches the runtime on `EnvironmentArtifactSchema.grantedPermissions`
+  >   and `AppPlugin.init()` hands each entry to
+  >   `PluginPermissionEnforcer.registerGrantedPermissions` — **live** (#13457);
+  > - **nothing queries that registry.** `enforceServiceAccess` and
+  >   `enforceHookTrigger` are reachable only through `SecurePluginContext`,
+  >   which has zero production construction sites; `enforceFileRead`,
+  >   `enforceFileWrite` and `enforceNetworkRequest` are called by nothing at
+  >   all, `SecurePluginContext` included.
+  >
+  > ⇒ the granted set records what was consented to and **refuses no
+  > operation**. Per-plugin context construction — §3.5 step 7's *"wraps
+  > `PluginContext` with the enforcer scoped to the granted set"* — is the
+  > materialize seam that maintainer ruling `5486840233` assigns to this ADR's
+  > install-flow design work and forbids improvising elsewhere; it is tracked as
+  > **#17147** and is not built. The measurement is pinned in
+  > `packages/core/src/security/granted-permissions-not-enforced.pin.test.ts`,
+  > which goes red the day it is — delete this note in that PR.
 - **Config.** RETIRED 2026-08-27 (#11982, ADR-0049 enforce-or-remove;
   maintainer ruling, decision-inbox batch 5). `PluginConfigValidator` /
   `createPluginConfigValidator` and `PluginMetadata.configSchema` were removed:

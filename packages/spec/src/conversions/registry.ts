@@ -8011,6 +8011,189 @@ const objectGridDefaultSortRemoved: MetadataConversion = {
 };
 
 /**
+ * `object-kanban`'s per-column quick-add switch leaves the contract (protocol
+ * 18, #17260, ADR-0049 enforce-or-remove; the spec half of the objectui#8285
+ * director-seat ruling, decision batch #91, 2026-09-08 — ruled option B,
+ * `quickAdd` is retired from the board and stays only on the `kanban-ui`
+ * block, where a React host can supply the runtime function the control
+ * needs).
+ *
+ * **A pure lossless delete.** The key never had an effect to preserve.
+ * Measured at the `.objectui-sha` pin (`53ded82bf`): the board FORWARDS it —
+ * `ObjectKanban.tsx:931` spreads the authored bag into `KanbanRenderer`,
+ * which passes `quickAdd={schema.quickAdd}` alongside
+ * `onQuickAdd={schema.onQuickAdd}` (`plugin-kanban/src/index.tsx:196`) — but
+ * `KanbanImpl` gates the affordance on BOTH (`:355`, `:368`), and
+ * `onQuickAdd` is a host-supplied FUNCTION that JSON cannot carry and that no
+ * producer puts on an `object-kanban` node (`ObjectKanban.tsx` names neither
+ * half of the pair: 0 occurrences each, against 6 for the sibling
+ * `onCardClick` in the same file). So the gate was permanently false and
+ * deleting the key preserves observed behaviour exactly.
+ *
+ * ⚠️ Scoped by component `type`, never by key name. `quickAdd` is LIVE on the
+ * `kanban-ui` block — the same renderer chain, reached by a React host that
+ * hands in `onQuickAdd` — and the ruling keeps it there deliberately. That
+ * block is objectui-side and is not a component type this spec declares, so no
+ * stack this walk reaches can carry it; the type scoping is what keeps the
+ * strip from generalising into a name-keyed one if it ever is declared. The
+ * fixture's non-carrier control is an `object-grid` authoring the same key
+ * name.
+ *
+ * The neighbouring forwarded keys `coverImageField` and `conditionalFormatting`
+ * are LIVE and survive untouched (both are read on this very path, by
+ * `KanbanRenderer` / `bucketCardsIntoColumns`).
+ *
+ * Zero authored occurrences in this repo's corpora — no `object-kanban`
+ * component is authored anywhere under `examples/` or `apps/` at all (control:
+ * `object-grid` 3, `object-metric` 8 in the same corpora, same instrument) —
+ * so this entry exists for stored `sys_metadata` rows and for authors outside
+ * the repo, which the filing seat explicitly could not measure.
+ */
+const objectKanbanQuickAddRemoved: MetadataConversion = {
+  id: 'object-kanban-quick-add-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface: 'page.component.object-kanban.quickAdd',
+  summary:
+    "object-kanban component prop 'quickAdd' removed (#17260 — the affordance is gated on a "
+    + "host-supplied 'onQuickAdd' function no producer puts on an object-kanban node, so the key "
+    + "was accepted and dropped; the quick-add control stays on the React-host 'kanban-ui' block)",
+  apply(stack, emit) {
+    return mapPageComponents(stack, (component, path) => {
+      if (component.type !== 'object-kanban') return component;
+      const properties = component.properties;
+      if (!isDict(properties) || !('quickAdd' in properties)) return component;
+      const stripped = stripKeys(properties, ['quickAdd'], emit, `${path}.properties`);
+      return { ...component, properties: stripped };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'delivery_board',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                // The carrier: an `object-kanban` authoring the retired key.
+                {
+                  type: 'object-kanban',
+                  id: 'k1',
+                  properties: { objectName: 'crm_task', groupBy: 'status', quickAdd: true },
+                },
+                // ⚠️ The same key name on a component that is NOT an
+                // `object-kanban` — not this entry's key. Untouched: the strip
+                // is scoped by component type, never by key name, which is what
+                // keeps the LIVE `kanban-ui` spelling out of its reach.
+                {
+                  type: 'object-grid',
+                  id: 'g1',
+                  properties: { objectName: 'crm_task', quickAdd: true },
+                },
+                // A board WITHOUT the key rides through untouched — the strip
+                // dispatches on key presence and the copy-on-write contract
+                // keeps the reference.
+                {
+                  type: 'object-kanban',
+                  id: 'k3',
+                  properties: { objectName: 'crm_task', cardFields: ['title'] },
+                },
+                // The nested position (#6775's lesson): a board inside a
+                // card's `children` is still a component.
+                {
+                  type: 'page:card',
+                  id: 'c1',
+                  properties: {
+                    children: [
+                      {
+                        type: 'object-kanban',
+                        id: 'k4',
+                        properties: { objectName: 'crm_lead', groupBy: 'stage', quickAdd: false },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        // The named-slot shape (#6776): a board authored into a slotted page.
+        {
+          name: 'delivery_board_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: {
+              type: 'object-kanban',
+              id: 'k5',
+              properties: { objectName: 'crm_task', groupBy: 'status', quickAdd: true },
+            },
+          },
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'delivery_board',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                {
+                  type: 'object-kanban',
+                  id: 'k1',
+                  properties: { objectName: 'crm_task', groupBy: 'status' },
+                },
+                {
+                  type: 'object-grid',
+                  id: 'g1',
+                  properties: { objectName: 'crm_task', quickAdd: true },
+                },
+                {
+                  type: 'object-kanban',
+                  id: 'k3',
+                  properties: { objectName: 'crm_task', cardFields: ['title'] },
+                },
+                {
+                  type: 'page:card',
+                  id: 'c1',
+                  properties: {
+                    children: [
+                      {
+                        type: 'object-kanban',
+                        id: 'k4',
+                        properties: { objectName: 'crm_lead', groupBy: 'stage' },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'delivery_board_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: {
+              type: 'object-kanban',
+              id: 'k5',
+              properties: { objectName: 'crm_task', groupBy: 'status' },
+            },
+          },
+        },
+      ],
+    },
+    // Three notices: the region-level board, the nested one and the slotted
+    // one. The `object-grid` sibling and the board without the key emit none.
+    expectedNotices: 3,
+  },
+};
+
+/**
  * Object-permission lifecycle bits `allowRestore` / `allowPurge` removed
  * (protocol 18, #12497 — ADR-0049 enforce-or-remove, maintainer ruling
  * 2026-08-26 accepting #1883's recommendation B).
@@ -9223,6 +9406,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     translationComponentSubmitLabelRemoved,
     pageComponentResponsiveRemoved,
     objectGridDefaultSortRemoved,
+    objectKanbanQuickAddRemoved,
     permissionAllowRestorePurgeRemoved,
     formViewOptionDefaultRemoved,
     fieldReferenceToAlias,

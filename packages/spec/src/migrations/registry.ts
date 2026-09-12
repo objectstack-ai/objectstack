@@ -5437,15 +5437,28 @@ const step18: MigrationStep = {
     'schema, so deleting it lands the row on exactly what it already rendered without this ' +
     'registry guessing a view type. The surviving page mount is the app navigation item ' +
     '(`PageNavItem.pageName`), untouched. ' +
+    'It also retires `object-kanban`\'s `quickAdd` (#17260, ADR-0049 enforce-or-remove; the spec ' +
+    'half of the objectui#8285 director-seat ruling, decision batch #91, 2026-09-08 — ruled ' +
+    'option B). The board FORWARDED the key into the shared renderer but the affordance is gated ' +
+    'on both `quickAdd` and `onQuickAdd`, and `onQuickAdd` is a host-supplied FUNCTION JSON ' +
+    'cannot carry and no producer puts on an `object-kanban` node — so the gate was permanently ' +
+    'false. The drop was NOT silent, and that is what made it worse than silence: objectui\'s ' +
+    'html tier reported the published key as `unknown-prop`, the same diagnostic a typo gets, so ' +
+    'an author following the contract met a tool contradicting it with no way to tell which side ' +
+    'was wrong. A retiredKey tombstone on `ObjectKanbanPropsSchema` with one D2 conversion that ' +
+    'is a pure lossless DELETE (the key never had an effect to preserve) scoped by component ' +
+    '`type`: `quickAdd` stays LIVE on the `kanban-ui` block, where a React host supplies the ' +
+    'runtime slot, and the ruling keeps it there deliberately.',
     'It also removes `page.assignedProfiles` (ADR-0090 D2 / ADR-0049 enforce-or-remove; ' +
     'maintainer ruling 2026-09-12 \u300c\u540c\u610f\u300d). The key was authorable on the published ' +
     '`PageSchema` and named for the Profile concept ADR-0090 D2 deleted, while the schema\'s own ' +
     'alias table CORRECTED an authored `profiles:` into it — two files from ' +
     '`security/permission.zod.ts` answering the same word with \"no Profile concept\". Measured ' +
     'across this repository and objectui it had zero readers, so a page that \"assigned ' +
-    'profiles\" was open to every caller who could reach it. `PageSchema` is a strictObject, so ' +
-    'the key leaves the shape and its prescription lives in that schema\'s guidance table; the ' +
-    'two alias entries became refusals naming the permission-set route. The D2 conversion ' +
+    'profiles\" was open to every caller who could reach it. It is a retiredKey tombstone on ' +
+    '`PageSchema` — the def is still parsed from the `page` root, so there is an author to ' +
+    'teach — and the two alias entries became refusals naming the permission-set route. The ' +
+    'D2 conversion ' +
     'STRIPS the key — there is no lossless target, because which permission set a given ' +
     'profile name corresponds to is a judgement no walker can make, which is what the paired ' +
     'D3 semantic entry is for.',
@@ -5462,6 +5475,7 @@ const step18: MigrationStep = {
     'translation-component-submit-label-removed',
     'page-component-responsive-removed',
     'object-grid-default-sort-removed',
+    'object-kanban-quick-add-removed',
     'permission-allow-restore-purge-removed',
     'form-view-option-default-removed',
     'field-reference-to-alias',
@@ -13498,6 +13512,34 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // (wrap-and-rename to `sort: [pair]` when `sort` is absent; a pure lossless
     // delete when `sort` is present, since the fallback was never read then).
     'ui/ObjectGridProps:defaultSort',
+    // #17260 — ADR-0049 enforce-or-remove, executing the objectui#8285
+    // director-seat ruling (comment 5583979207, decision batch #91, 2026-09-08,
+    // standing maintainer delegation): ruled option B — `quickAdd` is retired from
+    // the `object-kanban` board and stays only on the `kanban-ui` block, where a
+    // React host can supply the runtime function the control needs.
+    // The board FORWARDED the key but never honoured it: measured at the
+    // `.objectui-sha` pin `53ded82bf`, `ObjectKanban.tsx:931` spreads the authored
+    // bag into `KanbanRenderer` (`plugin-kanban/src/index.tsx:196` passes both
+    // `quickAdd` and `onQuickAdd`), and `KanbanImpl` gates the affordance on BOTH
+    // (`:355`, `:368`) — while `onQuickAdd` is a host-supplied FUNCTION that JSON
+    // cannot carry and no producer puts on an `object-kanban` node
+    // (`ObjectKanban.tsx` names neither half: 0 each, against 6 for the sibling
+    // `onCardClick` in the same file). The drop was not silent, which is the sharp
+    // edge: objectui's html tier reported the published key as `unknown-prop` —
+    // the SAME diagnostic a typo gets — and its registry-spec ledger records it as
+    // `ESCALATED (object-kanban.quickAdd — measured NOT honoured)`, so the author
+    // met a tool contradicting the contract with no way to tell which side was
+    // wrong. Tombstoned with `retiredKey()` in `ObjectKanbanPropsSchema` (the
+    // surface baseline line carries `[RETIRED]`); sources are stripped by the D2
+    // conversion `object-kanban-quick-add-removed`, a pure lossless delete scoped
+    // by component `type` so the LIVE `kanban-ui` spelling is untouched.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look — the `ui/ObjectGridProps:defaultSort`
+    // precedent one entry over.
+    'ui/ObjectKanbanProps:quickAdd',
     // #17063 (ADR-0049 enforce-or-remove; maintainer ruling 2026-09-09, decision
     // batch #107 item 1, verbatim 「撤」). `ObjectListView.pageName` named the published
     // page a `type: 'page'` view was to mount. Only the spec half of #13216 ever
