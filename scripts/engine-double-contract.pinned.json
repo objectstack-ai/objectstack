@@ -2392,6 +2392,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-auth/src/anonymous-session-refusal.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/anonymous-session-refusal.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/anonymous-session-refusal.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/audience-posture-setting.test.ts",
       "verb": "findOne",
       "pinned": 1
