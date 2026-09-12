@@ -139,9 +139,11 @@ export const SCAFFOLD_BUILT_DEPENDENCIES = ['better-sqlite3', 'esbuild'];
  *
  *  - RETIRED (#3653): `@better-auth/scim>better-call` — the rc.1-era scim pin
  *    peered an exact `better-call@1.3.7` against the host's 1.4.0, and this
- *    map declared that skew away. Stable `@better-auth/scim@1.7.1` (the pin
- *    since #3653 landed) peers `better-call@1.4.0`, so the skew is genuinely
- *    gone and the entry retired WITH the pin move, as its ratchet demanded.
+ *    map declared that skew away. Stable scim peers `better-call@1.4.0`, so
+ *    the skew is genuinely gone and the entry retired WITH the pin move, as
+ *    its ratchet demanded. Measured on 1.7.1 when #3653 landed; re-read
+ *    2026-09-12 on `1.7.3`, the pin today, off the installed manifest —
+ *    `peerDependencies['better-call']` is the exact string `1.4.0`.
  *
  *  - `<four>@better-auth/utils` — `@better-auth/core`, `/oauth-provider`,
  *    `/scim` and `/sso` each peer an EXACT `@better-auth/utils@0.4.2`, while a
@@ -194,8 +196,9 @@ export const SCAFFOLD_BUILT_DEPENDENCIES = ['better-sqlite3', 'esbuild'];
 export const SCAFFOLD_ALLOWED_PEER_VERSIONS: Record<string, string> = {
   'better-auth>better-sqlite3': '13',
   // '@better-auth/scim>better-call' retired with the scim rc pin (#3653) —
-  // stable 1.7.1 peers better-call@1.4.0 exactly, the copy every install
-  // already resolves. init.test.ts pins its ABSENCE now.
+  // stable scim peers better-call@1.4.0 exactly (re-read 2026-09-12 on the
+  // 1.7.3 pin), the copy every install already resolves. init.test.ts pins
+  // its ABSENCE now.
   '@better-auth/core>@better-auth/utils': '0.5.0',
   '@better-auth/oauth-provider>@better-auth/utils': '0.5.0',
   '@better-auth/scim>@better-auth/utils': '0.5.0',
@@ -514,10 +517,12 @@ export function renderPnpmWorkspaceYaml(
       '#   range is stale; pinning back to 12 would just install a second,',
       '#   unused native copy.',
       '#',
-      '#   @better-auth/scim (held at a release candidate deliberately) peers an',
-      '#   exact better-call 1.3.7, while better-auth itself depends on 1.4.0. A',
-      '#   better-auth plugin has to share the host\'s better-call instance, so',
-      '#   the single 1.4.0 copy is the correct resolution.',
+      '#   (The \'@better-auth/scim>better-call\' entry that used to sit here is',
+      '#   retired. The rc-era scim pin peered an exact better-call 1.3.7 against',
+      '#   better-auth\'s own 1.4.0 and this map declared that skew away; the pin',
+      '#   is a stable release now, and @better-auth/scim 1.7.3 peers an exact',
+      '#   better-call 1.4.0 — the one copy better-auth depends on. Re-measured',
+      '#   2026-09-12 off the installed manifest: the skew is gone.)',
       '#',
       '#   @better-auth/core, /oauth-provider, /scim and /sso each peer an exact',
       '#   @better-auth/utils 0.4.2, while better-call (better-auth\'s own HTTP',
