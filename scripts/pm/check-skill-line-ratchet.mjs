@@ -830,8 +830,9 @@ export const CEILINGS = new Map([
   // being read from the `event=merge_group` runs, and the queue's serial 15–30
   // minutes per PR, which together are the whole of the 「a quiet `main` tip is
   // not a stall」 reading; and the inert echoed `merge_method`, re-measured a
-  // fourth time this round and unchanged. Candidates 32 / landed 26 (23 new lines
-  // + 3 in-place corrections) / already present 6 / refused 0.
+  // fourth time this round and unchanged. Candidates 31 / landed 24 readings
+  // (23 new lines + 3 in-place corrections; two readings needed two lines each
+  // under the 120-byte cap) / already present 7 / refused 0.
   //
   // Nothing else was paid in place: the fourth increment MEASURED zero
   // line-neutral folds among this file's adjacent rule pairs, and re-wrap funding
