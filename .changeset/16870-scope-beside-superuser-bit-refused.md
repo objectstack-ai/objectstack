@@ -72,7 +72,7 @@ examples, two built access matrices, the built artifact fixture and every tracke
 controls on every probe (130 nodes declaring `viewAllRecords`, 53 of them `true`,
 18 declaring `readScope`; 133 brace-local `viewAllRecords: true` literals).
 
-<!-- adr-0087: not-required (no-key-moves) No authorable key is added, renamed or
+<!-- adr-0087: not-required (no-migration-prescription) No authorable key is added, renamed or
 retired — `readScope`, `writeScope`, `viewAllRecords` and `modifyAllRecords` all
 keep their spelling, position and meaning. What narrows is a COMBINATION, and it
 has no mechanical conversion: the two remedies (delete the depth key, or clear
