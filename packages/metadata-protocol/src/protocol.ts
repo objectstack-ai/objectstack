@@ -11943,12 +11943,15 @@ export class ObjectStackProtocolImplementation implements
         //
         // So a page hit surfaces to a caller exactly what `GET /meta/page`
         // already answers that caller — name, label, description — never
-        // more, and search is not a second read door. The page's own audience
-        // gate (`assignedProfiles`) is measured to have no backend consumer
-        // on the read door today; it is enforced where it is enforced now, at
-        // page render — the delegation posture direction 1's ruling recorded
-        // (a second enforcement point here would be a NEW authorization
-        // surface, the very thing the ruling's basis excludes).
+        // more, and search is not a second read door. ⚠️ A page has NO audience
+        // gate of its own. `page.assignedProfiles` read as one and enforced
+        // nothing — no backend consumer on the read door, and none at page
+        // render either (measured in objectui: every hit there was a
+        // declaration) — so it was removed under ADR-0090 D2 / ADR-0049. The
+        // delegation posture this sweep rests on is unaffected: what protects
+        // a page is the permission sets on the DATA it shows, and a second
+        // enforcement point here would still be a NEW authorization surface,
+        // the very thing the ruling's basis excludes.
         //
         // ## Matching and shape
         //

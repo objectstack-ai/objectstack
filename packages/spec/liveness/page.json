@@ -56,10 +56,6 @@
       "status": "live",
       "note": "default-page selection for an object/page-type — objectui page resolution."
     },
-    "assignedProfiles": {
-      "status": "live",
-      "note": "profile-scoped page audience; objectui bridges it (react/src/spec-bridge/bridges/page.ts) to PageLayout.assignedProfiles. End-to-end enforcement not independently verified (necessary-not-sufficient, ADR-0054)."
-    },
     "interfaceConfig": {
       "status": "live",
       "note": "the entire Airtable-parity list surface (source/columns/filterBy/appearance/userFilters/userActions/addRecord/buttons/recordAction/...) — objectui app-shell/src/views/InterfaceListPage.tsx + PageView.tsx. Verified in browser during the dogfood (grid+kanban+filters)."

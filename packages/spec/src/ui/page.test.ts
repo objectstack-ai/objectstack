@@ -191,7 +191,6 @@ describe('PageSchema', () => {
         },
       ],
       isDefault: true,
-      assignedProfiles: ['admin', 'sales_user'],
     });
 
     expect(page.object).toBe('account');
@@ -298,15 +297,49 @@ describe('PageSchema', () => {
     expect(page.type).toBe('utility');
   });
 
-  it('should accept page with profile assignments', () => {
-    const page = PageSchema.parse({
+  // [#16929] `assignedProfiles` was REMOVED (ADR-0090 D2 / ADR-0049): it was named
+  // for a deleted concept and no renderer, route or read door ever enforced it.
+  // This test used to assert the schema ACCEPTED it. The three pins below replace
+  // it, and they assert the ENVELOPE of the refusal — code and path — plus the
+  // prescription's load-bearing clause, never the whole sentence.
+  it('refuses `assignedProfiles` and prescribes the permission-set route', () => {
+    const result = PageSchema.safeParse({
       name: 'custom_page',
       label: 'Custom Page',
       regions: [],
       assignedProfiles: ['admin', 'sales_manager', 'sales_rep'],
     });
 
-    expect(page.assignedProfiles).toHaveLength(3);
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues[0]!;
+    expect(issue.code).toBe('unrecognized_keys');
+    expect(issue.path).toEqual([]);
+    expect(issue.message).toMatch(/`page\.assignedProfiles` was removed.*permission sets/s);
+    // The prescription names the tool sentence the house pin governs.
+    expect(issue.message).toContain('os migrate meta --from 17');
+  });
+
+  it('answers `profiles:` with the permission-set route, not the retired key', () => {
+    const result = PageSchema.safeParse({ name: 'p', label: 'P', profiles: ['admin'] });
+
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues[0]!;
+    expect(issue.code).toBe('unrecognized_keys');
+    // The alias used to CORRECT the author into the retired vocabulary. It must
+    // not name it any more, in either direction.
+    expect(issue.message).toContain('no Profile concept');
+    expect(issue.message).toContain('permission sets');
+    expect(issue.message).not.toContain('assignedProfiles');
+  });
+
+  it('answers `assignedTo:` with the same sentence as `profiles:`', () => {
+    const result = PageSchema.safeParse({ name: 'p', label: 'P', assignedTo: ['admin'] });
+
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues[0]!;
+    expect(issue.code).toBe('unrecognized_keys');
+    expect(issue.message).toContain('no Profile concept');
+    expect(issue.message).not.toContain('assignedProfiles');
   });
 
   it('should accept page with custom template', () => {

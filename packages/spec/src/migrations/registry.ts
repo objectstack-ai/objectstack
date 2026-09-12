@@ -5436,7 +5436,19 @@ const step18: MigrationStep = {
     'both keys rather than rewriting `type` to `\'grid\'`: `type` defaults to `grid` in the ' +
     'schema, so deleting it lands the row on exactly what it already rendered without this ' +
     'registry guessing a view type. The surviving page mount is the app navigation item ' +
-    '(`PageNavItem.pageName`), untouched.',
+    '(`PageNavItem.pageName`), untouched. ' +
+    'It also removes `page.assignedProfiles` (ADR-0090 D2 / ADR-0049 enforce-or-remove; ' +
+    'maintainer ruling 2026-09-12 \u300c\u540c\u610f\u300d). The key was authorable on the published ' +
+    '`PageSchema` and named for the Profile concept ADR-0090 D2 deleted, while the schema\'s own ' +
+    'alias table CORRECTED an authored `profiles:` into it — two files from ' +
+    '`security/permission.zod.ts` answering the same word with \"no Profile concept\". Measured ' +
+    'across this repository and objectui it had zero readers, so a page that \"assigned ' +
+    'profiles\" was open to every caller who could reach it. `PageSchema` is a strictObject, so ' +
+    'the key leaves the shape and its prescription lives in that schema\'s guidance table; the ' +
+    'two alias entries became refusals naming the permission-set route. The D2 conversion ' +
+    'STRIPS the key — there is no lossless target, because which permission set a given ' +
+    'profile name corresponds to is a judgement no walker can make, which is what the paired ' +
+    'D3 semantic entry is for.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5462,6 +5474,7 @@ const step18: MigrationStep = {
     'memory-persistence-auto-save-interval-to-ms',
     'turso-config-timeout-to-timeout-ms',
     'view-page-mount-removed',
+    'page-assigned-profiles-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by

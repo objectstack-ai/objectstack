@@ -66,7 +66,6 @@ const homePage = {
 | `source` | `string` | optional | Page source text — required (and authoritative over `regions`) when `kind` is `'html'` or `'react'`. For `kind: 'html'` it is constrained JSX/HTML compiled to the tree by `@objectstack/sdui-parser` at save time (parse, never execute). For `kind: 'react'` it is real React/JSX executed at render by `@object-ui/react-runtime` (trusted tier). See [React Pages](/docs/ui/react-pages) |
 | `variables` | `PageVariable[]` | optional | Local state variables |
 | `isDefault` | `boolean` | optional | Is default page for its type |
-| `assignedProfiles` | `string[]` | optional | Profiles that can access this page |
 
 ### Page Types
 

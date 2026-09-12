@@ -659,6 +659,36 @@ export function checkPageSourceCompleteness(
  * - 'PageDashboard' (PascalCase)
  * - 'Settings Page' (spaces)
  */
+/**
+ * The `page.assignedProfiles` tombstone prescription (ADR-0090 D2, ADR-0049).
+ *
+ * The key is gone from the shape, so it arrives here through the
+ * `unrecognized_keys` path like any other undeclared key — `guidance` is what
+ * turns that report into the upgrade. Body prose states the key's fate; the
+ * closing sentence states a property of `os migrate meta` and nothing about the
+ * key (the house sentence, pinned in `shared/retired-key-migrate-sentence.test.ts`).
+ */
+const PAGE_ASSIGNED_PROFILES_RETIRED =
+  '`page.assignedProfiles` was removed in @objectstack/spec 18 (ADR-0090 D2, ADR-0049 '
+  + 'enforce-or-remove) — it was named for the Profile concept ADR-0090 D2 deleted, and it '
+  + 'gated nothing: no renderer, route or metadata read door ever read the key, so a page that '
+  + '"assigned profiles" stayed open to every caller who could reach it. Delete the key. Page '
+  + "audience is the permission set's: gate the DATA the page shows with the object's permission "
+  + 'sets, and bind those sets to people through positions (`sys_position_permission_set`) — '
+  + 'those are the checks the runtime actually runs. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+/**
+ * The wrong-layer pointer `profiles` / `assignedTo` now carry. Deliberately the
+ * same answer `security/permission.zod.ts` gives the word `profiles`: one word,
+ * one answer, whichever schema receives it.
+ */
+const PAGE_AUDIENCE_WRONG_LAYER =
+  '`profiles` / `assignedTo` are not page keys (ADR-0090 D2: no Profile concept). Page '
+  + "audience is the permission set's — gate the DATA the page shows with the object's "
+  + 'permission sets, and bind those sets to people through positions '
+  + '(`sys_position_permission_set`), never on the page itself.';
+
 export const PageSchema = lazySchema(() => strictObject({
   surface: 'this page',
   history: PAGE_HISTORY,
@@ -671,7 +701,6 @@ export const PageSchema = lazySchema(() => strictObject({
     components: 'regions', children: 'regions',
     state: 'variables', params: 'variables', vars: 'variables',
     config: 'interfaceConfig', interface: 'interfaceConfig',
-    profiles: 'assignedProfiles', assignedTo: 'assignedProfiles',
     default: 'isDefault',
     jsx: 'source', html: 'source', code: 'source', content: 'source',
     dependencies: 'requires', plugins: 'requires',
@@ -696,23 +725,28 @@ export const PageSchema = lazySchema(() => strictObject({
     route: '`route` is not a page key — a page is routed by its `name` (lowercase snake_case). Rename the page rather than declaring a path.',
     path: '`path` is not a page key — a page is routed by its `name` (lowercase snake_case).',
     url: '`url` is not a page key — a page is routed by its `name`. To link OUT to an address, use a navigation node on the app.',
-    // ⛔ Neither prescription below may name `assignedProfiles` as the way to gate
-    // a page. The key is still authorable on this schema — nothing here changes what
-    // the schema accepts — but it gates NOTHING, so prescribing it handed the author
-    // a capability the runtime does not deliver, at parse time, which is Prime
-    // Directive #10's exact prohibition. Measured 2026-09-10: zero readers in this
-    // repo (every hit is a declaration, a generated artifact, prose, or this
-    // schema's own round-trip test) and zero readers in objectui at `3fbdd4a2d`
-    // (three hits — a docs table row, `packages/types/src/layout.ts` and
-    // `packages/types/src/zod/layout.zod.ts` — every one a declaration; lit controls
-    // `visibleWhen` 308 files and `PageSchema` 94 files prove the instrument fired).
-    // `liveness/page.json` still grades it `live` on the strength of an objectui
-    // bridge at `react/src/spec-bridge/bridges/page.ts` — a path that does not exist
-    // in that repo, while two sibling citations in the same ledger file resolve.
-    // It is also named for the concept ADR-0090 D2 removed, which
-    // `security/permission.zod.ts` states to authors three times over.
-    // ⛔ The key's own disposition (keep / rename / remove) needs a ruling and is
-    // tracked in #16929; this correction deliberately does not pre-empt it.
+    // ── The retired page-audience vocabulary (ADR-0090 D2, ADR-0049 enforce-or-remove).
+    //
+    // `assignedProfiles` was an authorable key named for the Profile concept
+    // ADR-0090 D2 deleted, and it gated nothing: measured across this repository
+    // and objectui, no renderer, route or read door ever read it, so a page that
+    // "assigned profiles" stayed open to everyone who could reach it — the
+    // declared-not-enforced shape ADR-0049 exists to close. Removed here; the
+    // strip for existing sources and stored rows is the protocol-18
+    // `page-assigned-profiles-removed` conversion.
+    //
+    // `profiles` and `assignedTo` were ALIASES into that vocabulary: an author
+    // writing `profiles:` was corrected INTO the retired word, two files away
+    // from `security/permission.zod.ts` answering the same word with "no Profile
+    // concept". They are refusals now, and they point where page audience really
+    // lives — the permission set.
+    assignedProfiles: PAGE_ASSIGNED_PROFILES_RETIRED,
+    profiles: PAGE_AUDIENCE_WRONG_LAYER,
+    assignedTo: PAGE_AUDIENCE_WRONG_LAYER,
+    // ⛔ Neither prescription below may name a page-level audience key as the way
+    // to gate a page: there is none. Prescribing one hands the author a capability
+    // the runtime does not deliver, at parse time, which is Prime Directive #10's
+    // exact prohibition.
     visibleWhen: 'page-level conditional rendering does not exist — put `visibleWhen` on the COMPONENT inside a region',
     permissions: 'a page is not permission-gated by a field — gate the DATA it shows with the object\'s permission sets (which is what actually protects the records)',
   },
@@ -762,7 +796,9 @@ export const PageSchema = lazySchema(() => strictObject({
   
   /** Activation */
   isDefault: z.boolean().default(false),
-  assignedProfiles: z.array(z.string()).optional(),
+  // `assignedProfiles` removed (ADR-0090 D2 / ADR-0049) — see the guidance
+  // table above: it named a deleted concept and no reader ever enforced it.
+  // Page audience is the permission set's; the refusal carries the route.
 
   /** Interface Page Configuration (Airtable Interface parity) */
   interfaceConfig: InterfacePageConfigSchema.optional()

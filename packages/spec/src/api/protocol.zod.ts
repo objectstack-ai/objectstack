@@ -2233,9 +2233,13 @@ export const SearchAllHitSchema = lazySchema(() => z.object({
  * state only, org-scoped through the same registry-derived predicate the
  * REST `/meta` read doors use), so a page hit surfaces exactly what
  * `GET /api/v1/meta/page` would have answered the same caller — never more.
- * Opening the hit goes through the existing page routes/renderer, where the
- * page's own audience gate (`assignedProfiles`) applies unchanged; the
- * search response is not a second read door.
+ * Opening the hit goes through the existing page routes/renderer, which is
+ * where whatever protects the page applies — unchanged by this surface, and
+ * NOT a page-level audience gate: a page has none. `page.assignedProfiles`
+ * was the key that read as one, and it was removed (ADR-0090 D2 / ADR-0049)
+ * precisely because nothing anywhere ever enforced it. What protects a page
+ * is the permission sets on the DATA it shows. The search response is not a
+ * second read door either way.
  *
  * NOT a member of {@link SearchAllHitSchema}'s array: page hits live in the
  * sibling `pages` array so an existing consumer iterating `hits` (every one
