@@ -393,6 +393,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'R7: an unknown category is refused (the vocabulary is closed)': 3,
   'R8: an empty justification is refused': 2,
   'G5: the catch-all, on a changeset carrying no prescription': 1,
+  'D-E2E (#17357): the denial heading, END TO END through `scan()`': 6,
   'R9: two markers is ambiguous, not "the first one wins"': 2,
   'R10: THE #6419 SHAPE -- a REAL prescription, written in Chinese with -': 4,
   'R11: the same, framed by a HEADING instead of an inline label': 3,
@@ -420,6 +421,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'Unit pins on the two pattern-shaped judgements': 29,
   'the floors: what the new vocabulary must refuse': 9,
   'the floors: labels that are NOT mentions, and mentions that ARE evidenced': 9,
+  'D1-D9 (#17357): a heading that DENIES a prescription is not evidence of one': 9,
   'P51-P60: the HARD-WRAPPED mention, and the floors that keep the cure from': 11,
   'P62-P68: the framed region closes at the same or a SHALLOWER heading, not': 7,
   'U1-U12 (#8299): unit pins on the runtime-interface-only primitives': 13,
@@ -1171,6 +1173,52 @@ const FRAMING_TAIL_RE =
   /(?:迁移|改写|改名|升级|migrat(?:e|es|ed|ing|ion|ions)|rename[sd]?|rewrit(?:e|es|ten|ing)|upgrade[sd]?)$/i;
 
 /**
+ * Does a NEGATOR directly govern the placeholder in this HEADING -- is the heading
+ * DENYING that a prescription exists rather than opening one? (#17357)
+ *
+ * A heading short-circuits the governance test below, because a heading is a label
+ * by construction and its words are a title rather than a sentence (P46). That is
+ * right for every heading which says what follows it, and exactly wrong for the one
+ * shape that says what does NOT follow it:
+ *
+ *     ## No FROM -> TO mapping, and why this section is not one
+ *
+ * Read as a label, that heading evidences the very prescription it denies, and the
+ * gate then refuses `not-required (no-migration-prescription)` on it -- offering as
+ * the remedy `registered <ENTRY_ID>`, which asserts the opposite of what the
+ * changeset says. Measured before the repair, through the real CLI on a real temp
+ * repo: the heading above is exit 1 with `Evidence (from-to-label)` naming the
+ * denial itself, and the IDENTICAL denial reworded off the token is exit 0. The
+ * detector was keying on the SPELLING rather than the meaning, and the only passing
+ * form was to avoid a word -- a gate shaping prose a human reads, in the direction
+ * of not naming the thing being denied.
+ *
+ * ⚠️ The rule is ADJACENCY, exactly as `GOVERNING_WORD_RE` is: the negator has to be
+ * the last word before the placeholder. "A negator appears somewhere in the heading"
+ * is a whole clause and a different claim -- `## 升级:不再支持的键的 FROM → TO` is a
+ * real prescription heading whose negator modifies a noun three words away, and a
+ * loose read turns it into a denial. The class is CLOSED for the same reason
+ * `WRAPPED_GOVERNOR_RE`'s is: an open read of "negative-sounding words" cannot be
+ * measured, and a false NEGATIVE here is the one direction this gate must not buy.
+ *
+ * ⚠️ A framing word between the negator and the placeholder is transparent, exactly
+ * as it is in-line (`FRAMING_TAIL_RE`): `## No migration FROM → TO` denies as
+ * plainly as `## No FROM → TO`, because `migration` FRAMES the placeholder rather
+ * than governing it. The second right-trim is what makes that composition work --
+ * stripping the framing tail leaves the space that preceded it.
+ *
+ * ⚠️ Direction, and the whole reason this cannot weaken the gate: a denying heading
+ * is NOT an exemption. It is demoted to exactly the status of a governed MENTION, so
+ * it falls through to `carriesConcreteRewrite` -- a body that denies in its heading
+ * and then SHOWS the goods anywhere is refused precisely as before -- and every
+ * other branch of `findMigrationPrescription` still reads the same body afterwards.
+ * The narrowing can only ever remove a hit whose SOLE evidence was a heading saying
+ * there was nothing to evidence.
+ */
+const HEADING_DENIAL_RE =
+  /(?:^|[^A-Za-z])(?:no|not|none|never|without|lacks?|lacking|zero)$|(?:无|没有|不|未|非)$/i;
+
+/**
  * A line whose sentence CANNOT run on into the line below it -- markdown structure
  * rather than prose. Consulted only by `labelPositioned`'s cross-line arm (#7094):
  * a placeholder opening the line under one of these is opening a segment, so it is
@@ -1263,6 +1311,14 @@ const VERTICAL_TO_RE = /^\s{0,3}(?:(?:\/\/|#|-|\*|>)\s*)*\**TO\**\s*(?::|—|-|$
  * short-circuits: `## 升级:翻译包键的 FROM → TO` is a title and not a sentence, and it
  * ends in the very particle the Chinese arm reads as governance.
  *
+ * ⚠️ With ONE exception, and it is a polarity one (#17357): a heading whose governing
+ * word DENIES the placeholder -- `## No FROM → TO mapping, and why this section is
+ * not one` -- is not opening a prescription, it is stating that there is none to
+ * open. Read as a label it evidenced the thing it denied, and the author was refused
+ * for saying so in the clearest available words. `HEADING_DENIAL_RE` above carries
+ * the closed class, the adjacency rule and why a denying heading is demoted to a
+ * mention rather than exempted.
+ *
  * ⚠️ Prose in this repo is HARD-WRAPPED at ~80 columns, so "starts its line" is NOT
  * the test and never could be -- `carry their\nFROM → TO migration` puts a mention
  * at column 0 with nothing at all to its left. #7078 left that as a stated blind
@@ -1306,8 +1362,15 @@ const VERTICAL_TO_RE = /^\s{0,3}(?:(?:\/\/|#|-|\*|>)\s*)*\**TO\**\s*(?::|—|-|$
  * @param {string} [prev] the line above it, when there is one (#7094)
  */
 function labelPositioned(line, col, prev) {
-  if (/^\s{0,3}#{1,6}\s/.test(line)) return true;
   const prefix = line.slice(0, col).replace(/\s+$/, '');
+  // A heading is a label by construction, whatever words it carries -- UNLESS the
+  // word governing the placeholder denies it (#17357). A denying heading is not
+  // granted an exemption here; it is demoted to the status of a governed mention and
+  // takes the `carriesConcreteRewrite` path below, so a body that shows the goods
+  // anywhere is refused exactly as it was.
+  if (/^\s{0,3}#{1,6}\s/.test(line)) {
+    return !HEADING_DENIAL_RE.test(prefix.replace(FRAMING_TAIL_RE, '').replace(/\s+$/, ''));
+  }
   if (prefix !== '') return !GOVERNING_WORD_RE.test(prefix.replace(FRAMING_TAIL_RE, ''));
   // The placeholder OPENS its line -- bare or merely indented, so a wrapped list
   // item counts. There is no character to its left, so the governing word, if there
@@ -4033,6 +4096,43 @@ function selfTest() {
     },
   })));
 
+  // ---- D-E2E (#17357): the denial heading, END TO END through `scan()` --------
+  //
+  // D1-D9 above pin the detector; these pin the VERDICT, because the detector is
+  // only half of what the author meets. Three cases, and the two REDs are the half
+  // that keeps this from being a weakening: an author who denies in plain words is
+  // admitted, an author who denies in the heading and ships the prescription anyway
+  // is still refused, and an author who says NOTHING at all is still refused.
+  battery('D-E2E (#17357): the denial heading, END TO END through `scan()`');
+  const DENIAL_HEADING = '## No FROM → TO mapping, and why this section is not one';
+  const DENIAL_WHY = 'a bare deletion on a non-strict schema refuses nothing and converts nothing';
+  green('D-E2E-G the plain-words denial is admitted', run(mk({
+    files: {
+      '.changeset/x.md': CS({
+        body: '**BREAKING** the `x` key is deleted outright.\n\n' + DENIAL_HEADING + '\n\n'
+          + 'No metadata upgrader has an edit and `os migrate meta` has nothing to list.\n\n'
+          + '<!-- adr-0087: not-required (no-migration-prescription) ' + DENIAL_WHY + ' -->\n',
+      }),
+    },
+  })));
+  red('D-E2E-R1 the same denial heading over a body that SHIPS the prescription still refuses', run(mk({
+    files: {
+      '.changeset/x.md': CS({
+        body: '**BREAKING** the `x` key is deleted outright.\n\n' + DENIAL_HEADING + '\n\n'
+          + '- `App.x` → `App.y`\n\n'
+          + '<!-- adr-0087: not-required (no-migration-prescription) ' + DENIAL_WHY + ' -->\n',
+      }),
+    },
+  })), [/contradicts the changeset's own body/, /Evidence \(from-to-label\)/]);
+  red('D-E2E-R2 a SILENT omission is still refused -- the denial is a reading, never an exemption', run(mk({
+    files: {
+      '.changeset/x.md': CS({
+        body: '**BREAKING** the `x` key is deleted outright.\n\n' + DENIAL_HEADING + '\n\n'
+          + 'No metadata upgrader has an edit and `os migrate meta` has nothing to list.\n',
+      }),
+    },
+  })), [/no `adr-0087:` disposition marker/]);
+
   // ---- R9: two markers is ambiguous, not "the first one wins" ---------------
   battery('R9: two markers is ambiguous, not "the first one wins"');
   red('R9 two disposition markers', run(mk({
@@ -5473,6 +5573,54 @@ function selfTest() {
   assert(
     findMigrationPrescription('prose that wraps at eighty columns and ends the line here\nFROM → TO:\n\n- `a.b` → `a.c`\n')?.line === 'FROM → TO:',
     'P50: the evidence line is the placeholder\'s OWN line -- the match may open on the newline that ends the line above, which used to be reported instead',
+  );
+
+  // --- D1-D9 (#17357): a heading that DENIES a prescription is not evidence of one.
+  //
+  // The heading short-circuit in `labelPositioned` had no polarity, so
+  // `## No FROM → TO mapping, and why this section is not one` evidenced the very
+  // prescription it denied and `not-required (no-migration-prescription)` was refused
+  // on it -- while the IDENTICAL denial reworded off the token passed. Both
+  // directions are pinned here, and the RED half is load-bearing: a narrowing that
+  // only proves the denial passes has made the gate weaker and measured nothing
+  // about it. D2/D4/D6 are the positive controls -- if any of them goes red the arm
+  // has stopped seeing rather than started discriminating.
+  battery('D1-D9 (#17357): a heading that DENIES a prescription is not evidence of one');
+  assert(
+    !hasMigrationPrescription('## No FROM → TO mapping, and why this section is not one\n\nA bare deletion on a non-strict schema refuses nothing and converts nothing.\n'),
+    'D1: THE #17357 SHAPE -- the denial heading verbatim, in a body that shows no goods',
+  );
+  assert(
+    findMigrationPrescription('## Migration — FROM → TO\n\ndelete the block\n')?.branch === 'from-to-label',
+    'D2: POSITIVE CONTROL -- an ordinary label heading, with NO concrete rewrite in the body to fall back on, still matches',
+  );
+  assert(
+    findMigrationPrescription('## No FROM → TO mapping, and why this section is not one\n\n- `a.b` → `a.c`\n')?.branch === 'from-to-label',
+    'D3: a denying heading is DEMOTED TO A MENTION, not exempted -- a body that denies and then SHOWS the goods is refused exactly as before',
+  );
+  assert(
+    findMigrationPrescription('## Upgrading the keys that are not yet removed, FROM → TO\n')?.branch === 'from-to-label',
+    'D4: POSITIVE CONTROL -- ADJACENCY is the rule; a negator three words away from the placeholder governs a different noun and denies nothing',
+  );
+  assert(
+    !hasMigrationPrescription('## 无 FROM → TO 映射,以及本节为什么不是一份映射\n\n直接删除,什么都不需要改写。\n'),
+    'D5: the Chinese spelling of the same denial -- `无` governs the placeholder',
+  );
+  assert(
+    findMigrationPrescription('## 升级:不再支持的键的 FROM → TO\n')?.branch === 'from-to-label',
+    'D6: POSITIVE CONTROL -- `不` modifies a noun three words away; the governing token is `的`, so this real prescription heading is untouched',
+  );
+  assert(
+    !hasMigrationPrescription('## No migration FROM → TO is prescribed by this change\n'),
+    'D7: a framing word between the negator and the placeholder is transparent -- `migration` FRAMES, it does not govern',
+  );
+  assert(
+    findMigrationPrescription('## No FROM → TO mapping, and why this section is not one\n\n**Migration (FROM → TO).** delete the block\n')?.line === '**Migration (FROM → TO).** delete the block',
+    'D8: only the DENYING occurrence is demoted -- a genuine label later in the same body still hits, and the evidence line is that label rather than the denial',
+  );
+  assert(
+    findMigrationPrescription('## Nonstandard keys, FROM → TO is how they are listed\n')?.branch === 'from-to-label',
+    'D9: POSITIVE CONTROL -- the closed class is WORD-anchored, so `Nonstandard` is not `no` and this heading keeps its label reading',
   );
 
   // --- P51-P60: the HARD-WRAPPED mention, and the floors that keep the cure from
