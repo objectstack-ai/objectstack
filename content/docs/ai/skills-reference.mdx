@@ -15,7 +15,7 @@ ObjectStack ships a set of **domain-specific skills** that teach AI assistants (
 
 Skills install into a project from the [skills.sh](https://skills.sh) registry, reading the `skills/` directory of the [`objectstack-ai/objectstack`](https://github.com/objectstack-ai/objectstack) repository.
 
-**New projects — installed automatically.** `create-objectstack` runs the install step for you during scaffolding:
+**New projects — installed automatically.** `create-objectstack` runs the install step for you during scaffolding, for a single agent runtime: the bundle lands once, in `.claude/skills/`, and the scaffolder's closing summary prints the exact command it ran — with a different agent name for any other runtime you use.
 
 ```bash
 npm create objectstack@latest my-app
@@ -24,13 +24,15 @@ npm create objectstack@latest my-app
 **Existing projects — install the whole bundle:**
 
 ```bash
-npx skills add objectstack-ai/objectstack/skills --all
+npx skills add objectstack-ai/objectstack/skills --skill '*' --agent claude-code -y
 ```
 
-Run the same command again at any time to pull the latest versions — `--all` is idempotent, so updating is one command regardless of how many skills the bundle contains. To choose which skills to add instead of the full set, run `npx skills add objectstack-ai/objectstack/skills` without `--all`. (The `/skills` subpath scopes discovery to the published catalog — always keep it in the command.)
+Name your own runtime after `--agent` (`codex`, `cursor`, …) — the bundle is byte-identical whichever you name, and it lands **once**, in that agent's own directory (`.claude/skills/` for `claude-code`). Run the same command again at any time to pull the latest versions: re-running is idempotent per destination, so updating is one command regardless of how many skills the bundle contains. To choose which skills to add instead of the full set, run `npx skills add objectstack-ai/objectstack/skills` with neither `--skill` nor `--all` and pick from the list. (The `/skills` subpath scopes discovery to the published catalog — always keep it in the command.)
+
+**The multi-runtime opt-in, and what it costs.** Replacing `--skill '*' --agent claude-code -y` with `--all` installs for every runtime the skills CLI knows. It is the same bundle, but it writes it to **three** destinations instead of one — a full real copy in **both** `.agents/` and `agent/`, plus `.claude/` symlinks pointing into `.agents/`. Inside a git repository that means the first `git add -A` stages the bundle twice over, plus the symlinks. Idempotence does not help here: re-running is idempotent *per destination*, and it is the destination count that grows. Name one `--agent` per runtime you actually use instead.
 
 <Callout type="info">
-Skills are versioned as **one bundle**. You do not track or update each skill individually — `--all` always installs the matching set for the `@objectstack/spec` version in your project.
+Skills are versioned as **one bundle**. You do not track or update each skill individually — `--skill '*'` always installs the matching set for the `@objectstack/spec` version in your project.
 </Callout>
 
 ---
