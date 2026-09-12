@@ -7391,6 +7391,80 @@ const fieldColumnListsCanonicalized: MetadataConversion = {
  * cube's `measures` RECORD (keyed by name), one level below the collection
  * item, so the top-level-only `stripKeys` runs per metric, not per cube.
  */
+const metricFiltersRemoved: MetadataConversion = {
+  id: 'metric-filters-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface: 'analyticsCubes[].measures.<metric>.filters',
+  summary:
+    "cube metric key 'filters' removed (#10414, ADR-0049 — no strategy ever read it: the "
+    + 'authored raw-SQL condition was parsed and dropped, and the query returned the '
+    + "unfiltered aggregate. Filter at query time with `where`, fold the condition into the "
+    + "metric's own `sql` expression, or use an ADR-0021 dataset measure's structured `filter`)",
+  apply(stack, emit) {
+    return mapCollection(stack, 'analyticsCubes', (cube, path) => {
+      const measures = cube.measures;
+      if (!isDict(measures)) return cube;
+      let touched = false;
+      const nextMeasures: Record<string, unknown> = { ...measures };
+      for (const [name, metric] of Object.entries(measures)) {
+        if (!isDict(metric)) continue;
+        const stripped = stripKeys(metric, ['filters'], emit, `${path}.measures.${name}`);
+        if (stripped === metric) continue;
+        nextMeasures[name] = stripped;
+        touched = true;
+      }
+      if (!touched) return cube;
+      return { ...cube, measures: nextMeasures };
+    });
+  },
+  fixture: {
+    before: {
+      analyticsCubes: [{
+        name: 'orders',
+        sql: 'orders',
+        measures: {
+          // The card's measured shape: parsed, registered, returned unfiltered.
+          closed_won_revenue: {
+            name: 'closed_won_revenue',
+            label: 'Closed-Won Revenue',
+            type: 'sum',
+            sql: 'amount',
+            filters: [{ sql: "stage = 'closed_won'" }],
+          },
+          // A metric WITHOUT the key rides through untouched — the strip
+          // dispatches on key presence, and the copy-on-write contract keeps
+          // the reference.
+          order_count: { name: 'order_count', label: 'Orders', type: 'count', sql: 'id' },
+        },
+        dimensions: {
+          stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' },
+        },
+      }],
+    },
+    after: {
+      analyticsCubes: [{
+        name: 'orders',
+        sql: 'orders',
+        measures: {
+          closed_won_revenue: {
+            name: 'closed_won_revenue',
+            label: 'Closed-Won Revenue',
+            type: 'sum',
+            sql: 'amount',
+          },
+          order_count: { name: 'order_count', label: 'Orders', type: 'count', sql: 'id' },
+        },
+        dimensions: {
+          stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' },
+        },
+      }],
+    },
+    // One notice: the single metric carrying `filters`.
+    expectedNotices: 1,
+  },
+};
+
 /**
  * `dimensions.<dim>.granularities` — the three sub-day names `TimeUpdateInterval`
  * declared until protocol 18 (#17296, ADR-0049 enforce-or-remove).
@@ -7494,80 +7568,6 @@ const cubeSubDayGranularitiesRemoved: MetadataConversion = {
     // dimensions are the fixture's own control — they prove the walk dispatches
     // on a retired MEMBER rather than on the key's presence.
     expectedNotices: 2,
-  },
-};
-
-const metricFiltersRemoved: MetadataConversion = {
-  id: 'metric-filters-removed',
-  toMajor: 18,
-  retiredFromLoadPath: true,
-  surface: 'analyticsCubes[].measures.<metric>.filters',
-  summary:
-    "cube metric key 'filters' removed (#10414, ADR-0049 — no strategy ever read it: the "
-    + 'authored raw-SQL condition was parsed and dropped, and the query returned the '
-    + "unfiltered aggregate. Filter at query time with `where`, fold the condition into the "
-    + "metric's own `sql` expression, or use an ADR-0021 dataset measure's structured `filter`)",
-  apply(stack, emit) {
-    return mapCollection(stack, 'analyticsCubes', (cube, path) => {
-      const measures = cube.measures;
-      if (!isDict(measures)) return cube;
-      let touched = false;
-      const nextMeasures: Record<string, unknown> = { ...measures };
-      for (const [name, metric] of Object.entries(measures)) {
-        if (!isDict(metric)) continue;
-        const stripped = stripKeys(metric, ['filters'], emit, `${path}.measures.${name}`);
-        if (stripped === metric) continue;
-        nextMeasures[name] = stripped;
-        touched = true;
-      }
-      if (!touched) return cube;
-      return { ...cube, measures: nextMeasures };
-    });
-  },
-  fixture: {
-    before: {
-      analyticsCubes: [{
-        name: 'orders',
-        sql: 'orders',
-        measures: {
-          // The card's measured shape: parsed, registered, returned unfiltered.
-          closed_won_revenue: {
-            name: 'closed_won_revenue',
-            label: 'Closed-Won Revenue',
-            type: 'sum',
-            sql: 'amount',
-            filters: [{ sql: "stage = 'closed_won'" }],
-          },
-          // A metric WITHOUT the key rides through untouched — the strip
-          // dispatches on key presence, and the copy-on-write contract keeps
-          // the reference.
-          order_count: { name: 'order_count', label: 'Orders', type: 'count', sql: 'id' },
-        },
-        dimensions: {
-          stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' },
-        },
-      }],
-    },
-    after: {
-      analyticsCubes: [{
-        name: 'orders',
-        sql: 'orders',
-        measures: {
-          closed_won_revenue: {
-            name: 'closed_won_revenue',
-            label: 'Closed-Won Revenue',
-            type: 'sum',
-            sql: 'amount',
-          },
-          order_count: { name: 'order_count', label: 'Orders', type: 'count', sql: 'id' },
-        },
-        dimensions: {
-          stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' },
-        },
-      }],
-    },
-    // One notice: the single metric carrying `filters`.
-    expectedNotices: 1,
   },
 };
 

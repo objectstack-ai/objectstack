@@ -827,7 +827,6 @@
     "suggestDefaultValueToken (function)",
     "suggestFieldTypeForSqlType (function)",
     "textOperatorDoorVerdict (function)",
-    "timeUpdateIntervalRefusalMessage (function)",
     "unprovisionedInjectedColumns (function)",
     "urlCredentialQueryParams (function)",
     "urlUserinfoPassword (function)",

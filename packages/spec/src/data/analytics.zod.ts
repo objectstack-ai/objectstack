@@ -98,13 +98,23 @@ export const RETIRED_SUB_DAY_INTERVALS = ['second', 'minute', 'hour'] as const;
  * - a RETIRED sub-day name is a value this enum used to declare, so the
  *   prescription is the retirement — what replaced it and the migrate line;
  * - anything else was never declared, so the prescription is the vocabulary.
+ *
+ * **Module-private**, which is the shape this kind of retirement takes:
+ * `hook-body.zod.ts`'s `CRYPTO_HASH_RETIRED` is the matching precedent — a
+ * prescription an enum's own error map consumes and nothing else does. The
+ * sibling {@link analyticsDateRangeRefusalMessage} is exported because a
+ * cross-file pin asserts `toBe(...)` against it, so the export IS the single
+ * source of that expected string; this one has no such consumer, and
+ * `driver-memory`'s door deliberately words its own sentence for its own
+ * surface rather than re-emitting this one. An export with no reader is a
+ * published surface the next narrowing has to keep.
  */
-export function timeUpdateIntervalRefusalMessage(input: unknown): string {
+function timeUpdateIntervalRefusalMessage(input: unknown): string {
   const received = typeof input === 'string' ? `'${input}'` : JSON.stringify(input) ?? String(input);
   const declared = DateGranularity.options.join(', ');
   if (typeof input === 'string' && (RETIRED_SUB_DAY_INTERVALS as readonly string[]).includes(input)) {
     return (
-      `Time interval ${received} was retired in protocol 18 (#17296, ADR-0049 enforce-or-remove). `
+      `Time interval ${received} was retired in protocol 18 (ADR-0049 enforce-or-remove). `
       + 'No backend ever bucketed it and none could advertise it: the canonical bucket-key '
       + 'vocabulary and `supports.queryDateGranularity` both stop at '
       + `${declared}, so the name resolved to a refusal or to one group per distinct timestamp. `
