@@ -34,7 +34,11 @@
 //   that lift, which would be a second copy free to drift from the real one.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
+import {
+  assertEngineDeleteDispatch,
+  assertEngineFindOnePredicate,
+  assertEngineUpdateDispatch,
+} from '@objectstack/objectql';
 import { SessionSchema, envelopeViolations } from '@objectstack/spec/api';
 import { AuthManager } from './auth-manager';
 import {
@@ -100,17 +104,27 @@ const createMemoryEngine = () => {
           (a, b) => (a[order.field] > b[order.field] ? 1 : -1) * (order.order === 'desc' ? -1 : 1),
         );
       }
-      if (q.offset) out = out.slice(q.offset);
-      if (q.limit) out = out.slice(0, q.limit);
+      // ⛔ By PRESENCE, never truthiness: `limit: 0` means "no rows", and a
+      // `if (q.limit)` double would hand back the whole set for it. Bound
+      // applied AFTER the filter, which is where the engine applies it.
+      if (typeof q.offset === 'number') out = out.slice(q.offset);
+      if (typeof q.limit === 'number') out = out.slice(0, q.limit);
       return out.map((r) => project(r, q.fields));
     },
     async count(name: string, q: any = {}) {
       return rows(name).filter((r) => matches(r, q.where)).length;
     },
-    async update(name: string, patch: any) {
-      const row = rows(name).find((r) => r.id === patch.id);
+    async update(name: string, data: any, options?: any) {
+      // Routed through ObjectQL's OWN dispatch predicate, so this fake cannot
+      // be looser than the engine it stands in for. better-auth's adapter
+      // calls `update(model, { ...patch, id })` with no options, which
+      // dispatches `by-id` — the id is read back from the predicate rather
+      // than re-derived here, so the two cannot disagree.
+      const dispatch = assertEngineUpdateDispatch(data, options);
+      if (dispatch.kind !== 'by-id') throw new Error(`fake driver: unsupported update ${dispatch.kind}`);
+      const row = rows(name).find((r) => r.id === dispatch.id);
       if (!row) return null;
-      Object.assign(row, patch);
+      Object.assign(row, data);
       return { ...row };
     },
     async delete(name: string, q: any = {}) {
