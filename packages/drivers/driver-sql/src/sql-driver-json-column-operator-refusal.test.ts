@@ -142,10 +142,19 @@ const REFUSED: ReadonlyArray<readonly [op: string, comparand: unknown]> = [
 ];
 
 /**
- * The operators that MUST keep working on a JSON column. The `LIKE` family
- * matches the serialization as text (which is how `$contains` works at all),
- * and the null predicates ask about the column's presence — a well-formed
- * question whatever the column holds.
+ * The operators that MUST keep working on a JSON column, and the null
+ * predicates, which ask about the column's presence — a well-formed question
+ * whatever the column holds.
+ *
+ * ⚠️ [#17590] The sentence that stood here said the `LIKE` family "matches the
+ * serialization as text (which is how `$contains` works at all)". That was an
+ * accurate description of a mechanism that has since been replaced: it made
+ * `$contains` a SUBSTRING test over the serialization — right across element
+ * boundaries on SQLite, and a `DATABASE_ERROR` 500 on live PostgreSQL, where a
+ * `json` column has no `LIKE` operator at all. The 2026-09-12 ruling replaced
+ * it with a real MEMBERSHIP construct compiled per dialect, so `$contains`
+ * still works here — it just no longer works BY reading the serialization as
+ * text. The rows below are unchanged and now execute on all three dialects.
  */
 const KEPT: ReadonlyArray<readonly [op: string, comparand: unknown]> = [
   ['$contains', U1],

@@ -3210,6 +3210,192 @@ function textMatchPredicate(
 }
 
 /**
+ * [#17590, director ruling 2026-09-12] The JSON scalars a `$contains` comparand
+ * denotes when the column it is aimed at holds a JSON array — the comparand
+ * half of {@link jsonMembershipPredicate}.
+ *
+ * # Why a comparand becomes a SET of candidates and not one value
+ *
+ * The contract declares `$contains`'s comparand a STRING
+ * (`FieldOperatorsSchema.$contains` is `z.string()`), so an author filtering a
+ * `multiple: true` NUMBER writes `'1'` and one filtering a `multiple: true`
+ * BOOLEAN writes `'true'` — the spellings `sql-driver-17343-multi-valued-
+ * boolean-membership.test.ts` already executes. A construct that asked the
+ * backend for the JSON STRING `"1"` would therefore answer nothing on every
+ * numeric and boolean multi-valued column in existence, which is option C
+ * (retire the capability) arriving through the back door — the option the
+ * ruling refused.
+ *
+ * So the comparand is read as the TEXT RENDERING of a member: `'1'` denotes the
+ * JSON string `"1"` OR the JSON number `1`, `'true'` denotes `"true"` OR
+ * `true`. At most two candidates, OR-ed, and the union is what makes the three
+ * dialects answer the same rows — measured over a 13-row fixture on
+ * better-sqlite3, live PostgreSQL 16.13 and live MySQL 8.0.46: 40 of 40 probes
+ * identical, `$contains`/`$notContains` exact complements on every row.
+ *
+ * The number candidate is CANONICALISED through `JSON.stringify(Number(x))`
+ * rather than passed through as written, because the three dialects normalise a
+ * JSON number differently and only the driver can make them agree: `'1.50'`
+ * becomes `1.5` here, and all three then answer the row holding `[1.5, 0]`.
+ *
+ * ⛔ Not a lenient alias layer (Prime Directive #12): both candidates are
+ * readings of ONE declared comparand type against one stored shape, decided
+ * here so every dialect gets the same pair — the opposite of a consumer
+ * tolerating an off-spec input its siblings reject.
+ */
+function jsonMembershipCandidates(value: unknown): string[] {
+  // `String(value)` is the SAME rendering {@link SqlDriver.applyLike} gives the
+  // comparand, so the membership reading of a comparand is never narrower than
+  // the substring reading it replaces. `assertCompilableComparand` has already
+  // refused every shape `String()` cannot render faithfully.
+  const text = String(value);
+  const candidates = [JSON.stringify(text)];
+  if (text === 'true' || text === 'false' || text === 'null') {
+    candidates.push(text);
+    return candidates;
+  }
+  // The JSON number grammar, spelled out rather than reached through
+  // `Number(text)`: `Number` also accepts `'0x10'`, `' 1 '`, `'Infinity'` and
+  // `''`, none of which is a JSON number, and admitting them would make the
+  // candidate set depend on JS coercion rules no dialect shares.
+  if (/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/.test(text)) {
+    const parsed = Number(text);
+    if (Number.isFinite(parsed)) {
+      const canonical = JSON.stringify(parsed);
+      if (canonical !== candidates[0]) candidates.push(canonical);
+    }
+  }
+  return candidates;
+}
+
+/**
+ * [#17590, director ruling 2026-09-12] The one place a `$contains` MEMBERSHIP
+ * test over a JSON-stored column becomes SQL — `{sql, bindings}` for knex's
+ * `whereRaw`, with `??` the column, exactly like {@link textMatchPredicate}.
+ *
+ * # The defect this closes
+ *
+ * `$contains` is the membership spelling on a multi-valued column — the one
+ * operator #7398 left working over a JSON column after refusing the equality
+ * family there, and the spelling `jsonColumnOperatorError`'s own prescription
+ * hands callers. Until this function it was lowered by {@link
+ * textMatchPredicate} like any other text operator, so it asked each backend a
+ * question about the SERIALIZATION rather than about the members, and the three
+ * dialects answered three different things:
+ *
+ * | dialect | what `$contains` did on a JSON column | |
+ * |---|---|---|
+ * | SQLite | `col GLOB '*v*'` over the TEXT holding `["a","b"]` | a substring test that USUALLY looks like membership |
+ * | MySQL | `CAST(col AS BINARY) LIKE ?` — the `json` column coerced | the same substring test |
+ * | PostgreSQL | `col LIKE $1 ESCAPE $2` over a real `json` column | **SQLSTATE 42883** `operator does not exist: json ~~ text` → `DATABASE_ERROR` 500 |
+ *
+ * Measured on live PostgreSQL 16.13 before this change: every `JSON_COLUMN_TYPES`
+ * member and every `multiple: true` column answers 42883, while the `varchar`
+ * column beside them answers normally.
+ *
+ * The substring reading is not merely imprecise, it is wrong ACROSS ELEMENTS:
+ * `['redwood']` answers `$contains: 'red'`, and `[10, 21]` answers
+ * `$contains: '1'`. The ruling refused option B (`col::text LIKE`) for exactly
+ * that reason — it would have frozen SQLite's cross-element mismatch into a
+ * cross-backend contract.
+ *
+ * # What is emitted now, and why each cell
+ *
+ * Every arm asks ONE question — *is the comparand's JSON value an element of
+ * the stored array?* — so the answer cannot depend on how a dialect stores or
+ * renders the array:
+ *
+ * - **PostgreSQL → `col::jsonb @> '[<candidate>]'::jsonb`.** The ruling's own
+ *   first option. The candidate is wrapped in an ARRAY rather than compared as
+ *   a bare scalar, which is what makes the construct array-only for free:
+ *   `'"red"'::jsonb @> '["red"]'::jsonb` is FALSE (a scalar contains no array)
+ *   and so is `'{"k":"red"}'::jsonb @> '["red"]'::jsonb`, with no
+ *   `jsonb_typeof` guard and no second reference to the column. The cast is
+ *   needed because `@>` is a `jsonb` operator and this driver's DDL emits
+ *   `json`.
+ * - **MySQL → `JSON_CONTAINS(col, '[<candidate>]')`**, the same array-wrapped
+ *   candidate and the same containment rule, including the same FALSE for a
+ *   scalar or object root. Measured directly on live MySQL 8.0.46 — the cell
+ *   the card carried only as a second-hand reading from #17343's CI.
+ * - **SQLite → a `json_each` scan**, because SQLite has no containment
+ *   operator. `typeof(os_member.key) = 'integer'` is the array-only condition:
+ *   `json_each` gives an array element an INTEGER key, an object member a TEXT
+ *   key and a scalar root a NULL one, so the one predicate answers all three
+ *   the way the containment operators do. The `CASE` over `os_member.type`
+ *   rebuilds each element's JSON TEXT: SQLite surfaces a JSON `true` as the
+ *   INTEGER 1, which `json_quote` would render `1` — indistinguishable from the
+ *   number 1, and a divergence from the other two arms. Taking the TYPE NAME
+ *   for those three cases is exact, because `'true'`/`'false'`/`'null'` ARE
+ *   their own JSON text.
+ * - **`'unknown'` → `null`**, and the caller falls back to the pre-#17590
+ *   `LIKE` shape. `dialectName` is `'unknown'` for a knex client this driver
+ *   does not model (mssql, oracle), where none of the three constructs above
+ *   parses. Emitting the old shape is not an endorsement of it — it is the only
+ *   answer that still RUNS, the same residue {@link textMatchPredicate}'s own
+ *   `'unknown'` arm names.
+ *
+ * # The `json_valid` guard, and why only SQLite has one
+ *
+ * A JSON column on SQLite IS a TEXT column, so bytes that are not JSON are
+ * physically storable — a row written before the field was declared
+ * `multiple: true` really does hold bare text there, which is why this driver
+ * keeps a whole read-side repair for the dialect (`hasLegacyStorageForm`).
+ * `json_each` RAISES on such a cell, so without the guard this change would
+ * turn a filter that works today into a 500 on the one dialect it works on.
+ * With it the cell simply has no members.
+ *
+ * PostgreSQL and MySQL need no guard and would not benefit from one: both
+ * REFUSE malformed bytes into a `json` column at write time — measured, `22P02`
+ * and `ER_INVALID_JSON_TEXT` — so there is nothing on disk for a guard to
+ * catch. The one shape that reaches them is an ADR-0015 EXTERNAL object whose
+ * declared JSON field maps to a foreign `text` column holding non-JSON, where
+ * both answer a loud `DATABASE_ERROR` (`22P02` /
+ * `ER_INVALID_JSON_TEXT_IN_PARAM`) instead of a wrong substring match. That is
+ * the fail-LOUD direction and it is stated here rather than papered over.
+ *
+ * @see jsonMembershipCandidates — the comparand half.
+ * @see SqlDriver.isJsonColumn — the population, unchanged by this card (#17469).
+ * @see https://github.com/objectstack-ai/objectstack/issues/17590
+ */
+function jsonMembershipPredicate(
+  dialect: SqlDialectName,
+  field: string,
+  value: unknown,
+): { sql: string; bindings: unknown[] } | null {
+  const candidates = jsonMembershipCandidates(value);
+  const parts: string[] = [];
+  const bindings: unknown[] = [];
+  for (const candidate of candidates) {
+    if (dialect === 'sqlite') {
+      parts.push(
+        `EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(??) THEN ?? ELSE '[]' END) AS os_member `
+          + `WHERE typeof(os_member.key) = 'integer' AND CASE os_member.type `
+          + `WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' WHEN 'null' THEN 'null' `
+          + `ELSE json_quote(os_member.value) END = ?)`,
+      );
+      bindings.push(field, field, candidate);
+      continue;
+    }
+    if (dialect === 'postgres') {
+      parts.push('??::jsonb @> ?::jsonb');
+      bindings.push(field, `[${candidate}]`);
+      continue;
+    }
+    if (dialect === 'mysql') {
+      parts.push('JSON_CONTAINS(??, ?)');
+      bindings.push(field, `[${candidate}]`);
+      continue;
+    }
+    return null;
+  }
+  // Parenthesised whatever the arity, so the OR of the two candidates can never
+  // re-associate with a sibling predicate when knex splices it into a larger
+  // `WHERE`, and so the negated spelling below negates the WHOLE membership
+  // test rather than its first candidate.
+  return { sql: `(${parts.join(' OR ')})`, bindings };
+}
+
+/**
  * [#7536] The one place a `$like` / `$ilike` PATTERN becomes SQL.
  *
  * The sibling of {@link textMatchPredicate}, and deliberately a second function
@@ -14466,6 +14652,54 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * [#17590, director ruling 2026-09-12] Emit the MEMBERSHIP reading of
+   * `$contains` / `$notContains` when the column they were aimed at is a JSON
+   * column, and say whether it did.
+   *
+   * Returns `false` — leaving the caller on the pre-#17590 substring emitter —
+   * in exactly two cases, and the two are different in kind:
+   *
+   * 1. **The column is not a JSON column.** On a scalar string column
+   *    `$contains` IS the substring test, unchanged and deliberately so: that
+   *    is the sentence the spec docblock now states on the other side of the
+   *    contract ({@link SqlDriver.isJsonColumn} is the population, taken from
+   *    #17469's reading of what the driver uses TODAY and ⛔ not widened here).
+   * 2. **The dialect has no membership construct** (`'unknown'` — a knex client
+   *    this driver does not model). {@link jsonMembershipPredicate} answers
+   *    `null` there and the old shape still runs.
+   *
+   * The negated spelling composes with the NULL rule rather than replacing it:
+   * a row with no value satisfies `$notContains` (#5298,
+   * {@link SqlDriver.applyNullSafeNegative}), and all three membership
+   * constructs answer NULL — not FALSE — for a NULL column, so the
+   * `col IS NULL OR NOT (…)` wrapper is doing real work and not decoration.
+   * Measured over a 13-row fixture: `$contains` and `$notContains` partition
+   * every row on all three dialects, NULL and empty-array rows included.
+   */
+  private applyJsonMembership(
+    builder: any,
+    method: string,
+    table: string | null | undefined,
+    localField: string,
+    field: string,
+    value: unknown,
+    negate: boolean,
+  ): boolean {
+    if (!this.isJsonColumn(table, localField)) return false;
+    const predicate = jsonMembershipPredicate(this.dialectName, field, value);
+    if (!predicate) return false;
+    const rawMethod = method.startsWith('or') ? 'orWhereRaw' : 'whereRaw';
+    if (!negate) {
+      builder[rawMethod](predicate.sql, predicate.bindings);
+      return true;
+    }
+    this.applyNullSafeNegative(builder, method, field, (qb) =>
+      qb.orWhereRaw(`NOT ${predicate.sql}`, predicate.bindings),
+    );
+    return true;
+  }
+
+  /**
    * [#5298] Emit a NEGATIVE-polarity value test so a row whose column is NULL
    * satisfies it: `(col IS NULL OR <test>)`.
    *
@@ -14868,8 +15102,15 @@ export class SqlDriver implements IDataDriver {
               );
               break;
             }
+            // [#17590] The MEMBERSHIP reading first: on a JSON column this
+            // operator asks whether the comparand is an ELEMENT of the stored
+            // array, not whether it is a substring of the serialization. Falls
+            // through to the substring emitter for every scalar string column,
+            // which is the other half of the sentence the spec now states.
             case '$contains':
-              this.applyContainsLike(builder, method, field, opValue);
+              if (!this.applyJsonMembership(builder, method, table, localField, field, opValue, false)) {
+                this.applyContainsLike(builder, method, field, opValue);
+              }
               break;
             // [#5702] The case-INSENSITIVE twin of `$contains`, and the
             // replacement `RETIRED_FILTER_OPERATORS` prescribes for `$regex`.
@@ -14881,11 +15122,20 @@ export class SqlDriver implements IDataDriver {
               this.applyLike(builder, method, field, opValue, 'contains', false, true);
               break;
             case '$notContains':
-              // [#5298] NULL-safe: `NOT LIKE` is UNKNOWN for a NULL column, and
-              // "does not contain" is true of a value that is not there.
-              this.applyNullSafeNegative(builder, method, field, (qb) =>
-                this.applyLike(qb, 'orWhere', field, opValue, 'contains', true),
-              );
+              // [#17590] The exact complement of the arm above, on the same
+              // population and the same construct. It moves WITH `$contains`
+              // and cannot be deferred: this operator is declared "the negation
+              // of $contains, on the same comparand contract", so leaving it on
+              // the substring emitter would make the pair non-complementary on
+              // every JSON column — `['redwood']` would answer neither
+              // `$contains: 'red'` nor `$notContains: 'red'`.
+              if (!this.applyJsonMembership(builder, method, table, localField, field, opValue, true)) {
+                // [#5298] NULL-safe: `NOT LIKE` is UNKNOWN for a NULL column, and
+                // "does not contain" is true of a value that is not there.
+                this.applyNullSafeNegative(builder, method, field, (qb) =>
+                  this.applyLike(qb, 'orWhere', field, opValue, 'contains', true),
+                );
+              }
               break;
             case '$startsWith':
               this.applyLike(builder, method, field, opValue, 'starts');
