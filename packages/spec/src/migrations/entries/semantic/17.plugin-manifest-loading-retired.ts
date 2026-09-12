@@ -17,8 +17,10 @@ export const entry: SemanticMigration = {
     + 'at the cloud marketplace PUBLISH gate only (an unverified publisher requesting the '
     + '`node` tier is rejected with HTTP 422 and forced to manual review), while load-side '
     + 'enforcement is NOT implemented, so a locally installed plugin is not isolated by the '
-    + 'tier it declares. Use the manifest permission declarations, which '
-    + 'are the surfaces the platform actually enforces',
+    + 'tier it declares. ⛔ Nor do the manifest permission declarations give it back: '
+    + 'the install-time granted set is REGISTERED on the PluginPermissionEnforcer at load '
+    + 'and queried by nothing, so it refuses no operation. Neither surface confines a '
+    + 'plugin today — do not author either one expecting isolation',
   reason:
     'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-04 on #4914. The block declared a '
     + 'complete plugin loading policy and NOTHING read it. A bare-name scan of all three '
