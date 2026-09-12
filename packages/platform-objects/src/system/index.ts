@@ -21,6 +21,9 @@ export {
   isDataMigrationVerified,
   mayActIrreversibly,
   recordDataMigrationRun,
+  // [#15989] The column-move stamp — its own act, written by the step that
+  // moves the columns, never implied by a backfill re-run.
+  recordFileColumnMove,
   attestFreshDatastore,
   CREATION_ATTESTATION_DETAIL,
   type MigrationFlagEngine,

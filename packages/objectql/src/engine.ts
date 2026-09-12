@@ -54,6 +54,7 @@ import {
   FILE_REFERENCES_MIGRATION_ID,
   VALUE_SHAPES_MIGRATION_ID,
   isDataMigrationFlagVerified,
+  hasMovedFileColumns,
   renderOperationMessage,
   objectLabelKey,
   resolveBundleLocale,
@@ -264,6 +265,16 @@ import {
 interface MigrationFlagRead {
   verified: boolean;
   conclusive: boolean;
+  /**
+   * [#15989] Have the file-family COLUMNS on this deployment moved to the
+   * bare-id encoding — `hasMovedFileColumns` over the same row?
+   *
+   * Carried on the SAME read rather than fetched by a second one, because it
+   * is a second question about one row and two reads could answer them out of
+   * one another's date. It is `false` on every row that lacks the stamp, on an
+   * unverified row, and on every way of not having read a row at all.
+   */
+  columnsMoved: boolean;
 }
 
 /**
@@ -5972,6 +5983,7 @@ export class ObjectQL implements IObjectQLEngine {
     }
 
     this.drivers.set(driver.name, driver);
+    this.supplyFileColumnsMovedResolver(driver);
     this.logger.info('Registered driver', {
       driverName: driver.name,
       version: driver.version
@@ -5980,6 +5992,59 @@ export class ObjectQL implements IObjectQLEngine {
     if (isDefault || this.drivers.size === 1) {
       this.defaultDriver = driver.name;
       this.logger.info('Set default driver', { driverName: driver.name });
+    }
+  }
+
+  /**
+   * Hand a freshly-registered driver the ADR-0104 media arm — the kernel→driver
+   * supply seam (#15989, the ruling on #15041 step 2).
+   *
+   * ## Why here, and why a closure rather than a value
+   *
+   * `registerDriver` is the one funnel every driver this engine will ever
+   * route to passes through, and it is early: the resolver is installed before
+   * `init()` connects and long before schema sync calls `initObjects`, which
+   * is where a SQL driver asks the closure exactly once and freezes the
+   * answer. A VALUE could not be supplied here at all — the fact lives in a
+   * `sys_migration` row this very driver has not connected to yet — so what is
+   * handed over is the question, not the answer.
+   *
+   * ## Duck-typed, and silent when the driver has no such seam
+   *
+   * A driver with no media arm (memory, mongodb, a third-party one) exposes no
+   * `setFileColumnsMovedResolver` and is left alone. That is not a degradation
+   * to report: a driver that never asks the question keeps whatever encoding
+   * it always had.
+   *
+   * ## ⛔ A host declaration WINS — this only ever fills an empty slot
+   *
+   * If the host passed `fileColumnsMoved` to the driver's own config, the
+   * driver refuses this resolver and says so on its own terms. The asymmetry
+   * is deliberate and the safety argument runs one way only: a host that
+   * declared `true` while the ledger says otherwise is a host that knows
+   * something about its own storage that the ledger does not yet record, and
+   * the engine silently overruling it to `false` would have the driver write
+   * JSON into columns that have already been retyped. The reverse — the engine
+   * overruling a declared `false` to `true` — writes bare ids into a JSON
+   * column, which is the failure direction the whole mechanism exists to
+   * prevent. Neither is acceptable, so the more specific authority wins and
+   * the engine never contradicts an explicit composition.
+   */
+  private supplyFileColumnsMovedResolver(driver: IDataDriver): void {
+    const sink = driver as unknown as {
+      setFileColumnsMovedResolver?: (resolve: () => Promise<boolean>) => void;
+    };
+    if (typeof sink.setFileColumnsMovedResolver !== 'function') return;
+    try {
+      sink.setFileColumnsMovedResolver(() => this.haveFileColumnsMoved());
+    } catch (e: any) {
+      // Installing the question must never break a driver registration. A
+      // driver that did not take the resolver keeps its own default, which is
+      // the JSON arm — the same place every other way of not knowing lands.
+      this.logger.debug('Driver declined the ADR-0104 media-arm resolver', {
+        driverName: driver.name,
+        error: e?.message ?? String(e),
+      });
     }
   }
 
@@ -8179,6 +8244,44 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * Have this deployment's file-family COLUMNS moved to the bare-id encoding
+   * (#15989 — the ruling on #15041, step 2)?
+   *
+   * The kernel-side half of the arm a SQL driver writes on. The driver cannot
+   * ask this itself: the fact lives in a `sys_migration` row, which is a row
+   * in a table the driver is the one serving, and reading it needs the
+   * registry and the read pipeline this engine owns. So the engine answers,
+   * and {@link registerDriver} hands each driver a closure over this method —
+   * that is the whole kernel→driver supply seam.
+   *
+   * ## Every way of not knowing answers "not moved"
+   *
+   * No `sys_migration` object registered, no row, an unreadable table, a row
+   * whose `columns_moved_at` is null or empty, a row that is not verified —
+   * all `false`, which is today's JSON encoding on every deployment that
+   * exists. That direction is not a preference: a driver that guessed "moved"
+   * would write bare ids into a JSON column, which is the one failure this
+   * whole mechanism is shaped to prevent. ⛔ It is also why the answer is NOT
+   * the `adr-0104-file-references` flag alone — every creation-attested store
+   * since 17.0 carries that flag AND JSON-quoted ids.
+   *
+   * Shares one memo slot, and therefore one read, with
+   * {@link isFileReferencesMigrationVerified}: they are two questions about
+   * one row. `invalidateDataMigrationFlags()` drops both.
+   */
+  async haveFileColumnsMoved(): Promise<boolean> {
+    return (
+      await this.readMigrationFlagRowMemoized(
+        'fileReferencesMigrationVerified',
+        FILE_REFERENCES_MIGRATION_ID,
+        '[value-shape] this deployment has verified the file-as-reference migration — ' +
+          'media value shapes are enforced and released field files may be collected ' +
+          '(ADR-0104 / #3617)',
+      )
+    ).columnsMoved;
+  }
+
+  /**
    * Has this deployment completed AND verified the ADR-0104 non-media
    * value-shape scan (`os migrate value-shapes`, #3438)? Same memoized seam and
    * same fail-lenient posture as the file flag above — and a SEPARATE flag,
@@ -8225,8 +8328,27 @@ export class ObjectQL implements IObjectQLEngine {
     migrationId: string,
     verifiedLog: string,
   ): Promise<boolean> {
+    return (await this.readMigrationFlagRowMemoized(slot, migrationId, verifiedLog)).verified;
+  }
+
+  /**
+   * The same memoized read, handed back WHOLE (#15989).
+   *
+   * The row carries two facts a consumer can want — is the migration verified,
+   * and have the columns moved — and they must come from one read: two reads
+   * can straddle a `--apply` and answer out of one another's date, which for
+   * these two facts means "verified, columns not moved" (the JSON arm) and
+   * "not verified, columns moved" (an unreachable state) both become
+   * observable. {@link readMigrationFlagMemoized} is this function projected
+   * onto its first field, so the two can never disagree.
+   */
+  private async readMigrationFlagRowMemoized(
+    slot: 'fileReferencesMigrationVerified' | 'valueShapesMigrationVerified',
+    migrationId: string,
+    verifiedLog: string,
+  ): Promise<MigrationFlagRead> {
     const cached = this[slot];
-    if (cached) return (await cached).verified;
+    if (cached) return await cached;
     const pending = this.readMigrationFlagVerified(migrationId, verifiedLog);
     this[slot] = pending;
     const result = await pending;
@@ -8234,7 +8356,7 @@ export class ObjectQL implements IObjectQLEngine {
     // by identity so a concurrent `invalidateDataMigrationFlags()` (or a
     // re-read that already replaced this slot) is not undone here.
     if (!result.conclusive && this[slot] === pending) this[slot] = null;
-    return result.verified;
+    return result;
   }
 
   /**
@@ -8255,9 +8377,9 @@ export class ObjectQL implements IObjectQLEngine {
   private async readMigrationFlagVerified(
     migrationId: string,
     verifiedLog?: string,
-  ): Promise<{ verified: boolean; conclusive: boolean }> {
+  ): Promise<MigrationFlagRead> {
     if (!this._registry.getObject(DATA_MIGRATION_FLAG_OBJECT)) {
-      return { verified: false, conclusive: false };
+      return { verified: false, conclusive: false, columnsMoved: false };
     }
     try {
       const rows = await this.find(DATA_MIGRATION_FLAG_OBJECT, {
@@ -8266,19 +8388,28 @@ export class ObjectQL implements IObjectQLEngine {
         context: { isSystem: true } as ExecutionContext,
       });
       const row: any = rows?.[0];
-      if (!row || row.id !== migrationId) return { verified: false, conclusive: true };
-      const verified = isDataMigrationFlagVerified({
+      if (!row || row.id !== migrationId) {
+        return { verified: false, conclusive: true, columnsMoved: false };
+      }
+      const flag = {
         id: migrationId,
         last_run_at: String(row.last_run_at ?? ''),
         verified_at: row.verified_at == null ? null : String(row.verified_at),
         // A non-numeric count must read as "not zero", not as 0 — a bad
         // coercion lands on NaN, which fails the === 0 test.
         blocking: typeof row.blocking === 'number' ? row.blocking : Number(row.blocking ?? Number.NaN),
-      });
+        // [#15989] Read here so both questions come off ONE row: an absent or
+        // empty stamp is the JSON encoding, which is what every row written
+        // before the column step existed holds.
+        columns_moved_at: row.columns_moved_at == null ? null : String(row.columns_moved_at),
+      };
+      const verified = isDataMigrationFlagVerified(flag);
       if (verified && verifiedLog) this.logger.info(verifiedLog);
-      return { verified, conclusive: true };
+      return { verified, conclusive: true, columnsMoved: hasMovedFileColumns(flag) };
     } catch {
-      return { verified: false, conclusive: false }; // unreadable evidence → stay lenient, keep asking
+      // unreadable evidence → stay lenient, keep asking; and the columns read
+      // as NOT moved, which is the encoding every deployment already writes.
+      return { verified: false, conclusive: false, columnsMoved: false };
     }
   }
 

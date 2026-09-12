@@ -4445,7 +4445,16 @@ export type SqlDriverConfig = Knex.Config & {
    * `registerObjectMetadata`-only) simply never resolves it and stays on the
    * JSON arm, which is again the correct fail-toward.
    *
-   * @see {@link SqlDriver.setFileColumnsMoved}
+   * ## Naming it at all — in EITHER polarity — shuts out the engine's supply
+   *
+   * The ordinary composition does not set this key: `ObjectQL.registerDriver`
+   * hands the driver a resolver over `sys_migration.columns_moved_at` instead
+   * (see {@link SqlDriver.setFileColumnsMovedResolver}). Setting it here says
+   * the host knows its own storage better than the ledger does, so the engine
+   * will not contradict it — and that is true of `false` as much as of `true`,
+   * since a declared `false` overruled to `true` is bare ids in a JSON column.
+   *
+   * @see {@link SqlDriver.setFileColumnsMovedResolver}
    */
   fileColumnsMoved?: boolean | (() => boolean | Promise<boolean>);
 };
@@ -4554,6 +4563,16 @@ export class SqlDriver implements IDataDriver {
   protected fileColumnsMoved = false;
   /** The unresolved resolver from config, cleared once it has been asked. */
   private fileColumnsMovedResolver?: () => boolean | Promise<boolean>;
+  /**
+   * Did the HOST name {@link SqlDriverConfig.fileColumnsMoved} at
+   * construction, in either polarity (#15989)?
+   *
+   * Distinguishes "the host declared `false`" from "the host said nothing" —
+   * two states the boolean field above cannot tell apart, because both leave
+   * it `false`. Only the second is an empty slot
+   * {@link setFileColumnsMovedResolver} may fill.
+   */
+  private fileColumnsMovedDeclared = false;
   /**
    * The columns whose DECLARED type is `boolean` or `toggle` — a READ-COERCION
    * registry: its readers present the stored form (SQLite INTEGER 0/1, MySQL
@@ -5276,6 +5295,11 @@ export class SqlDriver implements IDataDriver {
     // are ObjectStack concerns, not Knex options — strip them before handing
     // the config to Knex.
     const { schemaMode, autoMigrate, sqliteJournalMode, sqliteAbsentFile, fileColumnsMoved, ...knexConfig } = config;
+    // [#15989] Recorded before the branch, and on the KEY rather than on the
+    // value: `fileColumnsMoved: false` is a host declaration just as much as
+    // `true` is, and it must shut the engine's supply seam out — see
+    // {@link setFileColumnsMovedResolver}.
+    this.fileColumnsMovedDeclared = fileColumnsMoved !== undefined;
     if (typeof fileColumnsMoved === 'function') {
       this.fileColumnsMovedResolver = fileColumnsMoved;
     } else if (fileColumnsMoved === true) {
@@ -17309,9 +17333,58 @@ export class SqlDriver implements IDataDriver {
    * this memoized without a second boolean: a repeat `initObjects` (the batched
    * and deferred-DDL paths both call it more than once) finds nothing to ask.
    */
+  /**
+   * The kernel→driver supply seam for the ADR-0104 media arm (#15989).
+   *
+   * `ObjectQL.registerDriver` calls this with a closure over the engine's own
+   * `haveFileColumnsMoved()`, which reads `sys_migration.columns_moved_at`.
+   * It is the counterpart of {@link SqlDriverConfig.fileColumnsMoved} for the
+   * ordinary composition, where nobody hand-writes that option: the driver is
+   * constructed in an app's config long before any row can be read, so what
+   * arrives here is the question and {@link resolveFileColumnsMoved} asks it
+   * once, at `initObjects`.
+   *
+   * ## ⛔ A host declaration is never overruled — this fills an empty slot only
+   *
+   * If the config named `fileColumnsMoved` at all (a boolean of either
+   * polarity, or a resolver of the host's own), this is a NO-OP. The host is
+   * the more specific authority about its own storage, and the failure the
+   * engine could cause by overruling a declared `false` is the one this whole
+   * mechanism exists to prevent: bare ids written into a JSON column.
+   *
+   * ## It changes nothing that has already been asked
+   *
+   * After `initObjects` has run once the arm is resolved and frozen — every
+   * media column's `isJsonField` answer is already in `jsonFields` — so a
+   * resolver arriving later would be a promise this driver cannot keep. A
+   * registration after the first `initObjects` therefore leaves the resolved
+   * arm alone; the only thing it could do instead is change the write encoding
+   * of a table whose columns were built for the other one.
+   *
+   * @returns whether the resolver was taken, so a caller can tell an
+   *          installation from a refusal instead of inferring it.
+   */
+  setFileColumnsMovedResolver(resolve: () => boolean | Promise<boolean>): boolean {
+    if (this.fileColumnsMovedDeclared) return false;
+    if (this.fileColumnsMovedAsked) return false;
+    this.fileColumnsMovedResolver = resolve;
+    return true;
+  }
+
+  /** Has {@link resolveFileColumnsMoved} already run to completion? */
+  private fileColumnsMovedAsked = false;
+
   protected async resolveFileColumnsMoved(): Promise<void> {
     const resolver = this.fileColumnsMovedResolver;
-    if (!resolver) return;
+    if (!resolver) {
+      // A driver with nothing to ask has still settled its arm: `false`, the
+      // JSON encoding, which is what it will keep for the rest of its life.
+      // Recorded so a resolver supplied AFTER the first `initObjects` is
+      // refused rather than silently changing an already-frozen answer.
+      this.fileColumnsMovedAsked = true;
+      return;
+    }
+    this.fileColumnsMovedAsked = true;
     this.fileColumnsMovedResolver = undefined;
     try {
       this.fileColumnsMoved = (await resolver()) === true;
