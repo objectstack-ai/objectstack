@@ -1407,18 +1407,38 @@ jobs:
       # paths, not shell globs — measured, the glob form matches zero files
       # ("No test files found", exit 1). Loud rather than silent, but still
       # wrong; the substring is the form that actually selects both.
+      #
+      # [#17621] TWO substrings now, because the dialect that can fail is no
+      # longer only MySQL. #17175 gave the two presence probes a catalog arm per
+      # dialect family, and its PostgreSQL arm — `to_regclass` — was pinned as
+      # TEXT and executed NOWHERE: this package had no live-PG harness and this
+      # step supplied `OS_TEST_MYSQL_URL` alone, so the one arm whose failure
+      # mode is a SILENTLY skipped data repair was the one arm no server ever
+      # ran. The postgres service this job already provisions for the driver-sql
+      # leg is what makes closing that wiring rather than infrastructure.
+      #
+      # Multiple positionals are OR-ed, and each is still a substring: measured,
+      # `live-mysql live-postgres` selects the three `live-mysql*` files the
+      # single argument selected plus `seed-tenancy-backfill.live-postgres`. ⛔ A
+      # single shorter substring (`live-`) would select the same set today and
+      # silently widen with the next unrelated file that happens to spell it.
       - name: Build metadata-protocol and its dependencies
         run: pnpm exec turbo run build --filter=@objectstack/metadata-protocol... --concurrency=4
 
-      - name: Run the metadata-protocol migration statements against live MySQL
+      - name: Run the metadata-protocol migration statements against live MySQL and PostgreSQL
         env:
           OS_TEST_MYSQL_URL: mysql://root:root@127.0.0.1:3306/conformance
+          # [#17621] The same URL the driver-sql leg above already receives, for
+          # the postgres service this job already runs. One line, and the
+          # read-probe's Postgres arm stops being the only one nothing executes.
+          OS_TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
           # Same vacuous-pass guard as the driver-sql leg: this runner
           # provisioned the server, so a missing URL is a defect in the runner
-          # and must be a red rather than a skip.
+          # and must be a red rather than a skip. It now covers BOTH URLs: each
+          # live file above turns its own missing URL into a named failure.
           OS_EXPECT_LIVE_DIALECT_MATRIX: '1'
         run: |
-          pnpm --filter @objectstack/metadata-protocol exec vitest run live-mysql
+          pnpm --filter @objectstack/metadata-protocol exec vitest run live-mysql live-postgres
 
   dogfood:
     # Sharded 3-way: the suite is ~60 independent test files, each booting its
