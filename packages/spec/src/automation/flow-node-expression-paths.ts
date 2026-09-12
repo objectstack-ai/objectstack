@@ -421,10 +421,30 @@ export const STRUCTURAL_CONDITION_SHAPE_REFUSAL =
  *
  * `undefined` — admitted — for:
  *
- *  - every **string**, including a whitespace-only one. What a non-empty string
- *    *says* stays `validateExpression('predicate', …)`'s verdict, and a
- *    whitespace-only condition meaning `false` is consistent on both sides and
- *    is ruled correct, not a defect.
+ *  - every **string**, including a whitespace-only one — on the SHAPE question,
+ *    which is the only question this function answers. What a non-empty string
+ *    *says* stays `validateExpression('predicate', …)`'s verdict.
+ *
+ *    ⚠️ The whitespace-only string is still admitted here, but NOT for the
+ *    reason #15662 gave. That reason was that such a condition, meaning `false`,
+ *    "is consistent on both sides and is ruled correct, not a defect" — and
+ *    #15807 removed the ground under it, by making `FlowEdgeSchema.condition`
+ *    compose `EvaluatedExpressionInputSchema`, which refuses a blank `source` at
+ *    `FlowSchema.parse`. #17322 then ruled on the disagreement that left
+ *    (一个操作两个实现且行为不一致 ⇒ 带治理的一侧胜出,另一侧改绑) and rebound the node
+ *    door at `AutomationEngine.registerFlow`; #17495 followed at
+ *    `objectstack validate`. A blank structural condition is a defect today,
+ *    refused at all three doors.
+ *
+ *    It is refused there by the EVALUATED-SLOT rule, not by this one. Both
+ *    consumers ask `EvaluatedExpressionInputSchema` — the edge door's own
+ *    schema, imported rather than restated — in a second gate sitting behind
+ *    this shape refusal and in front of the CEL pass, answering
+ *    `EVALUATED_EXPRESSION_SOURCE_REQUIRED` and not
+ *    {@link STRUCTURAL_CONDITION_SHAPE_REFUSAL}. Keeping the two distinct is
+ *    deliberate: a string IS a well-shaped structural condition, and a second
+ *    hand-written notion of "blank" per door is exactly the drift #15662 built
+ *    this one shared refusal to prevent. ⛔ Do not move the blank rule in here.
  *  - absent / `null`. "Not authored" is not a malformed predicate; both callers
  *    already return early on it, and this agrees rather than disagreeing.
  *  - an **expression envelope the engine can evaluate**: an object carrying a
@@ -450,6 +470,23 @@ export const STRUCTURAL_CONDITION_SHAPE_REFUSAL =
  * surface and the engine cannot run on either. When AST-only evaluation lands,
  * `EvaluatedExpressionSchema` is the one place to relax, and this clause
  * follows it.
+ *
+ * ## The sibling `predicate` slots — an OPEN question, not answered here
+ *
+ * The blank rule reached the two STRUCTURAL slots only. The ledger `predicate`
+ * slots — `config.conditions[].expression`, a `decision` node's branch list, and
+ * `screen.fields[].visibleWhen` — are judged by {@link predicateSlotRefusal},
+ * not by this function, and they still ADMIT a whitespace-only string:
+ * registration takes it and `evaluateCondition` answers `false`, the same silent
+ * dead branch #17322 closed one slot over. Recorded here rather than fixed,
+ * because it is a RULING and not a refactor: #15572 pinned that admission as
+ * correct on the very ground #15807 removed — that the blank is treated the same
+ * way on both sides — so narrowing those slots re-judges a pin and moves a
+ * published accept-set. #17493 carries the question (does the ledger predicate
+ * slot follow the structural one?) and it is open at the time of writing. ⛔ Do
+ * not answer it by widening this refusal: those slots do not pass through this
+ * door, and a second notion of "blank" is what the shared refusal exists to
+ * prevent.
  *
  * ## What it refuses, and what that was doing before
  *
