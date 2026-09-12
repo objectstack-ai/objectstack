@@ -111,7 +111,7 @@ const FIELD = 'case_number';
  */
 function sequenceKeyHash(object: string, tenantId: string, field: string, scope: string): string {
   return createHash('sha256')
-    .update(`${object}${tenantId}${field}${scope}`)
+    .update(`${object}\u001f${tenantId}\u001f${field}\u001f${scope}`)
     .digest('hex');
 }
 
