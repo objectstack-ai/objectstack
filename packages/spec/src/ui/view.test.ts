@@ -3953,9 +3953,17 @@ describe("ListViewSchema — the RETIRED `page` view type (#17063)", () => {
     it('REFUSES `pageName` with the tombstone prescription, not a bare unknown-key report', () => {
       const r = parse({ type: 'grid', pageName: 'sales_dashboard', columns: ['name'] });
       expect(r.success).toBe(false);
+      // Select the TOMBSTONE issue by the shape `retiredKey()` raises rather
+      // than by its text. Since #17299 the overlay door also carries that text
+      // on the union WRAPPER (path `[]`), lifted verbatim from the issue below,
+      // so a text-only find is satisfied by either and this pin's subject —
+      // that the refusal is raised at the key the author wrote — needs the one
+      // that has a path. The two are asserted equal in
+      // `view-union-retirement-prescription.test.ts`.
       const issue = flatten((r as { error: z.ZodError }).error.issues)
-        .find((i) => i.message.includes('`view.pageName` was removed'));
+        .find((i) => (i as { expected?: string }).expected === 'never');
       expect(issue, JSON.stringify((r as { error: z.ZodError }).error.issues)).toBeDefined();
+      expect(issue!.message).toContain('`view.pageName` was removed');
       expect(issue!.path.join('.')).toBe('pageName');
     });
 
