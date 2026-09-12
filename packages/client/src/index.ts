@@ -4090,11 +4090,32 @@ export class ObjectStackClient {
        * performs no such split — `redirect_uris` must arrive **pre-split**,
        * one entry per URL, which is what an SDK caller holds anyway.
        *
+       * ## ⚠️ `redirect_uris` is OPTIONAL here, and that is measured parity (#17215)
+       *
+       * It used to be the one required member on this type. It was never a
+       * deliberate guard — it is residue from the method's first commit, which
+       * declared `client_name` required too; the same-day follow-up relaxed
+       * `client_name` and left this one behind, and no comment, test, ADR or
+       * review thread ever asserted a reason for it.
+       *
+       * Re-introspected at runtime against `@better-auth/oauth-provider@1.7.3`
+       * — instantiate `oauthProvider()`, walk `endpoints`, read `options.body`
+       * — the member is `optional`, and a body omitting it entirely parses
+       * `ok`. All 21 members of that schema are optional.
+       *
+       * ⚠️ Optional does NOT mean `[]` will do. The vendor refuses an empty
+       * array, so when the member is present it must be non-empty: omitting it
+       * and passing `[]` are different requests, and only the first is legal.
+       * ⚠️ Nor does it mean a client registered without redirect URIs is
+       * usable — it cannot complete an `authorization_code` flow. This type
+       * states what the route accepts, never that every accepted call yields a
+       * client fit for every grant.
+       *
        * Pinned by `oauth-applications-register-request-members.test.ts`.
        */
       register: async (req: {
         client_name?: string;
-        redirect_uris: string[];
+        redirect_uris?: string[];
         token_endpoint_auth_method?: 'none' | 'client_secret_basic' | 'client_secret_post';
         grant_types?: string[];
         response_types?: string[];
