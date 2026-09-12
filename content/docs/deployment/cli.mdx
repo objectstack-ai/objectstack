@@ -172,11 +172,41 @@ os dev --database file:./data/test.db --auth-secret $(openssl rand -hex 32)
 | `--auth-secret <s>` | `OS_AUTH_SECRET` | Override the dev-fallback secret |
 | `--environment-id <id>` | `OS_ENVIRONMENT_ID` | Environment identifier (default `env_local`) |
 | `-p, --port <n>` | `OS_PORT` / `PORT` | Listen port (default `3000`). In dev a busy port auto-hops to the next free one; the banner shows the actual port. |
+| `--cert <path>` | — | Path to a TLS certificate (PEM). With `--key`, terminate TLS in the dev process and serve `https://localhost:<port>`. Bring your own certificate — none is generated |
+| `--key <path>` | — | Path to the private key (PEM) for `--cert`. Required with `--cert` |
 | `--ui` | — | Force Console UI on (already on by default in dev) |
 | `--compile` | — | Force compiling `objectstack.config.ts` → `dist/objectstack.json` before starting (auto when the artifact is missing; ignored with `--artifact`) |
 | `--fresh` | — | Ephemeral `OS_HOME` in the OS tempdir (clean DB, uploads root, and other `OS_HOME`-keyed state), auto-deleted on exit; implies `--seed-admin`. See the scope note below |
 | `--seed-admin` / `--no-seed-admin` | — | Seed a dev admin (`admin@objectos.ai` / `admin123`) on an empty DB — default on; override with `--admin-email` / `--admin-password` |
 | `-v, --verbose` | — | Verbose output |
+
+##### Serving dev over https
+
+An interactive MCP client (and any OAuth client worth the name) refuses to open a
+sign-in against a plain-http URL, so the self-serve identity path — *interactive
+clients just open a browser login* — cannot be exercised against a dev server on
+`http://localhost`. Hand `os dev` a certificate you already have and it
+terminates TLS itself:
+
+```bash
+os dev --cert ./localhost.pem --key ./localhost-key.pem
+```
+
+Both flags are required together, and an unreadable file is refused rather than
+quietly downgraded to http. With them, every address this boot advertises is
+`https://localhost:<port>`: the two `/.well-known/*` discovery documents, the
+CSRF allow-list, the ready banner's `API:` / `MCP:` rows, the `🤖 MCP server`
+connect hint, and the runtime state file a supervisor reads. Without them nothing
+changes.
+
+Only the built-in default follows the listener. `OS_AUTH_URL` (and
+`OS_BASE_URL`) still win when set — they name where the deployment is *reached*,
+which behind a proxy or a tunnel is a different address from the one this process
+bound — so an explicit value is never rewritten, `http://` ones included.
+
+Where the certificate comes from, and which certificates your client or your
+machine accepts, is yours to decide: ObjectStack generates none and reads no
+store.
 
 By default `os dev` keeps your data between restarts in a project-local SQLite
 file at `.objectstack/data/dev.db` (created on first run). Pass `--database`,
