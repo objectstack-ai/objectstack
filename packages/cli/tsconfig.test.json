@@ -126,7 +126,7 @@
     "moduleResolution": "bundler",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["node"],
-    // [#15004, #15229] FOUR bare-name rules, no star, for the four workspace
+    // [#15004, #15229] FIVE bare-name rules, no star, for the five workspace
     // deps the option-B acceptance pin reaches
     // (`test/option-b-reader-acceptance.pin.test.ts` and its two fixtures;
     // `@objectstack/verify` joined them with card 5/4's probe rows). Without them tsc resolves those specifiers through
@@ -160,6 +160,13 @@
       // package publishes only `"."`.
       "@objectstack/plugin-dev": ["../plugins/plugin-dev/src/index.ts"],
       "@objectstack/plugin-security": ["../plugins/plugin-security/src/index.ts"],
+      // [#17647] The fifth, same reason and same no-star rule: the composed
+      // Connect-an-Agent wire pin (`test/connect-agent-both-halves-wire.pin.test.ts`)
+      // drives the REAL `RestServer` RBAC-by-route filter, so a type verdict
+      // resolved through `exports` to rest's **dist** would be a verdict about
+      // the last build rather than about the filter the pin is about. The
+      // package publishes only `"."`.
+      "@objectstack/rest": ["../rest/src/index.ts"],
       "@objectstack/runtime": ["../runtime/src/index.ts"],
       "@objectstack/verify": ["../verify/src/index.ts"]
     }
