@@ -50,8 +50,10 @@ allowBuilds:
 #   would clear the report only by installing a second, unused native copy.
 #
 #   (The '@better-auth/scim>better-call' entry that used to sit here retired
-#   with the scim release-candidate pin — stable @better-auth/scim 1.7.1 peers
-#   better-call 1.4.0 exactly, so the skew it declared away is gone.)
+#   with the scim release-candidate pin — stable @better-auth/scim 1.7.3 peers
+#   better-call 1.4.0 exactly, so the skew it declared away is gone. First
+#   measured on 1.7.1 when the entry retired; re-read 2026-09-12 on the 1.7.3
+#   pin, off the installed manifest.)
 #
 #   @better-auth/core, @better-auth/oauth-provider, @better-auth/scim and
 #   @better-auth/sso each peer an exact @better-auth/utils 0.4.2, while the
