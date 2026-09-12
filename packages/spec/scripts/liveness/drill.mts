@@ -3,10 +3,12 @@
 // Container coverage — the third direction of the liveness gate, and the one
 // that let a key hide in plain sight.
 //
-// WHY THIS EXISTS. The gate classifies a property at ONE level. A container
-// property (object / record / array-of-object) may be drilled via `children`;
-// without one, the ledger README's rule is that "the top-level entry covers the
-// whole subtree". That inheritance is invisible in three ways at once:
+// WHY THIS EXISTS. The gate classifies a property at the granularity the ledger
+// declares. A container property (object / record / array-of-object) may be
+// drilled via `children` — and a child that is itself a container may be drilled
+// again, as deep as the ledger goes; without a `children` map, the ledger
+// README's rule is that "the entry covers the whole subtree". That inheritance
+// is invisible in three ways at once:
 //
 //   1. The entry looks complete. `{ "status": "live" }` on `dashboard.widgets`
 //      reads as a finished classification, not as a blanket claim standing in
@@ -83,9 +85,18 @@
 //   - A container with no ledger row at all already reports UNCLASSIFIED. This
 //     rule only asks about entries the gate credited.
 
-/** One container property the gate classified with a single blanket verdict. */
+/**
+ * One container property the gate classified with a single blanket verdict, at
+ * any depth. A DRILLED child can itself be a container: until the walk recursed,
+ * such a child was credited as classified and the keys beneath it were covered
+ * by nothing at all — #4956's silence, one level below where #4956 was fixed.
+ */
 export interface ContainerCoverage {
-  /** `<type>/<propPath>` — the ledger coordinate carrying the blanket verdict. */
+  /**
+   * `<type>/<propPath>` — the ledger coordinate carrying the blanket verdict.
+   * `<propPath>` is dotted for a coordinate the walk reached by recursion, e.g.
+   * `dashboard/widgets.chartConfig`.
+   */
   key: string;
   /** The child keys the walk can see under it — the surface the verdict silently covers. */
   childKeys: readonly string[];
@@ -95,7 +106,10 @@ export interface ContainerCoverage {
 export interface DeferredContainer {
   /** `<type>/<propPath>` — the container riding on someone else's classification. */
   container: string;
-  /** Target coordinate: a governed type root (`field`) or a drilled coordinate (`view/list`). */
+  /**
+   * Target coordinate: a governed type root (`field`), or a drilled coordinate
+   * at any depth (`view/list`, `dashboard/widgets.chartConfig`).
+   */
   to: string;
 }
 
@@ -248,6 +262,9 @@ export const UNDRILLED_GUIDANCE = [
   '     way `view.list` / `view.form` are drilled. Do this when you can actually',
   '     close the call graph for those keys; divergent sub-statuses are the',
   '     signal (one dead key under a live container is the whole point).',
+  '     A coordinate with a dot in it (`dashboard/widgets.chartConfig`) is drilled',
+  '     the same way, by NESTING a `children` map inside the parent child entry:',
+  '     the walk follows the ledger down and classifies every level it declares.',
   '  2. DEFER it — if the container embeds a surface that is ALREADY classified',
   '     (a governed type, or a coordinate someone else drilled), add',
   '     `{ "container": …, "to": … }` to the `deferred` list in',

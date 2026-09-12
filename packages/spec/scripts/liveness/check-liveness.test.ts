@@ -35,10 +35,10 @@ const LEDGERS = path.join(SPEC, 'liveness');
 // extracts it) that this repo has never contained.
 const ROTTED = 'packages/plugins/driver-sql/src/sql-driver.ts';
 
-function runGate(ledgerRoot?: string): { status: number | null; output: string } {
+function runGate(ledgerRoot?: string, extraArgs: readonly string[] = []): { status: number | null; output: string } {
   const require = createRequire(import.meta.url);
   const tsx = require.resolve('tsx/cli');
-  const argv = [tsx, GATE, ...(ledgerRoot ? [`--ledger-root=${ledgerRoot}`] : [])];
+  const argv = [tsx, GATE, ...(ledgerRoot ? [`--ledger-root=${ledgerRoot}`] : []), ...extraArgs];
   const r = spawnSync(process.execPath, argv, { cwd: SPEC, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
   if (r.error) throw r.error;
   return { status: r.status, output: `${r.stdout ?? ''}${r.stderr ?? ''}` };
@@ -912,5 +912,198 @@ describe('check:liveness — an unrecognized ledger `status` (#13083)', () => {
     expect(status, output).toBe(0);
     expect(output).not.toContain('whose `status` is not one of');
     expect(output).not.toContain("do not add up to the walk's own count");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The drill recurses past one level — and its boundary is never silent (#17424).
+//
+// WHY THESE RUN THE REAL GATE AND READ ITS REPORT. Everything asserted here is a
+// property of the walk as CI invokes it: which coordinates get classified, which
+// get reported, and whether a run that classified nothing can still exit 0. The
+// defect was precisely that all three were TRUE of a `children` map at depth two
+// and the run said nothing, so a unit test of any single helper would have been
+// green throughout — the same shape as the #5623 case at the top of this file.
+//
+// `--json` is used rather than the prose output because the claims are about
+// specific report BUCKETS (`unclassified` vs `orphanEntries` vs `staleEvidence`),
+// and a substring search over the human summary cannot tell them apart — which
+// matters most here, since "reported somewhere" was never the question. The
+// question was whether anything was reported at all.
+//
+// Several fixtures below exit 1 for a SECOND, expected reason: drilling a
+// coordinate that the shipped baseline records as undrilled makes that baseline
+// row stale, and the baseline is read from the script's own directory rather
+// than from `--ledger-root`, so a copy cannot move it. That is why no case here
+// asserts on the exit code alone — each names the bucket its finding lands in.
+// Note also that `undrilledStale` is deliberately NOT used as evidence of
+// recursion: a coordinate the walk cannot see is reported stale too, so the
+// pre-fix and post-fix runs agree on it. It does not discriminate; the buckets
+// below do.
+describe('check:liveness — the drill recurses past one level (#17424)', () => {
+  let tmp: string;
+
+  beforeAll(() => {
+    tmp = mkdtempSync(path.join(tmpdir(), 'os-liveness-depth-'));
+  });
+  afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+
+  function freshRoot(name: string): string {
+    const root = path.join(tmp, name);
+    cpSync(LEDGERS, root, { recursive: true });
+    return root;
+  }
+
+  /** Set one field on an already-drilled child entry (e.g. its `childrenDefault`). */
+  function setChildField(root: string, type: string, prop: string, child: string, field: string, value: unknown): void {
+    const file = path.join(root, `${type}.json`);
+    const ledger = JSON.parse(readFileSync(file, 'utf8'));
+    ledger.props[prop].children[child][field] = value;
+    writeFileSync(file, `${JSON.stringify(ledger, null, 2)}\n`);
+  }
+
+  /** Nest a `children` map inside an already-drilled child entry — a depth-2 map. */
+  function nestChildren(root: string, type: string, prop: string, child: string, children: unknown): void {
+    const file = path.join(root, `${type}.json`);
+    const ledger = JSON.parse(readFileSync(file, 'utf8'));
+    ledger.props[prop].children[child].children = children;
+    writeFileSync(file, `${JSON.stringify(ledger, null, 2)}\n`);
+  }
+
+  function report(root?: string, extraArgs: readonly string[] = []): any {
+    const { output } = runGate(root, ['--json', ...extraArgs]);
+    const start = output.indexOf('{');
+    expect(start, output).toBeGreaterThanOrEqual(0);
+    return JSON.parse(output.slice(start));
+  }
+
+  // The control, and the first thing the fix changes about a GREEN tree: the
+  // depth-two container is now VISIBLE. Before the walk recursed, a container
+  // sitting under a drilled child was neither classified, nor deferred, nor
+  // recorded — it was not in any population at all, which is why nothing could
+  // ever have gone red about it. `dashboard/widgets.chartConfig` is the #17385
+  // coordinate that could not be drilled until this landed.
+  it('SEES a container that sits under a drilled child — the coordinate #17385 is blocked on', () => {
+    const r = report();
+    const seen = [...r.undrilled.map((u: any) => u.key), ...r.deferredContainers.map((d: string) => d.split(' → ')[0])];
+    expect(seen).toContain('dashboard/widgets.chartConfig');
+  });
+
+  it('is green against a verbatim copy of the shipped ledgers', () => {
+    const { status, output } = runGate(freshRoot('control'));
+    expect(status, output).toBe(0);
+  });
+
+  // ── 1. THE RECURSION ──
+  //
+  // The sharpest statement of the defect the card makes is "no evidence path is
+  // resolved". So rot one, at depth two, and require the evidence guard to reach
+  // it. A gate that still exits 0 on this is the pre-fix gate exactly.
+  it('RESOLVES a depth-2 entry\'s evidence — the pointer the one-level walk never read', () => {
+    const root = freshRoot('depth2-evidence');
+    nestChildren(root, 'dashboard', 'widgets', 'chartConfig', {
+      title: { status: 'live', evidence: `${ROTTED}:1`, verifiedAt: '2026-09-12' },
+    });
+    const r = report(root);
+    expect(r.staleEvidence.join('\n')).toContain('dashboard/widgets.chartConfig.title');
+  });
+
+  it('classifies the depth-2 keys, moving the verdict counts a blanket entry could not move', () => {
+    const control = report(freshRoot('depth2-counts-control')).types.dashboard;
+    const root = freshRoot('depth2-counts');
+    nestChildren(root, 'dashboard', 'widgets', 'chartConfig', {
+      title: { status: 'experimental', evidence: 'packages/spec/liveness/README.md:1', verifiedAt: '2026-09-12' },
+    });
+    setChildField(root, 'dashboard', 'widgets', 'chartConfig', 'childrenDefault', 'live');
+    const after = report(root).types.dashboard;
+    // One coordinate in, fourteen out: the blanket verdict on `chartConfig` is
+    // replaced by a verdict per key, and one of them is a status the container
+    // never carried. That difference is the whole point of drilling.
+    expect(after.classified).toBe(control.classified + 13);
+    expect(after.byStatus.experimental ?? 0).toBe((control.byStatus.experimental ?? 0) + 1);
+  });
+
+  // ── 2. ⭐ THE REPORT — as important as the recursion ──
+  //
+  // A key the tool did not classify must SURFACE. Each of the three ways an
+  // entry can go unclassified at depth one is pinned here at depth two, because
+  // "it recurses now" would be satisfied by a walk that recursed and then
+  // swallowed everything it could not resolve.
+
+  it('reports a depth-2 key with NO verdict as UNCLASSIFIED rather than dropping it', () => {
+    const root = freshRoot('depth2-unclassified');
+    // A `children` map that names ONE of the fourteen keys and no
+    // `childrenDefault` — the other thirteen have no verdict from anywhere.
+    nestChildren(root, 'dashboard', 'widgets', 'chartConfig', {
+      title: { status: 'live', evidence: 'packages/spec/liveness/README.md:1', verifiedAt: '2026-09-12' },
+    });
+    const r = report(root);
+    expect(r.unclassified).toContain('dashboard/widgets.chartConfig.type');
+    expect(r.unclassified).toContain('dashboard/widgets.chartConfig.series');
+    expect(r.unclassified).not.toContain('dashboard/widgets.chartConfig.title');
+  });
+
+  it('reports a BOGUS depth-2 entry as an orphan rather than guessing what it meant', () => {
+    const root = freshRoot('depth2-bogus');
+    nestChildren(root, 'dashboard', 'widgets', 'chartConfig', {
+      neverWasAKey: { status: 'live', evidence: 'packages/spec/liveness/README.md:1' },
+    });
+    const r = report(root);
+    expect(r.orphanEntries).toContain('dashboard/widgets.chartConfig.neverWasAKey');
+  });
+
+  it('reports `children` declared on a depth-2 NON-container, with the same message as depth one', () => {
+    const root = freshRoot('depth2-non-container');
+    // `widgets[].title` is a string. A `children` map on it is authorable
+    // nonsense, and before the recursion it was authorable nonsense nobody read.
+    nestChildren(root, 'dashboard', 'widgets', 'title', { anything: { status: 'live' } });
+    const r = report(root);
+    expect(r.unclassified).toContain(
+      'dashboard/widgets.title (declared children but property is not a container)',
+    );
+  });
+
+  // ── 3. ⭐ THE CEILING IS NOT SILENT ──
+  //
+  // The working depth limit is the ledger's own nesting, so this needs a
+  // RECURSIVE schema to reach a constant at all: a NavigationItem's `children`
+  // are NavigationItems, so the ledger can be nested arbitrarily deep against a
+  // real shape. Past `MAX_DRILL_DEPTH` the walk stops — and says so, per key.
+  // A limit that truncated quietly would be this card's own defect, rebuilt one
+  // level lower.
+  it('reports every key below the drill ceiling as UNCLASSIFIED instead of truncating in silence', () => {
+    const root = freshRoot('depth-ceiling');
+    const file = path.join(root, 'app.json');
+    const ledger = JSON.parse(readFileSync(file, 'utf8'));
+    // Ten nested levels of `children`, all on the real recursive key.
+    let node: any = ledger.props.navigation.children.children;
+    for (let i = 0; i < 10; i++) {
+      node.children = { children: {} };
+      node = node.children.children;
+    }
+    node.children = { label: { status: 'live', evidence: 'packages/spec/liveness/README.md:1' } };
+    writeFileSync(file, `${JSON.stringify(ledger, null, 2)}\n`);
+
+    const r = report(root);
+    const ceiling = r.unclassified.filter((u: string) => u.includes('drill ceiling'));
+    expect(ceiling.length, JSON.stringify(r.unclassified, null, 2)).toBeGreaterThan(0);
+    // It names the coordinate it stopped at, and says nothing beneath it is
+    // classified — the sentence whose absence made this invisible for so long.
+    expect(ceiling[0]).toContain('app/navigation.children.children');
+    expect(ceiling[0]).toContain('NOT walked');
+  });
+
+  it('fails the gate when the ceiling is hit — an unwalked subtree is never a pass', () => {
+    const root = freshRoot('depth-ceiling-exit');
+    const file = path.join(root, 'app.json');
+    const ledger = JSON.parse(readFileSync(file, 'utf8'));
+    let node: any = ledger.props.navigation.children.children;
+    for (let i = 0; i < 10; i++) {
+      node.children = { children: {} };
+      node = node.children.children;
+    }
+    writeFileSync(file, `${JSON.stringify(ledger, null, 2)}\n`);
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(1);
   });
 });
