@@ -56,8 +56,26 @@ Both halves are phase ①; ⛔ neither lands without the other following.
 
 **This is shipped, which is why it carries a changeset rather than
 `skip-changeset`.** `@objectstack/spec`'s published `files[]` ships `dist`, and
-the new code reaches it — `declaredCapabilities` and `appDeclaredCapabilityNames`
-each occur in 2 built files under `packages/spec/dist` after the build, with
-`describeHighPrivilegeBits` itself at 2 as the positive control that ships. The
-ADR half does not ship: a phrase unique to the revision note occurs in 0 built
-files, and `docs/adr/**` is in no package's `files[]`.
+the new code reaches it.
+
+Counts below are taken on a **clean full build of this head** — an empty `dist`,
+then `pnpm --filter @objectstack/spec build` with both passes (JS and DTS): exit
+0, `check-dts-emitted` reporting 34/34 declaration files, and
+`dist/.build-input-hash` and `.build-input-hash-dts` both matching `src`. The
+build state is named because it changes the answer: on a JS-only `dist` — one
+still mid-DTS, or built under `OS_SKIP_DTS` — every declaration file is missing
+and each count below that reaches one is halved.
+
+| identifier | built files | where |
+|---|---|---|
+| `declaredCapabilities` | **4** | `security/index.js`, `index.mjs`, `index.d.ts`, `index.d.mts` |
+| `AnchorBindingContext` | **2** | `index.d.ts`, `index.d.mts` — a type, so the declarations are its whole published reach |
+| `appDeclaredCapabilityNames` | **2** | `index.js`, `index.mjs` — module-private, so it has no declaration presence at all |
+| `describeHighPrivilegeBits` | **4** | the positive control: a symbol already known to ship |
+
+Negative control: a sentence occurring **only** in the ADR revision — `As first
+written, the bullet above made` — occurs in **0** built files, and `docs/adr/**`
+is in no package's `files[]`. ⚠️ The control has to be a sentence the source
+does not also carry: `The platform floor is absolute` reads 2, not 0, because
+that sentence is in this predicate's JSDoc as well as in the ADR, and an emitted
+JSDoc reaches `index.d.ts` / `index.d.mts` like any other declaration text.
