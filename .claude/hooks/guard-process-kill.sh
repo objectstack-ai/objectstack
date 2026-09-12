@@ -57,7 +57,35 @@
 #                                          scripts/gen-sdui-manifest.sh
 #   pkill -P "$pid" / pkill -s "$sid"    — the same selectors on pkill, with NO pattern
 #                                          operand. Add a pattern and it is blocked again.
-#   pgrep -f foo / ps aux | grep node    — a READ. Nothing dies; look all you like.
+#   pgrep -f foo / ps aux | grep node    — a READ. Nothing dies; look all you like. But a
+#                                          READ is not a WAIT — see the section below.
+#
+# ## The WAIT side of the same table: a READ is safe, a WAIT on what it matched is not
+#
+#   WAIT ONLY ON A PID YOU RECORDED.
+#
+# The line above is right about SIGNALS, and that is exactly where the trap sits.
+# Name-matching a container-wide process table does not stop being hazardous when nothing is
+# killed: a name-matched WAIT has the same root cause (one process table, text matching, no
+# ownership check) and the same property that makes the kill rule a RULE rather than advice
+# — it reports SUCCESS.
+#
+# `pgrep -f "$PAT"` run from a shell whose OWN command line contains "$PAT" matches the
+# asker itself; `head -1` takes it, the `echo` prints a plausible PID, and `tail --pid=$BP`
+# then waits for its own parent while that parent waits for it. Measured on this repo's
+# container: three such waiters sat deadlocked for five hours, on cards whose agent had been
+# dead for four — the real work had long since exited and no lock was held, so the wait
+# was waiting for nothing and said nothing about it.
+#
+# Record the pid the same way the kill rule prescribes: `cmd & pid=$!` then `wait "$pid"`, a
+# pidfile, or a wrapper that prints its own PID. Ordering cannot repair a bare `pgrep -f
+# "$PAT" | head -1` whose pattern is live in the asker's cmdline — a discovery by pattern
+# must exclude the asker and its ancestors, or it is not a discovery.
+#
+# ⛔ Deliberately NOT guarded, and the asymmetry is the reason: a name-matched KILL
+# destroys a NEIGHBOUR's run, invisibly to whoever fired it, which is what buys a hook. A
+# wait that never returns spends only the ASKER's own budget. So this half is a written
+# rule, not a refusal.
 #
 # Deliberate exception (you know the match can only be yours): OS_ALLOW_PROCESS_KILL=1.
 #
