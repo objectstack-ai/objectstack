@@ -28,6 +28,9 @@ import {
   ExplainRecordAttributionSchema,
   EXPLAIN_BATCH_MAX_RECORD_IDS,
 } from './explain.zod';
+// [#16870] Imported for ONE assertion: the boundary between the snapshot shape
+// this file locks and the AUTHORING accept set that now refuses the same pair.
+import { ObjectPermissionSchema } from './permission.zod';
 
 describe('ExplainOperationSchema — the operation vocabulary is fixed', () => {
   it('accepts exactly the seven CRUD + lifecycle operations', () => {
@@ -367,7 +370,32 @@ describe('ExplainDecisionSchema — the full decision report L3 consumes', () =>
 });
 
 describe('AccessMatrix schemas — the authoring-time companion', () => {
-  it('AccessMatrixEntry locks the crud bits + super-user bypass + scopes + sharingModel', () => {
+  // [#16870] ⚠️ The sample row below carries `viewAllRecords: true` BESIDE a
+  // `readScope`, and that is deliberate — but its reason changed, so read this
+  // before reading the assertion.
+  //
+  // That pair is a contradiction: the read-scope resolver answers `org` on the
+  // super-user bit before it ever consults `readScope`, so the depth is unread
+  // on every runtime path. The AUTHORING accept set (`ObjectPermissionSchema`)
+  // therefore REFUSES it now — pinned in `permission.test.ts`, and asserted
+  // from here in the next test so the two surfaces cannot drift apart silently.
+  //
+  // `AccessMatrixEntry` deliberately does NOT refuse it, for two measured
+  // reasons:
+  //
+  //  1. It is a DERIVED SNAPSHOT shape, not an accept set. `buildAccessMatrix`
+  //     constructs entries from ALREADY-PARSED metadata, and `os build` reads a
+  //     committed `access-matrix.json` back with a bare `JSON.parse` to diff it.
+  //     A snapshot written by an older toolchain may well carry the pair, and
+  //     the drift diff has to keep describing it.
+  //  2. Nothing in the tree parses through this schema outside this file —
+  //     it is a TYPE contract that cloud's L3 product reads. A refusal added
+  //     here would be a check no code path can ever run: exactly the
+  //     declared-but-unenforced shape #16870 is about, reproduced one level up.
+  //
+  // ⇒ What this test locks is unchanged — the FIELD SHAPE, every key present
+  // and typed. It is no longer evidence that the platform accepts the pair.
+  it('AccessMatrixEntry locks the crud bits + super-user bypass + scopes + sharingModel (a SNAPSHOT shape: tolerant by design)', () => {
     const entry = AccessMatrixEntrySchema.parse({
       permissionSet: 'crm_admin', object: 'crm_lead',
       create: true, read: true, edit: true, delete: false,
@@ -380,6 +408,23 @@ describe('AccessMatrix schemas — the authoring-time companion', () => {
       viewAllRecords: true, modifyAllRecords: false,
       readScope: 'unit_and_below', writeScope: 'own', sharingModel: 'private',
     });
+  });
+
+  it('[#16870] the AUTHORING accept set refuses the very pair this snapshot shape tolerates', () => {
+    // The boundary, asserted rather than described. If a later change makes
+    // the authoring schema accept the pair again, this fails here too — the
+    // snapshot tolerance above is only defensible while the door upstream of
+    // it is shut.
+    const authored = ObjectPermissionSchema.safeParse({
+      allowRead: true, viewAllRecords: true, readScope: 'unit_and_below',
+    });
+    expect(authored.success, 'the accept set refuses a depth the resolver never reads').toBe(false);
+    const snapshot = AccessMatrixEntrySchema.safeParse({
+      permissionSet: 'crm_admin', object: 'crm_lead',
+      create: true, read: true, edit: true, delete: false,
+      viewAllRecords: true, modifyAllRecords: false, readScope: 'unit_and_below',
+    });
+    expect(snapshot.success, 'the snapshot shape still describes artifacts written before the refusal').toBe(true);
   });
 
   it('the crud + bypass bits are REQUIRED (a missing bit is a contract break)', () => {
