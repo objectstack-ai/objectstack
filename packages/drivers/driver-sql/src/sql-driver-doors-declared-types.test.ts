@@ -64,8 +64,34 @@
 // not whether the door owes its declared type: optionality governs whether the
 // member EXISTS, not what it returns once it does.
 //
+// #17690 adds four MORE doors of the same family — `find`, `upsert`,
+// `bulkUpdate` and `temporalFilterValue` — and the reason they were not in
+// #15267's repaired set nor in its deliberately-excluded set is worth one
+// paragraph, because it is the transferable half of this card. #15267's census
+// matched the LITERAL STRING `Promise<any>`. Every door it repaired is spelled
+// exactly that way; every door it never named nests the `any` inside a wider
+// type — `Promise<any[]>` (`find`), `Promise<Record<string, any>>`
+// (`upsert`), `Promise<Record<string, any>[]>` (`bulkUpdate`), a bare `any`
+// (`temporalFilterValue`). The characters were not there, so the instrument
+// stayed silent, and the silence was read as coverage. An instrument's silence
+// is only evidence if the instrument could have spoken: the census that found
+// these parses `IDataDriver` out of `data-driver.ts` and compares each class's
+// published annotation against the declaration, so the honest doors show up as
+// EXACT rows and are shown to have been COVERED rather than skipped.
+//
+// `temporalFilterValue` is the one door in the family that is not a promise at
+// all: it is a synchronous `unknown` on the contract, so its halves are read
+// through `ReturnType` rather than `Resolved`. It is optional
+// (`temporalFilterValue?`), read through `NonNullable` for the same reason
+// `explain` and `aggregate` are.
+//
 // Out of scope, deliberately: `analyzeQuery()` (the helper behind `explain()`)
-// is not pinned here — it is not on `IDataDriver` at all.
+// is not pinned here — it is not on `IDataDriver` at all. And the PARAMETER
+// annotations of these doors (`data: Record<string, any>` on `upsert`,
+// `value: any` on `temporalFilterValue`) are deliberately NOT part of this
+// family: a parameter typed `any` accepts exactly what one typed `unknown`
+// accepts, so it erodes nothing on the CALLER's side — which is the whole
+// axis this family is about.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { Knex } from 'knex';
@@ -88,6 +114,12 @@ type ContractExecute = Resolved<IDataDriver['execute']>;
 type ContractExplain = Resolved<NonNullable<IDataDriver['explain']>>;
 // `aggregate` is optional too (`aggregate?(...)`), read the same way (#17277).
 type ContractAggregate = Resolved<NonNullable<IDataDriver['aggregate']>>;
+// [#17690] Four more doors. `temporalFilterValue` is synchronous, so it is read
+// through `ReturnType` — `Resolved` would answer `never` and pin nothing.
+type ContractFind = Resolved<IDataDriver['find']>;
+type ContractUpsert = Resolved<IDataDriver['upsert']>;
+type ContractBulkUpdate = Resolved<IDataDriver['bulkUpdate']>;
+type ContractTemporalFilterValue = ReturnType<NonNullable<IDataDriver['temporalFilterValue']>>;
 
 type SqlFindOne = Resolved<SqlDriver['findOne']>;
 type SqlCreate = Resolved<SqlDriver['create']>;
@@ -95,6 +127,10 @@ type SqlBulkCreate = Resolved<SqlDriver['bulkCreate']>;
 type SqlExecute = Resolved<SqlDriver['execute']>;
 type SqlExplain = Resolved<SqlDriver['explain']>;
 type SqlAggregate = Resolved<SqlDriver['aggregate']>;
+type SqlFind = Resolved<SqlDriver['find']>;
+type SqlUpsert = Resolved<SqlDriver['upsert']>;
+type SqlBulkUpdate = Resolved<SqlDriver['bulkUpdate']>;
+type SqlTemporalFilterValue = ReturnType<SqlDriver['temporalFilterValue']>;
 
 // 1. The contract half — what `IDataDriver` already declared before this change.
 const contractFindOne: Equals<ContractFindOne, Record<string, unknown> | null> = true;
@@ -103,6 +139,10 @@ const contractBulkCreate: Equals<ContractBulkCreate, Record<string, unknown>[]> 
 const contractExecute: Equals<ContractExecute, unknown> = true;
 const contractExplain: Equals<ContractExplain, unknown> = true;
 const contractAggregate: Equals<ContractAggregate, Record<string, unknown>[]> = true;
+const contractFind: Equals<ContractFind, Record<string, unknown>[]> = true;
+const contractUpsert: Equals<ContractUpsert, Record<string, unknown>> = true;
+const contractBulkUpdate: Equals<ContractBulkUpdate, Record<string, unknown>[]> = true;
+const contractTemporalFilterValue: Equals<ContractTemporalFilterValue, unknown> = true;
 
 // 2. The driver half — un-masked, and reading exactly as the contract reads.
 //    `unknown` needs the `IsAny` leg most of all: `Equals<any, unknown>` is
@@ -120,6 +160,17 @@ const sqlExplainIsAny: IsAny<SqlExplain> = false;
 const sqlExplainIsContract: Equals<SqlExplain, unknown> = true;
 const sqlAggregateIsAny: IsAny<SqlAggregate> = false;
 const sqlAggregateIsContract: Equals<SqlAggregate, Record<string, unknown>[]> = true;
+const sqlFindIsAny: IsAny<SqlFind> = false;
+const sqlFindIsContract: Equals<SqlFind, Record<string, unknown>[]> = true;
+const sqlUpsertIsAny: IsAny<SqlUpsert> = false;
+const sqlUpsertIsContract: Equals<SqlUpsert, Record<string, unknown>> = true;
+const sqlBulkUpdateIsAny: IsAny<SqlBulkUpdate> = false;
+const sqlBulkUpdateIsContract: Equals<SqlBulkUpdate, Record<string, unknown>[]> = true;
+// `temporalFilterValue` lands on `unknown`, so the `IsAny` leg carries most of
+// the weight here: `Equals<any, unknown>` is already `false`, and without it a
+// regression to `any` would be reported only as "not `unknown`".
+const sqlTemporalFilterValueIsAny: IsAny<SqlTemporalFilterValue> = false;
+const sqlTemporalFilterValueIsContract: Equals<SqlTemporalFilterValue, unknown> = true;
 
 describe('SqlDriver declared return types on the five remaining IDataDriver doors (#15267)', () => {
   let driver: SqlDriver;
@@ -218,6 +269,66 @@ describe('SqlDriver declared return types on the five remaining IDataDriver door
     // compared. Through the old `Promise<any>` this read compiled unchecked.
     const cell: unknown = rows[0].n;
     expect(Number(cell)).toBe(1);
+  });
+
+  // [#17690] The four doors a literal-string census could not see. Both halves
+  // each: put any one annotation back and `IsAny` flips to `true` while
+  // `Equals` flips to `false`, reding this file twice for that door.
+  it('pins both halves of find(), upsert(), bulkUpdate() and temporalFilterValue()', () => {
+    expect([contractFind, contractUpsert, contractBulkUpdate, contractTemporalFilterValue]).toEqual([
+      true,
+      true,
+      true,
+      true,
+    ]);
+    expect([sqlFindIsAny, sqlUpsertIsAny, sqlBulkUpdateIsAny, sqlTemporalFilterValueIsAny]).toEqual([
+      false,
+      false,
+      false,
+      false,
+    ]);
+    expect([
+      sqlFindIsContract,
+      sqlUpsertIsContract,
+      sqlBulkUpdateIsContract,
+      sqlTemporalFilterValueIsContract,
+    ]).toEqual([true, true, true, true]);
+  });
+
+  it('find() resolves to rows the declared record type describes, and the caller narrows to read a cell', async () => {
+    const rows = await driver.find('t', { where: { id: '1' } }, { bypassTenantAudit: true });
+    expect(rows).toHaveLength(1);
+
+    // The narrowing the declared type now demands of every caller: a cell
+    // arrives as `unknown` and is typed before it is used. Through the old
+    // `Promise<any[]>` this read compiled unchecked — and `find()` is the
+    // hottest read door in the repo, which is what made this one worth the card.
+    const first = rows[0];
+    const name: unknown = first.name;
+    expect(String(name)).toBe('before');
+  });
+
+  it('upsert() resolves to a record shape the declared type describes, behind the same narrowing', async () => {
+    const row = await driver.upsert('t', { id: '9', name: 'upserted' }, ['id'], { bypassTenantAudit: true });
+    const id: unknown = row.id;
+    expect(String(id)).toBe('9');
+  });
+
+  it('bulkUpdate() resolves to record shapes the declared type describes, behind the same narrowing', async () => {
+    await driver.create('t', { id: '7', name: 'seven' }, { bypassTenantAudit: true });
+    const rows = await driver.bulkUpdate('t', [{ id: '7', data: { name: 'seven-updated' } }], {
+      bypassTenantAudit: true,
+    });
+    expect(rows).toHaveLength(1);
+    const name: unknown = rows[0].name;
+    expect(String(name)).toBe('seven-updated');
+  });
+
+  it('temporalFilterValue() answers unknown, so a caller types the coerced comparand before emitting it', () => {
+    const coerced = driver.temporalFilterValue('t', 'name', 'plain');
+    // Not a temporal field: the contract says such values come back unchanged.
+    // The declared `unknown` is what forces this line to exist at all.
+    expect(typeof coerced === 'string' ? coerced : null).toBe('plain');
   });
 
   it('create() and bulkCreate() resolve to record shapes the declared types describe', async () => {

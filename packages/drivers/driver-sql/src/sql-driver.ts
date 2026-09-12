@@ -6079,7 +6079,14 @@ export class SqlDriver implements IDataDriver {
   // CRUD — IDataDriver core
   // ===================================
 
-  async find(object: string, query: DriverQuery, options?: DriverOptions): Promise<any[]> {
+  // [#17690] The return is the contract's own type. It was `Promise<any[]>`, and the
+  // reason #15267's census never named this door is worth carrying: that census
+  // matched the literal string `Promise<any>`, and here the `any` is NESTED
+  // inside a wider type, so the characters were not there to match. The door
+  // appeared in neither its repaired set nor its excluded set — it was never
+  // seen. Pinned at the type level, both halves, in
+  // `sql-driver-doors-declared-types.test.ts`.
+  async find(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
     return this.findRows(object, query, options);
   }
 
@@ -7825,7 +7832,14 @@ export class SqlDriver implements IDataDriver {
     throw refuseCrossRowIdentityMerge(object, tableName, id, rivals);
   }
 
-  async upsert(object: string, data: Record<string, any>, conflictKeys?: string[], options?: DriverOptions): Promise<Record<string, any>> {
+  // [#17690] The return is the contract's own type. It was `Promise<Record<string, any>>`, and the
+  // reason #15267's census never named this door is worth carrying: that census
+  // matched the literal string `Promise<any>`, and here the `any` is NESTED
+  // inside a wider type, so the characters were not there to match. The door
+  // appeared in neither its repaired set nor its excluded set — it was never
+  // seen. Pinned at the type level, both halves, in
+  // `sql-driver-doors-declared-types.test.ts`.
+  async upsert(object: string, data: Record<string, any>, conflictKeys?: string[], options?: DriverOptions): Promise<Record<string, unknown>> {
     const { _id, ...rest } = data;
     const toUpsert = { ...rest };
 
@@ -8307,7 +8321,14 @@ export class SqlDriver implements IDataDriver {
    * usable — the rollback decision for the caller's OWN work stays the
    * caller's, which is the half of `upsert`'s reasoning that does transfer.
    */
-  async bulkUpdate(object: string, updates: Array<{ id: string | number; data: Record<string, any> }>, options?: DriverOptions): Promise<Record<string, any>[]> {
+  // [#17690] The return is the contract's own type. It was `Promise<Record<string, any>[]>`, and the
+  // reason #15267's census never named this door is worth carrying: that census
+  // matched the literal string `Promise<any>`, and here the `any` is NESTED
+  // inside a wider type, so the characters were not there to match. The door
+  // appeared in neither its repaired set nor its excluded set — it was never
+  // seen. Pinned at the type level, both halves, in
+  // `sql-driver-doors-declared-types.test.ts`.
+  async bulkUpdate(object: string, updates: Array<{ id: string | number; data: Record<string, any> }>, options?: DriverOptions): Promise<Record<string, unknown>[]> {
     // An empty batch issues no statement, exactly as before: a BEGIN/COMMIT
     // pair — and the pool checkout behind it — buys nothing for zero rows.
     if (updates.length === 0) return [];
@@ -13822,7 +13843,12 @@ export class SqlDriver implements IDataDriver {
    * flips its operator, which is exactly the ambiguity the emitter-side rule
    * avoids.
    */
-  public temporalFilterValue(objectName: string, field: string, value: any): any {
+  // [#17690] The contract declares this hook `unknown`-returning; the class
+  // published a bare `any`, which is the same family as the promise-shaped
+  // doors above and the one member of it that is synchronous. Pinned through
+  // `ReturnType` rather than `Resolved` in
+  // `sql-driver-doors-declared-types.test.ts`.
+  public temporalFilterValue(objectName: string, field: string, value: any): unknown {
     return this.coerceFilterValue(objectName, field, value);
   }
 

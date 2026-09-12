@@ -308,7 +308,12 @@ function measure(cell: DialectCell): void {
         for (const col of INSTANT_COLUMNS) expectCanonicalInstant(r[col], `bulkUpdate() return w${i} ${col}`);
         expect(r.closed_at, `bulkUpdate() return w${i} closed_at`).toBe(CLOSED_AT[i]);
         // A fresh stamp, in UTC — the same recency bound §A1 puts on `find()`.
-        expect(Math.abs(Date.now() - Date.parse(r.updated_at)), `w${i}.updated_at is not the instant of the update`).toBeLessThan(10 * 60_000);
+        // [#17690] `bulkUpdate()` publishes the contract's
+        // `Record<string, unknown>[]` now, so the stamp is typed before it is
+        // parsed.
+        const updatedAt = r.updated_at;
+        assert(typeof updatedAt === 'string', `w${i}.updated_at is not a string`);
+        expect(Math.abs(Date.now() - Date.parse(updatedAt)), `w${i}.updated_at is not the instant of the update`).toBeLessThan(10 * 60_000);
       }
     });
 
@@ -342,16 +347,21 @@ function measure(cell: DialectCell): void {
       // the batch landed, its rows read back canonical through `find()`, and —
       // where the return carried a row — the return and the row agree value
       // for value, so the return door presents what the read door presents.
+      // [#17690] `find()` publishes `Record<string, unknown>[]`, so every id
+      // read off a returned row is narrowed before it is used as a key, and
+      // `Array.prototype.find`'s absent arm is narrowed away rather than
+      // asserted past.
       const landed = (await driver.find(TABLE_RETURNS, { orderBy: [{ field: 'id', order: 'asc' }] }, OPTS)).filter(
-        (row: any) => row.id in expectedClosedAt,
+        (row) => String(row.id) in expectedClosedAt,
       );
       expect(landed, 'the batch did not land').toHaveLength(batch.length);
       for (const row of landed) {
         for (const col of INSTANT_COLUMNS) expectCanonicalInstant(row[col], `find() after bulkCreate ${row.id} ${col}`);
-        expect(row.closed_at).toBe(expectedClosedAt[row.id]);
+        expect(row.closed_at).toBe(expectedClosedAt[String(row.id)]);
       }
       for (const r of rowReturns) {
-        const row = landed.find((l: any) => l.id === r.id);
+        const row = landed.find((l) => String(l.id) === String(r.id));
+        assert(row !== undefined, `find() has no landed row for bulkCreate() return ${r.id}`);
         for (const col of INSTANT_COLUMNS) expect(r[col], `bulkCreate() return vs find() ${r.id}.${col}`).toBe(row[col]);
       }
     });
