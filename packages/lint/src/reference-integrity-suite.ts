@@ -387,8 +387,11 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // section authored with a `label` and no `name` renders a heading that
   // `_sections` (keyed by name) can never address, so neither the orphan check
   // nor the coverage walk can see it. A reference that cannot be written is
-  // still a reference question, and warning-only for the same reason its
-  // sibling is: one heading stays in the source locale, nothing breaks.
+  // still a reference question, and warning-only on its own reading — NOT on
+  // its sibling's any more: `translation-target-unknown` gates, because an
+  // orphan key is a confident-looking grep hit for a surface that no longer
+  // exists. Here the surface is real and present; only its heading stays in the
+  // source locale, so nothing is misdescribed and nothing breaks.
   { name: 'validateTranslatableSections', run: validateTranslatableSections },
   { name: 'validateFlowTemplatePaths', run: validateFlowTemplatePaths },
   { name: 'validateAiSurfaceAffinity', run: validateAiSurfaceAffinity },
