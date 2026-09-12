@@ -34,10 +34,16 @@
  * ⇒ The day the materialize seam lands, THIS FILE GOES RED, and its failure
  * message is the handoff: the enforcer docblock, the `manifest.zod.ts`
  * `PluginPermissions` docblock, the `manifest.loading` tombstone, the ADR-0087
- * D3 entry, `content/docs/plugins/development.mdx` and objectui's
- * `PluginDisclosure` all claim "registered, not enforced" and become the lie in
- * the other direction. ⛔ Do not delete this file to get green — rewrite the
- * texts it names and re-point the assertions.
+ * D3 entry, the hand-written plugin development guide under content/docs/plugins/
+ * and objectui's `PluginDisclosure` panel all claim "registered, not enforced"
+ * and become the lie in the other direction. ⛔ Do not delete this file to get
+ * green — rewrite the texts it names and re-point the assertions.
+ *
+ * ⚠️ Every repo path in this file is written UNQUOTED, here and below, and that
+ * is load-bearing rather than sloppy: check-cross-package-test-inputs reads a
+ * QUOTED repo path as an input this package must declare a glob for, and the
+ * paths named in this prose are cited, not read. The same note sits on
+ * check-partof-closing-keyword.mjs, for the same reason.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -67,10 +73,14 @@ const SCAN_TIMEOUT_MS = 60_000;
 /**
  * ⛔ `.ts` / `.mts` and NOT `.tsx`. The population this pin JUDGES must equal
  * the population turbo RE-RUNS it for, and the second is declared elsewhere:
- * the `@objectstack/core` roster entry in `scripts/cross-package-test-inputs.mjs`
- * carries exactly `packages/**\/*.ts` and `packages/**\/*.mts`. A scanner wider
- * than that glob judges files neither scoping layer can see. Narrow the
- * SCANNER, never widen the GLOB.
+ * the `@objectstack/core` roster entry in the declaration table at
+ * scripts/cross-package-test-inputs.mjs carries exactly `packages/**\/*.ts` and
+ * `packages/**\/*.mts`. A scanner wider than that glob judges files neither
+ * scoping layer can see. Narrow the SCANNER, never widen the GLOB.
+ *
+ * This file is also listed in packages/core/vitest.repo-tests.json, which is the
+ * `repo` project's include: an escaping test run under the ordinary package task
+ * has a cache hash that never moves with what it actually reads.
  */
 const PATHSPECS = [':(glob)packages/**/*.ts', ':(glob)packages/**/*.mts'];
 
@@ -123,8 +133,8 @@ describe('[#17147] the install-time granted permission set is registered, not en
       + 'packages/spec/src/kernel/manifest.zod.ts (PluginPermissions docblock AND the '
       + '`manifest.loading` tombstone), '
       + 'packages/spec/src/migrations/entries/semantic/17.plugin-manifest-loading-retired.ts, '
-      + 'content/docs/plugins/development.mdx, and objectui '
-      + 'packages/app-shell/src/console/marketplace/PluginDisclosure.tsx.',
+      + 'the hand-written plugin development guide, and the objectui console '
+      + 'consent panel (PluginDisclosure).',
     ).toEqual([]);
 
     // Anti-vacuity: the needle must still match SOMETHING, or a rename has
