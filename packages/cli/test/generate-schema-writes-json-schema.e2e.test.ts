@@ -109,27 +109,39 @@ const isObject = (v: unknown): v is JsonObject =>
 const isUnconstrained = (v: unknown): boolean => isObject(v) && Object.keys(v).length === 0;
 
 /**
- * Every object schema in `doc` that lists a property as `required` while that
- * property declares a `default`.
+ * The io-direction census: every object schema that constrains a `required`
+ * list against a `properties` map (`inspected` — the instrument), and those of
+ * them listing a property that declares a `default` (`offenders` — the reading).
  *
- * This is the io-direction discriminator: zod's output derivation makes a
- * defaulted property present-and-required, its input derivation leaves it
- * optional. Derived from the document so no path is hard-coded.
+ * zod's OUTPUT derivation makes a defaulted property present-and-required; its
+ * INPUT derivation leaves it optional. Derived from the document, so the
+ * direction is pinned without hard-coding any path an ordinary spec change
+ * would move.
+ *
+ * ⛔ `offenders` is only a reading while `inspected` is non-zero. An empty
+ * document — which is what a command that wrote nothing leaves behind — has no
+ * offenders either, and a zero from a dark instrument is exactly the shape this
+ * whole file exists to refuse.
  */
-function defaultedYetRequired(node: unknown, path = '$', acc: string[] = []): string[] {
+function censusDirection(
+  node: unknown,
+  path = '$',
+  acc: { inspected: number; offenders: string[] } = { inspected: 0, offenders: [] },
+): { inspected: number; offenders: string[] } {
   if (Array.isArray(node)) {
-    node.forEach((child, i) => defaultedYetRequired(child, `${path}[${i}]`, acc));
+    node.forEach((child, i) => censusDirection(child, `${path}[${i}]`, acc));
     return acc;
   }
   if (!isObject(node)) return acc;
   if (Array.isArray(node.required) && isObject(node.properties)) {
+    acc.inspected++;
     for (const key of node.required) {
       const prop = typeof key === 'string' ? node.properties[key] : undefined;
-      if (isObject(prop) && 'default' in prop) acc.push(`${path}.required:${String(key)}`);
+      if (isObject(prop) && 'default' in prop) acc.offenders.push(`${path}.required:${String(key)}`);
     }
   }
   for (const [key, child] of Object.entries(node)) {
-    defaultedYetRequired(child, `${path}.${key}`, acc);
+    censusDirection(child, `${path}.${key}`, acc);
   }
   return acc;
 }
@@ -233,9 +245,12 @@ describe('os generate schema', () => {
   });
 
   it('(e) is the AUTHORING derivation — no defaulted property is published as required', () => {
-    // In the output derivation this count is 752 on this tree, and every one of
-    // them is an IDE reporting a valid config as missing a key its author never
-    // had to write.
-    expect(defaultedYetRequired(doc)).toEqual([]);
+    // In the output derivation the offender count is 752 on this tree, and every
+    // one of them is an IDE reporting a valid config as missing a key its author
+    // never had to write. `inspected` is the lit control: the zero below is only
+    // a reading while the instrument found object schemas to judge at all.
+    const census = censusDirection(doc);
+    expect(census.inspected).toBeGreaterThan(0);
+    expect(census.offenders).toEqual([]);
   });
 });
