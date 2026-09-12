@@ -308,6 +308,77 @@
  * record exists on this head and names a reviewer", never "the review passed";
  * precondition ① of the landing check stays human.
  *
+ * ## The self-solvable exit — one CORRECTION comment (#17366)
+ *
+ * The declaration limb was a ONE-WAY DOOR, and it was measured five times in
+ * one shift across two roles: a seat writes the line as prose, the reader
+ * above correctly refuses it, and the seat then has NO sanctioned act that
+ * repairs it. The MCP GitHub tool set has no edit-an-issue-comment call, so a
+ * seat holding only that set cannot rewrite the line it wrote; the claim
+ * protocol forbids a second `Claim:`; and this file's own ⛔ forbids the
+ * checker filling the line in. Three closed doors left a green PR — 38 checks,
+ * 0 failures — waiting on somebody OUTSIDE the repository to retype one line.
+ * That is the cost the card priced: not time, a human.
+ *
+ * ⭐ The exit is a FOURTH act, performable with the one tool a seat certainly
+ * has — posting a comment — in a shape fixed tightly enough that reading it
+ * relaxes nothing:
+ *
+ *     Clause-②-correction: 5642248126
+ *     Clause-②: no
+ *     Session: `session_01MCLBsUgfykL74aU716rzVK`
+ *
+ * The FIRST line's key names, in digits, the CLAIM COMMENT ID this comment
+ * corrects. The newest correction naming the card's governing claim supersedes
+ * that claim's declaration — in BOTH directions, so a wrong VALUE is repaired
+ * by the same act as an unreadable one. A correction naming any other comment
+ * is IGNORED WITH A PRINTED REASON, never silently.
+ *
+ * ⛔ Three things it is not, each one a direction this file already refuses:
+ *
+ *   1. **It relaxes no spelling.** The declaration inside a correction is read
+ *      by the SAME `CLAUSE2_KEY_LINE` through the SAME `readClause2Line`, so
+ *      prose in a correction is prose exactly as it is in a claim. What moved
+ *      is WHICH COMMENT may carry the declaration — the same move #16304 made
+ *      when it asked a sibling CARD — never what counts as an answer. #12409's
+ *      boundary moves by not one character, and the card's own five measured
+ *      prose spellings are pinned as negatives in the self-test.
+ *   2. **It is not a second `Claim:`.** The first line carries a key of its
+ *      own, which `CLAIM_COMMENT_MARKER` does not match, so a correction never
+ *      enters the claim pool, never becomes the governing claim and cannot
+ *      re-dispatch the card. It is also excluded from the MISPLACED scan: a
+ *      recognised correction is this limb's designated second carrier, not a
+ *      declaration written in a place the predicate does not look.
+ *   3. **It is not the checker filling anything in.** The value is the seat's
+ *      own, written by the seat, in the fixed spelling. This file reads it and
+ *      still writes nothing.
+ *
+ * ## Attribution: a DECLARED identity, and why that is the honest ceiling
+ *
+ * A correction must be the CLAIMING seat's own act, or it is one seat
+ * declaring on another's behalf — the thing the C2 row's ⛔ forbids. The
+ * carrier is the `Session:` line the claim protocol already makes mandatory
+ * (SKILL.md 〈模板与表〉, 「session ID 不可省」, and 「`mode:subagent` 的 dev 与
+ * PM 同会话同 ID」 — so the session is exactly the granularity of "the claiming
+ * seat"), and a correction is ATTRIBUTED when its `Session:` equals the
+ * governing claim's.
+ *
+ * ⚠️ That is a DECLARED identity, never a verified one. The value is copyable
+ * text, and under this fleet's shared GitHub identity `user.login`
+ * distinguishes nobody — which is precisely why the comparison is on the
+ * declared session rather than on the comment's author. It is the ceiling C4
+ * already works at: what a comment SAYS about its own authorship is
+ * measurable, who typed it is not.
+ *
+ * ⛔ And no branch of it may become a NEW one-way door, which is the defect
+ * this whole section exists to remove. A correction whose session differs from
+ * the claim's, or which carries no `Session:` line, is ignored with a reason
+ * that NAMES AN ACT THE CLAIMING SEAT CAN PERFORM — post one from the claiming
+ * session — rather than a state nobody can leave. And a governing claim that
+ * carries no `Session:` line at all leaves nothing to compare: the correction
+ * APPLIES, and the note says attribution could not be verified and why.
+ * Refusing there would have rebuilt the door one room over.
+ *
  * ## The three read paths — a seat's ACCESS must not decide whether ② is checkable
  *
  * Precondition ② is read by the seat that LANDS the pair, and the carrier
@@ -547,14 +618,16 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'C6: the review of record on this head, and the carrier the rule text names (#17302)': 40,
   'the exit register is distinct in every direction it must be': 6,
   'the argv contract and the board provenance (#16623)': 42,
+  '#17366: the correction comment — the self-solvable exit, and the three things it is not': 65,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-// Raised by exactly the one battery #16304 adds, and again by exactly the one
-// #17302 adds, so the roster's existing slack is preserved rather than
-// tightened or loosened as a side effect.
-const SELF_TEST_BATTERY_FLOOR = 16;
+// Raised by exactly the one battery #16304 adds, again by exactly the one
+// #17302 adds, and again by exactly the one #17366 adds, so the roster's
+// existing slack is preserved rather than tightened or loosened as a side
+// effect.
+const SELF_TEST_BATTERY_FLOOR = 17;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -736,6 +809,221 @@ export function readClause2Line(text) {
   return nearMiss === null ? null : { kind: 'near-miss', reason: 'spelling', line: nearMiss };
 }
 
+// ---------------------------------------------------------------------------
+// The self-solvable exit — one CORRECTION comment (#17366)
+// ---------------------------------------------------------------------------
+
+/**
+ * The correction comment's FIRST-LINE key, and the claim comment id it names.
+ *
+ * Spelled so that it can never be mistaken for the declaration key one section
+ * up: `Clause-②-correction` is not `Clause-②` followed by a colon, so
+ * `CLAUSE2_KEY_LINE`, `hasInlineClause2Key` and `CLAIM_COMMENT_MARKER` all miss
+ * it by construction rather than by ordering. The decoration tolerated is
+ * exactly the decoration `CLAUSE2_KEY_LINE` tolerates — markdown a seat writes
+ * without meaning anything by it — and nothing else.
+ *
+ * The id is DIGITS. ⛔ No angle brackets anywhere in the shape: GitHub's body
+ * sanitizer eats tag-shaped fragments, backticked ones included, so a carrier
+ * spelled with them can be stored short and read as absent — a second one-way
+ * door in a mechanism that exists to remove one.
+ */
+const CLAUSE2_CORRECTION_KEY_LINE =
+  /^[ \t]*(?:>[ \t]*)?(?:[-*][ \t]+)?(?:\*\*)?`?Clause-②-correction`?(?:\*\*)?[ \t]*:[ \t]*`?(\d{1,20})`?(?![0-9])/;
+
+/** The `Session:` line both carriers of the attribution comparison are read from. */
+const SESSION_KEY_LINE = /^[ \t]*(?:>[ \t]*)?(?:[-*][ \t]+)?(?:\*\*)?`?Session`?(?:\*\*)?[ \t]*:(.*)$/;
+
+/**
+ * The session a comment DECLARES about itself, or null.
+ *
+ * Read through the file's one `SESSION_TOKEN`, so a session id has a single
+ * spelling here whether it arrives on a verdict's `Reviewed-by:` line or on a
+ * claim's `Session:` line. The token must be the FIRST thing after the colon,
+ * the same calibration `readValueToken` states: `Session: \`session_x\` (GitHub
+ * \`os-sales\`, skills seat)` reads, and what follows the token is the seat's
+ * prose, which this file does not read.
+ *
+ * ⛔ `Claude-Session:` is a different key and is not matched: only line-start
+ * decoration may precede `Session`, and `Claude-` is not decoration.
+ *
+ * @param {string} text
+ * @returns {string|null}
+ */
+export function readSessionId(text) {
+  for (const line of String(text ?? '').split(/\r?\n/)) {
+    const m = SESSION_KEY_LINE.exec(line);
+    if (!m) continue;
+    const rest = String(m[1] ?? '').replace(/^[ \t]+/, '').replace(/^(?:\*\*)?`?[ \t]*/, '');
+    const hit = SESSION_TOKEN.exec(rest);
+    if (hit) return hit[1];
+  }
+  return null;
+}
+
+/**
+ * Read ONE comment as a correction, or null when it is not one.
+ *
+ * ⭐ The key must be on the comment's FIRST non-blank line, which is what makes
+ * the comment DEDICATED. A correction is a carrier, not a remark: a claim, a
+ * round report or a review that happens to quote the key further down is not
+ * one, and a heading or a mid-line form is not one either. That is the same
+ * call `cardDeclaration` makes about `Claim:` — the carrier is recognised by a
+ * fixed shape, and everything else on the thread is prose.
+ *
+ * The declaration INSIDE the correction is read by `readClause2Line`, the same
+ * reader, over the same `CLAUSE2_KEY_LINE`. A correction whose declaration is
+ * prose, malformed or absent reads `value: null` — it is still recognised as a
+ * correction, so that the row can say what is wrong with it instead of leaving
+ * the seat to guess why nothing changed.
+ *
+ * @param {{ id?: number|string, body?: string, created_at?: string }} row
+ * @returns {{ id: string|null, createdAt: string|null, claimId: string,
+ *   value: 'yes'|'no'|null, line?: string, session: string|null }|null}
+ */
+export function readClause2Correction(row) {
+  const body = String(row?.body ?? '');
+  const first = body.split(/\r?\n/).find((line) => line.trim() !== '');
+  if (first === undefined) return null;
+  const m = CLAUSE2_CORRECTION_KEY_LINE.exec(first);
+  if (!m) return null;
+  const read = readClause2Line(body);
+  return {
+    id: row?.id === undefined || row?.id === null ? null : String(row.id),
+    createdAt: row?.created_at ?? null,
+    claimId: m[1],
+    value: read?.kind === 'declared' ? read.value : null,
+    line: read?.kind === 'declared' ? read.line : read?.line,
+    session: readSessionId(body),
+  };
+}
+
+/** Newest first — by timestamp, falling back to thread order when it is unreadable. */
+function newestFirst(a, b) {
+  const ap = Date.parse(a.createdAt ?? '');
+  const bp = Date.parse(b.createdAt ?? '');
+  if (Number.isFinite(ap) && Number.isFinite(bp) && ap !== bp) return bp - ap;
+  return b.index - a.index;
+}
+
+/**
+ * Which correction, if any, governs this card's declaration — and when none
+ * does, WHY, in a sentence that names an act the claiming seat can perform.
+ *
+ * ⛔ Every `ignored` branch owes a reachable remedy. The card this mechanism
+ * closes was filed because three sanctioned acts were closed at once; a refusal
+ * here that a seat cannot answer would rebuild that door one room over, so the
+ * note always names what to post next.
+ *
+ * @param {{ id?: number|string, body?: string, created_at?: string }[]} commentRows
+ * @param {{ id?: number|string, body?: string }[]} pool — the governing claim rows.
+ * @returns {{ state: 'none' }
+ *   | { state: 'applies', value: 'yes'|'no', detail?: string, note: string }
+ *   | { state: 'ignored', note: string }}
+ */
+function applicableCorrection(commentRows, pool) {
+  const corrections = [];
+  commentRows.forEach((row, index) => {
+    const read = readClause2Correction(row);
+    if (read) corrections.push({ ...read, index });
+  });
+  if (corrections.length === 0) return { state: 'none' };
+
+  const claimById = new Map();
+  for (const row of pool) {
+    if (row?.id === undefined || row?.id === null) continue;
+    claimById.set(String(row.id), row);
+  }
+  const sorted = [...corrections].sort(newestFirst);
+  const names = (c) => `\`${CLAUSE2_CORRECTION_KEY_TEXT}: ${c.claimId}\``;
+  const chosen = sorted.find((c) => claimById.has(c.claimId)) ?? null;
+
+  if (chosen === null) {
+    const known = [...claimById.keys()];
+    return {
+      state: 'ignored',
+      note:
+        `a correction comment is on the thread (${names(sorted[0])}) but it names a comment that is ` +
+        'NOT this card\'s governing claim, so it corrects nothing here and is IGNORED — ⛔ never ' +
+        'silently, because a seat that posted it would otherwise wait on a repair that never ' +
+        'happened. ' +
+        (known.length > 0
+          ? `The governing claim comment's id is ${known.join(' or ')}; post one correction naming it.`
+          : 'The governing claim comment carries no id in this reading, so no correction can be ' +
+            'matched to it — that is a gap in the reading, not a defect in the correction.'),
+    };
+  }
+  if (chosen.value === null) {
+    return {
+      state: 'ignored',
+      note:
+        `the correction comment ${names(chosen)} carries no readable declaration` +
+        (chosen.line ? `; the nearest thing in it is ${JSON.stringify(chosen.line)}` : '') +
+        '. A correction is read by the SAME reader as a claim — the fixed spelling is ' +
+        '`Clause-②: yes` or `Clause-②: no`, exactly those two, on a line of its own — so prose in ' +
+        'a correction is prose. IGNORED; post one carrying the line in that spelling.',
+    };
+  }
+
+  const claimRow = claimById.get(chosen.claimId);
+  const claimSession = readSessionId(claimRow?.body);
+  const shared =
+    `it supersedes claim comment ${chosen.claimId}'s own declaration, which is NOT edited and ` +
+    'still reads as it was written. ⛔ Nothing was filled in on the seat\'s behalf: the value is ' +
+    'the seat\'s, in the fixed spelling, and this script still writes nothing.';
+
+  if (claimSession === null) {
+    return {
+      state: 'applies',
+      value: chosen.value,
+      detail: chosen.line,
+      note:
+        `the declaration is read from a CORRECTION comment (${names(chosen)}) as ` +
+        `\`Clause-②: ${chosen.value}\`, and ${shared} ⚠️ ATTRIBUTION NOT VERIFIED: the governing ` +
+        'claim comment carries no `Session:` line, so there is nothing to compare the correction ' +
+        'against. The reading stands — refusing it would put the card back in the state this ' +
+        'mechanism exists to end — but a reader owes it a second look, and the claim that omitted ' +
+        'the line is the thing to fix (SKILL.md 〈模板与表〉: 「session ID 不可省」).',
+    };
+  }
+  if (chosen.session === null) {
+    return {
+      state: 'ignored',
+      note:
+        `the correction comment ${names(chosen)} carries no \`Session:\` line, so it does not say ` +
+        'whose act it is. A correction is the CLAIMING seat\'s own judgement rewritten, and ⛔ no ' +
+        'seat may declare on another\'s behalf — so the line is required, not decoration. ' +
+        `IGNORED; post one carrying \`Session:\` with the claiming session (\`${claimSession}\`, ` +
+        'which the governing claim declares).',
+    };
+  }
+  if (chosen.session !== claimSession) {
+    return {
+      state: 'ignored',
+      note:
+        `the correction comment ${names(chosen)} declares session \`${chosen.session}\` while the ` +
+        `governing claim declares \`${claimSession}\`. ⛔ A correction is the CLAIMING seat's own ` +
+        'act; a different session rewriting it would be one seat declaring on another\'s behalf, ' +
+        'which is the refusal the C2 row states. IGNORED; the claiming session posts the ' +
+        'correction itself.',
+    };
+  }
+  return {
+    state: 'applies',
+    value: chosen.value,
+    detail: chosen.line,
+    note:
+      `the declaration is read from a CORRECTION comment (${names(chosen)}) as ` +
+      `\`Clause-②: ${chosen.value}\`, attributed to the claiming session \`${claimSession}\` — the ` +
+      'same session the governing claim declares. ⚠️ A DECLARED identity, never a verified one: ' +
+      'the value is copyable text and the fleet writes under one GitHub login, so the comparison ' +
+      `is on what the comments SAY, exactly as C4's is. And ${shared}`,
+  };
+}
+
+/** The key as prose, for the sentences above — declared once, beside the regex that reads it. */
+const CLAUSE2_CORRECTION_KEY_TEXT = 'Clause-②-correction';
+
 /**
  * The declaration limb of one CARD, judged over its comment thread.
  *
@@ -766,7 +1054,10 @@ export function readClause2Line(text) {
  * @param {{ body?: string, created_at?: string }[]|null} commentRows — the REST
  *   comment rows, or `null` when the thread could NOT be read.
  * @returns {{ state: 'declared'|'malformed'|'misplaced'|'missing'|'absent'|'unreadable',
- *   value?: 'yes'|'no', detail?: string, nearMissReason?: 'inline-key'|'spelling' }}
+ *   value?: 'yes'|'no', detail?: string, nearMissReason?: 'inline-key'|'spelling',
+ *   correctionNote?: string }} — `correctionNote` rides alongside for exactly one
+ *   purpose, the same way `nearMissReason` does: the rows below print it. ⛔ It is
+ *   not part of the state union and no verdict, count or exit reads it.
  */
 export function cardDeclaration(commentRows) {
   if (!Array.isArray(commentRows)) return { state: 'unreadable' };
@@ -781,25 +1072,51 @@ export function cardDeclaration(commentRows) {
     : claimRows;
   const pool = governing.length > 0 ? governing : claimRows;
 
+  // The CORRECTION reading comes first (#17366), and it supersedes in BOTH
+  // directions: an unreadable claim declaration and a claim declaration whose
+  // VALUE the seat got wrong are repaired by the same act, because the seat has
+  // no edit for either. `applicableCorrection` never widens what counts as an
+  // answer — the correction's own line is read by `readClause2Line` — so what
+  // this branch changes is WHICH COMMENT carried it, never WHAT was accepted.
+  const correction = applicableCorrection(commentRows, pool);
+  if (correction.state === 'applies') {
+    return {
+      state: 'declared', value: correction.value, detail: correction.detail, correctionNote: correction.note,
+    };
+  }
+  // An IGNORED correction rides along on whatever the thread reads without it,
+  // so the row below can say why the repair did not land. ⛔ It never changes
+  // the state: a correction that was not read is not a declaration.
+  const correctionNote = correction.state === 'ignored' ? correction.note : undefined;
+  const withNote = (o) => (correctionNote === undefined ? o : { ...o, correctionNote });
+
   let malformed = null;
   let nearMiss = null;
   for (const row of pool) {
     const read = readClause2Line(row?.body);
-    if (read?.kind === 'declared') return { state: 'declared', value: read.value, detail: read.line };
+    if (read?.kind === 'declared') return withNote({ state: 'declared', value: read.value, detail: read.line });
     if (read?.kind === 'malformed' && malformed === null) malformed = read;
     if (read?.kind === 'near-miss' && nearMiss === null) nearMiss = read;
   }
-  if (malformed) return { state: 'malformed', detail: malformed.line };
+  if (malformed) return withNote({ state: 'malformed', detail: malformed.line });
 
   // Not in the claim carrier. Is it on the thread at all? That distinction is
   // the whole point of this function.
+  //
+  // ⛔ A recognised CORRECTION comment is skipped here, and that is the #17366
+  // mechanism's own boundary rather than a convenience: a correction is this
+  // limb's designated second carrier, so reading its line as MISPLACED would
+  // send the seat to move a line that is already where the rule puts it. An
+  // IGNORED correction is skipped for the same reason — the note above says
+  // what is wrong with it, and `misplaced` would say something false.
   for (const row of commentRows) {
+    if (readClause2Correction(row) !== null) continue;
     const read = readClause2Line(row?.body);
-    if (read?.kind === 'declared') return { state: 'misplaced', value: read.value, detail: read.line };
+    if (read?.kind === 'declared') return withNote({ state: 'misplaced', value: read.value, detail: read.line });
     if (read?.kind === 'malformed' && malformed === null) malformed = read;
     if (read?.kind === 'near-miss' && nearMiss === null) nearMiss = read;
   }
-  if (malformed) return { state: 'malformed', detail: malformed.line };
+  if (malformed) return withNote({ state: 'malformed', detail: malformed.line });
   // Which of the two not-read states this is, told apart by whether the carrier
   // exists at all. `claimRows` is non-empty exactly when some comment matched
   // the imported claim predicate, and `pool` is derived from it — so this asks
@@ -809,11 +1126,11 @@ export function cardDeclaration(commentRows) {
   // state union and no verdict, count or exit reads it — a near miss with a
   // correctly-spelled key is the same `missing` this function has always
   // returned, and #12409's boundary moves by not one character.
-  return {
+  return withNote({
     state: claimRows.length > 0 ? 'missing' : 'absent',
     detail: nearMiss?.line,
     nearMissReason: nearMiss?.reason,
-  };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -935,9 +1252,43 @@ export function c1CarrierSplit(pair) {
  * "no reading" told a seat neither which of the two it was in nor what to
  * write, and let a round report state one number about two different owings.
  */
+const TEMPLATE_POINTER =
+  'The claim template in `.claude/skills/pm-dispatch/SKILL.md` 〈模板与表〉 already carries the ' +
+  'literal `Clause-②: yes | no` line: COPY the template\'s line rather than composing one. Every ' +
+  'one of the five misses measured in the filing shift was a line composed from memory, and no ' +
+  'seat needs to know this regex to satisfy it.';
+
+/**
+ * The remedy that names WHO can act and HOW — the sentence #17366 was filed to
+ * get, in three parts, because the old one («add the line to that claim
+ * comment») named an act the claiming seat may have no tool for.
+ *
+ * ⛔ Nothing here prescribes a VALUE, and part (3) is a shape, never a fill-in:
+ * the declaration is still the seat's judgement, written by the seat.
+ */
+const CORRECTION_REMEDY =
+  'Remedy — WHO can act, and HOW: the CLAIMING SEAT itself, and it needs no comment edit. ' +
+  `(1) ${TEMPLATE_POINTER} ` +
+  '(2) ⚠️ A claim comment that is ALREADY POSTED cannot be repaired by editing it from every ' +
+  'seat: the MCP GitHub tool set has no edit-an-issue-comment call, and ⛔ a second `Claim:` is ' +
+  'forbidden by the claim protocol. ⛔ Do not wait for somebody outside the repository. ' +
+  '(3) Post ONE new comment on this card whose FIRST line is `Clause-②-correction: 5642248126` — ' +
+  'the numeric id of the claim comment it corrects, digits only — followed by the declaration in ' +
+  'the fixed spelling on a line of its own, and a `Session:` line carrying the claiming session. ' +
+  'The newest correction naming the governing claim SUPERSEDES that claim\'s declaration, in ' +
+  'both directions; one naming any other comment, or declaring a different session, is ignored ' +
+  'with a printed reason. ⛔ Never a second `Claim:`.';
+
 export function c2DeclarationUnreadable(pair) {
   const d = cardDeclaration(pair?.cardComments ?? null);
   const head = `card #${pair.card} (delivering open PR #${pair.pr}${pair.draft ? ' (draft)' : ''})`;
+  // An IGNORED correction is appended to whichever row the thread earns, so a
+  // seat that DID try the self-solvable exit is told why it did not land — ⛔
+  // never left to read a row that describes only the claim and conclude the
+  // correction was never seen (#17366).
+  const withCorrection = (row) => (row === null || d.correctionNote === undefined
+    ? row
+    : `${row} ⚠️ A correction comment WAS posted and did NOT take effect: ${d.correctionNote}`);
   const fixed = `the fixed spelling is \`Clause-②: yes\` or \`Clause-②: no\`, exactly those two`;
   const notADecision =
     'A missing reading is NOT a declared `no`: one of those is a decision and the other is an ' +
@@ -946,6 +1297,14 @@ export function c2DeclarationUnreadable(pair) {
     'the claiming seat\'s behalf; the declaration IS the judgement. ⛔ And do not relax the ' +
     'spelling to accept the prose: a predicate that reads prose is a heuristic, and the measured ' +
     'terminus of that direction is a check that can barely fail.';
+  return withCorrection(c2Sentence(d, head, fixed, notADecision));
+}
+
+/**
+ * The C2 sentence itself, one per state — split out so the correction note is
+ * appended in exactly one place rather than on each branch.
+ */
+function c2Sentence(d, head, fixed, notADecision) {
   switch (d.state) {
     case 'declared':
       return null;
@@ -956,14 +1315,14 @@ export function c2DeclarationUnreadable(pair) {
         `${head} — the \`Clause-②\` declaration is MISPLACED: the fixed spelling appears on the ` +
         `thread (${JSON.stringify(d.detail)}) but NOT in the card's claim comment, which is the ` +
         'carrier the enqueue gate\'s content limb reads. The thinking was done and written down; ' +
-        `it is in a place the predicate does not look. Move the line into the claim comment — ` +
-        `${fixed}. ${NEVER_WRITES}`
+        `it is in a place the predicate does not look. The line belongs in the claim comment — ` +
+        `${fixed}. ${CORRECTION_REMEDY} ${NEVER_WRITES}`
       );
     case 'malformed':
       return (
         `${head} — the \`Clause-②\` line is MALFORMED: ${JSON.stringify(d.detail)} carries the key ` +
         `but not one of the two values, so there is no reading. ${fixed}. ${notADecision} ` +
-        `${NEVER_WRITES}`
+        `${CORRECTION_REMEDY} ${NEVER_WRITES}`
       );
     case 'missing':
       // The key is on the thread, spelled exactly right, and simply not at the
@@ -980,8 +1339,8 @@ export function c2DeclarationUnreadable(pair) {
           'line-anchored — only whitespace, a blockquote `>`, a list bullet and backtick/bold ' +
           'wrapping may precede the key — so a key that follows another field on a shared line is ' +
           'not read, however correctly it is spelled. ⛔ There is no typo to find on that line. ' +
-          'Remedy: put the `Clause-②: yes|no` line on a line of its OWN in the card\'s claim ' +
-          `comment, unchanged otherwise — ${fixed}. ${notADecision} ${NEVER_WRITES}`
+          'The `Clause-②: yes|no` line belongs on a line of its OWN, unchanged otherwise — ' +
+          `${fixed}. ${CORRECTION_REMEDY} ${notADecision} ${NEVER_WRITES}`
         );
       }
       return (
@@ -989,7 +1348,8 @@ export function c2DeclarationUnreadable(pair) {
         `missing: the card's claim comment is there and carries no \`Clause-②:\` line in the ` +
         'fixed spelling' +
         (d.detail ? `, and the nearest thing on the thread is ${JSON.stringify(d.detail)}` : '') +
-        `. Remedy: add the line to that claim comment — ${fixed}. ${notADecision} ${NEVER_WRITES}`
+        `. That claim comment owes the line — ${fixed}. ${CORRECTION_REMEDY} ${notADecision} ` +
+        `${NEVER_WRITES}`
       );
     default:
       return (
@@ -997,10 +1357,11 @@ export function c2DeclarationUnreadable(pair) {
         'missing: no comment on the card\'s thread is a claim comment, so the carrier this limb ' +
         'reads does not exist and no line could have been read from it' +
         (d.detail ? `; the nearest thing on the thread is ${JSON.stringify(d.detail)}` : '') +
-        '. Remedy: write the claim comment with a first line beginning `Claim:`, then the ' +
-        `\`Clause-②: yes|no\` line; ${fixed}. A heading-style claim (\`## Claim — …\`) is not a ` +
-        'claim comment to this predicate, however complete the reasoning under it. ' +
-        `${notADecision} ${NEVER_WRITES}`
+        '. Remedy — WHO can act, and HOW: the claiming seat, with one comment it can post today. ' +
+        'Write the claim comment with a first line beginning `Claim:`, then the ' +
+        `\`Clause-②: yes|no\` line; ${fixed}. ${TEMPLATE_POINTER} A heading-style claim ` +
+        '(`## Claim — …`) is not a claim comment to this predicate, however complete the ' +
+        `reasoning under it. ${notADecision} ${NEVER_WRITES}`
       );
   }
 }
@@ -2001,10 +2362,28 @@ export function pairRows(pair, pairs = null) {
  * total, a note does neither. Both read `readsSiblingDeclaration`, so the row
  * a pair gets and the count it lands in are decided once.
  */
+/**
+ * The correction reading, as a printed NOTE (#17366).
+ *
+ * ⭐ It PRINTS rather than going quiet, for the reason the fourth reading does:
+ * a pair that answers 0 because a CORRECTION comment carries its declaration is
+ * answering about a carrier the claim comment does not hold, and a seat reading
+ * only `$?` must be able to find out from the run which comment was read. The
+ * row also states, in as many words, that the claim comment was NOT edited —
+ * because the whole value of the shape is that nothing had to be.
+ */
+export function c2CorrectionNote(pair) {
+  const d = cardDeclaration(pair?.cardComments ?? null);
+  if (d.state !== 'declared' || d.correctionNote === undefined) return null;
+  return `card #${pair?.card} (delivering open PR #${pair?.pr}) — ${d.correctionNote}`;
+}
+
 export function pairNotes(pair, pairs = null) {
   const notes = [];
   const sibling = c2SiblingDeclared(pair, pairs);
   if (sibling) notes.push({ code: 'C2-SIBLING', text: sibling });
+  const correction = c2CorrectionNote(pair);
+  if (correction) notes.push({ code: 'C2-CORRECTION', text: correction });
   const record = c6RecordNote(pair);
   if (record) notes.push({ code: 'C6-RECORD', text: record });
   return notes;
@@ -2686,12 +3065,17 @@ function renderPair(pair, repo, pairs = null) {
     // a second note kind must not put the first one's sentence in its mouth.
     const sibling = notes.some((n) => n.code === 'C2-SIBLING');
     const record = notes.some((n) => n.code === 'C6-RECORD');
+    const corrected = notes.some((n) => n.code === 'C2-CORRECTION');
     console.log(
       `✓ check-clause2-carriers: PR #${pair.pr} / card #${pair.card} — the clause-② declaration is ` +
         (sibling
           ? 'readable in the fixed spelling on a SIBLING card this same PR delivers rather than on ' +
             'this card (the reading above names which, and what it says), and both carriers agree'
-          : 'readable in the fixed spelling and both carriers agree') +
+          : corrected
+            ? 'readable in the fixed spelling on a CORRECTION comment superseding the claim\'s own ' +
+              'line (the reading above names which comment, and says the claim was not edited), and ' +
+              'both carriers agree'
+            : 'readable in the fixed spelling and both carriers agree') +
         (record
           ? ', and a review of record names this head (the note above says which comment to cite; ' +
             'existence, not the verdict)'
@@ -2861,7 +3245,14 @@ export function selfTest() {
   t('a card with no Clause-② line in its claim comment produces a C2 row', typeof missingLine === 'string');
   t('…and says NO READING in as many words', says(missingLine, 'NO READING'));
   t('…and names the DECLARATION LINE as the thing that is missing', says(missingLine, 'DECLARATION LINE is what is missing'));
-  t('…and sends the remedy to the claim comment that is already there', says(missingLine, 'add the line to that claim comment'));
+  t('…and sends the remedy to the claim comment that is already there', says(missingLine, 'That claim comment owes the line'));
+  // #17366: the remedy names WHO can act and HOW. The sentence it replaced
+  // («add the line to that claim comment») named an act a seat holding only the
+  // MCP tool set has no call for, which is the one-way door the card measured.
+  t('⭐ …and the remedy names WHO can act', says(missingLine, 'WHO can act, and HOW: the CLAIMING SEAT'));
+  t('⭐ …and states that an already-posted claim comment is not editable from every seat', says(missingLine, 'no edit-an-issue-comment call'));
+  t('⭐ …and names the one comment that repairs it, first line and all', says(missingLine, 'Clause-②-correction: 5642248126'));
+  t('⛔ …while still forbidding a second `Claim:`', says(missingLine, 'Never a second `Claim:`'));
   const noClaim = c2DeclarationUnreadable(pair({ cardComments: [{ body: 'a triage note, and nothing that begins a line with the claim key', created_at: '2026-08-31T10:00:00Z' }] }));
   t('a thread with no claim comment produces a C2 row of its own', typeof noClaim === 'string');
   t('…and names the CLAIM COMMENT as the thing that is missing, not the line', says(noClaim, 'CLAIM COMMENT is what is missing'));
@@ -3669,6 +4060,168 @@ export function selfTest() {
   t('an argv refusal exits USAGE, never a verdict code', EXIT_USAGE !== EXIT_OK && EXIT_USAGE !== EXIT_INCOMPLETE && EXIT_USAGE !== EXIT_PAIR_ADVERSE && EXIT_USAGE !== EXIT_PREREQUISITE_NOT_MET);
   t('⛔ and NOT dispatch-gates\' usage exit of 2, which is this file\'s UNJUDGED verdict', EXIT_USAGE === 1 && EXIT_INCOMPLETE === 2);
 
+  // -- #17366: the correction comment, the self-solvable exit ---------------
+  //
+  // The card's acceptance list, in order: (1) a seat writing per the template
+  // gets a machine-readable declaration without knowing this regex; (2) the
+  // five prose spellings measured in the filing shift STILL do not read; (3)
+  // the state is self-solvable — the claiming seat repairs an unreadable
+  // declaration with ONE comment, no edit of the original, no second `Claim:`,
+  // nobody outside the repository.
+  battery('#17366: the correction comment — the self-solvable exit, and the three things it is not');
+  const C_SESSION = 'session_01MCLBsUgfykL74aU716rzVK';
+  const C_OTHER_SESSION = 'session_01YKEjmbYNvYWJvWGSWx26zK';
+  const C_CLAIM_ID = 5642248126;
+  // The claim carrier as the board actually writes it: the template's lines, a
+  // comment id, and the `Session:` line the protocol makes mandatory.
+  const CLAIMED = (extra, o = {}) => ({
+    id: o.id ?? C_CLAIM_ID,
+    created_at: o.created_at ?? '2026-09-12T00:41:08Z',
+    body:
+      `Claim: PM loop round 1\n` +
+      (o.session === null ? '' : `Session: \`${o.session ?? C_SESSION}\`\n`) +
+      'Branch: `claude/issue-17366-clause2-correction-shape`\n' +
+      `${extra ?? ''}`,
+  });
+  const CORRECTION = (lines, o = {}) => ({
+    id: o.id ?? 5650000001,
+    created_at: o.created_at ?? '2026-09-12T01:00:00Z',
+    body: lines.join('\n'),
+  });
+  const FIXED_CORRECTION = (value = 'no', o = {}) =>
+    CORRECTION(
+      [
+        `Clause-②-correction: ${o.claimId ?? C_CLAIM_ID}`,
+        `Clause-②: ${value}`,
+        ...(o.session === null ? [] : [`Session: \`${o.session ?? C_SESSION}\``]),
+      ],
+      o,
+    );
+
+  // (1) The template's line, read by the same reader a seat never has to know.
+  const TEMPLATE_LINE = 'Clause-②: yes | no';
+  t('⭐ criterion 1: the template\'s key with `no` substituted reads DECLARED', readClause2Line('Clause-②: no')?.value === 'no');
+  t('⭐ …and with `yes` substituted', readClause2Line('Clause-②: yes')?.value === 'yes');
+  t('…and the template line the seat copies is exactly the fixed key, so the two cannot drift', TEMPLATE_LINE.startsWith('Clause-②:'));
+  // ⚠️ CONTROL, measured and NOT endorsed: the template line copied WITHOUT
+  // choosing reads `yes`, because `readValueToken` takes the first token after
+  // the colon and treats the rest as the seat's argument. That calibration is
+  // #13914's and is untouched here.
+  //
+  // ⭐ FLIP TRIGGER, pre-registered: this is a key-INITIAL DESCRIBING line, which
+  // is exactly the population #17098 is open against. When #17098 lands, this
+  // reading becomes `kind !== 'declared'` and this case flips WITH it — change
+  // the expectation in THAT PR and keep the case. ⛔ Do not delete it, and ⛔ do
+  // not read its green today as an endorsement: it records what the reader does
+  // now, so that the sibling fix has a measured before-state to move.
+  t('⚠️ CONTROL (flips with #17098): the UNFILLED template line reads `yes` today — the token is first, the alternative is trailing prose', readClause2Line(TEMPLATE_LINE)?.value === 'yes');
+  t('⭐ the C2 rows point at the TEMPLATE rather than at a regex', says(missingLine, '〈模板与表〉') && says(noClaim, '〈模板与表〉'));
+  t('…and tell the seat to COPY it rather than compose one', says(missingLine, 'COPY the template'));
+  t('⛔ and the pointer prescribes no VALUE — the declaration is still the judgement', says(missingLine, 'Do not fill the line in'));
+
+  // (2) The negative control: the five spellings measured on the filing shift.
+  // Rows 2-5 of the card's table are one text ("同上") written on four cards, so
+  // the set is pinned as five INSTANCES of two distinct spellings and named as
+  // such rather than padded into five different strings.
+  const MEASURED_PROSE = [
+    '`Clause-②` holds at `no`.',            // #1, PR #17289's body
+    '条款② **`no`**(复用…)',                 // #2, card #17335's Claim:
+    '条款② **`no`**(复用…)',                 // #3, card #17337 — 同上
+    '条款② **`no`**(复用…)',                 // #4, card #16659 — 同上
+    '条款② **`no`**(复用…)',                 // #5, card #16549 — still unrepaired when the card was filed
+  ];
+  t('⭐ criterion 2: none of the five measured spellings reads as a declaration', MEASURED_PROSE.every((line) => readClause2Line(line)?.kind !== 'declared'));
+  t('⭐ …and none of them declares from a CLAIM comment either', MEASURED_PROSE.every((line) => cardDeclaration([CLAIMED(line)]).state !== 'declared'));
+  t('⛔ …nor does the correction mechanism admit one of them: prose in a correction is prose', cardDeclaration([CLAIMED('Domain: x'), CORRECTION([`Clause-②-correction: ${C_CLAIM_ID}`, MEASURED_PROSE[1], `Session: \`${C_SESSION}\``])]).state !== 'declared');
+  t('the #1 spelling is reported as a SPELLING near miss, so the residue is quoted back', readClause2Line(MEASURED_PROSE[0])?.reason === 'spelling');
+  t('⛔ …and never as an inline-key placement miss — there is no key-plus-colon on that line', readClause2Line(MEASURED_PROSE[0])?.reason !== 'inline-key');
+  t('the #2-#5 spelling reaches NO pattern at all — 条款② carries no `Clause` token', readClause2Line(MEASURED_PROSE[1]) === null);
+  t('…so its card reads MISSING with no residue to quote, which is a true reading and not a silence', cardDeclaration([CLAIMED(MEASURED_PROSE[1])]).state === 'missing');
+  t('⛔ the five instances cover exactly the two carriers the card measured, and both stay unread', readClause2Line(MEASURED_PROSE[0])?.kind !== 'declared' && readClause2Line(MEASURED_PROSE[4])?.kind !== 'declared');
+  t('⛔ CONTROL: the accept set did not move — the fixed spelling still reads, in both values', readClause2Line('Clause-②: yes')?.value === 'yes' && readClause2Line('Clause-②: no')?.value === 'no');
+  t('⛔ CONTROL: and the tolerated decoration still reads, no wider and no narrower', readClause2Line('> - **`Clause-②`**: `no`')?.value === 'no');
+
+  // (3) Self-solvability, end to end: the state, the one comment, the exit.
+  const BROKEN_THREAD = [CLAIMED(MEASURED_PROSE[1])];
+  const REPAIRED_THREAD = [CLAIMED(MEASURED_PROSE[1]), FIXED_CORRECTION('no')];
+  const brokenPair = pair({ cardComments: BROKEN_THREAD });
+  const repairedPair = pair({ cardComments: REPAIRED_THREAD });
+  t('⭐ criterion 3, BEFORE: the card reads MISSING — the declaration limb has no reading', cardDeclaration(BROKEN_THREAD).state === 'missing');
+  t('⭐ …and `--pair` earns a C2 finding, which is its exit 4', pairRows(brokenPair).some((r) => r.code === 'C2'));
+  t('⭐ AFTER one correction comment: the limb reads DECLARED', cardDeclaration(REPAIRED_THREAD).state === 'declared');
+  t('⭐ …carrying the seat\'s own value', cardDeclaration(REPAIRED_THREAD).value === 'no');
+  t('⭐ …and `--pair` has no C2 finding left to raise', pairRows(repairedPair).every((r) => r.code !== 'C2'));
+  t('⛔ and the original claim comment is BYTE-IDENTICAL across the two threads — nothing was edited', BROKEN_THREAD[0].body === REPAIRED_THREAD[0].body);
+  t('⛔ the correction is NOT a second `Claim:` — the claim predicate does not match it', CLAIM_COMMENT_MARKER.test(FIXED_CORRECTION().body) === false);
+  t('⛔ …so the governing claim does not move, and the card is not re-claimed', governingClaim(REPAIRED_THREAD)?.createdAt === governingClaim(BROKEN_THREAD)?.createdAt);
+  t('⛔ nor is the correction read as a MISPLACED declaration — it is the designated second carrier', cardDeclaration(REPAIRED_THREAD).state !== 'misplaced');
+  t('the reading PRINTS: a note names the correction rather than answering 0 in silence', typeof c2CorrectionNote(repairedPair) === 'string');
+  t('…and says the claim comment was NOT edited', says(c2CorrectionNote(repairedPair), 'NOT edited'));
+  t('…and names the comment id it corrects, so a reader can find it', says(c2CorrectionNote(repairedPair), String(C_CLAIM_ID)));
+  t('…and states the attribution ceiling rather than claiming a verification', says(c2CorrectionNote(repairedPair), 'DECLARED identity, never a verified one'));
+  t('…and it rides as a NOTE, never as a finding — pairNotes carries it, pairRows does not', pairNotes(repairedPair).some((n) => n.code === 'C2-CORRECTION') && pairRows(repairedPair).every((r) => r.code !== 'C2-CORRECTION'));
+  t('the sweep counts a corrected card as DECLARED — neither owing a line nor owing a comment', declarationLimbTally([repairedPair]).missing === 0 && declarationLimbTally([repairedPair]).absent === 0);
+
+  // A wrong VALUE is the same door: the seat has no edit for that either.
+  t('⭐ a correction supersedes a READABLE claim declaration too — a wrong value is repairable by the same act', cardDeclaration([CLAIMED('Clause-②: yes'), FIXED_CORRECTION('no')]).value === 'no');
+  t('…and the reverse direction reads the same way', cardDeclaration([CLAIMED('Clause-②: no'), FIXED_CORRECTION('yes')]).value === 'yes');
+  t('the NEWEST correction naming the governing claim wins', cardDeclaration([
+    CLAIMED('Clause-②: yes'),
+    FIXED_CORRECTION('no', { id: 1, created_at: '2026-09-12T01:00:00Z' }),
+    FIXED_CORRECTION('yes', { id: 2, created_at: '2026-09-12T02:00:00Z' }),
+  ]).value === 'yes');
+  t('…and an unreadable timestamp falls back to thread order, never to "fresh"', cardDeclaration([
+    CLAIMED('Clause-②: yes'),
+    FIXED_CORRECTION('yes', { id: 1, created_at: 'not a date' }),
+    FIXED_CORRECTION('no', { id: 2, created_at: 'not a date' }),
+  ]).value === 'no');
+
+  // Every refusal names an act the claiming seat can perform — ⛔ no branch of
+  // this mechanism may be a new one-way door.
+  const wrongId = cardDeclaration([CLAIMED(MEASURED_PROSE[1]), FIXED_CORRECTION('no', { claimId: 4242424242 })]);
+  t('⛔ a correction naming a comment that is not the governing claim does NOT apply', wrongId.state === 'missing');
+  t('…and is ignored with a PRINTED reason, never silently', says(wrongId.correctionNote, 'IGNORED'));
+  t('…that names the id to use instead', says(wrongId.correctionNote, String(C_CLAIM_ID)));
+  t('…and the C2 row carries it, so a seat that tried is told why it did not land', says(c2DeclarationUnreadable(pair({ cardComments: [CLAIMED(MEASURED_PROSE[1]), FIXED_CORRECTION('no', { claimId: 4242424242 })] })), 'did NOT take effect'));
+  const otherSeat = cardDeclaration([CLAIMED(MEASURED_PROSE[1]), FIXED_CORRECTION('no', { session: C_OTHER_SESSION })]);
+  t('⛔ a correction from a DIFFERENT session does not apply — no seat declares on another\'s behalf', otherSeat.state === 'missing');
+  t('…and the reason names both sessions, so the remedy is executable', says(otherSeat.correctionNote, C_OTHER_SESSION) && says(otherSeat.correctionNote, C_SESSION));
+  const noSession = cardDeclaration([CLAIMED(MEASURED_PROSE[1]), FIXED_CORRECTION('no', { session: null })]);
+  t('⛔ a correction with no `Session:` line does not apply — it does not say whose act it is', noSession.state === 'missing');
+  t('…and the reason names the session to write', says(noSession.correctionNote, C_SESSION));
+  const proseCorrection = cardDeclaration([CLAIMED(MEASURED_PROSE[1]), CORRECTION([`Clause-②-correction: ${C_CLAIM_ID}`, MEASURED_PROSE[0], `Session: \`${C_SESSION}\``])]);
+  t('⛔ a correction whose declaration is PROSE does not apply — the same reader judges both carriers', proseCorrection.state === 'missing');
+  t('…and says so by quoting the fixed spelling rather than by going quiet', says(proseCorrection.correctionNote, 'Clause-②: yes'));
+  // ⛔ The one branch that must NOT refuse: a claim with no session leaves
+  // nothing to compare, and refusing there would rebuild the door one room over.
+  const unverifiable = cardDeclaration([CLAIMED(MEASURED_PROSE[1], { session: null }), FIXED_CORRECTION('no')]);
+  t('⭐ a claim carrying no `Session:` line still gets its correction applied — ⛔ no new one-way door', unverifiable.state === 'declared' && unverifiable.value === 'no');
+  t('…and the note says attribution could NOT be verified, and why', says(unverifiable.correctionNote, 'ATTRIBUTION NOT VERIFIED'));
+
+  // The shape itself: what is a correction, and what is merely near one.
+  t('the correction key tolerates the same decoration the declaration key does', cardDeclaration([CLAIMED(MEASURED_PROSE[1]), CORRECTION([`> - **\`Clause-②-correction\`**: \`${C_CLAIM_ID}\``, 'Clause-②: no', `Session: \`${C_SESSION}\``])]).state === 'declared');
+  t('⛔ a MID-LINE correction key is not a correction — the key is read at line start', readClause2Correction({ id: 9, body: `Domain: x · Clause-②-correction: ${C_CLAIM_ID}\nClause-②: no` }) === null);
+  t('⛔ a HEADING form is not a correction either', readClause2Correction({ id: 9, body: `## Clause-②-correction: ${C_CLAIM_ID}\nClause-②: no` }) === null);
+  t('⛔ nor is the key buried below the first line — a correction is a DEDICATED comment', readClause2Correction({ id: 9, body: `Round report.\nClause-②-correction: ${C_CLAIM_ID}\nClause-②: no` }) === null);
+  t('…but a leading BLANK line does not disqualify one', readClause2Correction({ id: 9, body: `\nClause-②-correction: ${C_CLAIM_ID}\nClause-②: no` })?.claimId === String(C_CLAIM_ID));
+  t('⛔ a non-numeric id is not the shape — the id is digits, so no angle-bracketed token can be eaten by the sanitizer', readClause2Correction({ id: 9, body: 'Clause-②-correction: the claim above\nClause-②: no' }) === null);
+  t('⛔ the correction key never reads as the DECLARATION key — `Clause-②-correction:` is not `Clause-②:`', readClause2Line(`Clause-②-correction: ${C_CLAIM_ID}`)?.kind !== 'declared');
+  t('⛔ …and it is not read as an inline-key placement miss either', readClause2Line(`Clause-②-correction: ${C_CLAIM_ID}`)?.reason !== 'inline-key');
+  t('a thread with NO correction reads exactly as it always did', cardDeclaration([CLAIMED('Clause-②: no')]).state === 'declared' && cardDeclaration([CLAIMED('Clause-②: no')]).correctionNote === undefined);
+  t('⛔ CONTROL: the MISPLACED reading survives — a bare declaration in a NON-correction comment is still misplaced', cardDeclaration([CLAIMED('Domain: x'), { id: 7, body: 'Clause-②: yes', created_at: '2026-09-12T01:00:00Z' }]).state === 'misplaced');
+
+  // The `Session:` reader, which both sides of the attribution comparison use.
+  t('the session token is read through the file\'s one SESSION_TOKEN, backticks and all', readSessionId('Session: `session_abc123`') === 'session_abc123');
+  t('…with the seat\'s prose allowed to follow it, the Clause-② calibration', readSessionId('Session: `session_abc123` (GitHub `os-sales`, skills seat), claimed at 00:41Z') === 'session_abc123');
+  t('⛔ `Claude-Session:` is a different key and is not matched', readSessionId('Claude-Session: https://claude.ai/code/session_abc123') === null);
+  t('⛔ a line with no readable token reads null, not a guess', readSessionId('Session: the skills seat') === null);
+  t('⛔ and a body with no session line at all reads null', readSessionId('Claim: round 1\nBranch: `claude/issue-1-x`') === null);
+
+  // The exit register is untouched: the correction is a new INPUT to C2, never
+  // a new verdict family.
+  t('⛔ no new exit code was minted for the correction reading', new Set([EXIT_OK, EXIT_USAGE, EXIT_INCOMPLETE, EXIT_PREREQUISITE_NOT_MET, EXIT_PAIR_ADVERSE]).size === 5);
+  t('…and a repaired pair answers with the SAME code a never-broken one does', pairRows(repairedPair).length === pairRows(pair({ cardComments: [CLAIMED('Clause-②: no')] })).length);
+
   // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -3726,6 +4279,8 @@ export function selfTest() {
       + 'with the controls that keep exit 4 reachable, the 2026-08-31 seven-pair replay, the four gate-binding states ' +
       'replayed from the 2026-09-01 clear, the verdict-authorship pair and its legacy silence, ' +
       'the review of record on the completed state with the two shapes that are not one, ' +
+      'the correction comment that supersedes a claim declaration with the five measured prose ' +
+      'spellings held out as negatives, ' +
       'the three read paths with their offline reader, the argv contract with its usage and its '
       + 'refusal, the board provenance line, and the exit register).',
   );
