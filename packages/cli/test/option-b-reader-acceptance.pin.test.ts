@@ -285,17 +285,23 @@ describe('#15004 — option-B acceptance pin: every subsystem must see its colle
     // `expected 36 to be greater than or equal to 37`, so the floor is the
     // exact count and not slack.
     //
+    // ⚠️ RAISED AGAIN by #17528, which added two rows — `os lint`'s
+    // hand-written rubric (`lintConfig`) and the metadata-quality scorer that
+    // reaches it (`scoreMetadata`). Same discipline: 38 is MEASURED at the
+    // boundary in the same session — written `toBeGreaterThanOrEqual(39)` the
+    // run reports `expected 38 to be greater than or equal to 39`.
+    //
     // `>=` rather than `toBe` on purpose, and it is the same shrink-only
     // direction the ledger uses: a row ADDED to the probe is welcome and stays
     // green, a row that stops being measured is red. Raise the floor when the
     // probe grows; ⛔ never lower it to make a red run green.
     expect(
       additive.rows.length,
-      `The probe measured ${additive.rows.length} rows, fewer than the 36 it measured when ` +
+      `The probe measured ${additive.rows.length} rows, fewer than the 38 it measured when ` +
         `this floor was set. A row that stops being measured stops being able to fail, which ` +
         `is the one direction this pin cannot detect anywhere else — fix the probe rather ` +
         `than the floor.`,
-    ).toBeGreaterThanOrEqual(36);
+    ).toBeGreaterThanOrEqual(38);
   });
 
   // ── The pin ──────────────────────────────────────────────────────────────
@@ -371,5 +377,22 @@ describe('#15004 — option-B acceptance pin: every subsystem must see its colle
     const site =
       'B2/B3 · cli metadata summary (collectMetadataStats — validate, build, info) · every counted collection';
     expect(optionB.rows.map((r) => r.id), `#17527 site no longer measured: ${site}`).toContain(site);
+  });
+
+  it('#17528 — `os lint`\'s hand-written rubric and the scorer that reaches it are each represented', () => {
+    // Named for the same reason the blocks above are: the row-count floor is a
+    // COUNT, so it cannot tell "this row left" from "this row left and another
+    // arrived". Two rows, because they are two DOORS into one reader — the
+    // `os lint` command calls `lintConfig` directly, `os lint --score` and the
+    // metadata eval reach it through `lint/score.js` — and the scorer is the
+    // sharper one: when it read an empty stack it published `100/100 (A)` for a
+    // project it had judged nothing about.
+    const ids = optionB.rows.map((r) => r.id);
+    for (const site of [
+      'B2/B3 · cli lint hand-written rubric (lintConfig — naming, labels, structure) · objects',
+      'B2/B3 · cli metadata-quality rubric (scoreMetadata — os lint --score, metadata eval) · objects',
+    ]) {
+      expect(ids, `#17528 site no longer measured: ${site}`).toContain(site);
+    }
   });
 });
