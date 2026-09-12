@@ -71,6 +71,13 @@ export const InboxMessage = ObjectSchema.create({
             description: 'FK → sys_notification_delivery (outbox row); null until P1',
         }),
 
+        actor_id: Field.lookup('sys_user', {
+            label: 'Actor',
+            required: false,
+            description:
+                'User who caused the event (mentioner, assigner) — same semantics as sys_notification.actor_id. Lets a client suppress its own receipts with a purely local comparison. Null on a digest row by construction: a collapsed group has no single actor.',
+        }),
+
         topic: Field.text({
             label: 'Topic',
             searchable: true,

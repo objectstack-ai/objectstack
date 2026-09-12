@@ -296,6 +296,10 @@ export class NotificationDispatcher {
             severity: 'info',
             recipients: [recipient],
             channels: [channelName],
+            // No `actorId`: a collapsed group has no single actor, so a digest
+            // materializes with `actor_id` null by construction. ⛔ Do not pick
+            // the first row's actor — "you caused this" would then be asserted
+            // of a message that also carries other people's events.
             payload: { digest: true, count: digest.count, items: digest.items },
         };
 
@@ -339,6 +343,9 @@ export class NotificationDispatcher {
             recipients: [row.recipientId],
             channels: [row.channel],
             actionUrl: typeof p.actionUrl === 'string' ? p.actionUrl : undefined,
+            // Read the actor back off the snapshot `enqueueDeliveries` took —
+            // no read of `sys_notification` here, by design.
+            actorId: typeof p.actorId === 'string' ? p.actorId : undefined,
             payload: p,
         };
 

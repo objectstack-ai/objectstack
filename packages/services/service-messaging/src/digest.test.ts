@@ -137,3 +137,66 @@ describe('NotificationDispatcher — digest collapse (P3b-2)', () => {
         expect(pending.every((r) => (r.nextAttemptAt ?? 0) > now)).toBe(true);
     });
 });
+
+/**
+ * #16974 — the dispatcher's leg of the actor's journey, with its own control.
+ *
+ * `processRow` reads the actor back off the delivery row's snapshot;
+ * `processDigestGroup` deliberately does NOT, because a collapsed group has no
+ * single actor and "you caused this" must not be asserted of a message that
+ * also carries other people's events. Both halves are pinned in one test on
+ * purpose: an absence is only evidence when the same tick shows the presence.
+ */
+describe('NotificationDispatcher — actor read-back (#16974)', () => {
+    it('restores the actor on an immediate row and leaves a digest group without one', async () => {
+        let now = Date.UTC(2026, 0, 1, 9, 0);
+        const windowAt = Date.UTC(2026, 0, 2, 0, 0);
+        const outbox = new MemoryNotificationOutbox(1, () => now);
+        const key = 'u1|inbox|2026-01-01';
+        for (let i = 0; i < 2; i++) {
+            await outbox.enqueue({
+                notificationId: `n${i}`, recipientId: 'u1', channel: 'inbox',
+                payload: { title: `Item ${i}`, actorId: `user_${i}` },
+                digestKey: key, notBefore: windowAt,
+            });
+        }
+        await outbox.enqueue({
+            notificationId: 'imm', recipientId: 'u1', channel: 'inbox',
+            payload: { title: 'Immediate', actorId: 'user_9' },
+        });
+
+        const rec = recordingChannel('inbox');
+        const d = dispatcher(outbox, [rec.channel], () => now);
+
+        // CONTROL — the immediate row's actor survives the outbox round trip.
+        await d.tick();
+        expect(rec.sent.map((n) => n.title)).toEqual(['Immediate']);
+        expect(rec.sent[0].actorId).toBe('user_9');
+
+        // SUBJECT — the collapsed group carries no actor, though every row in
+        // it has one. Null by construction, not by a missing snapshot.
+        now = windowAt;
+        await d.tick();
+        const digest = rec.sent[1];
+        expect(digest.title).toBe('You have 2 notifications');
+        expect(digest.actorId).toBeUndefined();
+    });
+
+    it('ignores a non-string actor on the snapshot rather than passing it through', async () => {
+        const now = () => 1000;
+        const outbox = new MemoryNotificationOutbox(1, now);
+        await outbox.enqueue({
+            notificationId: 'n', recipientId: 'u1', channel: 'inbox',
+            // A payload is a stored JSON column: a legacy or hand-edited row can
+            // hold anything. The seam is typed `string | undefined`, so a
+            // non-string must not reach it (and `actor_id` then materializes null).
+            payload: { title: 'T', actorId: 42 as unknown as string },
+        });
+
+        const rec = recordingChannel('inbox');
+        await dispatcher(outbox, [rec.channel], now).tick();
+
+        expect(rec.sent).toHaveLength(1);
+        expect(rec.sent[0].actorId).toBeUndefined();
+    });
+});
