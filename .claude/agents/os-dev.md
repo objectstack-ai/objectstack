@@ -169,9 +169,9 @@ model: opus
 - `set -o pipefail` 与 `${PIPESTATUS[0]}` 仅当下游读到 EOF 才安全。
 - `| head -N` 读满即关读端,生产者吃 SIGPIPE 以 0 退出:是管道改了生产者的退出码。
 - 此陷阱不限于门禁:任何 `cmd | head` 之后读退出码都中招(`git grep`、`node` 皆然)。
-- 引用门禁结果时点名它自己印的判定行,永不引裸 `$?`:判定行由门禁写,`$?` 由你的管道写。
 - 陷阱在 shell 用法里,不可机械化;⛔ 别等机械强制。
 - 两类跑了却没测到,都读作 NOT MEASURED,不读作绿也不读作红。
+- 证据已销毁(评论、卡或 PR 答 404)的复核项记 NOT MEASURED 并写因,⛔ 不记通过或「无旗」。
 - ① 包的 `typecheck` 可能 `exclude` 掉 `**/*.test.ts`;声称它覆盖你的测试前,用 `--listFiles` 数。
 - ② `MODULE_NOT_FOUND` 一类的 exit 1 不是红门禁:多半是脚本名或路径敲错,根本没进到门禁体。
 - 它与 `exit 99` / queue-timeout / `PREREQUISITE NOT MET` 同类:用真正的 `pnpm check:*` 命令重跑。
