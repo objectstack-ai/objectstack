@@ -4038,6 +4038,33 @@ export class ObjectStackClient {
        * router skips SERVER_ONLY endpoints, so over HTTP it answers 404 with a
        * zero-byte body.
        *
+       * ## ⚠️ A plain `name` IS honoured somewhere — not here (#17210)
+       *
+       * There is exactly one door that reads a body member spelled `name`, and
+       * this method does not build it:
+       * `POST /api/v1/auth/sys-oauth-application/register`, the ObjectStack
+       * mount behind the Console's *Setup → OAuth Applications* create form.
+       * The same #15447 round drove both doors on one real socket: that mount
+       * answered **200** to a body spelled `name`, mapped it onto
+       * `client_name`, and the `sys_oauth_application` row's `name` column was
+       * set; this method's route, `/oauth2/create-client`, answered **201**
+       * with the value **stripped** — absent from the response, absent from
+       * `applications.get`, absent from `applications.list`, and `null` in
+       * that same column.
+       *
+       * ⛔ That mount is **not** an SDK door, and it is not withheld by
+       * oversight: it is `disposition: 'server-only'` in the auth route ledger
+       * (`packages/plugins/plugin-auth/src/auth-route-ledger.ts`), a
+       * session-required self-service wrapper written to serve the Console's
+       * form — and #17210 ruled that it **stays** `server-only`, so no SDK
+       * method builds its URL. To name a client from here, post `client_name`.
+       *
+       * The wrapper's other Console-shaped convenience is the same asymmetry's
+       * second half: it splits that form's newline-separated redirect-URL
+       * **textarea** into the array the vendor schema requires. ⛔ This route
+       * performs no such split — `redirect_uris` must arrive **pre-split**,
+       * one entry per URL, which is what an SDK caller holds anyway.
+       *
        * Pinned by `oauth-applications-register-request-members.test.ts`.
        */
       register: async (req: {

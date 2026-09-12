@@ -1787,8 +1787,37 @@ function closingKeywordRe() {
   return /\b(clos(?:e|es|ed)|fix(?:es|ed)?|resolv(?:e|es|ed))\b[ \t]*:?[ \t]*#(\d+)\b/gi;
 }
 
+/**
+ * `Part of #N` — and every spelling of it this repository's dispatch orders
+ * forbid, which is not the same set as the one a space-only pattern matched.
+ *
+ * MEASURED (2026-09-11, the spec seat, on one commit message fed to the gate
+ * that reads this): `Part of #17184` exited 1 and `Part-of: #17184` exited 0.
+ * The hyphen and the colon are the two spellings every `os-dev` dispatch order
+ * lists as forbidden, so a dev who greps for `Part-of` before pushing, gets 0,
+ * and trusts the gate to be the net underneath is reading a net with no thread
+ * in that square. The instruction surface and the enforcement surface were out
+ * of step at exactly the step that tells the dev to verify it themselves.
+ *
+ * The separator is therefore the one `closingKeywordRe` already ships — an
+ * optional colon between the word and the reference — and the word itself
+ * accepts a hyphen where it accepts a space. `Part-of:` is also the GIT TRAILER
+ * spelling (`Token: value`), which is the shape a commit message carries this
+ * relation in at all, so it is the spelling most likely to be typed.
+ *
+ * ⚠️ The widening is a STRICT SUPERSET of what this matched before — the
+ * whitespace run stays optional-colon-tolerant rather than being replaced by
+ * `[ \t]`, so no body or message that matched yesterday stops matching today.
+ * The direction matters: a narrowing here silently empties a `partOf` set and
+ * drops a row through to a fallback channel (see `partOfDeclarationRe`'s
+ * measured corpus note), which is a finding lost rather than a finding gained.
+ *
+ * `Part` alone, `Parts of` and `part-of` in prose are deliberately NOT widened
+ * to: the protocol has these spellings, and widening the reader further is how
+ * a dialect gets a home (`refsRe` makes the same call for `Ref`/`References`).
+ */
 function partOfRe() {
-  return /\bPart of\s+#(\d+)\b/gi;
+  return /\bPart[ \t-]of\b[ \t]*:?\s*#(\d+)\b/gi;
 }
 
 /**
@@ -1831,7 +1860,7 @@ function partOfRe() {
  * position is reported instead.
  */
 function partOfDeclarationRe() {
-  return /^[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?[*_]{0,3}Part of\s+#(\d+)\b/gim;
+  return /^[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?[*_]{0,3}Part[ \t-]of\b[ \t]*:?\s*#(\d+)\b/gim;
 }
 
 /**
@@ -1948,7 +1977,10 @@ export function partOfDeclarationTargets(body, { markdown = true } = {}) {
  * with nothing on the board contradicting anything — H49's row.
  *
  * Same strictness as `partOfRe`, on purpose: the word is bound (`\\b`), the
- * `#` follows on whitespace with no colon, the read is code-stripped for the
+ * `#` follows on whitespace or on the optional colon that every other relation
+ * in this file accepts — `Refs: #N` is the git-trailer spelling of this exact
+ * declaration and was as invisible here as `Part-of:` was there — the read is
+ * code-stripped for the
  * BODY surface (a body QUOTING `Refs #N` in backticks declares nothing), and a
  * fresh regex per call (the `lastIndex` note at `closingKeywordRe`). `Ref`,
  * `References` and `See #N` are deliberately NOT this relation: the protocol
@@ -1961,7 +1993,7 @@ export function partOfDeclarationTargets(body, { markdown = true } = {}) {
  * inventing an item.
  */
 function refsRe() {
-  return /\bRefs\s+#(\d+)\b(?:[ \t]*\(([^()\n]{1,40})\))?/gi;
+  return /\bRefs\b[ \t]*:?\s*#(\d+)\b(?:[ \t]*\(([^()\n]{1,40})\))?/gi;
 }
 
 /** `#N` -> the `(item k)` annotation beside it, or `null` when bare (first occurrence wins). */
@@ -19911,6 +19943,20 @@ async function selfTest() {
   t('extractor: `Part of` in a fence is invisible on the body surface', partOfTargets('```\nPart of #1\n```').size, 0);
   t('extractor: …and visible on the commit surface', partOfTargets('```\nPart of #1\n```', { markdown: false }).size, 1);
   t('extractor: the default is byte-identical to the pre-option reading', closingKeywordTargets('Fixes #1').get('1'), 'Fixes');
+  // The `Part of` spellings every dispatch order forbids, each pinned on the
+  // COMMIT surface — the one a pre-push refusal reads. The hyphen and the colon
+  // were both invisible here while every order listed them, so a dev greppping
+  // for them got 0 and trusted a net with no thread in that square (measured by
+  // the spec seat on one commit message: the space spelling exited 1, the
+  // hyphen-colon spelling exited 0).
+  t('extractor: `Part of #N` — the spelling that always matched', partOfTargets('Part of #17184', { markdown: false }).has('17184'), true);
+  t('extractor: `Part-of #N` — the hyphen spelling', partOfTargets('Part-of #17184', { markdown: false }).has('17184'), true);
+  t('extractor: `Part of: #N` — the colon spelling', partOfTargets('Part of: #17184', { markdown: false }).has('17184'), true);
+  t('extractor: `Part-of: #N` — the git-trailer spelling, the measured miss', partOfTargets('Part-of: #17184', { markdown: false }).has('17184'), true);
+  t('extractor: the widening is a superset — a line break still reaches the reference', partOfTargets('Part of\n#17184', { markdown: false }).has('17184'), true);
+  t('extractor: ⛔ `Parts of #N` is not this relation', partOfTargets('Parts of #17184', { markdown: false }).size, 0);
+  t('extractor: ⛔ nor a `part` that only ends the word', partOfTargets('Counterpart of #17184', { markdown: false }).size, 0);
+  t('extractor: the declaration subset reads every spelling the relation does', [...partOfDeclarationTargets('Part-of: #17184', { markdown: false })].join(','), '17184');
 
   // The REMEDY TEXT. The realistic regression is someone copying H7's tail
   // across, so H7's own sentence is asserted to CARRY the clause this one must
@@ -25162,7 +25208,16 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   t('refs extractor: case-insensitive, exactly as `partOfRe`', refsTargets('refs #16003').has('16003'), true);
   t('refs extractor: ⛔ `Ref #N` is not the protocol\'s spelling', refsTargets('Ref #16003').size, 0);
   t('refs extractor: ⛔ nor `References #N`', refsTargets('References #16003').size, 0);
-  t('refs extractor: ⛔ nor a colon, exactly as `Part of` takes none', refsTargets('Refs: #16003').size, 0);
+  // ⚠️ This pin USED to assert the opposite — that a colon was not this
+  // relation's spelling — and it was pinning the gap rather than a decision:
+  // `Refs: #N` is the git-trailer spelling of the same declaration, and the
+  // keyword extractor beside it has accepted `Fixes: #N` since the colon was
+  // measured against GitHub's own parser. Replaced rather than reworded: the
+  // old case passed for as long as the branch it named existed, which is the
+  // shape a fixture takes when what it really pins is a missing thread.
+  t('refs extractor: a colon IS the spelling, as at the keyword extractor', refsTargets('Refs: #16003').has('16003'), true);
+  t('refs extractor: …and the item annotation still reads through the colon', refsTargets('Refs: #16003 (item 2)').get('16003'), 'item 2');
+  t('refs extractor: the word is still bound — `Prefs: #N` is not a reference', refsTargets('Prefs: #16003').size, 0);
   t('refs extractor: the word is bound — `Prefs #N` is not a reference', refsTargets('Prefs #16003').size, 0);
   t('refs extractor: several cards in one body are each read', [...refsTargets('Refs #1 (item ①) and Refs #2').keys()].join(','), '1,2');
   t('refs extractor: a missing body is empty, never a crash', refsTargets(undefined).size, 0);
