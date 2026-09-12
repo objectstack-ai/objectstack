@@ -16635,18 +16635,44 @@ async function listRecentlyMergedPullRequests(stats = {}, nowMs = Date.now()) {
  * needs a different shape (a residue census like H39's, which counts rather than
  * lists) and is not this window's job.
  *
- * ⚠️ Cost note: 46% of the rows this stream returns are PULL REQUESTS, filtered
- * out after paging. The horizon is therefore reached in roughly twice the pages
- * a card-only stream would need. ⚖️ The `~6 pages for 3 days` this note used to
- * quote was the pinned divisor's arithmetic and it never described this board:
- * measured 2026-09-06 the horizon sits at ~13 pages, because the LEADING rows
- * run at ~414 updates/day against the 188.3 pinned at the time (the derivation
- * is in `CLOSED_ISSUE_WINDOW_PAGE_CEILING`, and it is why the old 12 bound).
- * Constants here are deliberately NOT self-updating (H8's rule): they are
- * CHECKED against what a sweep observes, never overwritten by it — so that
- * disagreement was closed the one way it can be, by a HAND re-measure and
- * re-pin (#16419: the divisor below now reads 415.1), never by a sweep quietly
- * editing it.
+ * ⚠️ Cost note — and the POPULATION every number in it is counted on, which
+ * is the half this note had wrong (#17626). The `46% of the rows are PULL
+ * REQUESTS` it opened with is a CONTAINER reading: the byte-identical
+ * `GET /repos/{repo}/issues?state=closed&sort=updated` page comes back 49.6%
+ * pull requests to a proxied agent container (read 2026-09-11T04:22:36Z, 12
+ * pages / 1,200 rows) and CARD-ONLY to the scheduled patrol runner, so the
+ * "roughly twice the pages" it derived is a container's bill and never this
+ * sweep's. The runner side is measured through the sweep's OWN numbers rather
+ * than from its response, which no seat can read: the 2026-09-11T01:55:32Z run
+ * (34552285557, `2f8ad091`) reports 5 pages, 428 in-window closures and reach
+ * 2026-09-07, and 428 in-window closures cannot come out of 5 PR-inclusive
+ * pages at all — only ~250 of those 500 rows would be cards. The 2026-09-09
+ * run is the same shape at 6 pages. ⛔ WHY the two streams differ is NOT
+ * claimed here: the runner's raw response was never read. The population
+ * difference itself is measured.
+ *
+ * ⭐ RE-MEASURE RECIPE, and it is the operative half of this note: a container
+ * read is NOT the patrol's stream. Filter pull requests OUT of every page
+ * BEFORE counting pages or rating rows, and quote the card-only slice. On the
+ * 2026-09-11T04:22:36Z read that slice gives 5 pages / 426 rows / ~139.4 per
+ * day against 9 pages / 426 / ~256.2 per day on the whole stream — the slice
+ * reproduces the runner's own 5 pages, the raw stream does not. ⛔ Never pin,
+ * and never cost a horizon, from the raw stream.
+ *
+ * ⚖️ The `~6 pages for 3 days` this note quoted before that was the pinned
+ * divisor's arithmetic and it never described this board: measured 2026-09-06
+ * FROM A CONTAINER the horizon sat at ~13 pages, because the leading rows of
+ * that PR-inclusive read ran at ~414 updates/day against the 188.3 pinned at
+ * the time (the derivation is in `CLOSED_ISSUE_WINDOW_PAGE_CEILING`, and it is
+ * why the old 12 bound). ⛔ That ~13 and today's 5 are not a population
+ * comparison: the two readings are five days AND one population apart, and the
+ * decomposition is in `MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY`. Constants here
+ * are deliberately NOT self-updating (H8's rule): they are CHECKED against what
+ * a sweep observes, never overwritten by it — so that disagreement was closed
+ * the one way it can be, by a HAND re-measure and re-pin, never by a sweep
+ * quietly editing it. #16419 re-pinned 415.1 on 2026-09-06 from the container
+ * stream; #17254 re-pinned on 2026-09-11 from the card-only slice, and the
+ * divisor below now reads 139.4.
  */
 export const CLOSED_ISSUE_WINDOW_DAYS = 3;
 
@@ -16682,7 +16708,20 @@ export const CLOSED_ISSUE_WINDOW_DAYS = 3;
  * 4,000 rows reached 12.8 days on the read above (~312/day averaged over that
  * depth), against a 3-day horizon: ~4.3x headroom, and headroom measured on
  * the whole depth the cap can actually be spent on rather than on a pinned
- * rate. 40 REST calls is also the budget this sweep gets for the pass, which
+ * rate.
+ *
+ * ⚠️ POPULATION, and it is why ~4.3x is a floor rather than the reading: the
+ * read above was taken from a proxied agent container, whose pages carry 49.6%
+ * pull requests, while the patrol runner pages the same URL CARD-ONLY (the
+ * measurement, the recipe and the boundary are in the ⚠️ Cost note under
+ * `CLOSED_ISSUE_WINDOW_DAYS`). 40 pages return 4,000 rows either way, but only
+ * ~2,000 of the rows above were cards, so on the runner the same ceiling
+ * reaches ABOUT TWICE as far back — ~25 days rather than 12.8, ~8x headroom
+ * against the 3-day horizon rather than ~4.3x. ⛔ A note, not a change: the
+ * direction is more headroom and not less, 40 is unchanged, and re-deriving it
+ * would need a card-only read at depth that nobody has taken.
+ *
+ * 40 REST calls is also the budget this sweep gets for the pass, which
  * is the OTHER thing a quota backstop is: ⛔ not a number to raise again the
  * next time it binds. A pass that binds it is reporting that the board's
  * closed-issue activity has grown past what one sweep can page — the remedy
@@ -16922,14 +16961,24 @@ async function listRecentlyClosedIssues(
   let reachedMs = null;
   // Every row this pass READ, projected to the one stamp the observed update
   // rate is counted over (#16393). ⛔ Deliberately the rows READ and not the
-  // rows ADMITTED: the pin this rate is checked against was measured over the
-  // RAW stream (400 rows / 0.964 days), while `out` holds only the in-window
-  // closures — a strictly smaller population over a strictly shorter span. Rate
-  // them against each other and the difference between two quantities reads as
-  // drift in one of them, which is the #4690 inversion with the numbers the
-  // right way up. Projected rather than retained whole because one field is all
-  // the instrument reads, and these pages are the largest thing this sweep
-  // holds.
+  // rows ADMITTED: the pin this rate is checked against is measured over the
+  // whole stream this pager consumes (500 rows / 3.586 days, read 2026-09-11),
+  // while `out` holds only the in-window closures — a strictly smaller
+  // population over a strictly shorter span. Rate them against each other and
+  // the difference between two quantities reads as drift in one of them, which
+  // is the #4690 inversion with the numbers the right way up.
+  // ⚠️ POPULATION, and it is why this says READ rather than "every row the
+  // endpoint returns": on the patrol runner that stream is CARD-ONLY, so these
+  // rows are cards and the rate is counted on the same population the pin was.
+  // The byte-identical request from a proxied agent container comes back 49.6%
+  // pull requests and `rateRows` would count those too — a rate on one
+  // population checked against a pin on another, which is #17626. ⛔ So a hand
+  // re-measure filters pull requests out BEFORE counting; the recipe is in the
+  // ⚠️ Cost note under `CLOSED_ISSUE_WINDOW_DAYS`. The earlier reading here,
+  // `RAW stream (400 rows / 0.964 days)`, described the 188.3 pin and not the
+  // 139.4 `MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY` now carries.
+  // Projected rather than retained whole because one field is all the
+  // instrument reads, and these pages are the largest thing this sweep holds.
   const rateRows = [];
   let page = 1;
   for (; page <= CLOSED_ISSUE_WINDOW_PAGE_CEILING; page++) {
