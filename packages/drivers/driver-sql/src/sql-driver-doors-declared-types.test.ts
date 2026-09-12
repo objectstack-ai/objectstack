@@ -117,6 +117,14 @@ type Resolved<F> = F extends (...args: never[]) => PromiseLike<infer R> ? R : ne
  *
  * That is the card's own lesson turning up inside its own instrument: an
  * instrument's silence is only evidence if the instrument could have spoken.
+ * The LANDED doors carried it too, and it was measured rather than assumed:
+ * with `aggregate()` put back to its own historical `Promise<any[]>`, this file
+ * red ONCE (the `Equals` leg) and `IsAny` stayed green — so the family's
+ * "both halves per door, a regression reds the file twice" was one half for
+ * that door. Every per-door leg in this file is therefore on `ContainsAny`,
+ * closing the class with one detector rather than door by door. `ContainsAny`
+ * is a strict superset of `IsAny` here — it asks `IsAny` first — so the doors
+ * whose regression shape IS a bare `any` lose nothing.
  * `ContainsAny` looks one and two levels in — the ROW of an array-shaped door
  * and the CELL of a record row — so `any[]`, `Record<string, any>` and
  * `Record<string, any>[]` all answer `true` while the contract's own
@@ -177,17 +185,17 @@ const contractTemporalFilterValue: Equals<ContractTemporalFilterValue, unknown> 
 //    `unknown` needs the `IsAny` leg most of all: `Equals<any, unknown>` is
 //    already `false`, but a door that regressed to `any` must be named as `any`
 //    rather than merely "not `unknown`".
-const sqlFindOneIsAny: IsAny<SqlFindOne> = false;
+const sqlFindOneHasAny: ContainsAny<SqlFindOne> = false;
 const sqlFindOneIsContract: Equals<SqlFindOne, Record<string, unknown> | null> = true;
-const sqlCreateIsAny: IsAny<SqlCreate> = false;
+const sqlCreateHasAny: ContainsAny<SqlCreate> = false;
 const sqlCreateIsContract: Equals<SqlCreate, Record<string, unknown>> = true;
-const sqlBulkCreateIsAny: IsAny<SqlBulkCreate> = false;
+const sqlBulkCreateHasAny: ContainsAny<SqlBulkCreate> = false;
 const sqlBulkCreateIsContract: Equals<SqlBulkCreate, Record<string, unknown>[]> = true;
-const sqlExecuteIsAny: IsAny<SqlExecute> = false;
+const sqlExecuteHasAny: ContainsAny<SqlExecute> = false;
 const sqlExecuteIsContract: Equals<SqlExecute, unknown> = true;
-const sqlExplainIsAny: IsAny<SqlExplain> = false;
+const sqlExplainHasAny: ContainsAny<SqlExplain> = false;
 const sqlExplainIsContract: Equals<SqlExplain, unknown> = true;
-const sqlAggregateIsAny: IsAny<SqlAggregate> = false;
+const sqlAggregateHasAny: ContainsAny<SqlAggregate> = false;
 const sqlAggregateIsContract: Equals<SqlAggregate, Record<string, unknown>[]> = true;
 const sqlFindHasAny: ContainsAny<SqlFind> = false;
 const sqlFindIsContract: Equals<SqlFind, Record<string, unknown>[]> = true;
@@ -236,7 +244,7 @@ describe('SqlDriver declared return types on the five remaining IDataDriver door
   });
 
   it('pins the driver half of all five doors: none is `any`, each is the contract type', () => {
-    expect([sqlFindOneIsAny, sqlCreateIsAny, sqlBulkCreateIsAny, sqlExecuteIsAny, sqlExplainIsAny]).toEqual([
+    expect([sqlFindOneHasAny, sqlCreateHasAny, sqlBulkCreateHasAny, sqlExecuteHasAny, sqlExplainHasAny]).toEqual([
       false,
       false,
       false,
@@ -276,12 +284,12 @@ describe('SqlDriver declared return types on the five remaining IDataDriver door
   });
 
   // [#17277] The sixth door of the same family. Both halves, same two legs:
-  // put the annotation back to `Promise<any>` and `sqlAggregateIsAny` flips to
+  // put the annotation back to `Promise<any>` and `sqlAggregateHasAny` flips to
   // `true` while `sqlAggregateIsContract` flips to `false`, reding this file
   // twice at `tsc` time.
   it('pins both halves of the sixth door, aggregate(): declared on the contract, published by the class', () => {
     expect(contractAggregate).toBe(true);
-    expect(sqlAggregateIsAny).toBe(false);
+    expect(sqlAggregateHasAny).toBe(false);
     expect(sqlAggregateIsContract).toBe(true);
   });
 

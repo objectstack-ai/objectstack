@@ -117,6 +117,14 @@ type Resolved<F> = F extends (...args: never[]) => PromiseLike<infer R> ? R : ne
  *
  * That is the card's own lesson turning up inside its own instrument: an
  * instrument's silence is only evidence if the instrument could have spoken.
+ * The LANDED doors carried it too, and it was measured rather than assumed:
+ * with `aggregate()` put back to its own historical `Promise<any[]>`, this file
+ * red ONCE (the `Equals` leg) and `IsAny` stayed green — so the family's
+ * "both halves per door, a regression reds the file twice" was one half for
+ * that door. Every per-door leg in this file is therefore on `ContainsAny`,
+ * closing the class with one detector rather than door by door. `ContainsAny`
+ * is a strict superset of `IsAny` here — it asks `IsAny` first — so the doors
+ * whose regression shape IS a bare `any` lose nothing.
  * `ContainsAny` looks one and two levels in — the ROW of an array-shaped door
  * and the CELL of a record row — so `any[]`, `Record<string, any>` and
  * `Record<string, any>[]` all answer `true` while the contract's own
@@ -172,15 +180,15 @@ const contractBeginTransaction: Equals<ContractBeginTransaction, unknown> = true
 //    contract reads. `execute` needs the `IsAny` leg most of all:
 //    `Equals<any, unknown>` is already `false`, so without it a door that
 //    regressed to `any` would be reported only as "not `unknown`".
-const tursoFindOneIsAny: IsAny<TursoFindOne> = false;
+const tursoFindOneHasAny: ContainsAny<TursoFindOne> = false;
 const tursoFindOneIsContract: Equals<TursoFindOne, Record<string, unknown> | null> = true;
-const tursoCreateIsAny: IsAny<TursoCreate> = false;
+const tursoCreateHasAny: ContainsAny<TursoCreate> = false;
 const tursoCreateIsContract: Equals<TursoCreate, Record<string, unknown>> = true;
-const tursoBulkCreateIsAny: IsAny<TursoBulkCreate> = false;
+const tursoBulkCreateHasAny: ContainsAny<TursoBulkCreate> = false;
 const tursoBulkCreateIsContract: Equals<TursoBulkCreate, Record<string, unknown>[]> = true;
-const tursoExecuteIsAny: IsAny<TursoExecute> = false;
+const tursoExecuteHasAny: ContainsAny<TursoExecute> = false;
 const tursoExecuteIsContract: Equals<TursoExecute, unknown> = true;
-const tursoAggregateIsAny: IsAny<TursoAggregate> = false;
+const tursoAggregateHasAny: ContainsAny<TursoAggregate> = false;
 const tursoAggregateIsContract: Equals<TursoAggregate, Record<string, unknown>[]> = true;
 const tursoFindHasAny: ContainsAny<TursoFind> = false;
 const tursoFindIsContract: Equals<TursoFind, Record<string, unknown>[]> = true;
@@ -228,7 +236,7 @@ describe('TursoDriver declared return types on the doors it overrides (#15267)',
   });
 
   it('pins the driver half: no override is `any`, each is the contract type', () => {
-    expect([tursoFindOneIsAny, tursoCreateIsAny, tursoBulkCreateIsAny, tursoExecuteIsAny]).toEqual([
+    expect([tursoFindOneHasAny, tursoCreateHasAny, tursoBulkCreateHasAny, tursoExecuteHasAny]).toEqual([
       false,
       false,
       false,
@@ -243,11 +251,11 @@ describe('TursoDriver declared return types on the doors it overrides (#15267)',
   });
 
   // [#17277] The fifth overridden door, both halves. Put the annotation back
-  // to `Promise<any>` and `tursoAggregateIsAny` flips to `true` while
+  // to `Promise<any>` and `tursoAggregateHasAny` flips to `true` while
   // `tursoAggregateIsContract` flips to `false`.
   it('pins both halves of the fifth overridden door, aggregate()', () => {
     expect(contractAggregate).toBe(true);
-    expect(tursoAggregateIsAny).toBe(false);
+    expect(tursoAggregateHasAny).toBe(false);
     expect(tursoAggregateIsContract).toBe(true);
   });
 
