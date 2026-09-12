@@ -13,7 +13,7 @@
 - `auto_merge` 字段不只是空,是不稳定:同一 PR 一分钟内先 set 后 None,入队后又回落 off。
 - ⛔ 永不据它判没挂上而重挂 —— 重挂踢队重排。
 - 推送重折已挂 auto-merge 的 PR 可静默掉挂,无字段说明 ⇒ 重折后重发,再按队列 ref 探。
-- 成功序列读间隔不读事件名:`removed_from_merge_queue` 后 ~1 秒内跟 `merged` 是落地不是被踢。
+- 成功序列读伴随不读次序:`removed_from_merge_queue` 与 `merged` 同秒或数秒内到,次序实测不定。
 - 真被踢是其后无 `merged`、几分钟后 PR 仍 open。
 - 不在 `origin/main` 上是二义读数:在队列里等 / 没入队,两者处置相反。
 - ⇒ 落地检查恒两个读数:队列成员资格 和 `origin/main`,缺一不可。
@@ -23,6 +23,8 @@
 - `list_pull_requests` 的 `fields` 请求 `merged_by` 不返回该字段 ⇒ 字段缺席不是值读数。
 - `mergeable_state` 惰性计算,`unknown` 不是读数 —— 挂 unknown 等于挂在可能脏的头上。
 - `dirty` 即队列入口否决(冲突对象是当前 main);draft PR 恒回 `draft`。
+- `needs:contract-review` 是合并闸:实测 `blocked` 而 `mergeable: true`,无标签同形兄弟回 `clean`。
+- ready 翻转实测两序列 `clean→blocked→clean` 与 `blocked→unstable→clean`;`unstable` 瞬态非失败。
 - 判头脏走零配额本地试合并:fetch PR ref 后 `git merge-tree --write-tree origin/main <ref>`。
 - 它直接列出冲突文件;读数随 fetch 老化,重跑先 fetch。
 - 它跑 `git merge` 的 merge-ort ⇒ 注册 `merge=os-regen` 的克隆照用驱动,未注册的退回文本合并。
@@ -70,6 +72,7 @@
 - 踢出成因两则:兄弟抢先落地 ⇒ `MERGE_CONFLICT`;缺批准 ⇒ 治理守卫 merge_group 腿 `CI_FAILURE`。
 - 队列 ref 在场时还答位置:名形 `…/pr-<PR>-<PARENT>` 的 `<PARENT>` 是前一条目的 tip。
 - 从根在当前 `origin/main` 的那条起走父-tip 链即真实排队序;`ls-remote` 的字典序无意义。
+- 名形里的 `<PARENT>` 是推测基:实测晚十余分钟才落 `main` ⇒ ⛔ 不读作该基已落地。
 - 该读法零配额,答 timeline 答不了的排第几;⛔ 只读现在、不重建历史。
 - 队列踢出先认签名再决定重投:核对失败签名与已知 flaky 一致 ⇒ 原样重投。
 - 止血修复合入后同一签名再现就不再是那条 flaky,是新问题须重新诊断,⛔ 禁反射式重投。
@@ -114,6 +117,8 @@
 - 调用方自带的 `Authorization` 头被代理覆盖;`HTTPS_PROXY` 端口打死也不切断网络。
 - ⇒ 容器内得出的 token 作用域结论 ⛔ 不迁移到出口未经代理的会话。
 - 同因:`check-clause2-carriers.mjs --pair` 带与不带 token 都不再 403 退 3;真缺声明照常退 4。
+- REST 写侧经出口代理必带 `Content-Type: application/json`,否则代理回 415 且一个字节都没写。
+- 判别式:该 415 的 `documentation_url` 指 Claude Code 不指 GitHub ⇒ 代理拒,不是 GitHub;四端点实测。
 - 两通道的信封在配额、权限、传输三样上都不同 ⇒ 任一侧的拒绝只是那一侧的读数。
 - 限流、403、传输失败都要试过另一侧才说得出我没手段。
 - 读数:`POST /actions/runs/{id}/rerun-failed-jobs` REST 回 403 而 MCP 回 201。
@@ -276,6 +281,7 @@
 - `rerun_failed_jobs` 复用原 run 的提交与合并 ref,不拿新 main 重算。
 - ⇒ 基上缺已合修复时重跑无效,只能 `git merge origin/main` 推提交;判别看修复合并时间。
 - 同一 head 上轻量兄弟 workflow `success` 加重量级载体 `cancelled` 是普通取代的预期签名。
+- 同名 `failure` 也会被带另一诊断的后一次 `failure` 取代 ⇒ 任何判定前先按名取最新一次。
 - cancel-in-progress 窗口只罩得住慢载体 ⇒ 先比对 run `head_sha` 与 PR 当前 head,不开调查。
 - CI 红了先取完整日志归档再下结论:断言文本只在归档里,直读工具拿不到。
 - `get_check_run` 对本仓 CI job 回空 `output.text`。
@@ -297,11 +303,13 @@
 - GitHub 存储字节完好,raw REST 取回一字不差。
 - ⇒ ⛔ 永不单凭 MCP 读判截断,先取 raw REST 或 WebFetch 渲染页核对再判。
 - 否则 repair-first 被正确地应用到完好的卡上,重写毁掉的是正确内容。
+- 唤醒中继渲染会把 `{` `}` `<` 转义 ⇒ 判已发布产物按 `GET` 取存储体,⛔ 永不按中继正文。
 - 判据 = 数空的行内代码跨度:一个空跨度恰是短尖括号片段被吃掉的签名。
 - 判据是尖括号不是反引号:有的正文本来就把标识符不带尖括号写。
 - 数字实体(如撇号成 `&#39;`)是普通实体编码,不是截断证据。
 - 写侧 sanitizer 作者规则住 AGENTS.md 的 GitHub mutates body BYTES 段,⛔ 不在本表复述。
-- 本表只补两条:要字面尖括号写实体 `&lt;` / `&gt;`。
+- 本表只补两条:要字面尖括号写实体 `&lt;` / `&gt;`,但实体在行内代码跨度里不解码。
+- 方括号占位符在行内代码跨度里存活 ⇒ 逐字引文与占位符走跨度,⛔ 不在跨度里写实体。
 - 裸标识符(无尖括号)存活 ⇒ SKILL 提取契约(字面文本 grep 加裸标识符回退)仍有效。
 - 写侧 · issue body:落库删字节,网页同显;sanitizer 按 tag 形状删,不按尖括号。
 - 行内反引号里的 tag 形状 token 整个被删,含注释标记、占位符、泛型这些未知标签形。
@@ -321,6 +329,7 @@
 - 署名页脚的写侧变异按通道与输入双重定域,⛔ 不是一条定律。
 - MCP `update_pull_request` 包装器删掉 PR 正文的页脚块。
 - 裸 REST `PATCH /pulls` 追加一个裸页脚并保留既有 session-URL 页脚,差恰 58 字节。
+- 同路送无页脚正文存回恰一条(平台裸形)⇒ 该格处方是不送页脚,⛔ 不是不重送正文。
 - 同一 MCP 包装器上有反例:把已带页脚的正文整体重送,两条页脚均逐字节存活。
 - 送无页脚正文经 MCP 编辑回读仍无页脚(两次实测)⇒ 它不为无页脚正文合成页脚。
 - 第四形:建 PR 两通道同判 —— 送出体尾部不是 `---` 加页脚块时,追加一条同形页脚。
@@ -334,6 +343,11 @@
 - 平台在尾部 `---` 前后正反两向归一空行:比对正文只按首个差异偏移,⛔ 不按长度。
 - 评论创建两通道都追加 58 字节 ⇒ 严格解析 `os-dev-report` 必须停在最后一个右花括号。
 - 评论 `PATCH` 重送含尾部页脚块的存储体是幂等的:逐字节一条页脚,与创建的追加相反。
+- PR 正文的 `Check Changeset` 门读 clause-② 声明宽容:其失败文案自述 `- `、`> `、`**` 前缀照读。
+- 认领腿 `CLAUSE2_KEY_LINE` 的轴是行首位置:引用块、项目符、粗体、反引号全容,冒号可在外。
+- 只有 `#` 标题与行中键破它;判据是导入 `readClause2Line`,⛔ 不数连续串。
+- `CLAIM_COMMENT_MARKER`(`check-half-states.mjs`)只认行首 `Claim:`/`Claimed:`,容前导空白或一个 `>`。
+- 词前 `**` 或反引号即让该评论对互斥读数三四与入队腿不可见 ⇒ 后继读作车道无人。
 - 并行 spec PR 同动 pin 计数断言:被踢不是事故,按 os-regen 序再解一轮。
 - 解冲突两侧收据都保留、按合并顺序堆叠;新计数从合并后源码重数,⛔ 不从收据做算术。
 - 操作数是文件本身不是历史;双方占同一编号是常态,重编号后进侧。
@@ -368,14 +382,21 @@
 - `in_progress` 不是过;advisory 门禁红进 main 是共享损伤,照样止血立单。
 - ⛔ 聚合命令同样不作判定:`check:type-check-debt` 可在包级 typecheck 绿时红。
 - `check:i18n` 以 PREREQUISITE NOT MET(workspace CLI 未 build)退 3,不是漂移。
+- 退出码是字段字面值:判据取门禁印的判定行,⛔ 不取码 —— 同一脚本里一个码可两义。
+- `check-governed-merges` 退 3 在 `--test` 上是 GOVERNED 判定,别处是 PREREQUISITE NOT MET。
 - 计数非机理读数:由 `GET .../actions/runs?event=merge_group` 计数 0 推 required 集为空,当天被推翻。
 - 计数答至今发生过没有,不答机制在不在:零计数只作弱先验。
 - 判 required 集为空要读 ruleset 的 required 集本身,或看队列合并是否真在等检查。
 - ⛔ 别处写下的计数值一律先复测再用。
 - MCP `issue_write create` 落库丢掉正文尾部的署名页脚块,正文其余部分完好。
+- MCP `issue_write` update 送尾部横线加页脚块则两者同被吃掉,而调用照常回 id 与 url。
 - 建卡改走 REST `POST /issues` 页脚存活;回读后 `PATCH /issues/{n}` 重送正文逐字节存下。
-- issue 正文 `PATCH` 存回可多一条裸页脚,已有页脚被归一到末尾而非复制,总数恒一条。
+- issue 正文 `PATCH` 识别按整块:送全块或不送页脚都存回恰一条,已有页脚归一末尾不复制。
+- 无横线的裸页脚不算页脚:它被保留而整块另追加,总数二 ⇒ 恒一条只对上行两输入成立。
+- 该格两空:MCP 送裸页脚、`title`/`labels` 单字段 `issue_write` 是否动页脚,均未实测。
 - 内联双引号 JSON 建卡:标题反引号标识符被 shell 以 root 展开,正文完好 —— 内容被执行。
+- heredoc 定界符不加引号会展开正文里每个反引号 ⇒ 请求体永不过会展开的 shell 上下文。
+- `cmd | tail; echo $?` 读到的是 `tail` 的状态 ⇒ 退出码在任何管道之前捕获。
 - CI job 的失败 step 不必与 job 名一致 ⇒ ⛔ 不由 job 名推原因,先读 step 名再下结论。
 - Actions 日志保留把老 job 截到 post-job cleanup ⇒ 归档只剩清理输出时原因不可断言。
 - 无 `packageManager` 的目录里 corepack 运行时解析 registry `latest` ⇒ 同 SHA 前绿后红是 tag 移了。
@@ -387,6 +408,8 @@
 - ⛔ 不越过该拒答自行枚举:短清单读作合规;加深日期取窗口起点之前,不猜深度。
 - 前台 `sleep` 被 harness 拒 ⇒ 等待写成带 until 条件的前台阻塞等待,⛔ 不写 sleep 轮询循环。
 - `check:pm-dispatch-gates` 逾容器 600 秒前台上限 ⇒ detach 加 `tail --pid` 前台等;超时不是读数。
+- `check-half-states.mjs` 连 `--help` 都跑整仓 I/O ⇒ 早读到的输出文件是空的,不是干净的。
+- 后台工具调用里再 `nohup … &` 会让包装器报假 `exit 0`,而真活还在跑。
 - 分支删除被拒有第二形态:代理回 403,与既有 send-pack 断连同处置 ⇒ 不可删,⛔ 不重试。
 
 ## 闭合关键词解析(PR 正文写侧)
