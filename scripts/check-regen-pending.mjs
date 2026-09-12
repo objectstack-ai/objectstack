@@ -90,7 +90,12 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { PENDING_MARKER, entryForPath, ownerDir, ownerOf, ownerRunCommand } from './regen-artifacts.mjs';
-import { inspectBuildStamp, inspectDeclarationStamp } from './build-input-hash.mjs';
+import {
+  inspectBuildStamp,
+  inspectDeclarationStamp,
+  inspectSchemaStamp,
+  writeSchemaStamp,
+} from './build-input-hash.mjs';
 import { gitFreeEnv } from './git-env.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 import {
@@ -195,6 +200,55 @@ export function buildStamp(specDir = SPEC_DIR) {
 }
 
 /**
+ * Did a GENERATION produce `specDir/json-schema` from the sources on disk right
+ * now? Same three verdicts, same one-way meaning, same wrapping argument as the
+ * two stamp readers above — the repo root is supplied here so no caller can hash
+ * against the wrong one.
+ *
+ * The THIRD stamp file: `json-schema/.build-input-hash-schema`, written by
+ * `build-schemas.ts` at the end of its generation rather than by the build.
+ * `inspectSchemaStamp`'s docblock is the authority on why the generator has to
+ * be the writer and why neither `dist/` stamp can stand in for it.
+ */
+export function schemaStamp(specDir = SPEC_DIR) {
+  try {
+    return inspectSchemaStamp(REPO_ROOT, specDir);
+  } catch {
+    return { state: 'unstamped', recorded: null, actual: null };
+  }
+}
+
+/**
+ * Write the stamp `schemaStamp` reads — the ONE write point, called from the end
+ * of `packages/spec/scripts/build-schemas.ts`.
+ *
+ * Here rather than imported straight from `build-input-hash.mjs` for two
+ * reasons, and the first is the same one the readers give: the repo root is
+ * supplied at this single site, so a caller cannot hash against the wrong one —
+ * and a writer that hashed against the wrong root would not merely refuse, it
+ * would record a digest no reader can ever match, turning the acquittal channel
+ * off with nothing visible to notice. The second is mechanical: the generator
+ * imports from inside a tsc program (`tsconfig.scripts.json`), where an untyped
+ * `.mjs` import is TS7016, and this module is the one here that ships a
+ * hand-written `.d.mts` mirror (kept honest by `check:declaration-mirrors`).
+ *
+ * ⛔ It reports rather than throws, and the caller must keep it that way. Failing
+ * a generation because a performance stamp could not be written would convert an
+ * acquittal channel into a new way for the build to die; the conservative
+ * default already covers the failure — no stamp is `unstamped`, `unstamped` is
+ * no evidence, and no evidence leaves the mtime refusal standing.
+ *
+ * @returns the digest written, or `null` when nothing could be written.
+ */
+export function recordSchemaStamp(specDir = SPEC_DIR) {
+  try {
+    return writeSchemaStamp(REPO_ROOT, specDir);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Is `packages/spec/dist` older than the sources it claims to describe? Missing
  * counts as stale. Deliberately conservative: a false "stale" costs a build, a
  * false "fresh" costs a silently wrong artifact.
@@ -268,12 +322,42 @@ export function distIsStale(specDir = SPEC_DIR) {
  *     `build-schemas.ts` (it imports the namespace barrels), so counting them
  *     would send every test-only spec PR to a `gen:schema` it does not need —
  *     and a guard that cries wolf is a guard someone deletes.
- *   - the artifact side matches `.json`, the tree's only content.
+ *   - the artifact side matches `.json`, the tree's only content. The stamp
+ *     below is deliberately not `.json` and starts with a dot, so it is
+ *     invisible to `newestMtime` on both counts and cannot vouch for itself.
+ *
+ * ## The mtime rule accuses; the GENERATION stamp may acquit
+ *
+ * The blind spot both siblings document is shared here, and until #16175 this
+ * was the one rule of the three with NO evidence to answer it with. Measured on
+ * a tree whose `git status` was empty, after a bare `touch` of one `.zod.ts`:
+ * `pnpm --filter @objectstack/spec check:docs` exits 1 with `packages/spec/
+ * json-schema is older than packages/spec/src`, and the only remedy on offer was
+ * a full `gen:schema` — minutes under the shared verify lock — for a tree that
+ * was exactly current.
+ *
+ * ⛔ Neither `dist/` stamp could answer it, and reaching for one would be #7122's
+ * rejected direction relocated rather than a relaxation of it: both are written
+ * at the END of the build, whereas `gen:schema` is its FIRST step and is also
+ * run standalone (this rule's own refusal message says so) and again by
+ * `check:authorable-surface`. A `dist/` stamp is evidence about `dist/`.
+ *
+ * So the evidence had to be made, and `build-schemas.ts` makes it: one write
+ * point at the end of generation records the digest of the inputs that
+ * generation consumed, into the tree it just emitted. `inspectSchemaStamp`'s
+ * docblock is the authority on why that write point is sound for all three
+ * entry points and why the digest's input set (a strict superset of the sources
+ * this rule counts) can only ever withhold an acquittal.
+ *
+ * And it may only ACQUIT. `unstamped` — no stamp, unreadable, not 64 hex
+ * characters, or a generation that died before the end — leaves the mtime
+ * verdict standing (#4690), so nothing that passes today can start failing.
  */
 export function schemaTreeIsStale(specDir = SPEC_DIR) {
   const tree = newestMtime(join(specDir, 'json-schema'), (n) => n.endsWith('.json'));
   if (!tree) return true;
-  return newestMtime(join(specDir, 'src'), (n) => n.endsWith('.ts') && !n.endsWith('.test.ts')) > tree;
+  if (newestMtime(join(specDir, 'src'), (n) => n.endsWith('.ts') && !n.endsWith('.test.ts')) <= tree) return false;
+  return schemaStamp(specDir).state !== 'match';
 }
 
 /**

@@ -265,6 +265,9 @@ describe('formatDefKeyCollisions', () => {
 // symlinked directory resolves its relative imports against the real path, so
 // `ui/view.zod.ts` would keep reading the unmutated `shared/http.zod.ts`.
 const PKG = path.resolve(__dirname, '..');
+/** The repo root. The fixture below mirrors its depth so the generator's own
+ *  `../../../scripts` import resolves inside the sandbox (#16175). */
+const REPO_ROOT = path.resolve(PKG, '..', '..');
 
 /** One full spec surface (~1600 schemas) per run; a timeout must mean "hung". */
 const SPAWN_TIMEOUT_MS = 180_000;
@@ -283,8 +286,18 @@ describe('build-schemas.ts refuses a second write of one def key (#5832)', () =>
     'goes red when `HttpMethodSchema` is re-declared next to the 7-value `HttpMethod`',
     { timeout: SPAWN_TIMEOUT_MS },
     () => {
-      const dir = path.join(sandbox, 'restored-limb');
-      fs.mkdirSync(dir);
+      // The fixture package sits at `<root>/packages/spec`, mirroring this repo's
+      // own depth (#16175): `build-schemas.ts` resolves everything from its own
+      // `__dirname` except the repo-root freshness module it now imports to write
+      // the generation stamp, and from a flat tmpdir that specifier walks off the
+      // top of the filesystem — the spawn then dies with MODULE_NOT_FOUND and this
+      // case reports on its own shape instead of on the def-key guard.
+      const limbRoot = path.join(sandbox, 'restored-limb');
+      const dir = path.join(limbRoot, 'packages', 'spec');
+      fs.mkdirSync(dir, { recursive: true });
+      // Read-only here, and a copy would be a second definition of the digest
+      // whose single definition is that module's whole point.
+      fs.symlinkSync(path.join(REPO_ROOT, 'scripts'), path.join(limbRoot, 'scripts'));
       fs.cpSync(path.join(PKG, 'scripts'), path.join(dir, 'scripts'), { recursive: true });
       fs.cpSync(path.join(PKG, 'src'), path.join(dir, 'src'), { recursive: true });
       for (const entry of ['node_modules', 'package.json']) {

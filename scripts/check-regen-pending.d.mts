@@ -1,19 +1,22 @@
-// Types for the two freshness predicates `check-regen-pending.mjs` exports to
-// other gates (#5475).
+// Types for the freshness predicates and stamp accessors
+// `check-regen-pending.mjs` exports to other gates (#5475).
 //
 // The module itself stays `.mjs`: `pre-commit` and `check:merge-driver` invoke
 // it with bare `node`, and every root script here is authored that way. What
-// changed is that three files under `packages/spec/scripts/` import from it —
-// `build-docs.ts`, `check-generated.ts` and `schema-tree-freshness.test.ts` —
-// and since #5475 those are inside a tsc program (`tsconfig.scripts.json`),
-// where an untyped `.mjs` import is TS7016: the predicate silently becomes
-// `any`, and `if (distIsStale)` — the missing call, the exact mistake this
-// guard exists to prevent — would type-check clean.
+// changed is that files under `packages/spec/scripts/` import from it —
+// `build-docs.ts`, `check-generated.ts`, `check-browser-reachable-entries.ts`,
+// `build-schemas.ts` and the freshness tests — and since #5475 those are inside
+// a tsc program (`tsconfig.scripts.json`), where an untyped `.mjs` import is
+// TS7016: the predicate silently becomes `any`, and `if (distIsStale)` — the
+// missing call, the exact mistake this guard exists to prevent — would
+// type-check clean.
 //
 // Declared rather than inferred (no `allowJs`) because the module sits at the
-// repo root, outside the consuming program's `rootDir`. The surface is five
+// repo root, outside the consuming program's `rootDir`. The surface is seven
 // functions with one optional argument; keep this file in step with them by
-// hand, and keep it small enough that doing so stays trivial.
+// hand, and keep it small enough that doing so stays trivial. `check:declaration-mirrors`
+// asserts the name, kind and required arity of each — never the types, which
+// stay yours.
 
 /**
  * Is `packages/spec/dist` older than the sources it claims to describe?
@@ -44,9 +47,43 @@ export function declarationStamp(specDir?: string): {
  * Is `packages/spec/json-schema` older than the sources it was generated from?
  * Missing counts as stale.
  *
+ * Answerable since #16175: an mtime accusation is cleared when — and only when —
+ * `schemaStamp` below reports `'match'`. Read the function's own docblock before
+ * reusing it.
+ *
  * @param specDir Absolute path to the spec package; defaults to this repo's.
  */
 export function schemaTreeIsStale(specDir?: string): boolean;
+
+/**
+ * Did a generation produce `specDir/json-schema` from the sources on disk right
+ * now? The generated tree's counterpart to `declarationStamp` and `buildStamp`,
+ * reading the THIRD stamp file (`json-schema/.build-input-hash-schema`, written
+ * by `build-schemas.ts` at the end of its generation, not by the build).
+ * `'match'` is the only verdict that clears an mtime accusation; `'unstamped'`
+ * is "no evidence". Read the function's own docblock before reusing it — neither
+ * `dist/` stamp is evidence about this tree.
+ *
+ * @param specDir Absolute path to the spec package; defaults to this repo's.
+ */
+export function schemaStamp(specDir?: string): {
+  state: 'match' | 'mismatch' | 'unstamped';
+  recorded: string | null;
+  actual: string | null;
+};
+
+/**
+ * Write the stamp `schemaStamp` reads — the ONE write point, called from the end
+ * of `packages/spec/scripts/build-schemas.ts` once the tree beside it exists.
+ *
+ * ⛔ Reports rather than throws: `null` means nothing could be written, which is
+ * the conservative state (no evidence, so the mtime refusal stands) and must
+ * never be escalated into a failed generation.
+ *
+ * @param specDir Absolute path to the spec package; defaults to this repo's.
+ * @returns the digest written, or `null`.
+ */
+export function recordSchemaStamp(specDir?: string): string | null;
 
 /**
  * Are `packages/spec`'s emitted JS bundles (`dist/**\/*.mjs`, `*.js`) older than
