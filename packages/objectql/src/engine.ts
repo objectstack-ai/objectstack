@@ -8234,7 +8234,18 @@ export class ObjectQL implements IObjectQLEngine {
    * short-circuits before any query.
    */
   async isFileReferencesMigrationVerified(): Promise<boolean> {
-    return this.readMigrationFlagMemoized(
+    return (await this.readFileReferencesFlagRow()).verified;
+  }
+
+  /**
+   * The one memoized read both file-flag questions come off (#15989).
+   *
+   * Written once so the two public readers cannot drift apart in the ARGUMENTS
+   * they pass — the slot and the migration id decide which row is read, and a
+   * second copy of them is a second way to read a different row.
+   */
+  private readFileReferencesFlagRow(): Promise<MigrationFlagRead> {
+    return this.readMigrationFlagRowMemoized(
       'fileReferencesMigrationVerified',
       FILE_REFERENCES_MIGRATION_ID,
       '[value-shape] this deployment has verified the file-as-reference migration — ' +
@@ -8270,15 +8281,7 @@ export class ObjectQL implements IObjectQLEngine {
    * one row. `invalidateDataMigrationFlags()` drops both.
    */
   async haveFileColumnsMoved(): Promise<boolean> {
-    return (
-      await this.readMigrationFlagRowMemoized(
-        'fileReferencesMigrationVerified',
-        FILE_REFERENCES_MIGRATION_ID,
-        '[value-shape] this deployment has verified the file-as-reference migration — ' +
-          'media value shapes are enforced and released field files may be collected ' +
-          '(ADR-0104 / #3617)',
-      )
-    ).columnsMoved;
+    return (await this.readFileReferencesFlagRow()).columnsMoved;
   }
 
   /**

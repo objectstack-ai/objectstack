@@ -52,14 +52,31 @@ interface ArmSink {
   installs: number;
 }
 
+/**
+ * Equality only.
+ *
+ * ⛔ A combinator read as a field name is the silently-wrong matcher
+ * `check:where-matcher` exists to stop — it would answer "no rows" for a filter
+ * it does not implement, which reads exactly like an empty ledger and would
+ * turn every arm question in this file into a false "not moved".
+ */
+function matches(row: Record<string, unknown>, where: any): boolean {
+  if (!where || typeof where !== 'object') return true;
+  return Object.entries(where).every(([k, v]) => {
+    if (k.startsWith('$')) throw new Error(`fake driver: unsupported combinator ${k}`);
+    return row[k] === v;
+  });
+}
+
+/** The caller's bound, applied AFTER the filter and BY PRESENCE. */
+function bounded(rows: Array<Record<string, unknown>>, ast: any): Array<Record<string, unknown>> {
+  return typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
+}
+
 function makeDriver(
   store: Store,
-  opts: { sink?: ArmSink; readThrows?: boolean } = {},
+  opts: { sink?: ArmSink } = {},
 ): IDataDriver {
-  const matches = (row: Record<string, unknown>, where: any): boolean => {
-    if (!where || typeof where !== 'object') return true;
-    return Object.entries(where).every(([k, v]) => row[k] === v);
-  };
   const driver: Record<string, unknown> = {
     name: 'default',
     version: '1.0.0',
@@ -67,11 +84,9 @@ function makeDriver(
     async disconnect() {},
     getSchemaSyncStats: () => ({ created: 0, existing: 2 }),
     async find(object: string, ast: any) {
-      if (opts.readThrows) throw new Error('relation "sys_migration" does not exist');
-      return rowsOf(store, object).filter((r) => matches(r, ast?.where));
+      return bounded(rowsOf(store, object).filter((r) => matches(r, ast?.where)), ast);
     },
     async findOne(object: string, ast: any) {
-      if (opts.readThrows) throw new Error('relation "sys_migration" does not exist');
       return rowsOf(store, object).find((r) => matches(r, ast?.where)) ?? null;
     },
     async count(object: string) { return rowsOf(store, object).length; },
@@ -126,7 +141,21 @@ function boot(
   opts: { sink?: ArmSink; readThrows?: boolean; withFlagObject?: boolean } = {},
 ): ObjectQL {
   const engine = new ObjectQL();
-  engine.registerDriver(makeDriver(store, opts), true);
+  const driver = makeDriver(store, opts) as unknown as Record<string, unknown>;
+  if (opts.readThrows) {
+    // The unreadable-ledger case is installed by OVERRIDING the reads on the
+    // finished double rather than by branching inside it. The branch version
+    // makes the shared double itself unprobeable — `check:objectql-double-limit`
+    // runs it and reads the throw as "unjudged", so the bound this double DOES
+    // hold stops being measurable at all.
+    driver.find = async () => {
+      throw new Error('relation "sys_migration" does not exist');
+    };
+    driver.findOne = async () => {
+      throw new Error('relation "sys_migration" does not exist');
+    };
+  }
+  engine.registerDriver(driver as unknown as IDataDriver, true);
   engine.registerApp({
     id: 'showcase_pkg',
     name: 'Showcase',

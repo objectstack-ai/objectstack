@@ -12,6 +12,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { FILE_REFERENCES_MIGRATION_ID, hasMovedFileColumns } from '@objectstack/spec/system';
 
 import {
@@ -23,6 +24,22 @@ import {
 
 const NOW = '2026-09-12T04:00:00.000Z';
 
+/**
+ * Equality only.
+ *
+ * ⛔ A combinator read as a field name is the silently-wrong matcher
+ * `check:where-matcher` exists to stop: it would answer "no rows" for a filter
+ * it does not implement, which is indistinguishable from a real empty ledger —
+ * and an empty ledger is exactly the "not moved" answer every case here is
+ * trying to tell apart from a real reading.
+ */
+function matches(row: Record<string, unknown>, where: Record<string, unknown>): boolean {
+  return Object.entries(where).every(([k, v]) => {
+    if (k.startsWith('$')) throw new Error(`fake engine: unsupported combinator ${k}`);
+    return row[k] === v;
+  });
+}
+
 /** An engine over one in-memory `sys_migration` table. */
 function engineOver(rows: Array<Record<string, unknown>>, opts: { registered?: boolean } = {}) {
   const updates: Array<Record<string, unknown>> = [];
@@ -30,15 +47,22 @@ function engineOver(rows: Array<Record<string, unknown>>, opts: { registered?: b
   const engine: MigrationFlagEngine = {
     getObject: (name: string) => (opts.registered === false ? undefined : { name }),
     async find(_object, options) {
-      const where = (options as { where?: Record<string, unknown> }).where ?? {};
-      return rows.filter((r) => Object.entries(where).every(([k, v]) => r[k] === v));
+      const o = options as { where?: Record<string, unknown>; limit?: number };
+      const matched = rows.filter((r) => matches(r, o.where ?? {}));
+      // The caller's bound, applied AFTER the filter and BY PRESENCE — a
+      // limit-blind double hides a caller that forgot to page.
+      return typeof o.limit === 'number' ? matched.slice(0, o.limit) : matched;
     },
     async insert(_object, data) {
       inserts.push(data);
       rows.push({ ...data });
       return data;
     },
-    async update(_object, data) {
+    async update(_object, data, options) {
+      // Both writers here update an existing flag row by the `id` in the
+      // payload — the shape `ObjectQL.update` routes `by-id`. Asserting it
+      // binds this double to the engine's verdict instead of re-deciding it.
+      assertEngineUpdateDispatch(data, options);
       updates.push(data);
       const row = rows.find((r) => r.id === data.id);
       if (row) Object.assign(row, data);

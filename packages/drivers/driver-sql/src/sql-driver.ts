@@ -11697,10 +11697,15 @@ export class SqlDriver implements IDataDriver {
             table: '*',
             column: '*',
             reason: 'dialect_not_supported',
+            // ⛔ No tracker id in the string: this `detail` reaches an operator
+            // reading a migration report, who has no tracker to resolve one
+            // against (`check:doc-authoring`). The card that owns the MySQL
+            // leg is #17788; the reader who can resolve that reads this line.
             detail:
               `the ADR-0104 column step has no measured statement for dialect '${this.dialectName}'. ` +
-              'MySQL is tracked by #17788, where its statement ORDER is settled against a real ' +
-              'instance; no other dialect has been rehearsed. Nothing was planned and nothing ran.',
+              'The MySQL leg is tracked separately and is settled against a real instance, because ' +
+              'its statement ORDER is what the ADR leaves open; no other dialect has been ' +
+              'rehearsed. Nothing was planned and nothing ran.',
           },
         ],
       };
