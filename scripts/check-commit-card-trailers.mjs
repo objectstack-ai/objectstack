@@ -666,7 +666,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'Every card-relation spelling in a commit message is a finding, including': 12,
   'The shapes that must stay green, so the gate does not tax ordinary commit': 8,
   'A bare reference in TRAILER position is a declaration; one in prose is not.': 7,
-  'The trailer pair is model-free: every measured spelling is a finding, and': 14,
+  'The trailer pair is model-free: every measured spelling is a finding, and': 15,
   '…and the shapes it must NOT refuse, so the pair stays cheap to write.': 10,
   'The finding names the commit AND the line, which is what a pusher acts on.': 6,
   'Delegation, not a second copy of the rule: the commit surface is the': 4,
