@@ -19,6 +19,42 @@ import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
+import {
+  describeFileColumnMoveRefusal,
+  runFileColumnMove,
+  type FileColumnMoveResult,
+} from './file-column-move.js';
+import type { IObjectQLEngine } from '@objectstack/spec/contracts';
+import type { SqlDriverLike } from '../../utils/schema-migrate.js';
+import type { MediaColumnMoveScan, SqlDialectName } from '@objectstack/driver-sql';
+
+/**
+ * What {@link MigrateFilesToReferences.runColumnStep} did, or declined to do.
+ *
+ * `skipped` and `failed` are deliberately separate: every skip is a stated,
+ * non-failing reason (this command's subject is the backfill), and only a
+ * column step that ran and could not finish fails the command — because that
+ * is the one outcome that leaves storage an operator has to be told about.
+ */
+interface ColumnStepOutcome {
+  skipped: 'gate_not_passed' | 'no_sql_driver' | 'no_sql_seam' | 'nothing_to_move' | null;
+  failed: boolean;
+  /** `sys_migration.columns_moved_at` as written, or `null` if it was not written. */
+  stampedAt: string | null;
+  /** Set when the columns moved and RECORDING that failed — a durability failure. */
+  stampError?: string;
+  report: {
+    dialect: SqlDialectName;
+    apply: boolean;
+    blocking: number;
+    outcomes: FileColumnMoveResult['outcomes'];
+    refusals: MediaColumnMoveScan['refusals'];
+    executedStatements: string[];
+    recordable: boolean;
+    /** Carried from the driver, because the renderer cannot `await import`. */
+    rollbackNotes: readonly string[];
+  } | null;
+}
 
 async function confirm(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false; // non-interactive → require --yes
@@ -221,6 +257,26 @@ export default class MigrateFilesToReferences extends Command {
         includeUnreferenced: flags['include-unreferenced'],
       });
 
+      // ── The COLUMN step (#15989, the ruling on #15041 step 2) ────────────
+      //
+      // Runs only after the backfill and its self-check reported zero blocking
+      // rows — the ruling's own "abort otherwise", and the reason it lives
+      // here rather than in a command of its own: the gate's verdict is what
+      // authorises it, and this is the only place that verdict exists.
+      //
+      // ⛔ The move and the arm flip are ONE act. Measured on SQLite: after
+      // the columns are converted a JSON-arm driver still READS the migrated
+      // column correctly but its next WRITE re-quotes. So `columns_moved_at`
+      // is stamped in the same block that moved the columns, and only when
+      // every one of them moved.
+      const columnMove = await this.runColumnStep({
+        stack,
+        engine,
+        apply,
+        gatePassed: result.gatePassed,
+        json: flags.json,
+      });
+
       if (flags.json) {
         await emitJson({
           database: stack.dbLabel,
@@ -250,9 +306,11 @@ export default class MigrateFilesToReferences extends Command {
           gatePassed: result.gatePassed,
           gateFailures: result.gateFailures,
           flag: result.flag,
+          columnMove: columnMove.report,
+          columnsMovedAt: columnMove.stampedAt,
           duration: timer.elapsed(),
         });
-        if (!result.gatePassed) this.exit(1);
+        if (!result.gatePassed || columnMove.failed) this.exit(1);
         return;
       }
 
@@ -291,9 +349,11 @@ export default class MigrateFilesToReferences extends Command {
             : 'Fix the records listed above, then re-run (and finally with --apply).',
         );
       }
+      this.renderColumnStep(columnMove);
+
       console.log(chalk.dim(`  ${timer.display()}`));
       console.log('');
-      if (!result.gatePassed) this.exit(1);
+      if (!result.gatePassed || columnMove.failed) this.exit(1);
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
       if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }
@@ -301,6 +361,174 @@ export default class MigrateFilesToReferences extends Command {
       this.exit(1);
     } finally {
       await stack.shutdown();
+    }
+  }
+
+  /**
+   * The column step — plan, pre-check, move, stamp (#15989).
+   *
+   * Every early return is a NON-failure with a stated reason: this command's
+   * subject is the backfill, and a deployment whose driver cannot plan a
+   * column move is not a deployment whose backfill failed. The one thing that
+   * fails the command is a column step that was asked to run, ran, and could
+   * not finish — because that leaves storage the operator must be told about.
+   */
+  private async runColumnStep(args: {
+    stack: { driver: SqlDriverLike | null; kernel: unknown };
+    engine: unknown;
+    apply: boolean;
+    gatePassed: boolean;
+    json: boolean;
+  }): Promise<ColumnStepOutcome> {
+    const { stack, apply, gatePassed, json } = args;
+
+    if (!gatePassed) {
+      // ⛔ The ruling's "abort unless backfill + verify report zero blocking".
+      // Not an error of this step's own — the gate already reported why.
+      return { skipped: 'gate_not_passed', failed: false, stampedAt: null, report: null };
+    }
+    if (!stack.driver || typeof stack.driver.planMediaColumnMove !== 'function') {
+      return { skipped: 'no_sql_driver', failed: false, stampedAt: null, report: null };
+    }
+
+    const scan = await stack.driver.planMediaColumnMove();
+    if (scan.plans.length === 0 && scan.refusals.length === 0) {
+      return { skipped: 'nothing_to_move', failed: false, stampedAt: null, report: null };
+    }
+
+    // Lazily, at the point of use — ⛔ never a static value import of a driver
+    // package in a command module (#5726).
+    const { MEDIA_COLUMN_MOVE_ROLLBACK_NOTES } = await import('@objectstack/driver-sql');
+    const { resolveSeedTenancyExec, normalizeRows } = await import('@objectstack/metadata-protocol');
+    const exec = resolveSeedTenancyExec(args.engine as IObjectQLEngine | undefined);
+    // Loud absence, never a silent success. A driver can expose an `execute`
+    // that accepts every statement and performs none (#10677) — and "moved 3
+    // columns" from a seam that ran nothing, followed by a `columns_moved_at`
+    // stamp, is the worst report this command could produce: the driver would
+    // then write bare ids into columns that never moved.
+    const answers = exec
+      ? await exec('select 1 as os_seam_probe')
+          .then((r) => normalizeRows(r).length > 0)
+          .catch(() => false)
+      : false;
+    if (!exec || !answers) {
+      return { skipped: 'no_sql_seam', failed: false, stampedAt: null, report: null };
+    }
+
+    const run = await runFileColumnMove({
+      scan,
+      exec,
+      rows: normalizeRows,
+      apply,
+      onStatement: json ? undefined : (statement: string) => printStep(chalk.dim(statement)),
+    });
+
+    let stampedAt: string | null = null;
+    let stampError: string | undefined;
+    if (run.recordable) {
+      try {
+        const { recordFileColumnMove } = await import('@objectstack/platform-objects/system');
+        const { FILE_REFERENCES_MIGRATION_ID } = await import('@objectstack/spec/system');
+        stampedAt = await recordFileColumnMove(args.engine as any, FILE_REFERENCES_MIGRATION_ID);
+      } catch (error: any) {
+        // The columns MOVED and the ledger does not say so. That is a
+        // durability degradation in the sense AGENTS.md names: the next boot
+        // stays on the JSON arm and re-quotes its writes into a column that
+        // has already been converted. It must fail the command.
+        stampError = error?.message ?? String(error);
+      }
+    }
+
+    const failed =
+      run.outcomes.some((o) => o.status === 'failed') || stampError !== undefined;
+
+    return {
+      skipped: null,
+      failed,
+      stampedAt,
+      stampError,
+      report: {
+        dialect: scan.dialect,
+        rollbackNotes: MEDIA_COLUMN_MOVE_ROLLBACK_NOTES,
+        apply: run.apply,
+        blocking: run.blocking,
+        outcomes: run.outcomes,
+        refusals: run.refusals,
+        executedStatements: run.executedStatements,
+        recordable: run.recordable,
+      },
+    };
+  }
+
+  /** The human-mode half of {@link runColumnStep}. JSON mode reports the same facts. */
+  private renderColumnStep(outcome: ColumnStepOutcome): void {
+    if (outcome.skipped === 'gate_not_passed' || outcome.report === null) {
+      if (outcome.skipped === 'no_sql_driver') {
+        printInfo(
+          'Column step: not applicable — the ADR-0104 file-family column move is a SQL-driver step ' +
+            'and no SQL driver is active here.',
+        );
+      } else if (outcome.skipped === 'no_sql_seam') {
+        printWarning(
+          'Column step: SKIPPED — the active driver exposes no usable raw SQL seam, so the media ' +
+            'columns were neither inspected nor moved. The deployment stays on the JSON encoding.',
+        );
+      } else if (outcome.skipped === 'nothing_to_move') {
+        printInfo('Column step: nothing to move — this datastore declares no single-value media column.');
+      }
+      return;
+    }
+
+    const report = outcome.report;
+    console.log('');
+    console.log(chalk.bold(`Column step · ${report.dialect}`));
+    for (const o of report.outcomes) {
+      const mark =
+        o.status === 'moved' ? chalk.green('✓')
+        : o.status === 'blocked' || o.status === 'failed' ? chalk.red('✗')
+        : chalk.yellow('•');
+      console.log(`${mark} ${chalk.bold(`${o.table}.${o.column}`)}  ${chalk.dim(`(${o.kind})`)}`);
+      console.log(`    ${chalk.cyan(o.statement)}`);
+      if (o.error) console.log(`    ${chalk.red(o.error)}`);
+    }
+    for (const refusal of report.refusals) {
+      printWarning(`${refusal.table}.${refusal.column}: ${refusal.detail}`);
+    }
+
+    const refusal = describeFileColumnMoveRefusal({
+      apply: report.apply,
+      outcomes: report.outcomes,
+      refusals: report.refusals,
+      executedStatements: report.executedStatements,
+      blocking: report.blocking,
+      recordable: report.recordable,
+    });
+    console.log('');
+    if (refusal) {
+      printError(refusal);
+    } else if (!report.apply) {
+      printInfo(
+        `Dry run — every abort pre-check passed and nothing was executed. ${report.outcomes.length} ` +
+          'column(s) would move. Take a backup, then re-run with --apply.',
+      );
+    } else if (outcome.stampError) {
+      printError(
+        `The columns MOVED but recording it failed (${outcome.stampError}). This deployment's ` +
+          'driver will stay on the JSON encoding and re-quote its next write into a column that ' +
+          'has already been converted — re-run this command to record it.',
+      );
+    } else if (outcome.stampedAt) {
+      printSuccess(
+        `Column step complete — ${report.outcomes.length} media column(s) moved to the bare-id ` +
+          `encoding and recorded (sys_migration.columns_moved_at = ${outcome.stampedAt}). The SQL ` +
+          'driver writes bare ids from its next boot, and keeps reading the legacy encoding.',
+      );
+    }
+
+    if (refusal || report.outcomes.some((o) => o.status === 'failed')) {
+      console.log('');
+      console.log(chalk.bold('If it goes wrong:'));
+      for (const note of report.rollbackNotes) console.log(`  ${chalk.dim('·')} ${note}`);
     }
   }
 }
