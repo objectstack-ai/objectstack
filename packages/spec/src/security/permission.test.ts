@@ -109,6 +109,111 @@ describe('ObjectPermissionSchema', () => {
   });
 });
 
+describe('[#16870] a depth axis beside the super-user bit that short-circuits it is REFUSED', () => {
+  // The defect: `PermissionEvaluator.getEffectiveScope` answers `org` on the
+  // super-user bit BEFORE it consults the depth key, and `getDeclaredScope`
+  // (the ADR-0090 D10 delegated-path input) carries the identical
+  // short-circuit ahead of the identical read. So the pair was accepted with
+  // zero diagnostics, materialised into `sys_permission_set.object_permissions`
+  // and counted by a capability census as coverage, while the read stayed
+  // org-wide. Refused at the accept set, which is the only site that stops the
+  // declaration from being STORED: `saveMetaItem` runs this parse before the
+  // runtime authoring gate, and `os build` runs it (compile.ts) before both the
+  // author-time rule registry and `buildAccessMatrix`.
+
+  // ── REFUSAL direction ────────────────────────────────────────────────
+  it('readScope beside viewAllRecords: true is refused, at the readScope path', () => {
+    const r = ObjectPermissionSchema.safeParse({
+      allowRead: true, viewAllRecords: true, readScope: 'own_and_reports',
+    });
+    expect(r.success).toBe(false);
+    const issue = r.error!.issues.find((i) => i.path[i.path.length - 1] === 'readScope')!;
+    expect(issue, 'the issue is LOCATED on the key the author must remove').toBeDefined();
+    expect(issue.message).toContain('viewAllRecords: true');
+    expect(issue.message).toContain('never enforced on any read path');
+    expect(issue.message, 'both remedies are named, not just one').toContain('set viewAllRecords: false');
+  });
+
+  it('readScope beside modifyAllRecords: true is refused too — the same disjunct short-circuits READ', () => {
+    const r = ObjectPermissionSchema.safeParse({
+      allowRead: true, modifyAllRecords: true, readScope: 'unit',
+    });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues.some((i) => i.path[i.path.length - 1] === 'readScope')).toBe(true);
+  });
+
+  it('writeScope beside modifyAllRecords: true is refused, at the writeScope path', () => {
+    const r = ObjectPermissionSchema.safeParse({
+      allowEdit: true, modifyAllRecords: true, writeScope: 'unit',
+    });
+    expect(r.success).toBe(false);
+    const issue = r.error!.issues.find((i) => i.path[i.path.length - 1] === 'writeScope')!;
+    expect(issue).toBeDefined();
+    expect(issue.message).toContain('modifyAllRecords: true');
+  });
+
+  it('the refusal reaches through a whole permission set, located at objects.<name>.<key>', () => {
+    const r = PermissionSetSchema.safeParse({
+      name: 'sales_manager',
+      objects: { crm_opportunity: { allowRead: true, viewAllRecords: true, readScope: 'own_and_reports' } },
+    });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues.some((i) => i.path.join('.') === 'objects.crm_opportunity.readScope')).toBe(true);
+  });
+
+  // ── COST direction: what the refusal must NOT cost ───────────────────
+  // A pin set that only proves the new refusal measures nothing about its
+  // price. These four are the shapes the resolver DOES read, and every one of
+  // them has to keep parsing.
+  it('viewAllRecords: false beside a readScope stays accepted — the ordinary, honoured shape', () => {
+    const parsed = ObjectPermissionSchema.parse({
+      allowRead: true, viewAllRecords: false, readScope: 'own_and_reports',
+    });
+    expect(parsed.readScope).toBe('own_and_reports');
+  });
+
+  it('a readScope with the super-user bits merely ABSENT stays accepted (the default is false)', () => {
+    const parsed = ObjectPermissionSchema.parse({ allowRead: true, readScope: 'unit' });
+    expect(parsed.readScope).toBe('unit');
+    expect(parsed.viewAllRecords).toBe(false);
+  });
+
+  it('viewAllRecords: true ALONE stays accepted — the refusal is about the pair, not the bit', () => {
+    const parsed = ObjectPermissionSchema.parse({ allowRead: true, viewAllRecords: true });
+    expect(parsed.viewAllRecords).toBe(true);
+  });
+
+  it('writeScope beside viewAllRecords: true stays ACCEPTED — viewAllRecords does not bypass write', () => {
+    // The asymmetry is read off the resolver, not assumed: the write
+    // short-circuit is `opClass === 'write' && op.modifyAllRecords`, which does
+    // not name `viewAllRecords`. Refusing this pair would delete a grant the
+    // platform honours.
+    const parsed = ObjectPermissionSchema.parse({
+      allowRead: true, allowEdit: true, viewAllRecords: true, writeScope: 'unit',
+    });
+    expect(parsed.writeScope).toBe('unit');
+  });
+
+  it('the WIRE surface stays tolerant — an older server may still emit a stored pair', () => {
+    // #4001's authorable/wire split: the refusal rides on the AUTHORING
+    // wrapper only. `EffectiveObjectPermissionSchema` extends the unrefined
+    // base, so a response carrying a pair stored before this refusal landed
+    // does not crash an older or newer client.
+    const parsed = EffectiveObjectPermissionSchema.parse({
+      allowRead: true, viewAllRecords: true, readScope: 'own_and_reports',
+    });
+    expect(parsed.readScope).toBe('own_and_reports');
+  });
+
+  it('the refusal does not disturb the shape read-through the residue stage publishes', () => {
+    // `acceptRetiredDefaultResidue` re-attaches a read-through `shape`; the
+    // refinement rides INSIDE it precisely so that stays true (a
+    // `.superRefine()` on the pipe would have dropped it).
+    expect(Object.keys(ObjectPermissionSchema.shape)).toContain('readScope');
+    expect(Object.keys(ObjectPermissionSchema.shape)).toContain('viewAllRecords');
+  });
+});
+
 describe('allowRestore / allowPurge are RETIRED (#12497, ADR-0049)', () => {
   // Removed by the 2026-08-26 maintainer ruling accepting #1883's
   // recommendation B: the `restore`/`purge` ObjectQL operations the bits
