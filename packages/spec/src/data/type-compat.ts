@@ -217,9 +217,36 @@ export function canonicalizeSqlType(rawType: string, dialect?: SqlDialect): Cano
 
   // `timestamp with time zone` collapsed to `timestamp` above; `timestamptz`
   // handled via alias.
+  // Own-property guard on BOTH halves. Either table is a plain object literal,
+  // so a bare index resolves `Object.prototype`'s members for an off-vocabulary
+  // `rawType`: `constructor` handed the `Object` FUNCTION out of a signature
+  // that admits only `CanonicalSqlType` string literals, and it passed the
+  // `if (...)` truthiness test on the way. `rawType` is uncontrolled here — it
+  // arrives from live database introspection — so the reach is real for a
+  // plain-JS caller, which has no compile-time narrowing at all.
+  //
+  // The refusal value is this function's own declared one, `'unknown'` (the
+  // trailing `return`), reached by simply not taking the alias branch. The
+  // guard narrows: every alias that answered before is an own key.
+  //
+  // ⛔ Not a null-prototype table, for the reason the sibling guards in
+  // `src/shared/value-domain.zod.ts` and `src/data/driver/config-registry.zod.ts`
+  // record: a `__proto__: null` object literal does not type-check against the
+  // `Record<…>` annotation at all (TS2353), and the
+  // `Object.assign(Object.create(null), …)` spelling that does compile silently
+  // COSTS the annotation's exhaustiveness check (TS2741 stopped firing for a
+  // table missing a member). A quiet failure is worse than a loud one.
+  //
+  // ⛔ Not a list of prototype member names either — a guard that names words
+  // does not survive the next prototype member, and `toString` / `valueOf` are
+  // quiet here only by the accident that `t` is lower-cased first.
   const dialectMap = dialect ? DIALECT_ALIASES[dialect] : undefined;
-  if (dialectMap && dialectMap[t]) return dialectMap[t];
-  if (BASE_ALIASES[t]) return BASE_ALIASES[t];
+  if (dialectMap && Object.prototype.hasOwnProperty.call(dialectMap, t) && dialectMap[t]) {
+    return dialectMap[t];
+  }
+  if (Object.prototype.hasOwnProperty.call(BASE_ALIASES, t) && BASE_ALIASES[t]) {
+    return BASE_ALIASES[t];
+  }
 
   // `timestamp with time zone` may survive as `timestamp` already mapped;
   // anything else is unknown.

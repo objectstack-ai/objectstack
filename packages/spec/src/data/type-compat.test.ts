@@ -5,6 +5,7 @@ import {
   canonicalizeSqlType,
   suggestFieldTypeForSqlType,
   isCompatible,
+  type SqlDialect,
 } from './type-compat';
 import { suggestFieldType } from '../shared/suggestions.zod';
 
@@ -152,5 +153,90 @@ describe('isCompatible', () => {
     expect(isCompatible('geometry', 'text')).toBe('lossy');
     expect(isCompatible('geometry', 'json')).toBe('lossy');
     expect(isCompatible('geometry', 'number')).toBe(false);
+  });
+});
+
+/**
+ * The Object.prototype fall-through pin. Its POPULATION is the point: the
+ * suite's other cases iterate the canonical vocabulary only, which is
+ * precisely the population that behaves, and that is why this site sat green
+ * while `canonicalizeSqlType('constructor')` returned the `Object` FUNCTION
+ * out of a signature that admits only `CanonicalSqlType` string literals.
+ *
+ * `rawType` is uncontrolled — it arrives from live database introspection —
+ * so the population below is the reachable one, not a contrived one.
+ */
+describe('canonicalizeSqlType — Object.prototype fall-through', () => {
+  // Fixed at five: the three prototype members a lower-cased key can name or
+  // nearly name, the assignment-shaped one, and a plain unknown word that
+  // names nothing at all. Four is not four-fifths of this pin.
+  const POPULATION = ['constructor', 'toString', 'valueOf', '__proto__', 'nope'] as const;
+  // Every member of the declared `SqlDialect` union, so the dialect half of the
+  // guarded line is covered for each table it can select — including the two
+  // the union declares but `DIALECT_ALIASES` does not populate, which fall
+  // through to the base map and must answer just as safely.
+  const DIALECTS: readonly SqlDialect[] = [
+    'postgres', 'mysql', 'sqlite', 'snowflake', 'bigquery', 'mongo',
+  ];
+
+  // The declared return type is a private union, so the pin names it here.
+  // ⛔ This list pins the SIGNATURE, not today's answers: a member added to
+  // `CanonicalSqlType` belongs here too.
+  const CANONICAL: readonly string[] = [
+    'text', 'integer', 'bigint', 'decimal', 'float', 'boolean', 'date', 'time',
+    'datetime', 'json', 'uuid', 'binary', 'enum', 'array', 'vector', 'unknown',
+  ];
+
+  it.each(POPULATION)('%s resolves to a declared CanonicalSqlType, never a prototype member', (word) => {
+    // The assertion is on the SHAPE of the answer, not on which word it is:
+    // what the defect produced was a `function`, and pinning "is a declared
+    // member of the union" survives a vocabulary change that pinning the
+    // string `'unknown'` would break.
+    expect(typeof canonicalizeSqlType(word)).toBe('string');
+    expect(CANONICAL).toContain(canonicalizeSqlType(word));
+    for (const dialect of DIALECTS) {
+      expect(typeof canonicalizeSqlType(word, dialect)).toBe('string');
+      expect(CANONICAL).toContain(canonicalizeSqlType(word, dialect));
+    }
+  });
+
+  it('`constructor` is refused with this function\'s own declared refusal value', () => {
+    // `'unknown'` is the trailing `return` of the function itself, ⛔ not a
+    // value invented for the fix.
+    expect(canonicalizeSqlType('constructor')).toBe('unknown');
+    for (const dialect of DIALECTS) expect(canonicalizeSqlType('constructor', dialect)).toBe('unknown');
+  });
+
+  it('`__proto__` answers `array` from the array-notation rule, ahead of either table', () => {
+    // Not a fall-through: `__proto__` starts with `_`, which is Postgres array
+    // notation (`_int4`), and that branch returns before any lookup. Recorded
+    // so a later reader does not mistake a legitimate declared answer for the
+    // defect, and so the array rule cannot be quietly dropped.
+    expect(canonicalizeSqlType('__proto__')).toBe('array');
+    expect(canonicalizeSqlType('_int4')).toBe('array');
+  });
+
+  it('the published sibling accessors stay total over the same population', () => {
+    // The defect was not confined to this function's own return: a
+    // non-`CanonicalSqlType` reaches `CANONICAL_TO_FIELD[canonical]`, which is
+    // `undefined`, and both accessors below threw a TypeError on the member
+    // read. That is the consequence a plain-JS caller actually meets.
+    for (const word of POPULATION) {
+      expect(() => suggestFieldTypeForSqlType(word)).not.toThrow();
+      expect(() => isCompatible(word, 'text')).not.toThrow();
+      for (const dialect of DIALECTS) {
+        expect(() => suggestFieldTypeForSqlType(word, dialect)).not.toThrow();
+        expect(() => isCompatible(word, 'text', dialect)).not.toThrow();
+      }
+    }
+  });
+
+  it('lit control — the canonical vocabulary is untouched by the guard', () => {
+    // If the guard narrowed anything it should not, these go red. Both halves
+    // of the guarded line are represented: the base map and a dialect map.
+    expect(canonicalizeSqlType('varchar')).toBe('text');
+    expect(canonicalizeSqlType('numeric(10,2)')).toBe('decimal');
+    expect(canonicalizeSqlType('timestamptz', 'postgres')).toBe('datetime');
+    expect(canonicalizeSqlType('objectid', 'mongo')).toBe('text');
   });
 });

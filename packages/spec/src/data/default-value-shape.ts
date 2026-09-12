@@ -294,5 +294,25 @@ export function suggestDefaultValueToken(dv: unknown): DefaultValueToken | undef
   // guard is a type error, not just awkward.
   const key = dv.trim().toLowerCase();
   if (isRuntimeDefaultToken(dv)) return undefined;
+  // Own-property guard: the table is a plain object literal, so a bare index
+  // resolves `Object.prototype`'s members for an off-vocabulary `dv` —
+  // `constructor` handed back the `Object` FUNCTION and `__proto__`
+  // `Object.prototype` itself, out of a signature that admits only a
+  // `DefaultValueToken` string or `undefined`. `toString` / `valueOf` are quiet
+  // here only because `key` is lower-cased first (`tostring` names nothing),
+  // which is an accident of casing and ⛔ not a guard — it does not cover the
+  // two prototype members whose names are already lower-case, and it would not
+  // cover a future one.
+  //
+  // The refusal value is this function's own declared one, `undefined`, read
+  // from the return type. The guard narrows: every suggestion that answered
+  // before is an own key.
+  //
+  // ⛔ Not a null-prototype table (TS2353 against the annotation, or a silent
+  // loss of its exhaustiveness check via `Object.assign(Object.create(null), …)`;
+  // measured in `src/data/driver/config-registry.zod.ts`'s sibling guard) and
+  // ⛔ not a list of prototype member names, which the next prototype member
+  // defeats.
+  if (!Object.prototype.hasOwnProperty.call(DEFAULT_VALUE_TOKEN_SUGGESTIONS, key)) return undefined;
   return DEFAULT_VALUE_TOKEN_SUGGESTIONS[key];
 }

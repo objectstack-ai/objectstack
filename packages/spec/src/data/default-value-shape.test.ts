@@ -17,8 +17,10 @@ import {
   checkLiteralDefaultValue,
   discriminateDefaultValueShape,
   isExpressionEnvelopeDefault,
+  suggestDefaultValueToken,
   type DefaultValueShape,
 } from './default-value-shape';
+import { DEFAULT_VALUE_TOKENS } from './default-value-tokens';
 
 describe('#7127 discriminateDefaultValueShape — engine-parity classification', () => {
   const CASES: Array<{ label: string; dv: unknown; shape: DefaultValueShape }> = [
@@ -173,5 +175,42 @@ describe('#7127 checkLiteralDefaultValue — the shared stored-form literal chec
     expect(v.ok).toBe(false);
     expect(v.detail).toContain('ISO-8601 instant');
     expect(v.detail).not.toContain('Unrecognized key');
+  });
+});
+
+/**
+ * The Object.prototype fall-through pin. Its POPULATION is the point: the
+ * suite's other suggestion cases iterate the canonical near-miss vocabulary
+ * only — precisely the population that behaves — which is why this site sat
+ * green while `suggestDefaultValueToken('constructor')` returned the `Object`
+ * FUNCTION and `suggestDefaultValueToken('__proto__')` returned
+ * `Object.prototype`, out of a signature declared `DefaultValueToken |
+ * undefined`.
+ */
+describe('suggestDefaultValueToken — Object.prototype fall-through', () => {
+  // Fixed at five. `toString` / `valueOf` are quiet here only because the key
+  // is lower-cased first, which is an accident of casing and ⛔ not a guard —
+  // they belong in the population precisely so the day that stops being true
+  // is a red test and not a silent regression.
+  const POPULATION = ['constructor', 'toString', 'valueOf', '__proto__', 'nope'] as const;
+
+  it.each(POPULATION)('%s answers this function\'s own declared refusal value', (word) => {
+    // `undefined` is read from the declared return type, ⛔ not invented here.
+    expect(suggestDefaultValueToken(word)).toBeUndefined();
+  });
+
+  it.each(POPULATION)('%s never yields a non-string, whatever the answer is', (word) => {
+    // Pins the SILENCE rather than today's `undefined`: should a prototype
+    // member ever be shadowed by a real own key, this still holds; what it
+    // refuses is a function or an object escaping the string union.
+    const out = suggestDefaultValueToken(word);
+    expect(out === undefined || DEFAULT_VALUE_TOKENS.includes(out)).toBe(true);
+  });
+
+  it('lit control — the real near-miss vocabulary still answers', () => {
+    // Without this, a guard that refused everything would pass the cases above.
+    expect(suggestDefaultValueToken('currentuser')).toBe('current_user');
+    expect(suggestDefaultValueToken('{now}')).toBe('NOW()');
+    expect(suggestDefaultValueToken('current_time')).toBe('NOW()');
   });
 });
