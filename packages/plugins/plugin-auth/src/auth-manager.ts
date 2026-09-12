@@ -306,6 +306,21 @@ function readSsoOnlyEnv(): boolean | undefined {
 }
 
 /**
+ * [#16384] The auth plugin's shipped `basePath` default — the ONE place this
+ * literal is written. Before this card it existed independently at four
+ * sites: this file's own `configuredBasePath()` fallback below, plus three in
+ * `auth-plugin.ts` (the constructor default and two later re-derivations of
+ * "what if the caller cleared `basePath`?"). A future edit to one could drift
+ * from the other three silently — `configuredBasePath()`'s own fallback is
+ * unfalsifiable by construction on the live path (`AuthPlugin` always supplies
+ * `basePath`, per its constructor default below), so no runtime test could
+ * have caught that drift. Every one of the four readers now evaluates BYTE
+ * IDENTICALLY to before this constant existed — see `configuredBasePath()`'s
+ * docblock for the normalisation chain this does NOT touch.
+ */
+export const DEFAULT_AUTH_BASE_PATH = '/api/v1/auth';
+
+/**
  * Whether this runtime serves the HTTP MCP surface (`/api/v1/mcp`).
  * Delegates to the platform-wide decision point (`isMcpServerEnabled` in
  * `@objectstack/types`): default ON, explicit `false` opts out — so the
@@ -5667,6 +5682,9 @@ export class AuthManager {
    * configured. Unchanged from before this card — only the reading of it moved
    * here, so `getBasePath()` and this cannot drift apart by accident.
    *
+   * [#16384] The fallback is `DEFAULT_AUTH_BASE_PATH`, not a re-typed literal
+   * — see that constant's docblock above.
+   *
    * ## ⛔ Never normalise here
    *
    * better-auth stamps the OAuth access-token `iss` from `ctx.context.baseURL`,
@@ -5692,7 +5710,7 @@ export class AuthManager {
    * #16399's decision, not this card's.
    */
   private configuredBasePath(): string {
-    return this.config.basePath || '/api/v1/auth';
+    return this.config.basePath || DEFAULT_AUTH_BASE_PATH;
   }
 
   /**

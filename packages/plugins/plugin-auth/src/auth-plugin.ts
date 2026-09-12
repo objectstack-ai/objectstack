@@ -35,6 +35,9 @@ import {
   AuthManager,
   resolveOidcProviderEnabled,
   readMcpServerEnabledEnv,
+  // [#16384] The one place `'/api/v1/auth'` is written — see its docblock in
+  // auth-manager.ts. This file no longer carries an independent copy.
+  DEFAULT_AUTH_BASE_PATH,
   type AuthManagerOptions,
 } from './auth-manager.js';
 import {
@@ -323,7 +326,7 @@ export class AuthPlugin implements Plugin {
   constructor(options: AuthPluginOptions = {}) {
     this.options = {
       registerRoutes: true,
-      basePath: '/api/v1/auth',
+      basePath: DEFAULT_AUTH_BASE_PATH,
       ...options
     };
   }
@@ -2023,7 +2026,7 @@ export class AuthPlugin implements Plugin {
   private registerAuthRoutes(httpServer: IHttpServer, ctx: PluginContext): void {
     if (!this.authManager) return;
 
-    const basePath = this.options.basePath || '/api/v1/auth';
+    const basePath = this.options.basePath || DEFAULT_AUTH_BASE_PATH;
 
     // Get raw Hono app to use native wildcard routing
     // Type assertion is safe here because we explicitly require Hono server as a dependency
@@ -3096,7 +3099,7 @@ export class AuthPlugin implements Plugin {
     // (including every MCP client bootstrapping from protected-resource
     // metadata) request `/.well-known/oauth-authorization-server/api/v1/auth`
     // — alias it to the same document.
-    const basePath = (this.options.basePath ?? '/api/v1/auth').replace(/\/$/, '');
+    const basePath = (this.options.basePath ?? DEFAULT_AUTH_BASE_PATH).replace(/\/$/, '');
     rawApp.get(`/.well-known/oauth-authorization-server${basePath}`, (c: any) =>
       withDiscoveryCache(authServerHandler, c.req.raw),
     );
