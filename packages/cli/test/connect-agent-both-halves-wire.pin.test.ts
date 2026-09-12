@@ -96,11 +96,11 @@ function composedRegistry(includeAccountHalf = true): SchemaRegistry {
     registry.registerApp(structuredClone(ACCOUNT_APP), '@objectstack/platform-objects');
 
     for (const contribution of SETUP_NAV_CONTRIBUTIONS) {
-        registry.registerAppNavContribution(contribution as AnyRec, '@objectstack/platform-objects');
+        registry.registerAppNavContribution(contribution as any, '@objectstack/platform-objects');
     }
     for (const contribution of bundleContributions()) {
         if (!includeAccountHalf && contribution.app !== 'setup') continue;
-        registry.registerAppNavContribution(contribution, '@objectstack/mcp');
+        registry.registerAppNavContribution(contribution as any, '@objectstack/mcp');
     }
     return registry;
 }
@@ -146,7 +146,7 @@ function setup(perms: string[], includeAccountHalf = true) {
         findData: vi.fn().mockResolvedValue([]),
     };
     const rest: AnyRec = new RestServer(
-        createMockServer() as AnyRec, protocol as AnyRec, { api: { requireAuth: false } } as AnyRec,
+        createMockServer() as any, protocol as any, { api: { requireAuth: false } } as any,
     );
     // The RBAC filter only runs for a RESOLVED caller; stubbing the exec
     // context is this repo's established pattern for exercising it by route.
