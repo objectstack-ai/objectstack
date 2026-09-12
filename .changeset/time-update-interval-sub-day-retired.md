@@ -5,7 +5,11 @@
 
 fix(spec)!: `TimeUpdateInterval` retires its three sub-day intervals and derives its members from `DateGranularity` (#17296)
 
-<!-- adr-0087: required (retirement) `second`, `minute` and `hour` leave a published closed enum that reaches TWO authored sites: an analytics request body's `timeDimensions[].granularity`, and an analytics cube dimension's `granularities[]`, which is stored metadata (`defineCube()` / `defineStack({ analyticsCubes })`). The stored half is rewritten by the D2 conversion `cube-sub-day-granularities-removed`, which strips the retired members from `analyticsCubes[].dimensions.<dim>.granularities` and drops the key entirely when nothing coarser remains (an empty list would read as "offers none", the absent key as "offers all"). The semantic entry `time-update-interval-sub-day-retired` carries the half no transform can decide: a dimension that offered ONLY sub-day intervals needs an author to say what it actually serves. `day`, `week`, `month`, `quarter` and `year` are untouched and parse byte-identically. -->
+<!-- adr-0087: registered time-update-interval-sub-day-retired, cube-sub-day-granularities-removed -->
+
+## ADR-0087 disposition
+
+`second`, `minute` and `hour` leave a published closed enum that reaches TWO authored sites: an analytics request body's `timeDimensions[].granularity`, and an analytics cube dimension's `granularities[]`, which is stored metadata (`defineCube()` / `defineStack({ analyticsCubes })`). The stored half is rewritten by the D2 conversion `cube-sub-day-granularities-removed`, which strips the retired members from `analyticsCubes[].dimensions.<dim>.granularities` and drops the key entirely when nothing coarser remains (an empty list would read as "offers none", the absent key as "offers all"). The semantic entry `time-update-interval-sub-day-retired` carries the half no transform can decide: a dimension that offered ONLY sub-day intervals needs an author to say what it actually serves. `day`, `week`, `month`, `quarter` and `year` are untouched and parse byte-identically.
 
 **BREAKING** for anyone authoring or sending `granularity: 'second'`,
 `'minute'` or `'hour'`, and for anyone importing the `TimeUpdateInterval`
