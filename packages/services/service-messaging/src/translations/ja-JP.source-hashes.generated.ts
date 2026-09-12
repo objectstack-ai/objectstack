@@ -58,8 +58,6 @@ export const jaJPGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_http_delivery.fields.url.label": "501585a180652bdf",
   "objects.sys_http_delivery.label": "302f263363fe99ab",
   "objects.sys_http_delivery.pluralLabel": "340f81dc6ea64987",
-  "objects.sys_inbox_message.fields.actor_id.help": "d395b4a79bed67f8",
-  "objects.sys_inbox_message.fields.actor_id.label": "b155813f8a7f06e3",
   "objects.sys_notification_delivery.description": "6e93eafd2b3ec57a",
   "objects.sys_notification_delivery.fields.attempts.label": "096d2dbc7038a926",
   "objects.sys_notification_delivery.fields.channel.label": "979883fe73ee88cb",
