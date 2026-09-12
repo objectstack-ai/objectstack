@@ -2007,7 +2007,8 @@ function metadataSurfaceFilesAt(rev, cwd) {
 
 const IDENT = '[A-Za-z_$][A-Za-z0-9_$]*';
 // A DOTTED MEMBER PATH: `oauth.applications.get`. The leading segments are the
-// object-literal nesting the member sits in; the last one is the member itself.
+// nesting the member sits in -- an object literal or a class (#17279); the last
+// one is the member itself.
 const MEMBER_PATH_RE = new RegExp(`^${IDENT}(?:\\.${IDENT})*$`);
 
 /**
@@ -2023,7 +2024,10 @@ const MEMBER_PATH_RE = new RegExp(`^${IDENT}(?:\\.${IDENT})*$`);
  * ⛔ A wider grammar over the old first-same-name reader would be strictly worse
  * than that refusal — writable but wrong — so `dotted` references are resolved
  * STRUCTURALLY (`resolveMemberPath`) and refused, never guessed, when the walk
- * finds zero or more than one candidate. ⛔ A line number is never the
+ * finds zero or more than one candidate. A leading segment names an object
+ * literal or a CLASS (#17279): reading only the first left `engine.ts#ObjectRepository.findOne`
+ * unwritable while the bare `engine.ts#findOne` answered about `ObjectQL.findOne`,
+ * which is #15627's defect surviving its own fix on the other container kind. ⛔ A line number is never the
  * disambiguator: this file's line numbers were measured to rot within one day.
  *
  * @returns {{ path: string, symbol: string, segments: string[], dotted: boolean }|null}
@@ -3143,9 +3147,11 @@ export function verifyTypeSurfaceOnly(refs, { base, head, cwd, bumps, packages, 
     '        <!-- adr-0087: not-required (type-surface-only ' +
     'packages/client/src/index.ts#queryDataset) why -->\n' +
     '      ...or, when the name is not unique in the file, as a DOTTED MEMBER PATH through the\n' +
-    '      object-literal nesting the member sits in (#15627):\n' +
+    '      nesting the member sits in -- an object literal (#15627) or a class (#17279):\n' +
     '        <!-- adr-0087: not-required (type-surface-only ' +
     'packages/client/src/index.ts#oauth.applications.get) why -->\n' +
+    '        <!-- adr-0087: not-required (type-surface-only ' +
+    'packages/objectql/src/engine.ts#ObjectRepository.findOne) why -->\n' +
     `      The symbol is what predicate 4 reads at BOTH revs${badRef ? ` (got: ${badRef})` : ''}.`;
 
   if (refs.length === 0) {
