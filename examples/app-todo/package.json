@@ -27,6 +27,7 @@
     "@objectstack/metadata": "workspace:*",
     "@objectstack/objectql": "workspace:^",
     "@objectstack/runtime": "workspace:^",
+    "@objectstack/service-i18n": "workspace:*",
     "@objectstack/service-knowledge": "workspace:*",
     "@objectstack/spec": "workspace:*"
   },
