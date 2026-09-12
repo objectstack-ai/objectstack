@@ -630,7 +630,7 @@ async function main(argv) {
 const SELF_TEST_BATTERIES = Object.freeze({
   'the token contract: the two spellings, and nothing else': 9,
   'the refusals: every route that must not reach the board': 20,
-  'the direction check: a stamp no act can have read': 20,
+  'the direction check: a stamp no act can have read': 22,
   'the substitution: one clock, read once, written everywhere': 9,
   'the read-back: what the transcript can actually prove': 11,
   'the CLI: the one decision a typo must never make': 12,
@@ -703,6 +703,8 @@ export function selfTest() {
   t('⛔ a PAST quoted stamp is untouched — the route this closes is one direction only', renderBody('Verdict {{NOW}} — on the board read {{WAS:2026-09-08T14:00Z}}.', NOW_MS).body.includes('board read 2026-09-08T14:00Z.'));
   t('⭐ BOUNDARY: a stamp equal to the act\'s OWN minute is ACCEPTED — a reading taken inside 06:37 is spelled 06:37Z', stampRefusals('read {{WAS:2026-09-10T06:37Z}}', NOW_MS).length === 0);
   t('⭐ …and the first minute the clock has NOT reached is refused', kinds('read {{WAS:2026-09-10T06:38Z}}', NOW_MS).includes('quoted-in-the-future'));
+  t('…the acceptance opens ON the tick: a clock standing exactly at 06:37:00 accepts 06:37Z', stampRefusals('read {{WAS:2026-09-10T06:37Z}}', Date.parse('2026-09-10T06:37:00Z')).length === 0);
+  t('…and one millisecond before it does not — the span must have STARTED, not be about to', kinds('read {{WAS:2026-09-10T06:37Z}}', Date.parse('2026-09-10T06:37:00Z') - 1).includes('quoted-in-the-future'));
   t('⛔ no forward skew window: 14 minutes ahead is refused though H56 tolerates 14 minutes of DRIFT', kinds('read {{WAS:2026-09-10T06:51Z}}', NOW_MS).includes('quoted-in-the-future') && H56_STAMP_TOLERANCE_MIN === 15);
   t('the grain is the stamp\'s own: 06:37:49Z is one second ahead of 06:37:48 and is refused', kinds('read {{WAS:2026-09-10T06:37:49Z}}', NOW_MS).includes('quoted-in-the-future'));
   t('…while the same instant spelled to the minute is not', stampRefusals('read {{WAS:2026-09-10T06:37Z}}', NOW_MS).length === 0);
