@@ -189,6 +189,20 @@ const identifiersIn = (expr: string): string[] => expr.match(/[A-Za-z_$][\w$]*/g
  * fold is called but not on the value handed over. Those three are asserted
  * directly, against fabricated sources, in the negative-control test below: a
  * guard that cannot fail is not a guard.
+ *
+ * ⚠️ Two BOUNDS, stated so the next reader knows which parts are proof and
+ * which are approximation — neither is a hole today, and both are places a
+ * future shape could outgrow this resolver rather than quietly defeat it:
+ *
+ *   - it follows EVERY identifier in the expression, so a composed expression
+ *     (`merge(a, b)`) passes as soon as any identifier it names reaches the
+ *     fold, even when the value handed over is the other one. Strictly narrower
+ *     than the `foldedElsewhere` case rejected below — there the fold-bearing
+ *     binding is not referenced at all — but it is source-level reachability,
+ *     not dataflow.
+ *   - {@link constBindingOf} takes the FIRST `const NAME =` in the file, so a
+ *     shadowed or re-declared binding resolves to the wrong one. Today each
+ *     command declares each of these names once.
  */
 const MAX_BINDING_HOPS = 4;
 
