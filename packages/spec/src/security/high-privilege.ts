@@ -42,11 +42,12 @@ function coerceRecord(v: unknown): Record<string, unknown> | undefined {
 export interface AnchorBindingContext {
   /**
    * Capability names declared by the packages installed in this stack — plain
-   * names, or declarations/registry rows carrying a `name`. Omit it (or pass an
-   * empty list) and the predicates refuse exactly as they did before the input
-   * existed.
+   * names, or declarations/`sys_capability` rows carrying a `name` (every other
+   * field on such a row is ignored, so a caller hands over what it already has
+   * and never transcribes). Omit it (or pass an empty list) and the predicates
+   * refuse exactly as they did before the input existed.
    */
-  declaredCapabilities?: Iterable<string | { name?: unknown }>;
+  declaredCapabilities?: Iterable<string | { name?: unknown; [key: string]: unknown }>;
 }
 
 /**

@@ -10,6 +10,7 @@
     "AdminScope (type)",
     "AdminScopeParsed (type)",
     "AdminScopeSchema (const)",
+    "AnchorBindingContext (interface)",
     "AuthzPosture (type)",
     "AuthzPostureSchema (const)",
     "CapabilityDeclaration (type)",
