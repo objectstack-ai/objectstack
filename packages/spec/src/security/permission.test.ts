@@ -236,11 +236,41 @@ describe('[#12840] the RETIRED DEFAULT parses as inert residue and strips (class
     // The helper contract: the residue value is the literal captured at
     // retirement time (`false`), compared by identity. Falsy near-misses are
     // NOT the emitted default and land on the tombstone like any authored value.
-    for (const wrong of [true, 0, '', null, 'false'] as const) {
-      const r = ObjectPermissionSchema.safeParse({ allowRestore: wrong } as never);
-      expect(r.success, `value ${JSON.stringify(wrong)} must NOT be tolerated`).toBe(false);
-      expect(r.error!.issues.map((i) => i.message).join('\n')).toContain('ObjectQL operation it claimed');
+    // [#17425] The full matrix, re-measured on this tree: NOT a truthy/falsy
+    // split — the string `'true'` and the number `1` are refused exactly like
+    // the string `'false'` and the number `0`, all with the same issue shape.
+    for (const wrong of [true, 0, 1, '', 'true', 'false', null] as const) {
+      for (const key of ['allowRestore', 'allowPurge'] as const) {
+        const r = ObjectPermissionSchema.safeParse({ [key]: wrong } as never);
+        expect(r.success, `value ${JSON.stringify(wrong)} must NOT be tolerated`).toBe(false);
+        const issue = r.error!.issues.find((i) => i.path.join('.') === key)!;
+        expect(issue, `${key}=${JSON.stringify(wrong)} must be refused AT ITS OWN PATH`).toBeDefined();
+        expect(issue.code).toBe('invalid_type');
+        expect((issue as unknown as { expected?: string }).expected).toBe('never');
+        expect(issue.message).toContain('ObjectQL operation it claimed');
+      }
     }
+  });
+
+  it('[#17425] the only post-parse observation left: an EXPLICIT `undefined` survives as an own key', () => {
+    // The consumer-facing claim this pins (prose on `ObjectPermissionSchema`):
+    // on data that came from JSON no post-parse guard can ever fire — `false`
+    // strips and every other JSON value throws, so the key is always
+    // `undefined`. But an in-memory TS/JS input carrying an explicit
+    // `undefined` — what spreading an object that once had the key produces —
+    // parses AND keeps the OWN key, so a presence check can still be true.
+    // ⛔ If a zod upgrade moves this, re-measure and rewrite the prose; do not
+    // relax the pin, because the prose is what consumers act on.
+    const parsed = ObjectPermissionSchema.parse({ allowRead: true, allowRestore: undefined } as never) as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(parsed, 'allowRestore')).toBe(true);
+    expect('allowRestore' in parsed).toBe(true);
+    expect(parsed.allowRestore).toBeUndefined();
+    // …and the two guards consumers were told to write stay dead regardless.
+    expect(parsed.allowRestore === true).toBe(false);
+    expect(Boolean(parsed.allowRestore)).toBe(false);
+    // JSON cannot spell it: a serialize round-trip drops the key again, which
+    // is why raw JSON sources can never reach this branch.
+    expect('allowRestore' in (JSON.parse(JSON.stringify(parsed)) as object)).toBe(false);
   });
 
   it('the residue strips inside a full permission-set / stack-shaped parse (the artifact path)', () => {
