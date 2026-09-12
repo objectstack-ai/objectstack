@@ -567,6 +567,8 @@ import {
   contractReviewHeadMatch,
   deliveryEvidence,
   deliveryEvidenceNote,
+  claimGovernance,
+  claimedBranches,
   governingClaim,
   isGateSemanticLabel,
   labelNames,
@@ -619,6 +621,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the exit register is distinct in every direction it must be': 6,
   'the argv contract and the board provenance (#16623)': 42,
   '#17366: the correction comment — the self-solvable exit, and the three things it is not': 65,
+  '#17149: a claim that parses to ZERO branches — malformed, never absent': 26,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -626,8 +629,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // Raised by exactly the one battery #16304 adds, again by exactly the one
 // #17302 adds, and again by exactly the one #17366 adds, so the roster's
 // existing slack is preserved rather than tightened or loosened as a side
-// effect.
-const SELF_TEST_BATTERY_FLOOR = 17;
+// effect, and once more by the one #17149 adds.
+const SELF_TEST_BATTERY_FLOOR = 18;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1042,6 +1045,20 @@ const CLAUSE2_CORRECTION_KEY_TEXT = 'Clause-②-correction';
  * is the claim comment. `missing` — a claim comment IS there and carries no
  * declaration line; the carrier exists and the line is what is owed.
  *
+ * ⭐ A THIRD fact sits underneath both of them, and it is not a reading of the
+ * declaration at all: WHICH claim comment is the carrier. The designated
+ * carrier is the GOVERNING claim, and governance is resolved by a branch parse
+ * — so a newest claim comment that names no parseable branch used to be
+ * discarded, silently handing this limb an OLDER claim's declaration to read.
+ * That is `claim-branch-unparsed`, and it is returned BEFORE any line is read
+ * from any comment, because every reading below it would be a reading of the
+ * wrong comment. It is neither of the two not-read states above and ⛔ never a
+ * `no`: an unparsed claim is an UNCLASSIFIED result, and the caller accounts it
+ * as UNJUDGED (exit 2) rather than as a verdict about this pair. The measured
+ * cost of the silence is on #16322 — the limb read a superseded `Clause-②: no`
+ * and exited 4 for two rounds — and its sharper half is the sibling that passed
+ * because the older claim happened to agree.
+ *
  * The predicate that separates them is `CLAIM_COMMENT_MARKER`, imported rather
  * than restated: a claim comment is one whose body carries a LINE BEGINNING
  * `Claim:` (or `Claimed:`, optionally blockquoted), and that one spelling is
@@ -1053,15 +1070,35 @@ const CLAUSE2_CORRECTION_KEY_TEXT = 'Clause-②-correction';
  *
  * @param {{ body?: string, created_at?: string }[]|null} commentRows — the REST
  *   comment rows, or `null` when the thread could NOT be read.
- * @returns {{ state: 'declared'|'malformed'|'misplaced'|'missing'|'absent'|'unreadable',
+ * @returns {{ state: 'declared'|'malformed'|'misplaced'|'missing'|'absent'|'unreadable'
+ *   |'claim-branch-unparsed',
  *   value?: 'yes'|'no', detail?: string, nearMissReason?: 'inline-key'|'spelling',
- *   correctionNote?: string }} — `correctionNote` rides alongside for exactly one
- *   purpose, the same way `nearMissReason` does: the rows below print it. ⛔ It is
- *   not part of the state union and no verdict, count or exit reads it.
+ *   correctionNote?: string, malformedClaim?: object, governingClaim?: object }} —
+ *   `correctionNote` rides alongside for exactly one purpose, the same way
+ *   `nearMissReason` does: the rows below print it. ⛔ It is not part of the state
+ *   union and no verdict, count or exit reads it. `malformedClaim` /
+ *   `governingClaim` ride the same way, on the `claim-branch-unparsed` state only,
+ *   so its sentence can name the comment and say what governance did instead.
  */
 export function cardDeclaration(commentRows) {
   if (!Array.isArray(commentRows)) return { state: 'unreadable' };
-  const claim = governingClaim(commentRows);
+  const governance = claimGovernance(commentRows);
+  // ⛔ FIRST, and ahead of the correction read (#17366) as well as of every
+  // line read below. When the newest claim comment parses to zero branches,
+  // `governing` is an OLDER claim or nothing at all — so the pool the reads
+  // below are built from is the wrong carrier, and a correction naming that
+  // older claim's id would be applied to it too. Every one of those readings
+  // would be about a comment the seat has already replaced, which is the
+  // silence this state exists to end. ⛔ Never resolved by guessing a branch
+  // out of the claim's prose: the reader is not widened here or anywhere.
+  if (governance.malformed) {
+    return {
+      state: 'claim-branch-unparsed',
+      malformedClaim: governance.malformed,
+      governingClaim: governance.governing,
+    };
+  }
+  const claim = governance.governing;
   const claimRows = commentRows.filter((row) => CLAIM_COMMENT_MARKER.test(String(row?.body ?? '')));
   // The governing claim is the one the board is waiting on; when no comment
   // names a branch, every claim-marked comment is still a claim carrier and is
@@ -1310,6 +1347,13 @@ function c2Sentence(d, head, fixed, notADecision) {
       return null;
     case 'unreadable':
       return null; // accounted as UNJUDGED by the caller — never silently clean.
+    case 'claim-branch-unparsed':
+      // Same posture, same reason: the carrier itself is unresolved, so this is
+      // UNJUDGED rather than a verdict about the pair, and `pairUnjudged` prints
+      // the whole sentence and raises exit 2. ⛔ Returning a C2 row here would
+      // make an unclassified result exit 4 — a verdict — which is exactly the
+      // reading the filing card refuses ('never a no').
+      return null;
     case 'misplaced':
       return (
         `${head} — the \`Clause-②\` declaration is MISPLACED: the fixed spelling appears on the ` +
@@ -1377,8 +1421,10 @@ function c2Sentence(d, head, fixed, notADecision) {
  * ⛔ Read through `cardDeclaration` — the same function, the same imported
  * `CLAIM_COMMENT_MARKER`, the same two spellings. Only a `declared` state on a
  * sibling's own claim comment is a carrier here: `misplaced`, `malformed`,
- * `missing`, `absent` and `unreadable` are all NOT declarations on the sibling
- * either, exactly as they are not on the subject card. Nothing about what
+ * `missing`, `absent`, `claim-branch-unparsed` and `unreadable` are all NOT
+ * declarations on the sibling either, exactly as they are not on the subject
+ * card — and the unparsed one least of all, since on that sibling this file
+ * cannot even say WHICH comment would have carried the line. Nothing about what
  * counts as an answer moves in this function; what moves is only which card is
  * being asked.
  *
@@ -1424,7 +1470,11 @@ export function siblingDeclarations(pair, pairs) {
  * protocol, so a dispatched card whose declaration line is missing reads
  * `missing` and keeps its C2 row and its exit 4. `malformed`, `misplaced` and
  * `missing` all mean a seat DID read this card and owes it something a
- * legitimate act can supply; none of them is covered here.
+ * legitimate act can supply; none of them is covered here. Neither is
+ * `claim-branch-unparsed`, and for a sharper reason: that state means this file
+ * could not resolve which comment is the carrier AT ALL, so borrowing a
+ * sibling's declaration would answer a question this card has not yet been able
+ * to ask. It is UNJUDGED (exit 2), which the caller reaches before any row.
  */
 export function readsSiblingDeclaration(pair, pairs) {
   if (cardDeclaration(pair?.cardComments ?? null).state !== 'absent') return false;
@@ -2401,9 +2451,12 @@ export function pairNotes(pair, pairs = null) {
  *
  * The tally reads the SAME `cardDeclaration` the rows read, so a count can
  * never disagree with the rows printed under it. `declared`, `misplaced`,
- * `malformed` and `unreadable` are counted into neither — each is its own
- * reading with its own row, and an unreadable thread is UNJUDGED rather than
- * either not-read state.
+ * `malformed`, `claim-branch-unparsed` and `unreadable` are counted into
+ * neither — each is its own reading with its own row, and an unreadable thread
+ * or an unresolvable claim carrier is UNJUDGED rather than either not-read
+ * state. ⛔ Counting an unparsed claim under `absent` would be the old silence
+ * wearing a number: it would say "this card has no claim comment" about a card
+ * that has one.
  *
  * ⭐ Since #16304 the `absent` population is split once more, for the same
  * reason it was split from `missing` in the first place: a card with no claim
@@ -2429,6 +2482,47 @@ export function declarationLimbTally(pairs) {
 }
 
 /**
+ * The UNJUDGED sentence for a card whose newest claim comment parses to ZERO
+ * branches (#17149) — the declaration limb's carrier, unresolved.
+ *
+ * ⚠️ It reports a CARRIER problem and says nothing about the declaration: the
+ * card may well carry a correctly-spelled line, and this run cannot tell
+ * whether it is the current one. Reporting it as `missing` would send the seat
+ * looking for a line that is there; reporting it as a `no` would manufacture a
+ * decision nobody made. The sentence names the comment, says what governance
+ * did instead, and gives the one remedy — a `Branch:` line of its own.
+ *
+ * ⛔ Nothing here widens the branch reader. The remedy is on the WRITE side,
+ * which is the same call the sibling script's H34 makes for the claim marker
+ * and for the same standing ruling (⛔ 不放宽谓词).
+ */
+export function claimBranchUnparsedGap(pair, decl) {
+  const m = decl?.malformedClaim ?? {};
+  const governing = decl?.governingClaim ?? null;
+  const which = m.id === null || m.id === undefined ? 'a comment carrying no readable id' : `comment ${m.id}`;
+  const instead = governing
+    ? `governance FELL BACK to an OLDER claim (${governing.createdAt ?? 'undated'}, naming ` +
+      `${(governing.branches ?? []).map((b) => `\`${b}\``).join(', ') || 'no branch'}), so the ` +
+      'declaration this run would otherwise have read is that older comment\'s — a SUPERSEDED ' +
+      'reading, and when it happens to agree with the current one the result is a green that is ' +
+      'right for the wrong reason'
+    : 'NOTHING governs this card, so the limb would otherwise have read `absent` — "no claim ' +
+      'comment was written", which is false: one was';
+  return (
+    `pair PR #${pair?.pr} / card #${pair?.card} — UNJUDGED: the card's NEWEST claim comment ` +
+    `(${which}, ${m.createdAt ?? 'undated'}) matches the claim marker but its \`Branch:\` directive ` +
+    `parses to ZERO branches, so the carrier this limb reads cannot be resolved. ${instead}. ` +
+    'An unparsed claim is an UNCLASSIFIED result, ⛔ never an absent declaration and ⛔ never a ' +
+    'declared `no` — this pair is missing from the readings above, not clean in them and not ' +
+    'adverse in them. Remedy — the CLAIMING SEAT, with one comment: name the branch on a ' +
+    '`Branch:` line of its OWN (`` Branch: `claude/issue-<n>-<slug>` ``), ⛔ not inside the ' +
+    '`Claim:` sentence, which no reader parses. ⚠️ A whole shift of claims reading this way is a ' +
+    'SEAT TEMPLATE fault, not a typo. ' +
+    NEVER_WRITES
+  );
+}
+
+/**
  * What this pair could NOT be judged on — the #4690 half.
  *
  * Returned separately from the rows so a caller can never render an incomplete
@@ -2440,6 +2534,14 @@ export function pairUnjudged(pair) {
   if (!Array.isArray(pair?.cardLabels)) gaps.push(`card #${pair?.card}'s labels`);
   if (!Array.isArray(pair?.prLabels)) gaps.push(`PR #${pair?.pr}'s labels`);
   if (!Array.isArray(pair?.cardComments)) gaps.push(`card #${pair?.card}'s comment thread`);
+  // The thread WAS read and the carrier still cannot be resolved (#17149).
+  // Placed after the read checks so an unread thread is never reported as a
+  // malformed claim, and before every limb below it because each of those
+  // reads a comment chosen by the governance this state says is broken.
+  if (gaps.length === 0) {
+    const decl = cardDeclaration(pair?.cardComments ?? null);
+    if (decl.state === 'claim-branch-unparsed') return claimBranchUnparsedGap(pair, decl);
+  }
   // The gate history is owed by C3 CANDIDATES only — the cost bound and the
   // accounting read one predicate, so a pair can never owe a stream the live
   // reader was never going to fetch. An unread stream is not a never-hung gate.
@@ -4222,6 +4324,101 @@ export function selfTest() {
   t('⛔ no new exit code was minted for the correction reading', new Set([EXIT_OK, EXIT_USAGE, EXIT_INCOMPLETE, EXIT_PREREQUISITE_NOT_MET, EXIT_PAIR_ADVERSE]).size === 5);
   t('…and a repaired pair answers with the SAME code a never-broken one does', pairRows(repairedPair).length === pairRows(pair({ cardComments: [CLAIMED('Clause-②: no')] })).length);
 
+  // -- #17149: a claim that parses to ZERO branches ---------------------------
+  //
+  // The declaration limb's carrier is the GOVERNING claim, and governance is
+  // resolved by a branch parse. A newest claim comment naming no parseable
+  // branch used to be discarded, and this file then read a declaration off a
+  // comment the seat had already replaced — silently, and in BOTH directions:
+  // wrong when the two disagreed, and right-for-the-wrong-reason when they
+  // agreed. The fixtures below are the MEASURED bodies, quoted rather than
+  // paraphrased, so a future widening of the branch reader cannot make this
+  // battery pass by accident.
+  battery('#17149: a claim that parses to ZERO branches — malformed, never absent');
+  // Card #16322, comments 5593513389 (2026-09-08T23:46:51Z) and 5594909614
+  // (2026-09-09T02:35:21Z) as posted: the branch named INSIDE the `Claim:`
+  // sentence, with no `Branch:` line anywhere. The two declare OPPOSITE values,
+  // which is what made the fallback visible at all.
+  const INLINE_OLD = {
+    id: 5593513389,
+    created_at: '2026-09-08T23:46:51Z',
+    body:
+      'Claim: session_01ADLdAs2pVcH17h9tZKWMBg — branch `claude/issue-16322-analytics-daterange-closed-vocabulary-drivers`\n\n' +
+      'Clause-②: no\n',
+  };
+  const INLINE_NEW = {
+    id: 5594909614,
+    created_at: '2026-09-09T02:35:21Z',
+    body:
+      'Claim: session_01ADLdAs2pVcH17h9tZKWMBg — branch `claude/issue-16322-analytics-daterange-closed-vocabulary-drivers`\n\n' +
+      'Clause-②: yes\n',
+  };
+  // The live board, 2026-09-12T02:53Z: the same spelling, a different seat's
+  // template, four claims inside three seconds. Card #16175's newest claim is
+  // branchless while its 2026-09-06 claim parses — and names a DIFFERENT branch.
+  const LIVE_BRANCHLESS = {
+    id: 5642984850,
+    created_at: '2026-09-12T02:53:06Z',
+    body: 'Claim: session_012GKcPZbMoGq7WPzKLfRBTU · claude/issue-16175-staleness-mtime-false-refusal\nClause-②: no\n',
+  };
+  const LIVE_PARSES = {
+    id: 5557414924,
+    created_at: '2026-09-06T06:19:06Z',
+    body: 'Claim: PM loop\nBranch: `claude/issue-16175-regen-sibling-stale-rules`\nClause-②: no\n',
+  };
+  const INLINE_THREAD = [INLINE_OLD, INLINE_NEW];
+  const unparsedDecl = cardDeclaration(INLINE_THREAD);
+  t('⭐ the measured inline spelling reads CLAIM-BRANCH-UNPARSED — the carrier could not be resolved', unparsedDecl.state === 'claim-branch-unparsed');
+  t('⛔ …and NOT `declared`: the line that IS on the thread belongs to a comment this run cannot confirm is current', unparsedDecl.state !== 'declared');
+  t('⛔ …nor `absent`, which would say no claim comment was written — one was', unparsedDecl.state !== 'absent');
+  t('⛔ …nor `missing`, which would send the seat looking for a line that is there', unparsedDecl.state !== 'missing');
+  t('…and it carries NO value — an unclassified result is never a reading', unparsedDecl.value === undefined);
+  t('the state names the comment it could not parse', unparsedDecl.malformedClaim?.id === 5594909614);
+  // The BEFORE-state, quantified rather than recalled: both comments carry a
+  // readable line, and they DISAGREE. That is why reading the wrong one was a
+  // wrong answer and not merely an unlucky one.
+  t('⭐ the superseded comment carried a readable declaration, and the two DISAGREE', readClause2Line(INLINE_OLD.body)?.value === 'no' && readClause2Line(INLINE_NEW.body)?.value === 'yes');
+  // The reading PRINTS, and it is UNJUDGED (exit 2) rather than a verdict.
+  const unparsedPair = pair({ cardComments: INLINE_THREAD });
+  const unparsedGap = pairUnjudged(unparsedPair);
+  t('⭐ the pair is UNJUDGED and the reading prints in full — ⛔ never silence', typeof unparsedGap === 'string' && unparsedGap.length > 0);
+  t('…naming the comment id, so a reader can open it', says(unparsedGap, '5594909614'));
+  t('…and the remedy, which is a `Branch:` line of its OWN', says(unparsedGap, '`Branch:` line of its OWN'));
+  t('…and saying in as many words that this is not a declared `no`', says(unparsedGap, 'never a declared `no`'));
+  t('…and that a whole shift reading this way is a TEMPLATE fault rather than a typo', says(unparsedGap, 'SEAT TEMPLATE fault'));
+  t('⛔ and it raises NO C2 finding — an unclassified result must never be rendered as an adverse verdict', pairRows(unparsedPair).every((r) => r.code !== 'C2'));
+  t('⛔ nor any other finding row on this pair', pairRows(unparsedPair).length === 0);
+  // The live specimen, and the fallback shape at its sharpest: the older claim
+  // names a DIFFERENT branch, so every reader downstream probes the wrong ref.
+  const liveDecl = cardDeclaration([LIVE_PARSES, LIVE_BRANCHLESS]);
+  t('⭐ the live 2026-09-12 specimen reads the same way', liveDecl.state === 'claim-branch-unparsed');
+  t('…and the state names the older claim governance would have fallen back to', liveDecl.governingClaim?.createdAt === '2026-09-06T06:19:06Z');
+  t('⚠️ …whose branch is a DIFFERENT one, so the fallback is not even about the same work', liveDecl.governingClaim?.branches.join(',') === 'claude/issue-16175-regen-sibling-stale-rules');
+  t('…and the printed gap names that older claim rather than leaving the reader to guess', says(pairUnjudged(pair({ cardComments: [LIVE_PARSES, LIVE_BRANCHLESS] })), 'claude/issue-16175-regen-sibling-stale-rules'));
+  // CONTROLS — the accept set did not move in either direction.
+  t('⛔ CONTROL: a well-formed newest claim still governs, and its value is read', cardDeclaration([
+    { id: 1, created_at: '2026-08-30T09:00:00Z', body: 'Claim: old\nBranch: `claude/issue-1-old`\nClause-②: yes' },
+    { id: 2, created_at: '2026-08-31T09:00:00Z', body: 'Claim: new\nBranch: `claude/issue-1-new`\nClause-②: no' },
+  ]).value === 'no');
+  t('⛔ CONTROL: an OLDER branchless claim is spent and raises nothing — governance is correct', cardDeclaration([
+    { id: 1, created_at: '2026-08-30T09:00:00Z', body: 'Claim: session_x · claude/issue-1-old\nClause-②: yes' },
+    { id: 2, created_at: '2026-08-31T09:00:00Z', body: 'Claim: new\nBranch: `claude/issue-1-new`\nClause-②: no' },
+  ]).state === 'declared');
+  t('⛔ CONTROL: #16170\'s bulleted `Branch:` directive still parses, so its card is unaffected', cardDeclaration([
+    { id: 1, created_at: '2026-08-31T09:00:00Z', body: 'Claim: PM loop\n- Branch: `claude/issue-15511-zh-gap-helptext`\nClause-②: no' },
+  ]).state === 'declared');
+  t('⛔ CONTROL: a thread with no claim comment at all still reads ABSENT', cardDeclaration([{ id: 1, body: 'a triage note', created_at: '2026-08-31T10:00:00Z' }]).state === 'absent');
+  t('⛔ CONTROL: an unreadable thread still reads UNREADABLE — never the new state', cardDeclaration(null).state === 'unreadable');
+  // The new state is nobody else's state: it is counted into neither not-read
+  // population and it is not the #16304 fourth reading's `absent`.
+  t('the tally counts it under NEITHER not-read population', declarationLimbTally([unparsedPair]).absent === 0 && declarationLimbTally([unparsedPair]).missing === 0);
+  t('⛔ …and the fourth reading is unavailable on it — a sibling cannot answer a question this card could not ask', readsSiblingDeclaration(unparsedPair, [unparsedPair, pair({ card: 999, cardComments: [CLAIM('Clause-②: yes')] })]) === false);
+  t('⛔ …nor is such a card a CARRIER for a sibling of its own', siblingDeclarations(pair({ card: 999, pr: 13910 }), [pair({ card: 999, pr: 13910 }), { pr: 13910, card: 13476, cardComments: INLINE_THREAD }]).length === 0);
+  // ⛔ The fix is the STATE, not a widening: the branch reader's accept set is
+  // byte-identical, which is what keeps the next unrecognised spelling loud.
+  t('⛔ the branch reader was NOT widened — the inline spelling still parses to zero', claimedBranches(INLINE_NEW.body).length === 0);
+  t('⛔ …and the claim marker still matches it, which is what makes the two-anchor split a STATE', CLAIM_COMMENT_MARKER.test(INLINE_NEW.body) === true);
+
   // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -4282,7 +4479,9 @@ export function selfTest() {
       'the correction comment that supersedes a claim declaration with the five measured prose ' +
       'spellings held out as negatives, ' +
       'the three read paths with their offline reader, the argv contract with its usage and its '
-      + 'refusal, the board provenance line, and the exit register).',
+      + 'refusal, the board provenance line, the claim whose `Branch:` line parses to ZERO '
+      + 'branches — reported as an unresolvable carrier rather than discarded — and the exit '
+      + 'register).',
   );
 
   selfTestReachedVerdict = true;
