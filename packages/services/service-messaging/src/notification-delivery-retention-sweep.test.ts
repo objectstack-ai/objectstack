@@ -148,7 +148,11 @@ async function seeded(opts?: { lifecycle?: unknown }) {
   for (const r of ROWS) {
     await driver.create('sys_notification_delivery', {
       id: r.id,
-      notification_id: 'n_1',
+      // Distinct per row: the object declares `(notification_id, recipient_id,
+      // channel)` UNIQUE, which is the real dedup key — one delivery per
+      // (event × recipient × channel). Reusing one event id here would be a
+      // shape production cannot produce.
+      notification_id: `n_${r.id}`,
       recipient_id: 'usr_1',
       channel: r.channel,
       status: r.status,
