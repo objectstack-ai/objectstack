@@ -14,10 +14,15 @@ name: PR Automation
 # run it produced is the first measured pass in that round where the gate read
 # the line.
 #
-# Sibling shape, deliberately copied rather than reinvented: this repo's two
-# other PR-body-scoped blocking checks -- `duplicate-fix-guard.yml` and
-# `partof-closing-keyword-guard.yml` -- already take `edited` and already carry
-# this argument.
+# Sibling shape, deliberately copied rather than reinvented: this repo's other
+# PR-body-scoped blocking checks -- `duplicate-fix-guard.yml`,
+# `partof-closing-keyword-guard.yml` and `closing-target-claim-guard.yml` --
+# already take `edited` and already carry this argument.
+#
+# ⚠️ The third of those joined AFTER the measurement below was taken, which is
+# why that paragraph still says "the two `edited`-subscribed workflows above":
+# it is a dated reading over the two that existed on 2026-09-08, and it is left
+# exactly as measured rather than re-derived from today's set.
 #
 # COST, measured rather than waved at (2026-09-01..09-08, this repo's own run
 # counts through `GET /actions/workflows/<file>/runs?event=pull_request`):

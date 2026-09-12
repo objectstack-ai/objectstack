@@ -50,6 +50,16 @@
  *   - the claim predicate is `h46ClaimNamesBranch`, which is itself
  *     `CLAIM_COMMENT_MARKER` plus `claimedBranches` — the same pair
  *     check-clause2-carriers reads. ⭐ "Import, never restate."
+ *   - the classification of everything that is NOT a claim on this branch is
+ *     `claimGovernance`, the three-valued reader check-clause2-carriers already
+ *     uses, and the next section is why a blocking gate needs all three values.
+ *
+ * The POSITIVE predicate is deliberately H46's and not governance's, so the
+ * patrol row and this gate can never disagree about the word CLAIMED. The two
+ * differ only on a thread where an OLDER claim names this branch and a NEWER
+ * one names another: H46 calls that claimed and so does this gate. That is the
+ * permissive direction — a blocking gate erring toward not-blocking on an
+ * ambiguous thread — and it is the no-fork property, not an accident.
  *   - the merge-queue ref reading is `pullNumberFromQueueRef`, the governed
  *     queue guard's, which already carries the `release/v5`-style base-branch
  *     lesson its own header records.
@@ -104,6 +114,32 @@
  * UNDETERMINED rather than unclaimed: absence over a truncated read is not
  * absence (#4690), and a degraded reading must never be folded into either
  * verdict.
+ *
+ * ## ⭐ An UNPARSED claim is UNCLASSIFIED, and ⛔ never a "no"
+ *
+ * This is the one place where promoting a report-only row to a blocking check
+ * changes what the answer has to be, so it is stated rather than inherited.
+ *
+ * `CLAIM_COMMENT_MARKER` decides whether a comment IS a claim; `claimedBranches`
+ * reads only a `Branch:` DIRECTIVE line. A claim that writes its branch on the
+ * `Claim:` line itself, after a separator, is therefore a claim that yields ZERO
+ * branches — and that shape is not hypothetical. It was measured live on the
+ * card this gate was written for, and on a second dispatched card the same
+ * morning: the comment is a claim to `CLAIM_COMMENT_MARKER`, to a human and to a
+ * grep, and names no branch to the reader that matters.
+ *
+ * For the patrol row that is a row. For a gate that fails builds it would be a
+ * false RED on a card that really is claimed, on the very branch being judged —
+ * and a dispatched executor ⛔ may not post a second claim to clear it, because
+ * the dispatch's claim is its identity. So the malformed case takes the third
+ * value `claimGovernance` exists to return: UNDETERMINED, warned about by name,
+ * never folded into either verdict.
+ *
+ * ⛔ The repair is NOT to widen the branch reader for whichever spelling was
+ * measured last — that treadmill closes one spelling and leaves the next one
+ * exactly as silent, and widening what a claim IS is the one change the
+ * 2026-08-11 ruling closes. The repair direction is the WRITE side, and the
+ * patrol rows that report a malformed claim are what drive it.
  *
  * ## Which numbers are judged, and which are declined
  *
@@ -193,7 +229,7 @@ import { isEntrypoint } from './invoked-as.mjs';
 // Imported, never restated. The closing-keyword grammar and the claim
 // predicate both have exactly one home in this tree, and this gate is their
 // second consumer rather than a second spelling.
-import { closingKeywordTargets, h46ClaimNamesBranch } from './pm/check-half-states.mjs';
+import { claimGovernance, closingKeywordTargets, h46ClaimNamesBranch } from './pm/check-half-states.mjs';
 import { pullNumberFromQueueRef } from './pm/check-governed-queue-guard.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
@@ -214,9 +250,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'The acceptance pair. Red and GREEN, because a probe tested only on its': 8,
   'The negative controls: a PR that closes nothing and a PR that is only': 7,
   'Delegation, not a second copy of the rule. The targets and the claim': 5,
-  'The failure has to carry the card, the branch and every remedy — the': 8,
+  'The failure has to carry the card, the branch and every remedy — the': 10,
   'Declined numbers. A closing keyword can bind something that is not an': 6,
-  'UNDETERMINED is its own answer: never clean, never an accusation.': 6,
+  'UNDETERMINED is its own answer: never clean, never an accusation.': 9,
   'Wiring absent: never clean, never an accusation.': 12,
   'The merge-queue leg, asserted rather than assumed.': 9,
   'The wiring itself. A gate whose workflow step is deleted or whose': 10,
@@ -425,8 +461,8 @@ export function judge(ctx) {
   const unclaimed = targets.filter((t) => t.verdict === TARGET_UNCLAIMED);
   const undeterminedLines = undetermined.map(
     (t) =>
-      `::warning::UNDETERMINED — #${t.number} could not be read to the end (${t.why}), so this run ` +
-      `could not prove whether any \`Claim:\` on it names \`${ctx.head}\`.`,
+      `::warning::UNDETERMINED — #${t.number} was not judged: ${t.why}. This run could not prove ` +
+      `whether any \`Claim:\` on it names \`${ctx.head}\`, and an unprovable absence is ⛔ not an absence.`,
   );
 
   if (unclaimed.length === 0) {
@@ -439,7 +475,8 @@ export function judge(ctx) {
         claimed.length > 0
           ? `✓ check:closing-target-claim: ${where}${leg} closes ${claimed.join(', ')}, and each carries a ` +
             `\`Claim:\` whose \`Branch:\` line names \`${ctx.head}\`.`
-          : `✓ check:closing-target-claim: ${where}${leg} binds no closing keyword to an open card.`,
+          : `✓ check:closing-target-claim: ${where}${leg} closes no card this run could hold against a ` +
+            'claim; every closing target it binds is accounted for below.',
         ...declined.map(
           (t) =>
             `  #${t.number} was not judged: ${t.verdict === TARGET_NOT_A_CARD ? 'it names a pull request, which carries no claim' : 'the card is already closed, so the merge closes nothing'}.`,
@@ -451,10 +488,12 @@ export function judge(ctx) {
     };
   }
 
-  const rows = unclaimed.map(
-    (t) =>
-      `  - \`${t.keyword} #${t.number}\` — no comment on #${t.number} is a \`Claim:\` whose \`Branch:\` ` +
-      `line names \`${ctx.head}\`.`,
+  const rows = unclaimed.map((t) =>
+    (t.names ?? []).length === 0
+      ? `  - \`${t.keyword} #${t.number}\` — no comment on #${t.number} is a \`Claim:\` at all, so the card ` +
+        `records no owner and nothing on it would have stopped a second seat.`
+      : `  - \`${t.keyword} #${t.number}\` — the governing \`Claim:\` on #${t.number} names ` +
+        `${(t.names ?? []).map((b) => `\`${b}\``).join(', ')}, not \`${ctx.head}\`.`,
   );
 
   return {
@@ -510,13 +549,13 @@ export function judge(ctx) {
  * the two have opposite verdicts.
  */
 async function listIssueComments(api, repo, number) {
-  const bodies = [];
+  const rows = [];
   for (let page = 1; page <= MAX_COMMENT_PAGES; page++) {
     const batch = await api(`/repos/${repo}/issues/${number}/comments?per_page=100&page=${page}`);
-    for (const comment of batch) bodies.push(comment?.body ?? '');
-    if (batch.length < 100) return { bodies, complete: true };
+    for (const comment of batch) rows.push(comment ?? {});
+    if (batch.length < 100) return { rows, complete: true };
   }
-  return { bodies, complete: false };
+  return { rows, complete: false };
 }
 
 /**
@@ -555,19 +594,20 @@ export async function collect(ctx, api) {
 
   const targets = [];
   for (const [number, keyword] of closingKeywordTargets(body ?? '')) {
-    let bodies = null;
+    let rows = null;
     let complete = true;
     try {
       const walked = await listIssueComments(api, ctx.repo, number);
-      bodies = walked.bodies;
+      rows = walked.rows;
       complete = walked.complete;
     } catch {
       targets.push({ number, keyword, verdict: TARGET_UNDETERMINED, why: 'its comment thread could not be read' });
       continue;
     }
 
-    if (h46ClaimNamesBranch(bodies, head)) {
-      targets.push({ number, keyword, verdict: TARGET_CLAIMED });
+    const governance = claimGovernance(rows);
+    if (h46ClaimNamesBranch(rows.map((row) => row?.body ?? ''), head)) {
+      targets.push({ number, keyword, verdict: TARGET_CLAIMED, malformed: governance.malformed !== null });
       continue;
     }
     if (!complete) {
@@ -576,6 +616,22 @@ export async function collect(ctx, api) {
         keyword,
         verdict: TARGET_UNDETERMINED,
         why: `its thread is longer than ${MAX_COMMENT_PAGES} pages of 100 comments`,
+      });
+      continue;
+    }
+    // ⭐ An unparsed claim is an UNCLASSIFIED result, ⛔ never a "no" — the
+    // ruling `claimGovernance` carries. The newest claim-shaped comment on this
+    // card yielded zero branches, so this run cannot tell a card claimed on
+    // another branch from one claimed on THIS branch in a spelling the shipped
+    // reader does not parse. A blocking gate must not turn that into an
+    // accusation, and widening the reader is the one repair the 2026-08-11
+    // ruling closes.
+    if (governance.malformed) {
+      targets.push({
+        number,
+        keyword,
+        verdict: TARGET_UNDETERMINED,
+        why: 'its newest `Claim:` comment carries no parseable `Branch:` line, so what it claims is unreadable',
       });
       continue;
     }
@@ -594,7 +650,7 @@ export async function collect(ctx, api) {
       targets.push({ number, keyword, verdict: TARGET_CLOSED });
       continue;
     }
-    targets.push({ number, keyword, verdict: TARGET_UNCLAIMED });
+    targets.push({ number, keyword, verdict: TARGET_UNCLAIMED, names: governance.governing?.branches ?? [] });
   }
 
   return { ...ctx, body, head, targets };
@@ -770,6 +826,16 @@ async function selfTest() {
   t('remedy 2 — the RENAMED/RE-CREATED branch case, named rather than discovered', failed.includes('RENAMED or RE-CREATED'), true);
   t('remedy 3 — drop the closing keyword for `Part of`', failed.includes('`Part of #N`'), true);
   t('the failure is annotated for the GitHub UI', failed.includes('::error::'), true);
+  t('a claim naming ANOTHER branch says so, and quotes the branch it does name', failed.includes(`names \`${OTHER}\``), true);
+  const noClaim = await run('Closes #15845', {
+    '/repos/o/r/issues/15845/comments': [{ body: 'Triage: p2.' }],
+    '/repos/o/r/issues/15845': { number: 15845, state: 'open' },
+  });
+  t(
+    '…and a card with no claim at ALL gets the OTHER sentence, because the remedies differ',
+    text(noClaim.verdict).includes('is a `Claim:` at all'),
+    true,
+  );
 
   // --- Declined numbers. A closing keyword can bind something that is not an
   // open card, and accusing its author would make this gate noise on day one.
@@ -801,6 +867,21 @@ async function selfTest() {
   t('a number whose own read fails is UNDETERMINED, not unclaimed', unreadableNumber.verdict.exit, EXIT_CLEAN);
   t('…and says so', text(unreadableNumber.verdict).includes('UNDETERMINED'), true);
   t('the page walk is capped, so an endless thread cannot hang the job', MAX_COMMENT_PAGES > 0 && MAX_COMMENT_PAGES <= 20, true);
+
+  // ⭐ The MEASURED specimen, live on this very card: a dispatch claim that
+  // writes its branch on the `Claim:` LINE itself, after a separator, with no
+  // `Branch:` directive under it. `CLAIM_COMMENT_MARKER` matches it, the
+  // shipped branch reader yields zero branches, and `claimGovernance` calls it
+  // MALFORMED. ⛔ A blocking gate must not read that as "no claim": it would red
+  // a card that really is claimed, on this very branch, and the executor of a
+  // dispatched card ⛔ may not post a second claim to clear it.
+  const malformed = await run('Closes #15845', {
+    '/repos/o/r/issues/15845/comments': [{ body: `Claim: session_0deadbeef · ${HEAD}\nClause-②: no` }],
+    '/repos/o/r/issues/15845': { number: 15845, state: 'open' },
+  });
+  t('a claim whose branch cannot be PARSED is UNDETERMINED, ⛔ never a finding', malformed.verdict.exit, EXIT_CLEAN);
+  t('…and the warning says the `Branch:` line is what is missing', text(malformed.verdict).includes('no parseable `Branch:` line'), true);
+  t('…and it is an UNDETERMINED warning, never a silent green', text(malformed.verdict).includes('::warning::UNDETERMINED'), true);
 
   // --- Wiring absent: never clean, never an accusation.
   battery('Wiring absent: never clean, never an accusation.');
