@@ -54,8 +54,10 @@ The scaffolder does more than copy files. It:
 - derives a **namespace** from the name (`support-desk` → `support_desk`), so
   every object you create is named `support_desk_*`;
 - installs dependencies;
-- runs `npx skills add objectstack-ai/objectstack/skills --all` to install the **AI skills
-  bundle**;
+- runs `npx skills add objectstack-ai/objectstack/skills --skill '*' --agent claude-code -y`
+  to install the **AI skills bundle** for one agent runtime — once, into
+  `.claude/skills/`, and it prints the same command for any other runtime you
+  use;
 - writes an **`AGENTS.md`** (and `.github/copilot-instructions.md`) that teach your
   coding agent the project layout, the naming rules, and — critically — *to run
   `npm run validate` after every metadata change*.
@@ -378,9 +380,11 @@ Three habits keep this reliable as the app grows:
   translations all go through the same `npm run validate` — the agent should run
   it after each change, exactly as `AGENTS.md` instructs.
 - **Keep the skills current.** After upgrading `@objectstack/spec`, re-run
-  `npx skills add objectstack-ai/objectstack/skills --all` so the agent authors
-  against the schemas you actually run. The full catalog is documented in the
-  [AI Skills Reference](/docs/ai/skills-reference).
+  `npx skills add objectstack-ai/objectstack/skills --skill '*' --agent claude-code -y`
+  — name your own runtime after `--agent` — so the agent authors against the
+  schemas you actually run. The full catalog, and the multi-runtime `--all`
+  trade-off, are documented in the
+  [AI Skills Reference](/docs/ai/skills-reference#installing-skills).
 
 ## 7. Your app is natively AI-operable (MCP)
 

@@ -133,6 +133,14 @@ interface WireBearingError extends Error {
 }
 
 /**
+ * The SQLSTATE the BACKEND raised, read off the envelope's non-enumerable
+ * `cause` — where [#17639] put it when it brought the ADR-0112 terminal to
+ * this door. Before that card the same value was the caller-visible `code`.
+ */
+const sqlstateOf = (err: WireBearingError): string | undefined =>
+  (err as { cause?: { code?: string } }).cause?.code;
+
+/**
  * Can `distinct()` EXECUTE over a JSON column on this backend?
  *
  * `multiple: true` is a JSON column on every dialect, but PostgreSQL's `json`
@@ -313,15 +321,21 @@ function declareReadSweep(cell: DialectCell): void {
        * edit made the boolean cell fail for a reason of its own, its error
        * would stop matching the control's and this row goes red.
        *
-       * ⚠️ The error is asserted on SQLSTATE and on class-identity, NOT on an
-       * ADR-0112 `code`/`status` envelope, because this door does not wrap it:
-       * `distinct()` leaks the backend's own object here — `code` is the raw
-       * `42883` and `status` is `undefined` — which is the gap #11455 closed
-       * for `aggregate()` and left open on this door. ⛔ Asserting a 500 here
-       * would pin a fiction; the missing envelope is filed as #17639 and is
-       * not this card's to repair. When it lands, the class-identity row below
-       * still holds and the SQLSTATE row goes red on purpose, so whoever fixes
-       * it comes and updates this pin.
+       * ⚠️ [#17639] UPDATED BY THE CARD THIS ROW NAMED. When this suite
+       * landed, the error was asserted on the raw SQLSTATE as the CALLER's
+       * `code`, because this door did not wrap it: `distinct()` leaked the
+       * backend's own object — `code` was the raw `42883` and `status` was
+       * `undefined` — the gap #11455 closed for `aggregate()` and left open
+       * here. The note said the SQLSTATE row would go red on purpose when the
+       * envelope landed and that whoever fixed it should come and update this
+       * pin; #17639 has landed it and this is that update.
+       *
+       * The caller now receives the ADR-0112 terminal — `DATABASE_ERROR` /
+       * 500 — and the SQLSTATE rides the non-enumerable `cause`. BOTH halves
+       * are asserted, so this row stays a reading about the BACKEND's refusal
+       * (still the json-equality one, `42883`, on the control and on each
+       * field) and not merely about the wrapper. ⛔ Still no claim that this
+       * door should ANSWER here: that question is #17590's, unchanged.
        */
       it('[#17590-family] `distinct()` over a JSON column is refused here — and the untouched NUMBER/tags controls are refused the SAME way', async () => {
         const errorFor = async (field: string): Promise<WireBearingError> =>
@@ -332,12 +346,15 @@ function declareReadSweep(cell: DialectCell): void {
 
         const control = await errorFor('nums');
         expect(control, 'the multiple:true NUMBER control must reach the backend').toBeInstanceOf(Error);
-        expect(control.code, 'the control refusal is the json-equality SQLSTATE').toBe('42883');
+        expect(control.code, 'the control refusal carries the ADR-0112 envelope [#17639]').toBe('DATABASE_ERROR');
+        expect(control.status, 'the control refusal carries a wire status [#17639]').toBe(500);
+        expect(sqlstateOf(control), 'the json-equality SQLSTATE survives as `cause`').toBe('42883');
 
         for (const field of ['toggles', 'flags', 'tags_']) {
           const err = await errorFor(field);
           expect(err, `${field} must reach the backend, not a presented answer`).toBeInstanceOf(Error);
           expect(err.code, `${field} fails identically to the untouched NUMBER control`).toBe(control.code);
+          expect(sqlstateOf(err), `${field} carries the control's SQLSTATE underneath`).toBe(sqlstateOf(control));
         }
       });
 

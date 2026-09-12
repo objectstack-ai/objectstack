@@ -41,7 +41,7 @@ for both corollaries.
 | `page` | 23 | 0 | 0 | 0 | 1 | 24 |
 | `view` | 77 | 0 | 0 | 11 | 0 | 88 |
 | `report` | 21 | 0 | 0 | 0 | 0 | 21 |
-| `dashboard` | 34 | 0 | 0 | 8 | 0 | 42 |
+| `dashboard` | 45 | 0 | 0 | 10 | 0 | 55 |
 | `webhook` | 19 | 0 | 0 | 0 | 0 | 19 |
 | `query` | 16 | 0 | 0 | 5 | 0 | 21 |
 | `datasource` | 30 | 0 | 0 | 0 | 0 | 30 |
@@ -63,4 +63,4 @@ for both corollaries.
 | `batch_endpoints` | 5 | 0 | 0 | 2 | 0 | 7 |
 | `route_generation` | 0 | 0 | 0 | 4 | 0 | 4 |
 | `realtime_subscription` | 0 | 0 | 0 | 6 | 0 | 6 |
-| **total** | **850** | **5** | **1** | **93** | **10** | **959** |
+| **total** | **861** | **5** | **1** | **95** | **10** | **972** |
