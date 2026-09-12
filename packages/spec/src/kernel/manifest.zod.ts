@@ -21,8 +21,16 @@ import { NavigationContributionSchema } from '../ui/app.zod';
  * Structured permission grants requested by a plugin (ADR-0025 §3.2).
  * Each list scopes one capability surface the plugin may touch. The
  * install-time consent flow (ADR §3.5 step 2) turns this declaration into
- * the persisted `granted_permissions` set enforced at load by the
- * PluginPermissionEnforcer.
+ * the persisted `granted_permissions` set, which the loader REGISTERS on the
+ * PluginPermissionEnforcer at load (#13457).
+ *
+ * ⚠️ **Registered is not enforced.** Nothing queries that registry: the
+ * enforcer's gates are reachable only through `SecurePluginContext`, which
+ * has no production construction site, and its fs/network gates are called
+ * by nothing at all. A grant declared here records which surfaces were
+ * consented to and REFUSES NOTHING today — authoring this block does not
+ * confine the plugin. The per-plugin context that would make it refuse is
+ * the ADR-0025 materialize seam (#17147).
  *
  * The consented set reaches the runtime on the environment artifact
  * envelope — `EnvironmentArtifactSchema.grantedPermissions`
@@ -708,7 +716,10 @@ export const ManifestSchema = strictObject({
     'marketplace PUBLISH gate only (an unverified publisher requesting the `node` tier is ' +
     'rejected with HTTP 422 and forced to manual review), while load-side enforcement is ' +
     'NOT implemented, so a locally installed plugin is not isolated by the tier it ' +
-    'declares. Use the permission declarations, which are enforced.',
+    'declares. ⛔ Nor do the permission declarations give it back: the install-time ' +
+    'granted set is REGISTERED on the PluginPermissionEnforcer at load and queried by ' +
+    'nothing, so it refuses no operation. Neither surface confines a plugin today — do ' +
+    'not author either one expecting isolation.',
   ),
 
   /**
