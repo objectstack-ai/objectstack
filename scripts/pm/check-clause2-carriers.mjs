@@ -4106,9 +4106,15 @@ export function selfTest() {
   // ⚠️ CONTROL, measured and NOT endorsed: the template line copied WITHOUT
   // choosing reads `yes`, because `readValueToken` takes the first token after
   // the colon and treats the rest as the seat's argument. That calibration is
-  // #13914's and is untouched here; the hazard is filed separately rather than
-  // fixed in this card's diff.
-  t('⚠️ CONTROL: the UNFILLED template line reads `yes` — the token is first, the alternative is trailing prose', readClause2Line(TEMPLATE_LINE)?.value === 'yes');
+  // #13914's and is untouched here.
+  //
+  // ⭐ FLIP TRIGGER, pre-registered: this is a key-INITIAL DESCRIBING line, which
+  // is exactly the population #17098 is open against. When #17098 lands, this
+  // reading becomes `kind !== 'declared'` and this case flips WITH it — change
+  // the expectation in THAT PR and keep the case. ⛔ Do not delete it, and ⛔ do
+  // not read its green today as an endorsement: it records what the reader does
+  // now, so that the sibling fix has a measured before-state to move.
+  t('⚠️ CONTROL (flips with #17098): the UNFILLED template line reads `yes` today — the token is first, the alternative is trailing prose', readClause2Line(TEMPLATE_LINE)?.value === 'yes');
   t('⭐ the C2 rows point at the TEMPLATE rather than at a regex', says(missingLine, '〈模板与表〉') && says(noClaim, '〈模板与表〉'));
   t('…and tell the seat to COPY it rather than compose one', says(missingLine, 'COPY the template'));
   t('⛔ and the pointer prescribes no VALUE — the declaration is still the judgement', says(missingLine, 'Do not fill the line in'));
