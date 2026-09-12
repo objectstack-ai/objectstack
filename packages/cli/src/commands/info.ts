@@ -4,6 +4,7 @@ import { Args, Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
 import { normalizeStackInput } from '@objectstack/spec';
 import { loadConfig } from '../utils/config.js';
+import { resolveStackCollection } from '../utils/stack-collections.js';
 import {
   printHeader,
   printKV,
@@ -42,12 +43,37 @@ export default class Info extends Command {
       const config: any = normalizeStackInput(rawConfig as Record<string, unknown>);
       const stats = collectMetadataStats(config);
 
+      // [#17790] ADR-0130 D4 / option B — the detail reads below resolve a
+      // package-owned collection through the ONE seam this package has for it
+      // (`utils/stack-collections.ts`), instead of reading the top level
+      // directly. On an option-B project (every definition inside `packages[]`,
+      // none flattened up) the top-level read saw nothing while `stats` above
+      // already counted the same definitions through the same seam, so ONE
+      // `--json` payload asserted `stats.objects: 1` beside `objects: []` and
+      // nothing in it distinguished "this project has no objects" from "this
+      // reader could not see them".
+      //
+      // Strictly additive: `resolveStackCollection` answers the caller's
+      // original expression FIRST and consults `packages[]` only when the top
+      // level does not carry the key at all, so every stack the platform emits
+      // today reports exactly what it reported before. It also cannot refuse a
+      // stack this command already accepted — `collectMetadataStats` above
+      // resolves the same package list through the same seam, so a malformed
+      // `packages` has already thrown its ADR-0112 422 by this line.
+      //
+      // ⛔ What this deliberately does NOT decide: whether an option-B
+      // project's detail listing should be this flat union or a per-package
+      // grouping. Each entry keeps the shape and the key set it has always had
+      // — no package attribution is added — so the grouping question stays
+      // exactly as open as it was, for the card that answers it.
+      const objects = resolveStackCollection(config, 'objects') as any[];
+
       if (flags.json) {
         await emitJson({
           config: absolutePath,
           manifest: config.manifest || null,
           stats,
-          objects: (config.objects || []).map((o: any) => ({
+          objects: objects.map((o: any) => ({
             name: o.name,
             label: o.label,
             fields: o.fields ? Object.keys(o.fields).length : 0,
@@ -72,10 +98,10 @@ export default class Info extends Command {
       printMetadataStats(stats);
 
       // Object details
-      if (config.objects && config.objects.length > 0) {
+      if (objects.length > 0) {
         console.log('');
         console.log(chalk.bold('  Objects:'));
-        for (const obj of config.objects) {
+        for (const obj of objects) {
           const fieldCount = obj.fields ? Object.keys(obj.fields).length : 0;
           // Record-ownership model (#3175); defaults to user-owned when unset.
           const ownership = obj.ownership || 'user';
@@ -88,10 +114,11 @@ export default class Info extends Command {
       }
 
       // Agent details
-      if (config.agents && config.agents.length > 0) {
+      const agents = resolveStackCollection(config, 'agents') as any[];
+      if (agents.length > 0) {
         console.log('');
         console.log(chalk.bold('  Agents:'));
-        for (const agent of config.agents) {
+        for (const agent of agents) {
           console.log(
             `    ${chalk.magenta(agent.name || '?')}` +
             (agent.role ? chalk.dim(` — ${agent.role}`) : '')
@@ -100,10 +127,11 @@ export default class Info extends Command {
       }
 
       // App details
-      if (config.apps && config.apps.length > 0) {
+      const apps = resolveStackCollection(config, 'apps') as any[];
+      if (apps.length > 0) {
         console.log('');
         console.log(chalk.bold('  Apps:'));
-        for (const app of config.apps) {
+        for (const app of apps) {
           console.log(
             `    ${chalk.green(app.name || '?')}` +
             (app.label ? chalk.dim(` — ${app.label}`) : '')
