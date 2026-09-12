@@ -1,0 +1,35 @@
+{
+  "number": 2315,
+  "kind": "pull_request",
+  "title": "fix(rest): register static data-action routes before greedy :object/:id",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-25T03:51:50Z",
+  "updated_at": "2026-06-25T05:27:06Z",
+  "closed_at": "2026-06-25T05:27:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-25T05:27:04Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2315",
+  "body": "## 问题\n\nREST 路由器(`RouteManager` → `IHttpServer`/Express 适配器)按**先注册先匹配**(first-match-wins)工作,没有任何按具体性排序的逻辑(见 `packages/rest/src/route-manager.ts:88,196`)。\n\n`registerDataActionEndpoints`(含 `GET /data/:object/export`)在 `registerCrudEndpoints`(含贪婪的 `GET /data/:object/:id`)**之后**注册,于是请求 `GET /api/v1/data/<object>/export?format=csv` 会先撞上 `:object/:id`,`\"export\"` 被当成一条记录的 id → 返回 `404 RECORD_NOT_FOUND`,根本到不了导出处理器。已对 `rest@10.0.0` 实证复现。\n\n## 修复\n\n把 `registerDataActionEndpoints(bp)` 调到 `registerCrudEndpoints(bp)` **之前**注册,让静态字面量动作路由(`/export`、`/import`、`/:id/clone` 等)排在贪婪的 `:object/:id` 之前。沿用代码库已有惯例(`/meta/:type/:name/references` 先于 `/meta/:type/:name`,见 `rest-server.ts:2140`)。\n\n### 为什么安全(两个方向都核对过)\n\n按 HTTP 方法 + 段数穷举,first-match 下只有\"同方法 + 同段数 + 字面量 vs `:param`\"才会互相遮蔽:\n\n| 方法 | 数据命名空间里的贪婪 `:param` | 调换影响 |\n|---|---|---|\n| GET | `:object/:id` | ✅ `export` 抢到 `:id` 前 = 修复目标;`export` 只精确匹配 `/export` 段,不会反向遮蔽真实 id |\n| POST | **无**(克隆是更深的 `:object/:id/clone`) | ✅ `import`/`query`/`batch` 等全是字面量,任何顺序都精确命中 |\n| PATCH / DELETE | `:object/:id` | ✅ DataAction 里没有同方法路由,不受影响 |\n\n- `registerDataActionEndpoints` 里**没有**任何贪婪 2 段 `:object/:id` 路由(只有字面量动作和更深的 `:id/clone`、`:id/shares`),所以它先注册也吃不掉任何 CRUD 字面量路由。\n- `enableCrud=false` 时行为不变:export 的注册条件没动。\n\n## 测试\n\n- 新增回归测试:断言 `GET /export` 的注册下标必须**小于** `GET /:object/:id`。在修复前的顺序下该测试失败(`export idx 61` 不小于 `:id idx 54`),修复后通过。\n- `packages/rest` 全量 **136 个测试通过**。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

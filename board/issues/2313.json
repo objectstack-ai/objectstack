@@ -1,0 +1,35 @@
+{
+  "number": 2313,
+  "kind": "pull_request",
+  "title": "fix(automation): re-bind scheduled-flow jobs on `os dev` hot-reload",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-25T03:00:20Z",
+  "updated_at": "2026-06-25T03:06:36Z",
+  "closed_at": "2026-06-25T03:06:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-25T03:06:35Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2313",
+  "body": "## Problem\n\nEditing a **schedule-triggered flow** under `objectstack dev` silently kept firing the **OLD** definition until a full server restart. The terminal prints `✓ recompiled — server will auto-reload`, but the scheduled job bound at boot keeps running the pre-edit flow (old `runAs` / schedule / logic) on its timer — with no signal the edit had no effect.\n\n## Root cause (a gap, not by design)\n\nThe dev watcher recompiles `dist/objectstack.json`; the server's **MetadataPlugin** reloads it into the **MetadataManager** (so `GET /meta` + UI HMR are fresh). But the **AutomationEngine** pulls its flow definitions and trigger/job bindings **once at boot** (`ql.registry.listItems('flow')`) and **nothing re-registers them on reload**. `registerFlow` / `ScheduleTrigger.start` are already idempotent and re-bind correctly — the reload path simply never called them.\n\nThis is a whole bug class: record-change flows also executed boot-time definitions after an edit; scheduled flows are just the most visible because they fire on a timer with no user interaction.\n\n## Fix\n\n- **`@objectstack/metadata`** — factor `_reloadAndAnnounce`; both reload sites (HMR POST handler + server-side artifact-file watcher) fire a generic `metadata:reloaded` hook after reloading (never on the initial boot load). MetadataPlugin stays decoupled from automation — it just announces.\n- **`@objectstack/service-automation`** — subscribe to `metadata:reloaded` and re-sync the engine from the metadata service: re-register every current flow (idempotent → re-binds the trigger; `ScheduleTrigger.start` cancels + reschedules the job) and unregister flows removed from the artifact so their jobs stop. Covers all auto-triggered flow types (schedule / record-change / api).\n\n> Why pull from the metadata service and not `ql.registry`? The reload writes the edited definitions only into the MetadataManager via `register()`. `ql.registry` is a boot-only cache the reload never refreshes, and programmatic `register()` does not fire the `subscribe()` watchCallbacks — so the metadata service is the only source carrying the edited definitions.\n\nProduction deployments are unaffected — nothing reloads the artifact there.\n\n## Tests\n\n| Suite | Result |\n|---|---|\n| `flow-hot-reload.test.ts` (new, service-automation) | 2/2 — edited scheduled flow re-binds to the new definition (fired job runs `runAs` user→system); deleted flow torn down |\n| `plugin-hmr-reload.test.ts` (new, metadata) | 2/2 — reload fires `metadata:reloaded`; a throwing subscriber never breaks the reload |\n| service-automation full suite | 223/223 |\n| metadata full suite | 252/252 |\n| trigger-schedule (schedule-path sanity) | 19/19 |\n\nSource typechecks (tsup DTS build clean). Changeset included (both packages `patch`, same fixed group).\n\nDiscovered while dogfooding the #1888 schedule/runAs follow-up (#2308) — not caused by it.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

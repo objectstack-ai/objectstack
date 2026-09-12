@@ -1,0 +1,33 @@
+{
+  "number": 2399,
+  "kind": "pull_request",
+  "title": "docs(content): finish 11 docs alignment — drop MSW mode from Vercel guide",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T18:05:42Z",
+  "updated_at": "2026-06-27T18:10:50Z",
+  "closed_at": "2026-06-27T18:10:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T18:10:48Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2399",
+  "body": "Closes the two deferred items from #2398 / #2392 — the 11 docs alignment tail.\n\n- **`deployment-vercel.mdx`**: removed the entire **MSW Mode** section and every reference to it (intro mode-table, \"Choosing the Mode\", the MSW checklist subsection, the Comparison table). `@objectstack/plugin-msw` is gone; **Hono server mode** is now the single documented path, with a short callout noting the removal.\n- **`implementation-status.mdx`**: QA table `@objectstack/plugin-msw` column → `@objectstack/verify` (the real test harness).\n\n`content/docs/**` now has **no removed-package references** (only the intentional \"removed in 11\" callout). Content-only; MDX validated by Build Docs.\n\nWith this, the 10 → 11 docs alignment is complete (#2393 internal docs · #2396 upgrade guide + README · #2398 docs site · this tail).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

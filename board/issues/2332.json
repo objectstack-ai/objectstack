@@ -1,0 +1,32 @@
+{
+  "number": 2332,
+  "kind": "pull_request",
+  "title": "chore(client): remove dead projects.* env-member SDK methods (ADR-0024 D9)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-25T16:59:09Z",
+  "updated_at": "2026-06-25T17:04:46Z",
+  "closed_at": "2026-06-25T17:04:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-25T17:04:43Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2332",
+  "body": "## What\nRemoves the four dead `projects.*` env-member methods from the `@objectstack/client` SDK:\n- `projects.listMembers(id)` → `GET /api/v1/cloud/environments/:id/members`\n- `projects.addMember(id, payload)` → `POST …/members`\n- `projects.updateMemberRole(id, memberId, role)` → `PATCH …/members/:memberId`\n- `projects.removeMember(id, memberId)` → `DELETE …/members/:memberId`\n\n## Why\nThese control-plane endpoints were **deleted in cloud#533** (retiring `sys_environment_member`, ADR-0024 D9), so the methods now return **404**. Org membership/invites flow through the better-auth `organization` plugin (`organization.inviteMember`/`listMembers`/…). objectui already uses `organization.*`, and there are **no in-repo callers** of the removed methods.\n\nThis is the framework-side follow-up explicitly called out in cloud#533's PR description.\n\n## Kept (intentionally)\n- The `membership?: any` field on `projects.get()` — cloud#533 still returns it on the single-env GET (re-sourced to the caller's org `sys_member` role), so `packages/cli/src/commands/environments/show.ts` (`res?.membership?.role`) is unchanged.\n- `organization.*` and `organization.teams.*` member methods (better-auth) — untouched.\n\n## Verification\n- grep (repo-wide): **0 callers** of the removed methods\n- `turbo run build --filter=@objectstack/client`: ✅ (DTS clean)\n- `tsc --noEmit`: ✅ clean\n- `@objectstack/client` tests: ✅ **106 passed (106)**\n\nChangeset: `patch` (removing dead, zero-caller methods; `@objectstack/client` is in the platform `fixed` version group).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

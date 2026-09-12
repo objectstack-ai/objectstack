@@ -1,0 +1,34 @@
+{
+  "number": 1316,
+  "kind": "issue",
+  "title": "[P2] layout: detail page `regions: []` with `kind: 'slotted'` is non-functional beyond header",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "documentation",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:25:54Z",
+  "updated_at": "2026-06-27T14:31:27Z",
+  "closed_at": "2026-06-27T14:31:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1316",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 14 条（**P2**，强烈影响 #26 撰写器和深度定制）。\n\n## 现象\n\n详情页 `page` 类型 `kind: 'slotted'` + `regions: [...]` 在文档里描述为「可以把多个区段插入到详情页不同位置」，但**实际只有 header 槽位生效**：\n\n- 写 `regions: [{ kind: 'related-list', ... }]` 没有渲染\n- 写复合 region 不出现\n- 文档示例与运行行为不一致\n\n效果：模板想做「在详情页底下塞一个消息撰写器 + 一个相关工单列表」之类的深度定制 → 做不到，只能在 header 上贴一些信息。\n\n## 复现\n\n```ts\n// pages/helpdesk_ticket_detail.page.ts\n{\n  kind: 'slotted',\n  regions: [\n    { kind: 'related-list', target: 'helpdesk_message', linkedBy: 'ticket' },\n    { kind: 'message-composer', ... },\n  ],\n}\n// 浏览器中：底下啥也没有\n```\n\n## 建议范围\n\n**M1：明确 spec**\n- 文档与实现对齐：要么实现 regions，要么把 spec 标 alpha\n- 列出当前真正生效的 slot 名称 + 行为表\n\n**M2：实现 regions**\n- `kind: 'related-list' | 'composer' | 'metric-strip' | 'custom-component' | 'embed-view'`\n- 通过 layout system 落到详情页对应锚点\n- 与 #26 撰写器一并落地\n\n**M3：自定义组件钩子**\n- `kind: 'custom-component'` + 注册表，让模板可注入自家组件\n\n## 验收\n\n- [ ] regions 真实可用 / 或文档明示当前限制\n- [ ] `helpdesk` 详情页底部出现 messages 列表 + 撰写器\n- [ ] 缺陷库 gap #14 标记为已解决\n\n## 关联\n\n- 直接阻塞 #26（撰写器）\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 2312,
+  "kind": "pull_request",
+  "title": "feat(identity): implement ADR-0068 unified user-context contract (D1–D4)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-25T01:39:37Z",
+  "updated_at": "2026-06-25T05:30:59Z",
+  "closed_at": "2026-06-25T05:30:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-25T05:30:58Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2312",
+  "body": "## Summary\nImplements **ADR-0068** — a unified `EvalUser` contract so a predicate authored once evaluates identically across **server-formula**, **server-RLS**, and **client**. Identities are modelled as roles (`roles: string[]`), not booleans.\n\n## Decisions implemented\n- **D1 — EvalUser contract** (`@objectstack/spec`): new `eval-user.zod.ts` (canonical `roles[]`, deprecated singular `role`, derived `isPlatformAdmin` alias, built-in role constants/metadata, `mapMembershipRole()`, `createEvalUser()`). `formula` mounts `current_user` / `user` / `ctx.user` / `os.user` as the **same** object; deprecated `role` kept read-only for migration.\n- **D2 — Built-in roles + normalization**: `plugin-security` seeds `sys_role` rows; `plugin-auth` `customSession` emits one canonical `roles[]` and **removes the `role='admin'` overwrite footgun**; `runtime` normalizes better-auth `owner/admin/member` → `org_*` and derives `platform_admin` from an **unscoped** `admin_full_access` grant.\n- **D3 — Role-definition authority**: `sys_role` gains a `managed_by` provenance field.\n- **D4 — Role-catalog validation**: `formula/validate.ts` closed-enum check rejects unknown role names in predicates.\n\n## Verification\n- Tests: formula **206**, plugin-auth **120**, plugin-security **143**, runtime **432** — all green.\n- Full `turbo build` **77/77** (incl. all DTS typechecks).\n\n## Rollout notes\n- ✅ **D4 blast radius audited — effectively zero today.** Scanned all three repos (framework / objectui / cloud) for the 4 D4 predicate syntaxes against role-name literals. The only matches are docs, tests, and one schema-description *example* (now fixed to the canonical `'org_admin' in current_user.roles`). **No production RLS/permission predicate references a role by literal**, and **no caller supplies `roleCatalog`** yet, so D4 is opt-in/dormant — enabling it is safe without a grace period. Re-run the audit before wiring `roleCatalog` into a live validator path.\n- Client counterpart: objectstack-ai/objectui#1990 (not publish-gated on this release).\n- Follow-up: a stale comment in cloud `auth-proxy-plugin.ts` still describes the removed `role='admin'` synthesis (comment-only; tracked separately).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n"
+}

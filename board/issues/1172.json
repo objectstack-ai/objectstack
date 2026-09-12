@@ -1,0 +1,30 @@
+{
+  "number": 1172,
+  "kind": "issue",
+  "title": "plugin-auth: Add bearer() plugin support for cross-origin token-based auth",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-04-17T03:58:52Z",
+  "updated_at": "2026-06-27T14:29:58Z",
+  "closed_at": "2026-06-27T14:29:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1172",
+  "body": "## Problem\n\nWhen the frontend (e.g. `localhost:5173`) connects to an API on a different origin (e.g. `demo.objectstack.ai`), **session cookies are blocked by the browser** due to third-party cookie restrictions. This means:\n\n- Users can sign in successfully\n- But refreshing the page loses the session (cookie not sent cross-origin)\n- Mobile clients (iOS/Android) also cannot use cookie-based auth\n\nThis is the standard behavior of modern browsers (Chrome, Safari, Firefox all block third-party cookies).\n\n## Solution\n\nAdd the better-auth `bearer()` server-side plugin to `@objectstack/plugin-auth`, so the server can:\n\n1. **Accept** `Authorization: Bearer <token>` headers (converts to session cookie internally)\n2. **Expose** the session token via `set-auth-token` response header (so the client can store it)\n\nThis is how Salesforce, Notion, Supabase, and all mobile apps handle auth — **token-based, not cookie-based**.\n\n## Required Changes\n\n### 1. `@objectstack/plugin-auth` — Add bearer plugin\n\nIn `buildPluginList()`, always include the `bearer()` plugin from `better-auth/plugins/bearer`:\n\n```ts\nimport { bearer } from 'better-auth/plugins/bearer';\n\nbuildPluginList() {\n  const plugins = [\n    bearer(), // Always enabled — supports cross-origin and mobile clients\n  ];\n  // ... existing organization, twoFactor, magicLink plugins\n  return plugins;\n}\n```\n\n### 2. CORS configuration\n\nEnsure the server's CORS config includes:\n- `Access-Control-Allow-Headers: Authorization`\n- `Access-Control-Expose-Headers: set-auth-token`\n\nThe bearer plugin automatically adds `set-auth-token` to `Access-Control-Expose-Headers` on responses, but the server must also allow the `Authorization` request header in CORS preflight responses.\n\n### 3. `trustedOrigins` configuration\n\nFor cross-origin deployments, `AuthPlugin` config should support specifying trusted origins:\n```ts\nnew AuthPlugin({\n  secret: '...',\n  trustedOrigins: ['http://localhost:5173', 'https://console.example.com'],\n})\n```\n\n## Client Side (already implemented in object-ui)\n\nThe `@object-ui/auth` package has been updated in [object-ui](https://github.com/objectstack-ai/object-ui) to:\n- Store session tokens in `localStorage` via `TokenStorage`\n- Inject `Authorization: Bearer <token>` on all requests via `createBearerFetch`\n- Capture rotated tokens from `set-auth-token` response header\n- Clear tokens on sign-out\n\n## References\n\n- [better-auth bearer plugin docs](https://www.better-auth.com/docs/plugins/bearer)\n- This is blocking cross-origin development workflow in object-ui (frontend connecting to remote dev servers)"
+}

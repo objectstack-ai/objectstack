@@ -1,0 +1,35 @@
+{
+  "number": 2413,
+  "kind": "pull_request",
+  "title": "feat(spec): add ActionSchema.openIn for declarative url new-tab (objectui #2043)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-28T05:21:11Z",
+  "updated_at": "2026-06-28T07:24:41Z",
+  "closed_at": "2026-06-28T07:24:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-28T07:24:39Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2413",
+  "body": "## Why\n\nCounterpart to **objectui issue #2043**. objectui added a first-class declarative field for url actions — `openIn?: 'self' | 'new-tab'` — in its public `ActionSchema`, honored by `ActionRunner.executeUrl` (read with priority over the legacy `params.newTab` / external-URL heuristic) and forwarded by all renderers (action-button/icon/menu/group, basic/elements).\n\nBut `@objectstack/spec`'s `ActionSchema` was a plain `z.object(...)` that **strips unknown keys**, so `openIn` written via `defineAction({...})` was silently dropped at build and never reached objectui's runtime. Downstream authors (e.g. plan-management) therefore still couldn't use it.\n\n## What\n\n1. **`packages/spec/src/ui/action.zod.ts`** — add `openIn: z.enum(['self', 'new-tab']).optional()` next to `target`. Kept **distinct** from the existing `opensInNewTab` / `newTabUrl` (those pre-open an `about:blank` tab synchronously for **async** SSO-redirect handlers — not merged). `openIn` is the simple, static case.\n2. **`action.test.ts`** — 5 cases, including a regression guard that `openIn` survives `parse()` (the whole point: it used to be stripped).\n3. **`liveness/action.json`** — classify `openIn` as `live` (objectui is the consumer). The liveness gate passes (`exit 0`).\n4. **`skills/objectstack-ui/SKILL.md`** — document the `openIn` vs `opensInNewTab`/`newTabUrl` split, plus a warning that new-tab behavior must **not** be expressed via `params` (object form fails the zod build; array form mis-renders as a user-facing checkbox).\n5. **changeset** — `@objectstack/spec` `minor`.\n\n### `openIn` semantics\n- `'new-tab'` — open a static `target` URL in a new tab. No handler, no pre-open.\n- `'self'` — navigate in place.\n- omitted — external/absolute URLs open in a new tab; relative URLs navigate in place.\n\n```ts\ndefineAction({\n  name: 'print_a3',\n  label: '打印总表(A3)',\n  type: 'url',\n  target: '/print/a3?id=${record.id}',\n  openIn: 'new-tab',\n});\n```\n\n## Publish coordination\n\nThe objectui side is already merged (issue #2043). Consuming projects need a `@objectstack/spec` version that includes this field for the declarative path to work end-to-end — hence the `minor` changeset.\n\n## Verification\n- `vitest run src/ui/action.test.ts` → **77 passed**\n- `tsx scripts/liveness/check-liveness.mts` → **exit 0** (`✓ all governed-type properties are classified`)\n- `tsc --noEmit` → clean\n"
+}

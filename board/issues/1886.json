@@ -1,0 +1,33 @@
+{
+  "number": 1886,
+  "kind": "issue",
+  "title": "[P0][security] Role parent dead — manager-rollup unimplemented",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "priority:p0",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T06:56:03Z",
+  "updated_at": "2026-06-27T17:24:48Z",
+  "closed_at": "2026-06-27T17:24:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1886",
+  "body": "Part of the metadata liveness audit umbrella #1878 (P0 security cluster).\n\n## Problem\nRole `parent` is **dead**. `team-graph.ts:27` does not walk it, so the documented \"managers see subordinates' data\" rollup is unimplemented. A role hierarchy authored via `parent` confers no inherited visibility — managers do not actually gain access to their reports' records.\n\n## Decision required (enforce or remove)\n- **Enforce**: have the team/role graph walk `parent` so the manager-rollup (and any `role_and_subordinates` sharing recipient — see the SharingRule issue) resolves through the hierarchy.\n- **Remove**: drop `parent` from `RoleSchema` if hierarchical visibility is out of scope, and remove the \"managers see subordinates\" claim from the docs.\n\n## Evidence\n- `docs/audits/2026-06-security-identity-property-liveness.md`\n- `team-graph.ts:27` (does not walk `parent`)\n\n> Note: closely related to the `SharingRuleSchema` issue (its `role_and_subordinates` recipient depends on this hierarchy walk).\n"
+}

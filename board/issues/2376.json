@@ -1,0 +1,33 @@
+{
+  "number": 2376,
+  "kind": "pull_request",
+  "title": "fix(objectql): stamp tenant org-key onto un-pinned business seed rows",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T14:26:16Z",
+  "updated_at": "2026-06-27T14:39:25Z",
+  "closed_at": "2026-06-27T14:39:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T14:39:24Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2376",
+  "body": "## Problem\nAn AI-built app lands **empty in every list / kanban** even though the seeded rows physically exist in the tenant DB.\n\nRoot cause (confirmed live on a built app): a published **seed loaded in-process** (the build agent's publish path) has no active user session, so `config.organizationId` is unset and the SQL driver's per-write org injection never fires → business seed rows persist with `organization_id = NULL`. Under strict org-scoping the data API filters `WHERE organization_id = <activeOrg>` and a NULL row matches nobody, so reads come back `total:0`.\n\nMetadata + dashboard datasets read via a **system (non-org-scoped) path**, so the app shell, views and dashboard *counts* render — only the **business data** is invisible. That's the \"I built it and it's empty\" footgun. (Single-org today it's only latent; the moment the env gains a second org / stricter scope the data disappears — an existing env is the live sample.)\n\n### Live evidence\nOn a freshly-built env, raw table had 12 work orders, all `organization_id = NULL`; `/api/v1/data/...` returned `total:0`. Stamping one row with the env's org made it (and only it) appear; stamping all 12 made the lists + kanban populate.\n\n## Fix\nWhen no org is pinned, `SeedLoaderService` resolves the tenant's **sole** organization and stamps **business** seed rows with it — the tenant key a normal create would inject.\n\n- `sys_`/`cloud_`/`ai_` platform seeds **never** take the fallback (stay global/cross-tenant).\n- **0 or >1** orgs → leave rows org-less (genuinely ambiguous → unchanged historical behavior).\n- An explicitly pinned `organizationId` still wins, for every object (unchanged).\n- Bonus: `os.org.id` now resolves in seed CEL on the un-pinned path.\n\n## Tests\n`src/seed-loader-org-fallback.test.ts` (5): sole-org stamp · `sys_` skip · ambiguous no-op · no-org no-op · explicit-org precedence. Existing seed-loader + protocol suites green (12 → no regression). `@objectstack/objectql` builds clean (DTS incl. deps).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

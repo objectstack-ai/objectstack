@@ -1,0 +1,35 @@
+{
+  "number": 2250,
+  "kind": "pull_request",
+  "title": "fix(automation): honor the `assignments` wrapper shape on assignment nodes",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-23T17:50:50Z",
+  "updated_at": "2026-06-23T17:53:02Z",
+  "closed_at": "2026-06-23T17:53:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-23T17:53:00Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2250",
+  "body": "## Problem\n\nThe built-in `assignment` node executor set each **top-level** `config` key as a flow variable:\n\n```ts\nfor (const [k, v] of Object.entries(config)) variables.set(k, v);\n```\n\nBut every surface that authors these nodes emits an `assignments` **wrapper** instead:\n\n- **Studio's visual Assignment editor** → `config: { assignments: { <var>: <value> } }`\n- **bundled example flows** (app-crm, showcase) → `config: { assignments: [{ variable, value }] }`\n\nSo a node designed in Studio (or any shipped example) silently set a single variable literally named `assignments` to the whole map/array and **never set the intended variables** — it passes build and no-ops at run time, leaving every downstream `{var}` reference unresolved. Classic \"passes build / silent at runtime.\"\n\nFound dogfooding the Studio Flow Builder as a business user.\n\n## Fix\n\n`builtin/logic-nodes.ts` now normalizes all three shapes (`assignments` map, `assignments` array of `{variable|name|key, value}`, and the legacy flat `{ <var>: <value> }`) and interpolates `{var}` templates in the values, matching the CRUD / screen nodes.\n\n## Tests\n\n- New `logic-nodes.test.ts` covers each shape (map / array / flat / interpolation) as a regression guard — fails on the wrapper shapes before the fix.\n- Full `@objectstack/service-automation` suite: **206 passing**, no regressions.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

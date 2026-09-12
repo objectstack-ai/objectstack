@@ -1,0 +1,30 @@
+{
+  "number": 2359,
+  "kind": "issue",
+  "title": "ADR-0070 D5 tail: retire the \"Local / Custom\" stopgap scope from the Studio selector (once envs are orphan-free)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T11:34:45Z",
+  "updated_at": "2026-06-27T14:28:34Z",
+  "closed_at": "2026-06-27T14:28:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2359",
+  "body": "Final step of ADR-0070 **D5** (migration), split out of Epic #2278 because it is gated on a runtime precondition, not just code.\n\n## Context\nThe \"Local / Custom (this env)\" package-selector scope ([objectui#1946](https://github.com/objectstack-ai/objectui/pull/1946)) was a **stopgap** that surfaced the package-less (`package_id = null`) orphan bucket. ADR-0070 repurposes it as a **migration affordance** and says it should be *removed* \"once an environment has no orphans.\"\n\nThe migration tooling that makes removal safe is already merged:\n- kernel: `protocol.reassignOrphanedMetadata` + `POST /packages/:id/adopt-orphans` ([framework#2301](https://github.com/objectstack-ai/framework/pull/2301))\n- Studio UI: the \"Adopt loose items\" action in `PackagesPage.tsx` ([objectui#1983](https://github.com/objectstack-ai/objectui/pull/1983))\n- new orphans are prevented at the kernel by `writable_package_required` ([framework#2285](https://github.com/objectstack-ai/framework/pull/2285))\n\nSo all that remains is removing the scope itself once it is empty.\n\n## Still present (to remove)\n`../objectui/packages/app-shell/src`:\n- `layout/ContextSelectors.tsx` — the \"Local / Custom (this env)\" / `本地 / 自定义（本环境）` option\n- `views/metadata-admin/package-scope.ts` — `isLocalScope()` + the sentinel scope helpers\n\n## Acceptance\n- A guard/telemetry confirms target envs report **0 orphans** (`reassignOrphanedMetadata` would reassign nothing), OR the scope is shown **only** while orphans exist (auto-hide when empty).\n- Remove the \"Local / Custom\" scope from the selector; drop `isLocalScope` and the null/`sys_metadata` create-destination path.\n- ADR-0070 D5 §\"retire the stopgaps\" can be ticked.\n\n## Out of scope\nThe kernel `null`-as-legacy-overlay read path stays (ADR-0070 D5: `null` survives as a read-side rehydration tag for legacy rows).\n\nRepo: `../objectui`. Parent epic: #2278."
+}

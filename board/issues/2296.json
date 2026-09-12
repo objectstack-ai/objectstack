@@ -1,0 +1,35 @@
+{
+  "number": 2296,
+  "kind": "pull_request",
+  "title": "feat(analytics): multi-hop relationship joins for datasets (ADR-0071)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T15:35:35Z",
+  "updated_at": "2026-06-24T15:49:18Z",
+  "closed_at": "2026-06-24T15:46:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T15:46:04Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2296",
+  "body": "## Summary\nImplements the remaining open gap from [ADR-0071](docs/adr/0071-dataset-semantic-layer-depth.md) — **multi-hop joins** (matrix/across was already shipped). A dataset can now group or aggregate by a field two or three **to-one** relationships away:\n\n```\nopportunity → account → owner → region    (dimension field: account.owner.region)\n```\n\n## Design (per the ADR)\n- **To-one only** — `include` holds lookup / master_detail (child→parent) relationships, which never fan out. So `SUM`/`COUNT` stay correct with **zero** symmetric-aggregate machinery. To-many traversal is explicitly out of scope.\n- **Dotted paths, dot-free aliases** — authors write `account.owner.region` (dotted, self-disambiguating). The SQL alias is `account__owner` (dots → `__`, the Cube.js convention) because the read-scope SQL guard fail-closed-rejects dotted identifiers. Single-segment paths are unchanged ⇒ **single-hop joins are byte-for-byte identical**.\n- **Per-hop RLS for free** — the strategy's tenant/read-scope loop already iterates every registered join alias, so each hop's object is scoped without touching the security path. (A new test asserts base + both hops are scoped.)\n- **Depth cap 3 hops** (4 objects, Salesforce-report-type parity) — a perf guard, not a correctness one; rejected at parse (spec refine) and compile.\n- **D-C preserved** — undeclared paths rejected; declaring `a.b` auto-includes intermediate `a`.\n\n## Touch points\n| File | Change |\n|---|---|\n| `spec/src/ui/dataset.zod.ts` | `include` paths + ≤3-hop refine + field docs |\n| `service-analytics/dataset-compiler.ts` | `RelationshipResolver → {object,table}`; chain-resolve into per-prefix joins; `joinAlias`; allowlist = prefixes |\n| `service-analytics/native-sql-strategy.ts` | `qualifyAndRegisterJoin` chain; `resolveStorageTarget` multi-hop |\n\n## Tests\n- **27 new/updated** unit tests (compiler chain + allowlist + auto-intermediate + depth cap + back-compat string resolver; strategy chained `LEFT JOIN`s + **per-hop RLS** + prefix-allowlist enforcement).\n- Full analytics suite **164/164 green**; spec dataset tests 10/10; spec `check:api-surface` unchanged.\n\n## Review notes\nTouches the analytics SQL builder + RLS scoping, so I'm opening this **for review rather than auto-merging**. The follow-up (ADR P2 — objectui multi-hop field picker / include-path editor) is not in this PR.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

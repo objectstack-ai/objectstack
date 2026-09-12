@@ -1,0 +1,35 @@
+{
+  "number": 2255,
+  "kind": "pull_request",
+  "title": "feat: formula field typing — inferExpressionType + FieldSchema.returnType",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T02:16:28Z",
+  "updated_at": "2026-06-24T03:12:45Z",
+  "closed_at": "2026-06-24T03:12:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T03:12:43Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2255",
+  "body": "## What\nFormula-field typing primitives, consumed by cloud dataset-derive (and useful for formatting/validation):\n- **`@objectstack/formula`** — `inferExpressionType(input, {fields})` / `inferCelType()`: surface the cel-js type-checker result for a CEL value/formula expression as `number | text | boolean | date | unknown`. The type was already computed in `celEngine.compile` and discarded.\n- **`@objectstack/spec`** — `FieldSchema.returnType` (`number|text|boolean|date`, optional): a formula field can now carry its declared value type (the way Salesforce/Airtable do), so consumers read a declared type instead of re-parsing the expression. Without it the type would be stripped at validation.\n\n## Why\nA numeric **formula** field carries no static type. Cloud dataset-derive needs to know a formula computes a number to give it a SUM measure (so an AI-built \"total of a computed number\" dashboard card is buildable). This is the typing half of that fix; the authoring/derive half is a companion cloud PR that canonicalizes a formula's source onto `expression` and stamps `returnType` from this inference.\n\n## Conservative by construction\n- member access / two `dyn` operands → `dyn` → `unknown` (e.g. `a + b`, possibly string concat, is **not** numeric)\n- typed literal / stdlib return pins it: `daysBetween(start,end)+1` → `number`, `x*0.1` → `number`\n\n## Tests\n`validate.test.ts` covers number/text/boolean/date/unknown, envelope input, bare vs `record.`-qualified refs, and the conservative `dyn` cases (formula suite green locally, 77).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

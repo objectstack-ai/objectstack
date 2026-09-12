@@ -1,0 +1,34 @@
+{
+  "number": 2262,
+  "kind": "pull_request",
+  "title": "feat(spec): type ChartConfig `colors` as palette or value→color map",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T04:21:26Z",
+  "updated_at": "2026-06-24T04:21:44Z",
+  "closed_at": "2026-06-24T04:21:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T04:21:40Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2262",
+  "body": "## What\n\nTypes `ChartConfigSchema.colors` as a **union**: either a positional palette (`string[]`) **or** an explicit value→color map (`Record<value, color>`, kanban-style — mirroring `RowColorConfigSchema.colors`).\n\n## Why\n\nSpec-level parity for the `object-chart` semantic-color feature shipped in objectui (objectstack-ai/objectui#1932 renderer + #1936 `ObjectChartSchema` typing). When a chart's category dimension is a select/lookup field, its option colors — and any explicit value→color map — should take precedence over the positional palette per category, so health/status charts paint their own semantic colors instead of the generic `--chart-1..5` palette.\n\nAdditive and backward-compatible: the field is optional and the existing `string[]` palette form is unchanged. No framework runtime consumes `ChartConfig.colors` as an array, so the union widens the type with no break.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

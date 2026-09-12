@@ -1,0 +1,33 @@
+{
+  "number": 1338,
+  "kind": "issue",
+  "title": "[portal] action 完成后导航策略（onComplete + portal 级默认）（GAP-8 of #1294）",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p0"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T06:49:12Z",
+  "updated_at": "2026-06-27T14:31:30Z",
+  "closed_at": "2026-06-27T14:31:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1338",
+  "body": "## 现象\n#1294 spec 的 `PortalNavItem` 包含 action 类型（点导航直接执行 action，如 Submit），但**没声明 action 完成后跳哪**。\n\n## 复现\n1. 匿名用户点 \"Submit a Ticket\" → 填表 → 提交成功\n2. 框架要不要跳详情页？跳成功页？跳 KB？跳\"原页面\"？\n3. spec 没规定 → 不同 portal 行为不一致\n\n## Workaround\n模板作者把跳转逻辑硬塞到 action 的 success hook 或 view 的 onAction 里 — 违反「零业务代码」+ 与 portal 主题/路由耦合。\n\n## 分阶段建议\n**M2**（与 GAP-1/#1331 一起）：在两处可声明，由具体到一般覆盖。\n\n**action nav item 上**：\n```ts\n{\n  id: 'nav_submit',\n  type: 'action',\n  actionRef: 'helpdesk_ticket.create',\n  onComplete?: {\n    goto: { viewRef?: string; actionRef?: string; path?: string; back?: boolean; recordCreated?: boolean };\n    toast?: { message: I18nLabel; severity: 'success'|'info' };\n  }\n}\n```\n\n**portal 级默认（fallback）**：\n```ts\nactionDefaults?: {\n  onComplete?: { goto: ... };\n};\n```\n\n**匿名 route 上**（参见 GAP-1/#1331 的 onSuccess）：与上面 onComplete 合并为同一字段，保持一致。\n\n## 验收\n- 模板声明 `onComplete.goto.recordCreated: true` → 提交后自动跳新工单详情\n- 没声明 → 默认行为：toast \"Submitted\" + 留在当前页\n\n## 关联\n- #1294\n- #1331（GAP-1，匿名 onSuccess 字段与本字段语义合并）\n"
+}

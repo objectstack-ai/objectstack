@@ -1,0 +1,33 @@
+{
+  "number": 1310,
+  "kind": "issue",
+  "title": "[P1] sla: no conditional timer primitive — SLA can't pause on waiting_customer; metrics are unfair",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:24:46Z",
+  "updated_at": "2026-06-27T14:30:06Z",
+  "closed_at": "2026-06-27T14:30:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1310",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 35 条（**P1**）。\n\n## 现象\n\n平台没有「条件性计时器」原语。所有时间字段都是绝对时刻，**无法做「状态切换时暂停 / 恢复」**。\n\n最痛的场景是 SLA：\n- 工单进入 `waiting_customer`（等客户回复），SLA 计时应**暂停**\n- 客户回复后状态回到 `in_progress`，SLA **继续累计**\n- 总耗时 = 真实处理时间，不该把「等客户」的时间算给坐席\n\n今天的 `resolution_due_at` 是创建时按 SLA 策略加出来的绝对时刻，**整段全程跑表**。这导致：\n- 客户三天不回，工单 SLA 必然爆 → 业绩不公正\n- KPI / 工资 / 升迁全错\n- 客服管理者必须手动扣减 → 失去自动化意义\n\n## 复现\n\n`helpdesk` 模板：\n\n```\nTIC-2026-006 创建于 2026-05-22，resolution_due_at = 2026-05-24\n2026-05-22: status → waiting_customer\n2026-05-26: 客户回复，status → in_progress\n当前 SLA: 已逾期 2 天（不应）\n```\n\n## 当前 workaround\n\n- 加 `paused_at` / `total_paused_minutes` 字段，写两个 flow 在状态切换时累加 —— 模板侧能写但易错、不能跨模板复用、UI 显示混乱\n- 干脆放弃 SLA 提醒 —— 失去模板核心卖点\n\n## 建议范围\n\n**M1：声明式 timer 字段**\n- spec 新字段类型 `timer`：`{ name, startsAt: cel, pauseWhen: cel, resumeWhen: cel, dueAfter: duration | cel }`\n- 系统层维护 `accumulated_duration` / `due_at`（动态计算）\n- 状态机切换时自动评估暂停 / 恢复\n\n**M2：分级 SLA**\n- `sla_policy` 上能挂多个 timer：first_response_due / resolution_due\n- 业务对象引用 policy + 起步时刻\n\n**M3：暂停审计**\n- 暂停 / 恢复记录入审计（依赖 #25 audit 表面化）\n- 可视化时间轴：每段「绿色 = 计时中 / 灰色 = 暂停」\n\n**M4：通知集成**\n- 接近 due 时触发通知（依赖 #1）\n- 暂停期间不报警\n\n## 验收\n\n- [ ] timer 字段类型 + 状态机暂停谓词\n- [ ] `helpdesk` 模板：waiting_customer 暂停 SLA，回到 in_progress 恢复\n- [ ] 缺陷库 gap #35 标记为已解决\n\n## 关联\n\n- 依赖 #1 通知、#25 审计\n- 配合 #7 CEL stdlib（写谓词需要时间函数）\n"
+}

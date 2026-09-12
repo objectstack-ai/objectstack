@@ -1,0 +1,35 @@
+{
+  "number": 2291,
+  "kind": "pull_request",
+  "title": "feat(spec): add `back` edge style to the flow-builder canvas protocol",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T14:52:04Z",
+  "updated_at": "2026-06-24T15:01:46Z",
+  "closed_at": "2026-06-24T15:01:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T15:01:43Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2291",
+  "body": "Part of #2274 (#2274 item 3 — spec completeness). `FlowCanvasEdgeStyleSchema` gains a **`back`** value alongside `solid`/`dashed`/`dotted`/`bold`, marking an ADR-0044 declared back-edge (a `revise` loop's resubmit edge) so flow-builder-protocol consumers render it as a distinct curved/dashed return arc — matching the objectui designer's hand-rolled canvas ([objectui#1954](https://github.com/objectstack-ai/objectui/pull/1954)).\n\n**Additive** enum value — `check:api-surface` confirms the public API surface + factory signatures are **unchanged**.\n\nVerification: `@objectstack/spec` flow-builder tests **23 passing** (accepts `back`); `tsc --noEmit` clean; spec build green; api-surface check ✓.\n\nRefs #2274, #1770 (ADR-0044). 🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

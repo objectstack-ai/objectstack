@@ -1,0 +1,36 @@
+{
+  "number": 2480,
+  "kind": "pull_request",
+  "title": "feat(spec): spec↔frontend conformance check for react blocks (+ first audit)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "skip-changeset",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-30T09:18:25Z",
+  "updated_at": "2026-06-30T09:27:41Z",
+  "closed_at": "2026-06-30T09:27:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-30T09:27:38Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2480",
+  "body": "Addresses the review question: *we can't guarantee the frontend components actually follow the backend protocol — should we confirm it?* **Confirmed — they diverge.**\n\n- **`packages/spec/scripts/check-react-blocks-conformance.ts`** — compares the spec schemas referenced by `REACT_BLOCKS` against the live objectui registry-inputs manifest (`sdui.manifest.json`), reporting **matched / spec-only / frontend-only** props per block. Run: `MANIFEST=… pnpm --filter @objectstack/spec check:react-conformance` (`--strict` to fail).\n- **`docs/audits/2026-06-react-blocks-conformance.md`** — the first run + how to read it.\n\n**Finding**: 79 spec-only, **17 frontend-only**, 0 missing. The reliable, actionable divergence is *frontend-only* — `object-form` exposes formType / drawer* / modal* / split* that the spec's `FormViewSchema` doesn't declare; `object-chart` differs from `ChartConfigSchema`; the `record:*` blocks declare **zero** designer inputs. (spec-only is softer — the registry inputs are a designer-palette subset of the protocol, read in full at render.)\n\n**For an ADR**: there's no single machine-readable 'authoritative component prop surface' today (spec=protocol, registry inputs=palette subset, React types=impl), and nothing keeps them in lockstep. Recommendation: spec = source of truth; add genuine frontend-only props to the spec; ratchet this check in CI (with a console manifest dump).\n\nThis is the **conformance-first** step; the AI-source prop-validation gate follows on the now-trustworthy contract. Report-only for now (no hard gate while 79 divergences are triaged).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

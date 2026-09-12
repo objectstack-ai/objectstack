@@ -1,0 +1,36 @@
+{
+  "number": 2307,
+  "kind": "pull_request",
+  "title": "feat(mcp): native business-action execution (list_actions / run_action)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T16:55:12Z",
+  "updated_at": "2026-06-24T17:07:21Z",
+  "closed_at": "2026-06-24T17:07:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T17:07:18Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2307",
+  "body": "## Why\n\nThe open-source MCP server (`@objectstack/mcp`, Apache-2.0) let a BYO-AI client (Claude Code, Cursor, …) **read/write records** but could not **operate the app** — run its business actions/flows. Action execution rode on `@objectstack/service-ai`'s `toolRegistry`, which MCP only ever *optionally duck-typed* (it must not hard-depend on service-ai). Now that the in-UI `ask` agent moved out to the closed cloud `@objectstack/service-ai-studio`, the framework AI runtime is **headless** and that bridged registry is **empty in a CE runtime** → MCP could CRUD rows but never trigger business logic.\n\nAn action is an open **mechanism**, not closed \"intelligence\", so this moves action execution into the open framework — bridged directly from the framework's action mechanism, with **no dependency on `@objectstack/service-ai`**.\n\n## What\n\nTwo native MCP tools, registered exactly like the existing object-CRUD tools (`registerObjectTools` → `registerActionTools`), bound to the **caller's principal**:\n\n| Tool | Description |\n|------|-------------|\n| `list_actions` | Enumerate the invokable business actions the caller may run — permission- + visibility-filtered. |\n| `run_action` | Invoke an action by name with `{ recordId, params }`. |\n\n### `@objectstack/mcp` (`mcp-http-tools.ts`)\n- New `registerActionTools()` + `McpActionBridge` seam (`McpActionSummary`, `RegisterActionToolsOptions`). Owns the tool **shape**; delegates execution + security to the runtime bridge — the same split as `registerObjectTools`.\n- Wired into `handleHttpRequest` **by capability**: only registered when the runtime bridge can resolve the action mechanism (graceful degradation, mirroring how record resources need a `dataEngine`). `package.json` unchanged — **no `@objectstack/service-ai`**.\n- `run_action` marked `destructiveHint` (clients confirm); `sys_*`-object actions rejected fail-closed at the tool layer.\n\n### `@objectstack/runtime` (`http-dispatcher.ts`)\n- `buildMcpBridge` now implements `listActions` + `runAction`, resolving + dispatching through the framework's **own** mechanism — `IDataEngine.executeAction` (script/body) / automation flow runner (flow) — bound to the request's `ExecutionContext`: the **same permission + RLS path the REST `/actions/...` route uses**.\n- `list_actions` enumerates headless-invokable actions (script/flow; UI-only `url`/`modal`/`form` excluded), filtered to what the caller may run; `sys_*`-object actions held back fail-closed.\n- The **ADR-0066 D4 `requiredPermissions` capability gate** is now single-sourced (`actionPermissionError`) and enforced for both the REST action route and `run_action` (no drift).\n\nReferenced the now-moved `service-ai/src/tools/action-tools.ts` for the resolution + invocation contract (resolve by name → dispatch via the action's `target` → `executeAction`), and reproduced it directly in the runtime bridge without importing service-ai.\n\n## Permissions / safety\n- Actions run **AS the caller** (same RLS posture as the CRUD tools): row-context records load under RLS; an unseen record reads as not-found.\n- `requiredPermissions` enforced before dispatch; `list_actions` hides what the caller can't run.\n- `sys_*`-object actions excluded by default (fail-closed) at both the tool layer and the bridge.\n\n## Tests\n- **`packages/mcp/src/mcp-action-tools.test.ts`** — tool shapes, capability-gated registration, delegation, fail-closed `sys_*` guard, tool-error surfacing (mirrors the object-tools http test).\n- **`packages/runtime/src/http-dispatcher.test.ts`** — real `buildMcpBridge`: `list_actions` filtering, `run_action` dispatching via the action's `target` handler key, ADR-0066 D4 gate deny/allow, modal/unknown rejection.\n- **`examples/app-todo/test/mcp-actions.test.ts`** — **CE end-to-end**: boots the real ObjectQL engine + app-todo handlers (NO service-ai) and drives the real `MCPServerRuntime` over JSON-RPC. `run_action complete_task` flows through `engine.executeAction` → the registered handler → the driver; verifies the record becomes `completed`, plus the fail-closed `sys_*` guard and the requiredPermissions gate (deny → allow) end-to-end. (`pnpm --filter @objectstack/example-todo test:mcp`)\n\n```\n✅ MCP action E2E PASSED — CE runtime lists + executes business actions, permission-enforced\n```\n\nFull suites green: `@objectstack/mcp` 53/53, `@objectstack/runtime` 441/441. Both packages typecheck clean.\n\n## Acceptance\n- [x] CE runtime (open framework + `@objectstack/mcp`, no cloud studio) lists **and** executes the app's business actions, permission-enforced.\n- [x] `@objectstack/mcp` has no `@objectstack/service-ai` dependency; existing object tools unchanged.\n- [x] Unit + integration tests added under `packages/mcp/src/` and `packages/runtime/src/`.\n- [x] Verified end-to-end via an MCP client over JSON-RPC against a seeded local env.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

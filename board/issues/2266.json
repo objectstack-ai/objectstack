@@ -1,0 +1,34 @@
+{
+  "number": 2266,
+  "kind": "pull_request",
+  "title": "fix(setup): drop Advanced nav entries for non-listable objects (verifications, device codes)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T04:44:07Z",
+  "updated_at": "2026-06-24T05:00:23Z",
+  "closed_at": "2026-06-24T04:44:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T04:44:22Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2266",
+  "body": "## What\n\nRemoves two **Setup → Advanced** menu entries that can never load:\n- **Verifications** (`sys_verification`)\n- **Device Codes** (`sys_device_code`)\n\n## Why\n\nFound by browser-verifying *every* Setup menu (all 38). Both objects intentionally omit `list` from `apiMethods` (`sys_verification`: `get/create/delete`; `sys_device_code`: `get/create/update/delete`) — they're sensitive, ephemeral secrets that aren't meant to be browsed. But the Advanced group pinned them as generic object/list-view menus, so every visit hit `405 OBJECT_API_METHOD_NOT_ALLOWED` and rendered the \"无法加载记录 / failed to load\" error boundary.\n\nRemoved both nav entries (and their now-orphaned zh labels). The objects stay reachable by id (`get`). Re-introducing a browse menu would require enabling `list` on the object — a security decision, not a nav change.\n\nSibling objects in the same group (`sys_oauth_application`, `sys_jwks`, `sys_account`, `sys_user_preference`) all allow `list` and render fine.\n\n## Verification\n\nRe-built `platform-objects`, restarted, re-swept: Advanced now shows OAuth 应用 / 签名密钥 / 身份链接 / 用户偏好; the two broken entries are gone; all remaining **36** Setup menus render without error.\n\nRelates to #2246.\n"
+}

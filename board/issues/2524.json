@@ -1,0 +1,33 @@
+{
+  "number": 2524,
+  "kind": "pull_request",
+  "title": "ci: bump downstream hotcrm smoke ref to v1.2.1 (ADR-0085 digestion)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-02T16:40:09Z",
+  "updated_at": "2026-07-02T16:45:55Z",
+  "closed_at": "2026-07-02T16:45:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-02T16:45:52Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2524",
+  "body": "The Release pipeline's **Downstream backward-compat smoke** pins hotcrm at a published release (`HOTCRM_REF`). It correctly went red after #2521: hotcrm v1.2.0 authored the `ObjectSchema.detail` block that ADR-0085 removed — the one real downstream author our two-repo zero-authors scan missed.\n\nDigestion chain, now complete:\n- [hotcrm#423](https://github.com/objectstack-ai/hotcrm/pull/423) removed the block (proven no-op: the Reference Rail is off by default, the flag never did anything) — merged\n- [hotcrm v1.2.1](https://github.com/objectstack-ai/hotcrm/releases/tag/v1.2.1) tagged with the fix\n- this PR moves the pin → unblocks the Version Packages release for the ADR-0085 spec\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

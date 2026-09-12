@@ -1,0 +1,35 @@
+{
+  "number": 2374,
+  "kind": "pull_request",
+  "title": "feat(spec)!: remove deprecated IUIService contract — use IMetadataService (11.0)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T14:17:43Z",
+  "updated_at": "2026-06-27T14:37:04Z",
+  "closed_at": "2026-06-27T14:37:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T14:37:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2374",
+  "body": "Removes the dead `IUIService` contract (spec `contracts/ui-service.ts`), long superseded by `IMetadataService` (views/dashboards are metadata). Epic #2364, A3.\n\n- spec: delete `contracts/ui-service.ts` (+test) + barrel export.\n- plugin-dev: drop `createUIStub` + factory entry; `'ui'` stays a `CoreServiceName` and falls back to a generic dev stub (guarded path) — no crash, only the obsolete view/dashboard methods removed.\n\nUse `IMetadataService` for view/dashboard CRUD. spec contracts tests (227) + plugin-dev (7) green. Major changeset → 11.0.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

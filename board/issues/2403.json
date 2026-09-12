@@ -1,0 +1,33 @@
+{
+  "number": 2403,
+  "kind": "pull_request",
+  "title": "docs(skill): document env-global / admin-only object visibility posture (objectstack-data)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T18:42:33Z",
+  "updated_at": "2026-06-27T18:47:37Z",
+  "closed_at": "2026-06-27T18:47:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T18:47:35Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2403",
+  "body": "Docs-only. Follow-up to cloud#551.\n\nThe objectstack-data skill covered tenancy modes + RLS but not the non-obvious interaction that the SSO list-visibility fix hinged on (I reverse-engineered it across several reboots): a platform admin's `viewAllRecords` superuser bypass is **posture-gated** — it only fires for `access.default:'private'` or `tenancy.enabled:false` objects, so env-global adapter-written objects (e.g. `sys_sso_provider`, whose rows never get an `organization_id` stamp) render an **empty list** under `member_default`'s wildcard `tenant_isolation` RLS.\n\nAdds the correct recipe (`tenancy.enabled:false` + `requiredPermissions`) and calls out the two single-flag pitfalls (member leak / admin-blind).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

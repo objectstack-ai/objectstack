@@ -1,0 +1,35 @@
+{
+  "number": 2384,
+  "kind": "pull_request",
+  "title": "feat(spec)!: remove deprecated DriverInterface alias — use IDataDriver (11.0, #2378)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T15:14:52Z",
+  "updated_at": "2026-06-27T15:29:18Z",
+  "closed_at": "2026-06-27T15:29:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T15:29:16Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2384",
+  "body": "Addresses #2378 (with a **scope correction**). Part of the 11.0 breaking-change batch (#2364).\n\n## Scope correction\nThe issue title said \"remove IDataEngine\", but reading the code: **`IDataEngine` is NOT deprecated** — it's the live engine-layer contract (`ObjectQL implements IDataEngine`, 60 refs). The genuine `@deprecated` alias is **`DriverInterface`** (`= IDataDriver`). So this PR removes `DriverInterface`; `IDataEngine` stays.\n\n## Changes\n- `spec/contracts/data-engine.ts`: drop the `DriverInterface` alias + now-unused `IDataDriver` import.\n- `@objectstack/core`: drop the `DriverInterface` re-export (`contracts/data-engine.ts` + `index.ts`).\n- `objectql/engine.ts`: type drivers as `IDataDriver` (11 refs) — **type-identical**, since the alias literally *was* `IDataDriver`.\n- driver-memory config / sql-driver comment / `data-engine.test.ts`: renamed to `IDataDriver`.\n- Regenerated spec `api-surface.json` (diff is exactly one line: `- \"DriverInterface (type)\"`).\n\n## Not touched\n- `IDataEngine` (live, not deprecated).\n- The separate zod-derived `DriverInterface` / `DriverInterfaceSchema` in `@objectstack/spec/data` (runtime driver schema) — different type, same name, not deprecated.\n\n## Verification\nspec contracts/data tests **32**, objectql **718** green; 8 build tasks green (incl. objectql DTS typecheck); api-surface snapshot regenerated. No other package imports the alias.\n\nDriver authors migrate `DriverInterface` → `IDataDriver` (identical shape).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

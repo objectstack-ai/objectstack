@@ -1,0 +1,33 @@
+{
+  "number": 1320,
+  "kind": "issue",
+  "title": "[P2] dashboard: no period-over-period primitive — \"this week vs last\" needs custom flows",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:26:23Z",
+  "updated_at": "2026-06-27T14:31:28Z",
+  "closed_at": "2026-06-27T14:31:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1320",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 38 条（**P2**）。\n\n## 现象\n\n平台没有周期对比（period-over-period）原语：\n\n- 本周 vs 上周\n- 本月 vs 上月\n- YoY 同比\n\n每个运营复盘看板都缺这一半信息——只有「当前是多少」、看不到「比上次涨/跌多少」。\n\n## 建议范围\n\n**M1：metric widget 周期对比**\n- `compareTo: 'previousPeriod' | 'previousYear' | { offset: '7d' }`\n- 显示主值 + 副值（百分比变化 + 箭头）\n\n**M2：chart widget 双轨**\n- bar / line 上叠加上一个周期的对照线 / 灰柱\n\n**M3：自定义周期**\n- 模板可声明「财年」「财月」等业务自定义周期\n\n## 验收\n\n- [ ] metric / chart widget 支持 compareTo\n- [ ] `helpdesk` Manager Overview 增加「Open Tickets 本周 vs 上周」\n- [ ] 缺陷库 gap #38 标记为已解决\n"
+}

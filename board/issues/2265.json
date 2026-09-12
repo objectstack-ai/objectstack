@@ -1,0 +1,35 @@
+{
+  "number": 2265,
+  "kind": "pull_request",
+  "title": "fix(spec): remove unrendered roadmap page types (enforce-or-remove) + liveness gate",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T04:42:37Z",
+  "updated_at": "2026-06-24T04:42:54Z",
+  "closed_at": "2026-06-24T04:42:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T04:42:52Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2265",
+  "body": "Follow-up to the Studio page-design dogfood (#2254 / #2261). Asked as a low-code architect: *are the roadmap page types a protocol error, and should they be deleted?* — yes. They're authorizable-but-unrendered, a false affordance that passes validation then breaks at runtime, worse because templates are AI-authored. This applies the codebase's own **ADR-0049 enforce-or-remove**.\n\n## What\n\n`PageTypeSchema` advertised **six page types with no renderer** — `dashboard`, `form`, `record_detail`, `record_review`, `overview`, `blank`. Verified in-browser: authoring `type: 'blank'` renders **\"Unknown component type: blank\"**; none have a dedicated renderer (`blank`'s `blankLayout` is destructured to `_blankLayoutProp` — ignored).\n\n- **Enum is now the live set**: `record`, `home`, `app`, `utility`, `list`. Authoring a removed type now **fails fast at parse** (the (1) \"guard\" the dogfood asked for is achieved by the enum reflecting reality) instead of silently at render (2).\n- New **`PAGE_TYPE_ROADMAP`** export tracks the removed types so the intent isn't lost — they re-enter the enum only when a renderer ships.\n- **Liveness gate test** (`page-type-liveness`) asserts the enum never re-grows a roadmap type — the regression backstop (4), in the spirit of the existing `liveness/` gate (page isn't a governed type yet; full onboarding is a follow-up).\n- `recordReview` / `blankLayout` config schemas + fields kept **`@deprecated`** (their types are no longer authorizable) to avoid breaking downstream imports — `objectui` still imports `BlankPageLayoutSchema`; hard removal is a coordinated follow-up.\n- **`variables`** documented **`@experimental`** (3): the `PageVariablesProvider` + `usePageVariables` hook exist, but nothing reads/writes them end-to-end yet (no `element:record_picker` writer, not injected into the `visible` CEL context) — completion tracked separately.\n\n## Verification\n- ✅ 801 spec UI tests pass (rewrote the tests that authored removed types into live-type + roadmap-rejection tests); `@objectstack/spec` typecheck clean.\n- ✅ Swept framework + examples: no page is authored with a removed type (the `type:'dashboard'` hits are nav-item kinds / metadata-type refs, not `PageType`).\n\n## Follow-ups (not in this PR)\n- objectui: drop `blank`/`blankLayout` references in `spec-bridge` + `types` so the deprecated schemas can be hard-removed.\n- Onboard `page` to the `liveness/` ledger (declare every authorable property + evidence).\n- Complete `variables` (writer + `visible`-CEL injection + example/proof) **or** remove it.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

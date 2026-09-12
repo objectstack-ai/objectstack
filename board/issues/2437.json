@@ -1,0 +1,36 @@
+{
+  "number": 2437,
+  "kind": "pull_request",
+  "title": "feat: @objectstack/sdui-parser — parser's framework home (ADR-0080 M3b)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-28T18:28:27Z",
+  "updated_at": "2026-06-28T18:40:11Z",
+  "closed_at": "2026-06-28T18:40:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-28T18:40:09Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2437",
+  "body": "ADR-0080 **M3b** (part 1 — the hoist). Creates `@objectstack/sdui-parser`: the constrained JSX-source → SDUI SchemaNode compiler's **canonical framework home** (pure, isomorphic, zero React) — `parse` (whitelist-sanitizing, never executes) · `validate` (vs manifest) · `codegen` (`JSX.IntrinsicElements` `.d.ts`) · `compile()`.\n\nThis is what the server-side `os build` save-gate will call to compile/validate a `kind:'jsx'` page's `source`; the client `@object-ui/sdui-parser` can re-export it.\n\nBuilds via tsup (CJS+ESM+DTS); compile + completeness + codegen verified against the built dist. Added to the changeset fixed group (the gate requires it).\n\n**Remaining (M3b part 2, separate PR):** wire the `os build` / save path to call `compile()` with a serialized component manifest, and have `@object-ui/sdui-parser` re-export this package. That needs the cross-repo manifest artifact pipeline.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

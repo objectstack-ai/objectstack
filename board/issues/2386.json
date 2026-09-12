@@ -1,0 +1,34 @@
+{
+  "number": 2386,
+  "kind": "pull_request",
+  "title": "fix(auth): make the SSO-provider registration form produce a usable IdP (ADR-0024 / cloud#551)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T15:38:53Z",
+  "updated_at": "2026-06-27T15:46:12Z",
+  "closed_at": "2026-06-27T15:46:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T15:46:09Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2386",
+  "body": "## Why\nFollow-up to the cloud#551 SSO work (#2363 admin-gate, #2370 public-IdP trust). The open-source `sys_sso_provider` **registration form** was broken: its `register_sso_provider` action posts FLAT fields to `@better-auth/sso`'s `/sso/register`, which expects the OIDC fields NESTED under `oidcConfig`. Top-level `clientId`/`clientSecret` get Zod-stripped → the form silently persists an `oidc_config = null` provider that returns **\"Invalid SSO provider\"** on login. So an admin could not actually configure a working IdP through the UI.\n\n## What\n- **plugin-auth**: a shared `runRegisterSsoProviderFromForm` helper reshapes the flat form body into the nested shape and **re-dispatches it through the real `/sso/register`** (so the admin gate, the public-routable `trustedOrigins` allowance, discovery hydration, and secret handling all still run — zero logic duplicated). Exposed via a new `/admin/sso/register` bridge on the host `AuthPlugin`. The cloud per-environment runtime mounts the *same* helper in its `AuthProxyPlugin` (separate cloud PR) — mirrors how `set-initial-password` stays in lockstep across the two mount points.\n- **platform-objects**: `register_sso_provider` retargets to `/api/v1/auth/admin/sso/register` and gains `discoveryEndpoint`, `scopes`, and attribute-mapping (`mapId`/`mapEmail`/`mapName`) fields.\n\nThis keeps runtime self-service IdP registration **in the OSS edition** — the open mechanism — rather than gating the config UI behind a paid tier.\n\n## Verification (browser E2E, local prod-like stack)\n- Admin registers an external OIDC IdP from the **flat form** (`/admin/sso/register`) → **200**; the provider has a populated `oidcConfig` (sign-in/sso returns a real authorize URL — was `oidc_config:null` → \"Invalid SSO provider\").\n- A federated user logs in through the **form-registered** provider → JIT user `alice@acme.example.com`; `list-accounts` → `providerId` = the form-registered IdP.\n- **Regression**: a non-admin registering via the bridge is rejected **403** (the admin gate fires through the re-dispatch); the route is mounted in the env runtime (was 404 — host-only AuthPlugin routes don't reach the env).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

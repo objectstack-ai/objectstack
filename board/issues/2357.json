@@ -1,0 +1,32 @@
+{
+  "number": 2357,
+  "kind": "pull_request",
+  "title": "feat(plugin-auth): cap self-created orgs per user (OS_ORG_LIMIT)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T08:13:23Z",
+  "updated_at": "2026-06-27T09:24:08Z",
+  "closed_at": "2026-06-27T09:24:07Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T09:24:07Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2357",
+  "body": "## What\nAdds a configurable per-user cap on **self-created** organizations, forwarded to better-auth's `organizationLimit`.\n\n- New `resolveOrgLimit()` (`@objectstack/types`) reads `OS_ORG_LIMIT`; unset → unlimited (self-host default).\n- `plugin-auth` passes `organizationLimit` in **function form**, counting only the caller's `role=owner` memberships (orgs they created) — read via `withSystemReadContext` so the cross-tenant `sys_member` count isn't filtered to empty by org-scoping. Fail-open if the count can't be taken.\n\n## Why\nEnabling multi-org (`OS_MULTI_ORG_ENABLED`) lets a user create orgs, and on the cloud control plane **every new org auto-provisions a free environment** (a real DB). Without a cap, one account could script `createOrganization` to spawn unbounded free DBs.\n\nbetter-auth's *number* form counts **all** of a user's memberships, which would wrongly block a collaborator invited into many orgs from creating their own. Owner-scoped counting is the correct axis. No-op in single-org mode (create is already denied by `beforeCreateOrganization`).\n\n## Verified (local rig)\n- A user owning 4 orgs but a member of 5 is **allowed** to create at `OS_ORG_LIMIT=5` (the invited org is not counted).\n- Once they own 5, the next create is **blocked** (403 “maximum number of organizations”).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

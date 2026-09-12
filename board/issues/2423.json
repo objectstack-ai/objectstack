@@ -1,0 +1,34 @@
+{
+  "number": 2423,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0076 rev.5 — kernel review + ObjectStackProtocol segmentation (D8/D9)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-28T10:43:13Z",
+  "updated_at": "2026-06-28T10:58:00Z",
+  "closed_at": "2026-06-28T10:57:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-28T10:57:59Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2423",
+  "body": "## What\n\nFolds the deep kernel-architecture review **into ADR-0076** (rev.5) — per maintainer preference for fewer ADRs — instead of a separate ADR.\n\n## Added\n\n- **D8 (ratify)** — the engine (`objectql`) is a clean, governance-free primitive (verified: zero RLS/RBAC/owner/tenant in `engine.ts`; all pluggable via middleware/hooks). **Protect it; no protocol/metadata/governance logic may enter it.**\n- **D9 (new)** — the central contract `ObjectStackProtocol` is a **70-method, 11-domain god-interface** (60/70 optional; no consumer uses >11%). Decision: **segment per ISP** into `DataProtocol` + `MetadataProtocol` + optional capability protocols (Analytics/Feed/Realtime/Notification/View/…), keeping `ObjectStackProtocol = DataProtocol & MetadataProtocol & Partial<…>` as a back-compat alias. Spec/type-level + incremental; impl restructure + `metadata-protocol` rename ride the cross-repo window with D7/Step 2.\n- TL;DR point + three open questions (data-facade home, post-segmentation package name, per-domain versioning).\n\n## Scope\n\nDocs only — edits `docs/adr/0076-objectql-core-tiering.md` (Status → rev.5). No code. Empty changeset.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 2283,
+  "kind": "pull_request",
+  "title": "fix(cli): type approvalFlow test helper's edges param (unblock TS on main)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T10:41:55Z",
+  "updated_at": "2026-06-24T10:48:04Z",
+  "closed_at": "2026-06-24T10:48:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T10:48:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2283",
+  "body": "main's **TypeScript Type Check** is red: `packages/cli/src/utils/lint-flow-patterns.test.ts:190` — `error TS7006: Parameter 'edges' implicitly has an 'any' type` (introduced by #2279). The TS job builds the whole workspace, so this blocks CI for **every open PR** (incl. the ADR renumber #2280).\n\nOne-line test-helper type annotation. No behavior change.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

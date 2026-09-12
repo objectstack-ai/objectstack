@@ -1,0 +1,30 @@
+{
+  "number": 2379,
+  "kind": "issue",
+  "title": "[11.0][A3] Remove legacy environment-variable aliases (OS_MULTI_TENANT, …)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T14:36:20Z",
+  "updated_at": "2026-06-27T15:29:10Z",
+  "closed_at": "2026-06-27T15:29:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2379",
+  "body": "**Part of 11.0 breaking-change batch (#2364).**\n\nRemove the legacy environment-variable aliases. (Owner decision: remove in 11.0, not deferred to v12.)\n\n### Scope\n- `packages/types/src/env.ts` — `readEnvWithDeprecation` + the legacy fallbacks (e.g. `OS_MULTI_TENANT` → `OS_MULTI_ORG_ENABLED`; review `PORT` → `OS_PORT`).\n- Consumers: `resolveMultiOrgEnabled()` used by `packages/cli/src/commands/serve.ts` and `packages/plugins/plugin-dev`.\n\n### Why this cascades\nThis is a **runtime/deployment-config** break, not a code API. Any deployment still starting with the old env names will read no value after removal.\n\n### Checklist\n- [ ] Drop legacy-alias handling; read canonical names only\n- [ ] Update callers (`serve.ts`, dev-plugin) + any example/CI env\n- [ ] `UPGRADE.md`: document the renamed env vars (old → new)\n- [ ] changeset\n\n**Risk**: low (code), but ensure docs/examples/CI all use the new names + a clear upgrade note.\n"
+}

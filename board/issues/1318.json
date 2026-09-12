@@ -1,0 +1,33 @@
+{
+  "number": 1318,
+  "kind": "issue",
+  "title": "[P2] dashboard: charts have no drill-down — manager dashboards are read-only wallpaper",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:26:23Z",
+  "updated_at": "2026-06-27T14:31:27Z",
+  "closed_at": "2026-06-27T14:31:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1318",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 37 条（**P2**）。\n\n## 现象\n\nDashboard 图表没有 drill-down：点击柱 / 扇形 / 折线点**不会跳到对应过滤的列表视图**。\n\n效果：管理者看到「sentiment = angry 有 8 条」之后无法一键查看是哪 8 条 → 看板沦为只读壁纸。\n\n## 复现\n\n`helpdesk` Manager Overview：\n- 点 \"Sentiment Distribution\" 的 angry 扇形 → 啥都不发生\n\n## 建议范围\n\n**M1：声明式 drill-down**\n- chart widget 上 `drillTo: { view: 'helpdesk_ticket.list', applyFilter: 'category' }`\n- 点击时，平台自动把分类值带进过滤器跳转\n\n**M2：默认行为**\n- 若 widget 未声明，默认跳到 `<object>.list` + 自动套用 categoryField 过滤\n\n**M3：与周期对比 #38 配合**\n- 周期对比柱的 drill-down 可指定时间段\n\n## 验收\n\n- [ ] chart widget 默认 drill-down 可用 + 可显式配置\n- [ ] `helpdesk` Manager Overview 4 个 chart 全部可点\n- [ ] 缺陷库 gap #37 标记为已解决\n\n## 关联\n\n- 依赖 #10（先让聚合工作）\n"
+}

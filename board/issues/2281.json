@@ -1,0 +1,32 @@
+{
+  "number": 2281,
+  "kind": "issue",
+  "title": "[Auth] Implement ADR-0069 — enterprise authentication hardening (P1/P2/P3)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T09:55:26Z",
+  "updated_at": "2026-06-27T18:50:43Z",
+  "closed_at": "2026-06-27T18:50:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2281",
+  "body": "Tracking issue for **implementing [ADR-0069: Enterprise authentication hardening](https://github.com/objectstack-ai/framework/blob/main/docs/adr/0069-enterprise-authentication-hardening.md)** (merged in #2275). Design is accepted-in-principle; **no code yet** — this issue tracks the phased build.\n\nParent: #2246 (first-run admin experience). Governing constraint: **ADR-0049** — every setting ships with its runtime enforcement; no \"false surface\" toggles.\n\nEach item = (setting → enforcement seam → mechanism). `[native]` = better-auth 1.6.x knob; `[custom]` = ObjectStack hook/middleware; `[field]` = new identity column.\n\n### P1 — security floor (first real customers)\n- [x] **Password: breached-password reject** `[native]` — enable `haveibeenpwned` plugin (`password_reject_breached`). *Lowest-risk first PR / sample for the pattern.* ✅ shipped in #2361 (the enforcement-wired pattern template).\n- [x] **Password: complexity** `[custom]` — `password_require_complexity` + `password_min_classes`, validated in `before` hooks on `/sign-up/email`, `/reset-password`, `/change-password`. ✅ shipped in #2368.\n- [ ] **Password: expiry + history** `[custom][field]` — `password_expiry_days` (gate at session validation), `password_history_count` (reject reuse); fields `sys_user.password_changed_at`, `sys_account.previous_password_hashes`. ✅ **history** shipped in #2371 (no-reuse, `password_history_count` + `sys_account.previous_password_hashes`); **expiry** shipped in #2388 (the session-validation gate; REST surface).\n- [x] **Account lockout** `[custom][field]` — `lockout_threshold` + `lockout_duration_minutes`; fields `sys_user.failed_login_count`, `locked_until`; admin **Unlock** action + locked-accounts filter. ✅ shipped in #2365 (locked-accounts list filter is a small follow-up).\n- [x] **Rate-limit tuning** `[native]` — enable/tune better-auth core `rateLimit` with stricter `customRules` for `/sign-in|sign-up|reset`; shared store for multi-node. ✅ shipped in #2365 (multi-node shared store still TODO).\n- [x] **Enforced MFA** `[custom][field]` — `mfa_required` + `mfa_grace_period_days`; gate password-only sessions at session validation until TOTP enrolled+verified; field `sys_user.mfa_required_at`. ✅ shipped in #2390 (global mfa_required + grace, reusing the #2388 gate; per-org require_mfa + objectui enroll prompt = follow-ups #2375).\n\n### P2 — defense in depth\n- [ ] **Session controls** `[custom][field]` — idle timeout, absolute max, concurrent cap; fields `sys_session.last_activity_at`, `revoked_at`, `revoke_reason`.\n- [ ] **IP allowlist** `[custom][field]` — `sys_organization.allowed_ip_ranges` (+ optional per-user); Hono auth-route middleware before the better-auth handler.\n- [ ] **OIDC trust-list UI** `[native]` — surface admin-managed OIDC providers (issuer/client/scopes/allowed domains) instead of env-only `genericOAuth`.\n\n### P3 — federation breadth\n- [ ] **SAML 2.0** — *not in better-auth core*; assess `@better-auth/sso` vs custom plugin. Do **not** ship a SAML settings surface before an enforcing impl (ADR-0049).\n- [ ] Broader settings-driven social providers; per-org override UI polish.\n\n### Out of scope (separate issues/ADRs)\n- SCIM / directory provisioning & bulk import (separate ADR — provisioning ≠ auth).\n- Passkeys / WebAuthn.\n\n**Suggested first PR**: `haveibeenpwned` (native, low-risk) as the enforcement-wired pattern template, then the `[custom]` items each with their hook + tests.\n\n\n\n\n\n\n"
+}

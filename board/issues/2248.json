@@ -1,0 +1,35 @@
+{
+  "number": 2248,
+  "kind": "pull_request",
+  "title": "feat(studio): online dataset authoring — create form, derived measures, joined-query fix",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-23T17:44:17Z",
+  "updated_at": "2026-06-23T18:13:48Z",
+  "closed_at": "2026-06-23T18:01:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-23T18:01:39Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2248",
+  "body": "## Summary\n\nDogfooded **online dataset authoring** (ADR-0021 analytics semantic layer) in the Studio app as a business user, found three issues, fixed them, and browser-verified each.\n\n| # | Fix | Package | Type |\n|---|-----|---------|------|\n| A | Add `dataset.form.ts` (sectioned create form + `object` picker) + register in `METADATA_FORM_REGISTRY` | `@objectstack/spec` | feat |\n| B | Make `DatasetMeasure.aggregate` optional — derived measures no longer need a dummy aggregate (required for non-derived only) | `@objectstack/spec` | feat |\n| C | Qualify base-object columns in joined dataset queries → fixes `ambiguous column name` 500s | `@objectstack/service-analytics` | fix |\n\n### Why\n- **A** — `dataset` was the *only* UI-authorable metadata type without a `defineForm`, so Studio's create surface fell back to the flat auto-layout (free-text `object`, no grouping).\n- **B** — a derived measure (`derived: { op, of }`) ignores `aggregate` at compile time, but the schema still **required** it → saving a derived measure failed validation (`422`) unless you added a meaningless aggregate.\n- **C** — a joined dataset (`include` + `relationship.field`) emitted **bare** base-table columns while joined columns were alias-qualified; when both tables share a column name (e.g. `status`), the query 500'd with `ambiguous column name`.\n\n### Verification\n- `@objectstack/spec` tests: **6624 pass** (+2 derived-aggregate regression)\n- `@objectstack/service-analytics` tests: **151 pass** (+2 base-column-qualification regression in `native-sql-rls.test.ts`)\n- Full framework build: **76/76** (no TypeScript ripple from making `aggregate` optional)\n- **Browser-verified** on showcase: improved create form (sections + object picker); joined + derived dataset query returns correct values — `utilization = spent/budget` = Contoso 70.0%, Fabrikam 97.8%, Northwind 40.0% / 96.0%, with `account.name` join + base `status` grouping + `US$` formatting.\n\n### Notes / follow-ups (objectui, out of scope)\n- `include`/`filter` are intentionally curated out of the **create** form (the rich *designer* canvas owns them via `CREATE_MODE_CANVAS_TYPES` / `hiddenFields` in `ResourceEditPage.tsx`). The clean long-term fix is to add `'dataset'` to the canvas-create list (same move as the in-flight **report**-create-canvas work) so create == the rich designer. Tracked separately to avoid colliding with that change.\n- The dataset designer appears to lack a dataset-level `filter` (scope) editor — possible objectui follow-up.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 2342,
+  "kind": "pull_request",
+  "title": "fix(driver-sql): canonical ISO-8601-Z audit timestamps on SQLite (ADR-0074)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-26T10:55:55Z",
+  "updated_at": "2026-06-26T11:02:57Z",
+  "closed_at": "2026-06-26T11:02:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-26T11:02:55Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2342",
+  "body": "## Problem\n\nOn SQLite the driver's two write paths disagreed on how they stored the builtin `created_at`/`updated_at` audit columns:\n\n- **INSERT** relied on the column default `defaultTo(knex.fn.now())` → `CURRENT_TIMESTAMP` → `'2026-06-26 10:23:40'` (space-separated, no millis, **no zone**).\n- **UPDATE** stamped `toISOString().replace('T',' ').replace('Z','')` → `'2026-06-26 10:23:40.246'` (space-separated, with millis, **no zone**).\n\nBoth are **timezone-naive**. A zone-less, space-separated string is not ISO-8601, so `Date.parse` (V8) reads it as **local** time. On a non-UTC runtime a stored UTC wall-clock silently shifts by the host offset when read back — corrupting every `new Date(updated_at)` comparison. This surfaced as the objectos kernel **freshness probe never evicting** on a UTC+8 self-hosted EE: a shifted `updated_at` landed *before* the absolute `builtAtMs`, so the per-env kernel reported \"fresh\" and publishes/installs/config toggles didn't take effect until the LRU TTL expired. (The cloud consumer was already hardened defensively; this is the deeper storage-side fix.)\n\nNote: the \"INSERT stores `…Z`\" framing only held for **caller-stamped** tables (e.g. `sys_metadata` writes ISO-Z via `toISOString()`) — and `update()` then *clobbered* that back to the naive format, which is the actual mechanism. A SQL-level `ORDER BY updated_at` (objectql metadata load) also means fixing only `update()` would **mix** formats on disk (space `0x20` < `T` `0x54`) and mis-order rows, so insert and update had to change together.\n\n## Fix (`packages/plugins/driver-sql/src/sql-driver.ts`)\n\n- **`update()`** → SQLite stamps `new Date().toISOString()` (canonical ISO-8601 with `Z`).\n- **`create()` / `bulkCreate()` / `upsert()`** → new `stampInsertTimestamps()` fills missing `created_at`/`updated_at` with the same canonical instant. Applied **app-side** (not via a DDL default) so **existing tenant databases** are fixed immediately — a column-default change only affects newly created tables.\n- **`upsert()`** → `created_at` is now insert-only (a conflicting `merge()` never overwrites it; `updated_at` still advances).\n- **`formatOutput()`** → idempotent **tolerant reader** repairs any legacy/raw zone-naive audit timestamp to ISO-8601-`Z` on read (interpreting the stored wall-clock as UTC). No data migration needed; mirrors the existing `Field.date`/numeric read-repair. `Field.datetime`-typed audit columns stored as epoch-ms INTEGER pass through untouched.\n\nPostgres/MySQL are unchanged (native `now()` stores a real zone-aware `TIMESTAMP`).\n\n## Verification\n\n- New regression suite `sql-driver-timestamp-format.test.ts` (10 cases incl. the freshness-probe regression, idempotent read-repair, no on-disk mixing, upsert `created_at` immutability).\n- **driver-sql full suite: 217 pass.** The 3 date/time tests flagged as at-risk don't actually pin the `updated_at` format and pass unchanged.\n- Downstream green: objectql 64 (optimistic locking via `updated_at` + integration), service-analytics 164 (`created_at` bucketing), dogfood gate 173, service-messaging 129, service-job 36, service-settings 128, service-storage 48.\n- eslint clean; tsup DTS (type) build passes.\n\n## Docs / release\n\n- ADR-0074 (`docs/adr/0074-canonical-audit-timestamp-storage-on-sqlite.md`), building on ADR-0053.\n- Changeset: `@objectstack/driver-sql` patch.\n\nFollow-up (scoped out, tracked separately): user-declared `datetime` fields with a `NOW()` default still take the naive `CURRENT_TIMESTAMP` default on SQLite.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

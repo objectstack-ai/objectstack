@@ -1,0 +1,35 @@
+{
+  "number": 2371,
+  "kind": "pull_request",
+  "title": "feat(plugin-auth): password history / no-reuse (ADR-0069 D1, P1)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T14:05:54Z",
+  "updated_at": "2026-06-27T14:13:04Z",
+  "closed_at": "2026-06-27T14:13:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T14:13:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2371",
+  "body": "ADR-0069 P1 (tracking #2281): **D1 password history / no-reuse**. Continues the password-policy work (after HIBP #2361 and complexity #2368), reusing the setting→before/after-hook pattern.\n\n## What\n- New `auth` setting `password_history_count` (0–24, default 0 = off).\n- On `/change-password` and `/reset-password`, a new password matching the **current** password or any of the last **N** hashes is rejected with `PASSWORD_REUSE`.\n- New bounded `sys_account.previous_password_hashes` column (JSON ring, system-managed, hidden) backs the check; before/after hooks capture the old hash and append it on success.\n\n## Reuses better-auth (no duplication)\nPer a \"don't reinvent\" review of the installed better-auth 1.6.20: password history is **not** native, so it's custom — but the check **reuses better-auth's native `password.verify`** (no bespoke crypto), and the reset-flow user is resolved via the **same reset-token verification lookup** better-auth's own handler uses. Session revocation on reset stays on the native `revokeSessionsOnPasswordReset`.\n\n## ADR-0049\nDefault-off / additive (no upgrade behavior change); the setting ships with its enforcement.\n\n## Verification\n- **Unit**: 135 plugin-auth (parse / reuse-reject / ring-trim helpers with a stub `verify` + where-aware `sys_account` mock) + service-settings + platform-objects green; builds incl. strict DTS green.\n- **Live dogfood** (history_count=3): change P1→P2 ok; change back to P1 (historical) → `400 PASSWORD_REUSE`; change P2→P2 (current) → `400 PASSWORD_REUSE`; change to a fresh password ok; the ring column persists bounded real hashes.\n\n## ADR-0069 P1 status\n✅ D1 HIBP (#2361) · ✅ D2 lockout + rate-limit (#2365) · ✅ D1 complexity (#2368) · ✅ **D1 history (this PR)**. Remaining P1: **D1 expiry** + **D3 enforced MFA** — both need the session-validation gate (core-runtime, higher blast radius); planned as a focused follow-up.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

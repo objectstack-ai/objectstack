@@ -1,0 +1,33 @@
+{
+  "number": 2381,
+  "kind": "pull_request",
+  "title": "feat(spec): blueprint dashboard widget `condition` slot (threshold/status filter)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T14:36:40Z",
+  "updated_at": "2026-06-27T16:22:00Z",
+  "closed_at": "2026-06-27T16:21:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T16:21:57Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2381",
+  "body": "## Problem\nA dashboard widget whose **title** restricts which records it counts — \"库存低于10的备件预警\", \"overdue work orders\", \"金额超过 2000\" — has no slot to express that. `measure`/`groupBy` (cloud#476) only choose the NUMBER and the axis, not the row set, so the builder emits a plain `count` and the card counts **every** row. Confirmed live: a \"库存低于10的备件预警\" card showed 12 (all parts) when only 2 are below 10.\n\n## Change\nAdd an optional `condition {field, op, value}` (op ∈ `lt|lte|gt|gte|eq|ne`) to the blueprint dashboard widget — **lenient + strict** variants — which the cloud builder compiles to the framework widget's existing presentation-scope `filter` (`DashboardWidgetSchema.filter` → `runtimeFilter`, ANDed into the dataset query).\n\nDeliberately a single comparison: the model emits it reliably, and the builder drops an unresolvable field/op rather than yielding a mysteriously empty card.\n\n## Pairs with\nCloud `dashboardBody` mapping + propose_blueprint prompt guidance + `resolveConditionFilter` unit tests (separate cloud PR). Same cross-repo shape as #476 (framework slot → cloud honors it). `@objectstack/spec` builds clean (DTS incl. deps).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

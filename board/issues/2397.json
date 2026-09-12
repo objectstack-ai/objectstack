@@ -1,0 +1,35 @@
+{
+  "number": 2397,
+  "kind": "pull_request",
+  "title": "feat(auth): session controls — idle / absolute / concurrent (ADR-0069 D4, P2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T17:37:48Z",
+  "updated_at": "2026-06-27T17:44:02Z",
+  "closed_at": "2026-06-27T17:44:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T17:44:00Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2397",
+  "body": "ADR-0069 **P2 / D4 — session controls**: idle timeout, absolute max lifetime, and a concurrent-session cap.\n\n## What\nThree new `auth` settings (all 0 = off):\n- **`session_idle_timeout_minutes`** — sign a user out after inactivity. Enforced in `customSession`: touches `sys_session.last_activity_at` (throttled to ~once a minute) and revokes the session once the idle window is exceeded.\n- **`session_absolute_max_hours`** — cap total session lifetime regardless of refresh; revoked once `created_at` is older than the cap.\n- **`max_concurrent_sessions_per_user`** — on sign-in, keep the newest N live sessions and revoke the rest (oldest first).\n\nNew `sys_session` columns back this: `last_activity_at`, `revoked_at`, `revoke_reason`.\n\n## Mechanism (no client change)\nRevocation **expires the session in place** (`expires_at` → past + `revoked_at`/`revoke_reason`), so better-auth returns no session on the next request → the Console's existing `401 → login redirect` handles it. Idle/absolute run in `customSession` (the per-request session-validation seam); the concurrent cap runs in the sign-in after-hook.\n\n> Note: there is a one-request grace for idle/absolute (the request that trips the limit resolves, then revokes — the next request is rejected). And better-auth garbage-collects expired sessions, so the `revoke_reason` **audit** is best-effort; the **enforcement** (session killed) is not.\n\n## ADR-0049\nDefault-off / additive (no upgrade behavior change); each setting ships with its enforcement. The existing native `session.expiresIn`/`updateAge` and `/revoke-other-sessions` are kept as-is.\n\n## Verification\n- **Unit**: plugin-auth 203 + service-settings 129 + platform-objects 63 green; full build incl. strict DTS green. New tests cover idle revoke, absolute revoke, last_activity touch, already-revoked no-op, and concurrent-cap oldest-eviction.\n- **Live dogfood**:\n  - **Concurrent**: cap=2 + 3 sign-ins → the oldest session is revoked (`get-session` → no user; DB `revoke_reason=concurrent_cap`), the 2 newest stay alive.\n  - **Idle**: `idle=15m` with a back-dated `last_activity_at` → the session is killed on the next request (`get-session` → no user).\n\n## ADR-0069 status\nP1 complete; enforced MFA complete across all surfaces (+ Console UI). P2 now adds session controls. Remaining on #2375: P2 **IP allowlist** + **OIDC trust-list UI**, and **P3 SAML**.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

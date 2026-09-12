@@ -1,0 +1,32 @@
+{
+  "number": 2523,
+  "kind": "pull_request",
+  "title": "docs(builder-ui): draft-vs-preview semantics for the Data Form view",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-02T16:29:24Z",
+  "updated_at": "2026-07-02T17:45:36Z",
+  "closed_at": "2026-07-02T17:45:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-02T17:45:34Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2523",
+  "body": "Codifies the owner decision on the Form view's two sub-modes:\n\n- **布局 = draft confirmation** — renders the draft at the metadata level (fields + fieldGroups, per-type control previews, no object-data SQL). Safe by construction: structural draft changes have no physical columns until publish.\n- **预览 = published runtime reference** — deliberately renders the **published** ObjectForm, because a data-bound draft preview would hit columns that don't exist yet. Publishing stays a **deliberate user action**; with unpublished changes the preview now says so (companion objectui PR).\n- Data-bound **draft** preview = deferred — it's a structural-authoring / DDL-timing decision, not a rendering feature.\n\nAlso refreshes §4 Built-so-far (Form view 布局⇄预览 + package-level publish landed via objectui#2142/#2147/#2155) and trims Still-to-build.\n\nDocs only.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 2415,
+  "kind": "pull_request",
+  "title": "refactor(objectql): extract metadata-protocol + add lean ./core entry (ADR-0076 Step 1)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-28T06:24:39Z",
+  "updated_at": "2026-06-28T07:07:46Z",
+  "closed_at": "2026-06-28T07:07:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-28T07:07:44Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2415",
+  "body": "## What\n\n**ADR-0076** — makes `@objectstack/objectql` cleanly embeddable, in two non-breaking parts:\n\n### 1. Relocate metadata management → `@objectstack/metadata-protocol`\n`protocol.ts` (`ObjectStackProtocol` impl — sys_metadata CRUD, draft/publish, locks, package ownership, diagnostics) plus `sys-metadata-repository`, `metadata-diagnostics`, `seed-loader`, `build-probes` were metadata-domain code living in objectql for historical reasons. They now live in a new `@objectstack/metadata-protocol` package. The protocol is typed against an injected `MetadataHostEngine` interface (engine still injected at runtime), so dependency is one-way (`objectql → metadata-protocol`), no cycle. **Non-breaking**: objectql re-exports every previously public symbol.\n\n### 2. Lean `@objectstack/objectql/core` entry\nA thin embedder (e.g. the objectbase gateway) imports `@objectstack/objectql/core` to get the engine/registry/hooks/validation surface with **no** kernel plugin, kernel factory, or metadata protocol — so `@objectstack/metadata-protocol` (268KB) never enters its bundle. A **boundary ratchet test** walks `core.ts`'s full import closure and fails if anything reachable imports the protocol/plugin/kernel.\n\n## Why\n\n- `protocol.ts` co-changes with `engine.ts` only ~6% of the time but with `metadata-core`/`metadata`/`spec` ~43% — it belongs in the metadata layer.\n- Splitting the *engine itself* into its own repo/package is **not** pursued: 88% of recent `engine.ts`/`registry.ts` commits are cross-package (engine API still co-evolving), and cloud boots `ObjectQLPlugin` directly in ~8 places — a breaking boot-contract change isn't worth it now. The `./core` entry delivers the lean-embed goal without any of that cost.\n\n## Verification\n\n- ✅ Full turbo build green incl. DTS; `dist/core.*` has **0** references to metadata-protocol (vs 5 in index); runtime smoke confirms `ObjectQL` exported, `ObjectQLPlugin`/protocol not.\n- ✅ `@objectstack/objectql` suite: **58 files / 719 tests** (incl. real-engine protocol integration + the new boundary ratchet).\n- ✅ Downstream `runtime` + `rest` + `metadata` (25 pkgs) build clean — public surface intact.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

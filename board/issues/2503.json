@@ -1,0 +1,33 @@
+{
+  "number": 2503,
+  "kind": "pull_request",
+  "title": "docs: ADR-0084 app-builder IA + builder UI design doc",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-01T01:23:41Z",
+  "updated_at": "2026-07-01T13:51:05Z",
+  "closed_at": "2026-07-01T13:51:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-01T13:51:03Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2503",
+  "body": "## What\n\nTwo companion docs for the application builder:\n\n1. **ADR-0084** — the information architecture (the *decisions*): 4 content pillars\n   **Data / Automation / Interface / Access** + **Settings** (General + Advanced),\n   AI as a platform capability (not a pillar), Integration folded into Advanced,\n   Operate/Platform out of the builder. Records what was chosen and what was rejected.\n\n2. **`docs/design/builder-ui.md`** — the UI design (a *living doc*, the how-it-looks):\n   the shared **3-zone shell** (pillar tabs · left rail · main work surface · right\n   inspector · draft/publish), the **design principles** (facet=tab / item=inspector,\n   grid-primary via a default `Records` tab, small-config→inspector /\n   big-designer→main, two-doors, same-renderer, no-modal), and the **Data pillar** in\n   detail (object facet tabs, field manager, Validations grounded in the real 6-type\n   `ValidationRuleSchema`, v1 scope). TODO placeholders for Automation / Interface /\n   Access / Settings — it grows as those are designed.\n\n## Why the split\nADR = *why it's decided this way, what's excluded* (bound, stable). Design doc =\n*what it looks like, how it's used* (living, iterated). Keeping them separate lets the\nUI evolve without re-opening the IA decision.\n\n## Scope\nDocs only. No code."
+}

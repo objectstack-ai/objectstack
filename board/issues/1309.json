@@ -1,0 +1,33 @@
+{
+  "number": 1309,
+  "kind": "issue",
+  "title": "[P1] formula: cross-object formula not supported — can't derive ticket.priority from customer.tier",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:24:46Z",
+  "updated_at": "2026-06-27T14:30:05Z",
+  "closed_at": "2026-06-27T14:30:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1309",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 36 条（**P1**）。\n\n## 现象\n\n`formula` 字段**不能跨对象引用**。在 ticket 上想用 `customer.tier` 来推导优先级，写不出来：\n\n```ts\n// 想要的：\n{ name: 'derived_priority', type: 'formula', expr: `customer.tier == 'enterprise' ? 'urgent' : 'normal'` }\n// 实际：formula 上下文里只能拿到本对象字段\n```\n\n只能写 flow 在 customer 变化时回填 ticket 的字段 —— flow 模拟派生字段：\n\n- 不实时\n- 多链路同步易漂移\n- 关联深一层就崩\n- 列表渲染时 N+1\n\n## 复现\n\n`helpdesk` 模板：\n- 想按 `customer.tier` 自动设 SLA → 不能 derive\n- 想按 `team.timezone` 算业务时间 → 不能 derive\n\n`procurement`：\n- 想按 `vendor.compliance_score` 决定审批阈值 → 不能 derive\n\n## 当前 workaround\n\n- 字段冗余 + flow 同步（前述问题）\n- view 计算列（仅展示）\n\n## 建议范围\n\n**M1：formula 支持 lookup 字段一跳**\n- `customer.tier` / `team.name` / `assignee.role` 等单跳支持\n- 编译时检查、运行时缓存\n- 列表批量预取避免 N+1\n\n**M2：多跳（链式）**\n- `customer.organization.industry` 谨慎开放\n- 默认 2 跳上限\n\n**M3：依赖追踪 + 失效**\n- 关联对象变更时增量重算\n- 索引 / 物化策略可配置\n\n**M4：rollup 字段**（关联：子记录聚合）\n- 与跨对象 formula 是双胞胎：`children.count() / .sum(amount)`\n\n## 验收\n\n- [ ] formula 字段支持单跳 lookup\n- [ ] rollup 字段在 spec 中可声明\n- [ ] `helpdesk` 模板：用 `customer.tier` 派生 priority\n- [ ] 缺陷库 gap #36 标记为已解决\n\n## 关联\n\n- 与 #7 CEL stdlib 共同提升公式表达能力\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 2333,
+  "kind": "pull_request",
+  "title": "fix(identity): sys_verification.value must not be UNIQUE — breaks OIDC authorize (503)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-25T17:17:29Z",
+  "updated_at": "2026-06-25T18:45:56Z",
+  "closed_at": "2026-06-25T18:45:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-25T18:45:54Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2333",
+  "body": "## Bug\n`/api/v1/auth/oauth2/authorize` (the cloud-as-IdP OP) returns **HTTP 503** with:\n```\nUNIQUE constraint failed: sys_verification.value\n```\nbetter-auth's `oauth-provider` stores OIDC **authorization codes** in the verification table with `value` = a JSON blob (`{type:\"authorization_code\", query:{…,state}, userId, sessionId, …}`). That blob can legitimately repeat (same user+client+state on retry), but `sys-verification.object.ts` declared `{ fields: ['value'], unique: true }` → the insert violates the constraint → 503.\n\n**Impact:** the env→cloud OIDC SSO (\"Continue with ObjectStack\", ADR-0024 D3) **loops forever** — the cloud login SPA re-issues the signed authorize request every ~20s and never completes.\n\n## Fix\n`value` → `unique: false` (keep the index for lookups; better-auth keys on `identifier`, not `value`).\n\n## Found via\nLocal browser E2E of the env-side SSO against a real cloud OP (anonymous env login → \"Continue with ObjectStack\"). Confirmed in the server log (`SqliteError … SQLITE_CONSTRAINT_UNIQUE`); dropping `uniq_sys_verification_value` in the live DB stopped the UNIQUE errors.\n\n## Follow-ups (separate)\n- **Migration:** existing control-plane DBs already have `uniq_sys_verification_value`; schema-sync is additive, so they need a one-off `DROP INDEX`.\n- **Frontend:** even with this fixed, the cloud login SPA does not navigate to the authorize success redirect (200-with-body) — the OIDC SSO still needs a frontend fix to complete. Filed separately.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

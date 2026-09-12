@@ -1,0 +1,33 @@
+{
+  "number": 1314,
+  "kind": "issue",
+  "title": "[P2] dx: dashboard config changes require dev server restart",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:25:21Z",
+  "updated_at": "2026-06-27T14:30:07Z",
+  "closed_at": "2026-06-27T14:30:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1314",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 12 条（**P2**）。\n\n## 现象\n\n`pnpm dev` 模式下，dashboard widget 的配置改动（layout、type、aggregate、filter）**需要重启 dev server** 才能生效。其他元数据（objects / views / flows）能通过 watcher 增量重载。\n\n模板作者调样式时反复 `Ctrl+C` 重启，效率拖后腿。\n\n## 复现\n\n`packages/helpdesk`：\n\n```bash\npnpm dev\n# 修改 src/dashboards/manager_overview.dashboard.ts：移动 widget x/y\n# 浏览器刷新 — 看不到变化\n# 必须 Ctrl+C 重启\n```\n\n## 建议范围\n\n**M1：dashboard 热重载**\n- watcher 监听 `src/dashboards/**`，触发 build → 推到前端\n- 前端检测到 dashboard schema 变更后局部重渲染\n\n**M2：广义热重载诊断**\n- 一个统一的「下面这些类型支持 HMR / 下面这些不支持」表\n- 不支持时控制台明确提示「请重启」而不是静默\n\n## 验收\n\n- [ ] dashboard 配置改动 < 2 秒前端可见\n- [ ] 不支持热重载的元数据类型有明确警告\n- [ ] 缺陷库 gap #12 标记为已解决\n"
+}

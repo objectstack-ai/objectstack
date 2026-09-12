@@ -1,0 +1,30 @@
+{
+  "number": 2284,
+  "kind": "pull_request",
+  "title": "fix(cli): type approvalFlow test helper — unbreak workspace build (follow-up #2279)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T11:29:49Z",
+  "updated_at": "2026-06-24T13:15:28Z",
+  "closed_at": "2026-06-24T13:15:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2284",
+  "body": "One-line follow-up to #2279: the `approvalFlow` test helper's `edges` param was implicitly `any`, which the strict cli `tsc` build (`tsconfig.build.json`) rejects — vitest/esbuild transpiled it without a full type-check, so it passed locally but broke the workspace **Build / TypeScript Type Check** jobs after merge. Typed it explicitly; `pnpm --filter @objectstack/cli build` is green again. No behavior change. Refs #2274, #1770."
+}

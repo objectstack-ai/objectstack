@@ -1,0 +1,32 @@
+{
+  "number": 2526,
+  "kind": "pull_request",
+  "title": "chore: bump objectui to 144ab55b247c",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-03T01:58:40Z",
+  "updated_at": "2026-07-03T02:19:01Z",
+  "closed_at": "2026-07-03T02:18:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-03T02:18:59Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2526",
+  "body": "Moves the vendored console pin to objectui main @ `144ab55b2`, pulling in:\n\n- [objectui#2168](https://github.com/objectstack-ai/objectui/pull/2168) — ADR-0085 consumer switch: single-source `deriveFieldGroupLayout` from spec 11.7.0, `stageField: false` stepper suppression, `highlightFields` reads (with `compactLayout` fallback), dead `views.*`/`detail.*` reads removed.\n- [objectui#2169](https://github.com/objectstack-ai/objectui/pull/2169) — Studio Data rail search + inline new-object.\n\n`scripts/build-console.sh` run locally at this pin: bundle canary green, dist 42MB.\n\nThis is the precondition for removing the spec-side `compactLayout` transition mirror (scheduled one minor after this lands).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 2292,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0070 Accepted — P1–P3 implemented, merged & live-verified",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T15:05:05Z",
+  "updated_at": "2026-06-24T15:10:20Z",
+  "closed_at": "2026-06-24T15:10:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T15:10:17Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2292",
+  "body": "Marks **ADR-0070 (Package-first authoring)** as **Accepted** now that P1–P3 are implemented, merged, and verified end-to-end.\n\n- **Status**: Proposed → Accepted.\n- Adds an **Implementation status** section: P1 kernel ([framework#2285](https://github.com/objectstack-ai/framework/pull/2285)), P2 Studio ([objectui#1970](https://github.com/objectstack-ai/objectui/pull/1970)), P3 AI ([cloud#479](https://github.com/objectstack-ai/cloud/pull/479) + [cloud#481](https://github.com/objectstack-ai/cloud/pull/481); tests [cloud#480](https://github.com/objectstack-ai/cloud/pull/480)).\n- Records the **live dogfood** result: a one-sentence magic build + iterative business-user changes (add related object, add field) all landed in **one** app base (`app.iojn`) — live, editable, no `com.workspace`, no orphans.\n- Annotates the **Rollout** (D1–D3 ✅; D4 lifecycle / D5 migration / D6 framing ⏳).\n\nDocs-only; no code or changeset.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

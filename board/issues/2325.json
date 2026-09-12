@@ -1,0 +1,36 @@
+{
+  "number": 2325,
+  "kind": "pull_request",
+  "title": "feat!: remove service-ai — open edition is MCP-only (ADR-0025 S2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-25T11:19:40Z",
+  "updated_at": "2026-06-25T11:28:22Z",
+  "closed_at": "2026-06-25T11:28:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-25T11:28:20Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2325",
+  "body": "ADR-0025 migration — **framework half (S2): remove service-ai, open edition is MCP-only.**\n\nCompletes the boundary in ADR-0025 / ADR-0026 (cloud#513) and pairs with the cloud-side move (cloud#514). `@objectstack/service-ai` (in-UI AI runtime + `ask` agent) now lives in `cloud/packages/service-ai` (closed); the **open framework exposes AI only via `@objectstack/mcp` (BYO-AI)**.\n\n**Changes**\n- delete `packages/services/service-ai`\n- drop the dep from `packages/cli` + `examples/app-todo` (CLI keeps its dynamic-import + silent-skip path so a cloud/EE host can still mount it)\n- remove app-todo's 7 in-UI-AI integration tests; **keep** `mcp-actions.test.ts` (CE test proving actions work over MCP with no service-ai)\n- drop `@objectstack/service-ai` from `.changeset/config.json` `fixed[]`\n- de-stale `ai-capabilities.mdx` + `packages.mdx` (open AI → MCP)\n\n**Verified locally:** `turbo build` (CLI + example-todo closures) green; app-todo **CE MCP-actions E2E passes** with service-ai absent.\n\n**BREAKING:** `@objectstack/service-ai` is no longer published from the open framework. (Already-published versions stay on npm; self-hosted open runtimes use `@objectstack/mcp`.)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

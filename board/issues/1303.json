@@ -1,0 +1,33 @@
+{
+  "number": 1303,
+  "kind": "issue",
+  "title": "[P1] list: no \"changed since last visit\" indicator — agents can't tell what moved during off-hours",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:23:22Z",
+  "updated_at": "2026-06-27T14:30:03Z",
+  "closed_at": "2026-06-27T14:30:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1303",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 29 条（**P1**）。\n> 实证：`helpdesk` 轮班、`procurement` 审批人回到工作台、`compliance` 整改巡检全部踩坑。\n\n## 现象\n\n列表视图 / 工作台**没有「上次访问以来的变化」标记**：\n\n- 无未读 / 有更新的 badge\n- 无时间线分割线（「↓ 你上次访问后 ↓」）\n- 无「新记录」/「已修改」/「他人评论」高亮\n\n业务用户回到工作台后**无法识别哪些行需要重新关注**，必须挨个点开看，效率与心智负担都打折。\n\n## 复现\n\n客服坐席休班 24 小时回来：\n- 自己负责的 20 张工单中，有 5 张被客户回复 / 团队成员加了内部备注 / SLA 状态变化\n- 在 list view 中**没有任何视觉提示**指明这 5 张\n\n## 当前 workaround\n\n让用户按 `updated_at desc` 排序后凭记忆判断 —— 不可靠。\n\n## 建议范围\n\n**M1：每用户「最后访问时间」**\n- 系统层记录 `(user_id, object, view, last_visited_at)`\n- 列表加载时计算每行 `updated_at > last_visited_at` 得到「new since visit」flag\n- 渲染：左侧粗色 indicator / 加粗、时间线分割线\n\n**M2：更细粒度「有变化」**\n- 「我未读的评论数」（依赖 #6 评论模块）\n- 「自上次以来状态变更次数」\n- list view 上能新增列「新动态」展示这些\n\n**M3：跨设备一致**\n- last_visited_at 持久化、跨设备同步\n- 显式 「Mark all read」操作\n\n## 验收\n\n- [ ] 任意 list view 渲染 has-new indicator\n- [ ] `helpdesk` 我的队列：自上次访问以来有客户回复的单高亮在最前\n- [ ] 缺陷库 gap #29 标记为已解决\n"
+}

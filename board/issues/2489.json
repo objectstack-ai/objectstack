@@ -1,0 +1,33 @@
+{
+  "number": 2489,
+  "kind": "pull_request",
+  "title": "docs(showcase): dogfood the react-tier authoring loop + golden Renewals page (ADR-0081)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-30T14:15:49Z",
+  "updated_at": "2026-06-30T14:24:29Z",
+  "closed_at": "2026-06-30T14:24:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-30T14:24:27Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2489",
+  "body": "## What\n\nEnd-to-end proof that the react-tier authoring loop **closes** — the thing the tier was built for: an author (human or AI) writes a `kind:'react'` page knowing every component's props from the contract, and `os validate` catches them when they don't.\n\nNot \"the gate has unit tests\" — a real run through the real CLI on the real showcase app.\n\n## The loop\n\n1. **Generated contract** — `skills/objectstack-ui/references/react-blocks.md` (generated from the spec schemas) lists every injected block and the exact props it accepts.\n2. **Author reads it** — new `examples/app-showcase/src/pages/renewals-pipeline.page.ts`: a Renewals Pipeline scenario exercising **five** server-connected blocks (`ListView`, `RecordHighlights`, `ObjectChart`, `RecordRelatedList`, `ObjectForm` as a drawer), every prop taken straight from the contract.\n3. **Validate enforces it** — `os validate` step 3d (`validateReactPageProps`, ADR-0081 Phase 2) parses the real JSX and checks usage against the contract.\n\n## Evidence (in the audit doc)\n\n**Authored correctly → passes:**\n```\n→ Checking React-source page props (ADR-0081)...\n✓ Validation passed (98ms)            # exit 0\n```\n\n**Authored wrong → caught** (dropped required `objectName` on `<ObjectChart>`, `onSucces` typo on `<ObjectForm>`):\n```\n⚠ <ObjectForm>: has prop \"onSucces\" — did you mean \"onSuccess\"?\n✗ React-source page prop check failed (1 issue)\n  • <ObjectChart>: missing the required prop \"objectName\".\n      rule: react-prop-missing-required               # exit 1\n```\n\n## Changes\n\n- `renewals-pipeline.page.ts` — the golden, validated example page (stays in the showcase).\n- `pages/index.ts` + `objectstack.config.ts` — wire it into the stack.\n- `docs/audits/2026-06-react-tier-authoring-dogfood.md` — the dogfood writeup + captured runs.\n\nValidates clean; `tsc --noEmit` green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

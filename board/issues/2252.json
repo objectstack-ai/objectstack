@@ -1,0 +1,33 @@
+{
+  "number": 2252,
+  "kind": "pull_request",
+  "title": "fix(objectql): don't stamp runtime-authored metadata into a loaded code package",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-23T18:05:49Z",
+  "updated_at": "2026-06-24T03:34:35Z",
+  "closed_at": "2026-06-24T03:34:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T03:34:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2252",
+  "body": "## Problem (found by dogfooding Studio as a business user)\n\nDesigned a custom object (`maint_asset`) from scratch in Studio, **published it, and it immediately became read-only** with the banner *\"此条目由代码包提供，无法在运行时修改\"* (provided by a code package — cannot be modified at runtime). I had just created it, yet I could no longer edit it.\n\nRoot cause confirmed at the data layer — the `sys_metadata` row was stamped with a **code package's** id:\n\n```\nname = maint_asset\ntype = object\npackage_id = app.objectstack.hotcrm   ← a code package\nscope = platform\n```\n\nStudio sends the currently-selected package dropdown value via `?package=` as a *viewing* context. `saveMetaItem` persisted that id verbatim as the brand-new row's `package_id`, so the org object read back as code-provided and locked itself.\n\n## Fix\n\n`saveMetaItem` now drops the package binding for a **runtime-only** (DB-only, non-artifact-backed) write whose target is a **loaded code package**, persisting it as a plain org overlay (`package_id = null`, editable).\n\nTwo scopes are deliberately **left bound**:\n- **`override-artifact`** writes — an org overlay *of* a packaged item must keep pointing at that package.\n- writes into a **non-loaded \"authoring workspace\"** package id (a bare id with no booted manifest) — ADR-0048 #1824 per-package scoping must survive.\n\n`isLoadedPackage` distinguishes them via the engine manifest map (every `registerApp` records it) + a registered-objects/apps fallback. The coercion mutates `request.packageId` so **every** downstream consumer (repo write, parent-version lookup, the live registry mutation on publish, audit) sees the same value — coercing only the repo write left the in-memory object stamped and still read-only (caught in E2E).\n\n## Verification\n\n- **3 new unit tests** (`protocol-save-meta-repo-path.test.ts`): runtime-only + loaded package → dropped; runtime-only + non-loaded package → kept (#1824); override-artifact → kept.\n- **Full `@objectstack/objectql` suite green: 695 tests**; typecheck + eslint clean.\n- **End-to-end against a live showcase server**: creating an object under the loaded `com.example.showcase` package now stores `package_id = null` and reads back org-owned/editable; the guard logs the coercion.\n\n## Notes\n\nThis surfaced during a broader Studio dogfooding pass. Other findings (objectui-side: a freshly-added select field seeds an empty-value option that fails spec validation; untranslated English strings + free-text target-object input in the lookup config) are UI-repo issues to be filed separately."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 2472,
+  "kind": "pull_request",
+  "title": "feat(examples): 3 kind:'react' business-scenario showcase pages (ADR-0081)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-30T06:07:05Z",
+  "updated_at": "2026-06-30T06:15:59Z",
+  "closed_at": "2026-06-30T06:15:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-30T06:15:57Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2472",
+  "body": "Three realistic kind:'react' showcase pages composing the real ListView + ObjectForm with React state: **Inquiry Triage** (status tabs+live counts filter a real ListView; row->detail with Mark Contacted/Close actions), **Account Cockpit** (live-search + ObjectForm edit + cross-object related strip projects/invoices/open-AR via useAdapter), **Invoice Console** (status-aggregation KPIs + segmented filter + create/edit + Mark Paid). Wired into showcase nav; os validate passes (incl ADR-0081 react syntax gate); 28 pages. Browser-verified end-to-end via objectui dev/sdui-scenarios-preview (paired objectui #2107).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

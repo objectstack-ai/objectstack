@@ -1,0 +1,34 @@
+{
+  "number": 1295,
+  "kind": "issue",
+  "title": "[P0] field-render: LookupCellRenderer hardcodes display-field candidates — related cells show raw IDs unless field is named `name`",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "enhancement",
+    "priority:p0"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:20:04Z",
+  "updated_at": "2026-06-27T14:30:00Z",
+  "closed_at": "2026-06-27T14:30:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1295",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 2 条（**P0**）。\n> 实证发现自 `contracts` / `procurement` / `compliance` / `helpdesk` 4 个模板的列表视图与详情页。\n\n## 现象\n\n`LookupCellRenderer`（关联字段在列表 / 详情中的显示组件）**硬编码了候选 display 字段**。具体表现：\n\n- 若关联对象的「显示字段」命名为 `name`，✅ 显示为人类可读名称（例：`Bob Tanaka`）。\n- 若叫 `title` / `subject` / `display_name` / `vendor_name` / `contract_name` 等，⚠️ 一部分能落到 fallback。\n- 若叫 `code` / `policy_name` / `customer_email` / 其他业务命名，❌ 直接显示**原始记录 ID**（`8f3a…1c2b`）。\n\n业务方看到一串 ID，无法识别。每个新模板都要为「关联字段不叫 name」反复加 workaround：要么强行加一个冗余 `name` 字段、要么写 formula 字段同步。\n\n## 复现\n\n在 `packages/helpdesk` 的种子数据里看 `helpdesk_sla_policy`：\n\n```ts\n// objects/helpdesk_sla_policy.object.ts —— displayNameField: 'name' ✅\n// objects/helpdesk_team.object.ts        —— displayNameField: 'name' ✅\n// objects/helpdesk_customer.object.ts    —— displayNameField: 'name' ✅\n```\n\n修改任意一个对象，把 `displayNameField` 改成 `code` 或 `email`，列表视图里关联到它的列立即变成原始 ID。\n\n`contracts` 模板里 `vendor` 关联起初命名为 `vendor_name`，因此踩坑，最后被迫加了个 `name` 字段保持兼容。\n\n## 当前 workaround\n\n模板侧的三种 workaround，都难看：\n\n1. 把对象的 display 字段统一改名 `name`（牺牲业务自然命名）。\n2. 加冗余字段 `name` + 公式同步真实业务字段。\n3. 在模板里硬编码 lookup 字段的额外 metadata（仍然不渲染人类名）。\n\n## 建议范围\n\n**M1：让 `LookupCellRenderer` 真正读对象元数据**\n- 关联渲染时优先级：\n  1. 显式 view 字段配置 `displayField: 'xxx'`（如果指定）\n  2. 关联对象的 `displayNameField`\n  3. 关联对象的 `titleFormat`（如果定义）\n  4. fallback：`name` / `title` / `subject` / `label` 探测\n  5. 最后才回退到记录 ID（带 prefix `#…1c2b`）\n\n**M2：批量预取**\n- 列表渲染时按关联对象 ID 集合批量查询，而非每行一次 N+1。\n\n**M3：开发者警告**\n- Dev 模式下，如果某个 lookup cell 落到 ID fallback，控制台打印一次提示（含字段名 + 建议）。\n\n## 验收\n\n- [ ] 关联字段在所有视图/详情页正确显示对象的 displayName，不再出现原始 ID\n- [ ] `helpdesk` 把 `displayNameField` 改成 `code` / `email` 验证仍正常\n- [ ] dev console 出现 warning 当 fallback 命中\n- [ ] 缺陷库 gap #2 标记为已解决\n\n## 影响\n\n涉及所有模板的所有列表 / 详情 / 仪表盘表格。在客服模板的 Manager Overview 里曾因此把 customer / team / assignee 三列错显为 ID，后来通过强约定 `name` 字段才修复。\n"
+}

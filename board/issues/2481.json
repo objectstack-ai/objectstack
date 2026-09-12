@@ -1,0 +1,30 @@
+{
+  "number": 2481,
+  "kind": "issue",
+  "title": "feat(rest): 列表导出支持 XLSX + 类型感知字段格式化(lookup/user/select/boolean/date)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-30T09:42:26Z",
+  "updated_at": "2026-06-30T14:32:33Z",
+  "closed_at": "2026-06-30T14:32:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2481",
+  "body": "## 问题\n\n后端列表导出能力不满足实际需求:\n\n1. **不支持 Excel(XLSX)**。现有 `GET /api/v1/data/:object/export`(`packages/rest/src/rest-server.ts`)只支持 `csv` / `json` 两种格式。\n2. **导出的是原始值,不可读**。`rowsToCsv` 直接写 `row[field]`,`formatCsvCell` 只做 Date→ISO 转义,导致:\n   - lookup / user 类型导出的是 id,而不是名称\n   - select 类型导出的是 code/value,而不是 label\n   - boolean 导出的是 `true/false`,而不是「是/否」\n   - date/datetime 导出的是 ISO 串,未格式化\n3. 业务需要导出约 **2 万行**数据,必须服务端流式处理(客户端方案扛不住)。\n\n权限方面**现状已正确**:导出走 `findData(context)`,SecurityPlugin 自动施加对象级 / 字段级屏蔽 / 行级 RLS,本 issue 不改权限。\n\n## 方案(仅改 `packages/rest`)\n\n1. **新增 xlsx 格式**:导出路由 `format` 增加 `xlsx`,用 `exceljs` 的流式 `WorkbookWriter` 写入 response stream(不全量进内存,支撑 2 万行);`packages/rest/package.json` 新增 `exceljs` 依赖。\n2. **新增类型感知格式化**(新文件 `packages/rest/src/export-format.ts`):依据对象 schema 字段类型,把原始值转成显示值——\n   - lookup / user:对字段自动加 `$expand`,从展开的嵌套记录取 `displayField` / 被引用对象 `nameField`(缺失时回退 name/title/id)\n   - select:用字段 `options` 把 value 映射成 label\n   - boolean:`是` / `否`\n   - date / datetime:格式化\n   - csv / json / xlsx 三种输出统一过此格式化层\n3. 导出查询对 lookup / user 字段自动注入 `$expand`,让名称随行返回(批量 `$in`,深度上限 3,无 N+1)。\n\n## 范围\n\n- 本 issue 只覆盖 framework 后端(`packages/rest`)。\n- 前端 `@object-ui/data-objectstack` 适配器接入同步流式下载 + ListView 改造,另在 objectui 仓库跟进。\n\n## 验收\n\n- `GET /api/v1/data/:object/export?format=xlsx` 返回合法 xlsx,2 万行流式不 OOM。\n- lookup/user 出名称、select 出 label、boolean 出是/否、date 已格式化。\n- 现有 csv/json 行为不回退;权限(对象/字段/行级)仍由 findData 自动保证。\n"
+}

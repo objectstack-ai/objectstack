@@ -1,0 +1,33 @@
+{
+  "number": 2253,
+  "kind": "pull_request",
+  "title": "fix(audit,messaging): provision system tables at kernel:ready",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-23T22:04:48Z",
+  "updated_at": "2026-06-23T22:07:57Z",
+  "closed_at": "2026-06-23T22:05:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-23T22:05:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2253",
+  "body": "## Problem\n\nWhen a freshly-provisioned tenant env reads `sys_activity` / `sys_inbox_message` / `sys_notification_receipt` before anything has written to them — the home page's recent-activity feed and the Console inbox/notifications bell — it hits SQLite **`no such table`**. These objects are defined by `plugin-audit` / `service-messaging` but their physical tables are otherwise **lazy-created on first write**. The engine logs every miss as a `Find operation failed` **ERROR** ([engine.ts](packages/objectql/src/engine.ts) `find()` re-throws after logging), so the UI degrades to empty but the runtime log is noisy and can mask real errors.\n\n## Fix\n\n`AuditPlugin` and `MessagingServicePlugin` now provision their own system objects' tables up front, in a `kernel:ready` hook, via the engine's idempotent `syncObjectSchema(name)` (the documented \"object became live at runtime\" primitive):\n\n- **plugin-audit** → `sys_audit_log`, `sys_activity`, `sys_comment`\n- **service-messaging** → `sys_inbox_message`, `sys_notification_receipt`, and the sibling notification objects (independent of `reliableDelivery` — the inbox tables are needed either way)\n\nThe call is guarded (`(engine as any).syncObjectSchema?`) so it is a safe no-op on engines without on-demand DDL, idempotent (creates only when the table is absent), and isolates per-object failures.\n\nChose this over a read-path empty-fallback because the engine logs the ERROR **before** re-throwing, so a caller-side `[]` fallback would suppress the failure but not the log line — only making the table exist removes the ERROR.\n\n## Tests\n\n- New `audit-plugin.test.ts` + added cases in `messaging-service-plugin.test.ts`: a fake engine whose `find()` throws `no such table` until `syncObjectSchema()` runs; assert the plugin provisions each object at `kernel:ready` and the read then returns `[]`.\n- Full suites green locally: **plugin-audit 23/23**, **service-messaging 129/129**.\n\n## Note on scope\n\nThe cloud per-tenant env kernel hardcodes `skipSchemaSync: false`, so its boot-time schema sync already provisions these tables — this fix is the safety net for the cold-start paths where boot sync is skipped or the objects register late (`OS_SKIP_SCHEMA_SYNC`, standalone `objectstack serve`, migration-gap envs), which is where the reported ERRORs originate.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

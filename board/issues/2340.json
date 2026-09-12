@@ -1,0 +1,33 @@
+{
+  "number": 2340,
+  "kind": "pull_request",
+  "title": "docs: fix responsiveStyles keys + dataset include (found dogfooding #2338)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-26T08:27:21Z",
+  "updated_at": "2026-06-26T08:34:00Z",
+  "closed_at": "2026-06-26T08:33:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-26T08:33:58Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2340",
+  "body": "## What\n\nTwo doc inaccuracies in #2338, **found by dogfooding** (booted `app-showcase`, exercised the newly-documented features at runtime).\n\n## Verified working (no change needed)\n- **`$search` / `searchableFields`** (ADR-0061): `$search=technology` on `showcase_account` returned the 4 technology accounts — matching on the `industry` field, proving it searches the declared `searchableFields`, not just name.\n- **Multi-hop dataset joins** (ADR-0071): an inline dataset on `showcase_invoice_line` with `include: ['invoice.account']` + dimension `invoice.account.industry` returned correctly grouped rows and the expected chained `LEFT JOIN ... LEFT JOIN ...` SQL.\n\n## Fixed\n- **`page.mdx` — `responsiveStyles` breakpoint keys were wrong.** Documented as `xs/sm/md/lg/xl/2xl`, but `ResponsiveStylesSchema` uses **`large` / `medium` / `small` / `xsmall`** (desktop-first: `large` = unconditional base, the rest are `max-width` overrides). The `xs..2xl` axis is `BreakpointName`, used for layout columns/visibility/order — a different axis. Confirmed against the served `showcase_styling_gallery` page metadata (key: `large`).\n- **`analytics-datasets.mdx` — multi-hop joins need an `include` declaration.** The prior text implied any dotted path joins; in fact joins are **derived from the dataset's `include`** and only declared paths are joinable. Now shows `include: ['account', 'account.owner']`.\n\n## Not exercised\n`access`/`requiredPermissions` (ADR-0066) and `controlled_by_parent` RLS derivation (ADR-0055) are config-verified (showcase ships them; server boots & accepts them; spec/plugin-security confirmed by audit) but their E2E enforcement wasn't exercised — provisioning a scope-limited test principal needs role-assignment plumbing beyond a quick API pass. Those docs are accurate as written.\n\nDocs-only. Build Docs CI validates MDX.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

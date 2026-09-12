@@ -1,0 +1,33 @@
+{
+  "number": 1888,
+  "kind": "issue",
+  "title": "[P0][security] Flow runAs never switches execution identity",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "priority:p0",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T06:56:34Z",
+  "updated_at": "2026-06-24T16:38:06Z",
+  "closed_at": "2026-06-24T16:38:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1888",
+  "body": "Part of the metadata liveness audit umbrella #1878 (P0 security cluster).\n\n## Problem\nFlow `runAs` **never switches execution identity**. The `service-automation` engine ignores it, so a flow declaring `runAs: system` does not elevate, and one declaring a restricted identity does not de-elevate. Steps execute as whatever the triggering context already was — a privilege-boundary surprise in both directions.\n\n## Decision required (enforce or remove)\n- **Enforce**: have the engine establish the declared identity/permission context for the duration of the run (and restore it afterward), respecting `runAs: system` vs a named principal.\n- **Remove**: drop `runAs` from `FlowSchema` if identity switching is not going to be implemented, and document that flows always run as the trigger's identity.\n\n## Evidence\n- `docs/audits/2026-06-flowschema-property-liveness.md`\n- `service-automation` engine (runAs unconsumed)\n"
+}

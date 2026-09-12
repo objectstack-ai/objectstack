@@ -1,0 +1,33 @@
+{
+  "number": 1329,
+  "kind": "issue",
+  "title": "[P3] release: template package publish / upgrade flow undefined — ecosystem blocked",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:27:56Z",
+  "updated_at": "2026-06-27T14:31:29Z",
+  "closed_at": "2026-06-27T14:31:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1329",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 24 条（**P3**）。\n\n## 现象\n\n模板包（`@template/*`）的发布 / 版本升级流程未定义：\n\n- 客户如何「安装」一个模板到自己的环境？\n- 模板 v1.0 → v1.1 如何升级？数据迁移？\n- 多模板共存 / 同名冲突？\n- 模板版本与平台版本兼容性矩阵？\n\n这是模板生态化的卡点：没有可重复的发布路径，模板写得再多也只是 demo。\n\n## 建议范围\n\n**M1：模板发布 manifest**\n- 每个模板包 `template.manifest.json`：id / version / description / requires(platform) / changelog\n- 上传到 marketplace 或私有 registry\n\n**M2：安装 / 升级流程**\n- 客户环境通过 CLI / Console UI 安装\n- 升级时检查 metadata 差异 + 生成数据迁移建议\n- 回滚机制\n\n**M3：版本兼容性矩阵**\n- 模板与平台版本声明范围\n- CI 跑跨版本兼容性测试\n\n**M4：marketplace**\n- 已有 `MarketplaceProxy` 插件 → 文档化 + UI 接通\n\n## 验收\n\n- [ ] 任一现有模板能按文档发布到本地 marketplace\n- [ ] 升级流程 + 数据迁移示例\n- [ ] 缺陷库 gap #24 标记为已解决\n"
+}

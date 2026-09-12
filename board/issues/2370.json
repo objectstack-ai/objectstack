@@ -1,0 +1,34 @@
+{
+  "number": 2370,
+  "kind": "pull_request",
+  "title": "fix(auth): trust public-routable external-IdP origins at SSO registration (ADR-0024 / cloud#551)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T13:37:38Z",
+  "updated_at": "2026-06-27T13:44:33Z",
+  "closed_at": "2026-06-27T13:44:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T13:44:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2370",
+  "body": "## Why\nFollow-up to #2363 (the cloud#551 SSO admin-gate). Local E2E surfaced a second gap: `@better-auth/sso`'s discovery validation (`validateDiscoveryUrl` + `normalizeAndValidateUrl`) requires **every** IdP endpoint origin to be in `trustedOrigins` — even for a publicly-routable IdP. So registering any external OIDC IdP returns `400 discovery_untrusted_origin` unless the operator pre-listed it, which **breaks ADR-0024's \"register your IdP at runtime, no boot config\" promise**.\n\n## What\nWhen the external-SSO RP is enabled (`isSsoWired()`), `trustedOrigins` is now a per-request function that, for a `POST /sso/register` | `/sso/update-provider`, additionally trusts the **public-routable** issuer / `oidcConfig` endpoint origins declared in the request body — using `@better-auth/core`'s own `isPublicRoutableHost` (the same predicate better-auth's sub-endpoint check uses). All other requests get exactly the previous static origins.\n\nSafety:\n- **Private / internal / loopback hosts are never auto-trusted** — they still require explicit `trustedOrigins` config (the documented SSRF escape hatch).\n- better-auth's own DNS-resolution checks still apply.\n- The function is only consulted for the two SSO admin paths; normal CSRF/origin behavior is unchanged.\n\n## Verification (browser E2E, local prod-like stack, **no** trustedOrigins entry)\n- Same-origin public IdP **GitLab.com** (issuer + all discovered endpoints on one origin — like Okta / Entra / Auth0 / Keycloak) → register **200, oidcConfig hydrated** from GitLab's live discovery (was a hard `400`).\n- Google's main discovery URL now passes too; Google still needs its split `googleapis.com` endpoint origins trusted (documented caveat — multi-domain IdPs).\n- **Regression:** a non-admin registering a valid public IdP is still **403** (the #2363 admin gate fires before discovery); normal auth flows intact.\n\n## Scope\nOnly `packages/plugins/plugin-auth/src/auth-manager.ts` (+ changeset). SSO mechanism stays framework-open.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

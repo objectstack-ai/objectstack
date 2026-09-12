@@ -1,0 +1,30 @@
+{
+  "number": 1504,
+  "kind": "issue",
+  "title": "BPMN 2.0 XML (de)serialization plugin on top of the construct mapping (ADR-0031 follow-up)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T02:13:49Z",
+  "updated_at": "2026-06-29T15:17:21Z",
+  "closed_at": "2026-06-29T15:17:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1504",
+  "body": "Follow-up to ADR-0031 / #1479 (now complete).\n\nThe **model-level** BPMN ⇄ structured-construct mapping shipped in #1500 (`@objectstack/spec` `automation/bpmn-mapping.ts`): `exportConstructsToBpmn` / `importBpmnToConstructs` translate between the structured constructs (`loop`/`parallel`/`try_catch`) and the BPMN gateway/boundary/multi-instance vocabulary on the flow model, round-trippable via the `osConstruct` extension marker.\n\nWhat's still missing is the **wire format**: actual BPMN 2.0 **XML** parse/emit, so flows round-trip with external BPM tools (Camunda, Activiti, jBPM, …).\n\n### Scope\n- A plugin (per `automation/bpmn-interop.zod.ts`, which already defines `BpmnImportOptions` / `BpmnExportOptions` / `BpmnInteropResult` / `BUILT_IN_BPMN_MAPPINGS`) that:\n  - parses BPMN 2.0 XML → flat flow graph, then calls `importBpmnToConstructs` to fold gateways/boundary/multi-instance into constructs;\n  - takes a flow, calls `exportConstructsToBpmn`, then emits BPMN 2.0 XML (incl. DI layout from node positions, and `extensionElements` carrying the `osConstruct` marker for lossless round-trip).\n- Honour `BpmnImportOptions.unmappedStrategy` and surface `BpmnDiagnostic`s.\n\n### Notes\n- Needs an XML parser/serializer dependency — keep it in the plugin, not core.\n- ADR-0031 marks XML interop **\"Priority: Low\"**, so this is deliberately deferred from the core roadmap."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 2464,
+  "kind": "pull_request",
+  "title": "chore(ai)!: drop @ai-sdk provider SDKs from framework, align spec with ai v7",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-29T14:53:16Z",
+  "updated_at": "2026-06-29T15:08:40Z",
+  "closed_at": "2026-06-29T15:08:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-29T15:08:38Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2464",
+  "body": "## 背景\nAI 运行时能力已迁到 cloud 包(`service-ai` 从开源版移除,ADR-0025 S2)。因此 framework **不应再携带任何 `@ai-sdk/*` provider SDK**——本 PR 是 Vercel AI SDK `v6→v7` / providers `v3→v4` 大版本迁移的**第一步(framework 侧)**。\n\n## 改动\n- **`@objectstack/cli`**:删除死依赖 `@ai-sdk/anthropic|gateway|google|openai`(`cli/src` **零引用**——它们当初只是为让 in-tree 的 `service-ai` 运行时 `require()` 而打包)。\n- **`examples/app-todo`**:删除未使用的 `ai` / `@ai-sdk/gateway` devDeps,以及指向已迁移文件的死脚本 `test:ai*` / `test:agent` / `test:llm` 等。\n- **`@objectstack/spec`**:`ai` peer/dev 依赖 `^6 → ^7`。协议仍 re-export 正准的消息/流类型(`ModelMessage`/`TextStreamPart`/`ToolSet`/`FinishReason`…),已逐一确认在 `ai@7` 存在;`ai` 保持 **optional peer**,不强制安装。\n\n## 验证\n- `@objectstack/spec` build ✅ + **6650 测试全绿**(ai@7 下契约测试通过)\n- `ai@7` 类型 re-export **10/10 存在** ✅\n- `turbo build --filter=@objectstack/cli`(含上游)**54/54 成功** ✅\n\n## ⚠️ 合并时序提醒\n合并本 PR 后,cloud 的 `apps/objectos` / `apps/cloud`(通过 `link:` 引用 framework cli)会**暂时失去 provider 来源**。**配套的 cloud PR**(`service-ai` 适配器迁移 v7 + apps 声明 v4 provider)需随后跟进。objectui chatbot(`useChat` v7)再单独一个 PR。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

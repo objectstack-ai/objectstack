@@ -1,0 +1,30 @@
+{
+  "number": 1548,
+  "kind": "issue",
+  "title": "In-environment marketplace 'Install' dead-ends (proxy is browse-only → 405); needs delegated install or redirect-to-cloud",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-02T14:47:44Z",
+  "updated_at": "2026-06-27T14:31:48Z",
+  "closed_at": "2026-06-27T14:31:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1548",
+  "body": "## Symptom\nFrom inside a tenant ObjectOS runtime, the Setup-app marketplace package page (e.g. `https://<env-host>/_console/apps/setup/system/marketplace/<pkg_id>`) shows an **Install** action, but clicking it fails — the user cannot install an app from within their own environment.\n\n## Root cause\n`packages/runtime/src/cloud/marketplace-proxy-plugin.ts` deliberately forwards **only GET/HEAD** to the cloud control plane; any non-GET (the install POST) is rejected:\n```\nif (method !== 'GET' && method !== 'HEAD') {\n  return c.json({ success:false, error:{ code:'marketplace_method_not_allowed',\n    message: 'Marketplace proxy only forwards GET/HEAD; install via cloud.' }}, 405);\n}\n```\nRationale in-code: *\"those would need credentialled cloud auth which the tenant runtime does not carry.\"* So the in-env marketplace is **browse-only**; installation must happen on the cloud control plane.\n\nCloud-side install works (verified: `POST /api/v1/actions/sys_environment/install_application` → 200, \"Installed … into environment\"). It's specifically the **in-environment** install path that dead-ends.\n\n## Impact\nThe Setup-app marketplace surfaces an **Install** affordance that can never succeed on a tenant runtime — every in-env install attempt 405s. This is the natural place a user tries to install (they're already *in* the environment), so it reads as broken.\n\n## Suggested fix (pick one)\n1. **Delegated install (preferred):** have the runtime forward the install to cloud using the env→cloud service credential (`OS_CLOUD_API_KEY`) plus the acting user's identity, so install works in-place. The proxy comment already anticipates this (*\"future iteration may introduce a delegated install token\"*).\n2. **Redirect-to-cloud:** make the in-env marketplace **Install** CTA deep-link to the cloud control-plane install flow (cloud env-detail → Install Application) instead of POSTing to the browse-only proxy — and/or hide the Install button on tenant runtimes so it isn't a dead end.\n\nEither removes the dead-end. framework @ `cf03ef2f7` (also current main)."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 2465,
+  "kind": "pull_request",
+  "title": "fix(examples): ADR-0079 — app-todo uses nameField, not retired titleFormat",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-29T15:22:00Z",
+  "updated_at": "2026-06-29T15:27:52Z",
+  "closed_at": "2026-06-29T15:27:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-29T15:27:50Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2465",
+  "body": "Last titleFormat user in framework examples. Migrates `examples/app-todo` task object from the retired render-only `titleFormat: tmpl\\`{{record.subject}}\\`` to the canonical `nameField: 'subject'`, and drops the now-unused `tmpl` import.\n\nWith autoprov (#2458) designating a derived nameField at registry, a leftover titleFormat is shadowed — so the example would otherwise silently stop demonstrating the intended title. tsc clean. Follows #2434/#2458/#2463."
+}

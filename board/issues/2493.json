@@ -1,0 +1,33 @@
+{
+  "number": 2493,
+  "kind": "pull_request",
+  "title": "docs(agents): define OS_ env-var naming structure rule",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-30T15:17:52Z",
+  "updated_at": "2026-06-30T20:42:16Z",
+  "closed_at": "2026-06-30T20:42:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-30T20:42:14Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2493",
+  "body": "## 背景\n\nPrime Directive #9 只规定了 `OS_` 前缀,**结构没定义**。结果新变量飘:讨论 #2486(通用拼音搜索)时取了个裸名 `OS_PINYIN_SEARCH` 当布尔开关,既无域分组也无 `_ENABLED` 后缀,跟现有 `OS_SSO_ENABLED` / `OS_CORS_ENABLED` 一类不一致。\n\n## 改动\n\n把现有变量里**已经存在的规律**固化进 #9(grounded in actual usage,非凭空造):\n\n- `OS_{DOMAIN}_{FEATURE}[_QUALIFIER]` —— 域分组(AUTH/CORS/SSO/CLOUD/DATABASE/…)\n- **布尔开关 → `_ENABLED` 后缀**(`OS_SSO_ENABLED`、`OS_SEARCH_PINYIN_ENABLED`),不要裸名\n- 配置值 → `OS_{DOMAIN}_{NAME}`(`OS_CLOUD_URL`、`OS_LOG_LEVEL`)\n- 逃生阀 → `OS_ALLOW_{X}`(故意不分组、显眼);opt-out → `OS_SKIP_`/`OS_DISABLE_`\n- 测试专用 → `OS_TEST_*`/`OS_EXPECT_*`\n- 现存不合规的(`OS_METADATA_WRITABLE`/`OS_EAGER_SCHEMAS`/`OS_SERVER_TIMING`)标为 **债,非先例**\n\n## 关联\n\n- 触发场景:#2486(已把该 issue 的开关名同步成 `OS_SEARCH_PINYIN_ENABLED`)\n- 纯文档,无代码 / 行为变更\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 2297,
+  "kind": "pull_request",
+  "title": "docs(readme): reposition as the developer framework (vs the ObjectOS runtime)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T15:51:52Z",
+  "updated_at": "2026-06-24T16:26:50Z",
+  "closed_at": "2026-06-24T15:56:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T15:56:39Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2297",
+  "body": "## What\n\n`framework` (ObjectStack) is the **developer framework**; `../objectos` is the **end-user runtime**. The README had drifted into ObjectOS's territory (runtime dashboards, \"AI operates it within RBAC/RLS/audit\"). This repositions it around the framework/protocol story.\n\n- **Hero** — dev/protocol tagline + an `ObjectStack → describe / ObjectOS → run` boundary box; leads with the metadata→surfaces architecture diagram instead of a runtime dashboard.\n- **Author your app** — replaces \"See it in action\": a real `ObjectSchema` sample + Studio object/flow designers (authoring is the framework's surface). The runtime gallery moved to the ObjectOS README (objectstack-ai/objectos#31) with a \"see it running\" link.\n- **Use the generated API** — REST example + SDK/plugin pointers for developers.\n- **Dedupe** — runtime/governance claims now point to ObjectOS.\n- Removes the 6 runtime screenshots (now hosted in objectos).\n\nPairs with objectstack-ai/objectos#31. Docs-only.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

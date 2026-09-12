@@ -1,0 +1,35 @@
+{
+  "number": 2351,
+  "kind": "pull_request",
+  "title": "feat: add a first-class `user` field type (person picker)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-26T16:25:49Z",
+  "updated_at": "2026-06-26T16:53:40Z",
+  "closed_at": "2026-06-26T16:53:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-26T16:53:38Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2351",
+  "body": "## What\n\nAdds a `user` field type — the equivalent of Airtable's **Collaborator** / Notion's **Person** / Salesforce's **Lookup(User)**. Authored as `Field.user({ ... })`; `{ multiple: true }` for collaborators/watchers and `{ defaultValue: 'current_user' }` to auto-fill the acting user on create.\n\n## Why a distinct type (not just `Field.lookup('sys_user')`)\n\nSelecting a person is table-stakes, but you can already store one via a lookup — `owner_id`/`created_by` already do. The value is **modelling discoverability**: a \"User\" entry in the Studio/AI field palette instead of requiring authors (and the AI authoring path) to know to reference the internal `sys_user` system object — plus `current_user` defaults and a user-search picker.\n\n## Design: a semantic specialization of `lookup`, **not** a new storage primitive\n\n`user` shares the **exact lookup code path** — same FK string column (`multiple` ⇒ JSON), same `$expand` resolution, same indexing. Consequences:\n\n- Referential integrity + always-fresh display names come for free (vs. an inline collaborator blob that goes stale).\n- An existing `Field.lookup('sys_user')` is equivalent at the storage layer → **zero data migration** to adopt `Field.user`.\n- Nothing in the lookup machinery is re-implemented.\n\nThis mirrors how relational platforms (Salesforce, ServiceNow, Dataverse) model users as a reference to the user object, while presenting a first-class type at the authoring/UX layer like Airtable/Notion.\n\n## Ownership left unchanged\n\nA declarative `owner` field type was intentionally **not** added. Ownership is a system role (one per object, auto-stamped) already handled by the `owner_id` convention + `plugin-security` auto-stamp/RLS; a second type would only grow the platform-wide `FieldType` surface for marginal benefit.\n\n## Changes\n\n- **spec**: `FieldType` gains `'user'` + `Field.user()` builder; seed-loader / GraphQL / SQL type-compat reference maps accept `user`.\n- **drivers (sql, mongodb)**: treat `user` exactly like `lookup`.\n- **engine**: resolve `$expand` for `user` fields; honour a new `defaultValue: 'current_user'` token (resolved app-side from the execution context, mirroring the `NOW()` convention).\n- **misc**: kanban group-by, symbolic seed references, and approvals enrichment accept `user`.\n\n## Tests\n\n- engine: `$expand`-for-user; `current_user` stamp (present / absent actor).\n- driver-sql: string-id + `multiple` ⇒ JSON round-trip.\n- 713 objectql + 234 driver-sql pass; api-surface gate green (additive enum member — public surface unchanged).\n\n## Paired UI\n\nobjectui [`feat/user-field-picker`](https://github.com/objectstack-ai/objectui/pull/new/feat/user-field-picker) wires the `UserField` picker to `sys_user`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

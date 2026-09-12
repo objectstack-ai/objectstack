@@ -1,0 +1,33 @@
+{
+  "number": 2492,
+  "kind": "pull_request",
+  "title": "chore(build): decouple SDUI manifest + react-conformance ratchet from console build",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-30T14:49:57Z",
+  "updated_at": "2026-06-30T14:58:30Z",
+  "closed_at": "2026-06-30T14:58:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-30T14:58:28Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2492",
+  "body": "## Problem\n\n`scripts/build-console.sh` launched a headless browser (Playwright) to dump the public-tier SDUI manifest (ADR-0080) and ratchet spec↔frontend react-block conformance (ADR-0081). That made every `objectui:build` / `objectui:refresh` / `release` console rebuild depend on a matching Playwright browser binary. A freshly bumped `.objectui-sha` crashes the rebuild:\n\n```\n→ Generating SDUI public-tier manifest (ADR-0080)...\nbrowserType.launch: Executable doesn't exist at .../chrome-headless-shell\n```\n\n## Why the browser step doesn't belong on the build path\n\n- The day-to-day `pnpm build` (turbo) never touched a browser — only the console-rebuild scripts did.\n- The step was already documented \"best-effort, non-fatal\" (gate falls back to parse-level when the manifest is absent).\n- **In CI it never actually ran.** Both workflows install Playwright *after* `build-console.sh` (`release.yml` installs none at all), so `build-console.sh` always hit the missing-browser path and silently degraded. The ratchet only executed when a developer happened to have a matching browser installed locally — i.e. a gate that was effectively dormant.\n\n## Change\n\n- **`scripts/gen-sdui-manifest.sh`** (new) — on-demand manifest generation + conformance ratchet. Reuses the vendored `.cache/objectui-<sha>` tree; gives clear guidance when the tree is missing (`pnpm objectui:build`) or the Playwright browser is missing (`pnpm exec playwright install chromium-headless-shell`); **fails loud** instead of silently degrading.\n- **`scripts/build-console.sh`** — drop the browser block (−35 lines), single-purpose again (rebuild console SPA + copy dist). Prints a pointer to `pnpm sdui:manifest`.\n- **`package.json`** — add `\"sdui:manifest\"` script.\n\n## Usage\n\n```\npnpm objectui:build      # rebuild + vendor the console dist (no browser)\npnpm sdui:manifest       # on demand: dump manifest + ratchet conformance (needs Playwright)\n```\n\n## Not in scope\n\nCI is intentionally left unchanged — the ratchet was already not running there, so this is a no-op for CI. Re-activating it (move `playwright install` ahead of `build-console.sh` + add a `pnpm sdui:manifest` step) can be a follow-up if desired.\n\n## Verification\n\n- `bash -n` clean on both scripts; `package.json` valid JSON.\n- Graceful \"tree not built yet\" branch verified (exits with actionable message).\n- `build-console.sh` no longer references Playwright / a browser.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

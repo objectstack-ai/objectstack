@@ -1,0 +1,33 @@
+{
+  "number": 2520,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0085 — presentation intent as cross-surface semantic roles, never per-surface hint blocks",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-02T14:19:57Z",
+  "updated_at": "2026-07-02T14:27:50Z",
+  "closed_at": "2026-07-02T14:27:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-02T14:27:48Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2520",
+  "body": "## What\n\nADR-0085: object presentation intent is declared **only as cross-surface semantic roles** — `nameField` / `highlightFields` (renamed from `compactLayout`, ADR-0079 alias pattern) / `stageField: string | false` (newly typed) / `fieldGroups`. The spec `detail` passthrough block is deleted, `views.*` reader paths retire with no deprecation window (zero authors, evidence in the ADR), fieldGroups collapse semantics converge on one `collapse` enum, and the group-derivation helper is single-sourced in `@objectstack/spec`.\n\n## Why now\n\nReviewing objectui#2149 (fieldGroups → detail wiring) surfaced the full pathology of the hint channels:\n\n- `views.*`: readers-only, zero authors across both repos — dead protocol;\n- `detail` passthrough: 3 typed keys vs 9 read; typed `hideReferenceRail` is a **no-op for spec authors** (rail is default-off; the only enabling key was never typed);\n- `fieldGroups`: two-way collapse-key drift — spec `defaultExpanded` has no consumer, the UI reads `collapsible`/`collapsed` which the spec rejects, so designer-authored objects collapse and spec-authored packages silently don't.\n\nEvery failure mode is a silent no-op — the worst shape when AI is the primary author (ADR-0078).\n\n**Supersedes** the `detail.*` passthrough approach of objectui#2065 / objectui#2148 §6 (mechanism replaced; both issues' goals still ship).\n\n## Execution (tracked separately, not in this PR)\n\n1. spec PR: `stageField` union, `highlightFields` rename + alias, delete `detail` block, `collapse` enum, `deriveFieldGroupLayout`, lint warnings, ~36 in-repo author migrations;\n2. objectui#2149 revision (keep fieldGroups wiring + tests; drop `detail.*`/`views.*` reads);\n3. objectui legacy monolith renderer removal (retires `renderViaSchema`);\n4. designer data migration (`collapsible`/`collapsed` → `collapse`);\n5. docs/skills sweep; kanban card-fields follow-up.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

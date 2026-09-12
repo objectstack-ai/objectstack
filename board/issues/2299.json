@@ -1,0 +1,35 @@
+{
+  "number": 2299,
+  "kind": "pull_request",
+  "title": "feat(objectql): duplicate a writable base — ADR-0070 D4",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T15:55:11Z",
+  "updated_at": "2026-06-24T16:00:25Z",
+  "closed_at": "2026-06-24T16:00:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T16:00:23Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2299",
+  "body": "## What\nAdds the missing piece of **ADR-0070 D4** (package = lifecycle unit). Delete-cascade (`protocol.deletePackage` + `?keepData`) and export (`GET /packages/:id/export`) already shipped; this adds **duplicate**:\n\n- **`protocol.duplicatePackage`** — clones every ACTIVE item a base owns into a NEW package, **re-namespacing** object names (the blueprint prefixes object names with the base namespace, e.g. `iojn_repair_ticket`; `sys_metadata` keys on `(type,name,org)`, so a same-name copy would collide with the source) and **rewriting every intra-package reference** (lookup `reference`, view `object`, expressions, …) to the new names via a longest-first, identifier-boundary replace (so `iojn_task` never corrupts `iojn_task_log`).\n- **`POST /packages/:id/duplicate`** (body `{ targetPackageId, targetName?, targetNamespace? }`).\n\n## Tests\n`@objectstack/objectql`: 708 green incl. new `duplicatePackage` tests — re-namespacing, lookup-reference + view-object rewrite, and boundary-safety; `tsc` clean. (The runtime endpoint mirrors the existing `revert`/`rollback` package routes.)\n\n## Follow-up\nobjectui `PackageDetailSheet` \"Duplicate\" button (wires to this endpoint) — small UI add. The `keepData` schema-vs-data **delete** choice could also be surfaced in the UI.\n\nCompletes ADR-0070 D4. (D5 migration / D6 framing remain.)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

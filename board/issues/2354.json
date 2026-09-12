@@ -1,0 +1,32 @@
+{
+  "number": 2354,
+  "kind": "pull_request",
+  "title": "fix(plugin-auth): surface email-send failures instead of swallowing",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-26T18:15:55Z",
+  "updated_at": "2026-06-26T18:22:08Z",
+  "closed_at": "2026-06-26T18:22:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-26T18:22:07Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2354",
+  "body": "## What\nEmail verification / password-reset callbacks in `AuthManager` swallowed every send failure (`console.error` + return), so signup **and** the explicit \"Resend verification email\" endpoint both reported success while no mail was sent. Users were left permanently stuck with no signal and no resend that could ever work.\n\n## Changes\n- `sendVerificationEmail` / `sendResetPassword` now **throw** on failure (no email service, template error, or transport `status:'failed'`).\n- Resilience preserved by better-auth's own structure: it runs the `sendOnSignUp` / forget-password paths through `runInBackgroundOrAwait` (await + catch + log, never rethrow) and the routes return success regardless → **sign-up stays resilient** and there's **no email-enumeration leak**, while the awaited `/send-verification-email` **resend surfaces a real error** to the UI.\n- `AuthPlugin` boot guard: when verification is required but no email service is registered, log an error at `kernel:ready` (not a quiet info line) so the misconfiguration is caught at startup.\n\n## Verification\nReal `serve-node` boot: resend with a failing transport → HTTP 500 (was fake success); signup with failing transport → 200 + `sys_email` row `status=failed` (recorded, not swallowed); boot guard fires when verification required & no email service.\n\n## Cross-repo\nPart of the email-verification fix set with `objectstack-ai/cloud` (control-plane email wiring) and `objectstack-ai/objectui` (verify-screen error state).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

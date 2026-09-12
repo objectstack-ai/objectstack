@@ -1,0 +1,35 @@
+{
+  "number": 2269,
+  "kind": "pull_request",
+  "title": "feat(showcase): page-local state demo + flip variables @experimental→live (ADR-0049)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T06:53:46Z",
+  "updated_at": "2026-06-24T07:06:08Z",
+  "closed_at": "2026-06-24T07:06:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T07:06:06Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2269",
+  "body": "## What\n\nPromotes **`PageSchema.variables`** from `@experimental` to **live** (ADR-0049) and ships a worked example. The end-to-end page-variable loop is now implemented in objectui (companion PR [objectstack-ai/objectui#1957](https://github.com/objectstack-ai/objectui/pull/1957)): page state is injected into the expression context as `page.<var>`, `element:record_picker` writes a variable via `source`, and `visibility` predicates gate live.\n\n## Changes\n\n- **spec** (`packages/spec/src/ui/page.zod.ts`) — replace the `@experimental` marker on `PageSchema.variables` with live docs; enrich `PageVariableSchema` (binding direction: a variable names its **writer** component via `source`, e.g. `{ name: 'selectedProjectId', source: 'project_picker' }`).\n- **showcase** — new master/detail page `showcase_page_variables`: a record picker writes `selectedProjectId`; a detail panel gates on `page.selectedProjectId != ''` (empty-state hint on `== ''`). Wired into navigation + the app config.\n- **dogfood test** (`test/page-variables.test.ts`) — asserts the wiring is coherent (variable bound to a real picker id) and the gating predicates actually flip with the variable (mutually-exclusive empty/detail states), plus config + nav registration.\n\n## Verification\n\n- Spec page tests green; the showcase page parses under the current spec with its wiring intact.\n- Browser E2E (against this showcase served by a dev backend, rendered by the objectui#1957 console): picking a project reveals the detail panel live, no reload.\n\nRequires objectstack-ai/objectui#1957 for the runtime behavior.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

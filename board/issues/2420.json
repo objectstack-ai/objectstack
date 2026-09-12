@@ -1,0 +1,33 @@
+{
+  "number": 2420,
+  "kind": "pull_request",
+  "title": "feat(spec): gallery + gantt as first-class blueprint view kinds",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-28T10:31:10Z",
+  "updated_at": "2026-06-28T11:00:12Z",
+  "closed_at": "2026-06-28T11:00:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-28T11:00:10Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2420",
+  "body": "## Why\n\nThe AI **magic-build** agent could only express `list` / `form` / `kanban` / `calendar` views in a blueprint. Both the lenient `BlueprintViewSchema` **and** the `StrictView` mirror (the structured-output contract the model is validated against) capped `view.type` at those four.\n\nSo when a user explicitly asked for a **画廊/gallery** or **甘特图/gantt**, the model literally could not emit it — the closest allowed enum value (`list`) won and the view silently downgraded to a grid. Reproduced live: a build prompt asking for \"活动海报的画廊视图\" produced `{ viewKind:'list', config:{ type:'grid' } }`, and the agent self-narrated that gallery was \"not currently available\".\n\nThis is **not** a renderer gap: the view spec (`ListViewSchema.type`) already lists `gallery`/`gantt` with `GalleryConfigSchema`/`GanttConfigSchema`, and objectui ships `ObjectGallery` + `plugin-gantt`. The gap was only in the simplified **blueprint proposal** enum.\n\n## What\n\n- Widen `BlueprintViewSchema.type` and the `StrictView` mirror to include `gallery` and `gantt`.\n- Enrich the `type` / `columns` / `groupBy` field descriptions with when-to-use guidance (gallery for visual card/cover browse with an image field; gantt for a start+end date timeline; include the image field / order start-before-end in `columns`).\n- **No new blueprint slots** — the gallery cover image and the gantt start/end dates are inferred downstream from the object's fields, exactly as kanban's `groupBy` already is. Keeps the strict structured-output schema lean.\n- Tests: the lenient schema and the strict mirror both accept `gallery`/`gantt` views.\n\n## Consumer\n\nPaired with **objectstack-ai/cloud** `service-ai-studio`: blueprint `LIST_TYPE` + `viewBody` honor the new kinds (cover/date inference + grid fallback when a gantt lacks two dates), and the build skill/prompt teach when to use them. That cloud PR depends on this one and will bump `.framework-sha` once this merges.\n\n## Test plan\n\n- [x] `pnpm --filter @objectstack/spec exec vitest run src/ai/solution-blueprint.test.ts` — 25 passed (incl. 2 new gallery/gantt cases)\n- [x] `view.test.ts` unaffected (201 passed across blueprint+view)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

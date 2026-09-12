@@ -1,0 +1,33 @@
+{
+  "number": 2303,
+  "kind": "pull_request",
+  "title": "test(dogfood): package-first authoring gate (ADR-0070 Phase 6)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T16:15:06Z",
+  "updated_at": "2026-06-24T16:20:10Z",
+  "closed_at": "2026-06-24T16:20:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T16:20:08Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2303",
+  "body": "## What\nADR-0070 **Phase 6** — an automated regression gate for the package-first contract, run end-to-end through the **real booted CRM stack** (not a mocked unit), under the required **Dogfood Regression Gate** CI check.\n\n- Asserts `protocol.saveMetaItem` for a runtime-only create into a **loaded code package** throws `writable_package_required` (D1/D2).\n- Control: the same create into a fresh **writable base** id is accepted.\n\nReverting D1 (the `writable_package_required` throw) turns this red — that's the point of the gate. Locks the contract that the Studio + AI surfaces depend on.\n\n## Verification\n`@objectstack/dogfood` — 2/2 pass locally against the booted `@objectstack/example-crm` stack.\n\nFinal piece of the ADR-0070 epic (D1–D6 + gate).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

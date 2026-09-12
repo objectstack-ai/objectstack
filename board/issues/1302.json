@@ -1,0 +1,33 @@
+{
+  "number": 1302,
+  "kind": "issue",
+  "title": "[P1] cel-stdlib: missing daysBetween / date arithmetic / dateFormat — formula fields un-writable",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:22:40Z",
+  "updated_at": "2026-06-27T14:30:03Z",
+  "closed_at": "2026-06-27T14:30:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1302",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 7 条（**P1**）。\n\n## 现象\n\nCEL（公式 / formula 字段、flow 条件、过滤器宏）的**函数库不完整**，公式经常写不出来：\n\n- ❌ 无 `daysBetween(date1, date2)`\n- ❌ 无 `date + N` / `date - N`（整数天加减）\n- ❌ 无 `dateOnly()` / `dateTrunc('week')`\n- ❌ 无 `iif(cond, a, b)`（仅有 `cond ? a : b` 但与 macro 系统冲突）\n- ⚠️ `today()` / `now()` 时区不一致\n- ⚠️ 字符串：缺 `trim` / `padStart` / `format`\n\n## 复现\n\n`helpdesk` 模板想算 `sla_remaining_minutes = (resolution_due_at - now()) / 60`，CEL 报无法对 datetime 做减法。\n`contracts` 模板想算 `days_to_renewal = daysBetween(today(), renewal_date)` —— 函数不存在。\n`procurement` 想做 `created_at + 7 days` —— 不能。\n\n## 当前 workaround\n\n- 改成在 flow 里写脚本节点算好，再 update_record 回填到普通字段（失去 derived 字段优势）\n- 接受字段近似（仅显示日期差的「天数粒度估算」）\n\n## 建议范围\n\n**M1：日期 / 时间函数补全**\n- `daysBetween(a, b)`、`hoursBetween`、`minutesBetween`\n- `addDays(date, n)` / `addHours` / `addMinutes`\n- `dateTrunc(date, 'day' | 'week' | 'month')`\n- `dateFormat(date, pattern, locale?)`\n- `isWeekend(date)`、`isBusinessDay(date, calendarId?)`\n\n**M2：时区一致性**\n- 所有 datetime 函数明确支持 `tz` 参数，默认从 tenant / user setting 取\n- `today()` 在不同入口（formula / flow / macro）行为统一\n\n**M3：字符串 + 数字 + 数组**\n- 字符串：`trim`、`padStart`、`replace`、`split`、`join`、`upper`、`lower`\n- 数字：`round(n, decimals)`、`clamp`\n- 数组：`sum` / `avg` / `min` / `max` / `any` / `all` / `count`\n\n**M4：文档 + IDE 提示**\n- 集中页 `docs/cel-reference.md`\n- spec 可声明 `formulaContext: {...}` 让编辑器能补全\n\n## 验收\n\n- [ ] 上述函数全部可用，单元测试覆盖\n- [ ] `helpdesk` 用 CEL 写出 `sla_remaining_minutes` 派生字段\n- [ ] `contracts` 用 `daysBetween` 计算续约倒计时\n- [ ] 缺陷库 gap #7 标记为已解决\n"
+}

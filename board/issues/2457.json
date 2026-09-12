@@ -1,0 +1,32 @@
+{
+  "number": 2457,
+  "kind": "pull_request",
+  "title": "feat(app-showcase): surface Command Center (JSX) in nav (ADR-0080)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-29T07:26:22Z",
+  "updated_at": "2026-06-29T10:44:26Z",
+  "closed_at": "2026-06-29T10:44:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-29T10:44:23Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2457",
+  "body": "Wires the ADR-0080 kind:'jsx' example page (showcase_command_center_jsx, browser-verified) into the showcase app navigation (Pages → Command Center (JSX)) so it's clickable in the running showcase. It's the only kind:'jsx' page in showcase — a Tailwind-freeform layout authored as a JSX source string, compiled (parse, never execute) to the SDUI tree.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

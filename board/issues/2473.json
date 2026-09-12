@@ -1,0 +1,33 @@
+{
+  "number": 2473,
+  "kind": "pull_request",
+  "title": "docs: document html/react page-authoring tiers (ADR-0080/0081)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-30T06:39:26Z",
+  "updated_at": "2026-06-30T06:55:37Z",
+  "closed_at": "2026-06-30T06:55:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-30T06:55:34Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2473",
+  "body": "Closes the last hand-written-doc gap for the page-authoring tiers.\n\n- **layout-dsl.mdx**: new 'Authoring Modes' section — frames the structured (regions) mode this doc covers vs the **html** (constrained, parsed-never-executed) and **react** (real React, executed, `OS_PAGE_REACT`-gated, ON by default) source tiers, with a decision table + ADR-0080/0081 cross-links.\n- **objectstack-ui SKILL** frontmatter mentions the source tiers; regenerated the skills catalog (skills.mdx + skills/README.md) via gen:skill-docs.\n\nGenerated spec references (references/ui/page) self-refresh at docs build (apps/docs build runs gen:docs before next build), so no manual reference edits needed. The SKILL body section on the tiers already shipped in #2470.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

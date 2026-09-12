@@ -1,0 +1,32 @@
+{
+  "number": 2475,
+  "kind": "pull_request",
+  "title": "feat(examples): Task Desk — kind:'react' drawer + modal popup edit",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-30T06:55:48Z",
+  "updated_at": "2026-06-30T07:05:48Z",
+  "closed_at": "2026-06-30T07:05:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-30T07:05:46Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2475",
+  "body": "Adds the popup-edit patterns the existing in-page master/detail scenarios were missing: a **slide-out drawer** to edit a task and a **centered modal** to create one — both author-built React overlays (fixed positioning + backdrop + Esc-to-close) wrapping the real `<ObjectForm>`. Wired into the showcase nav; os validate passes; 29 pages. Browser-verified (drawer opens with the loaded form, modal opens for create). Pairs with objectui harness coverage in the Studio PR.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

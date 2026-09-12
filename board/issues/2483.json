@@ -1,0 +1,30 @@
+{
+  "number": 2483,
+  "kind": "issue",
+  "title": "分拆法人(公司)维度:新建 sys_company,从 sys_business_unit 中剥离 kind='company'(并移除 cost_center)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-30T11:43:05Z",
+  "updated_at": "2026-06-30T14:06:48Z",
+  "closed_at": "2026-06-30T14:06:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2483",
+  "body": "## 背景 / 问题\n\n当前 `sys_business_unit`(下称 BU)用一棵递归树 + 一个 `kind` 枚举(`company / division / department / office / cost_center`,见 `packages/platform-objects/src/identity/sys-business-unit.object.ts`)同时承载了**语义完全不同的概念**:\n\n- **公司 / 法人实体**(`kind='company'`)—— 财务/法定边界(报税、并表、按法人记账、跨公司交易);\n- **成本中心**(`kind='cost_center'`)—— 管理会计/费用分摊单元;\n- **职能组织单元**(`division/department/office`)—— 汇报/分区结构。\n\n把它们压进同一棵树、只靠 `kind` 区分,在集团场景下会\"混乱\":一个集团公司既有**子公司**(法人),又有**集团本部的部门**(职能单元),它们被迫成为同一层的兄弟节点。`kind` 是 display hint(\"does not change graph semantics\"),不足以可靠表达\"这是法律主体 vs 这是部门\",也无处存放公司专有属性(税号、币种、财年等)。\n\n> 判据:**\"语义不同才拆,只是粒度不同就留作 kind\"**。`division/department/office` 是同一种\"组织单元\"的不同粒度 → 留作 kind;`company` 与 `cost_center` 语义不同 → 不该留在 BU 树里。\n\n### 命名\n\n公司对象技术名 **`sys_company`**,`label: 'Company'` / `'公司'`。\"Company\" 是主流 ERP 的法人术语(Workday Financials 即用 Company;Dynamics/Oracle 用 Legal entity 表达同一概念)。\n\n> ⚠️ `sys_company` 与 BU 现有的 `kind='company'` **字面撞名**,因此**必须与\"移除 BU 的 `kind='company'`\"在同一波迁移落地**,不可长期并存,否则数据模型里会出现两个\"company\"概念。\n\n### 为什么不能复用 `organization_id`\n\n`sys_organization` 是**多租户隔离边界**(`managedBy: 'better-auth'`、`protection: { lock: 'full' }`,见 `sys-organization.object.ts`):\n\n1. **语义相反**:org 的唯一职责是**硬隔离**(RLS 按 active org 挡行)。把子公司建成 org,会让集团内**跨子公司可见/并表/跨公司选人**全部失效——而这正是集团场景需要的。\n2. **schema 锁死**:无法在其上添加公司属性(税号/币种/财年/母公司/合并方式)。\n3. **better-auth 语义渗透**:active-org 切换、org 成员/邀请、`require_mfa` 等会被一个\"公司\"莫名继承。\n4. **单向门**:单租户下 org 是干净的预留隔离轴;烧成\"公司\"后,将来真要多租户就没有隔离轴了。\n\n### 为什么不把 BU 改名为\"部门表\"\n\n`department` 只是 BU 众多 `kind` 之一;用一个 kind 命名整棵树会重犯\"一名多义\"。剥离公司/成本中心后 BU 仍承载 `division/department/office`(多粒度组织单元),且 membership / 共享(`recipient_type='business_unit'`)/ 审批(`bu:` 前缀)/ 选人器都挂在它身上。**BU 不改名**,它仍是\"组织结构 + 数据分区 + 安全\"的那棵树。\n\n## 方案\n\n### 已定决策\n\n1. **新建 `sys_company`**(技术名),`label: 'Company'` / `'公司'`——租户内的公司/法人维度,additive、能力门控。\n2. **BU 移除 `kind='company'`**,改挂 `company_id` 外键(**与移除 company 类型在同一波迁移落地**,避免撞名并存)。\n3. **BU 移除 `kind='cost_center'`** —— 成本中心是**会计/应用域概念,由业务软件开发者按需自建**(自定义对象/字段),**平台 BU 不预置**。\n4. **BU `kind` 最终保留 `division / department / office`** —— 全是同语义、不同粒度的组织单元。\n5. **不重载 `organization_id`**,保持休眠预留。\n6. **公司范围的记录** opt-in `company_id`:自动盖戳、去规范化冗余在记录上(同 `sys_user.primary_business_unit_id` 的惯例,见 `sys-user.object.ts:500`),性质是**软归属标签**,非硬隔离 —— 集团内仍可跨公司可见。主数据(客户/产品/供应商)与系统对象不带。\n7. **`sys_business_unit` 不改名**。\n8. **能力门控**:不需要多公司的客户不启用 `sys_company`,零负担(符合 ADR-0057 的 evidence-gated 哲学)。\n\n### `sys_company` 字段集(草案)\n\n| 字段 | 说明 |\n|---|---|\n| `name` / `label` | 公司名称 |\n| `code` | 短码(唯一) |\n| `tax_id` / `reg_no` | 税号 / 工商注册号 |\n| `currency` | 本位币 |\n| `fiscal_calendar` | 财年/会计期间 |\n| `parent_company_id` | 母公司(公司股权/并表层级,与 BU 组织树正交) |\n| `ownership_pct` | 持股比例(并表用,可选) |\n| `consolidation_method` | 合并方式(全资/权益法/比例合并等) |\n| `country` / `registered_address` | 注册地 |\n| `active` / `effective_from` / `effective_to` | 生命周期 |\n\n> 公司层级:`parent_company_id` 构成**股权/并表树**(集团→子公司→孙公司),**默认单父**(控股方);合资/多股东(DAG)为矩阵边界,留作 P2 junction(对称于 BU 的\"主属树 + 矩阵 junction\")。\n\n### BU 侧改动\n\n- `kind` 枚举:**移除 `company` 与 `cost_center`**,保留 `division / department / office`(与下方迁移同批完成)。\n- 新增 `company_id: Field.lookup('sys_company')`,每个 BU 节点归属一个公司。\n- `org_chart` 树视图渲染时,**\"公司\"层来自 `sys_company` 的虚拟节点**(按 `company_id` 分组 + join),不再是 BU 行。\n\n### 共享层改动\n\n- 新增 `recipient_type='company'`(或等价表达 `company_id IN (...)`),替代原先\"共享给 `kind='company'` 的 BU 子树\"。\n- `BusinessUnitGraphService` 维持不变(仍按 BU 子树展开);公司层的展开走 `company_id`。\n\n## 迁移\n\n1. 每个现存 `kind='company'` 的 BU → 建一条 `sys_company` 行;给其后代 BU 盖 `company_id`;删除该 company 节点。\n2. 现存 `kind='cost_center'` 的 BU(如有)→ 评估去向:平台不再预置成本中心,需由对应业务方迁移为自建对象/字段(或在数据为空时直接移除枚举值)。\n3. `kind` 枚举移除 `company` 与 `cost_center`(与步骤 1 同批)。\n4. 重定向原先指向 company-BU 的共享/审批寻址到对应 `sys_company`。\n\n## 待定(非阻塞)\n\n- **哪些业务对象 opt-in `company_id`**(交易/财务类要,主数据/系统对象不要)。\n- **自动盖戳来源**:用户主公司(user→BU→company)/ 父记录继承 / \"当前公司\"上下文切换器,机制对称于 OrgScopingPlugin。\n\n## 范围 / 非目标\n\n- **additive**,不改 `sys_business_unit` 结构(仅加一个 FK + 清理 kind 枚举),旧数据 `company_id` 可为 null;\n- **成本中心不进平台**——交由业务软件自建;\n- 不引入全多维 ERP 组织(position hierarchy / matrix cross-BU 等仍按 ADR-0057 的 P4 evidence-gated 路线);\n- 与对应的 ObjectUI 选人器需求(objectstack-ai/objectui#2112)**解耦**:选人器保持 dimension/root-agnostic,不依赖公司维度是否启用。\n\n## 关联\n\n- ADR: `docs/adr/0057-erp-authorization-core-business-units-and-scope-depth.md`(ERP 授权核心 / BU 分区)\n- 相关对象:`sys-business-unit.object.ts`、`sys-user.object.ts`、`sys-business-unit-member.object.ts`、`sys-organization.object.ts`\n- 下游需求:objectstack-ai/objectui#2112(分层选人器)\n"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 2392,
+  "kind": "issue",
+  "title": "[12.0] Docs-accuracy pass after the breaking-change batch (adapters/env/Policy/aliases)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T16:59:05Z",
+  "updated_at": "2026-06-27T18:11:16Z",
+  "closed_at": "2026-06-27T18:11:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2392",
+  "body": "**Docs-accuracy pass after the 11.x→12.0 breaking-change batch.** Run once the remaining A-items (#1886, #2377) land. Use the `docs-accuracy-audit` skill + a targeted sweep for the symbols/concepts removed:\n\n### Known doc debt from merged PRs\n- **Adapter trim (#2391)** — open edition is now **Hono-only** + MSW removed:\n  - `docs/HARDENING.md` — the \"Fastify recipe\" imports `@objectstack/fastify` (deleted) → rewrite as Hono or drop.\n  - `docs/design/driver-turso.md` — \"All adapters (Next.js, NestJS, Hono, …)\" wording → Hono-only.\n  - `../objectui` `e2e/sidebar-text-visibility.spec.ts:27` — stale comment \"e.g. via `@objectstack/plugin-msw`\".\n  - Any website / \"supported frameworks\" list.\n- **Env aliases (#2383)** — `OS_MULTI_TENANT`→`OS_MULTI_ORG_ENABLED`, `OBJECTSTACK_METADATA_WRITABLE`→`OS_METADATA_WRITABLE`, `AUTH_BASE_URL`/`OS_AUTH_BASE_URL`→`OS_AUTH_URL`; add an UPGRADE note. (ADR-0010 mentions the old metadata-writable env — leave as historical or annotate.)\n- **PolicySchema removed (#1882)** — any doc describing `definePolicy` / stack `policies` / \"org security policy\".\n- **Flow http node aliases removed (#2369)** — docs mentioning `http_request`/`http_call`/`webhook` flow node → `http`.\n- **IUIService removed (#2374)** / **DriverInterface alias removed (#2378)** — any contract docs.\n- **client-react query aliases removed (#2372)** — `select/filters/sort/top/skip` → `fields/where/orderBy/limit/offset`.\n- **Open edition = MCP-only (#2325 / 11.0)** — positioning/overview docs.\n\n### Scope\nframework `docs/**` (hand-written, not generated) + package READMEs + `../objectui` docs/comments. CHANGELOGs and ADRs are historical — leave unless actively misleading.\n"
+}

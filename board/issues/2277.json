@@ -1,0 +1,33 @@
+{
+  "number": 2277,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0069 — package-first authoring (Airtable base model)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T09:41:02Z",
+  "updated_at": "2026-06-24T09:52:41Z",
+  "closed_at": "2026-06-24T09:52:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T09:52:38Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2277",
+  "body": "**Status: Proposed** — drafted from a business-user Studio dogfood pass; opening for team decision.\n\n## What\nADR for the **Airtable-style package-first model**: every runtime-authored metadata item must live in a **writable package (base)**; no orphans. Code/installed packages are read-only; the **package is the delete / export / duplicate unit** (the answer to *\"a pile of loose metadata — how do I delete it?\"*).\n\n## Why now\nA dogfood pass surfaced a family of defects with one root cause — no package-first contract:\n- **#2252** (read-only after publish): code-package context stamped new objects read-only → stopgap coerces to `package_id = null`.\n- **#1946** (orphan pile): the null bucket has no delete container and is filtered out of package-scoped lists.\n- **../cloud `service-ai-studio`** can still silently default into a catch-all `com.workspace`.\n\nThe ADR unifies the contract across **kernel** (`saveMetaItem`), **Studio UI**, and **../cloud AI authoring**, and retires #2252 / #1946 as transitional.\n\n## Decisions\n- **D1** no orphan authored metadata (writable `package_id` required; kernel rejects with `writable_package_required`)\n- **D2** two package kinds — code/installed = read-only, writable bases = the only authoring target\n- **D3** create-flow contract enforced on all three surfaces (pick/create a base first; no silent default)\n- **D4** package = lifecycle unit (delete-cascade / export / snapshot / duplicate)\n- **D5** retire the #2252/#1946 stopgaps via a migration affordance\n- **D6** single-tenant framing; reject \"org/local default\" (it reproduces the orphan pile)\n\nTracking epic + rollout: see the package-first card.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

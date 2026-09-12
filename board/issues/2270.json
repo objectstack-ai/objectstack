@@ -1,0 +1,35 @@
+{
+  "number": 2270,
+  "kind": "pull_request",
+  "title": "feat(spec): authoritative per-type create seeds + validating test",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T07:23:15Z",
+  "updated_at": "2026-06-24T07:23:39Z",
+  "closed_at": "2026-06-24T07:23:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T07:23:37Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2270",
+  "body": "## Why\n\nA recurring family found dogfooding the Studio designers: **the designer creates a minimal item the spec rejects, so create → save 422s** — a new dashboard lacked `layout`, a new `script` action lacks `body`, a new report carried stale `objectName`/`columns`. Root cause: the create-form's default shape is invented **client-side** (objectui `createDefaults`) and drifts from the spec's required fields, with **nothing validating the two against each other**.\n\nPer-instance fixes (#2247 dashboard, objectui#1950 action) + guards (#2260, objectui#1950) treat the symptoms. This anchors the create shape to the spec so it **can't drift** — the root cause.\n\n## What (Phase 1)\n\n- **`packages/spec/src/kernel/metadata-create-seeds.ts`** — the single source of truth for each type's minimal valid create shape (`getMetadataCreateSeed(type)`), co-located with the schemas. Seeds the 9 core Studio-designer types: dashboard, action, page, view, flow, validation, hook, dataset, object.\n- **`metadata-create-seeds.test.ts`** — asserts every seed validates against its `metadata-type-schemas` schema (the canonical guard, at the most authoritative layer), returns fresh clones, and accounts for every schema-backed type (seeded or explicitly known-unseeded, e.g. canvas-create `report`).\n\nEach seed reuses the exact shape proven save-valid (200) against the real backend while dogfooding.\n\n## Verification\n\n`vitest run metadata-create-seeds.test.ts` → **12 passed** (9 seed-validates + sanity + clone + no-silent-cap coverage).\n\n## Phase 2 (follow-up)\n\nExpose `createSeed` per type via `/meta/types` (protocol `getMetaTypes` + rest), then the Studio designer (objectui `anchors.ts`) derives its `createDefaults` from the spec seed instead of hardcoding it — at which point the objectui conformance guard (objectui#1950) becomes a pure consistency check.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

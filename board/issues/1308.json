@@ -1,0 +1,33 @@
+{
+  "number": 1308,
+  "kind": "issue",
+  "title": "[P1] collaboration: no presence indicators — multiple agents reply to same ticket, no concurrent edit warning",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:24:03Z",
+  "updated_at": "2026-06-27T14:30:05Z",
+  "closed_at": "2026-06-27T14:30:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1308",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 33 条（**P1**）。\n\n## 现象\n\n记录详情页没有「在线状态指示」：\n\n- ❌ 不显示「张三正在查看这条记录」\n- ❌ 不显示「李四正在编辑此字段」\n- ❌ 不锁字段、不警告并发\n\n后果：\n- 多坐席同时回复同一张工单 → 重复回复客户\n- 两个销售同时改同一条 lead → 互相覆盖\n- 审批人和发起人同时编辑同一审批包\n\n## 复现\n\n打开两个浏览器，分别登录 A、B，同时访问 `TIC-2026-003` 详情页：\n- 互相不可见对方在场\n- 同时改 status 字段 → 后写者覆盖前写者（无任何提示）\n\n## 当前 workaround\n\n无。靠群里口头通报「这个我接了」。\n\n## 建议范围\n\n**M1：基础 presence**\n- 系统层 presence service（WebSocket / SSE）\n- 详情页头像组「现在 N 人在看」\n- 心跳 / 离开检测\n\n**M2：字段级编辑锁定（可选）**\n- 进入字段编辑状态广播，其他人看到「张三正在改 status…」\n- 不强制锁，但有视觉警告\n\n**M3：冲突检测**\n- 保存时若 record_version 已变，弹冲突合并对话框（基础三方 diff）\n\n**M4：与撰写器集成**\n- 撰写器（#26）内显示「李四正在草拟回复」防止双发\n\n## 验收\n\n- [ ] 详情页头像组显示其他在场用户\n- [ ] 字段级编辑警告 + 冲突保存对话框\n- [ ] `helpdesk` 模板：双坐席演示场景文档化\n- [ ] 缺陷库 gap #33 标记为已解决\n\n## 关联\n\n- 与 #26 撰写器深度集成\n"
+}

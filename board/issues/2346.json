@@ -1,0 +1,35 @@
+{
+  "number": 2346,
+  "kind": "pull_request",
+  "title": "fix(driver-sql): canonical ISO-8601-Z for user NOW()-default temporal fields on SQLite",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-26T12:16:03Z",
+  "updated_at": "2026-06-26T12:21:54Z",
+  "closed_at": "2026-06-26T12:21:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-26T12:21:52Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2346",
+  "body": "## What\n\nThe ADR-0074 follow-up it explicitly scoped out: a **user-declared** `Field.datetime` (or `date`/`time`) with `defaultValue: 'NOW()'` got `col.defaultTo(knex.fn.now())` in `createColumn`. On SQLite that compiles to `CURRENT_TIMESTAMP` — a timezone-**naive** `'YYYY-MM-DD HH:MM:SS'` (no millis, no zone) that `Date.parse` reads as **local** time, so the stored UTC wall-clock shifts by the host offset on a non-UTC runtime. The same class of bug ADR-0074 fixed for `created_at`/`updated_at`.\n\nWorse, the **same** datetime column mixed storage: an explicit JS `Date` is bound by better-sqlite3 as **INTEGER epoch ms**, while an omitted value took the **naive TEXT** default — one column holding both.\n\n## Fix (SQLite-only; Postgres/MySQL keep native `now()` and are unaffected)\n\n- **Write** — `nowColumnDefault(type)` emits a per-type canonical default via `strftime`: datetime → ISO-8601-`Z` (`2026-06-26T10:34:13.891Z`), date → `YYYY-MM-DD`, time → `HH:MM:SS.fff`.\n- **Read** — `formatOutput` folds every `Field.datetime` storage form (INTEGER epoch ms, canonical ISO-`Z`, legacy naive TEXT → interpreted as UTC) to one canonical **ISO-8601-`Z`** instant via `normalizeSqliteDatetimeOutput`. Idempotent, total, repairs legacy rows on read with **no data migration**.\n\nA DDL default only governs newly-created columns, so existing-table coverage comes from the read normalization (not app-side stamping like ADR-0074's audit fix) — an explicit `Date` stays INTEGER regardless, so the INTEGER-vs-TEXT split is inherent to SQLite and resolved at the read boundary. Decision rationale lives in the changeset + the `nowColumnDefault` comment (no new ADR).\n\n## Reconciliation with ADR-0074 (#2342, just merged)\n\nRebased onto ADR-0074. `normalizeSqliteDatetimeOutput` **reuses** its `repairNaiveUtcAuditTimestamp` for the string shapes (single source of the zone-naive→UTC rules) and adds the INTEGER epoch-ms / `Date` folding. Consequently a `datetime`-typed audit column now also presents as canonical ISO-`Z` — *more* consistent than before (ADR-0074's own string-typed audit columns already present as ISO-`Z`). ADR-0074's \"datetime-typed `created_at` reads as epoch-ms number\" test is updated to expect the canonical string.\n\n## Testing\n\n- `@objectstack/driver-sql`: **227 passed** (incl. 10 new in `sql-driver-user-datetime-default-format.test.ts`; ADR-0074's reconciled test green).\n- `@objectstack/service-analytics`: **164 passed** — analytics SQL bucketing reads these columns via `strftime`, bypassing `formatOutput`; verified ISO-`Z` TEXT buckets identically to the old naive TEXT, so no regression.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

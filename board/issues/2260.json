@@ -1,0 +1,33 @@
+{
+  "number": 2260,
+  "kind": "pull_request",
+  "title": "test(dogfood): designer-shaped (layout-less) dashboard saves + publishes",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T04:07:39Z",
+  "updated_at": "2026-06-24T04:08:33Z",
+  "closed_at": "2026-06-24T04:08:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T04:08:32Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2260",
+  "body": "## Why\n\nThe P1 found dogfooding the Studio dashboard designer (fixed in #2247) hid in a coverage gap: the **Dogfood Regression Gate tested only code-authored dashboards, which always specify a `layout`** — so nothing exercised the layout-less shape the *designer* actually produces. The draft save returned 422 and Publish stayed disabled, yet every static gate passed.\n\n## What\n\nA golden regression that boots the real showcase stack and drives the actual **create → save → publish** metadata path with a designer-shaped (layout-less) dashboard:\n\n- `PUT /meta/dashboard/:name?mode=draft` → **200** (was 422: `widgets: expected object, received undefined`)\n- `POST /meta/dashboard/:name/publish` → **200**\n- `GET /meta/dashboard/:name` → widgets persisted, **layout-less intact**\n\nThis is the test that would have caught the bug before merge. It closes the \"renders at design time ≠ persists\" gap for the dashboard designer.\n\n## Verification\n\n`vitest run` → **3 passed** in ~3.6s.\n\nPairs with #2247 (made `DashboardWidget.layout` optional).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

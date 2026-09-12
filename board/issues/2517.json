@@ -1,0 +1,33 @@
+{
+  "number": 2517,
+  "kind": "pull_request",
+  "title": "chore(agents): harden worktree-first guard + surface Directive #11 via CLAUDE.md",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-02T12:45:58Z",
+  "updated_at": "2026-07-02T12:54:19Z",
+  "closed_at": "2026-07-02T12:54:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-02T12:54:18Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2517",
+  "body": "## Why\n\nPrime Directive #11 (worktree-first) is well written in AGENTS.md, yet agents (this one included) still edited on shared checkouts. Root cause wasn't the prose — it was **enforcement + reach**:\n\n1. **The guard checked the wrong condition.** `guard-main-checkout.sh` blocked only when `branch == main`. Creating a *feature branch on the shared primary checkout* passed the guard while the tree could still be switched/reset under you — the exact loophole that got hit (`feat/studio-*` on the shared objectui checkout; `wip/session-off-main` on framework).\n2. **The guard only watched this repo.** It inspected `$CLAUDE_PROJECT_DIR`, so editing a **sibling repo** (`objectui`/`cloud`) on its shared checkout from a framework session was silently unguarded.\n3. **The directive never reached the agent's context.** There's no `CLAUDE.md` (which *is* auto-loaded); AGENTS.md isn't. So the agent started blind to #11 and only learned it when the guard fired — where loophole #1 let it be bypassed.\n\n## What\n\n- **Hook now enforces \"in a linked worktree\"** (`git rev-parse --git-dir` under `.git/worktrees/…`), not `branch != main`. A branch on the shared checkout is blocked.\n- **Hook now checks the edited file's own repo** (parses `tool_input.file_path` from the PreToolUse stdin), so sibling repos are covered too — not just `$CLAUDE_PROJECT_DIR`.\n- **New `CLAUDE.md`** (auto-loaded): inlines the worktree-first rule + command, extends it to sibling repos, and points to AGENTS.md for the full playbook. (Inlining the critical rule beats a bare \"go read AGENTS.md\" — same weak indirection that failed.)\n- **AGENTS.md #11** updated to match the hardened hook.\n\n## Verified (hook unit tests)\n\n| case | expect | result |\n|---|---|---|\n| file on framework primary (main) | block | ✅ exit 2 |\n| file in a framework **worktree** | allow | ✅ exit 0 |\n| file on **objectui** primary (main), from this session | block | ✅ exit 2 (cross-repo) |\n| non-repo path | allow | ✅ exit 0 |\n| `OS_ALLOW_MAIN_EDITS=1` | allow | ✅ exit 0 |\n\nAuthored from a worktree (`framework-guardfix`), per #11.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

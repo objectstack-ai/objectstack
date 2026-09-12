@@ -1,0 +1,35 @@
+{
+  "number": 2287,
+  "kind": "pull_request",
+  "title": "fix(analytics): boolean filters & group-by compare against real boolean, not stringified '1'",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T13:50:47Z",
+  "updated_at": "2026-06-24T14:20:10Z",
+  "closed_at": "2026-06-24T14:20:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T14:20:07Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2287",
+  "body": "## Problem\n\nOn the analytics dataset query path (`POST /api/v1/analytics/dataset/query`), a metric widget filtered on a boolean field (e.g. `{ is_critical: true }`) **always returned 0**, and pie/donut/bar charts grouped by a boolean dimension failed to bucket.\n\n## Root cause\n\nA lossy string roundtrip in the filter normalizer:\n\n1. `stringifyForCube` serialized boolean `true` → `'1'` ([`filter-normalizer.ts`](../blob/main/packages/services/service-analytics/src/strategies/filter-normalizer.ts)) — indistinguishable from a numeric `1`.\n2. `ObjectQLStrategy` then coerced `'1'` back to the **number** `1` via `coerceFilterValueForSql` and passed `{ is_critical: 1 }` into `engine.aggregate`.\n3. The stored field holds a **real boolean** `true`, so `1 !== true` — the comparison never matched.\n\nThe SQL strategy needs `1`/`0` (better-sqlite3 cannot bind a JS boolean), but the ObjectQL engine compares against the *stored* runtime type — sharing one coercer was the defect.\n\n## Fix\n\n- `stringifyForCube` serializes booleans as the tokens `'true'`/`'false'`, preserving boolean identity through the `string[]` pipeline form (SQL output unchanged: `'true'` → `1`).\n- New `coerceFilterValueForObjectQL` recovers a real `true`/`false` for the ObjectQL engine; SQL path keeps recovering `1`/`0`. Shared numeric recovery extracted into `recoverNumber`.\n- `ObjectQLStrategy.convertFilter` uses the ObjectQL coercer.\n\n## Test\n\nNew `objectql-strategy-boolean-filter.test.ts` — the mock engine filters/buckets in-memory rows by **strict `===`** (so a stringified `1` fails it):\n- `{ is_critical: true }` → real boolean reaches the engine, count is non-zero (3);\n- `{ is_critical: false }` → matches its rows (2);\n- group-by on a boolean dimension → produces **both** `true` (3) and `false` (2) buckets.\n\nFull service-analytics suite (154 tests) passes; package builds clean.\n\n> Context: discovered while building an ObjectStack dashboard; the downstream project worked around it with a numeric-range filter + string mirror field. This is the real fix in framework."
+}

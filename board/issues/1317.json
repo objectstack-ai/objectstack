@@ -1,0 +1,33 @@
+{
+  "number": 1317,
+  "kind": "issue",
+  "title": "[P2] config: `sort` must be nested under `options.sort` — surprising, no doc example",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:25:54Z",
+  "updated_at": "2026-06-27T14:31:27Z",
+  "closed_at": "2026-06-27T14:31:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1317",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 15 条（**P2**）。\n\n## 现象\n\n列表视图 / dashboard table widget 的 `sort` 配置**必须嵌在 `options.sort`**，而不是顶层 `sort`。该约定不直观，文档也无示例：\n\n```ts\n// 直觉写法（不工作）：\n{ type: 'table', sort: [{ field: 'priority', order: 'desc' }] }\n// 真实写法：\n{ type: 'table', options: { sort: [{ field: 'priority', order: 'desc' }] } }\n```\n\n模板作者反复踩坑。\n\n## 建议范围\n\n**M1：二选一**\n- (a) 兼容顶层 `sort`（推荐）\n- (b) 强制 `options.sort`，但 schema 校验报清晰错误 + 文档示例\n\n**M2：文档**\n- 在 dashboard / view 章节加显式示例\n- TS 类型让 IDE 直接报错\n\n## 验收\n\n- [ ] 任一写法工作，或非法写法 build 阶段报错\n- [ ] dashboard / view 文档明确示例\n- [ ] 缺陷库 gap #15 标记为已解决\n"
+}

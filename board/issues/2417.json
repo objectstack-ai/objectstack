@@ -1,0 +1,36 @@
+{
+  "number": 2417,
+  "kind": "pull_request",
+  "title": "docs(examples): add embed-objectql — lean @objectstack/objectql/core usage (ADR-0076)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-28T08:34:52Z",
+  "updated_at": "2026-06-28T09:39:57Z",
+  "closed_at": "2026-06-28T09:39:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-28T09:39:55Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2417",
+  "body": "## What\n\nA minimal, runnable **`examples/embed-objectql`** showing how a thin host embeds the ObjectQL engine **as a plain library** via `@objectstack/objectql/core` — no kernel, no `ObjectQLPlugin`, no `@objectstack/metadata-protocol`.\n\nThis is the deferred **P4/P5 of [ADR-0076](https://github.com/objectstack-ai/framework/blob/main/docs/adr/0076-objectql-core-tiering.md)** (standalone embed example + smoke). It closes the discoverability gap that started this work — without a runnable example, the lean entry is invisible and embedders reach for a raw query builder instead.\n\n## Highlights\n\n- ~40-line [`src/index.ts`](examples/embed-objectql/src/index.ts): `new ObjectQL()` from `@objectstack/objectql/core` + `InMemoryDriver` + an ordinary `ObjectSchema.create({...})` + CRUD.\n- The object is the **same shape** you'd ship to a full backend — one object model, two hosts, only the installed capability set differs.\n- **Doubles as a CI smoke** (`examples/*` are in `turbo run test`): asserts CRUD round-trips via the lean entry, and that the entry exposes `ObjectQL` but **not** `ObjectQLPlugin` / `ObjectStackProtocolImplementation`.\n\n## Verification\n\n- ✅ `pnpm --filter @objectstack/example-embed-objectql test` → 2/2 pass (engine boots standalone, CRUD round-trips).\n- ✅ `typecheck` clean.\n\nPrivate example package — no changeset/publish.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 2372,
+  "kind": "pull_request",
+  "title": "feat(client-react)!: remove deprecated useQuery legacy query-field aliases (11.0)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T14:07:04Z",
+  "updated_at": "2026-06-27T14:36:49Z",
+  "closed_at": "2026-06-27T14:36:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T14:36:48Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2372",
+  "body": "Removes the deprecated legacy query-field aliases from `@objectstack/client-react` `useQuery`/`useInfiniteQuery` (epic #2364, A3). Canonical names only: `select`→`fields`, `filters`→`where`, `sort`→`orderBy`, `top`→`limit`, `skip`→`offset`. One file; no framework consumers used the aliases; build+DTS+tsc clean. Rides into 11.0 (major changeset).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 1292,
+  "kind": "issue",
+  "title": "[P0] notification: no outbound notification channel — every flow's notify node is a no-op",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "enhancement",
+    "priority:p0"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:17:12Z",
+  "updated_at": "2026-06-27T14:29:59Z",
+  "closed_at": "2026-06-27T14:29:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1292",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 1 条（**P0**）。\n> 实证发现自 `objectstack-ai/templates` 仓库中的 7 个模板：contracts / procurement / compliance / content / todo / hotcrm / helpdesk。\n> 每一个模板都被这个缺陷击中，且没有任何模板侧能彻底绕过去的方案。\n\n## 现象\n\nFlows / state machines 里写的 `notify` 节点**调用是成功的**（dev server 日志里能看到节点执行、`notify.send` 之类的调用记录），但**没有任何外发通道把消息真正送到收件人手里**：\n\n- 邮件 ❌（无 SMTP / SendGrid / SES adapter）\n- IM / 群机器人 ❌（飞书 / 钉钉 / 企业微信 / Slack / Teams 全无）\n- Webhook ❌（连最通用的「往 URL POST 一个 JSON」都没有）\n- 站内 inbox ❌（用户在 Console 内也看不到一个「未读通知」铃铛）\n\n结果：业务用户**根本不知道有事要处理**。审批人不会主动去刷新工单页，客户不会主动登录工单门户看回复。整个系统看起来是「死的」。\n\n## 复现路径\n\n任选一个已发布模板：\n\n```bash\ncd packages/procurement\npnpm dev\n# 浏览器：创建一个 procurement_request，把金额改到超过审批阈值\n# 触发 procurement.approval_required 流程\n```\n\n预期：审批人 (Owner profile) 收到通知。\n实际：审批人收到 0 条任何形式的通知。Flow 日志显示 `notify` 节点 OK。\n\n相同复现可在 helpdesk 的 `escalate_angry_customer.flow.ts`、compliance 的逾期任务提醒、contracts 的续约 60 天提醒等任意 flow 中观察到。\n\n## 当前模板侧的不得已 workaround\n\n只能用「状态字段 + dashboard 视图」做轮询代偿：\n\n```ts\n// 例：procurement/src/dashboards/approver_inbox.dashboard.ts\n{ type: 'table', filter: { status: 'pending_approval', approver: '{currentUser}' } }\n```\n\n代价：\n1. 用户必须**主动登录**才能看到。\n2. 离开当前页面就完全失联。\n3. 时效性归零——SLA 模板（helpdesk / compliance）的 SLA 失去意义。\n4. 跨设备 / 移动端 / 假期场景全部 0 触达。\n\n## 建议范围（最小可用切片）\n\n> 不追求一步到位做 7 种 channel，先把**架构**和**两个最普适的 channel** 落地。\n\n**M1：通道抽象层**\n- 在 `framework` 新增 `services/notification`（或挂在 `EmailServicePlugin` 旁）：\n  - `Channel` 接口：`send(envelope: NotificationEnvelope): Promise<DeliveryResult>`\n  - `NotificationEnvelope`：`{ to, subject?, body, locale, contextRef?, channelHint? }`\n  - 路由策略：根据收件人 profile 的 `preferred_channels` 选 channel，按 hint / 优先级降级\n- Flow 节点 `notify` 接入此服务（当前只是日志桩）\n\n**M2：两个内置 channel**\n- **inbox** —— 站内 `notifications` 对象 + Console 顶栏铃铛 + 未读 badge（**这是 P0 中的 P0**，无外部依赖、任何部署都能用）\n- **email** —— SMTP adapter（最低门槛），SendGrid / SES 作为扩展点\n\n**M3：开发者扩展点**\n- Plugin 形式注册 channel（社区可补飞书 / 钉钉 / Webhook）\n- 文档 + helpdesk / procurement 模板里至少一个 flow 真实接通\n\n**非目标（本 issue 不做）**\n- 模板化邮件渲染（MJML 等）— 单开 issue\n- 通知聚合 / 摘要 / 静默时段 — 单开 issue\n- 推送 / SMS — 单开 issue\n\n## 验收\n\n- [ ] `notify` 流节点能落到站内 inbox，并在 Console 顶栏有未读提示\n- [ ] `notify` 流节点能通过 SMTP 发出邮件，至少有一个模板（建议 helpdesk 的 `escalate_angry_customer`）真接通\n- [ ] 至少一个第三方 channel plugin 示例（建议 Webhook）\n- [ ] `docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 把 gap #1 标为已解决\n- [ ] 七个模板的 README 不再需要「目前没有真实通知投递」的限制条款\n\n## 影响面（按降序）\n\n| 模板 | 被阻塞的核心场景 |\n|---|---|\n| helpdesk | SLA 预警、愤怒升级、新工单分诊提示 |\n| procurement | 审批通知、超期提醒 |\n| compliance | 整改任务到期、外审通知 |\n| contracts | 续约 60/30/7 天提醒 |\n| content | 发布日历到期提醒 |\n| hotcrm | 商机阶段变更、跟进提醒 |\n| todo | 截止日期提醒 |\n\n---\n\n参考：\n- 仓库：`https://github.com/objectstack-ai/templates`\n- 缺陷库：`https://github.com/objectstack-ai/framework/blob/main/docs/PLATFORM_GAPS_FROM_TEMPLATES.md`\n"
+}

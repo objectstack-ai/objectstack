@@ -1,0 +1,32 @@
+{
+  "number": 2334,
+  "kind": "pull_request",
+  "title": "fix(runtime): wire ai_access→ai_seat synthesis into the AI route dispatch (per-user seat gate)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-25T18:35:18Z",
+  "updated_at": "2026-06-25T18:40:18Z",
+  "closed_at": "2026-06-25T18:40:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-25T18:40:17Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2334",
+  "body": "## Problem\n\nThe per-user AI-seat gate ([ADR-0024], `service-ai` `evaluateAgentAccess` → requires the `ai_seat` capability) reads `req.user.permissions`. But the dispatch `ExecutionContext` that serves the `/ai/*` routes never carried the seat, so a **seated** user (`sys_user.ai_access=true`) was still **denied**:\n\n- `GET /ai/agents` returned an **empty catalog** for every authenticated caller (and the console hides the AI surface when the catalog is empty), while unauthenticated requests leaked the full catalog.\n- in-UI `build`/`ask` would 403.\n\n…even though the cap (cloud#525) correctly counted the same `ai_access` booleans. Root cause: the `ai_access → ai_seat` synthesis lived **only** in `plugin-hono-server`'s data-route `resolveCtx` — which is exactly why the cap (data-write path) worked but the gate (AI-route path) did not.\n\n## Fix\n\nAdd the guarded synthesis to **both** AI `req.user` construction paths in `@objectstack/runtime`:\n\n- **`http-dispatcher.ts`** — the `/ai/*` wildcard dispatch (the **active** path). Build `req.user.permissions`, then read `sys_user.ai_access` via the **default** (current per-request env) ObjectQL service and push `ai_seat` when true.\n  - ⚠️ Must **not** pass `context.environmentId`: in the cloud runtime that's the control-plane env UUID, which keys a *distinct, empty* per-scope engine; the env's own `sys_user` is served by the default service. (Passing it returned `[]` in testing — diagnosed live.)\n- **`dispatcher-plugin.ts` `resolveRequestUser`** — the concrete-route mount path (defensive; guarded read via the env kernel's `data` service).\n\nGuarded system read → can only ever **ADD** access, never break auth (absent / false / missing-column / error → no seat, unchanged).\n\n## Verification\n\nLive on a local cloud + objectos stack, `OS_CLOUD_AI_SEAT_MODE=enforce`, driving the env REST as the seated admin (env session via the `sso-open` bridge):\n\n| state | `/ai/agents` |\n|---|---|\n| seated (`ai_access=true`) | `[build, ask]` ✅ |\n| unseated (`ai_access=false`) | `[]` ✅ |\n| restored (`true`) | `[build, ask]` ✅ |\n\nCap (cloud#525) still 400s past the licensed seat count. **Unblocks flipping `OS_CLOUD_AI_SEAT_MODE=enforce`** (the boot-verify that `ai-seat-simple-model` flagged as mandatory).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

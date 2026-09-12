@@ -1,0 +1,33 @@
+{
+  "number": 2367,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0075 — configurable, opt-out-able post-login landing",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T13:20:20Z",
+  "updated_at": "2026-06-27T13:36:41Z",
+  "closed_at": "2026-06-27T13:36:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2367",
+  "body": "## Design proposal — for review (docs only)\n\nMakes the **post-login landing** a metadata-declared, opt-out-able capability instead of a hardcode.\n\n### Problem\nThe console hardcodes where users land after sign-in: `CloudAwareRootRedirect` carries a literal `PREFERRED_APPS = ['cloud_control']` (→ `/apps/cloud_control`, else the `/home` launcher). A deployment can neither **opt out** of the outer `/home` (e.g. our cloud service doesn't want it) nor **land somewhere custom** without forking the SPA. App `isDefault` is a badge that doesn't route.\n\n### Key framing (from review)\nThe landing is a **product-definition decision made at build/dev time** by whoever builds a product on the framework (declared in metadata/source) — **not** a runtime, per-tenant, admin-UI preference.\n\n### Proposal (metadata-native, near-zero new schema)\nResolve from existing app metadata:\n- **Wire `isDefault` into root routing** — land in the `isDefault` app; its existing `homePageId` selects the landing page inside it. \"Custom home\" = your app + its `homePageId` (an ADR-0065 page). No settings namespace, no `page:<name>` top-level concept.\n- **Fallback** (nobody declares `isDefault`): single visible app → it; else today's `/home` launcher (unchanged).\n- Replace `CloudAwareRootRedirect`'s hardcode with a generic `LandingResolver`. Cloud already has `cloud_control` `isDefault: true`, so behavior is preserved and the hardcode is deleted.\n- An env var stays only as a secondary **ops escape hatch**; metadata is the source of truth.\n\n### Explicitly NOT doing\nNo `console.default_landing` Settings-Manifest namespace, no per-tenant `sys_setting`, no Settings UI, no per-tenant runtime landing. (An earlier draft proposed the Settings route — dropped per review.)\n\n### Back-compat\nNo `isDefault` app → unchanged `/home`. Cloud → unchanged (still lands on `cloud_control`), minus the hardcode. Likely **no framework spec change** beyond documenting `isDefault`'s routing semantics; the work concentrates in objectui.\n\n**Seeking design sign-off before implementing.**\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

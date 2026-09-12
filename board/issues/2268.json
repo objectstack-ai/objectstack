@@ -1,0 +1,35 @@
+{
+  "number": 2268,
+  "kind": "pull_request",
+  "title": "chore(spec): hard-remove dead blank/record_review page config (enforce-or-remove)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T05:37:50Z",
+  "updated_at": "2026-06-24T05:38:07Z",
+  "closed_at": "2026-06-24T05:37:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T05:37:54Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2268",
+  "body": "Completes the enforce-or-remove begun in framework#2265 — now fully unblocked (objectui dropped all references in objectui#1949).\n\n## Deletes (all unreachable — their page types have no renderer and were removed from `PageTypeSchema`)\n- `BlankPageLayoutSchema`, `BlankPageLayoutItemSchema`, `RecordReviewConfigSchema` + their inferred types.\n- The `blankLayout` / `recordReview` fields on `PageSchema`.\n- `page-builder.zod.ts` (the `blank`-type drag-drop canvas config — `PageBuilderConfigSchema` / `CanvasSnapSettingsSchema` / `CanvasZoomSettingsSchema` / `ElementPaletteItemSchema` / `InterfaceBuilderConfigSchema`) + its `@objectstack/spec/studio` re-exports. Nothing in framework or objectui consumed it.\n\nThe `page` liveness ledger drops to **15 props** (the two `dead` entries removed with the fields).\n\n## Verification\n- ✅ spec UI **787** + studio **104** tests pass; `@objectstack/spec` typecheck clean.\n- ✅ liveness gate exits 0 (`page 15 classified — live 14, experimental 1`).\n- ✅ Swept framework + objectui: zero remaining consumers.\n\nThis closes the full enforce-or-remove loop for unrendered page types: removed from the enum (#2265) → objectui de-referenced (objectui#1949) → governed by the liveness gate (#2267) → dead config hard-removed (this PR).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

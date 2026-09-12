@@ -1,0 +1,34 @@
+{
+  "number": 2431,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0076 rev.8 — keep the metadata-protocol name (resolve Open Question #7)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-28T15:37:29Z",
+  "updated_at": "2026-06-28T15:43:35Z",
+  "closed_at": "2026-06-28T15:43:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-28T15:43:33Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2431",
+  "body": "## What\n\nPer maintainer decision: **keep the already-published `@objectstack/metadata-protocol` name** — do not rename. Resolves ADR-0076 **Open Question #7**.\n\n- **D10**: the \"rename `metadata-protocol` → `metadata-runtime`\" clause is replaced with **name retained**; the package's *content* still converges to the metadata-management impl at the cross-repo window (only the rename is dropped).\n- **Open Question #7**: resolved (keep the name; a README note should clarify impl-vs-contract).\n- **Status → rev.8**; also notes D9 step-1 (interface segmentation) shipped in #2429.\n\n## Why\n\nRenaming a published package churns downstream for ~0 benefit. The `protocol` suffix on an impl package is a deliberate, low-cost naming exception — the real **contract** lives in `@objectstack/spec/api` (the segmented `DataProtocol`/`MetadataProtocol`/… interfaces), which is correctly named; the impl package name is cosmetic.\n\n## Scope\n\nDocs only — edits `docs/adr/0076-objectql-core-tiering.md`. No code. Empty changeset.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

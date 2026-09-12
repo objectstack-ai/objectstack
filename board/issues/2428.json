@@ -1,0 +1,34 @@
+{
+  "number": 2428,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0076 rev.7 — dissolve the ObjectStackProtocol union (D9) + framework-agnostic transport port (D11)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-28T14:11:45Z",
+  "updated_at": "2026-06-28T14:17:30Z",
+  "closed_at": "2026-06-28T14:17:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-28T14:17:28Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2428",
+  "body": "## What\n\nConcludes the kernel review in **ADR-0076** (rev.7), in one ADR per maintainer preference.\n\n## D9 refinement — no unified protocol interface\n\nThe composed `ObjectStackProtocol = DataProtocol & MetadataProtocol & …` alias is **transitional only**; the end-state **dissolves the union**. The two things a \"unified protocol\" is actually for already exist and are *not* the god-interface:\n- **runtime discovery `services` registry** (`spec/api/discovery.zod.ts` — \"single source of truth for service availability\"; `capabilities`/`features` was *removed* as derivable from `services[x].enabled`);\n- **shared envelope/error spine** (`errors.zod.ts`, `shared/error-map.zod.ts`, `dispatcher.zod.ts`).\n\nSo `ObjectStackProtocol` is a static, lesser duplicate of the runtime `services` map → keep N independent domain protocols + the thin spine + discovery; delete the alias at the cross-repo window. Better for tiering (capabilities = what's installed, computed at runtime).\n\n## D11 — transport is a framework-agnostic port (multi-adapter)\n\nThe transport repeats the kernel's pattern — **clean port, god implementation**:\n- **Port (ratify)**: `http-dispatcher` has no Hono import (normalized `HttpProtocolContext`→`HttpDispatcherResult`); `IHttpServer` is in spec; `plugin-hono-server` is an adapter. Deliberately abstracted for multi-adapter — correct.\n- **God impl (fix)**: dispatcher (~3.8k) + rest-server (~5.1k) hardcode every domain. Each capability plugin should register a **normalized handler** into a thin registry — **not** Hono routes (that would couple to Hono and break multi-adapter). Decompose incrementally; cross-repo window.\n- **Caveats**: multi-adapter unproven (only Hono; validate with a 2nd adapter); dispatcher/rest-server overlap to confirm.\n\n## Scope\n\nDocs only — edits `docs/adr/0076-objectql-core-tiering.md` (Status → rev.7). No code. Empty changeset.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

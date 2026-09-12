@@ -1,0 +1,35 @@
+{
+  "number": 2402,
+  "kind": "pull_request",
+  "title": "feat(spec): remove first batch of dead metadata props (#2377, A2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T18:28:36Z",
+  "updated_at": "2026-06-27T18:50:00Z",
+  "closed_at": "2026-06-27T18:49:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T18:49:59Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2402",
+  "body": "First, low-risk slice of #2377 (ADR-0049 enforce-or-remove). Only the **cleanly-verifiable, unique-named** dead props with near-zero test footprint.\n\n## Removed (verified 0 set / 0 read across framework + objectui + cloud + hotcrm + templates)\n- **field**: `caseSensitive`, `maxRating`\n- **object**: `softDelete` (+ `SoftDeleteConfigSchema`), `partitioning` (+ `PartitioningConfigSchema`), `defaultDetailForm`\n- **dataset**: `measures.certified`\n\nLiveness ledgers (field/object/dataset) updated; `api-surface.json` regenerated (drops `SoftDeleteConfig`/`PartitioningConfig` types only); `dataset.test.ts` default assertion fixed.\n\n## Deliberately NOT removed (deferred in #2377)\nThe overloaded-name candidates (`field.index`/`columnName`/`dependencies`, `object.tags`/`active`/`abstract`/`isSystem`/`search`/`versioning`/`enable.*`, `agent.tenantId`, `action.timeout`) — their names are too overloaded across the test suite (`dependencies` 18 files, `tags` 26, `tenantId` 21, …) to reliably separate spec-prop usage from noise. They're unenforced-but-harmless; see the issue for the safe/risky split.\n\n## Verification\nFull spec suite **6595 passed**; `check:api-surface` ✓; **spec-property-liveness gate ✓**; fixed-group check ✓. Folded into the 11 line (minor → 11.1.0).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

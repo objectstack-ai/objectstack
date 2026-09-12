@@ -1,0 +1,33 @@
+{
+  "number": 2484,
+  "kind": "pull_request",
+  "title": "feat(spec): complete FormView protocol with form-presentation props (conformance)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-30T11:52:18Z",
+  "updated_at": "2026-06-30T12:02:53Z",
+  "closed_at": "2026-06-30T12:02:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-30T12:02:51Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2484",
+  "body": "Per the platform-author call: add the genuine *frontend-only* props the conformance check (#2480) surfaced to the spec, so the protocol declares what the `ObjectForm` component actually accepts.\n\n`FormViewSchema` gains (all **optional, additive**) the per-`type` presentation config: `layout`, `columns`, `title`, `description`, `defaultTab`, `tabPosition`, `allowSkip`, `showStepIndicator`, `splitDirection`, `splitSize`, `splitResizable`, `drawerSide`, `drawerWidth`, `modalSize`.\n\n**Result** (re-ran conformance against the live manifest):\n- object-form: **15 matched / 6 spec-only / 0 frontend-only** (was 1 / 6 / **14**) — the genuine divergence is eliminated.\n- the react-tier contract now **sources these from the spec** (with descriptions) instead of a hand-authored overlay (ObjectForm 14→20 props, regenerated).\n\nLow risk: `view` isn't in the property-liveness GOVERNED set (no liveness decl needed); **6650 spec tests still green**; **api-surface unchanged** (optional fields don't move the tracked surface). The 6 remaining spec-only (data/groups/subforms/defaultSort/sharing/submitBehavior) are metadata config the registry palette doesn't expose as designer inputs — the softer, expected signal.\n\nThis is the first concrete step of the architectural principle: **spec = protocol source of truth; the frontend conforms; conformance ratchets it.**\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

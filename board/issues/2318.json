@@ -1,0 +1,33 @@
+{
+  "number": 2318,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0073 — automation execution identity (non-human principal for user-less runs)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-25T05:26:58Z",
+  "updated_at": "2026-06-25T06:15:07Z",
+  "closed_at": "2026-06-25T06:15:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-25T06:15:05Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2318",
+  "body": "**Status: Proposed — opened for discussion** (not for immediate merge).\n\nFollow-up to #1888 / #2308. #2308 made the schedule/user-less `runAs:'user'` fail-open *audible* but deliberately left the runtime identity unchanged, because the real fix is a platform-identity decision. This ADR records it.\n\n## The decision in one breath\n\nObjectStack conflates two axes into \"is `userId` present?\": **authorization** (what may the run do) and **attribution** (who did it). That's why a user-less scheduled run both skips into god-mode *and* writes `created_by = NULL`. ADR-0073 separates them, in the ADR-0068 idiom:\n\n1. **Automation is a first-class non-human identity, expressed as built-in roles** — `automation` (org-scoped) and `platform_automation` (unscoped, platform-only). No anonymous run.\n2. **`runAs` becomes an authorization posture**: `user` / **`automation`** (RLS-enforced — the Salesforce \"with sharing\" middle, new default for user-less triggers) / `system` (god-mode, unchanged for back-compat).\n3. **Attribution always concrete** (audit actor), **decoupled from ownership** so automation never silently *owns* the rows it writes (owner-RLS would hide them from humans — Salesforce models this the same way).\n4. **User-less `runAs:'user'` is a config error.**\n\n## Why this shape\n\nGrounded in how **Salesforce** (Automated Process user + system-with/without-sharing), **ServiceNow** (Run-as service account), **AWS IAM** (execution roles, least-privilege), **Kubernetes** (ServiceAccount), **iPaaS** (connection owner), and **GitHub Actions** (least-privilege token) all converge on four invariants: automation runs as a concrete non-human principal; authorization ≠ attribution; safe explicit defaults; elevation is explicit + audited.\n\nIt's a **platform primitive**, not a flow feature — `plugin-reports` (already hand-rolling `SYSTEM_CTX`), audit, ADR-0057 lifecycle jobs, webhooks, and AI agents are all consumers.\n\n## Staging (per ADR-0049)\n\n- **v1 (non-breaking, foundational):** the contract + seeded roles + lint completeness (extend the #2308 lint to all user-less triggers; user-less `runAs:'user'` → validation error). Runtime behavior unchanged.\n- **M2 (roadmapped enforcement):** attribution wiring (non-breaking) → then `automation`-default RLS-enforced authorization + scopable grants (default-broad → tighten).\n- `runAs:'system'` unchanged throughout.\n\nOpen questions called out in the ADR's \"Alternatives\" + costs. Builds on ADR-0049 / 0057 / 0066 / 0068.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

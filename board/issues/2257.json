@@ -1,0 +1,33 @@
+{
+  "number": 2257,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0068 — unified user-context contract & built-in identity roles",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T03:42:32Z",
+  "updated_at": "2026-06-24T03:42:53Z",
+  "closed_at": "2026-06-24T03:42:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T03:42:51Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2257",
+  "body": "Adds **ADR-0068** consolidating the role/permission-model convergence (v1).\n\n## Why\nA platform-admin-only action was silently hidden in the cloud console (objectui#1928); root cause was a **predicate-context** gap, not a permission gap. Investigation surfaced four general defects: three different names/shapes for \"the current user\" across formula (`os.user.role`, singular) / RLS (`current_user.roles`, array) / client (`ctx.user.*`); `role` vs `roles` ambiguity; identity-as-boolean (`isPlatformAdmin`) orthogonal to `roles[]`; and objectui owning/duplicating the user shape.\n\n## Decisions\n- **D1** — one `EvalUser` contract in `@objectstack/spec`; canonical `current_user` variable (aliases `user`/`ctx.user`) identical across formula, RLS, and client; `roles[]` canonical (drop singular `role`); add `roles[]` to the formula scope; objectui stops defining its own `AuthUser`.\n- **D2** — identities become built-in `sys_role`s (`platform_admin` unscoped; `org_owner/admin/member` org-scoped), one-way projection from existing sources; `isPlatformAdmin` → derived alias; no bespoke identity booleans.\n- **D3** — role-definition authority follows the isolation boundary (global roles = super-admin/packages only, namespaced + managed; per-env tenants define inside their own env; ad-hoc org-level definition in a shared kernel forbidden).\n- **D4** — v1 gating: platform-operator actions use `isPlatformAdmin`; AI in-app gates use the env's `sys_role` catalog (closed enum + server validation, incl. system-predefined roles); **capability-gating deferred → cloud#474**.\n\nBuilds on **ADR-0057** (sys_role vs better-auth; `ExecutionContext.roles` union) and **ADR-0066** (capability/assignment/requirement). **Status: Proposed** — doc-only; no code changes. Conformance checklist (spec → formula → plugin-security → plugin-auth → objectui → cloud-consumer) is in the ADR.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

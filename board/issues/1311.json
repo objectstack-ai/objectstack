@@ -1,0 +1,34 @@
+{
+  "number": 1311,
+  "kind": "issue",
+  "title": "[P2] analytics: chart widgets don't aggregate / filters don't support formula fields",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:24:47Z",
+  "updated_at": "2026-06-27T14:30:06Z",
+  "closed_at": "2026-06-27T14:30:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1311",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 10 条（**P2**，但被多次确认影响普遍）。\n\n## 现象\n\nDashboard 的 chart widget（`type: 'bar' | 'pie' | 'line' | 'area'`）使用 `categoryField` 后**没有按值聚合**：\n\n- 应该按 `status` 分组 → 实际把每条记录当一根柱子，按主键散开\n- analytics 过滤器不支持公式 / 派生字段\n- 切换 aggregate（count / sum / avg）行为不一致\n\n效果：Manager Overview 看板只能用 metric tile + table，所有 chart 都长得「每个工单一根柱」，毫无价值。\n\n## 复现\n\n```bash\ncd packages/helpdesk && pnpm dev\n# 打开 Manager Overview Dashboard\n# \"Tickets by Status\" / \"AI Category Mix\" / \"Volume by Channel\" 三个 bar 全部一根一根\n# \"Sentiment Distribution\" pie 同样不聚合\n```\n\n## 当前 workaround\n\n去掉 chart widget，只用 metric + table。但「按 channel / sentiment / category 看分布」是支持团队复盘的核心动作。\n\n## 建议范围\n\n**M1：服务端真聚合**\n- analytics service 按 `categoryField` 真正 GROUP BY，返回 `[{category, value}, ...]`\n- chart 渲染基于聚合结果\n\n**M2：过滤器支持公式 / 派生字段**\n- formula / derived 字段（含跨对象，依赖 #36）能参与 filter\n- macro 系统统一（依赖 #11）\n\n**M3：性能**\n- 索引建议\n- 大数据集合分页 / sampling\n\n**M4：交互**\n- Drill-down（点柱子跳过滤列表）见单独 #37\n\n## 验收\n\n- [ ] chart 真聚合\n- [ ] 过滤器支持公式字段\n- [ ] `helpdesk` Manager Overview 4 个 chart 全部正常显示分组\n- [ ] 缺陷库 gap #10 标记为已解决\n\n## 关联\n\n- 与 #37 drill-down、#38 周期对比 同属 analytics 大主题\n"
+}

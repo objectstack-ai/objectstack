@@ -1,0 +1,33 @@
+{
+  "number": 1307,
+  "kind": "issue",
+  "title": "[P1] keyboard: no registerable shortcut API — high-frequency operator roles lose 3x throughput",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:24:03Z",
+  "updated_at": "2026-06-27T14:30:04Z",
+  "closed_at": "2026-06-27T14:30:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1307",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 34 条（**P1**）。\n\n## 现象\n\n平台没有可注册的「键盘快捷键」API。所有高频操作都得点鼠标：\n\n- next ticket / prev ticket（队列翻页）\n- assign to me（一键接单）\n- close / resolve（结案）\n- 切换 view / tab\n- 提交 / 取消\n\n对**客服 / 内容审核 / 数据标注 / 风控操作**等高频岗位，效率打三折。\n\n## 复现\n\n任意 list / detail / dashboard：\n- `j` / `k` 上下行：无\n- `a` 接单：无\n- `r` 标记已读：无\n- `?` 显示快捷键索引：无\n\n## 建议范围\n\n**M1：全局快捷键引擎**\n- 平台层注册 + dispatch\n- 支持 single key / chord\n- 视图级 / 全局级层叠\n\n**M2：声明式注册**\n- spec 里 `view.shortcuts: [{ key: 'a', actionId: 'assign_to_me' }]`\n- 视图加载时自动绑定 / 卸载\n\n**M3：发现性**\n- 全局 `?` 显示当前页可用快捷键\n- 文档常驻\n\n**M4：可访问性**\n- 完全键盘可用（与 a11y 同步推进）\n\n## 验收\n\n- [ ] 快捷键 API + 文档\n- [ ] `helpdesk` 模板：`j/k` 行导航、`a` 接单、`r` 解决、`c` 撰写、`?` 帮助\n- [ ] 缺陷库 gap #34 标记为已解决\n"
+}

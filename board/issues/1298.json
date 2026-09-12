@@ -1,0 +1,33 @@
+{
+  "number": 1298,
+  "kind": "issue",
+  "title": "[P1] collaboration: no @mention / reactions / threaded reply / cross-record reference in discussion",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:21:45Z",
+  "updated_at": "2026-06-27T14:30:01Z",
+  "closed_at": "2026-06-27T14:30:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1298",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 6 条（**P1**）。\n\n## 现象\n\n记录详情页的 Discussion 区域**只是一个审计风格的活动流**：能写一条文字评论 / 看到系统事件。缺：\n\n- **@-mention**：无法 @ 某人触发通知（叠加 gap #1）\n- **结构化提及**：@ 角色、@ 团队、@ 上一手处理人\n- **反应（emoji reaction）**：👍 / 🙏 等\n- **回复（threaded reply）**：所有评论平铺，无法对某条单独跟进\n- **草稿恢复 / 多人占位**（依赖 #33 presence）\n- **跨记录 @ 引用**：在评论里写 `#TIC-2026-003` 自动渲染为链接卡片\n- **附件**（依赖 #28）\n\n业务用户对比飞书 / 钉钉 / Slack 的协作体验，差距太大，最终选择**在 IM 群里讨论 ObjectStack 里的工单**——讨论上下文与系统脱节，事后追溯困难。\n\n## 复现\n\n任意模板任意记录详情页 Discussion：写一条 `@张三`，纯文本输出，没有补全、没有通知、没有链接。\n\n## 建议范围\n\n**M1：mention 解析 + 渲染**\n- 输入 `@` 弹补全（用户 / 角色 / 团队）\n- 持久化为结构化 token，渲染为链接 + 头像\n- 触发通知（gap #1）\n\n**M2：reactions + threaded reply**\n- 任意评论可加 reaction\n- 「Reply」可让评论形成 thread（最多 2 层即可）\n\n**M3：跨记录引用**\n- `#<ticket_number>` / `#<vendor.code>` 自动渲染卡片预览\n- spec 可声明每个对象的「reference parser」\n\n**M4：与撰写器复用**\n- 内联消息撰写器（#26）和评论框共用编辑器底座（含 mention / reaction），减少二次实现\n\n## 验收\n\n- [ ] 任意详情页 Discussion 支持 @ + 通知 + reaction + threaded reply\n- [ ] `helpdesk` 模板：@ 团队负责人触发邮件通知，记录跳转链接\n- [ ] 缺陷库 gap #6 标记为已解决\n\n## 关联\n\n- 依赖 #1 通知投递（@ 必须送达）\n- 配合 #28 附件、#31 富文本、#33 presence\n"
+}

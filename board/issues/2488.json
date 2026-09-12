@@ -1,0 +1,32 @@
+{
+  "number": 2488,
+  "kind": "pull_request",
+  "title": "chore(spec): close react-block frontend-only divergence — overlay data/fields/options (ADR-0081)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-30T14:06:12Z",
+  "updated_at": "2026-06-30T14:19:15Z",
+  "closed_at": "2026-06-30T14:19:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-30T14:19:13Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2488",
+  "body": "## What\n\nFollow-up to the conformance ratchet (#2485). That PR's baseline *accepted* three frontend-only props — `ObjectChart.data`, `ListView.fields`, `ListView.options`. This closes them so the baseline is **0 frontend-only across every block**, making the ratchet noise-free.\n\n## Why these aren't real divergence\n\nAll three are legitimate **binding escape-hatches** the component genuinely accepts, that the spec schema just doesn't model:\n- `ObjectChart.data` — pass static/precomputed data directly instead of binding via `objectName` + `aggregate`.\n- `ListView.fields` — a simplified column list (directly analogous to `ObjectForm.fields`, already in the overlay).\n- `ListView.options` — a per-viewType options bag (kanban/calendar/gantt extras).\n\nThe divergence was \"component accepts a prop the contract doesn't document.\" The fix is to **document it** (in the react-blocks overlay → the AI-facing contract), not to leave it sitting as accepted baseline noise.\n\n## How\n\n- Add the three props to the `react-blocks.ts` overlay as `binding` kind with honest descriptions.\n- Regenerate `react-blocks.contract.json` + `references/react-blocks.md` (AI now sees these props) and `react-conformance.baseline.json` (all `frontendOnly: []`).\n\n## Result\n\n- Every block: **0 frontend-only**. The ratchet now treats *any* future frontend-only prop as a real, actionable signal.\n- `@objectstack/spec` build green; **api-surface unchanged** (overlay entries, not new exports).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

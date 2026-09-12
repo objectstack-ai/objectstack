@@ -1,0 +1,33 @@
+{
+  "number": 2290,
+  "kind": "pull_request",
+  "title": "docs(readme): add UI screenshots, architecture diagram, and homepage polish",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T14:31:12Z",
+  "updated_at": "2026-06-24T14:38:10Z",
+  "closed_at": "2026-06-24T14:38:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T14:38:08Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2290",
+  "body": "## What\n\nAdds visuals and polish to the homepage README.\n\n- **See it in action** — framed browser-window screenshots of the Console & Studio (dashboard, kanban, Gantt, calendar, gallery, object & flow designers, AI assistant), captured from the live `showcase` + HotCRM apps.\n- **How it works** — a generated architecture diagram (typed metadata → compiled artifact → REST / SDK / Console & Studio / MCP, governed by Auth / RBAC / RLS / FLS / audit) plus a real `ObjectSchema` code sample.\n- **Accuracy** — fix stale Codebase Metrics (source packages 51 → 72, test files 229 → 676).\n- **Tighten** — de-duplicate the \"built for AI / ~100× less code\" messaging; collapse the long Package Directory into a `<details>` block.\n\nAssets live under `docs/screenshots/` (per the `.gitignore` convention). Docs-only change — no source code touched.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

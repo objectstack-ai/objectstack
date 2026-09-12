@@ -1,0 +1,32 @@
+{
+  "number": 2498,
+  "kind": "pull_request",
+  "title": "docs(showcase): reorganize pages by authoring model for teaching (Start Here + kind-grouped nav)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-30T21:59:09Z",
+  "updated_at": "2026-06-30T22:14:09Z",
+  "closed_at": "2026-06-30T22:14:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-30T22:14:07Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2498",
+  "body": "Page `kind` keeps iterating (full/slotted · html · react), but the showcase had no map: **29 pages in one flat \"Pages\" group, 6 overlapping react pages, 1 html page, and nowhere that teaches WHICH kind fits WHICH scenario.** This reorganizes the showcase so it actually teaches the decision.\n\n## Changes\n\n- **New `Start Here` default landing** — a `kind:'html'` teaching index: the two-axis model (`type` × `kind`), a decision tree (catalogue → full/slotted · custom layout → html · interactivity → react), and four cards linking to the canonical example of each. It doubles as the second HTML-tier example. *Browser-verified: renders correctly, cards navigate.*\n- **Nav grouped BY KIND** — the flat \"Pages\" group becomes **Authoring · Structured / · Visualizations / · HTML / · React**, so the authoring models are visible at a glance. `Start Here` is pinned at the top; Component Gallery loses its default flag.\n- **React consolidated 6 → 4**, each teaching one react-only capability:\n  - CRM Workbench · master/detail\n  - Task Desk · drawer & modal\n  - Account Cockpit · live rollup\n  - Renewals Pipeline · record blocks\n  \n  Dropped `inquiry-triage` + `invoice-console` — their tabs / KPI-filter patterns are already covered by the kept react pages and by the structured Task Triage interface page, so they added overlap, not teaching value.\n- **Labels show the teaching point**; the Start Here decision tree is the single source for \"which kind, when\".\n\n## Verification\n\n- Browser: Start Here renders (header / decision tree / 4 kind cards), card links navigate, the React nav group shows the 4 labeled pages, CRM Workbench still renders.\n- `os validate` + `tsc --noEmit` green; the new html page has no Tailwind (ADR-0065 guardrail clean).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

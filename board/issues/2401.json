@@ -1,0 +1,35 @@
+{
+  "number": 2401,
+  "kind": "pull_request",
+  "title": "feat(auth): IP allow-list — network gating on auth routes (ADR-0069 D5, P2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T18:16:14Z",
+  "updated_at": "2026-06-27T18:21:53Z",
+  "closed_at": "2026-06-27T18:21:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T18:21:51Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2401",
+  "body": "ADR-0069 **P2 / D5 — IP allow-list** (network gating).\n\n## What\nNew `allowed_ip_ranges` auth setting (CIDR ranges or exact IPs, one per line / comma-separated; empty = no restriction). A Hono middleware registered **ahead of the better-auth handler** in the auth-route registration rejects auth requests from a client IP outside the ranges with `403 IP_NOT_ALLOWED` — the exact seam ADR-0069 D5 names.\n\n- Client IP is read **trust-proxy-aware**: `x-forwarded-for` (first hop) → `cf-connecting-ip` → `x-real-ip`.\n- `/config` + `/bootstrap-status` are **exempt** so a blocked client still gets a clean login page + a clear error (rather than a broken page).\n- **Fails OPEN** when the client IP can't be determined (no proxy header) — a misconfigured proxy is a no-op, not a lockout. An admin enabling this must ensure forwarded headers are trusted.\n- IPv4 CIDR (`a.b.c.d/n`) + exact IPv4/IPv6 matching (`ipMatchesRange` / `isClientIpAllowed`, unit-tested).\n\n## ADR-0049\nDefault-off / additive (no upgrade behavior change); the setting ships with its enforcement.\n\n## Verification\n- **Unit**: plugin-auth 208 + service-settings 129 green; full build incl. strict DTS green. Tests cover CIDR/exact matching, in-range vs out-of-range, no-ranges-allows-all, and fail-open on undetermined IP.\n- **Live dogfood** (`allowed_ip_ranges=203.0.113.0/24`):\n  - sign-in with `X-Forwarded-For: 8.8.8.8` → `403 IP_NOT_ALLOWED`\n  - sign-in with `X-Forwarded-For: 203.0.113.50` → `200` + token\n  - `/config` from a disallowed IP → `200` (login still renders)\n  - no proxy header → `200` (fail-open; admin not locked out)\n\n## Scope / follow-ups (#2375)\nThis gates the **auth routes** (sign-in / session), per the ADR's D5 seam. Gating *all* data requests by IP, per-org `sys_organization.allowed_ip_ranges`, and the `require_ip_match` session-pinning toggle are follow-ups. Remaining ADR-0069 work: **P3 SAML** (needs a `@better-auth/sso` vs custom plugin decision). (OIDC trust-list UI / D6 verified already shipped via the SSO-provider surface.)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

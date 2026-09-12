@@ -1,0 +1,32 @@
+{
+  "number": 2244,
+  "kind": "pull_request",
+  "title": "feat(showcase): live bare-variant KPIs + brand palette on Command Center 大屏",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-23T14:00:38Z",
+  "updated_at": "2026-06-23T14:11:26Z",
+  "closed_at": "2026-06-23T14:11:24Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-23T14:11:24Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2244",
+  "body": "Makes the showcase **Command Center (大屏)** use the data-screen primitives added in objectstack-ai/objectui#1923, replacing the per-page workarounds with first-class props:\n\n- **KPIs** → live `object-metric` `variant:'bare'` (big tinted numbers, data-bound) instead of hand-typed static `element:text` numbers. Budget uses compact `'0.0a'` → `1.1M`.\n- **Charts** → `object-chart` `colors` brand palette (drops the `--chart-1..5` CSS-var override) + first-class `donut` chartType.\n\nBumps `.objectui-sha` to the objectui commit (`69e8cf2`) carrying those renderer capabilities.\n\n**Depends on** objectstack-ai/objectui#1923 — merge that first so `.objectui-sha` resolves from objectui/main (it will be merged with a merge commit, keeping the pinned sha reachable).\n\nVerified locally (re-vendored console, light + dark): live bare KPIs, cohesive palette via `colors`, scaling donut, gradient area, compact `1.1M` budget, 0 console errors."
+}

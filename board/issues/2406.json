@@ -1,0 +1,35 @@
+{
+  "number": 2406,
+  "kind": "pull_request",
+  "title": "fix(security): platform admins see all rows of better-auth-managed identity objects (ADR-0024 / cloud#551)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T19:20:02Z",
+  "updated_at": "2026-06-27T19:25:07Z",
+  "closed_at": "2026-06-27T19:25:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T19:25:06Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2406",
+  "body": "## Why\n`managedBy: 'better-auth'` identity tables (`sys_oauth_application`, `sys_account`, `sys_session`, `sys_sso_provider`, …) are written by better-auth's own adapter with **no tenant context**, so `organization_id` is never stamped and `member_default`'s wildcard `tenant_isolation` RLS denies every row — a platform admin's Setup lists (**OAuth Applications**, **Identity Links**, …) render **empty**. (This is the systemic root of the `sys_sso_provider` list-empty issue I patched per-object earlier.)\n\n## What\nExtend the **posture-gated superuser bypass** (today: `private` / `tenancy.enabled:false`) to `managedBy:'better-auth'` objects, so a platform admin's `viewAllRecords` sees all identity rows env-wide.\n\n**Admin-only, no member leak:**\n- Members never trigger the bypass → their `_self` carve-outs / `tenant_isolation` still apply (regression test asserts a member stays tenant-scoped).\n- The new flag is deliberately **not** used in the wildcard-policy drop, so it can't expose rows to non-admins.\n- Only the platform super-admin (`admin_full_access` `viewAllRecords`) is affected; org-admins (no `'*'` viewAllRecords) are not.\n\nThis fixes the whole class without per-object `tenancy` changes — important because some of these objects (`sys_oauth_application`) are **cross-env-isolated in the control plane**, so a global tenancy flag would be unsafe; the admin-bypass is.\n\n## Verification\n- **145** security-plugin tests green (incl. **2 new**: admin bypassed / member tenant-scoped).\n- Browser E2E: a platform admin sees **all** `sys_session` rows (own + another user's); a plain member sees **only their own**.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

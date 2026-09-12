@@ -1,0 +1,35 @@
+{
+  "number": 2369,
+  "kind": "pull_request",
+  "title": "feat(automation)!: remove deprecated http_request/http_call/webhook flow-node aliases (ADR-0018 M3, 11.0)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T13:35:47Z",
+  "updated_at": "2026-06-27T14:09:12Z",
+  "closed_at": "2026-06-27T14:09:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T14:09:11Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2369",
+  "body": "## What\nRemoves the deprecated `http_request` / `http_call` / `webhook` flow-**node** aliases, leaving the canonical `http` node as the only outbound-callout verb. Part of the **11.0** breaking-change batch (epic #2364, A3).\n\nADR-0018 M3 collapsed the divergent verbs onto `http` and kept the old names as deprecated aliases for back-compat. 11.0 is where they're removed.\n\n## Changes\n- **spec**: drop `http_request` from `FlowNodeAction` (so it leaves `FLOW_BUILTIN_NODE_TYPES = FlowNodeAction.options`); flow-builder palette offers `http`; BPMN `serviceTask` ↔ `http`.\n- **service-automation**: `registerHttpNodes` no longer registers the `http_request` / `http_call` / `webhook` aliases — only canonical `http`. (`registerNodeAlias` itself stays — general capability.)\n- **examples** (showcase, app-crm): migrated to `type: 'http'`.\n- **tests**: updated; `http-nodes.test.ts` gains a guard asserting the removed aliases are *not* registered.\n\n## Not touched (deliberately)\n- Trigger `eventType: 'webhook'` and the `webhook` **resume** event — different namespace, unaffected.\n- Observability metric names (`http_requests_total`, …) and arbitrary node-ids (`http_call_1`).\n- `AutomationEngine.registerNodeAlias` — kept as a general aliasing capability.\n\n## Behavior change\nAuthoring a removed node type now **fails fast at parse** instead of silently resolving to `http`. Migration is mechanical: `type: 'http_request'` → `type: 'http'` (identical runtime — durable outbox when `config.durable`, inline fetch otherwise). Pre-launch, so only first-party examples needed migrating.\n\n## Verification\n- `@objectstack/spec` tests: **154 passed** (flow / execution / bpmn-interop / bpmn-mapping / node-executor / flow-builder).\n- `@objectstack/service-automation` tests: **111 passed**; engine boots **17 node types** with `http`, no aliases.\n- `example-showcase` + `example-crm` build clean (flows validate as `http`).\n- `changeset status` → major; fixed-group check passes.\n\nRides into 11.0 alongside #2366.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

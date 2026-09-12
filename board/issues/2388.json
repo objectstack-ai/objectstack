@@ -1,0 +1,35 @@
+{
+  "number": 2388,
+  "kind": "pull_request",
+  "title": "feat(auth): password expiry via the session-validation gate (ADR-0069 D1, P1)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T16:02:56Z",
+  "updated_at": "2026-06-27T16:17:55Z",
+  "closed_at": "2026-06-27T16:17:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T16:17:53Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2388",
+  "body": "ADR-0069 P1 (tracking #2281, follow-up #2375): builds the **authentication-policy session gate** and wires it for **password expiry** (D1). This is the shared seam that **enforced MFA (D3)** will reuse.\n\n## What\n\nWhen `password_expiry_days` (new `auth` setting, 0 = off) is exceeded, an authenticated user is blocked from protected REST resources with `403 PASSWORD_EXPIRED` until they change their password — while auth + remediation paths stay reachable so they can recover.\n\n| Package | Change |\n|---|---|\n| `@objectstack/core` | new pure `evaluateAuthGate` / `isAuthGateAllowlisted` — one source of truth for the allow-list (auth endpoints, change-password, health, UI-bootstrap reads) |\n| `@objectstack/plugin-auth` | `customSession` computes the gate posture once → `user.authGate`; `computeAuthGate` compares `sys_user.password_changed_at` vs the window; `password_changed_at` stamped on sign-up / change / reset; `isAuthGateActive()` keeps it **zero-overhead when off** |\n| `@objectstack/platform-objects` | new `sys_user.password_changed_at` column |\n| `@objectstack/rest` | `resolveExecCtx` carries `authGate`; `enforceAuth` blocks gated sessions (independent of `requireAuth`) |\n| `@objectstack/service-settings` | new `password_expiry_days` setting |\n\n## Design notes\n\n- **Seam choice (found via dogfood):** the live data path is `@objectstack/rest`'s `rest-server` (not the hono-plugin CRUD routes nor the dispatcher). The gate hooks `enforceAuth`, which 39 protected routes already call. Metadata / discovery / `me/*` stay reachable so the Console can still render the remediation screen — blocking those would brick the UI; **data (read + write) is the protected resource and is gated**.\n- **Dispatcher/MCP** path is a tracked follow-up (#2375). The Console's REST surface is fully gated here.\n- Null `password_changed_at` never expires (upgrade-safe). Default-off / additive. ADR-0049 (enforcement ships with the setting); `Date` timestamps (ADR-0074).\n\n## Verification\n\n- **Unit**: core 299 + rest 140 + plugin-auth 182 + service-settings 129 + platform-objects 63 green; full 60-package build incl. strict DTS green. New tests: the pure core allow-list/evaluate, the `enforceAuth` gate, `computeAuthGate`/`stampPasswordChangedAt`, and the settings bind.\n- **Live dogfood** (showcase, `password_expiry_days=30`, backdated password):\n  - expired user: `GET` and `POST /api/v1/data/*` → `403 PASSWORD_EXPIRED`; `change-password` (allow-listed) → 200\n  - admin + within-window users → **not** gated (no false positive)\n  - after change-password the gate lifts (normal RLS resumes) → **remediation loop closes**\n\n## Next\nEnforced MFA (D3) reuses this `authGate` seam — a second posture branch (`mfa_required` + grace + per-org) + an objectui follow-up for the enrollment prompt.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1297,
+  "kind": "issue",
+  "title": "[P1] import: no CSV / Excel import wizard — customer Day-1 cold-start has no path",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:21:45Z",
+  "updated_at": "2026-06-27T14:30:01Z",
+  "closed_at": "2026-06-27T14:30:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1297",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 4 条（**P1**）。\n\n## 现象\n\n平台没有 CSV / Excel 导入向导。新客户上线时**没有任何把存量数据导进系统的路径**：\n\n- 客户的合同清单、供应商库、客户资料、KB 文章、历史工单 —— 全部要么手敲、要么写脚本调 API。\n- 模板里的种子数据 ≠ 客户自有数据；客户启用模板后 Day-1 是空的。\n\n这把 ObjectStack 的「上手即用」承诺打得稀碎：客户花 10 分钟看完了 demo，要花 10 周凑数据。\n\n## 复现\n\n任意模板 + 一份真实客户的 CSV。从 Console / 应用页面试图导入 — 没有入口。\n\n## 当前 workaround\n\n- 走 REST API：`POST /api/v1/data/<object>` 单条循环（无字段映射、无错误恢复、无幂等去重）。\n- 写一次性 seed script（只有开发者会做）。\n- 把数据塞进模板 `src/data/index.ts` 然后重发版本（违反「数据 vs 元数据」分离）。\n\n## 建议范围\n\n**M1：导入向导（per-object）**\n- 入口：每个 list view 顶栏「Import」按钮\n- 步骤：上传 CSV / xlsx → 自动检测分隔符 / 编码 → 字段映射（拖拽匹配） → 校验预览（前 20 行红绿提示） → 提交（异步 job）\n- 唯一键去重 / Upsert 选项（基于 `externalId` 或任意字段）\n- 失败行下载（带原因列）\n\n**M2：关联字段处理**\n- 通过「lookup-by-business-key」语义：CSV 里写 `customer_email`，导入时按 customer 对象的 email 字段反查 ID\n- 缺失关联时：跳过 / 自动建桩 / 报错三选一\n\n**M3：模板预设映射**\n- 每个对象可在 spec 声明 `importPreset: { columns: [...] , defaults: {...} }` —— 模板作者预定义好「客户最常导入的字段」一键映射\n\n**M4：导出对称**\n- 同一对象 list view 「Export」按钮，导出 CSV / xlsx，作为反向通道（同时是「先导出 → 编辑 → 再导入」的常用模式）\n\n## 验收\n\n- [ ] 任意模板的任意对象 list view 都有 Import / Export 按钮\n- [ ] 包含字段映射 + 校验预览 + 异步处理 + 失败行回收\n- [ ] `contracts` 模板：能 CSV 导入 500 条 vendor + 1000 条 contract，关联 vendor 用 vendor.code\n- [ ] 缺陷库 gap #4 标记为已解决\n\n## 影响\n\n- 客户冷启动从 10 周缩到 1 天，直接决定 conversion。\n- 任何要求「数据迁移」的 RFP 否则零分。\n"
+}

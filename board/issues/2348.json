@@ -1,0 +1,34 @@
+{
+  "number": 2348,
+  "kind": "pull_request",
+  "title": "fix(platform-objects): hide org/membership surfaces in single-org mode",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-26T13:52:58Z",
+  "updated_at": "2026-06-26T14:02:15Z",
+  "closed_at": "2026-06-26T14:02:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-26T14:02:13Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2348",
+  "body": "## Problem\n\nThe platform gates multi-org features two ways — nav entries on `requiresService: 'org-scoping'` (e.g. setup-nav Organizations/Invitations) and object actions on `visible: 'features.multiOrgEnabled != false'` (e.g. `sys_organization.create_organization`). That convention had only been wired in a handful of spots, so a wide band of org/membership surface leaked into single-org deployments (`OS_MULTI_ORG_ENABLED` unset/false) where it is pure UX noise or a broken affordance.\n\nTriggering example: `…/_console/apps/com.objectstack.account/sys_member/view/mine` (\"My Organizations\") shows even in single-org, where there are no `sys_organization` rows and no auto-stamped memberships — so the view is **always empty for every user**.\n\n## Changes (metadata-only)\n\n**Nav (P1)**\n- Account app `nav_account_memberships` (`sys_member`/`mine`): was gated on `requiresObject: 'sys_member'`, which never fires (system object is always registered). Re-gated on `requiresService: 'org-scoping'`.\n- setup-nav `nav_teams` (`sys_team`): had no gate while sibling Organizations/Invitations were service-gated. Added `requiresService: 'org-scoping'`.\n\n**Actions — gated on `features.multiOrgEnabled != false` (P0)**\n- `sys_user.invite_user` (most exposed — the Users list is always reachable in single-org)\n- `sys_member`: `add_member` / `update_member_role` / `remove_member`, and `transfer_ownership` (combined with its existing `record.role != 'owner'` condition)\n- `sys_team`: `create_team` / `update_team` / `remove_team`\n- `sys_team_member`: `add_team_member` / `remove_team_member`\n- `sys_invitation`: `invite_user` / `resend_invitation` / `cancel_invitation` (recipient-side accept/reject stay record-gated — unreachable in single-org anyway)\n\n**Remaining rough edges (P2)**\n- `sys_organization` admin actions (`update` / `delete` / `set_active` / `leave` / `change_slug`) now all gated too — previously only `create_organization` was.\n- `titleFormat` no longer renders a null organization: `sys_member` → `{user_id} ({role})`, `sys_invitation` → `Invitation for {email}` (org_id is null in single-org → old formats read \"… null\").\n\n`sys_team`'s `by_org` view left as-is: the teams list is empty in single-org (create is gated) so the grouping never degenerates in practice, and the nav entry is hidden anyway.\n\n## Scope / safety\n\nNo behavior change in multi-org deployments (`OS_MULTI_ORG_ENABLED=true`): `features.multiOrgEnabled` is true and the `org-scoping` service is present, so every gate evaluates to visible exactly as before. No schema, API, or runtime changes.\n\nNot in scope (follow-up): single-sourcing the multi-org flag resolution (`driver-sql` reads the env var directly instead of the resolved flag; ~8 scattered detection sites) and a regression gate asserting org-scoped surfaces are hidden in single-org.\n\n## Verification\n- `@objectstack/platform-objects` build + DTS succeed\n- Package tests 63/63 pass\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

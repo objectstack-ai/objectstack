@@ -1,0 +1,30 @@
+{
+  "number": 1476,
+  "kind": "issue",
+  "title": "Map view renders no basemap tiles (no default MapLibre style configured)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T14:35:53Z",
+  "updated_at": "2026-06-27T14:31:31Z",
+  "closed_at": "2026-06-27T14:31:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1476",
+  "body": "## Summary\nA `type: 'map'` list view (ObjectMap / MapLibre) renders the canvas, zoom controls, and record **markers** correctly, but shows a **blank background** — no geographic tiles. There's no default map style / tile source configured, so MapLibre falls back to an empty style.\n\n## Repro\n- `@objectstack/example-showcase` → Tasks → \"Work Locations (Map)\" view (tasks now carry `location` coords after framework #1466).\n- Markers are placed (verified: 10 markers, no \"missing coordinates\" warning), but on a blank background.\n\n## Expected\nA sensible default basemap so the map capability is actually demonstrable out of the box — e.g. a free vector/raster style (demotiles) or a `VITE_MAP_STYLE` / config-driven style URL (and document how to supply a provider token for production).\n\n## Notes\n- This is infra/config, not a data bug (data/markers are correct).\n- Scope decision: ship a free default style vs. require explicit config.\n\n_Found while fixing showcase seed data (task map coordinates), framework #1466._"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1337,
+  "kind": "issue",
+  "title": "[portal] record detail URL scheme + share-link 协议（GAP-7 of #1294）",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p0"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T06:48:50Z",
+  "updated_at": "2026-06-27T14:31:30Z",
+  "closed_at": "2026-06-27T14:31:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1337",
+  "body": "## 现象\n#1294 spec 的 `navigation[]` 只列出 list view 入口，**没声明用户点开一条记录的 detail URL 长什么样**。\n\n## 复现\n1. 客户在 My Tickets 列表点开一行\n2. 期望 URL 类似 `/portal/helpdesk/ticket/<id>`\n3. 实际：spec 没规定。\n   - 是 `/portal/helpdesk/_object/helpdesk_ticket/<id>`（暴露内部对象名）？\n   - 是 `/portal/helpdesk/view/<view_id>/<record_id>`（不直观）？\n   - 是 `/portal/helpdesk/ticket/<id>`（漂亮但谁定义\"ticket\"这个 segment）？\n\n也影响 share-link：客户想把工单链接发给同事，没有 URL 协议就没有可分享 link。\n\n## Workaround\n模板作者只能等框架定，或写 plugin layout 自己路由。\n\n## 分阶段建议\n**M2**（用户体验必须）：portal 级 URL 模板。\n\n```ts\nPortalSchema 新增:\nrecordUrlScheme?: {\n  // 选项 1：约定俗成\n  style?: 'object-slug' | 'view-id';\n  // 选项 2：模板作者完全自定义\n  pattern?: string;   // e.g. '/ticket/{record.id}'，{record.<field>} 占位符\n\n  // 哪些对象在该 portal 暴露 detail view\n  objects?: Array<{\n    objectName: string;\n    slug?: string;                            // URL segment, e.g. 'ticket' for helpdesk_ticket\n    detailViewRef: string;                    // 渲染哪个 view\n    shareableByPortalUsers?: boolean;         // 用户能否生成 share-link\n    shareTokenTtl?: string;                   // share-link 有效期，默认 '7d'\n  }>;\n};\n```\n\n运行时：\n- 列表行点击 → 按 scheme 生成 URL → 路由到 detailViewRef\n- share-link：`/portal/helpdesk/ticket/<id>?share_token=<JWT>`，token 由 record sharing 校验\n\n## 验收\n- 模板声明 `slug: 'ticket'` → 客户访问 `/portal/helpdesk/ticket/123` 看到详情\n- 客户点「分享」生成短链，未注册同事打开能看（受 share_token TTL 限制）\n\n## 关联\n- #1294\n- GAP-1（#1331，ephemeral token 与 share_token 复用同一签发机制）\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 2435,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0080 — AI-authored UI pages via JSX source (parse ≠ execute)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-28T17:35:35Z",
+  "updated_at": "2026-06-28T17:45:56Z",
+  "closed_at": "2026-06-28T17:45:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-28T17:45:54Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2435",
+  "body": "ADR-0080. AI authors a constrained JSX/HTML+Tailwind **source**, parsed (never executed) into the existing SDUI `SchemaNode` tree; the **component registry** is the contract; **capability ≠ contract** (curated public tier); authoritative parse/validate/compile runs server-side at save, the client renders the compiled tree.\n\nBuilds on / connects ADR-0033, 0046, 0048, 0058, 0063/0064, 0065, 0067, 0077, 0078. Records the reversed path (don't lift component props into the framework Zod spec — the registry is the single source).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

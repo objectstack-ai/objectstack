@@ -1,0 +1,32 @@
+{
+  "number": 2286,
+  "kind": "pull_request",
+  "title": "docs(readme): bridge hero to open-source / AI-native app positioning",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T13:24:27Z",
+  "updated_at": "2026-06-24T13:54:14Z",
+  "closed_at": "2026-06-24T13:54:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T13:54:11Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2286",
+  "body": "## What\nBridges the README hero to the marketing positioning (objectos.ai) while keeping every bit of technical depth and the ObjectStack name.\n\n- **Tagline** now leads with **open-source**, \"AI builds the whole app\", \"a database you own\", and **self-host** — so a visitor arriving from the site sees the same promise. Keeps the \"backend / Zod metadata\" substance.\n- Adds a **\"Try it in ~30s\"** line: HotCRM on StackBlitz (no install) + a link to the hosted platform.\n- **Intro** now states open-source + self-hostable up front.\n\nNothing technical removed — \"not another low-code UI builder\", the architecture, features, the Retool/Appsmith comparison table, and quick-start are all untouched.\n\n## ⚠️ Founder decision needed: brand architecture\nI added \"Hosted platform: **ObjectOS**\", which implies **ObjectStack = the open-source framework** and **ObjectOS = the hosted platform**. But \"ObjectOS\" is *also* the name of the **Control Layer** in this repo (ObjectQL / ObjectOS / ObjectUI), and the marketing site brands the whole product \"ObjectOS\". That's a name collision worth resolving deliberately — confirm the intended hierarchy and I'll align both the README and the marketing site.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 2410,
+  "kind": "pull_request",
+  "title": "feat(auth): opt-in SSO domain verification — DNS-TXT proof + resultDialog UI (ADR-0024 ②)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-28T02:18:29Z",
+  "updated_at": "2026-06-28T02:30:17Z",
+  "closed_at": "2026-06-28T02:30:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-28T02:30:16Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2410",
+  "body": "## What\n\nAdds **DNS-TXT domain-ownership verification** for external SSO providers — the remaining ② item of the ADR-0024 Unified-Identity V1 plan (per-env external IdP). Gated behind a new **`OS_SSO_DOMAIN_VERIFICATION`** flag (off by default).\n\nWhen **off** (default): today's behavior is unchanged — register → login immediately.\nWhen **on**: `@better-auth/sso` mounts `/sso/request-domain-verification` + `/sso/verify-domain` **and** enforces a hard login gate — a provider whose email domain is not DNS-verified rejects logins (`Provider domain has not been verified`). These two are coupled in `@better-auth/sso` (the endpoints only register when `domainVerification.enabled`), so one flag governs both. This prevents an org admin from registering a provider for a domain they don't control.\n\n## Changes\n- **`auth-manager.ts`** — new `ssoDomainVerification` enabled-flag (`readBooleanEnv`, accepts `true/1/yes/on`) → passes `domainVerification: { enabled: true }` to `sso()`; public `isSsoDomainVerificationEnabled()` helper.\n- **`register-sso-provider.ts`** — `runRequestDomainVerification` / `runVerifyDomain` bridges: re-dispatch through the gated better-auth endpoints (so the per-provider admin gate runs) and reshape the response into the `{ success, data }` envelope the action `resultDialog` reads — **request** returns the ready-to-paste DNS TXT record (`{ dnsRecordName, dnsRecordValue }`); **verify** returns a clear success/error. A bare 404 from the inner endpoint is surfaced as \"not enabled for this environment\".\n- **`auth-plugin.ts`** — mount the two bridges as rawApp routes (`/admin/sso/{request-domain-verification,verify-domain}`).\n- **`sys_sso_provider`** — `domain_verified` field + list column + `Request Domain Verification` / `Verify Domain` actions (request uses `resultDialog` to one-shot-reveal the DNS record); `domainVerified` documented in `AUTH_SSO_PROVIDER_SCHEMA`.\n\n## Verification (local prod-like stack, `OS_SSO_DOMAIN_VERIFICATION=true`)\n- `request-domain-verification` → **200** with the exact DNS record (`_better-auth-token-<id>.<domain>` = `_better-auth-token-<id>=<token>`); rendered in the action's resultDialog (revealed values match byte-for-byte).\n- `verify-domain` (no DNS) → **502** + friendly \"DNS TXT record not found yet…\".\n- Provider org-scoped (`organizationId` set), `domainVerified:false`.\n- **Hard login gate**: `sign-in/sso` for the unverified domain → **401 `Provider domain has not been verified`**.\n- List shows the `Domain Verified` column; both row actions appear.\n- The DNS-**success** path (TXT present → `domain_verified:true`) is inherently un-testable locally (needs a real domain + DNS TXT) — verified up to that boundary.\n\nThe cloud env-runtime mount (`AuthProxyPlugin`) + `.framework-sha` bump land in a companion cloud PR.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

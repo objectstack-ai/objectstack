@@ -1,0 +1,34 @@
+{
+  "number": 1294,
+  "kind": "issue",
+  "title": "[P0] portal: no external-user portal mechanism — customers see the full admin Console chrome",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "enhancement",
+    "priority:p0"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:20:02Z",
+  "updated_at": "2026-06-27T14:29:59Z",
+  "closed_at": "2026-06-27T14:29:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1294",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 27 条（**P0**）。\n> 实证发现自 `helpdesk`（最尖锐）、`compliance`（外审）、`contracts`（甲乙双方）、`procurement`（供应商 portal）。\n\n## 现象\n\n平台**没有「外部用户门户」机制**。当同一个 app 同时被员工和外部用户（客户 / 审计员 / 供应商 / 合作方）使用时：\n\n- 外部用户登录后看到的是**和员工一样的 Console**：同样的顶栏、同样的左侧导航、同样的应用网格、同样的搜索框。\n- 权限只能靠 `profile` 隐藏字段 / 视图 / 应用入口，但**视觉层（chrome / navigation / 入口）无法换肤**。\n- 没法给客户做一个干净的「我的工单 + 提交工单 + 浏览知识库」自助页面。\n\n`helpdesk` 模板的 `customer_portal` profile 是空壳——除了限制能看哪些字段，体验上和 admin 同屋。\n\n## 复现\n\n```bash\ncd packages/helpdesk && pnpm dev\n# 创建一个 profile=customer_portal 的账号登录\n# 看到的还是 /_console/...，左侧有 Tickets / Messages / Customers / KB / Teams / SLA 全套导航\n# 没有「外部用户专属布局」可选\n```\n\n## 当前 workaround\n\n只能：\n\n1. 起一个**第二份模板包**（如 `helpdesk-portal`），独立部署、独立端口。\n   - 代价：双倍部署、数据要么共享 DB 要么走 API 同步、SSO 状态分裂。\n2. 或者在 profile 里**关掉绝大部分**入口，让外部用户看到一片空白 + 一个对象——但仍然顶着 Console 的 ObjectStack chrome，UX 像「内部系统给你开了一道缝」。\n\n两种都不达标 B2B/B2C SaaS 体验。\n\n## 建议范围\n\n**M1：Portal 概念**\n- 在 spec 引入 `portal: { id, label, themeOverrides?, layoutKind: 'minimal' | 'embedded' | 'console' }`。\n- 同一份 app metadata 能挂多个 portal，每个 portal 有独立路由前缀（如 `/portal/customer/...`）。\n- 每个 portal 绑定一组 profiles。\n\n**M2：Portal-aware Layout**\n- `minimal` 布局：去掉应用网格 / 跨应用导航 / 顶栏品牌部分可换肤。\n- 路由根据 portal id 切换：`/portal/customer/helpdesk/...` vs `/_console/apps/helpdesk/...`。\n- 同一对象的同一视图能在两个 portal 用不同的 view 名称引用。\n\n**M3：Portal 默认页 + 公开入口**\n- portal 可声明 `entryView: 'helpdesk_ticket.list'` 与 `entryAction: 'create_ticket'`。\n- 支持**未登录访客**（anonymous role）能访问的入口：「提交工单 / 浏览公开 KB」（依赖 #21）。\n\n## 验收\n\n- [ ] `helpdesk` 模板新增 `customer_portal` portal，路由 `/portal/helpdesk-customer/...`，左导航只显示「我的工单 / 提交工单 / 知识库」三项\n- [ ] 同一登录态下可在 customer portal 与 console 之间用 URL 切换（不再共用 chrome）\n- [ ] `compliance` 模板新增 `auditor_portal`：外审人员只能看到只读证据\n- [ ] 缺陷库 gap #27 标记为已解决\n\n## 关联\n\n- 配合 #21（外部访客 / 只读 portal）一并推进。\n- 影响所有面向外部用户的模板。\n"
+}

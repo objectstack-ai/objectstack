@@ -1,0 +1,34 @@
+{
+  "number": 2454,
+  "kind": "pull_request",
+  "title": "feat(cli): wire SDUI manifest generation+consumption (ADR-0080)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-29T04:20:16Z",
+  "updated_at": "2026-06-29T04:27:23Z",
+  "closed_at": "2026-06-29T04:27:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-29T04:27:21Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2454",
+  "body": "ADR-0080 — wires the manifest end-to-end (the generation mechanism merged as objectstack-ai/objectui #2068).\n\n- **`build-console.sh`**: a **guarded, best-effort** step that boots the just-built console's registry and dumps the public-tier manifest (`getPublicConfigs()` → `manifestFromConfigs`) into `@objectstack/console/dist/sdui.manifest.json`. Skips cleanly on an objectui sha without the dump tooling; **never fails the console build** (the gate just falls back to parse-level).\n- **`validate.ts`**: the `os build` / `os validate` JSX gate now resolves the manifest from `@objectstack/console` too (cli already deps it), in addition to the project root → full component/prop validation when present.\n\n**Verified end-to-end already** (manually, the real path the script automates): live registry → 35-block manifest with full contracts → `compile()` catches missing-required / bad-enum / unknown-component.\n\n**Activation (deliberate release step, not in this PR):** bump `.objectui-sha` to `>=96b1293` (the objectui commit that ships the dump tooling). `build-console.sh` runs at publish time, not on PR CI, and a pin bump ships a new console across unrelated objectui changes — so it's surfaced here rather than buried in a feature PR. Until then everything is non-breaking (gate = parse-level; build step = skip).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

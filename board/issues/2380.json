@@ -1,0 +1,30 @@
+{
+  "number": 2380,
+  "kind": "issue",
+  "title": "[11.0][A3] Remove deprecated HttpDispatcher class (staged; use createDispatcherPlugin)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T14:36:23Z",
+  "updated_at": "2026-06-27T16:56:54Z",
+  "closed_at": "2026-06-27T16:56:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2380",
+  "body": "**Part of 11.0 breaking-change batch (#2364).** Largest A-item — **do in stages**.\n\nRemove the deprecated `HttpDispatcher` **class** (`packages/runtime/src/http-dispatcher.ts`, annotated \"removed in v2\"), superseded by `createDispatcherPlugin()`.\n\n### Keep (do NOT remove)\nThe other exports in that file are NOT deprecated: `HttpProtocolContext`, `HttpDispatcherResult`, `KernelResolver`, `HttpDispatcherOptions`. (Also note: `packages/services/service-messaging/src/http-dispatcher.ts` is a *different* class — unrelated.)\n\n### Blast radius (~245 refs, 7 adapters)\n- `runtime/src/index.ts` public export of `HttpDispatcher`\n- 7 framework adapters import it: `express`, `fastify`, `nextjs`, `nestjs`, `nuxt`, `sveltekit`, `hono` (`src/index.ts` + each `__mocks__/runtime.ts`)\n- 5–6 `runtime/src/http-dispatcher*.test.ts` that `new HttpDispatcher(...)` directly\n\n### Staged plan\n1. [ ] Migrate the 7 adapters to import only the surviving types; route through `createDispatcherPlugin()`\n2. [ ] Confirm `dispatcher-plugin.ts` (`createDispatcherPlugin`) is the canonical entry\n3. [ ] Remove the public `HttpDispatcher` export (mark class `@internal` or delete); keep the 4 types exported\n4. [ ] Rewrite/relocate the http-dispatcher tests to exercise the plugin\n5. [ ] `gen:api-surface` + major changeset\n\n**Risk**: high — own PR, staged, verify each adapter builds.\n"
+}

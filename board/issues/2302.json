@@ -1,0 +1,35 @@
+{
+  "number": 2302,
+  "kind": "pull_request",
+  "title": "fix(security): enforce flow runAs execution identity (#1888)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T16:09:42Z",
+  "updated_at": "2026-06-24T16:45:48Z",
+  "closed_at": "2026-06-24T16:37:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T16:37:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2302",
+  "body": "Resolves **#1888** — `[P0][security] Flow runAs never switches execution identity` (part of the metadata-liveness audit umbrella **#1878**).\n\n## Decision: ENFORCE\nThe platform expresses an elevated identity via the ObjectQL `options.context` — `{ isSystem: true }` short-circuits the security middleware (RLS/tenant bypass), and `{ userId, roles, … }` drives row-level security. That mechanism exists and is used pervasively (plugin-security / plugin-sharing / plugin-auth), so `runAs` is enforced, not removed.\n\n## Root cause\nThe CRUD nodes (`get/create/update/delete_record`) passed **no identity at all** to ObjectQL. With no `userId`/`roles`/`isSystem`, the auth middleware is a no-op and the security middleware **skips entirely** — so every flow ran effectively elevated regardless of `runAs`. `runAs:'user'` did **not** de-elevate (a privilege-boundary surprise); `runAs:'system'` did not *explicitly* elevate (it merely happened to be unscoped too).\n\n## The fix\n- **Engine** (`service-automation`): `execute()` (and the retry path) establish the run's effective identity from `flow.runAs` on a **copy** of the context (so the caller's context is restored afterward — the elevation is scoped to the run), persisted on suspend so `resume()` re-establishes it.\n- **CRUD nodes**: every ObjectQL read/write now passes `options.context` derived from the run's `runAs` via the new **`resolveRunDataContext`** helper (the single mapping point, shared so the policy can't drift between node types):\n  - `runAs:'system'` → `{ isSystem: true }` (elevated, RLS-bypassing),\n  - `runAs:'user'` (default) → the triggering user `{ userId, roles, permissions, tenantId }`.\n- **Trigger surfaces forward the full identity** so `runAs:'user'` matches a direct request by that user (not a member fallback): the REST trigger route (`runtime`) and the record-change trigger (`trigger-record-change`) now forward the caller's resolved `roles`/`tenantId` into the `AutomationContext` (new optional contract fields), not just `userId`.\n- **Spec**: removed the `[EXPERIMENTAL — not enforced]` marker from `FlowSchema.runAs`; api-surface unchanged (additive optional fields).\n- **Audit**: `docs/audits/2026-06-flowschema-property-liveness.md` — `runAs` marked **live/enforced**.\n\n## Tests (both directions, with a negative/regression guard)\n- **Dogfood regression gate** — `packages/dogfood/test/flow-runas.dogfood.test.ts` (+ fixture): boots a real app, a **restricted member** triggers flows against an owner-scoped record. `runAs:'system'` can read/write the record the member is RLS-denied; `runAs:'user'` is correctly denied. Verified **RED before / GREEN after** the engine fix (the two user-mode cases flip).\n- **Unit** — `packages/services/service-automation/src/builtin/crud-runas.test.ts`: captures the `context` each data op receives — system → `isSystem:true` (not attributed to the trigger user); user → `{ userId, roles, tenantId }`; default = user; **caller context not mutated** (restore/no-leak); a **regression test** that fails if `runAs:'system'` ever stops elevating; plus direct `resolveRunDataContext` cases (incl. the schedule/no-user fallback).\n\n## Behavior change / migration\nFlows that relied on the implicit elevation (default `runAs:'user'` ran unscoped) now run as the **triggering user** and are subject to their RLS. **Declare `runAs:'system'`** on any flow that must read/write beyond the trigger's access (system automations, cross-owner roll-ups). Schedule-triggered runs have no trigger user; under `user` they stay unscoped — declare `system` to make elevation explicit. The example CRM/showcase flows already declare `runAs` (`lead-qualification`/`renewal-reminder` = system; `convert-lead`/showcase = user) and the full dogfood gate stays green.\n\n## Verification\n- `service-automation` vitest: **215 pass** (incl. 10 new) · dogfood gate: **168 pass** (33 files) · `trigger-record-change`: 20 · spec automation+contracts: 526 · runtime dispatcher: 158 · `spec` api-surface: unchanged ✓ · all touched packages build clean.\n\nContext: this is the security-layer instance of the \"configured in the UI, silently does nothing at runtime\" anti-pattern fixed for assignment/decision nodes (#2250, objectui #1927/#1930). Sibling P0s in the same cluster: #1882, #1886, #1883.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

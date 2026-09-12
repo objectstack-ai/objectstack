@@ -1,0 +1,35 @@
+{
+  "number": 2247,
+  "kind": "pull_request",
+  "title": "fix(spec): make dashboard widget `layout` optional (auto-flowed when omitted)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-23T17:43:36Z",
+  "updated_at": "2026-06-23T17:44:39Z",
+  "closed_at": "2026-06-23T17:44:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-23T17:44:37Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2247",
+  "body": "## Problem\n\nFound by dogfooding the Studio **dashboard designer** in the browser: you could not save or publish **any** dashboard authored in the designer.\n\n`DashboardWidgetSchema.layout` was **required**, but the entire runtime treats it as optional:\n- objectui's `DashboardGridLayout` auto-flows any widget without a layout (`x: (i%4)*3, y: ⌊i/4⌋*4, w: 3, h: 4`).\n- The Studio dashboard designer's `addWidget` creates widgets **without** a layout by design.\n\nSo every designer-authored dashboard failed spec validation the moment a widget was added — the draft `PUT /api/v1/meta/dashboard/<name>?mode=draft` returned **422** (`widgets: Invalid type: expected object, received undefined`), the draft never saved (stuck \"Unsaved\"), and **Publish stayed disabled** — even though the widget rendered correctly in the canvas.\n\n## Fix\n\nMake `layout` **optional**; absence means \"auto-place\". Authors may still pin an explicit grid position.\n\n- Backward-compatible — existing dashboards that specify `layout` are unaffected.\n- Adds 2 regression tests (a layout-less widget and a designer-authored layout-less dashboard must validate).\n- Adds a changeset.\n\n## Verification\n\n- 804/804 spec UI tests pass.\n- End-to-end on a patched server: the same layout-less draft now returns **200**, Publish enables, and a 10-widget dashboard publishes.\n\nPairs with objectui `fix(dashboard): auto-flow layout-less widgets in the positioned grid` so layout-less dashboards also render as a clean grid.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

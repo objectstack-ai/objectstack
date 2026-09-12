@@ -1,0 +1,32 @@
+{
+  "number": 2471,
+  "kind": "pull_request",
+  "title": "chore: bump .objectui-sha to d23d6ebfa (activate kind:'html'/'react' page tiers)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-30T05:28:08Z",
+  "updated_at": "2026-06-30T05:36:48Z",
+  "closed_at": "2026-06-30T05:36:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-30T05:36:46Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2471",
+  "body": "Bumps vendored @objectstack/console to objectui d23d6ebfa so the served console includes the kind:'react' renderer (+ @object-ui/react-runtime) and the full HTML tag set for kind:'html' (ADR-0081). Makes the CRM Workbench showcase page render in the real `objectstack dev` path. Range since previous pin (8d351f1->d23d6ebfa, 3 commits): objectui #2105 + list inline-edit toggles #2102/#2103. build-console.sh rebuilds at release time, not PR CI.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

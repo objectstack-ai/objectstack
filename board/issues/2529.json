@@ -1,0 +1,33 @@
+{
+  "number": 2529,
+  "kind": "pull_request",
+  "title": "docs: retire legacy UI-hint keys (ADR-0085 semantic roles)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-03T02:39:46Z",
+  "updated_at": "2026-07-03T02:45:32Z",
+  "closed_at": "2026-07-03T02:45:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-03T02:45:31Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2529",
+  "body": "Docs-only sweep for teachings of the object UI-hint keys that ADR-0085 removed or renamed, rewritten to the current semantic-role protocol (`nameField` / `highlightFields` / `stageField` / `fieldGroups` + `Field.group`; per-page customization via an assigned Page). Executes the \"Docs and skills … are updated in the same change series\" item from ADR-0085 §Execution.\n\n## Files touched\n\n- **`content/docs/guides/data-modeling.mdx`** — the Field Groups example and the `ObjectFieldGroup` property table taught the removed group-level `visibleOn` and the deprecated `defaultExpanded` flag. Now teach the `collapse` enum (`'none' | 'expanded' | 'collapsed'`, with a note that `defaultExpanded` is a deprecated alias) and point per-page needs at an assigned Page.\n- **`content/docs/guides/public-forms.mdx`** — §10 taught `ObjectSchema.defaultDetailForm` and a `views.formViews` / `views.form` resolution chain. `defaultDetailForm` was never implemented and was removed from spec in the dead-props batch (#2402); object-level `views.*` hints were retired by ADR-0085. The section now explains that record detail derives from the semantic roles, with an assigned Page schema as the supported per-page path. Frontmatter description updated to match.\n- **`skills/objectstack-data/SKILL.md`** — fieldGroups example modernized (`collapse: 'collapsed'` instead of `defaultExpanded: false`; removed the group `visibleOn` line) and the group bullets now teach the `collapse` enum + assigned-Page guidance.\n- **`skills/objectstack-ui/SKILL.md`** — removed the `detail.relatedLayout` (`'stack' | 'tabs'`) teaching (the whole object-level `detail: {...}` block is gone). Now teaches: single Related tab is the built-in layout; first-class child-table navigation = a custom record Page with `record:related_list` blocks; relationship-level refinements (`relatedList: false`, `relatedListTitle` / `relatedListColumns`) remain.\n- **`skills/objectstack-formula/SKILL.md`** — dropped the `ObjectFieldGroup | visibleOn` row from the CEL-surface inventory (key removed per ADR-0085 / ADR-0049 enforce-or-remove).\n\n## Deliberately untouched\n\n- **`docs/adr/**`** — historical records, never rewritten.\n- **CHANGELOGs / `.changeset/**`** — historical.\n- **`docs/audits/2026-06-objectschema-property-liveness.md`** (and the dead-surface disposition plan) — point-in-time audit snapshots; they *document* the legacy keys, they don't teach them.\n- **`content/docs/references/**`** (`ui/component.mdx`, `ui/view.mdx`, `studio/object-designer.mdx`) — auto-generated from spec (`build-docs.ts`); their `defaultExpanded` / `defaultExpandedDepth` hits belong to unrelated Studio-designer / tree-view config schemas, not `ObjectFieldGroup`.\n- **`skills/objectstack-ui/references/react-blocks.md`** — generated from `packages/spec/src/ui/react-blocks.ts`; its two stale `compactLayout` prop-description mentions live in that source file (code, out of scope for a docs sweep — noted as follow-up).\n\n## Verification\n\n- `pnpm check:doc-authoring` — clean (171 files, no bare metadata literals).\n- `pnpm docs:build` — green. (The build locally regenerated `content/docs/references/**` with unrelated pre-existing drift vs. current spec; that churn was reverted, not committed.)\n- Re-grep of the full legacy-key term list over `docs/**`, `content/**`, `skills/**`, `packages/*/README.md`, `examples/**` — remaining hits are only ADRs, audits, changelogs, generated references, and the new \"deprecated alias\" notes themselves.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

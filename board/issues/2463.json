@@ -1,0 +1,36 @@
+{
+  "number": 2463,
+  "kind": "pull_request",
+  "title": "feat(spec,lint): ADR-0079 gate — deprecate titleFormat + record-title validator",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-29T14:40:31Z",
+  "updated_at": "2026-06-29T15:06:07Z",
+  "closed_at": "2026-06-29T15:06:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-29T15:06:04Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2463",
+  "body": "Closes the ADR-0079 authoring gate. (1) titleFormat `.describe()` → `[DEPRECATED → nameField]` + fixes the stale 'Overrides' text. (2) New `@objectstack/lint` `validate-record-title` (warns on titleFormat + reuses `objectTitleCompleteness` for no-title) wired into the registry + `os lint` (ADR-0078 not-cloud-only). (3) objectstack-data skill: nameField canonical, titleFormat retired. Tests: validator 9/9; spec build + api-surface green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 2321,
+  "kind": "pull_request",
+  "title": "feat(ui): add element:text_input — free-text data-entry element for SDUI pages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-25T08:33:55Z",
+  "updated_at": "2026-06-25T09:00:42Z",
+  "closed_at": "2026-06-25T09:00:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-25T09:00:40Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2321",
+  "body": "## Why\n\nSDUI pages could **display and navigate** but not **collect input** — there was no free-text input element and no input-bound schema, so you couldn't author a data-entry form as a pure SDUI page. The first consumer is a branded onboarding screen for the cloud control plane (collect a workspace name + subdomain, post to a backend endpoint) that today is hand-rolled vanilla HTML; this lets it become a console-rendered SDUI page (design system, dark mode, i18n). The capability is general — any SDUI data-entry form.\n\nThis is the **spec half**. Paired renderer + action bridge land in objectui.\n\n## What\n\n**Spec** (`packages/spec/src/ui`)\n- `ElementTextInputPropsSchema` — `inputType` (text/email/number/tel/url/password), `label`, `placeholder`, `defaultValue`, `required`, `disabled`, `description`, `targetVariable`.\n- Wired into `PageComponentType` (page.zod.ts) and `ComponentPropsMap` (component.zod.ts) as `element:text_input`.\n- One element carries the whole **free-text family** via `inputType`, leaving genuinely-distinct inputs (textarea/select/checkbox) free to arrive as their own elements later.\n- `liveness/page.json` `variables` note refreshed to cite the new writer + the `{{page.<var>}}` submit bridge.\n\n**Demo** (`examples/app-showcase`)\n- `showcase_contact_form` — four `element:text_input`s write page variables; a Submit `element:button` runs an `api` action whose params reference them as `{{page.<var>}}`, POSTing to the existing public web-to-lead endpoint (`/api/v1/forms/contact-us/submit`, ADR-0056) to create a `showcase_inquiry`. The showcase analog of the onboarding screen.\n- Registered in `pages/index.ts`, `objectstack.config.ts`, and the app nav.\n- Changeset: `@objectstack/spec` minor (fixed group).\n\n## Verification\n- Spec suite green: **6624 tests / 245 files** (incl. new `element:text_input` schema + `ComponentPropsMap` cases).\n- `definePage` parses the demo page against the built spec.\n- Backend boots with the new config/page (config compiles, nav↔pages resolves).\n- **Live E2E**: console renders the form, typing writes page variables (the `page.inquiryEmail`-gated hint appears), Submit POSTs the resolved body `{name,email,company,message}` → **HTTP 201**, `showcase_inquiry` created.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

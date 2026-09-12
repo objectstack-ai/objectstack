@@ -1,0 +1,30 @@
+{
+  "number": 1596,
+  "kind": "issue",
+  "title": "feat(spec): 新增 `user` 人员字段类型（lookup 到身份对象的语义化特化）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-05T09:01:14Z",
+  "updated_at": "2026-07-01T05:02:51Z",
+  "closed_at": "2026-07-01T05:02:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1596",
+  "body": "## 背景\n\n当前协议（`packages/spec/src/data/field.zod.ts`）有 48 种字段类型，但**没有独立的“用户/人员”字段类型**。目前表达用户关系有两条路径：\n\n1. **作者侧**：`Field.lookup('sys_user', {...})` —— 外键硬编码指向 `sys_user` 表。\n2. **系统侧**：`object.zod.ts` 中 `systemFields` 已为 `owner`（owner_id）和 `audit`（created_by/updated_by）**预留了自动注入位**，但标注为 \"Reserved for future\"，尚未落地。\n\n框架已隐含“人员引用是一等公民”的路线图，但缺少**作者可声明**的人员字段类型。\n\n## 提案\n\n新增 `user` 字段类型，作为 `lookup` 的**薄封装/语义化特化**（不是一套新的关系机制），由引擎解析到配置的身份对象（默认 `sys_user`）。\n\n主流低代码平台（Salesforce Lookup(User)/Owner、飞书多维表“人员”、钉钉宜搭“成员”、Airtable Collaborator、Dataverse、Mendix）普遍把“人员”做成独立字段类型，原因是它承载了普通 lookup 给不了的语义：\n\n| 能力 | `lookup('sys_user')` | 专用 `user` |\n|---|---|---|\n| 表名解耦（better-auth / 外部 IdP / 自定义身份表） | ❌ 硬编码 | ✅ 引擎解析当前身份对象 |\n| 默认当前登录用户 `$currentUser` | ❌ | ✅ |\n| 人员选择器 UI（头像、目录搜索、@提及） | 自行约定 | ✅ 内建 |\n| 与权限/记录归属（owner→行级共享）打通 | ❌ | ✅ |\n| 通知/审批路由（assignee 自动通知） | ❌ | ✅ |\n| 多人值 | 需 multiselect 拼凑 | ✅ `multiple: true` |\n| 按组织/角色过滤可选人 | 需手写 filter | ✅ `userScope` |\n\n## 建议设计\n\n```ts\n// FieldType enum 新增\n'user',   // 人员引用 —— 解析到配置的身份对象（默认 sys_user）\n\n// Field 工厂\nuser: (config: FieldInput = {}) => ({ type: 'user', ...config } as const),\n```\n\n配套配置（复用现有 reference 体系）：\n- `multiple?: boolean` —— 单人 / 多人\n- `userScope?: 'org' | 'all' | 'role:<x>'` —— 限定可选范围（多租户下默认本组织成员）\n- `defaultValue: '$currentUser'` —— 创建时默认当前用户\n- 引擎层 `reference` 默认解析为身份对象，作者无需写死 `sys_user`\n\n与已预留的 `systemFields.owner/audit` 对齐：系统侧的 owner_id/created_by 本质上就是 `user` 类型的实例，二者共用同一套解析与渲染，路线一致。\n\n## 影响范围\n\n- `packages/spec/src/data/field.zod.ts`：enum + `Field.user` 工厂 + 配置项\n- 文档：`content/docs/guides/cheatsheets/field-type-gallery.mdx`、`skills/objectstack-data/rules/field-types.md`\n- 后续（可分阶段）：REST、`$expand`、校验、UI 渲染器、权限/通知联动\n\n## 需要权衡\n\n1. **类型表面积**：REST、`$expand`、校验、UI 渲染都需新增 `user` 分支。\n2. **冗余风险**：需明确文档——人员引用一律用 `user`，不再用 `lookup('sys_user')`，避免两种写法并存。\n3. **身份子系统耦合**：`user` 做成“引用身份”，避免把 auth 逻辑泄漏进通用字段层。\n\n## 建议落地范围（MVP）\n\n先只做协议层（spec）最小闭环：`user` 类型 enum + `Field.user` 工厂（含 `multiple` 与 `$currentUser`）+ 文档。权限/通知联动后续迭代。"
+}

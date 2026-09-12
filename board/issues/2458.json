@@ -1,0 +1,32 @@
+{
+  "number": 2458,
+  "kind": "pull_request",
+  "title": "feat(spec,objectql): ADR-0079 — wire provisionPrimary (designate-only) at object registry",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-29T10:13:18Z",
+  "updated_at": "2026-06-29T14:04:02Z",
+  "closed_at": "2026-06-29T14:04:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-29T14:04:00Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2458",
+  "body": "Lands the ADR-0079 **structural invariant** safely: every normal object gets a reliably-populated `nameField` at registration, with **no DB-schema migration**.\n\n- `provisionPrimary` gains `{ synthesize?: boolean }`. `synthesize:false` designates an existing title-eligible field as `nameField` when undeclared, but **never synthesizes a new `name` column**.\n- `SchemaRegistry.registerObject` calls `provisionPrimary(schema, { synthesize: false })` at the materialization seam (own ownership) — replacing the staged `TODO(ADR-0079)`. So `nameField` is reliably set for user/AI-built objects (which always have a text label), while fieldless system tables (`sys_record_share`, …) are left untouched (no migration, the reason this was deferred). Title-less objects still fall to the resolver's `Record #<id>` floor.\n- One-shot migration sweep for existing envs.\n\nGates: `@objectstack/spec` 6650/6650 + liveness + api-surface; `@objectstack/objectql` 723/723 — all green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

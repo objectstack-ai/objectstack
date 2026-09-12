@@ -1,0 +1,30 @@
+{
+  "number": 2506,
+  "kind": "issue",
+  "title": "Design: application builder UI — remaining pillars (Automation / Interface / Access / Settings)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-01T13:52:47Z",
+  "updated_at": "2026-07-02T02:37:36Z",
+  "closed_at": "2026-07-02T02:37:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2506",
+  "body": "Follow-up to [ADR-0084](https://github.com/objectstack-ai/framework/blob/main/docs/adr/0084-application-builder-information-architecture.md) and the living design doc [`docs/design/builder-ui.md`](https://github.com/objectstack-ai/framework/blob/main/docs/design/builder-ui.md) (both merged in #2503).\n\nThe **shell** and the **Data pillar** are designed. This issue tracks designing the remaining pillars into the same living doc, each with an annotated HTML mockup.\n\n## Remaining pillars\n- [ ] **Automation** — left: automations grouped by trigger (record-change / scheduled / API / manual action); main: the flow **canvas**; inspector: selected node config; a Runs view for execution history.\n- [ ] **Interface** — left: surfaces (Apps · Pages · Views · Dashboards · Reports); main: page **builder** (structured canvas) or **source + preview** (html/react pages); inspector: component props.\n- [ ] **Access** — left: roles; main: the permission **matrix** (objects × CRUD + record scope); inspector: role / field-level detail.\n- [ ] **Settings** (⚙) — General (app basic info) + Advanced (Code: hooks · functions; Connections: datasources), grouped by audience.\n\n## Non-negotiable constraints (doc §1 — every pillar is checked against these)\n1. **AI generates it in one shot** — author within constrained, declarative surfaces; the metadata *shape* is the target, not a click-through wizard.\n2. **The design prevents AI mistakes** — declarative over code, typed/enumerated inputs, pre-publish validation gates, draft-only (never auto-publish).\n3. **A human confirms it in one pass** — draft diff, single canvas, non-blocking inspector, no modals.\n4. **Reuse, never rebuild** — every per-item config panel **is** Studio's existing protocol-generated form, dropped into the inspector unchanged. The builder builds only the shell/composition.\n\n## Deliverable per pillar\n- A section in `docs/design/builder-ui.md` (same structure as the Data pillar: left rail · main work surface · right inspector · v1 scope).\n- An HTML mockup under `docs/design/builder-ui/` composed from `shell.css`, every region tagged `data-build=\"shell\"` or `data-reuse=\"<component>\"` (dashed outline for reused).\n- Explicit **build boundary**: name the existing renderer/panel reused for each slot (canvas, matrix, page builder, protocol forms).\n\n## Also deferred (Data pillar v1 out-of-scope — fold in later)\nExtended objects (objectExtensions) · External objects (datasources) · ERD/model view · formal Lifecycle · Indexes · seed-data UI · saved views / kanban / calendar (these are Interface).\n\n## Related (already have issues)\n- #2501 — dashboard-level filters\n- #2502 — inline-vs-dataset rule\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 2347,
+  "kind": "pull_request",
+  "title": "fix(driver-sql): present Field.time as a wall-clock time-of-day on read (SQLite)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-26T12:43:21Z",
+  "updated_at": "2026-06-26T12:48:43Z",
+  "closed_at": "2026-06-26T12:48:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-26T12:48:41Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2347",
+  "body": "## What\n\nCloses the one residual from #2346: `Field.time`. `Field.time` is a **tz-naive wall-clock time-of-day**, not an instant (established in #2004). A `defaultValue: 'NOW()'` time column historically took the full SQLite `CURRENT_TIMESTAMP` default, so a defaulted/legacy row read back a full `'YYYY-MM-DD HH:MM:SS'` timestamp instead of a time-of-day.\n\n## Fix\n\n`formatOutput` now repairs a `Field.time` value to just its time portion via `toTimeOnly`:\n- a legacy full timestamp (or a full ISO value that leaked into the column) → sliced to `HH:MM[:SS[.fff]]`;\n- a value **already** a bare time-of-day → left **untouched**.\n\nDeliberately **narrow and read-only** (no `formatInput`/`coerceFilterValue` counterpart): it only transforms legacy full-timestamp values that were already filter-broken, and never touches a bare time-of-day — so it introduces **no write/read asymmetry** and preserves exact round-trips for bare time-of-day values, including the field-zoo `f_time` guard (`'14:30:00'`, #2022). Runs for every dialect (a native PG/MySQL `TIME` column already returns a time-of-day → no-op). Adds a `timeFields` registry + registration mirroring `dateFields`/`datetimeFields`.\n\nWhy not full canonicalization (write + filter)? That would impose a single canonical form #2004 deliberately left lenient and risk the field-zoo round-trip — out of proportion for this niche type. The narrow read-repair closes the actual gap without that cost.\n\n## Testing\n\n- `@objectstack/driver-sql`: **233 passed** (+6 new in `sql-driver-time-of-day.test.ts`: legacy full-timestamp repair, full-ISO repair, bare time-of-day untouched (field-zoo parity), NOW()-default reads a time-of-day, list-path parity, null).\n- `@objectstack/service-analytics`: **164 passed** (CRM cube time dimensions unaffected).\n\nCompletes the temporal-field read normalization: `datetime` → canonical ISO-8601-`Z`, `date` → `YYYY-MM-DD`, `time` → wall-clock time-of-day.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

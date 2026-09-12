@@ -1,0 +1,33 @@
+{
+  "number": 1300,
+  "kind": "issue",
+  "title": "[P1] form: no conditional show / required / readonly on fields — complex forms degenerate to flat soup",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:22:34Z",
+  "updated_at": "2026-06-27T14:30:02Z",
+  "closed_at": "2026-06-27T14:30:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1300",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 8 条（**P1**）。\n\n## 现象\n\n表单字段**没有条件显示 / 条件必填 / 条件只读** 机制。所有字段一律：\n\n- 一直展示（即便对当前 state 无意义）\n- `required` 是静态布尔\n- `readonly` 也是静态布尔\n\n复杂业务表单只能堆字段，看上去像一锅粥。\n\n## 复现\n\n`procurement_request` 表单：\n\n- 当 `category = 'service'` 时应必填 `service_period_months`，否则隐藏\n- 当 `status = 'closed'` 时所有字段只读\n- 当 `amount > 100000` 时必填 `justification`\n\n以上需求今天**只能靠加 validation flow + 多个 view 切换实现**，UI 没有原生支持。\n\n## 建议范围\n\n**M1：声明式字段条件**\n- spec：每个字段可加 `visibleIf: cel`、`requiredIf: cel`、`readonlyIf: cel`\n- 表单引擎按当前 record 值计算，实时更新（不需重渲染）\n\n**M2：字段组 / 区段级别条件**\n- `fieldGroup` 上能加同样表达式\n- 整个 group 折叠 / 展开 / 隐藏\n\n**M3：跨字段联动**\n- A 改变值时，B 的可见性自动反应\n- 当 B 隐藏后，其值在保存时清空（可配置）\n\n**M4：与权限系统区分清楚**\n- 「字段是否对当前用户可见」（profile / sharing）与「在当前业务条件下是否相关」（visibleIf）是两套，不要混\n\n## 验收\n\n- [ ] spec + form engine 支持 visibleIf / requiredIf / readonlyIf\n- [ ] `procurement` 模板：service_period_months 按 category 条件出现\n- [ ] `helpdesk` 模板：waiting_customer 状态下所有字段只读\n- [ ] 缺陷库 gap #8 标记为已解决\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 2337,
+  "kind": "pull_request",
+  "title": "docs: align AI docs with open=MCP-only / in-UI AI=cloud (cloud ADR-0025)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-26T05:26:16Z",
+  "updated_at": "2026-06-26T05:32:12Z",
+  "closed_at": "2026-06-26T05:32:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-26T05:32:10Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2337",
+  "body": "## What & why\n\nPropagates framework #2325 (`@objectstack/service-ai` removed from the open framework) across all the docs that were still describing the old model. The canonical decision lives in **cloud ADR-0025** (`service-ai → cloud; open = MCP-only`, Accepted 2026-06-25).\n\nAlso fixes a cross-repo reference trap: the old `ai-capabilities.mdx` note said \"Per ADR-0025\", but **framework** ADR-0025 is `plugin-package-distribution` (unrelated) — the decision is **cloud** ADR-0025. All references now say \"cloud ADR-0025\" explicitly and link the cloud repo.\n\n## New model (now stated consistently)\n\n- **Open edition** (cloud free tier / Docker / desktop / on-prem) — **no in-product `ask`/`build` chat**. Two BYO-AI paths, zero platform AI cost:\n  - **Data query → `@objectstack/mcp`** (Claude / Cursor / local model / any MCP client; RLS-governed; local model keeps data + inference in-boundary).\n  - **Metadata authoring → source mode** (typed metadata as source + an AI coding agent, aided by `skills/` + MCP introspection).\n- **Cloud / Enterprise** — the in-UI AI runtime (`ask` + `build` + in-product chat + `/api/v1/ai/*`), governed `ask`, managed/metered AI.\n\n## Changes (13 files)\n\n**User-facing (8)**\n- `ai-capabilities.mdx` — `ask` edition open→cloud; fixed the ambiguous ADR-0025 ref; added the open-edition two-path callout.\n- `plugin-chatbot-integration.mdx`, `environment-variables.mdx`, `knowledge.mdx`, `implementation-status.mdx` — cloud/EE tier banners.\n- `README.md` — AI-service bullet → MCP/BYO-AI; removed the dead `@objectstack/service-ai` Services row.\n- `skills/objectstack-ai/SKILL.md`, `skills/objectstack-platform/SKILL.md` — edition-boundary banner; fixed `ask`=open line; `AIServicePlugin` marked cloud/EE-only.\n\n**ADR cloud-owned banners (5)** — per cloud ADR-0025: `0033`, `0038`, `0040`, `0063`, `0064`. **Banners only — ADR bodies are preserved as historical record.**\n\n**Deliberately left untouched**: `docs/audits/2026-06-*` (dated snapshots), `RELEASE_NOTES.md` (historical log), `ARCHITECTURE.md` (`@objectstack/spec/ai` schemas stay open), `apps/docs/app/llms*` (generated route handlers), other ADRs' incidental `service-ai` mentions.\n\n## Verification\n\nDocs-only. No stale \"ask = open-source/free\" claims remain; all `<Callout>` tags balanced (Callout is a global Fumadocs component — 295 files use it, 0 import it); added internal links resolve. Full Next.js docs build not run.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

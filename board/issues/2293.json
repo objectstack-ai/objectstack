@@ -1,0 +1,33 @@
+{
+  "number": 2293,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0071 correction — matrix already shipped, refocus on multi-hop joins",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T15:08:27Z",
+  "updated_at": "2026-06-24T15:15:18Z",
+  "closed_at": "2026-06-24T15:15:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T15:15:16Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2293",
+  "body": "## Why\nBefore building the matrix \"P1\" from the freshly-merged ADR-0071 (#2289), I read the latest renderer — and matrix/across pivoting is **already implemented end-to-end**, so that part of the ADR was based on a stale ADR-0021-era note:\n\n- **Render** — `DatasetMatrixTable` (`plugin-report/src/DatasetReportRenderer.tsx`): true cross-tab, server subtotals/grand-total, drill-down, with tests.\n- **Author** — `ReportDefaultInspector.tsx` exposes `type: 'matrix'` + a \"columns across\" editor; `report.form.ts` reveals `columns` when `type == 'matrix'`.\n\n**Multi-hop joins remain a real gap** — `native-sql-strategy.ts:250` still reads *\"Only the first dotted hop is supported (single-level relation).\"*\n\n## What\n- Adds a **Correction** section documenting that matrix (ADR-0021 D2) is satisfied, citing the code.\n- Refocuses the ADR title + scope on **multi-hop joins only**; drops the matrix decision/phase.\n- Keeps the substance: to-one-only fan-out boundary, dotted self-disambiguating paths, depth cap (3), per-hop RLS, prior-art alignment.\n- Phasing is now P1 = multi-hop (framework), P2 = objectui catalog/UI.\n\nIntegrity correction to a doc merged minutes ago — no one has built on it yet.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

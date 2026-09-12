@@ -1,0 +1,33 @@
+{
+  "number": 2419,
+  "kind": "pull_request",
+  "title": "fix(automation): accept config.fieldValues as an alias for create/update_record fields",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-28T10:05:36Z",
+  "updated_at": "2026-06-28T10:19:32Z",
+  "closed_at": "2026-06-28T10:19:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2419",
+  "body": "## Problem\n\nThe `create_record` / `update_record` automation node executors read their write map from `config.fields` (`packages/services/service-automation/src/builtin/crud-nodes.ts`). But the AI build agent — and some hand-authored/legacy flows — emit the write map under `config.fieldValues`. When the keys mismatch, `interpolate(cfg.fields ?? {}, …)` resolves to an **empty map**, so the node inserts/updates a **blank record**; required-field validation then fails and the automation silently does nothing.\n\nThis is the framework half of \"AI-built record-change flows don't write end-to-end\". The runtime/trigger half (flows never fired) was fixed in cloud#686; the authoring-convention half is fixed in the paired cloud PR (the skill now emits `fields`). This PR makes the executor **defensively tolerant** so flows already stored under `fieldValues` keep working without re-authoring.\n\n## Change\n\nAlias the write-map key, mirroring the executor's existing `cfg.filter ?? cfg.filters` and `cfg.objectName ?? cfg.object` tolerance right alongside:\n\n```ts\nconst fields = interpolate(cfg.fields ?? cfg.fieldValues ?? {}, variables, context);\n```\n\n`fields` wins when both are present. Applied to both `create_record` and `update_record`.\n\n## Tests\n\n- **`crud-output-var.test.ts`** — proves the alias through the **real `AutomationEngine`** (create + update, with `{var.id}` interpolation), plus a `fields`-wins-over-`fieldValues` precedence case.\n- **`record-change-integration.test.ts`** — boots a **real kernel** (ObjectQL + automation + record-change trigger + data engine) and drives the documented scenario *\"customer status → lost auto-creates a linked follow-up\"* end to end: a live `data.update` fires the `record-after-update` hook, the flow's `create_record` writes a follow-up that is correctly **linked** (`{record.id}` → the triggering row's id) and **populated** (`{TODAY()}` → today's date). Asserted for **both** the canonical `fields` key and the legacy `fieldValues` alias.\n\nFull `service-automation` (224) and `trigger-record-change` (22) suites green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

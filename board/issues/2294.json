@@ -1,0 +1,33 @@
+{
+  "number": 2294,
+  "kind": "pull_request",
+  "title": "docs(skill): teach the automation skill the ADR-0044 send-back-for-revision shape",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T15:08:34Z",
+  "updated_at": "2026-06-24T15:24:46Z",
+  "closed_at": "2026-06-24T15:24:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T15:24:22Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2294",
+  "body": "Completes the **agent-teaching** slice of #2274 (ADR-0044). The `objectstack-automation` skill — how the AI agent learns to author flows in this repo — documented approve/reject approvals (ADR-0019) but **not the revise loop**, so AI-authored approval flows omit send-back (and a revise loop built without the back-edge gets rejected by `registerFlow`).\n\nAdds a **Send-back for revision (ADR-0044)** section to the Approvals area:\n- the `revise` out-edge → a signal `wait` node,\n- the resubmit edge typed **`type: 'back'`** (the only thing that legalizes the cycle — graph-minus-`back`-edges must be a DAG; authors opt in edge by edge, per the ADR),\n- the **`maxRevisions`** budget (default 3; `0` disables),\n- the two footguns the compile-time lint flags (dead-end revise; unmarked back-edge), and a pointer to the canonical `showcase_budget_approval`.\n\nADR-aligned (teaches correct opt-in — **no** auto-mutation, which would contradict ADR-0044 D5). Markdown-only; `check:doc-authoring` ✓ and `check:skill-docs` in-sync ✓ (frontmatter unchanged, so no generated-doc regen).\n\nThis closes the practical scope of #2274: lint #2279 + spec #2291 + this skill, with the engine's cycle-rejection error already carrying the specific hint. Remaining (optional): a dedicated agent **eval**. Refs #2274, #1770. 🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

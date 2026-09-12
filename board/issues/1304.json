@@ -1,0 +1,33 @@
+{
+  "number": 1304,
+  "kind": "issue",
+  "title": "[P1] editor: rich-text only in comments — long_text business fields are plain textarea",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:23:22Z",
+  "updated_at": "2026-06-27T14:30:03Z",
+  "closed_at": "2026-06-27T14:30:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1304",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 31 条（**P1**）。\n\n## 现象\n\n富文本编辑器**仅在 Discussion 评论框可用**。所有业务的 `long_text` 字段（如 `description`、`ai_summary`、`ai_suggested_reply`、`kb_article.body`、`contract.clauses`）渲染为**纯文本 textarea**：\n\n- 无加粗 / 标题 / 列表 / 代码块 / 引用 / 链接\n- 无图片插入\n- 无表格\n- 无 Markdown 渲染 / 预览\n\n业务文档输出（KB 文章、AI 草稿、合同条款）长得像 1995 年的 BBS。\n\n## 复现\n\n`helpdesk` 模板 `helpdesk_kb_article.body`：输入 Markdown 文本，详情页显示原始 `# 标题` `**粗体**` 字面。\n\n## 建议范围\n\n**M1：long_text 字段渲染策略**\n- spec 上 `format: 'plain' | 'markdown' | 'rich' | 'code'`\n- 默认 plain；模板作者按需开启\n\n**M2：富文本编辑器**\n- 与 Discussion 评论框共用底座（含 mention / 图片 / 链接 / 代码块）\n- 支持 Markdown 双向：输入 MD 立即渲染、可切换 raw 视图\n\n**M3：长文档场景增强**\n- 「KB 文章」类对象支持锚点 TOC / 大纲面板\n- 文档预览：详情页能切换 raw / rendered\n\n**M4：与附件 / mention 集成**\n- 图片走 #28 storage\n- @ 走 #6 mention\n- 与撰写器 #26 共用\n\n## 验收\n\n- [ ] long_text 字段可声明 format\n- [ ] `helpdesk` KB 文章用富文本编辑器，渲染漂亮\n- [ ] 缺陷库 gap #31 标记为已解决\n"
+}

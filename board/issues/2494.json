@@ -1,0 +1,32 @@
+{
+  "number": 2494,
+  "kind": "pull_request",
+  "title": "fix(showcase): drop Tailwind from kind:'react' pages — inline styles + pre-styled overlays (ADR-0065)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-30T15:27:55Z",
+  "updated_at": "2026-06-30T15:50:55Z",
+  "closed_at": "2026-06-30T15:50:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-30T15:50:53Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2494",
+  "body": "## The bug\n\nA `kind:'react'`/`'html'` page's `source` is **runtime metadata**, so the console's build-time Tailwind never scans it. Utility classes that don't *also* appear in the console's own source silently produce **no CSS** — exactly the ADR-0065 failure: styling that \"works only by coincidence.\"\n\nCaught on the live Task Desk page: the hand-rolled `bg-black/50` modal backdrop computed to `rgba(0,0,0,0)` (transparent), the form floated as unstyled black boxes with invisible labels, and light-theme `text-slate-900` headings were near-invisible on the dark theme.\n\n<details><summary>Confirmed in the browser</summary>\n\n`getComputedStyle` probe on the running console: `bg-black/50` → `rgba(0,0,0,0)` (no CSS), while `hsl(var(--card))` → `rgb(24,24,27)` ✓. The console's CSS tokens are HSL triplets that must be wrapped `hsl(var(--token))`.\n</details>\n\n## The fix\n\nAll six `kind:'react'` showcase pages now use **ZERO Tailwind**:\n\n- **Overlays** use the platform's own `<ObjectForm formType=\"drawer\"|\"modal\">` variant — a pre-styled Radix Sheet/Dialog with backdrop + animation, driven by `open`/`onOpenChange` — instead of hand-rolled `fixed inset-0` overlays.\n- **Page chrome** (headers, KPI cards, tabs, badges, empty states) uses inline `style={{}}` with `hsl(var(--token))` theme colors — real CSS, theme-aware, always generated regardless of the build's content scan.\n\nPages: `task-desk`, `crm-workbench`, `inquiry-triage`, `account-cockpit`, `invoice-console`, `renewals-pipeline`.\n\n## Verification\n\nBrowser-verified on a real `objectstack serve --dev` console (not a dev preview):\n- Titles now legible (were dark-on-dark).\n- **Task Desk** drawer + modal render the pre-styled ObjectForm overlay — proper dark backdrop + card + visible labels (vs the previous transparent, unstyled mess).\n- **CRM Workbench** KPI cards and **Inquiry Triage** tabs/count-badges all theme-correct.\n- `tsc --noEmit` green.\n\n## Follow-up (same correction, next PRs)\n\n- `command-center-jsx` (the `kind:'html'` page) off Tailwind.\n- Correct the AI guidance — react-blocks contract / objectstack-ui SKILL / three-tier docs / ADR-0080·0081 still say \"HTML + Tailwind\"; that contradicts ADR-0065 and must point to inline styles + pre-styled components.\n- Extend the styling lint to flag Tailwind `className` in react/html page source.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

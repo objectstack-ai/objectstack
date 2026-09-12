@@ -1,0 +1,35 @@
+{
+  "number": 2487,
+  "kind": "pull_request",
+  "title": "feat(rest): 列表导出路由 (csv/xlsx/json) + 类型感知格式化 + 表头本地化",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-30T13:52:32Z",
+  "updated_at": "2026-06-30T14:32:34Z",
+  "closed_at": "2026-06-30T14:32:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-30T14:32:32Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2487",
+  "body": "## 背景\nCloses #2481\n\n为列表导出补齐服务端导出能力:`GET /api/v1/data/:object/export`,流式输出 CSV / XLSX / JSON。\n\n## 改了什么\n- **新路由** `GET /data/:object/export`,支持 `format=csv|xlsx|json`、`fields`、`filter`、`orderby`、`limit`、`header` 等参数。XLSX 用 exceljs `WorkbookWriter` 流式写出,`useStyles:false`,可承受 2w+ 行不爆内存。\n- **类型感知格式化**(`export-format.ts`):lookup/user/master_detail → 关联记录名(非 id);select/radio → 选项 label(非 code);multiselect/tags → 多 label 拼接;boolean → 是/否;date → 格式化。无字段元数据时回退原值,与未格式化路径字节一致。\n- **自动 `$expand` 引用字段**:批量 `$in`(在 `findData` 内),无 N+1。\n- **表头本地化**:导出前用现成的 `translateMetaItem` 按请求 locale(Accept-Language / `?locale=`)翻译对象 schema,表头与控制台列头一致(此前直接用 `field.label` 原值,连英文翻译包都绕过)。\n- demo:`examples/app-crm` 商机视图开启 `exportOptions: ['csv','xlsx','json']`。\n\n## 验证\n- `pnpm --filter @objectstack/rest test` → **155 passed**。\n- 真实控制台 UI 点「导出为 XLSX」下载到的 xlsx,表头为 `[\"商机名称\",\"Account\",\"阶段\",\"金额\",\"赢单概率 (%)\",\"Expected Revenue\",\"预计成交日期\"]`,与列头一致。\n\n## 配套前端\nobjectstack-ai/objectui#2111(导出按钮 + 服务端下载 + 权限门)。"
+}

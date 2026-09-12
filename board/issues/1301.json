@@ -1,0 +1,33 @@
+{
+  "number": 1301,
+  "kind": "issue",
+  "title": "[P1] export: no print / PDF export — procurement orders & audit reports cannot be delivered",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:22:34Z",
+  "updated_at": "2026-06-27T14:30:02Z",
+  "closed_at": "2026-06-27T14:30:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1301",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 9 条（**P1**）。\n\n## 现象\n\n平台没有「打印 / 导出 PDF」原语。业务用户日常需要把记录当成纸质 / 邮件附件交付：\n\n- 采购订单 PO（发供应商）\n- 合同附件（盖章版）\n- 审计报告（外审 / 监管）\n- 客户工单回执\n- 报销单据\n\n目前**无法**：从详情页一键生成带 logo / 标准排版 / 多页分页的 PDF。\n\n## 复现\n\n任意模板任意记录详情页：没有「Print」/「Export PDF」按钮。\n\n## 当前 workaround\n\n- 浏览器原生 Ctrl+P：但页面包含 Console chrome、不分页、表格被截断、样式不适合纸。\n- 客户写定制 React 组件 + Puppeteer：但脱离平台，模板无法承接。\n\n## 建议范围\n\n**M1：声明式打印模板**\n- spec 新增 `print_template`：`{ name, object, layout: 'invoice' | 'report' | 'custom', sections: [...] }`\n- 支持页眉 / 页脚 / 分页 / 表格 / 关联子记录列表\n\n**M2：渲染引擎**\n- 后端用 Puppeteer / Chromium headless 渲染 HTML → PDF\n- 模板渲染用 React 同构组件（与 Console 渲染共用以保证一致性）\n- 输出可直接下载或塞入 storage（用 #28）\n\n**M3：行操作集成**\n- list view / detail view 的 row action「Export PDF」\n- 选模板（如果对象有多个）→ 生成 → 下载\n\n**M4：批量导出**\n- list view 多选「Bulk Export PDF」（一份合并 / 多份 zip）\n\n## 验收\n\n- [ ] `procurement` 模板：PO 一键导出 PDF（含 vendor / items / 金额 / 签字位）\n- [ ] `contracts` 模板：合同附件 PDF\n- [ ] `compliance`：审计报告 PDF\n- [ ] 缺陷库 gap #9 标记为已解决\n\n## 关联\n\n- 与 #28 storage 互通\n- 配合 #5 审批留痕（盖章版本）\n"
+}

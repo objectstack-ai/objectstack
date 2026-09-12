@@ -1,0 +1,33 @@
+{
+  "number": 2434,
+  "kind": "pull_request",
+  "title": "feat(spec): ADR-0079 record display-name foundation — nameField + resolver",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/l",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-28T16:34:24Z",
+  "updated_at": "2026-06-28T18:37:27Z",
+  "closed_at": "2026-06-28T18:37:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-28T18:37:25Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2434",
+  "body": "Foundation for **ADR-0079** (record display-name contract). Makes a record's human title a real, resolvable field instead of an optional render-time guess.\n\n## What\n- **`nameField`** added to `ObjectSchema` as the canonical primary-title pointer; **`displayNameField` kept as a deprecated back-compat alias** (parse/safeParse/create map it → `nameField`, output preserves both). No hard required-refine yet (staged).\n- New **`data/display-name.ts`** (pure, 36 unit tests): `isTitleEligible` (excludes date/number/select/lookup/… ; email yes, phone no), `resolveDisplayField` (nameField → displayNameField → ranked type-aware derivation incl. `*_name`), `resolveRecordDisplayName` (`Record #<id>` floor — never \"Untitled\"), `provisionPrimary` (designate-or-synthesize, idempotent), `objectTitleCompleteness`.\n- Consumers (`objectql` search, `plugin-approvals`) read `nameField ?? displayNameField`.\n- Blueprint object schema carries optional `nameField` (AI authoring).\n- Single-field-title sys objects migrated to explicit `nameField` (additive).\n\n## Staged (deliberate)\n- **Auto-provision not wired** at `SchemaRegistry.registerObject` — synthesizing a `name` column would migrate dozens of title-less system tables; seam + designate-only path documented as `TODO(ADR-0079)`.\n- **No hard `.refine()`** requiring a title (would reject existing metadata).\n- **`titleFormat` retained** (objectui still reads it cross-repo).\n\n## Gates\n`@objectstack/spec` 6642/6642 · `@objectstack/objectql` 719/719 — green.\n\nADR: `objectstack-ai/cloud` `docs/adr/0079-record-display-name.md`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

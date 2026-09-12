@@ -1,0 +1,34 @@
+{
+  "number": 2363,
+  "kind": "pull_request",
+  "title": "fix(auth): admin-gate self-service SSO provider registration + default-role JIT (ADR-0024 / cloud#551)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T12:47:41Z",
+  "updated_at": "2026-06-27T12:54:23Z",
+  "closed_at": "2026-06-27T12:54:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T12:54:21Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2363",
+  "body": "## Why\nPart of the cloud#551 Unified Identity V1 (ADR-0024) E2E. Local browser testing surfaced a real gap that static review had missed.\n\n`@better-auth/sso`'s `POST /sso/register` only enforces org-admin **when `body.organizationId` is supplied** (`index.mjs`: `if (ctx.body.organizationId) { … hasOrgAdminRole … }`). A **global** (org-less) provider passes on nothing but a valid session — so **any authenticated env member can register an env-wide external IdP**, a JIT-provisioning / login-routing vector. This violates ADR-0024's \"registerSSOProvider is admin-only\".\n\n## What\n- **A3 — admin gate:** a `before`-hook on `/sso/register` requiring the caller to be a **platform admin OR an owner/admin of their active org**, regardless of whether `organizationId` is passed. Fail-closed; unauthenticated requests still fall through to `sessionMiddleware` (→ 401). New helpers `resolveActor()` (hook-order-independent cookie/bearer resolution) and `isOrgOrPlatformAdmin()` (mirrors `customSession`'s role derivation; reads via `withSystemReadContext`).\n- **A4 — default role:** pass `organizationProvisioning.defaultRole:'member'` to `sso()` so a first-time federated login lands with an explicit role (over SecurityPlugin's `member_default` baseline).\n\n## Verification (browser E2E, local prod-like stack + a mock OIDC IdP)\n- Non-admin member register → **403 `SSO_REGISTER_FORBIDDEN`** (was 200 before this change).\n- Org owner register → **200** (discovery hydrated).\n- External-IdP OIDC login → JIT user created; better-auth `list-accounts` shows `providerId` set = the `sys_account` source marker.\n- Role-less federated user reaches a usable env (member_default); anon denied.\n- `tsc` adds no new errors (the two pre-existing DTS errors — `@better-auth/scim` @1241 and `passwordRejectBreached` @865 — are from prior commits, not this one).\n\n## Scope\nOnly `packages/plugins/plugin-auth/src/auth-manager.ts`. The SSO mechanism stays framework-open (no identity-governance added). Closes the A-workstream gap for cloud#551.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

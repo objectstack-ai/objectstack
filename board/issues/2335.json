@@ -1,0 +1,32 @@
+{
+  "number": 2335,
+  "kind": "pull_request",
+  "title": "fix(runtime): synthesize ai_seat in resolveExecutionContext (works on sharded runtime)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-26T01:27:08Z",
+  "updated_at": "2026-06-26T01:31:53Z",
+  "closed_at": "2026-06-26T01:31:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-26T01:31:51Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2335",
+  "body": "Follow-up to fw#2334. The gate's `ai_seat` synthesis used `getObjectQLService()` (no-arg), which resolves the env engine on single-env local but **not** on the sharded multi-tenant runtime (`OS_OBJECTOS_SHARDS>1`) — a SEATED user got `/ai/agents=[]`. **Caught live on staging enforce.** Fix: synthesize in `resolveExecutionContext`, which already has the scope-correct `ql` (used for permission sets), so it works everywhere; drop the two heuristic spots for a single source. 🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

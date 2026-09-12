@@ -1,0 +1,33 @@
+{
+  "number": 1305,
+  "kind": "issue",
+  "title": "[P1] list: bulk operations UI not E2E — multi-select → assignee/status change is the daily ops workflow",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:23:22Z",
+  "updated_at": "2026-06-27T14:30:04Z",
+  "closed_at": "2026-06-27T14:30:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1305",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 30 条（**P1**，原 #17 升级合并）。\n\n## 现象\n\n列表视图的**批量操作（多选 → 改状态 / 转 assignee / 移团队 / 删除 / 导出）UI 入口未端到端验证**：\n\n- 行首多选 checkbox 存在但被点击后没有 batch action bar\n- 即使有 bar，可用操作非常有限\n- 没有「保存为视图条件」、没有「按当前过滤批量」\n\n业务运营每天都要做：\n\n| 场景 | 触发频率 |\n|---|---|\n| 客服主管把一批工单从 T1 转 T2 | 多次/天 |\n| 销售经理把一批 lead 转给新销售 | 入职/休假时高频 |\n| 合规人员批量关闭已整改任务 | 周度 |\n\n今天只能逐条点开 → 改 → 保存，n*5 秒。\n\n## 复现\n\n任意 list view → 多选 5 行 → 找批量操作入口 → 没有可用的「change assignee」/「change status」对话框。\n\n## 当前 workaround\n\n- 暴露 row action「按 ID 列表批量改」flow，让用户**手抠 ID 写到 JSON 里**触发 —— 反人类。\n- 直接 DB 操作（破坏审计 / sharing / hook）。\n\n## 建议范围\n\n**M1：list view 批量条**\n- 选中 N 行后顶部出现 batch action bar\n- 标准动作：删除 / 状态变更 / 字段赋值（单字段批量改） / 转 assignee / 导出选中\n- 每个对象 spec 可自定义额外 batch action（hook 到 flow）\n\n**M2：按过滤批量**\n- 「选中当前过滤的全部 X 条」（含跨页）\n- 服务端按条件批处理 + 进度条 + 失败行回收\n\n**M3：撤销 / 审计**\n- 批量操作生成一条审计组事件，可批量撤销（time-bounded）\n\n## 验收\n\n- [ ] 任意 list 多选后出现 batch action bar\n- [ ] 标准 4 操作可用 + 自定义 hook 机制\n- [ ] `helpdesk` 模板：批量改 assignee / 批量移团队\n- [ ] 缺陷库 gap #17 + #30 同时标记为已解决\n"
+}

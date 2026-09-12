@@ -1,0 +1,30 @@
+{
+  "number": 2278,
+  "kind": "issue",
+  "title": "Epic: package-first authoring (ADR-0070) — bases as the authoring & delete unit",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T09:41:37Z",
+  "updated_at": "2026-06-27T14:27:37Z",
+  "closed_at": "2026-06-27T14:27:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2278",
+  "body": "**ADR**: framework#2277 (ADR-0070, *Accepted*). This card tracks the cross-repo rollout.\n\n> **Status (2026-06-27): functionally complete.** All six decisions (D1–D6) are implemented and merged across `framework` / `../objectui` / `../cloud`, and ADR-0070 is **Accepted** with an end-to-end live dogfood. The full lifecycle is now also covered by an **automated** gate (framework#2358). One deliberately-deferred tail remains, tracked as #2359 (retire the \"Local / Custom\" stopgap scope once envs are orphan-free). See the status comment below for the PR-by-PR map.\n\n## Problem (from a business-user Studio dogfood pass)\nAuthored metadata can end up **orphaned** (`package_id = null`) with **no container to delete/export** — *\"a pile of loose metadata, how do I clean it up?\"*. Root cause: no package-first contract. Stopgaps shipped: framework#2252 (coerce-to-null), objectui#1946 (Local scope). We adopt the **Airtable base model**: create/select a **writable package (base)** first; author into it; manage/delete/export **by base**.\n\n## Rollout checklist\n- [x] **kernel (D1/D2)** — `isWritablePackage` predicate + reject runtime creates with no writable target (`code: 'writable_package_required'`); evolved #2252 coerce-to-null → reject. `@objectstack/objectql` `protocol.saveMetaItem`. ✅ framework#2285\n- [x] **Studio UI (D3)** — create entry points prompt/redirect to a writable base; selector defaults to a writable base, never null/code-pkg; new items bound to the active base. `../objectui`. ✅ objectui#1970\n- [x] **AI authoring (D3)** — `../cloud` `service-ai-studio`: dropped auto-`com.workspace` fallback; auto-creates an *intentional named* base via `installPackage`; requires package context. ✅ cloud#479 / #481 / tests #480 (+ follow-ups #577 / #588 / #590 \"Edit with AI\")\n- [x] **Package = lifecycle unit (D4)** — delete-cascade + export (shipped) and `duplicatePackage` (re-namespace + reference rewrite). UI: Duplicate / structure-only delete. ✅ framework#2299, objectui#1983\n- [x] **Migration (D5)** — `reassignOrphanedMetadata` + `POST /packages/:id/adopt-orphans` (+ \"Adopt loose items\" UI) bulk-rebind legacy `null` rows. ✅ framework#2301, objectui#1983. ◐ **tail:** removing the #1946 \"Local / Custom\" scope is gated on envs being orphan-free → tracked in #2359. (#2252 coerce-to-null already replaced by the D1 reject.)\n- [x] **Single-tenant default (D6)** — default to a writable base, never a null \"org/local\" scope. ✅ framing in ADR + objectui#1983; cloud#588 (each build → fresh base).\n- [x] **Dogfood gate** — `@objectstack/dogfood` coverage: create→bind→publish→editable→discoverable→delete-cascade + adopt-orphans + duplicate, against the real booted stack. ✅ framework#2303 (D1/D2) + framework#2358 (full D3/D4/D5 lifecycle); cloud#594 / #598 (quantified build-quality evals).\n\n## Open questions (resolved)\n1. Auto-provision a base on first authoring → **resolved**: a *prompted/named* one-click base (cloud auto-creates a named base; no silent `com.workspace`).\n2. `allowOrgOverride` in single-tenant → keep overlay for surgical tweaks (design note; non-blocking).\n3. Delete-cascade also delete *records*? → **resolved**: `deletePackage({ keepData })` + a \"structure-only delete\" UI option (objectui#1983).\n4. Base naming vs stable id (`app.<slug>`) → surface a name, keep the id stable (design note).\n\nRepos: `framework` (kernel, ADR, dogfood gate), `../objectui` (Studio), `../cloud` (`service-ai-studio`). Remaining tail: #2359.\n"
+}

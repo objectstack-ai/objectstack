@@ -1,0 +1,33 @@
+{
+  "number": 2426,
+  "kind": "pull_request",
+  "title": "docs(adr-0078): the completeness gate — Zod-valid-but-inert metadata must fail loudly at author time",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-28T11:13:37Z",
+  "updated_at": "2026-06-28T12:26:40Z",
+  "closed_at": "2026-06-28T12:26:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-28T12:26:38Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2426",
+  "body": "## What\n\nADR-0078 + its evidence doc. Establishes the **completeness gate**: a metadata *instance* that is Zod-valid but functionally incomplete (and therefore silently does nothing at runtime) must fail **loudly at author time**, enforced **uniformly across every authoring surface** — not just the cloud AI-build path.\n\n- `docs/adr/0078-no-silently-inert-metadata.md` — the decision\n- `docs/audits/2026-06-metadata-functional-completeness.md` — the evidence (5-angle audit, deduped + confidence-tiered)\n\n## Why\n\nSurfaced by [cloud#687](https://github.com/objectstack-ai/cloud/pull/687): an AI-built `summary` field shipped as a dead `{type:'summary'}` shell, the dependent \"occupancy rate\" formula was forever `0`, and the agent reported it *done*. A 5-angle audit showed this is a **class**, not a one-off.\n\nIt sits in a precise seam in the existing 3-gate chain:\n\n| Gate | Question | Misses a bare summary because |\n|---|---|---|\n| ADR-0049 liveness | does any code read property P? | `summaryOperations` **is** live (per-property, blind to a per-instance omission) |\n| ADR-0054 prove-it-runs | does a *correct* instance run? | proves a *complete* summary computes; never asserts an *incomplete* one is rejected |\n| ADR-0038 / gate-1 lint | is the metadata valid? | `{type:'summary'}` **is** valid; completeness coverage is incomplete **and cloud-only** |\n\n`@objectstack/lint` (framework) does expressions/widgets/SDUI but **no** field/view/action completeness; `formula_without_expression` exists **only** in cloud graph-lint. So `os build`/`os validate`/MCP/hand authors get none of it — exactly the wrong shape when AI authors across many surfaces.\n\n## Decision (in brief)\n\n1. Extend ADR-0049's trichotomy from *property* to *instance*: a config whose omission makes an instance silently inert must be **completeness-enforced**, **`[EXPERIMENTAL — not enforced]`**, or **gracefully-optional** — never parsed-and-silently-inert.\n2. **One shared per-type predicate** in `@objectstack/spec` (sibling of `isIncoherentAggregate`), consumed by **both** `@objectstack/lint` and cloud graph-lint → kills the path asymmetry.\n3. Fix the cloud root cause: materialization must **spread-not-allow-list** (and the blueprint field shape must represent type-specific config) so a *correct* authoring can't be silently stripped.\n4. Optional runtime **loud-not-silent** diagnostic (the only authoring-tool-agnostic layer); **no** hard Zod refine (back-compat).\n5. **Ratchet, not retrofit** — verified Tier-A shapes now; the long tail gated on a verification pass.\n\nSibling to [ADR-0077](https://github.com/objectstack-ai/framework/blob/main/docs/adr/0077-authoring-surface-boundary-hook-flow-validation.md) (surface-routing traps) — same \"loud-not-silent, AI-is-the-author\" family, orthogonal axis.\n\n## Discipline note\n\nThe audit's scariest candidate — a \"sharing rule fails open and shares every record\" security claim — **collapsed on a three-file read** (`condition` is required; `ExpressionInputSchema` rejects empty; the match-all branch is gated per ADR-0049). The audit yields **candidates, not bugs**; each becomes a rule only after verification. That lesson is baked into the ratchet.\n\n## Status\n\nProposed — **decision record for review**, no code in this PR. cloud#687 already shipped the first instance (summary/formula rules); Phase 1 re-homes them onto the shared predicate.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

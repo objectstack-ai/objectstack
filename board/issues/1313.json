@@ -1,0 +1,33 @@
+{
+  "number": 1313,
+  "kind": "issue",
+  "title": "[P2] dx: @objectstack/spec/state-machine import path mismatch with docs",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:25:21Z",
+  "updated_at": "2026-06-27T14:30:07Z",
+  "closed_at": "2026-06-27T14:30:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1313",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 13 条（**P2**）。\n\n## 现象\n\n文档（包括 README / DX_ROADMAP）指引开发者从 `@objectstack/spec/state-machine` 导入状态机类型 / 工具，但**实际导出路径不一致**：\n\n- 真实路径在 `@objectstack/spec/objects/state-machine` 或别的\n- 新人按文档写法导入会 TS 报错，30 分钟才发现是文档误导\n\n## 复现\n\n```ts\n// 按文档：\nimport { defineStateMachine } from '@objectstack/spec/state-machine'; // ❌\n// 真实：\nimport { defineStateMachine } from '@objectstack/spec';                // 或别处\n```\n\n## 建议范围\n\n**M1：统一导出**\n- 重新 export 出 `@objectstack/spec/state-machine` 子路径，与文档对齐\n- 或者：修文档与代码现状一致，但**至少两边相同**\n\n**M2：新人 onboarding 检查表**\n- 模板作者 README 顶部加一段「常见导入坑列表」\n- TS 错误信息更友好\n\n## 验收\n\n- [ ] spec 导出与文档完全一致\n- [ ] 模板里所有 state-machine 导入路径统一\n- [ ] 缺陷库 gap #13 标记为已解决\n"
+}

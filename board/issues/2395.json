@@ -1,0 +1,35 @@
+{
+  "number": 2395,
+  "kind": "pull_request",
+  "title": "feat(auth): per-org MFA + dispatcher/MCP gate (ADR-0069 D3)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T17:20:01Z",
+  "updated_at": "2026-06-27T17:26:17Z",
+  "closed_at": "2026-06-27T17:26:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T17:26:15Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2395",
+  "body": "ADR-0069 (tracking #2281, follow-up #2375): the two remaining tails that make **enforced MFA total**.\n\n## What\n- **Per-org `sys_organization.require_mfa`** — an org can require MFA above the global floor. `computeAuthGate` now treats the active org's `require_mfa` as an effective MFA requirement even when global `mfa_required` is off. `isAuthGateActive()` stays cheap (synchronous) via a **60s-TTL \"any org requires MFA\" cache** with a lazy background refresh — a brand-new per-org requirement activates the gate on the next request, with no per-request org query when the feature is off.\n- **Dispatcher / MCP gate** — the auth-policy gate now also runs in the runtime dispatcher (after `resolveExecutionContext`), so **MCP / GraphQL / embedded** data paths enforce `PASSWORD_EXPIRED` / `MFA_REQUIRED` consistently with the REST seam (#2388). Reuses the shared core `evaluateAuthGate` + allow-list. Previously only the REST surface (the Console) was gated.\n\nDefault-off / additive; ADR-0049 (enforcement ships with the setting).\n\n## Verification\n- **Unit**: plugin-auth 195 + runtime 444 + core 299 + platform-objects 63 + service-settings 129 green; full build incl. strict DTS green. New tests: per-org `computeAuthGate` (active-org require_mfa → MFA_REQUIRED with global off; not-requiring org → pass; cache trips `isAuthGateActive`).\n- **Live dogfood**:\n  - **Per-org**: global MFA **off**; an org with `require_mfa=true` → its member's data request is `403 MFA_REQUIRED`, while an admin with no org is `200` (correct scoping).\n  - **Dispatcher**: global MFA on → `POST /api/v1/mcp` returns `403 { error: { details: { code: 'MFA_REQUIRED' } } }` (the dispatcher seam fires, matching the REST gate).\n\n## ADR-0069 enforced MFA — now complete across all surfaces\n✅ global + per-org enforcement · ✅ REST (Console) gate (#2388) · ✅ dispatcher/MCP gate (this PR) · ✅ Console remediation UI (objectstack-ai/objectui#2037). Remaining on #2375 is P2/P3 only.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

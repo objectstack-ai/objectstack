@@ -1,0 +1,32 @@
+{
+  "number": 2496,
+  "kind": "pull_request",
+  "title": "fix(showcase): command-center html page off Tailwind (ADR-0065)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-30T16:05:24Z",
+  "updated_at": "2026-06-30T20:41:56Z",
+  "closed_at": "2026-06-30T20:41:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-30T20:41:54Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2496",
+  "body": "Completes the \"no Tailwind in page source\" conversion (#2494 did the react pages; the guardrail + guidance landed in #2495). This is the last page — the `kind:'html'` Command Center, which still had 48 Tailwind `className`s the new guardrail flags.\n\n## Change\n\nRewritten with the html tier's real primitives (no Tailwind):\n- **Layout** via the components' own structured props — `<flex direction gap>`, `<grid columns>`.\n- **Color/size** via inline JSON `style` objects with `hsl(var(--token))` theme colors.\n- **Text** via native `<div style>` — the `<text>` renderer only applies `style` when a `className`/designer-id is *also* present (a real html-tier limitation worth noting), so styled text uses native passthrough tags.\n- **Throughput bars** via `<grid columns={7}>` — a nested `<flex>` bar with `flex:1` collapsed to width:0; a grid track gives each bar width.\n\n## Verification\n\n- `os validate` passes: the ADR-0080 parse gate **and** the new ADR-0065 styling guardrail are both clean (0 className).\n- The html-tier `<flex>`/grid/card/color rendering was **browser-verified** earlier in the session (cards, the primary-bg card, grid layout, and colored status dots all render correctly via `<flex style>`).\n- The two remaining tweaks (native-`<div>` text + grid bars) use the same confirmed style-passthrough path and pass the gates. **Note:** the final pixel re-check of those two tweaks was blocked by a local dev-serve login glitch (the dev login's password autofill didn't populate after repeated serve restarts), so a quick glance on a normally-authed console is worth it post-merge.\n\n## Finding (follow-up candidate)\n\nThe `<text>` renderer dropping `style` unless a `className`/`dataObjId` is present is a genuine html-tier styling gap — worth fixing in objectui so `<text style>` works without the className escape hatch.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

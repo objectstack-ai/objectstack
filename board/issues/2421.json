@@ -1,0 +1,34 @@
+{
+  "number": 2421,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0078 — segment the ObjectStackProtocol god-interface (ISP); keep the engine a pure primitive",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-28T10:38:17Z",
+  "updated_at": "2026-06-28T10:42:03Z",
+  "closed_at": "2026-06-28T10:40:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2421",
+  "body": "## What\n\n**ADR-0078** records a deep kernel-architecture assessment and the decision that follows. It builds on [ADR-0076](https://github.com/objectstack-ai/framework/blob/main/docs/adr/0076-objectql-core-tiering.md) (which handled packaging) and addresses the **deeper contract shape** 0076 did not.\n\n## Findings (verified against source)\n\n- **The engine is the crown jewel and it's correct** — `engine.ts` (~3.3k LOC) hard-codes **zero** governance; RLS/RBAC/field-masking/owner/tenant are all pluggable via `registerMiddleware` + hooks. Driver port minimal. **Protect it; don't add protocol/governance to it.**\n- **The real debt is `ObjectStackProtocol`: a 70-method, 11-domain god-interface** (Data 9, Metadata 8, Feed 13, Notifications 7, Realtime 6, Packages 6, Views 5, …). **60/70 optional; no consumer uses >11%.** It aggregates domains that already have their own services, which forces a ~5.6k-LOC facade and makes the contract un-versionable. It's also the root cause of the `metadata-protocol` naming confusion (the package carries the thin data facade too).\n\n## Decision\n\n- **D1** Ratify the engine as a pure primitive (protect over tidiness).\n- **D2** Segment the contract per ISP → `DataProtocol` + `MetadataProtocol` + optional capability protocols (Analytics/Feed/Realtime/Notification/View/…); keep a composed alias `ObjectStackProtocol = DataProtocol & MetadataProtocol & Partial<…>` for back-compat. **Spec/type-level, incremental, low-risk.**\n- **D3** Impl + package naming follow the contract; capability domains served by their existing services, not re-bundled.\n- **D4** Contract segmentation can start now (incremental); the impl restructure + rename ride the **cross-repo window with ADR-0076 Step 2** (cloud constructs `ObjectQLPlugin` directly in ~8 sites).\n\n## Scope\n\nDocs only — adds `docs/adr/0078-protocol-segmentation.md` and a forward-pointer in ADR-0076. No code. Empty changeset (no release impact).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

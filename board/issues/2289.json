@@ -1,0 +1,33 @@
+{
+  "number": 2289,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0071 dataset semantic-layer depth (multi-hop joins + matrix pivot)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T14:30:10Z",
+  "updated_at": "2026-06-24T15:04:39Z",
+  "closed_at": "2026-06-24T15:04:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T15:04:36Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2289",
+  "body": "## Summary\nA grounded ADR for the two capability follow-ups from ADR-0021 (the option-2 \"semantic-layer depth\" direction), based on the **current** code:\n\n- **Multi-hop joins** — today `Dataset.include` is `string[]` of single relationship names and `qualifyAndRegisterJoin` splits on the *first* dot, so `account.owner.region` breaks. Proposal: `include` accepts relationship **paths**; the compiler expands the join chain; the strategy emits chained `LEFT JOIN`s with **per-hop RLS**, behind a depth cap (default 3); undeclared paths still rejected (D-C unchanged).\n- **Matrix pivot** — `Report.rows`/`columns` already exist but the dataset renderer flattens instead of pivoting (ADR-0021 D2 follow-up). Proposal: `DatasetReportRenderer` pivots the existing rows/columns into a 2-D grid (query/spec unchanged), with a column-cardinality cap.\n\n## Phasing\n- **P1** matrix pivot — objectui-only, no spec/query change, ships independently (lowest risk).\n- **P2** multi-hop — framework spec + compiler + strategy + per-hop RLS, behind the depth cap; gated by the ADR-0021 reconciliation harness.\n- **P3** objectui catalog/UI — multi-hop field picker + include-path editor.\n\nBackward compatible (single-hop + flat rows unchanged). Looking for review on the spec shape (dotted `include` paths), the depth cap, and the phasing before implementing.\n\nNote: ADR number 0071 picked off latest `main` (0070); happy to renumber if it collides with a concurrent ADR.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

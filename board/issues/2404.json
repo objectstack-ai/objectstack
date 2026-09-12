@@ -1,0 +1,35 @@
+{
+  "number": 2404,
+  "kind": "pull_request",
+  "title": "feat(plugin-auth): SAML 2.0 SSO via @better-auth/sso (ADR-0069 P3)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T18:43:29Z",
+  "updated_at": "2026-06-27T18:49:43Z",
+  "closed_at": "2026-06-27T18:49:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T18:49:41Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2404",
+  "body": "## What\n\nAdds **SAML 2.0 SSO** as the P3 deliverable of [ADR-0069](https://github.com/objectstack-ai/framework/issues/2281).\n\nThe key finding: **`@better-auth/sso@1.6.20` already ships full SAML 2.0** (samlify-backed) — the *same* package that powers the OIDC trust list. The ADR's original \"SAML is out of better-auth core\" premise is stale, so **no custom plugin was needed**. The package exposes `/sso/saml2/sp/metadata`, `/sso/saml2/sp/acs/:providerId`, `/sso/saml2/sp/slo/:providerId`, and registers SAML providers through the *same* `/sso/register` endpoint with a nested `samlConfig`.\n\n## Changes\n\n- **`register_saml_provider` action** on `sys_sso_provider` (Setup → SSO Providers) — collects flat IdP fields (providerId, IdP EntityID, domain, IdP SSO URL, IdP signing cert PEM, NameID format).\n- **`runRegisterSamlProviderFromForm` bridge** (sibling of the OIDC one in `register-sso-provider.ts`) — reshapes the flat form into the nested `samlConfig` (entryPoint/cert/callbackUrl/spMetadata/identifierFormat), derives the per-provider ACS URL, defaults the SP descriptor, and re-dispatches through `/sso/register` so the **admin gate runs**. Returns the SP ACS + metadata URLs to configure on the IdP.\n- **`/api/v1/auth/admin/sso/register-saml`** admin route in `auth-plugin.ts`.\n- **ADR-0069 addendum** correcting the stale premise and documenting what shipped.\n- 3 unit tests for the bridge (flat→nested reshape, missing-fields 400, better-auth failure → `saml_register_failed`).\n\n## Verification\n\nSuites green: `plugin-auth` 220, `platform-objects` 63. Build green.\n\n**E2E against a test IdP** (mocksaml-style config):\n- `POST /admin/sso/register-saml` → **200**, provider persisted in `sys_sso_provider` with `saml_config` set (`oidc_config` null).\n- `GET /sso/saml2/sp/metadata?providerId=...` → **200**, valid SAML `EntityDescriptor` / `SPSSODescriptor` / `AssertionConsumerService`.\n- `POST /sign-in/sso` with an `@example.com` email → returns a valid `SAMLRequest` redirect to the IdP's `entryPoint`.\n\nThe IdP→ACS assertion round-trip (signature/replay/timestamp validation) is `@better-auth/sso` / samlify's tested responsibility.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

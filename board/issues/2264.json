@@ -1,0 +1,35 @@
+{
+  "number": 2264,
+  "kind": "pull_request",
+  "title": "fix(objectql,rest): single-item meta reads must revalidate (no `max-age=3600`)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T04:27:37Z",
+  "updated_at": "2026-06-24T04:28:35Z",
+  "closed_at": "2026-06-24T04:28:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T04:28:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2264",
+  "body": "## Problem\n\n`GET /api/v1/meta/object/:name` (and the other single-item meta reads served by the cached path) sent:\n\n```\nCache-Control: public, max-age, max-age=3600\n```\n\nTwo bugs in one header:\n\n1. **Stale metadata for up to an hour.** Object metadata is invalidated by publish, but the 1-hour TTL let browsers (and any CDN/proxy) serve a stale schema **without revalidating** — e.g. the AI-build *New* create form kept rendering pre-publish fields until the TTL lapsed. The list endpoint `GET /api/v1/meta/object` is uncached, which is why list views updated but single-object reads didn't.\n2. **Malformed header.** The directives array carried a bare `max-age` placeholder *and* the REST layer appended `max-age=3600` from the `maxAge` field, concatenating into the invalid `public, max-age, max-age=3600`.\n\nThe ETag is already correct (it changes on publish), so the fix is to let the validator — not a TTL — gate freshness.\n\n## Fix\n\n- **`packages/objectql/src/protocol.ts`** — `getMetaItemCached` now returns `directives: ['private', 'no-cache']` with no `maxAge`. `no-cache` forces an `If-None-Match` revalidation on every use (cheap `304` when unchanged, fresh data the instant a publish bumps the ETag); `private` keeps per-tenant metadata out of shared caches.\n- **`packages/rest/src/rest-server.ts`** — the header builder strips the bare `max-age` placeholder before appending the real value, so a directive array + `maxAge` can never collide into `…, max-age, max-age=N` again (defends all callers).\n\n## Verification\n\n| | `Cache-Control` |\n|---|---|\n| Before | `public, max-age, max-age=3600` |\n| After | `private, no-cache` |\n\nEnd-to-end against a real booted showcase stack: the single-object meta endpoint now returns `private, no-cache`, and replaying the ETag with `If-None-Match` returns `304 Not Modified` (validator path intact; a publish bumps the ETag → fresh `200`).\n\nTests (added/extended):\n- `protocol-meta.test.ts` — asserts the protocol returns `['private','no-cache']` with no `maxAge`.\n- `rest.test.ts` — asserts the emitted header is `private, no-cache` (no `max-age`), plus a regression guard that `['public','max-age']` + `maxAge:3600` now yields a single well-formed `public, max-age=3600`.\n\nContext: the consumer-side symptom was previously worked around in objectui (`getObjectSchema` reads with `cache: 'no-cache'`); this server header is the actual root cause affecting all consumers.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

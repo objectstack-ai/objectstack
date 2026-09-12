@@ -1,0 +1,32 @@
+{
+  "number": 2432,
+  "kind": "pull_request",
+  "title": "ci(framework): assert capability packages ship a runtime entry (no dts-only / half-built)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-28T15:48:45Z",
+  "updated_at": "2026-06-28T15:56:03Z",
+  "closed_at": "2026-06-28T15:56:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-28T15:56:01Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2432",
+  "body": "## Why\n\nCapability packages under `packages/{services,triggers,plugins}` are loaded by the cloud multi-tenant runtime via a **dynamic import** of their published entry. If one ships a **dts-only / half-built / 0-byte `dist`** (an interrupted build, or a package retired in source but still referenced), the import resolves to nothing and that capability **silently fails to load** — e.g. AI-built record-change automation registers but never fires, with no user-visible signal.\n\nThe shared `tsup` config always emits JS (the only toggle, `OS_SKIP_DTS`, drops *declarations*, not JS), so a dts-only `dist` can only happen by accident — and nothing in CI caught it. (This came up while debugging a cloud-side `triggers` capability that wasn't loading; the framework package itself was fine, but there was no guard proving it.)\n\n## What\n\nExtend the existing **Verify build outputs** step (runs right after `pnpm build`, so no build-ordering ambiguity) with a filesystem assertion that every *buildable* capability package produced its declared `main` runtime entry.\n\nSelf-maintaining and false-positive-safe:\n- reads each package's own `main` (defaults to `dist/index.js`);\n- skips dirs with no `package.json` (a retired `service-feed` / `service-ai` leftover);\n- skips packages with no `scripts.build`;\n- `-s` catches 0-byte half-writes.\n\n## Validation\n- Passes against a freshly-built tree (all capability packages have runtime entries).\n- **Negative test**: removing `trigger-record-change/dist/index.js` is caught and fails the step.\n- `ci.yml` parses.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 2300,
+  "kind": "pull_request",
+  "title": "docs(skill): add the first automation eval — ADR-0044 revise loop",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T15:57:49Z",
+  "updated_at": "2026-06-24T16:36:57Z",
+  "closed_at": "2026-06-24T16:03:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T16:03:03Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2300",
+  "body": "## What & why\n\nPart of #2274 (ADR-0044 AI-authoring awareness). Adds the **first concrete eval** under the skills' `evals/` directories — until now every `skills/*/evals/` held only a placeholder README documenting the intended format.\n\n`skills/objectstack-automation/evals/approvals/test-revise-loop.md` follows that documented format:\n- **Scenario** — author an approval flow with send-back-for-revision (cap at 2 send-backs).\n- **Expected Output** — the full ADR-0044 shape: `revise` branch → signal `wait` node → resubmit edge typed **`type: 'back'`** + `maxRevisions` (mirrors `showcase_budget_approval`).\n- **Common Mistakes** — the three footguns, each mapped to what catches it (the `lint-flow-patterns` rules from #2279, `registerFlow`, design review).\n- **Validation Criteria** — `registerFlow`-registers + revise branch + back-edge + wait window + `maxRevisions >= 1` + no lint findings.\n\nCloses the **authorable** half of #2274's eval slice: it pins, as a checkable spec, the behaviour the skill (#2294) teaches and the lint (#2279) enforces.\n\n## Scope (important)\n\nThis is the eval **spec** (markdown), not an executable runner. The skills' eval **harness does not exist yet** — every `evals/README.md` says *\"Not yet implemented.\"* Building a runner that feeds prompts through the agent, registers the output, and scores pass-rate across runs is a **separate platform project** (it benefits all skills and involves non-deterministic-LLM CI concerns). Tracked as the remaining (b) item on #2274.\n\n## Verification\n\n- `check:doc-authoring` ✓ (164 files clean) · `check:skill-docs` in-sync ✓ · markdown-only, no changeset (matches prior skill-doc PRs).\n\nRefs #2274, #1770. 🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

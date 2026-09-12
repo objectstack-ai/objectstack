@@ -1,0 +1,30 @@
+{
+  "number": 2339,
+  "kind": "pull_request",
+  "title": "docs(ai-capabilities): in-UI ask & build are cloud/Enterprise, not open-source",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-26T06:52:15Z",
+  "updated_at": "2026-06-26T06:54:16Z",
+  "closed_at": "2026-06-26T06:54:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2339",
+  "body": "The **AI Capabilities Guide** contradicted itself on edition gating.\n\nThe note at the top of the guide states the in-UI AI runtime (the `ask`/`build` assistants, in-product chat) ships in the **cloud / Enterprise** distribution, and the open framework instead exposes objects, queries, and actions to your own AI through `@objectstack/mcp` (BYO-AI). But:\n\n- the **agent table** marked `ask` as `open-source · free`, and\n- the **skills section** called only `build` \"cloud-only\" (implying `ask` is open-source).\n\nBoth reasserted the pre-migration model. This aligns the guide:\n\n- Agent table: both `ask` and `build` → **cloud / Enterprise**.\n- Add a one-paragraph pointer under the table: the open-source runtime has no in-product assistant; it reaches the same objects/queries/actions via `@objectstack/mcp`.\n- Skills tiering note: both in-UI agents are cloud/Enterprise only, so `surface:'ask'`/`surface:'build'` skills bind no in-product agent on the open framework — use MCP there.\n\nDocs-only change. Surfaced while updating the marketing site ([www.objectos.ai#32](https://github.com/objectstack-ai/www.objectos.ai/pull/32)) to the same edition split.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

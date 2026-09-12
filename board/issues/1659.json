@@ -1,0 +1,32 @@
+{
+  "number": 1659,
+  "kind": "issue",
+  "title": "业务侧自助报表搭建器（in-app，非 Studio）——基于 dataset 按名选维度/度量",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-07T21:00:45Z",
+  "updated_at": "2026-06-27T14:32:03Z",
+  "closed_at": "2026-06-27T14:32:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1659",
+  "body": "## 背景\ndataset 语义层已就绪：维度/度量被声明、可枚举（introspect）、绑定即一致口径 + 强制 RLS。Studio 的 dataset 设计器面向开发者/分析师；但**普通业务人员**应能在**应用内**（非 Studio 元数据工作台）自助搭建报表，而不必懂 dataset 定义。\n\n## 目标\n让业务用户在 app 内：\n- 选一个已发布的 dataset；\n- 从该 dataset **已声明的维度/度量里按名选**（选不出错——治理在 dataset 层）；\n- 选可视化（表/KPI/柱/线/饼）+ compareTo（同环比）+ 运行时筛选；\n- 保存为个人/共享报表。\n\n## 价值\n- 治理与自助兼得：口径由 dataset 统一，用户只做「选择」不做「定义」，杜绝指标漂移。\n- 复用现有 `queryDataset` 受治理查询路径（RLS/D-C 自动生效）。\n\n## 待评估\n- [ ] 落点：objectui 应用运行时（非 Studio）的报表构建 UI。\n- [ ] dataset 维度/度量枚举 introspection API（ADR-0010「合法状态转移查询」同构）。\n- [ ] 报表保存模型（个人 vs 共享、权限）。\n- [ ] 与现有 report 元数据类型的关系（业务报表是否就是 dataset-bound report 的轻量创建入口）。\n\n参考：plan 风险表 R10（AI/人工编排可 introspect 性）；本能力是 dataset 价值链「治理指标 → 自助消费」的业务侧出口。"
+}

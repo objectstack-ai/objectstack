@@ -1,0 +1,35 @@
+{
+  "number": 2350,
+  "kind": "pull_request",
+  "title": "refactor: single-source the multi-org (OS_MULTI_ORG_ENABLED) flag resolution",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-26T14:23:15Z",
+  "updated_at": "2026-06-26T14:33:33Z",
+  "closed_at": "2026-06-26T14:33:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-26T14:33:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2350",
+  "body": "## Problem\n\n\"Is this deployment multi-org / multi-tenant?\" was resolved in **10 places across 8 packages** with **three subtly different inline expressions**:\n\n| Variant | Sites |\n|---|---|\n| `String(readEnvWithDeprecation('OS_MULTI_ORG_ENABLED','OS_MULTI_TENANT') ?? 'false').toLowerCase() !== 'false'` | objectql registry, plugin-dev, runtime app-plugin, cli serve (×2) + verify, cloud-connection |\n| `env.OS_MULTI_ORG_ENABLED !== undefined ? … : …` (redundant explicit check) | plugin-auth — `/auth/config` features + `beforeCreateOrganization` guard |\n| bare `process.env.OS_MULTI_ORG_ENABLED ?? process.env.OS_MULTI_TENANT` | **driver-sql `isMultiTenantMode()`** — skipped the `OS_MULTI_TENANT` deprecation warning every other site emits |\n\nBecause the SQL driver computed the mode **independently** of the auth/security layer (and via a different code path), the driver's tenant-audit gate and the rest of the system could in principle disagree about whether tenant isolation is active. This is the kind of divergence single-sourcing eliminates.\n\n## Change\n\n- Add `resolveMultiOrgEnabled()` to `@objectstack/types` (beside `readEnvWithDeprecation` — the natural leaf dependency every consumer already imports) as the single source of truth.\n- Route **all 10 sites** through it.\n- `@objectstack/driver-sql` gains a direct `@objectstack/types` dependency (it previously read `process.env` directly).\n\nMirrors the existing `resolveAuthzContext` single-source pattern in `@objectstack/core`.\n\n## Safety\n\nBehaviour is **unchanged everywhere except the SQL driver**, which now also emits the one-shot \"`OS_MULTI_TENANT` is deprecated, rename to `OS_MULTI_ORG_ENABLED`\" warning — making it **consistent** with every other site (an improvement, not a regression). The boolean semantics (`raw ?? 'false'`, case-insensitive `!== 'false'`) are byte-for-byte the canonical expression the 9 other sites already used.\n\n## Follow-up (not in this PR)\n\nA lint gate forbidding new inline `OS_MULTI_ORG_ENABLED` / `OS_MULTI_TENANT` reads outside the helper (the same shape as `check:authz-resolver`), so the consolidation can't silently drift back.\n\n## Verification\n- Builds (incl. DTS type emission) green across all 8 affected packages + dependents\n- Tests: types 7, plugin-auth 135, driver-sql 233, objectql 710, runtime 444, cli 42, cloud-connection 9, plugin-dev 1 — all pass\n- ESLint: 0 errors on changed files\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

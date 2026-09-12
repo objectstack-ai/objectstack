@@ -1,0 +1,32 @@
+{
+  "number": 2400,
+  "kind": "pull_request",
+  "title": "fix(auth): SSO env-flag parsing + register-form empty state (ADR-0024 / cloud#551)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T18:15:11Z",
+  "updated_at": "2026-06-27T18:21:27Z",
+  "closed_at": "2026-06-27T18:21:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T18:21:25Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2400",
+  "body": "Quality polish from the cloud#551 SSO work.\n\n- **plugin-auth**: `OS_OIDC_PROVIDER_ENABLED` / `OS_SSO_ENABLED` / `OS_SCIM_ENABLED` now use the shared `readBooleanEnv` parser, so `true`/`1`/`yes`/`on` all enable (was the literal `'true'` only — `OS_SSO_ENABLED=1` silently parsed as **disabled**, a repeated operator footgun). + unit tests (10 cases).\n- **platform-objects**: `sys_sso_provider` list view gets a per-object empty state (\"No SSO providers yet\" → \"Register SSO Provider\"); the shared identity-object copy wrongly said records can't be added here.\n\nVerified E2E: `OS_SSO_ENABLED=1` → `features.sso: true`; the SSO Providers list shows the new empty state.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

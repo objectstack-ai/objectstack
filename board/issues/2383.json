@@ -1,0 +1,34 @@
+{
+  "number": 2383,
+  "kind": "pull_request",
+  "title": "feat(types)!: remove ObjectStack's own legacy env-var aliases (11.0, #2379)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T14:51:29Z",
+  "updated_at": "2026-06-27T15:29:11Z",
+  "closed_at": "2026-06-27T15:29:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T15:29:09Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2383",
+  "body": "Closes #2379. Part of the 11.0 breaking-change batch (#2364).\n\n## Scope (per owner decision: remove only ObjectStack's *own* renames; keep ecosystem standards)\n**Removed** — rename required:\n\n| removed legacy name | use |\n|---|---|\n| `OS_MULTI_TENANT` | `OS_MULTI_ORG_ENABLED` |\n| `OBJECTSTACK_METADATA_WRITABLE` | `OS_METADATA_WRITABLE` |\n| `OS_AUTH_BASE_URL`, `AUTH_BASE_URL` | `OS_AUTH_URL` |\n\n**Kept (reclassified to `silent` — permanent conventions, no longer nag):** `DATABASE_URL`, `AUTH_SECRET`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `PORT`, `CORS_*`, `LOG_LEVEL`, `ROOT_DOMAIN`, `MCP_SERVER_*`.\n\n## Changes\n- `resolveMultiOrgEnabled` reads only `OS_MULTI_ORG_ENABLED`; `sys-metadata-repository` only `OS_METADATA_WRITABLE`; `serve` auth-url drops the two OS-own aliases (keeps `BETTER_AUTH_URL` silent).\n- ~15 ecosystem call sites get `{ silent: true }`.\n- Stale comments + plugin-org-scoping/plugin-security READMEs + object.zod/protocol.zod describe text → canonical names.\n- Generic `readEnvWithDeprecation` helper + `env.test.ts` unchanged (CHANGELOGs/ADR-0010 left as historical record).\n\n## Verification\ntypes env **7**, cli **436**, objectql **718**, driver-sql **234**, plugin-auth **175**, mcp **53**, plugin-hono-server **40** — all green. spec `check:api-surface` unchanged; 53 build tasks green. No test referenced the removed aliases.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

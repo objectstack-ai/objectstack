@@ -1,0 +1,34 @@
+{
+  "number": 2505,
+  "kind": "pull_request",
+  "title": "feat(import): server-side coercion + write-mode for /data/:object/import",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-01T06:13:34Z",
+  "updated_at": "2026-07-01T13:54:04Z",
+  "closed_at": "2026-07-01T13:54:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-01T13:54:01Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2505",
+  "body": "## 背景 / Problem\n\n列表数据导入需要把电子表格里的原始值写进对象。特殊值(布尔、数字、日期、下拉选项 select、关联 lookup、多选)如果在每个前端各自转换,逻辑会重复且不一致,而且 lookup 名称→id 必须查库,前端做不了。\n\n## 方案 / Solution\n\n把所有特殊值处理下沉到服务端 `POST /api/v1/data/:object/import`,前端只发**原始值 + 列映射**,一条代码路径服务所有客户端(小文件同步、后续大文件异步)。\n\n### 改动\n\n- **spec** (`export.zod.ts`):新增 `ImportRequest` / `ImportResponse` / `ImportRowResult` / `ImportWriteMode` / `ImportMapping`\n  - `writeMode`: `insert` | `update` | `upsert`(后两者需 `matchFields`)\n  - 开关:`runAutomations`(批量默认关钩子)、`trimWhitespace`、`nullValues`、`createMissingOptions`、`skipBlankMatchKey`、`dryRun`\n- **rest/import-coerce.ts**(新)——`coerceRow` / `coerceFieldValue`,export-format 的逆运算:\n  - boolean / number / date·datetime·time→ISO / select label→code / multi-select 拆分匹配 / **lookup name→id**(带缓存的 `RefResolver`,按 displayField→name/email/id 逐个候选查)\n  - `createMissingOptions`、`trimWhitespace` 开关;逐字段收集错误而非首错即停\n- **rest-server `/import`**:归一化 mapping(record 或 entry[])、校验 `writeMode↔matchFields`、解析字段元数据、`findExisting`(blank/none/ambiguous 守卫)、逐行 action 报告(created/updated/skipped/failed)、`skipAutomations` 抑制钩子、超限 413 提示走异步任务\n- **client SDK**:两个 data 命名空间都加 `data.import(object, request)`\n- **测试**:`import-coerce`(单元)+ `import-integration`(upsert/update/dryRun)共 **28** 个,全绿\n\n### 未做(后续 P1/P2)\n\n大文件异步 import_job + 流式 + 进度 + 5万上限、导入历史、真正的钩子开关落地(现在 `skipAutomations` 已透传,等引擎支持);任务级 undo、字段类型自动探测。\n\n## 验证 / Verification\n\n`pnpm --filter @objectstack/rest exec vitest run import-coerce import-integration` → **28 passed**。\n\n前端配套改动在 objectui PR(依赖本 PR 发布后的 client)。"
+}

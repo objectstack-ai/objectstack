@@ -1,0 +1,33 @@
+{
+  "number": 2414,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0076 — relocate metadata protocol out of objectql (lean engine, enforced boundary, deferred repo-split)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-28T05:39:25Z",
+  "updated_at": "2026-06-28T05:52:44Z",
+  "closed_at": "2026-06-28T05:52:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-28T05:52:42Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2414",
+  "body": "## What\n\n**ADR-0076** — v12 layering for `objectql`, driven by measured coupling.\n\nCenterpiece (rev.4): **`protocol.ts` is metadata-domain code mis-located in the data-engine package.** It implements `ObjectStackProtocol` (contract in `@objectstack/spec`), manages sys_metadata / draft-publish / locks / package ownership — and uses the engine only as storage, via a 5-method `SysMetadataEngine` interface injected at runtime.\n\n## Decision\n\n**Now**\n- **D1** Relocate `protocol` + `sys-metadata-repository` + `metadata-diagnostics` into a **new `@objectstack/metadata-protocol`** (between `metadata-core` and the `metadata` plugin). objectql becomes a lean data engine **by construction** — 268KB leaves the package; the gateway depends on objectql with no protocol. `objectql` re-exports for back-compat.\n- **D2** Boundary ratchet: objectql must not import `metadata-protocol`/`plugin`/`kernel`.\n- **D3** Capability/profile contract (derive required caps from object schema; default fail-closed; `trusted` via two-key, prod env-gated).\n- **D4** Formula stays in core (validation / L1 hooks / seed loader use it).\n\n**Later (separate, trigger-gated)**\n- **D7** Extracting the *engine itself* into a standalone repo is gated on its cross-package commit ratio (currently **88%**) falling. Independent of D1.\n\n## Evidence (in the ADR)\n\n```\nprotocol.ts commits last month:          47\n  also touched engine.ts:                 3  (6%)   → protocol ≈ decoupled from engine\n  also touched metadata-core/metadata/spec: 20 (43%) → its real neighbors\nmove blast radius:                        2 source files (plugin.ts, index.ts)\nengine surface needed:                    SysMetadataEngine (5 methods, injected)\n(contrast) engine/registry commits:       50, 88% cross-package → engine NOT separable yet\n```\n\n- knex is a SQL query builder objectql already uses, not an ORM to switch to.\n- Splitting protocol into its own package removes its deps from the engine package.\n\n## Scope\n\nDocs only — `docs/adr/0076-objectql-core-tiering.md`. No code changes; implementation (P1–P4) tracked as follow-up.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

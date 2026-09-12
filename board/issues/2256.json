@@ -1,0 +1,35 @@
+{
+  "number": 2256,
+  "kind": "pull_request",
+  "title": "feat: package-scoped commit history & rollback for AI authoring (ADR-0067)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T02:25:23Z",
+  "updated_at": "2026-06-24T02:34:35Z",
+  "closed_at": "2026-06-24T02:34:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T02:34:32Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2256",
+  "body": "Implements the ADR-0067 v1 foundation: turn each AI authoring apply into a **revertible commit** on a package-scoped timeline, so the model becomes \"ship, review the history, revert if wrong\" instead of \"confirm every publish\".\n\n## What lands\n- **`sys_metadata_commit`** object (metadata-core) + registration — groups a turn's metadata changes (by `event_seq` range) into one unit on top of `sys_metadata_history`.\n- **`publishPackageDrafts`** now records each publish as ONE commit (best-effort, never blocks the publish), capturing a per-artifact revert plan (created → soft-remove; edited → `restoreVersion(prevVersion)`) + threads an optional `message`/`aiModel`.\n- **`listCommits` / `revertCommit` / `rollbackToPackageCommit`** on the protocol, reusing the existing `restoreVersion` + delete primitives. A revert is itself an append-only commit.\n- **REST routes** (http-dispatcher): `GET /packages/:id/commits`, `POST /packages/:id/commits/:cid/revert`, `POST /packages/:id/rollback`.\n- ADR-0067 doc (amends ADR-0045).\n\n## Verification\n- **objectql**: 19 unit tests (commit-history + publish-drafts), no regressions.\n- **runtime**: 131 http-dispatcher tests (incl. 5 new route tests).\n- objectql + runtime `tsup`/DTS typecheck clean.\n\n## Deferred (per ADR)\nCross-item DB atomicity (ambient-tx) — `publishPackageDrafts` stays per-item best-effort and records the commit from what landed.\n\nPairs with cloud (pin + apply_blueprint message) and objectui (Build-history timeline UI) PRs.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

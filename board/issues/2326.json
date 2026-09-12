@@ -1,0 +1,33 @@
+{
+  "number": 2326,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0057 addendum — finish D4's reverse role→users path (sys_member.role → sys_user_role)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-25T11:58:42Z",
+  "updated_at": "2026-06-25T15:22:02Z",
+  "closed_at": "2026-06-25T15:22:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-25T15:22:00Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2326",
+  "body": "## What\n\nAppends an addendum to ADR-0057 recording a follow-up gap found while adjudicating an approval-routing question.\n\nD4 made `sys_user_role` the source of truth for RBAC role assignment and migrated the **forward** direction (`given a user → which roles`, into `ctx.roles = sys_user_role ∪ sys_member.role`). The **reverse** direction (`given a role → which users`) was **not** migrated:\n\n- `plugin-approvals` `expandRoleUsers` (`approval-service.ts:380-389`) → `find('sys_member', { filter: { role } })`\n- `plugin-sharing` `teamGraph.expandRoleUsers` (`team-graph.ts:70-80`) → `find('sys_member', …)`\n\nNeither unions `sys_user_role`.\n\n## Why this framing\n\n- **Not** intentional design (no recorded decision that approval/sharing roles == org-membership roles).\n- **Not** an approvals-only bug — the in-scope sibling `plugin-sharing` behaves identically.\n- Accurate: an **incomplete / phased migration** — forward path shipped under the transition-window union, reverse-lookup consumers left on the legacy table.\n\n## Consequence\n\nA user holding a role **only** via `sys_user_role` (never written to `sys_member.role`) is invisible to approval routing and sharing-rule role expansion.\n\n## Follow-up decision (documented, does not revise D4)\n\n1. Read `sys_user_role ∪ sys_member.role` on the reverse path, in **both** plugins, scoped by `organization_id`.\n2. Retire `sys_member.role` from forward and reverse paths together when the transition window closes.\n3. Until (1) lands, multi-plant 岗位/职务 approval chains use `type:'field'` approvers fed by a submit-time 岗位→人 mapping.\n\nDoc-only change. Implementation + regression test (a `sys_user_role`-only assignee must resolve) tracked as follow-up."
+}

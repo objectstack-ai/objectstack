@@ -1,0 +1,32 @@
+{
+  "number": 2343,
+  "kind": "pull_request",
+  "title": "feat(auth): oidcAuthorizeGate seam for OIDC OP app-assignment (ADR-0024 D5.1)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-26T11:12:09Z",
+  "updated_at": "2026-06-26T11:12:40Z",
+  "closed_at": "2026-06-26T11:12:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-26T11:12:38Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2343",
+  "body": "Optional host-supplied authorization gate for the OIDC OP. better-auth's `oauth-provider` authenticates the subject but never authorizes it against the requesting client — it mints a code for **any** logged-in user and **any** registered client. This adds `oidcAuthorizeGate?({userId, clientId})` to the auth config; when set, the `/oauth2/authorize` before-hook calls it for an authenticated subject and **denies (no code)** on false.\n\nThe cloud control plane will supply it to enforce **org-membership (app-assignment)** — closing a verified cross-tenant hole (any cloud user could SSO into any tenant's env). Unset (open editions / self-host) = allow, unchanged. Pairs with cloud-side ADR-0024 D5.1 impl.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

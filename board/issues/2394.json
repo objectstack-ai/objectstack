@@ -1,0 +1,34 @@
+{
+  "number": 2394,
+  "kind": "pull_request",
+  "title": "fix(auth): make the SSO Providers list visible to admins (ADR-0024 / cloud#551)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T17:16:40Z",
+  "updated_at": "2026-06-27T17:22:05Z",
+  "closed_at": "2026-06-27T17:22:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T17:22:03Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2394",
+  "body": "## Why\nAfter an admin registers an external IdP, the **Setup → Access Control → SSO Providers** list rendered **empty**. `member_default`'s wildcard `tenant_isolation` RLS (`organization_id == current_user.organization_id`) denied every row — better-auth writes `sys_sso_provider` via its adapter with no tenantId context, so `organization_id` is never stamped, and the platform-admin `viewAllRecords` superuser bypass is gated to private/non-tenant objects.\n\n## What\n`sys_sso_provider` is **env-global, admin-only** identity config, so it now declares:\n- `tenancy: { enabled: false }` — opts out of multi-tenancy (the env IS the tenant; providers are env-wide), so a platform admin's `viewAllRecords` bypass sees every provider.\n- `requiredPermissions: ['manage_platform_settings']` — object-level capability gate so ordinary members are **denied** (without it, tenancy-disabled + `member_default`'s `'*': allowRead` would leak providers to every authenticated user — I verified that leak before adding this).\n\n## Verification (browser E2E)\n- **Admin** → Setup list shows all env providers (`total=1`, the registered `gl` row renders); register form still works.\n- **Non-admin** → `403 'requires capability [manage_platform_settings]'`.\n\nEnv-only object (no control-plane cross-tenant impact). The sibling `sys_oauth_application` / `sys_account` nav entries share the same empty-list symptom but span the control plane — separate per-object follow-up.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

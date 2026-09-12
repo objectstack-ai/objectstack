@@ -1,0 +1,33 @@
+{
+  "number": 2288,
+  "kind": "pull_request",
+  "title": "docs(skill): document gantt timeSegments (排班分段)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T13:51:35Z",
+  "updated_at": "2026-06-24T14:19:48Z",
+  "closed_at": "2026-06-24T14:19:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T14:19:46Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2288",
+  "body": "## What\n\nAdds a **Configuring Gantt Views** section to the `objectstack-ui` skill (`SKILL.md`), documenting the new **`timeSegments`** (白班/夜班 排班分段) capability shipped in objectui gantt (objectui PR #1969).\n\n## Why\n\nThe skill is what authors gantt view metadata, but it had no gantt config section at all and no mention of `timeSegments`. Authors had no way to discover the shift-segmentation fields or their semantics.\n\n## Covers\n\n- Core gantt config (start/end/progress/dependency/parent fields, summary vs leaf bars).\n- `timeSegments` as an **ObjectUI display extension** (not in upstream `GanttConfigSchema`).\n- Field table: `dayStart`, `bands[].{key,label,start,end,color?}`.\n- Behavior: day-scale-only, two-tier 排班日 header, start-based attribution, cross-midnight in one column, 12h drag-snap, dashed calendar-midnight cue, default-off zero-regression, optional per-band tint.\n\nDocs-only; no code or schema changes."
+}

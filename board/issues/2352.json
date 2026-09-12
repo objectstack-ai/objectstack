@@ -1,0 +1,33 @@
+{
+  "number": 2352,
+  "kind": "pull_request",
+  "title": "docs: document the `user` field type",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-26T17:04:01Z",
+  "updated_at": "2026-06-26T17:10:27Z",
+  "closed_at": "2026-06-26T17:10:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-26T17:10:25Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2352",
+  "body": "Follow-up to #2351 (the `user` field type) — brings docs in line with the shipped feature.\n\n## Changes\n- **`references/data/field.mdx` + `seed-loader.mdx`** — regenerated via `gen:docs` so the FieldType / reference enums list `user`. (#2351 added the enum value but `gen:docs` isn't a CI gate, so these committed reference pages were left stale.)\n- **`guides/data-modeling.mdx`** — new **User Fields** section: `Field.user()`, `multiple`, `defaultValue: 'current_user'`, lookup specialized to `sys_user` (FK storage; zero-migration from `Field.lookup('sys_user')`).\n- **`guides/standards.mdx`** — adds a **User / Person** row to the field-type table.\n\nOnly user-related regenerated lines included; unrelated generated-doc drift left out. Docs-only.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

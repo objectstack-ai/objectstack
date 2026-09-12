@@ -1,0 +1,35 @@
+{
+  "number": 2478,
+  "kind": "pull_request",
+  "title": "feat(spec): source the react-tier component contract from the spec schemas",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-30T08:16:28Z",
+  "updated_at": "2026-06-30T08:28:15Z",
+  "closed_at": "2026-06-30T08:28:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-30T08:28:13Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2478",
+  "body": "Course-correction from the platform-author steer: the standard components are **already defined in the spec** (FormView/ListView in `view.zod`, RecordDetails/Highlights/RelatedList/Path in `component.zod`, Chart in `chart.zod`) — so the AI contract is now **generated from them**, not hand-authored.\n\n- **`packages/spec/src/ui/react-blocks.ts`** — the component-type → spec-schema **index** (the small 'completion' that lets tooling enumerate which schema defines a block) + a thin **React-interaction overlay** (`binding`/`controlled`/`callback` — objectName, recordId, mode, onSuccess, onRowClick, … — inherently React, absent from the declarative schema). Curated per-block via `dataProps` allowlists (ADR-0080 'capability ≠ contract').\n- **`scripts/build-react-blocks-contract.ts`** — generator: `z.toJSONSchema(spec schema)` → `data` props with the spec's own descriptions; merge the overlay; emit the AI reference (`references/react-blocks.md`) + machine contract (`.json`). `pnpm --filter @objectstack/spec gen:react-blocks`.\n- Replaces the Phase-1 hand-authored contract — now spec-sourced + drift-free. api-surface snapshot updated (+4 additive, 0 breaking); spec 6650 tests green.\n\nThe result: `<ObjectForm>`/`<ListView>`/`<RecordDetails>`/… each list their props with the **spec's authoritative descriptions** for config props + the React overlay for interaction. Follow-up: `os build` prop-validation gate consuming this contract.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

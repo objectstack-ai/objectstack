@@ -1,0 +1,32 @@
+{
+  "number": 2375,
+  "kind": "issue",
+  "title": "[Auth] ADR-0069 remaining — session-validation gate (password expiry + enforced MFA), session controls, IP allowlist, OIDC/SAML",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T14:25:12Z",
+  "updated_at": "2026-06-27T18:50:25Z",
+  "closed_at": "2026-06-27T18:50:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2375",
+  "body": "Follow-up to **[ADR-0069](https://github.com/objectstack-ai/framework/blob/main/docs/adr/0069-enterprise-authentication-hardening.md)** tracking issue #2281. Collects everything **not yet built**. The P1 password-policy + anti-brute-force surface is now shipped; what remains is the session-validation gate (P1 leftover), defense-in-depth (P2), and federation breadth (P3).\n\n## ✅ Already shipped (context)\n- D1 breached-password reject (HIBP) — #2361\n- D2 account lockout + rate-limit tuning — #2365\n- D1 password complexity — #2368\n- D1 password history / no-reuse — #2371\n\nPattern established for all of the above: **setting (auth manifest) → `bindAuthSettings` patch → enforcement seam (better-auth `before`/`after` hook or native plugin)**, default-off, ADR-0049-compliant.\n\n---\n\n## 🔑 P1 leftover — the *session-validation gate* (do these together)\n\nBoth remaining P1 items enforce at **authenticated-request / session-validation time** (not the auth endpoints), which today has **no denial path**. `resolveExecutionContext` (`packages/runtime/src/security/resolve-execution-context.ts`) is explicitly *\"never throws\"*; the shared authz resolver is `resolveAuthzContext` (`packages/core/src/security/resolve-authz-context.ts`); denial happens downstream in SecurityPlugin / the dispatcher. There is **no existing MFA/step-up or password-age gate**. Building this seam is the bulk of the work and is shared by both items below, so they should land as one focused effort.\n\n- [ ] **D1 — password expiry** `[custom][field]`. Setting `password_expiry_days` (0 = off). Field `sys_user.password_changed_at` (stamp on every successful sign-up / change / reset). On authenticated requests, if `now - password_changed_at > expiry` → force `/change-password` (`PASSWORD_EXPIRED`). *(The history PR #2371 already touches the change/reset hooks — stamping can be added there.)*\n- [ ] **D3 — enforced MFA** `[custom][field]`. Settings `mfa_required` (global) + `mfa_grace_period_days` (default 7); per-org `sys_organization.require_mfa`; field `sys_user.mfa_required_at`. The `twoFactor` plugin already provides TOTP enroll/verify — *requiring* it is the gap: a session whose user has `two_factor_enabled = false` (and whose grace window has elapsed) is gated out of all protected resources until enrollment + verification. The `/two-factor/*` enrollment endpoints and `/sign-out` do **not** flow through `resolveExecutionContext`, so they need no allowlist there.\n  - **Needs an objectui follow-up**: the Console must handle an `MFA_REQUIRED` response by showing the TOTP-enrollment prompt, otherwise flipping `mfa_required` on bricks the UI for un-enrolled users. Backend gate is default-off so existing envs are unaffected.\n\n> Reuse, don't reinvent (verified against better-auth 1.6.20): TOTP/2FA mechanism, `session.freshAge` (re-auth freshness), `revokeSessionsOnPasswordReset`, `password.hash/verify` are all **native** — only the *enforcement/requirement* layer is custom.\n\n---\n\n## 🛡️ P2 — defense in depth (after the gate exists)\n- [ ] **D4 session controls** `[custom][field]` — idle timeout, absolute max lifetime, concurrent-session cap; fields `sys_session.{last_activity_at, revoked_at, revoke_reason}`. (`multiSession` + `session.expiresIn/updateAge/freshAge` are native; idle/absolute/concurrent caps are custom and also ride the authenticated-request seam.)\n- [ ] **D5 IP allowlist** `[custom][field]` — `sys_organization.allowed_ip_ranges` (+ optional per-user); Hono auth-route middleware **before** the better-auth handler (trust-proxy-aware client-IP extraction), reject with `IP_NOT_ALLOWED`.\n- [ ] **D6 OIDC trust-list UI** `[native]` — surface admin-managed OIDC providers (issuer / client / scopes / allowed domains) instead of env-only `genericOAuth`.\n\n## 🌐 P3 — federation breadth\n- [ ] **SAML 2.0** — not in better-auth core; assess `@better-auth/sso` vs a custom plugin. Do **not** ship a SAML settings surface before an enforcing impl (ADR-0049).\n- [ ] Broader settings-driven social providers; per-org override UI polish.\n\n---\n\n## Suggested order\n1. **The session-validation gate** (D1 expiry + D3 MFA) — unblocks the rest and is the biggest single piece.\n2. D4 session controls (reuses the same authenticated-request seam).\n3. D5 IP allowlist (independent — Hono middleware).\n4. D6 OIDC trust-list UI.\n5. P3 SAML assessment.\n\nOut of scope (separate ADRs): SCIM/provisioning (done — ADR-0071 #2356), passkeys/WebAuthn, a dedicated security-events audit stream."
+}

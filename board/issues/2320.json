@@ -1,0 +1,33 @@
+{
+  "number": 2320,
+  "kind": "pull_request",
+  "title": "feat(service-ai): access-aware agent catalog so the UI hides agents you can't chat",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-25T07:44:33Z",
+  "updated_at": "2026-06-25T07:51:28Z",
+  "closed_at": "2026-06-25T07:51:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-25T07:51:25Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2320",
+  "body": "`GET /api/v1/ai/agents` (and `listAgents`) returned **every** active agent regardless of the caller's per-agent access (`permissions`/`access`). The console keys its \"Build with AI\" / \"Ask AI\" surfaces off this catalog, so a user without the required permission still saw the buttons and only hit a 403 on click (dead-end UX) — notably with the per-user AI-seat gate (ADR-0068), where `build`/`ask` carry `permissions:['ai_seat']`.\n\n`listAgents` now takes an optional caller context and, when present, drops agents the caller can't access (the same `evaluateAgentAccess` the chat route enforces, ADR-0049). The list route passes `req.user`. No caller → unfiltered (internal default-agent resolution unchanged). Ungated agents (no `permissions`) stay visible to everyone → no-op until an agent is actually gated.\n\n**Net effect:** the existing frontend \"no build/ask in catalog → no AI surface\" logic now hides AI for seat-less users with ZERO objectui code changes.\n\n+5 unit tests; service-ai suite green (408). Part of the per-user AI-seat gate (ADR-0068).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

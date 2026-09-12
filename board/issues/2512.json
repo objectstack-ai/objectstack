@@ -1,0 +1,30 @@
+{
+  "number": 2512,
+  "kind": "issue",
+  "title": "build-console.sh 打包 console 时应注入本仓库 client,否则新 UI + 旧 client 漂移(11.5.0 已发生)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-02T04:38:53Z",
+  "updated_at": "2026-07-02T12:29:34Z",
+  "closed_at": "2026-07-02T12:29:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2512",
+  "body": "## 问题\n\n`@objectstack/console@11.5.0` 运行时报:\n\n> The connected @objectstack/client does not support async import jobs.\n\n原因:`scripts/build-console.sh` 在 objectui 树里 `pnpm install --frozen-lockfile` 后直接构建,console bundle 里的 `@objectstack/client` 版本完全由 **objectui 的 lockfile** 决定。发布 11.5.0 时 objectui lockfile 锁的是 client 11.2.0(新 client 当时还没发到 npm,objectui 不可能提前锁到它),于是发布出去的 console = 新导入 UI + 旧 client(无 `data.createImportJob`),前端探测失败直接抛错。已在实际项目 os-tianshun-ehr 复现并逐环验证(served dist 中 `import/jobs` 出现 0 次)。\n\n这是结构性问题:凡是某个版本给 client 加新 API 且 UI 依赖它,按现状都得「发 framework → objectui bump pin → framework 再发一版」两段式,永远慢一拍。\n\n## 解决方案\n\n`build-console.sh` 构建 console 前:\n\n1. 校验 pinned objectui 的 `apps/console/vite.config.ts` 存在 `OBJECTSTACK_CLIENT_DIST` 钩子(objectui main 已有),没有则报错退出而不是静默漂移;\n2. 必要时先构建本仓库 `packages/client` 的 dist;\n3. `export OBJECTSTACK_CLIENT_DIST=<framework>/packages/client`,让 vite 把本仓库、本版本的 client 打进 console bundle;\n4. 默认构建命令加 `--force`,避免 turbo 缓存返回未注入的旧产物(objectui 侧同步在 turbo.json 声明该 env,见 objectstack-ai/objectui#2146)。\n\n之后 console 的 client 永远与 framework 发布版本一致,一趟发版;本次直接以现有 `.objectui-sha`(1432efe81)重打 dist 发 `@objectstack/console@11.5.1` 即可修复线上问题。\n"
+}

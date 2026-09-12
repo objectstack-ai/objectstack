@@ -1,0 +1,35 @@
+{
+  "number": 2495,
+  "kind": "pull_request",
+  "title": "fix(sdui): no Tailwind in page source — guardrail + corrected guidance (ADR-0065)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-30T15:41:22Z",
+  "updated_at": "2026-06-30T15:52:31Z",
+  "closed_at": "2026-06-30T15:52:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-30T15:52:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2495",
+  "body": "Follow-up to #2494 (which removed Tailwind from the react showcase pages). This closes the loop so AI authors don't repeat the mistake: a **prevention gate** + **corrected guidance**.\n\n## Why\n\nA `kind:'html'`/`'react'` page's `source` is **runtime metadata**, so the console's build-time Tailwind never scans it — authored utility `className`s silently produce no CSS (the ADR-0065 failure the Task Desk modal hit: transparent backdrop, unstyled boxes). The contract/skill/docs were still telling AI to write \"HTML + Tailwind\", so the gate and the guidance both needed fixing.\n\n## Prevention — the guardrail\n\n- New `@objectstack/lint` rule **`validatePageSourceStyling`**: flags `className` attributes in source-tier pages, wired into `os validate` as **step 3e** — a **warning** with the actionable fix (react: inline `style` + `hsl(var(--token))` + `<ObjectForm formType=…>` overlays; html: structured props + a JSON `style` object).\n- **Verified end-to-end**: `os validate` now flags all 7 showcase source pages with the right per-tier hint. 6 unit tests; all 106 lint tests green.\n\n```\n→ Checking source-page styling (ADR-0065)...\n⚠ page \"showcase_task_desk\": 19 `className` attributes in react-source page — Tailwind utilities\n  in page source silently produce no CSS (the build never scans authored metadata; ADR-0065).\n    Style with inline style={{}} using hsl(var(--token)) … render drawer/modal via <ObjectForm formType=…>.\n```\n\n## Corrected guidance — so the docs no longer teach the mistake\n\n- **react-blocks contract** generator note → \"do NOT use Tailwind className; inline `style` + `hsl(var(--token))`; overlays via ObjectForm formType\" (regenerated `contract.json` + `react-blocks.md`).\n- **objectstack-ui SKILL.md**: the html + react examples and prose rewritten off Tailwind; the ADR-0065 styling section gains a **source-tier subsection** (html = structured props + JSON `style`; react = inline `style` + `hsl(var(--token))` + `formType` overlays).\n- **layout-dsl.mdx**: html-tier row no longer says \"HTML + Tailwind\".\n- **ADR-0080 / ADR-0081**: amendment notes pointing to ADR-0065 — the tiers stand, only the styling primitive changes.\n\n## Follow-up\n\n`command-center-jsx` (the `kind:'html'` showcase page) still uses Tailwind — the new guardrail flags it (48 classNames). It's the last page to convert (html tier: structured props + JSON `style`); doing it in a separate change so this PR stays focused on the systemic gate + guidance.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

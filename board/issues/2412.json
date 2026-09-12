@@ -1,0 +1,35 @@
+{
+  "number": 2412,
+  "kind": "pull_request",
+  "title": "perf(core): authenticated request issues ~16 sequential queries (duplicate authz + 3× localization) — add request-scoped memoization",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-28T02:39:43Z",
+  "updated_at": "2026-06-28T03:33:06Z",
+  "closed_at": "2026-06-28T03:33:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-28T03:33:04Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2412",
+  "body": "## Problem\n\nAn authenticated REST request resolves its **execution context** (identity + RBAC/RLS + localization) *multiple times within a single handler* — the data operation itself, app-nav RBAC filtering, dashboard widget gating, and the ADR-0069 auth gate all call `RestServer.resolveExecCtx`. Each pass runs the full `resolveAuthzContext` aggregation plus the localization read — **~16 sequential queries** — and nothing memoized it. So a request that resolves the context twice (e.g. `GET /meta/:type`, which gates app nav at one site and dashboard widgets at another) pays for **duplicate authz + repeated localization**.\n\nConcrete duplication confirmed by tracing the path:\n- `rest-server.ts` — `resolveExecCtx` is invoked 2× in the same handler (app RBAC filter + dashboard widget gating), each re-running everything.\n- `resolve-authz-context.ts` — `sys_user` read twice per pass (email fallback at one site, `ai_seat` synthesis at another) on the API-key path; the localization direct-read fallback issues **3 sequential** `sys_setting` queries (timezone / locale / currency).\n\n## Fix — request-scoped memoization\n\n**`@objectstack/rest`**\n- `resolveExecCtx` is now a thin memoizing wrapper; the heavy resolution moved to `computeExecCtx`.\n- Memo is a `WeakMap` keyed by the **per-request `req` object** (collected with the request → naturally request-scoped, no TTL, no cross-request leak), then by the input `environmentId` (one host can route multiple environments).\n- Caches the **in-flight Promise**, so concurrent callers share one resolution. Anonymous (`undefined`) resolutions are cached too, so repeat callers don't re-run `getSession`.\n\n**`@objectstack/core`**\n- `resolveAuthzContext` reads `sys_user` **at most once** per pass (a memoized `getUserRow()` shared by the email fallback and the `ai_seat` synthesis).\n- `resolveLocalizationContext`'s direct-read fallback batches `timezone`/`locale`/`currency` into **one** `sys_setting` query (`$in` on `key`) instead of three sequential reads.\n\n## Safety\n\n- **No authorization-behavior change** — the same roles / permissions / RLS context is resolved, just without the redundant reads. Verified the 47 `resolveExecCtx` call sites treat the result as **read-only** (no mutation), so sharing one cached instance per request is safe.\n- The two `sys_member` reads (per-user roles vs. all-org-members for RLS scoping) are **intentionally left distinct** — different filters and limits; merging them would risk a subtle behavior change for marginal gain.\n\n## Tests\n\n- `resolve-authz-context.test.ts` — query-counting harness asserts `sys_user` is read **once** (email + `ai_seat` both satisfied) and localization reads `sys_setting` **once** for all three keys; plus UTC/en-US fallback.\n- `rest-exec-ctx-memo.test.ts` (new) — pins the memo contract: once per request object, re-resolves for a different request, keyed by `environmentId`, and caches anonymous results.\n- Full suites green: `@objectstack/core` security (79) and `@objectstack/rest` (144). Both packages build clean (incl. strict DTS).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

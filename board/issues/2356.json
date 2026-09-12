@@ -1,0 +1,34 @@
+{
+  "number": 2356,
+  "kind": "pull_request",
+  "title": "feat(plugin-auth): env-side SCIM 2.0 via @better-auth/scim (ADR-0071, OPEN mechanism)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T07:53:03Z",
+  "updated_at": "2026-06-27T08:00:19Z",
+  "closed_at": "2026-06-27T08:00:18Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T08:00:18Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2356",
+  "body": "The **OPEN** per-environment SCIM mechanism for Enterprise Identity (design: cloud ADR-0071 / [cloud#611](https://github.com/objectstack-ai/cloud/pull/611), implementing the SCIM slice ADR-0024 D6 deferred). The environment becomes a SCIM 2.0 **Service Provider** so an external IdP (Okta / Entra) can auto-provision / deprovision its users. Off by default (`OS_SCIM_ENABLED`); the paid **entitlement gate** + token-admin UI land cloud-side, separately.\n\n### What's here (mirrors the @better-auth/sso wiring)\n- Install `@better-auth/scim` (MIT); push `scim({ storeSCIMToken: 'hashed' })` under `OS_SCIM_ENABLED`; force the `admin` plugin on (`active:false` → ban needs it).\n- New `sys_scim_provider` object + registration in `plugin-auth`'s `authIdentityObjects` manifest (export ≠ provisioning — the manifest drives schema sync, D7).\n- Map `scimProvider → sys_scim_provider` in `AUTH_MODEL_TO_PROTOCOL`; the adapter auto-bridges camelCase↔snake_case. Fixed the now-stale adapter TODO comment.\n- **Source-marking fix:** SCIM creates `sys_account` bypassing better-auth's `account.create.after`, so users landed `source=env_native`. Added an ObjectQL `afterInsert` hook on `sys_account` that stamps `source=idp_provisioned` for non-credential accounts (robust to the creation path; uses the QueryAST `where` key — `filter` is silently ignored).\n- Token stored **hashed**, never cleartext.\n\n### Verified E2E on the objectos-ee rig\n`generate-token` ✅ · `POST /Users` → **201** ✅ · `PATCH active:false` → **204 + sys_user.banned=1** ✅ (compliance offboarding) · `GET /Users` ✅ · SCIM user → **source=idp_provisioned** ✅ · dev admin (credential) stays **env_native** ✅. Full `plugin-auth` suite: **137 passed**, incl. new SCIM wiring tests.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

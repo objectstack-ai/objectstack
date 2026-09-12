@@ -1,0 +1,33 @@
+{
+  "number": 1333,
+  "kind": "issue",
+  "title": "[portal] 多语言 supportedLocales + fallbackLocale + 切换器协议（GAP-3 of #1294）",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T06:47:08Z",
+  "updated_at": "2026-06-27T14:31:29Z",
+  "closed_at": "2026-06-27T14:31:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1333",
+  "body": "## 现象\n#1294 spec 有 `locale: 'auto'` 但**没声明 portal 支持哪些语言**，Accept-Language 落在不支持的语种时 fallback 行为未定义。\n\n## 复现\n1. helpdesk 翻译 bundle 只含 en + zh-CN\n2. 日本客户访问 `/portal/helpdesk`，浏览器 Accept-Language=ja\n3. 框架是渲染 ja key（缺失文案显示原 key）？回落到 en？回落到模板默认？spec 没规定\n\n## Workaround\n模板里强制 `locale: 'en'`，多语言客户体验差。\n\n## 分阶段建议\n**M2**：`PortalSchema` 新增：\n```ts\nsupportedLocales?: string[];              // e.g. ['en','zh-CN','ja']\nfallbackLocale?: string;                  // 当 Accept-Language 不在 supportedLocales 时使用，默认 'en'\nlanguageSwitcher?: { visible: boolean; position?: 'header'|'footer' }; // UI 开关\n```\n\n运行时：\n1. 解析 Accept-Language\n2. 与 `supportedLocales` 取交集，按 q 值排序选第一个\n3. 没交集 → `fallbackLocale`\n4. 用户手动切换 → 写 cookie，覆盖自动协商\n\n## 验收\n- portal 声明 `supportedLocales: ['en','zh-CN']`\n- ja 客户访问看到英文（fallback），不是缺失 key\n- 头部出现 EN | 中文 切换器（如声明 visible）\n\n## 关联\n- #1294\n"
+}

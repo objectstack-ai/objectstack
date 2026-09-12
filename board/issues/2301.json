@@ -1,0 +1,35 @@
+{
+  "number": 2301,
+  "kind": "pull_request",
+  "title": "feat(objectql): adopt orphaned metadata into a base — ADR-0070 D5 migration",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T16:02:47Z",
+  "updated_at": "2026-06-24T16:07:55Z",
+  "closed_at": "2026-06-24T16:07:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T16:07:53Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2301",
+  "body": "## What\nADR-0070 **D5** — the migration affordance that retires the pre-package-first stopgaps.\n\n- **`protocol.reassignOrphanedMetadata`** — bulk-rebinds every package-less orphan (`package_id` null / `\"\"` / the `sys_metadata` sentinel) onto a target base; already-owned rows are untouched.\n- **`POST /packages/:id/adopt-orphans`** — \"move all loose items into this base\".\n\nOnce an env runs this and has no orphans, objectui can drop the **\"Local / Custom\"** scope from the selector (the UI side of D5 + the D6 single-tenant guardrail) — a follow-up objectui change. Pairs with D1 (`writable_package_required`) which already stops NEW orphans.\n\n## Tests\n`@objectstack/objectql` green incl. new `reassignOrphanedMetadata` tests (rebinds null/`\"\"`/`sys_metadata`, leaves owned rows, no-orphans → count 0). `tsc` clean. Stacked on D4 ([#2299](https://github.com/objectstack-ai/framework/pull/2299), merged) then rebased — diff is D5-only.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 1447,
+  "kind": "issue",
+  "title": "Support a configurable product/brand name (whitelabel) instead of hardcoded titles",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T05:27:10Z",
+  "updated_at": "2026-06-27T14:31:31Z",
+  "closed_at": "2026-06-27T14:31:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1447",
+  "body": "## Background\n\nDownstream deployments (e.g. ObjectOS Cloud at https://cloud.objectos.ai) want to set a single **product / brand name** and have it surface consistently across auth emails, page titles, and API docs. Today the brand string is partly configurable, partly hardcoded — there is no single knob.\n\nIn the `cloud` repo we already wired `OS_APP_NAME` (default `ObjectOS Cloud`) into the auth plugin's `appName`, which covers email templates. The remaining surfaces are hardcoded inside the framework and cannot be overridden by deployers.\n\n## Hardcoded brand strings in the framework\n\n1. **Account / auth SPA `<title>`** — `apps/account/index.html:10`\n   ```html\n   <title>ObjectOS Account</title>\n   ```\n2. **REST API docs `<title>`** — `packages/rest/src/rest-server.ts:1402`\n   ```html\n   <title>ObjectStack API Docs</title>\n   ```\n   (Note the inconsistency: \"ObjectOS\" vs \"ObjectStack\".)\n3. **Auth email `appName` default** — `packages/plugins/plugin-auth/src/auth-manager.ts:1105`\n   ```ts\n   return this.config.appName ?? 'ObjectStack';\n   ```\n   This one is already overridable via `AuthManagerConfig.appName` (good) — listed only for completeness as the canonical source of the brand name.\n\n## Proposal\n\nIntroduce a single configurable product name (e.g. `appName` / `productName`) resolvable from one source — config field and/or `OS_APP_NAME` env — and thread it into:\n\n- [ ] `apps/account` HTML title (inject at build/serve time, or render dynamically)\n- [ ] REST docs title in `rest-server.ts` (add an option to `RestServer`, falling back to the current default)\n- [ ] Keep `auth-manager` `appName` as the canonical default, but align its fallback with the same source so all three agree\n\n### Acceptance criteria\n- Setting one value (config or `OS_APP_NAME`) renames auth emails, the account SPA title, and the API docs title together.\n- Backward compatible: unset → current defaults (suggest unifying the default to a single string rather than today's mix of `ObjectOS` / `ObjectStack`).\n\n## Context\nFiled from the `cloud` repo while wiring `OS_APP_NAME` → auth `appName`. The framework-side titles are the missing piece for a fully configurable product name."
+}

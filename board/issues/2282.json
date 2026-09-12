@@ -1,0 +1,34 @@
+{
+  "number": 2282,
+  "kind": "pull_request",
+  "title": "feat(spec): create seeds for agent / tool / skill / email_template / permission",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T10:34:48Z",
+  "updated_at": "2026-06-24T11:02:39Z",
+  "closed_at": "2026-06-24T11:02:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T11:02:37Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2282",
+  "body": "## Why\n\nExtends the **spec-derived create-shape contract** (#2270 seeds → #2276 `/meta/types` → objectui#1967 designer consumes) to the **AI + integration metadata types** my earlier create-roundtrip probe never covered. Without a seed, \"New agent/tool/skill → Save\" would hit the same `create→save 422` family (e.g. an agent needs `role`+`instructions`, which the name-first create form doesn't supply).\n\n## What\n\nAuthoritative minimal create seeds, empirically derived from each schema's required fields and validated by `metadata-create-seeds.test.ts`:\n\n| type | required fields seeded |\n|---|---|\n| `agent` | `role`, `instructions` |\n| `tool` | `description`, `parameters` |\n| `skill` | `tools` |\n| `email_template` | `subject`, `bodyHtml` |\n| `permission` | `objects` |\n\n`trigger` has no spec schema (`getMetadataTypeSchema('trigger')` is undefined) and is intentionally left unseeded. No new exports → **api-surface unchanged**.\n\nThese flow to the designer / CLI / API automatically via `/meta/types` (#2276) and `buildCreateModeBody` (objectui#1967) — no further wiring.\n\n## Verification\n\n`metadata-create-seeds.test.ts` — **17 pass** (the 5 new seeds each validate against their registered schema).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

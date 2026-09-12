@@ -1,0 +1,35 @@
+{
+  "number": 2365,
+  "kind": "pull_request",
+  "title": "feat(plugin-auth): account lockout + rate-limit tuning (ADR-0069 D2, P1)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T13:03:19Z",
+  "updated_at": "2026-06-27T13:10:04Z",
+  "closed_at": "2026-06-27T13:10:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T13:10:03Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2365",
+  "body": "Second slice of **ADR-0069 (enterprise authentication hardening)** — tracking issue #2281 — implementing **D2: per-identity account lockout + native rate-limit tuning**. Reuses the setting→enforcement-seam pattern established by the HIBP PR (#2361).\n\n## What\n\n**Account lockout** `[custom][field]`\n- New identity columns `sys_user.failed_login_count` + `sys_user.locked_until`.\n- New `auth` settings `lockout_threshold` (0 = off, default) and `lockout_duration_minutes` (default 15), in a new **Anti-abuse** settings group.\n- Enforced in the `/sign-in/email` better-auth `before`/`after` hooks: failures increment the counter; crossing the threshold stamps `locked_until`; a locked account is rejected **even with the correct password** (per-identity — survives IP rotation, unlike rate limiting). A successful sign-in resets both fields.\n- Admin **Unlock**: admin-guarded `POST /api/v1/auth/admin/unlock-user` route + an `unlock_user` action on `sys_user`.\n\n**Rate-limit tuning** `[native]`\n- New `auth` settings `rate_limit_max` / `rate_limit_window_seconds` wire better-auth's core `rateLimit` with stricter `customRules` for `/sign-in/email`, `/sign-up/email`, `/request-password-reset`, `/reset-password`.\n\n## ADR-0049 / ADR-0074 compliance\n\nEvery setting ships with its enforcement (no false surface). All default off / to safe values and are additive — no behavior change on upgrade. `locked_until` is written as a `Date`, never epoch-ms (ADR-0074).\n\n## Verification\n\n- **Unit**: 158 plugin-auth + 129 service-settings + 63 platform-objects green; builds incl. strict DTS green.\n- **Live dogfood** (showcase): 3 failed sign-ins lock the account → the correct password is then rejected `403 ACCOUNT_LOCKED` while **other users (incl. the admin) sign in normally** → admin unlock restores access → unauthenticated unlock `401` → a rate-limit burst trips `429` after the cap.\n\n> Dogfood caught a real bug the mocked unit tests had masked: the lockout helpers initially used `filter:` (copied from an adjacent code path) but the ObjectQL engine's query key is `where:` — so lookups silently returned the *first* user (the admin) instead of the target. Fixed to `where:`, and the test mock now honours the `where` clause so the regression can't recur.\n\n## Out of scope (follow-up ADR-0069)\n\nD3 enforced MFA; remaining D1 `[custom]` (complexity / expiry / history); P2 (sessions / IP allowlist / OIDC trust-list); P3 (SAML). A locked-accounts list-view filter is a small follow-up.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

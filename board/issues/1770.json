@@ -1,0 +1,30 @@
+{
+  "number": 1770,
+  "kind": "issue",
+  "title": "feat(studio): flow designer authoring for the approval revise loop (ADR-0044)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T06:58:34Z",
+  "updated_at": "2026-06-24T13:16:28Z",
+  "closed_at": "2026-06-24T13:16:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1770",
+  "body": "Follow-up to #1744 / PR #1769 (ADR-0044), split out on purpose.\n\nThe engine, service, REST and Console inbox for send-back-for-revision are merged: an approval node may declare a `revise` out-edge to a wait node, with a `type: 'back'` edge closing the loop back into the approval node (cycle validation now runs on the graph minus declared back-edges), guarded by `maxRevisions` on the node config.\n\nWhat's missing is **authoring**: today the revise loop is reachable only by hand-editing flow JSON (see `showcase_budget_approval` in `examples/app-showcase/src/flows/index.ts` for the canonical shape). The Studio flow designer should:\n\n1. offer the `revise` branch on the approval node's out-edge labels (alongside approve/reject), with `maxRevisions` already surfaced via the node's published configSchema;\n2. let the author draw/mark a back-edge (`type: 'back'`) and render it distinctly (dashed/curved return arrow);\n3. validate the reduced-graph DAG rule client-side so an unmarked cycle is flagged while a declared revise loop passes;\n4. ideally a one-click \"add revision loop\" affordance that drops the wait node + both edges in one gesture.\n\nReferences: docs/adr/0044-approval-send-back-for-revision.md, `APPROVAL_BRANCH_LABELS` (packages/spec/src/automation/approval.zod.ts), `FlowEdgeSchema.type` (packages/spec/src/automation/flow.zod.ts).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

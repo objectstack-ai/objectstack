@@ -1,0 +1,37 @@
+{
+  "number": 2341,
+  "kind": "pull_request",
+  "title": "fix(security): single-source the request authorization resolver (REST dropped sys_user_role)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-26T09:20:23Z",
+  "updated_at": "2026-06-26T09:29:45Z",
+  "closed_at": "2026-06-26T09:29:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-26T09:29:44Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2341",
+  "body": "## What & why\n\nA security/correctness root-fix. The REST server (`@objectstack/rest`) and the runtime dispatcher (`@objectstack/runtime`) each carried **their own copy** of the request → `ExecutionContext` identity/role resolver. On a security path, duplicated logic drifts — and it did:\n\nThe REST copy silently omitted **`sys_user_role`** (so custom roles granted via the ADR-0057 D4 platform-RBAC path — the only way to assign custom roles, since `sys_member.role` is restricted to owner/admin/member — did **not** apply over REST), plus `sys_role_permission_set`, the `owner→org_owner` membership normalization, the platform-admin derivation, and the `ai_seat` synthesis.\n\n**Fail-closed** (legitimate access denied / RLS under-applied), not a privilege escalation — but real: RBAC via `sys_user_role` was a no-op on REST.\n\n> Found by dogfooding #2338: a freshly-provisioned user granted `contributor` via `sys_user_role` got `403 \"for roles []\"` on the REST data path, while the dispatcher path resolved the role correctly.\n\n## The most-thorough fix (not a band-aid)\n\nDon't keep two mirrors in sync on security code — collapse to one. This **finishes the extraction the API-key verifier already modelled** (`resolveApiKeyPrincipal` already lived in `@objectstack/core` and was shared by both transports):\n\n- **`@objectstack/core/security`** — new `resolveAuthzContext` (the complete session + role/permission aggregation: `sys_member` + `sys_user_role` + `sys_user_permission_set` + `sys_role_permission_set`, platform-admin derivation, `ai_seat`) and `resolveLocalizationContext`. Core is the lowest common dependency of both `rest` and `runtime`, so there's no upward-import problem.\n- **`@objectstack/runtime`** — `resolveExecutionContext` now delegates (469 → 138 lines).\n- **`@objectstack/rest`** — the inline identity resolver delegates (drops its divergent ~180-line copy).\n- **Guardrails** — a contract test (`resolve-authz-context.test.ts`) locking every authorization source, and a lint gate (`scripts/check-single-authz-resolver.mjs`, wired into `lint.yml`) that fails CI on a future duplicate resolver or a dropped delegation.\n\n## Verification\n\n- Contract test **7/7** (custom role via sys_user_role · owner→org_owner · role-bound permission sets · platform_admin only-when-unscoped · ai_seat · anonymous).\n- Suites green: runtime **444/444**, rest **130/130**, core green. Full turbo build green. ESLint clean. `check:authz-resolver` passes.\n- **Dogfooded**: a user granted `contributor` via `sys_user_role` now resolves that role on the REST data path (previously `roles []`).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

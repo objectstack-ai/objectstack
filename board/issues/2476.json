@@ -1,0 +1,33 @@
+{
+  "number": 2476,
+  "kind": "pull_request",
+  "title": "chore: bump .objectui-sha to e885db38d (Studio source-page editor fix)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-30T07:23:13Z",
+  "updated_at": "2026-06-30T07:48:26Z",
+  "closed_at": "2026-06-30T07:48:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-30T07:48:24Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2476",
+  "body": "Bumps the vendored @objectstack/console pin so the served console includes the **Studio source-page editor** (objectui #2109): editing a `kind:'html'`/`'react'` page now shows a code editor + live preview instead of crashing on the design canvas. Range since previous pin (998c5b3c9 -> e885db38d): #2106 (data-table inline-edit error surfacing) + #2109 (Studio fix). build-console.sh rebuilds at release time.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

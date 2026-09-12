@@ -1,0 +1,34 @@
+{
+  "number": 2275,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0069 enterprise authentication hardening",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T08:17:32Z",
+  "updated_at": "2026-06-24T08:17:48Z",
+  "closed_at": "2026-06-24T08:17:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T08:17:38Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2275",
+  "body": "## What\n\nAdds **ADR-0069: Enterprise authentication hardening** — the design for taking the auth settings surface from \"demo-grade\" (10 fields: email/password, signup, verify, password min/max, session expiry/refresh, Google) to \"enterprise security-review-grade\".\n\n## Why now\n\nDogfooding the Setup app as a new system administrator (#2246) showed a real company can't enable the platform without a password policy, *enforced* MFA, SSO beyond Google, session controls, IP gating, and brute-force protection. This ADR specifies that end-state.\n\n## The discipline\n\nPer **ADR-0049 (no unenforced security properties)**, every capability is written as a **(setting → enforcement seam → mechanism)** triple — no field is proposed without the runtime code path that enforces it. It explicitly separates:\n- **better-auth-native** knobs (1.6.x): core `rateLimit`, `haveibeenpwned` breached-password, `twoFactor`, `genericOAuth`/`oidcProvider`, session `expiresIn`/`updateAge`/`freshAge`.\n- **custom** hooks/middleware + new identity fields: password complexity/expiry/history, **account lockout**, **org-wide MFA requirement**, idle/absolute/concurrent sessions, **IP allowlist**.\n\nSAML is called out as **not in better-auth core** → scoped P3/external (don't ship a SAML settings surface before an enforcing implementation exists — that would itself violate ADR-0049). SCIM/bulk-provisioning is deferred to a separate ADR.\n\nGrounded in a read of `plugin-auth` (better-auth wiring, `bindAuthSettings`/`applyConfigPatch`), `auth.manifest.ts`, and the identity objects. Phased P1/P2/P3.\n\nDocs-only (`Status: Proposed`) → `skip-changeset`. Relates to #2246.\n"
+}

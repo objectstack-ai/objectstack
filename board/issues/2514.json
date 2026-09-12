@@ -1,0 +1,30 @@
+{
+  "number": 2514,
+  "kind": "issue",
+  "title": "spec: 请发布 ObjectSchema 的 views / stageField 键（源码已有，11.5.0 未包含）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-02T08:23:19Z",
+  "updated_at": "2026-07-02T08:29:09Z",
+  "closed_at": "2026-07-02T08:29:09Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2514",
+  "body": "## 问题\n\n控制台默认记录页（`buildDefaultPageSchema` / `RecordDetailView`）已支持从对象元数据读取三个定制点：\n\n- `views.detail.highlightFields` — 顶显字段条（RecordDetailView.tsx 约 :1389）\n- `views.form.sections` — 详情正文分组\n- `stageField` — 阶段路径条（按 select 字段 options 渲染）\n\n上游源码中 spec 的 ObjectSchema 已包含这些键的定义，但**最新发布的 `@objectstack/spec@11.5.0` 不含**，`ObjectSchema.create` 按 ADR-0032 对未知键直接报错：\n\n```\nObjectSchema.create('mtc_lead'): unknown key(s) — views, stageField.\n```\n\n结果是「console 能读、spec 不让写」：应用包想用对象级顶显/分组/路径条，只能回退自定义 Page 或者魔改依赖（我们团队禁止打补丁）。\n\n## 复现\n\n```ts\nimport { ObjectSchema } from '@objectstack/spec/data'; // 11.5.0\n\nObjectSchema.create({\n  name: 'demo',\n  label: 'Demo',\n  fields: {},\n  stageField: 'status',                                   // ← unknown key\n  views: { detail: { highlightFields: ['owner'] } },      // ← unknown key\n});\n```\n\n## 请求\n\n发布一个包含 `views` / `stageField` 键的 spec 版本（>11.5.0）。我们已在真实项目验证：把这两个键放行后，控制台 11.5 的默认记录页三件套（顶显条 / 分组 / 路径条）端到端全部生效，无需其他改动。\n\n谢谢！"
+}

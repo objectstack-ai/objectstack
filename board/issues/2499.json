@@ -1,0 +1,33 @@
+{
+  "number": 2499,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0083 — metadata-type taxonomy (Airtable 3 + 3)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-30T22:38:59Z",
+  "updated_at": "2026-07-01T01:25:25Z",
+  "closed_at": "2026-07-01T01:25:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2499",
+  "body": "Answers \"Airtable categorizes as Data / Automation / Interface — I have more metadata types, how do I express and present them?\" by defining the model once, as a single source of truth.\n\n## The problem\n\nObjectStack has a **superset** of Airtable's surface (~27 top-level metadata types) but no single model — and the two places that group types **disagree and are each muddled**:\n- `os` stats (`format.ts`): Data / UI / Logic / Security — files `action` under UI (it's behavior), buries `agent` in Logic (it's AI).\n- Studio nav (`studio.app.ts`): a Build group mixing Data with Interface, then splits \"Logic\" (actions/hooks) from \"Automation\" (flows) — two names for one concern.\n\n## The model — keep the 3, add the 3\n\n| Layer | Pillar | Anchor | Types |\n|---|---|---|---|\n| **Core (Airtable parity)** | Data | `object` | object · field · validation · state_machine · dataset |\n| | Automation | `flow` | flow · hook · action · trigger · job |\n| | Interface | `page` | app · page · view · form · dashboard · report · theme · book · doc |\n| **Superset (beyond Airtable)** | Access | `role` | permission · role · profile · sharing |\n| | Intelligence | `agent` | agent · tool · skill |\n| **Edge (cross-cutting)** | Integration | `datasource` | datasource · connector · webhook |\n\n- **Integration is a connective edge, not a 7th peer** — its types cross-cut Data/Automation, so each gets a primary home + a documented secondary (no duplicate listings).\n- **Anchor per pillar + progressive disclosure** — show six pillars and one anchor type each; the full 27 are one expand away. Never flat.\n\n## Single source of truth\n\nA spec `METADATA_CATEGORY` map that Studio nav, `os` stats, the docs reference, and the showcase **Start Here** all **derive** from — so they stop disagreeing, and the build agent gains a canonical category to reason with.\n\nDocs-only; all cross-ADR links verified.\n\nFollow-ups (separate PRs, per your call): encode `METADATA_CATEGORY` in spec; regroup Studio nav; align `os` stats; extend Start Here to the six-pillar map.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

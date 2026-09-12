@@ -1,0 +1,32 @@
+{
+  "number": 2450,
+  "kind": "pull_request",
+  "title": "fix(auth): restore admin gate on OAuth toggle-disabled after ADR-0068",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-29T02:58:58Z",
+  "updated_at": "2026-06-29T03:06:50Z",
+  "closed_at": "2026-06-29T03:06:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-29T03:06:47Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2450",
+  "body": "## What\n\nADR-0068 (`a3a5abff8`) stopped the server `customSession` from synthesizing `user.role = 'admin'`. Canonical roles now arrive in `user.roles[]` (`platform_admin` / `org_*`) with `user.isPlatformAdmin` as a derived alias.\n\nThe OAuth-client enable/disable route — `POST {basePath}/admin/oauth-application/toggle-disabled` in `auth-plugin.ts` — was **missed in that migration** and still gated on:\n\n```ts\nif ((session.user as any).role !== 'admin') { /* 403 */ }\n```\n\nSince `user.role` is no longer synthesized, this now **rejects even platform admins** (unless the admin-plugin literally stored the `'admin'` scalar on their row). The sibling `/admin/unlock-user` route in the same file was migrated correctly; this one was not.\n\n## Fix\n\nGate on the same three canonical signals as `/admin/unlock-user`:\n\n```ts\nconst u: any = session.user;\nconst isAdmin =\n  u?.isPlatformAdmin === true ||\n  (Array.isArray(u?.roles) && u.roles.includes('platform_admin')) ||\n  u?.role === 'admin';\n```\n\nAlso corrects the stale `customSession()` doc comment in `auth-manager.ts` that still described the removed `user.role = 'admin'` overwrite (the very pattern downstream consumers copied).\n\n## ⚠️ Behavior / posture note for reviewers\n\nThe pre-ADR-0068 `role === 'admin'` check implicitly allowed **active-org owners/admins** too (they were synthesized to `role='admin'`), as the old comment stated. This fix makes the gate **platform-admin-only**, matching the sibling `unlock-user` route and treating OAuth-client management as an instance-level concern. If org owners/admins are intended to manage OAuth clients, add `org_owner`/`org_admin` to the `roles[]` check — flagging explicitly so this is a conscious decision rather than a silent change.\n\n## Verification\n\n- `@objectstack/plugin-auth` build + DTS type-check clean.\n- Changeset included (`patch`).\n\n## Companion\n\nobjectui [#2063](https://github.com/objectstack-ai/objectui/pull/2063) fixes the same missed migration on the client (4 views gating on `user?.role === 'admin'`)."
+}

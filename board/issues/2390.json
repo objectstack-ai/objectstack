@@ -1,0 +1,35 @@
+{
+  "number": 2390,
+  "kind": "pull_request",
+  "title": "feat(auth): enforced MFA via the session-validation gate (ADR-0069 D3, P1)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T16:25:07Z",
+  "updated_at": "2026-06-27T16:35:28Z",
+  "closed_at": "2026-06-27T16:35:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T16:35:26Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2390",
+  "body": "ADR-0069 P1 (tracking #2281, #2375): **enforced MFA (D3)** — completes the session-validation gate, reusing the `authGate` seam shipped in #2388 (password expiry).\n\n## What\nWhen `mfa_required` (new `auth` toggle) is on, an authenticated user **without TOTP enrolled** is blocked from protected REST resources with `403 MFA_REQUIRED` once their `mfa_grace_period_days` (default 7) window elapses — while `/two-factor/*` enrollment stays reachable so they can comply.\n\n- **plugin-auth**: `computeAuthGate` gains an MFA branch (un-enrolled + grace elapsed → `MFA_REQUIRED`); `mfa_required_at` (the grace clock) is stamped lazily on the first required-but-unenrolled session; `isAuthGateActive()` also trips on `mfa_required`.\n- **bind**: `mfa_required` + `mfa_grace_period_days`; enabling `mfa_required` **force-enables the `twoFactor` plugin** so the enrollment endpoints exist (otherwise gated users couldn't comply).\n- **platform-objects**: new `sys_user.mfa_required_at` column.\n- **service-settings**: new Multi-factor settings group.\n\nDefault-off / additive; ADR-0049 (enforcement ships with the setting). The `/two-factor/*` + `change-password` paths are already allow-listed by the core gate helper.\n\n## Verification\n- **Unit**: plugin-auth 191 + service-settings 129 + platform-objects 63 + core 299 + rest 140 green; full build incl. strict DTS green. New tests: MFA gate (grace elapsed/within/null-stamp/enrolled/grace-0) + bind (force-twoFactor, clamp).\n- **Live dogfood** (`mfa_required` + grace 7, un-enrolled user):\n  - within grace → **not** gated (`mfa_required_at` stamped)\n  - past grace → `403 MFA_REQUIRED`\n  - `/two-factor/enable` reachable (200, totpURI) while blocked — remediation open\n  - after enrollment (`two_factor_enabled`) the gate lifts; native better-auth 2FA verification takes over\n  - admin within grace → **not** falsely blocked\n\n## Follow-ups (tracked in #2375)\n- **objectui**: Console must render a TOTP-enroll prompt on `403 MFA_REQUIRED` (otherwise flipping the toggle on shows errors instead of a guided enroll). Backend is default-off so existing envs are unaffected.\n- Per-org `sys_organization.require_mfa`; the dispatcher/MCP gate path.\n\n## ADR-0069 P1 — now complete\n✅ D1 HIBP (#2361) · ✅ D2 lockout+rate-limit (#2365) · ✅ D1 complexity (#2368) · ✅ D1 history (#2371) · ✅ D1 expiry + gate (#2388) · ✅ **D3 enforced MFA (this PR)**.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

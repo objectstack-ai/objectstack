@@ -1,0 +1,33 @@
+{
+  "number": 2319,
+  "kind": "pull_request",
+  "title": "chore(crm): remove the AI agent (service-ai is an enterprise capability)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-25T05:30:33Z",
+  "updated_at": "2026-06-25T05:37:59Z",
+  "closed_at": "2026-06-25T05:37:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-25T05:37:57Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2319",
+  "body": "## Why\n\nSame as the showcase (#2317): `@objectstack/service-ai` is an enterprise capability, so the open-source CRM example shouldn't define an AI agent that requires it.\n\n## What\n\n- Delete `src/agents/` (`SalesAssistantAgent` + `DealManagementSkill` + `LookupContactTool`) and remove the `agents` / `skills` wiring from `objectstack.config.ts`, plus the now-empty, unused `referenceMetadata` export that only held the AI tool.\n- Remove the `@objectstack/service-ai` dependency (reverts #2311's crm addition).\n\n## Verification (worktree, fresh runtime)\n\n- `tsc --noEmit` clean; **all 29 crm tests pass** (`smoke.test.ts` doesn't assert agents, so no test change needed).\n- Boots as a CE shape: `services.ai: { enabled: false, status: \"unavailable\" }`, `/api/v1/ai/agents` → `404`, AIService not in the plugin list.\n\nWith this, both open-source examples (showcase + crm) are Community-Edition-shaped — no AI.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

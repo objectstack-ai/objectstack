@@ -1,0 +1,33 @@
+{
+  "number": 2422,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0077 — authoring-surface boundary (hook / flow / validation)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-28T10:39:25Z",
+  "updated_at": "2026-06-28T10:44:56Z",
+  "closed_at": "2026-06-28T10:44:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-28T10:44:54Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2422",
+  "body": "## What\n\nAdds **ADR-0077** — names the long-term boundary between **hook**, **flow**, and **validation rule** for an AI-authored platform.\n\nTriggered by the review question *\"now that flow is this capable, is hook metadata still necessary, and when should each be used?\"* Answer: **yes, hook stays** — it uniquely owns the in-transaction write path (rewrite + veto) and the read path (`beforeFind`/`afterFind`), neither of which flow can express by construction.\n\n## Decisions\n\n1. **Route by intent, not mechanism** — reject→validation rule; rewrite/transactional→hook; read interception→hook; after-the-fact multi-step/approval/schedule/webhook→flow; complex hot-path→hook escape hatch.\n2. **Tier by audience** — validation/flow are business-legible; hook is deliberately not. (`after-*` side effects go to flow if ops may ever want to change them, else hook.)\n3. **Verifiability tier = friction tier** — declarative surfaces are `os build`-provable (lower friction); a **hook body is the only non-provable surface → always human-reviewed** (ties to ADR-0038 / ADR-0033 draft-gating).\n4. **Loud-not-silent** — v1 ships two `os build` lints so the named failure mode becomes a build error instead of a silent runtime no-op.\n\n## Code-grounded fact\n\n`record-before-*` flows **cannot rewrite or veto the triggering write**: the `record_change` trigger discards the flow output and swallows its errors by design (*\"a flow failure must NEVER break the CRUD write that triggered it\"*); flow CRUD nodes don't thread the transaction, and ADR-0034's ALS ambient-tx doesn't survive `setImmediate`. The \"visual write-time gate\" belongs to validation rule (veto) / hook (rewrite), never a before-flow.\n\n## Non-goals (explicit)\n\nDo **not** extend record-change flow to mutate / veto / join-the-transaction — that re-creates Salesforce's order-of-execution swamp and hands the AI more overlapping ways to express one intent.\n\n## Scope\n\nDocs-only (one new ADR). The two `os build` lints and the skill decision-tree updates are recorded as follow-ups, not in this PR.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

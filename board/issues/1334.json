@@ -1,0 +1,33 @@
+{
+  "number": 1334,
+  "kind": "issue",
+  "title": "[portal] 通知通道声明（email/in_app/web_push）+ 品牌继承（GAP-4 of #1294）",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T06:47:30Z",
+  "updated_at": "2026-06-27T14:31:29Z",
+  "closed_at": "2026-06-27T14:31:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1334",
+  "body": "## 现象\n#1294 spec 描述 portal 是「UI 投影」，但 portal 用户接收通知是核心场景，spec 完全没声明。\n\n## 复现\n1. 客户在 portal 提单 → 客服在 console 回复\n2. 客户怎么知道有回复？email？站内？digest？模板作者得在哪里声明？\n3. spec 只字未提\n\n## Workaround\n模板在 view/object 上挂触发器手写 email 模板，绕过 portal 元数据，结果 portal 切换主题/品牌时邮件没跟着改。\n\n## 分阶段建议\n**M2/M3**：`PortalSchema` 新增 `notifications`:\n\n```ts\nnotifications?: {\n  channels: ('email' | 'in_app' | 'web_push' | 'sms')[];\n  digestPolicy?: 'realtime' | 'hourly' | 'daily';\n  emailFromName?: string;                          // e.g. \"Acme Support\"\n  emailFromAddress?: string;                       // e.g. \"support@acme.com\"\n  emailTemplateRef?: string;                       // 引用现有 EmailTemplate 元数据\n  brandedFromTheme?: boolean;                      // logo/颜色继承自 portal.theme\n  unsubscribeAllowed?: boolean;\n};\n```\n\n绑定到 portal 是因为「同一对象的同一事件，在不同 portal 通知样式可能不同」（客服内部 vs 客户外部）。\n\n## 验收\n- 客户回复工单 → 客户收到带 portal logo + 颜色的邮件\n- 客户在 in-app 看到红点\n- 客户可关闭某 portal 的通知而不影响其它\n\n## 关联\n- #1294\n- #1331（GAP-1，与 ephemeral token 共享通知发送链路）\n"
+}

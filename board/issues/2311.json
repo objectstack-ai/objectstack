@@ -1,0 +1,35 @@
+{
+  "number": 2311,
+  "kind": "pull_request",
+  "title": "feat(cli): make the AI service opt-in via a declared dependency (Community-Edition support)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-25T01:07:54Z",
+  "updated_at": "2026-06-25T02:39:04Z",
+  "closed_at": "2026-06-25T02:39:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-25T02:39:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2311",
+  "body": "## Why\n\nA self-host **Community Edition** runtime (framework + the MIT console, without the cloud AI package) should serve **no AI** but still support **MCP**. Today it can't: the CLI auto-registers the headless `AIServicePlugin` whenever the `ai` tier is enabled (default) and `@objectstack/service-ai` is merely **resolvable**. In a workspace/monorepo the package is hoist-resolvable even when an app doesn't declare it, so **every** app gets the AI service — discovery reports `services.ai: available` and the agent runtime serves any metadata-defined agents — even CE apps that ship no AI.\n\n(Surfaced from the objectui side: the console gates its AI UI on the live agent catalog, but a CE runtime still reported `services.ai` available with agents served, so the AI surface didn't hide.)\n\n## What\n\n**1. AI is opt-in via a declared dependency** (`packages/cli/src/commands/serve.ts`). Auto-register the AI service only when the host app declares `@objectstack/service-ai` **or** `@objectstack/service-ai-studio` — gating on a *declared* dep, not mere resolvability, so it's reliable in a monorepo.\n\n```js\nconst wantsAiService =\n  hostDeclaresDependency('@objectstack/service-ai')\n  || hostDeclaresDependency('@objectstack/service-ai-studio');\nif (!hasAIPlugin && tierEnabled('ai') && wantsAiService) { … }\n```\n\n- CE app declares **neither** → no AI service, no agents, `services.ai: { enabled:false, status:'unavailable' }` → the console hides its AI surface.\n- **MCP unaffected** — separate capability (`requires: ['mcp']`), no `service-ai` dependency, bridges data/metadata regardless; only *optionally* bridges the AI tool registry when the `ai` service is present.\n- **Cloud path fixed** — AI Studio attaches personas via the base service's `ai:ready` hook, so declaring Studio now implies (and loads) the base service. Previously a Studio-only app would have loaded neither.\n- `app-showcase`/`app-crm` now declare `@objectstack/service-ai` (they ship AI agents).\n\nFor real standalone apps (outside this monorepo) this is a **no-op** — they already had to declare deps to resolve them. Only in-monorepo apps relying on hoisting were affected (the two examples, now fixed).\n\n**2. `config.tiers` is now honored** (`packages/spec/src/stack.zod.ts`). `ObjectStackDefinitionSchema` gains a `tiers` field, so `defineStack` no longer strips it. `config.tiers` (e.g. a list **without** `ai`) now actually overrides the `--preset` default — previously silently dropped by schema validation, which made the `--preset` help text (\"overridden by config.tiers if set\") inaccurate. A second, in-place way to disable AI without touching dependencies.\n\n## Verified end-to-end (isolated build, fresh runtime)\n\n| Scenario | `services.ai` | `/api/v1/ai/agents` | AIService | MCP |\n|---|---|---|---|---|\n| CE — declares neither | `enabled:false, \"unavailable\"` | `404` | not loaded | loads + serves (`OS_MCP_SERVER_ENABLED=true` → `401` auth-gate = live) |\n| declares `service-ai` | `enabled:true, \"available\"` | serves `showcase_assistant` | loaded | — |\n| declares **only** `service-ai-studio` | `enabled:true, \"available\"` | `200` | loaded (base, for `ai:ready`) | — |\n| `config.tiers` without `ai` (service-ai declared) | `enabled:false, \"unavailable\"` | `404` | **not loaded** (tier wins) | — |\n\n`@objectstack/cli` + `@objectstack/spec` build clean (`tsc`). Changeset included (both `minor`).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

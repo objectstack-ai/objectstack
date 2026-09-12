@@ -1,0 +1,36 @@
+{
+  "number": 2470,
+  "kind": "pull_request",
+  "title": "feat(spec,lint): ADR-0081 — kind:'html' (rename) + trusted kind:'react' tier",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-30T04:01:06Z",
+  "updated_at": "2026-06-30T05:26:22Z",
+  "closed_at": "2026-06-30T05:26:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-30T05:26:20Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2470",
+  "body": "## Summary\n\nADR-0081 splits the AI page-authoring surface (ADR-0080) into **honest tiers**. ADR-0080's `kind:'jsx'` oversold itself — authors expected \"JSX\" to mean any HTML + any JS, which a constrained parse-never-execute model cannot do. This separates the two:\n\n- **`kind:'html'`** — the constrained, parse-never-execute tier renamed to match what it is (HTML + Tailwind + registered components). `'jsx'` kept as a **deprecated alias** so already-saved pages keep loading.\n- **`kind:'react'`** — a new **trusted** tier whose `source` is real React, executed at render in the main React tree by `@object-ui/react-runtime`, gated behind a host capability (default OFF, enterprise/private only). Security = **trust + human review**, not a sandbox.\n\n### Changes\n- **`@objectstack/spec`** — `PageSchema.kind` → `enum(['full','slotted','html','react','jsx'])`; `source`/`kind` describes updated; the ADR-0078 completeness gate now requires a non-empty `source` for `html`/`react`/`jsx`.\n- **`@objectstack/lint`** — `validate-jsx-pages` lints `html`/`jsx` (constrained parse) and **skips** `react` (real JS would false-error the constrained parser). +tests for both.\n- **examples** — `command-center` page moves to `kind:'html'`.\n- **docs** — ADR-0081.\n\n### Verification\n- spec: 6650 tests green; forced `dist` rebuild (incl. strict DTS) clean.\n- lint: 89 tests green (incl. new `html` validated / `react` skipped cases).\n- `@objectstack/example-showcase` typecheck clean against the new `kind` type.\n\nPairs with objectui **#2105** (the runtime + renderer + capability gate + the full HTML tag set, browser-verified through the real PageRenderer).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

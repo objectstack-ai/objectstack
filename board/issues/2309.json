@@ -1,0 +1,33 @@
+{
+  "number": 2309,
+  "kind": "pull_request",
+  "title": "fix(mcp): make remote /api/v1/mcp data plane work for external agents",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T18:01:46Z",
+  "updated_at": "2026-06-24T18:13:32Z",
+  "closed_at": "2026-06-24T18:13:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T18:13:30Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2309",
+  "body": "## Summary\n\nThe remote MCP HTTP surface (ADR-0036, `/api/v1/mcp`) was **non-functional for external agents** — found via local end-to-end testing. Three bugs, all the same family: **the MCP route resolves data services differently (and more buggily) than REST**, so a key that authenticates on REST was rejected on MCP, standard MCP clients couldn't connect at all, and writes crashed.\n\n| # | Symptom | Root cause |\n|---|---|---|\n| 1 (P0) | Valid api-key → `401` on `/api/v1/mcp`, **same key works on REST** | `resolveExecutionContext`'s `getQl` used scoped `resolveService('objectql', envId)`, which in the multi-env runtime returns an instance that can't see the env's `sys_api_key` rows → key never resolves. REST resolves identity via `kernel.getServiceAsync('objectql')` directly (the same gotcha `handleActions` works around). |\n| 2 | `Authorization: Bearer <key>` rejected | `extractApiKey` only accepted `X-API-Key` / `ApiKey`. Remote MCP clients (Claude Desktop / Cursor / Claude Code) send the key as a Bearer per the MCP spec. |\n| 3 | `create/update/delete_record` → `ql.insert is not a function` | `buildMcpBridge` passes `context.dataDriver` (a **raw** db driver in the multi-env runtime) as `ql`; `callData` writes called `ql.insert/update/delete` directly. Reads worked only because query/get prefer `protocol.findData/getData`. |\n\n## Changes (4 files, +74/-15)\n\n- **`runtime/http-dispatcher.ts` — `resolveExecutionContext` getQl**: prefer `this.kernel.getServiceAsync('objectql')`, fall back to the scoped path. Aligns MCP identity resolution with REST.\n- **`core/security/api-key.ts` — `extractApiKey`**: also accept `Authorization: Bearer osk_<key>` (prefix-gated). A better-auth session Bearer never carries the `osk_` prefix, so the session path is unaffected.\n- **`runtime/http-dispatcher.ts` — `callData` create/update/delete**: route through `protocol.createData/updateData/deleteData` (mirroring the read paths and REST) before falling back to `ql`.\n- Tests updated/added for the new Bearer behaviour.\n\n## Validation\n\nLive, on a local isolated stack (cloud + multi-tenant objectos runtime, real env, real `sys_api_key`):\n\n- `tools/list` `401 → 200` with **both** `X-API-Key` and `Authorization: Bearer`\n- `create_record` succeeds (was `ql.insert is not a function`); `query_records` / `get_record` work\n- `sys_*` objects stay fail-closed; no-auth and bad-key stay `401`\n- REST data/meta unaffected (no regression)\n\nUnit: `@objectstack/mcp` 44/44 · `core` api-key 10/10 · `runtime` (mcp / exec-context / keys / kernel-resolver) 41/41.\n\n## Follow-ups (not in this PR)\n\n- HTTP MCP surface exposes **no aggregate tool** (stdio-only) — agents must page+count client-side.\n- `query_records` passes `where` through to `protocol.findData`/objectql, but the **tool description only documents equality** — agents won't discover operator/range filters. Worth enriching the tool schema.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

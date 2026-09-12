@@ -1,0 +1,36 @@
+{
+  "number": 2440,
+  "kind": "pull_request",
+  "title": "feat(lint,cli): os build gate for kind:'jsx' page source (ADR-0080 M3b②)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-29T02:18:09Z",
+  "updated_at": "2026-06-29T02:24:29Z",
+  "closed_at": "2026-06-29T02:24:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-29T02:24:26Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2440",
+  "body": "ADR-0080 **M3b②** — the author-time gate. `os validate` / `os build` now parse a `kind:'jsx'` page's `source` via `@objectstack/sdui-parser` (new `validateJsxPages` lint rule), so malformed JSX **fails loudly at author time** (ADR-0078) instead of being stored and only breaking at render — alongside the existing expression / widget / styling gates.\n\nScope: **parse-level** — syntax, tag matching, forbidden constructs (event handlers, `dangerouslySetInnerHTML`). Full component/prop whitelist validation arrives once the registry **manifest** is threaded through `compile()` (the cross-repo manifest-artifact pipeline — the remaining M3b piece). This also makes `@objectstack/sdui-parser` a consumed (non-inert) package.\n\nVerified: `validateJsxPages` unit checks (valid passes; empty/malformed/forbidden flagged at the `source` path; non-jsx ignored). Lockfile + changeset included; `@objectstack/lint` gains a `@objectstack/sdui-parser` dep.\n\n**Still remaining (true M3b tail, needs cross-repo infra):** ship a serialized component manifest to the gate for full prop validation, and have `@object-ui/sdui-parser` re-export this package once published.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

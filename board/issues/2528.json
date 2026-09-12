@@ -1,0 +1,33 @@
+{
+  "number": 2528,
+  "kind": "pull_request",
+  "title": "test(dogfood): runtime proof for ADR-0085 semantic roles over the served pipeline",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-03T02:35:44Z",
+  "updated_at": "2026-07-03T02:40:49Z",
+  "closed_at": "2026-07-03T02:40:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-03T02:40:47Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2528",
+  "body": "Solidifies the one-off browser verification of the ADR-0085 chain (#2521 / objectui#2168) into a permanent regression guard, in the `field_zoo` (#2005) tradition.\n\n## Fixtures\n`showcase_semantic_zoo` (canonical: `highlightFields` + `stageField: 'status'` + `fieldGroups` with `collapse: 'collapsed'`) and `showcase_semantic_zoo_legacy` (deprecated: `compactLayout` + `stageField: false`, with a `status`-named field that trips the stepper heuristic if suppression ever leaks).\n\n## Assertions (real HTTP against the booted showcase app)\n1. Canonical spellings served verbatim **+ compactLayout transition mirror** — the mirror assertion is deliberately load-bearing: the PR that retires the alias must delete it, so a red here after retirement = a missed consumer.\n2. Deprecated `compactLayout` aliases onto `highlightFields` when served.\n3. `stageField: false` arrives as a **strict** `false` — guards the falsy-check bug class objectui#2168 fixed.\n4. Served metadata × shared `deriveFieldGroupLayout` (§5) = declared order, collapse passthrough, trailing ungrouped bucket.\n5. Fixtures are real writable objects (create + read-back round-trip).\n\n## Verification\n- New test 5/5 green; full dogfood suite 36 files / 181 tests green (no disturbance).\n- **Red-proof**: removing `stageField: false` from the fixture turns assertion 3 red (verified, then restored).\n- `examples/app-showcase` typecheck green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

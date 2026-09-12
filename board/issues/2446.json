@@ -1,0 +1,32 @@
+{
+  "number": 2446,
+  "kind": "pull_request",
+  "title": "feat(lint,cli): JSX gate full validation via manifest (ADR-0080 M3b①)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-29T02:31:12Z",
+  "updated_at": "2026-06-29T02:42:03Z",
+  "closed_at": "2026-06-29T02:42:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-29T02:42:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2446",
+  "body": "ADR-0080 **M3b①** — the manifest consumption seam. The `os build` / `os validate` JSX gate (#2440) now upgrades from parse-level to **full component/prop validation** when a `sdui.manifest.json` is present at the project root: unknown component, missing/wrong prop, bad enum, and binding sites — via `@objectstack/sdui-parser`'s `compile()`. Without a manifest it falls back to parse-level (syntax/structure/forbidden constructs), so nothing regresses.\n\nVerified: `validateJsxPages` with a manifest catches unknown-component + missing-required and passes a valid page; without a manifest it stays parse-level. No new deps (node builtins).\n\n**Remaining (the genuinely cross-repo bit):** *generating + shipping* the manifest — the registry's public tier (`getPublicConfigs`, objectui) serialized into `sdui.manifest.json` and made available to the build. That's a CI/release step (boot registry → emit JSON), plus the eventual `@object-ui/sdui-parser` re-export once `@objectstack/sdui-parser` is published. The consumption side is now in place and dormant-until-fed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

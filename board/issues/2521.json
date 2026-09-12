@@ -1,0 +1,35 @@
+{
+  "number": 2521,
+  "kind": "pull_request",
+  "title": "feat(spec): ADR-0085 semantic roles — stageField, highlightFields rename, detail block removal, collapse enum, shared fieldGroups derivation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-02T14:47:07Z",
+  "updated_at": "2026-07-02T15:53:05Z",
+  "closed_at": "2026-07-02T15:53:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-02T15:53:02Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2521",
+  "body": "Executes [ADR-0085](https://github.com/objectstack-ai/framework/blob/main/docs/adr/0085-object-semantic-roles-over-surface-hint-blocks.md) (#2520) in the spec layer. Companion objectui changes tracked separately (objectui#2149 revision + consumer switch).\n\n## What\n\n**`@objectstack/spec`**\n- **`stageField: string | false`** typed at top level — the lifecycle-role key renderers already read (`false` = declared non-linear, suppress stage heuristics).\n- **`compactLayout` → `highlightFields`** — ordered most-important fields (default list columns, cards, child previews, detail highlight strip). Old key remains a parse-time alias, preserved on output (ADR-0079 `displayNameField` pattern).\n- **`fieldGroups[].collapse: 'none' | 'expanded' | 'collapsed'`** replaces `defaultExpanded` **and** the UI-dialect `collapsible`/`collapsed` pair (both alias-mapped at parse for one minor). `visibleOn` removed — zero consumers anywhere (ADR-0049 enforce-or-remove).\n- **`detail` passthrough block removed** — zero authors across framework+objectui; the typed `hideReferenceRail` was a proven no-op for spec authors; `renderViaSchema` retires with the legacy monolith render path (separate objectui PR).\n- **New `deriveFieldGroupLayout(def)`** in `@objectstack/spec/data` — single source of the fieldGroups rendering semantics; retires the two near-identical copies in objectui (consumer-switch PR follows).\n- Liveness ledger updated accordingly.\n\n**`@objectstack/lint` + `os lint`**\n- New `validateSemanticRoles`: warns on dangling `Field.group`, declared-but-empty groups, unknown `stageField`/`highlightFields` names — Zod-valid-but-silently-inert pointers (ADR-0078 completeness gate).\n\n**`@objectstack/platform-objects` / examples**\n- 35 system objects + app-todo renamed `compactLayout:` → `highlightFields:` (behaviour unchanged via alias).\n\n## Verification\n\n- spec **6666/6666**, lint **112/112**, cli **440/440**, platform-objects **63/63** tests green\n- `check:api-surface` unchanged ✓ (no export removals — key-level schema changes only)\n- `check:liveness` green (all governed properties classified)\n- app-todo example typecheck green after migration\n\n## Versioning note\n\n`detail`/`visibleOn` removal is breaking on paper, dead in practice (zero-author evidence in the ADR). Shipped as **minor** under the documented dead-surface exception (PR #2272 precedent) — release owner may bump to major at version time.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

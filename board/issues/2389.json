@@ -1,0 +1,34 @@
+{
+  "number": 2389,
+  "kind": "pull_request",
+  "title": "feat(auth): surface \"SSO Providers\" in the Setup nav when SSO is enabled (ADR-0024 / cloud#551)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T16:19:59Z",
+  "updated_at": "2026-06-27T16:36:48Z",
+  "closed_at": "2026-06-27T16:36:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T16:36:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2389",
+  "body": "Final A5 polish for cloud#551 — adds an 'SSO Providers' entry to Setup → Access Control, gated on AuthManager.isSsoWired() (self-host OS_SSO_ENABLED + cloud per-env planAllowsSso). The register form (form#2386 bridge) renders all fields and posts 200. List view empty is a pre-existing better-auth-managed-object data-API behavior (sys_oauth_application/sys_account already in nav read total:0 too) — separate follow-up. Verified via browser E2E.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

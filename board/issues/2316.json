@@ -1,0 +1,32 @@
+{
+  "number": 2316,
+  "kind": "pull_request",
+  "title": "fix(examples): declare runAs:'system' on showcase webhook + approval-outcome flows (#1888)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-25T04:16:49Z",
+  "updated_at": "2026-06-25T04:22:11Z",
+  "closed_at": "2026-06-25T04:22:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-25T04:22:09Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2316",
+  "body": "Regression-audit follow-up to #2302 (flow `runAs` enforcement, #1888). Now that `runAs` is enforced, I audited every example-app flow for ones that would be silently under-privileged or that teach the wrong pattern as AI-authoring reference templates.\n\n## Audit result\n**No example flow regresses** under the enforcement (consistent with the green dogfood gate). They split cleanly:\n- **`system` (correct)** — cross-owner / no-user work: CRM `lead_qualification_conversion`, `renewal_reminder_flow`, `stale_opportunity_sweep`; todo escalation + recurring-task flows.\n- **`user` (correct)** — acts only on the trigger user's own accessible record: CRM `crm_convert_lead_wizard` (get/update the user's own lead), showcase `showcase_reassign_wizard` (edit a task the user launched the action on), `showcase_resilient_sync` (updates the same task the trigger user just completed).\n- **No CRUD nodes (unaffected)** — approval/script/notify-only flows (discount approval, high-value-deal, opportunity-won, etc.).\n\n## Fixes (2 showcase flows)\nTwo flows relied on **implicit** elevation and would teach the wrong pattern as templates:\n\n- **`showcase_inbound_task_webhook`** — an HMAC webhook (`type: 'api'`, **no authenticated user**) that creates a task. It only worked via the \"no identity → security-skipped\" fall-through. Now declares **`runAs: 'system'`** — the correct, explicit pattern for external ingest, and robust once the target object carries RLS.\n- **`showcase_invoice_signoff`** — the revert-on-reject `update_record` is an approval-**process** outcome, not an act of the submitter. **`runAs: 'system'`** so it lands regardless of whether the submitter still has edit rights on a \"sent\" invoice (mirrors how Salesforce approval field updates run as the process).\n\nNo behavioral change in the showcase itself (broad member perms — the gate was already green); this hardens the reference templates so they stay correct under stricter RLS and as patterns AI copies.\n\n## Verification\n- `pnpm --filter @objectstack/example-showcase typecheck` ✓\n- Full dogfood regression gate: **173 tests green** (35 files; includes the showcase boots + the #1888 `flow-runas` proof).\n\nExample-only change to a **private** package → no changeset needed.\n\nRefs #1888\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

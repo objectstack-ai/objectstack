@@ -1,0 +1,33 @@
+{
+  "number": 2490,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0082 — react-tier component contract governance",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-30T14:32:17Z",
+  "updated_at": "2026-06-30T14:39:25Z",
+  "closed_at": "2026-06-30T14:39:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-30T14:39:24Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2490",
+  "body": "## What\n\nA capstone ADR recording the governance model that the react-tier contract work converged on — now fully implemented and merged, but spread across many small PRs (framework #2478/#2480/#2482/#2484/#2485/#2488/#2489, objectui #2113/#2115) with no single document recording **why** it's built this way.\n\n## Why\n\nMultiple prior memos flagged \"架构结论(待 ADR)\" — the design was deferred to a decision repeatedly. Now that the chain is real and closed, this ADR captures it so future contributors don't re-litigate: where the source of truth lives, why the registry is only a subset, why conformance is a ratchet and not a per-PR gate, and what each gate enforces.\n\n## The model (recorded)\n\n- **Spec zod schema = the protocol source of truth.** The AI-facing contract (`react-blocks.md`) is **generated** from it — zero-drift, never hand-authored.\n- **Registry `inputs` = the designer palette (a subset).** spec-only is a *soft* signal (panel gap); frontend-only is the *actionable* one (undocumented extension).\n- **React-interaction props live in a thin overlay**, not the spec (callbacks / controlled / binding escape-hatches). Declaring a genuine binding there is how a frontend-only prop is *closed* → baseline now **0 frontend-only**.\n- **Conformance = a build-time baseline ratchet** (`build-console.sh`, warn-only), not a per-PR gate — the manifest only exists at console-build time.\n- **Authoring correctness = a hard gate at `os validate`** (missing-required → error, typo → warning).\n- **Dogfood golden page** proves the chain closes.\n\nPlus the alternatives rejected (copy props into spec / per-PR hard gate / hand-authored contract / registry-as-source).\n\nDocs-only; all cross-ADR links verified to resolve.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

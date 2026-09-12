@@ -1,0 +1,30 @@
+{
+  "number": 2409,
+  "kind": "issue",
+  "title": "perf(core): authenticated request issues ~16 sequential queries (duplicate authz + 3× localization) — add request-scoped memoization",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-28T02:08:47Z",
+  "updated_at": "2026-06-28T18:59:04Z",
+  "closed_at": "2026-06-28T18:59:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2409",
+  "body": "## Summary\n\nAn authenticated control-plane data-API read (`GET /api/v1/data/<object>`) issues **~16 sequential SQL queries**, of which **only 2 are the actual data** (the `find` + the pagination `count`). The other ~14 are auth/identity/settings/metadata overhead, and **several are exact duplicates within the same request**. Because the queries are sequential, latency = `query_count × per-query_RTT`. On Neon (us-east-1) at ~50ms warm round-trip, 16 sequential queries ≈ **800ms** of fixed, **row-count-independent** server time. This is the dominant cost behind the \"control plane feels slow\" reports — invisible to external probing.\n\n## Measurement\n\nBooted `apps/cloud` (control plane) locally on sqlite with `DEBUG=knex:query`, signed in, and issued **one** `GET /api/v1/data/sys_environment?$top=20` (returned 0 rows). The exact SQL sequence:\n\n```\n 1  select * from sys_session where token = ?              ┐ better-auth getSession\n 2  select * from sys_user where id = ?                    │\n 3  select * from sys_user_permission_set where user_id=?  │\n 4  select * from sys_jwks                                 ┘\n 5  select * from sys_member where user_id = ?             ┐ resolveAuthzContext (call #1)\n 6  select * from sys_user_role where user_id = ?          │\n 7  select * from sys_user_permission_set where user_id=?  │  ← dup of #3\n 8  select * from sys_user where id = ?                    ┘  ← dup of #2\n 9  select * from sys_setting where namespace = ?          ┐ resolveLocalizationContext\n10  select * from sys_setting where namespace = ?          │  (timezone / locale / currency\n11  select * from sys_setting where namespace = ?          ┘   — 3 single-row reads)\n12  select * from sys_metadata where type=? and state=? …  ┐ metadata\n13  select * from sys_metadata where type=? and state=? …  ┘  ← dup of #12\n14  select * from sys_user_permission_set where user_id=?     ← dup of #3/#7 (3rd time!)\n15  select * from sys_member where user_id = ?                ← dup of #5\n16  select * from sys_environment where organization_id in(?) ← the actual find\n17  select count(*) from sys_environment                      ← pagination count\n```\n\nStable across repeats (~15-16 queries); **object- and row-independent** (`sys_package` read = 15 queries; `sys_environment` with 0 rows still = 16). So this is fixed per-request overhead, not data volume.\n\n## Root causes (attributed)\n\n1. **No request-scoped memoization of the authz context.** `resolveAuthzContext()` (`packages/core/src/security/resolve-authz-context.ts:84`) reads `sys_member` (L136), `sys_user_role` (L149), optionally `sys_member` again (L159), `sys_user_permission_set` (L172). It is invoked **more than once per request** — from `packages/rest/src/rest-server.ts` and `packages/runtime/src/security/resolve-execution-context.ts` (and the better-auth getSession path independently re-reads `sys_user` + `sys_user_permission_set`). Nothing caches the result for the life of the request, so identity rows are re-queried 2-3× each.\n\n2. **`resolveLocalizationContext()` fans out into 3 single-row queries** (`resolve-authz-context.ts:307-309`): one each for `localization/timezone`, `localization/locale`, `localization/currency`. These could be a single `where namespace='localization'` read, and are near-static (cacheable). Note: the same `sys_setting where namespace=?` pattern also floods at **boot** (dozens of identical reads), suggesting settings have no cache layer at all.\n\n3. **`sys_metadata` read twice** per request (#12/#13), and `sys_jwks` read on every request (#4) rather than cached in memory.\n\n## Proposed fix\n\n- **Request-scoped identity/authz cache.** Resolve `{session, user, member, roles, permissionSets}` **once per request** (AsyncLocalStorage, or attach to the existing per-request `context`) and have all callers (`rest-server`, `resolve-execution-context`, security/org-scope plugins, better-auth bridge) read from it. Collapses #2/#3/#5/#7/#8/#14/#15 → ~4 unique queries.\n- **Collapse localization** into one `sys_setting where namespace='localization'` read, and cache it (TTL + invalidate-on-write). Big boot win too.\n- **Cache `sys_jwks` in memory** (invalidate on rotation) — it changes ~never.\n- **Memoize the per-request metadata read** (#12/#13).\n\nTarget: **~16 → ~6 queries** per authenticated data read → roughly halve the control-plane data-API latency on a remote Postgres, with no behaviour change.\n\n## Verification\n\nThe companion observability card (#2408, Server-Timing perf mode) would make this measurable in production directly: a `db;dur=X;desc=\"N queries\"` span would show the count drop. Until then, the `DEBUG=knex:query` local repro above is the regression check.\n\n## Relationship\n\n- Observability/measurement capability: #2408\n- This card: the actual N+1 / duplicate-query **fix**.\n"
+}

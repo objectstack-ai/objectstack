@@ -1,0 +1,32 @@
+{
+  "number": 2273,
+  "kind": "pull_request",
+  "title": "docs(dogfood-skill): pre-check vendored console build before declaring UI bugs",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T08:15:07Z",
+  "updated_at": "2026-06-24T08:15:48Z",
+  "closed_at": "2026-06-24T08:15:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T08:15:46Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2273",
+  "body": "## What\nAdds a §2 pre-check to the internal **dogfood-verification** skill: the `/_console` UI at :3000 is a *vendored objectui build* pinned by `.objectui-sha`, distinct from framework `dist`. A merged objectui fix — or even a bumped pin — is **not live until the vendored console is rebuilt** (the server keeps serving the old bundle). So a \"console/Studio UI bug\" found on the vendored console may already be fixed upstream.\n\nThe new bullet says: before declaring a console/Studio UI bug at :3000/_console, check it against current objectui source or a fresh/HMR console.\n\n## Why\nReal cost this session: an action-create dead-end found on the stale vendored :3000 console was **already fixed in objectui main** (`anchors.ts` createDefaults seeds a valid no-op body) — but the running build predated it. Verified after rebuild that action create now works. This pre-check would have skipped a full spawn-a-fix investigation.\n\nInternal `.claude/` tooling only — no published-package change, no changeset.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

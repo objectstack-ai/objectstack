@@ -1,0 +1,32 @@
+{
+  "number": 2519,
+  "kind": "pull_request",
+  "title": "fix(agents): guard resolves nearest existing ancestor dir (no fail-open)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-02T13:24:32Z",
+  "updated_at": "2026-07-02T15:14:56Z",
+  "closed_at": "2026-07-02T15:14:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-02T15:14:53Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2519",
+  "body": "Follow-up to #2517. `git -C \"$(dirname file)\"` fails when the edited file's parent dir doesn't exist yet (a Write creating a new nested directory), and `|| exit 0` then let the edit through on the shared checkout. Now the guard walks up to the nearest existing ancestor before resolving the repo — new-file-in-new-dir writes are guarded too. Mirrored in objectui#2160 / cloud#721. Tested: primary(existing & new-nested)→block, worktree→allow, non-repo→allow. Authored from a worktree.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1299,
+  "kind": "issue",
+  "title": "[P1] approval: single-step threshold only — no multi-stage / parallel / delegation / OOO",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:21:46Z",
+  "updated_at": "2026-06-27T14:30:01Z",
+  "closed_at": "2026-06-27T14:30:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1299",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 5 条（**P1**）。\n> 实证：`procurement`、`compliance`、`contracts` 三个模板的审批流均验证不足。\n\n## 现象\n\n平台审批流（`approval` flow 节点 / state machine guard）目前**仅支持单步阈值审批**，缺：\n\n- **多级串行审批**：金额 < X 部门主管 → < Y 财务总监 → < Z CEO\n- **并行 + 会签**：若干审批人必须全部通过 / 任意一人通过 / N 人之 M\n- **委派（delegation）**：A 临时把审批权限给 B\n- **OOO（out of office）**：A 标记不在岗，自动跳过 → 备选人\n- **撤回 / 重审**：发起人撤回、上级驳回到指定节点\n- **审批意见持久化**：审批人填的理由 / 附件\n\n## 复现\n\n```bash\ncd packages/procurement && pnpm dev\n# 创建一个金额 1,000,000 的请求 — 期望走 manager → finance → CEO 三级\n# 实际只能配置单一阈值，超过 X 全部转给一个人\n```\n\n## 当前 workaround\n\n模板侧硬写多 step state machine：\n\n```ts\nstates: { pending_manager, pending_finance, pending_ceo, ... }\n```\n\n把审批拆成业务状态，每一级写一个 flow。代价：\n\n1. 审批关系 hardcode 在模板里，客户改不了。\n2. 没有委派 / OOO 概念。\n3. 无审批意见结构化字段。\n4. 并行 / 会签写不出来。\n5. 撤回需要写自定义 flow。\n\n## 建议范围\n\n**M1：审批引擎**\n- 新对象 `approval_request` + `approval_step`（系统级）\n- 步骤定义：approver（user / role / formula）、`mode`（all / any / quorum:N）、`escalateAfter`（超时）、`onReject`（return-to / restart / fail）\n- 委派：`approval_delegation` 记录 + `approver` 解析时按链路\n\n**M2：流程节点**\n- Flow 新增 `request_approval` 节点：携带 `policy`、`payload`、`subject`，返回 `decision`\n- State machine guard 能引用最新决策\n\n**M3：审批 UI**\n- 标准化「我的待办」（依赖 #1 通知）\n- 审批面板：决策 + 意见 + 附件（依赖 #28）+ @ 其他人征求意见（依赖 #6）\n\n**M4：审批轨迹可视化**\n- 一条审批记录显示当前在哪一步 / 已完成 / 何人 / 何时 / 意见\n\n## 验收\n\n- [ ] `procurement` 模板把 hardcode 三级 state 替换为 `approval_policy: { steps: [...] }`\n- [ ] 支持串行 + 并行 + quorum 三种模式\n- [ ] 委派 + OOO 覆盖\n- [ ] 缺陷库 gap #5 标记为已解决\n\n## 关联\n\n- 依赖 #1（通知投递）\n- 推动 #20（OOO / 委派）的合并实现\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1882,
+  "kind": "issue",
+  "title": "[P0][security] PolicySchema is 100% dead — enforce or remove",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "priority:p0",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T06:53:14Z",
+  "updated_at": "2026-06-27T16:22:12Z",
+  "closed_at": "2026-06-27T16:22:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1882",
+  "body": "Part of the metadata liveness audit umbrella #1878 (P0 security cluster).\n\n## Problem\n`PolicySchema` is **100% dead**: password complexity, session idle/absolute timeout, `forceMfa`, IP allow-list (`trustedRanges`/`vpnRequired`), and audit retention/redaction are all parsed but enforced by **nothing**. It is not even registered as a metadata type. `better-auth` runs hardcoded defaults instead (`auth-manager.ts:458`), producing a **false sense of compliance** — an admin can author a strict policy and the system silently ignores it.\n\n## Decision required (enforce or remove)\n- **Enforce**: register `policy` as a metadata type, wire each group into its enforcement point (better-auth config for password/session/MFA, request middleware for IP allow-list, audit pipeline for retention/redaction).\n- **Remove**: delete `PolicySchema` from the spec so authors aren't misled, and document the actual (hardcoded) behavior.\n\nShipping it parsed-but-unenforced is a compliance/security liability and is not an acceptable end state.\n\n## Evidence\n- `docs/audits/2026-06-security-identity-property-liveness.md`\n- `auth-manager.ts:458` (hardcoded defaults)\n"
+}

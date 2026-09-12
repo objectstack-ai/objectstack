@@ -1,0 +1,33 @@
+{
+  "number": 2424,
+  "kind": "pull_request",
+  "title": "docs(agents): contract-first — fix the metadata, not the runtime (Prime Directive #12)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-28T10:43:26Z",
+  "updated_at": "2026-06-28T10:59:00Z",
+  "closed_at": "2026-06-28T10:58:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-28T10:58:59Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2424",
+  "body": "Codifies the principle behind the AI-flow `create_record` fix as **Prime Directive #12**.\n\n**The rule:** this is a metadata-driven framework — `packages/spec` is the one contract between metadata *producers* and the runtime/renderers that *consume* it. When metadata \"doesn't work,\" ask first whether it's spec-compliant and whether the fix is the long-term-correct direction. If the metadata is wrong, fix the **producer** and **reject it at authoring/publish** — do **not** add a lenient alias / `??` fallback in a consumer (node executor, REST layer, renderer) to tolerate off-spec input. A tolerant fallback fossilizes the wrong convention into a second de-facto contract, dilutes the spec, and hides the producer's bug. We own both ends, so Postel's law does not apply. Change the spec only when it's genuinely wrong — deliberately, with migration. The existing `cfg.filter ?? cfg.filters` / `cfg.objectName ?? cfg.object` fallbacks are debt, not a pattern to copy.\n\n**Worked example** (the origin of this rule): an AI-authored `create_record` used `fieldValues`/`today()`/`{{trigger.record.id}}` while the executor reads `fields`/`{TODAY()}`/`{record.id}`. Fix = correct the authoring skill + a publish-gate lint that rejects the wrong shape (cloud#688), **not** a `cfg.fields ?? cfg.fieldValues` runtime alias (framework#2419, rejected).\n\nOne of three sibling PRs adding the same principle to the framework / cloud / objectui AGENTS.md.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 2355,
+  "kind": "pull_request",
+  "title": "fix(cli): redirect Console on a bare/reserved platform host to the cloud console",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T06:14:03Z",
+  "updated_at": "2026-06-27T06:46:54Z",
+  "closed_at": "2026-06-27T06:46:53Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T06:46:53Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2355",
+  "body": "## The \"dead login face\"\n\n`objectstack serve` / `dev` serves the Console SPA on **any** host, but a bare/reserved platform host (the apex, or `www`/`app`/… — none bind a tenant env) has no env → its `/api/v1/auth/*` calls **404** → the login renders the misleading **\"Auth request failed with status 404\"** dead form. The unknown-hostname guard already passes reserved hosts through (`RESERVED` includes the empty/apex subdomain), so the SPA loads and breaks.\n\n## Fix\nIn the guard, when a reserved/apex platform host gets a `/_console*` request **and** the runtime is cloud-connected (`OS_CLOUD_URL` set), **302 it to the cloud control plane** (`OS_CLOUD_URL` + `/_console/`). A self-hosted single-env runtime (no `OS_CLOUD_URL`) keeps the prior pass-through; non-console paths (infra, health, `/api`) are unchanged; a real env host resolves to a tenant and is served normally.\n\n## Verification\nMirrors the same cleanup on the **cloud** `serve-node` path (objectos `server/index.ts`), which was **verified live**: bare `localhost/_console/login` → `302` → cloud console; `/api/v1/auth/*` still `404`; env host `/_console` → `200`. `@objectstack/cli` build green (DTS typecheck clean).\n\nFound while dogfooding the magic moment locally (`run-stack.sh --seed` boots objectos via `objectstack dev` → this guard). The cloud-side mirror is a separate cloud PR; a cloud `.framework-sha` bump consumes this.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

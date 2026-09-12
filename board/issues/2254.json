@@ -1,0 +1,35 @@
+{
+  "number": 2254,
+  "kind": "pull_request",
+  "title": "fix(spec): make page `regions` and component `properties` optional (unblock Studio non-list page creation)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T00:25:31Z",
+  "updated_at": "2026-06-24T00:37:19Z",
+  "closed_at": "2026-06-24T00:27:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T00:27:39Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2254",
+  "body": "## Problem\n\nFound by dogfooding the Studio page designer as a business user: **you cannot create a record / home / app page** — saving fails with `regions: Invalid type: expected record, received undefined` (×5), and there is no UI affordance to satisfy it. List pages create fine.\n\nTwo required-but-unauthorable fields are responsible:\n\n1. **`PageSchema.regions`** was required, but the \"New Page\" form has no region editor and list/interface pages don't use regions at all. This forced `regions: []` boilerplate on every page (see every `examples/app-showcase/src/pages/*.page.ts`) and a hard dead-end for record/home/app pages.\n2. **`PageComponentSchema.properties`** was the *real* gate. The create-form seeds a record page's layout from the bound object's synthesized default page (`buildDefaultPageSchema`), whose nodes carry their props at the **top level** rather than under `properties`. So every seeded block failed `regions.N.components.M.properties: expected record`. Many components (`record:activity`, `element:divider`, …) also legitimately carry no props.\n\n## Fix\n\n- `regions: z.array(PageRegionSchema).optional().default([])`\n- `properties: z.record(z.string(), z.unknown()).optional().default({})`\n- Drop `required: true` on the page form's `regions` repeater (`page.form.ts`)\n- Update the three tests that asserted the old contract\n\nSemantics are unchanged for existing pages: an empty `full` page falls back to the synthesized default layout, slotted pages compose via `slots`, list pages ignore regions. `: Page`-typed literals still get `regions`/`properties` via the defaults (`z.infer` keeps them non-optional).\n\n## Verification\n\n- ✅ Created a record page (`showcase_project`) through the Studio form end-to-end → saved → editor opened with the auto-seeded default layout (path stepper / details / discussion).\n- ✅ 802 spec UI tests pass; `@objectstack/spec` + `platform-objects` typecheck clean.\n\n> Note: the server validates page saves against `PageSchema` loaded from `dist`, so this also requires a `@objectstack/spec` rebuild for running servers to pick it up. The bundled console picks it up on its next objectui rebuild.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

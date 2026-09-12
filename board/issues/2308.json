@@ -1,0 +1,36 @@
+{
+  "number": 2308,
+  "kind": "pull_request",
+  "title": "fix(security): surface schedule/user-less flow runAs fail-open (#1888 follow-up)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T16:57:13Z",
+  "updated_at": "2026-06-24T17:51:34Z",
+  "closed_at": "2026-06-24T17:51:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T17:51:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2308",
+  "body": "## Problem\n\nFollow-up to #1888 (flow `runAs` enforcement). With `runAs` now enforced, a **schedule-triggered** flow with the default `runAs:'user'` has **no trigger user**. `resolveRunDataContext` returns `undefined`, so the CRUD nodes pass no ObjectQL `options.context`, and the security middleware — which **skips** when there is no identity (it delegates auth to the auth layer, `security-plugin.ts:343-349`) — runs the operation **UNSCOPED** (effectively elevated).\n\nAn author who left `runAs` at the `'user'` default expecting a *restricted* run silently gets an *unscoped* one. That is fail-open, and exactly the kind of \"security property that silently does the opposite of what it implies\" **ADR-0049** prohibits.\n\nKey architectural finding: a \"zero-authority user context\" does **not** fail closed — the middleware skips on no-identity by design. (And `report-schedule` is **not** a second fail-open: report-service uses an explicit `SYSTEM_CTX = { isSystem:true }`.)\n\n## Decision — Option 1 (author-time prevention + non-breaking runtime visibility)\n\nEmpirically, **2 of 3** first-party scheduled CRUD flows relied on the default, so **fail-closed (option 3) would break legitimate scheduled CRUD**. Silently elevating would hide author intent. A dedicated **service principal (option 2)** is the right long-term enforcement (attributable + scopable) but is M2 work. So:\n\n- **Author-time lint** (`@objectstack/cli`): new advisory rule `flow-schedule-runas-unscoped` — a schedule-triggered flow whose effective `runAs` is `user` (explicit or unset) and which performs a data op is flagged toward `runAs:'system'`. Catches it at compile time (most flows are AI-authored).\n- **Runtime warning** (`@objectstack/service-automation`): the engine emits one clear `[runAs]` warning per run when a user-mode run resolves no trigger identity and the flow touches data — the fail-open is **audible, not silent**. Behavior is otherwise unchanged (scheduled CRUD is not broken). The two `runContext` sites collapse into one `resolveRunContext`; new helpers `runIsUnscopedUserMode` / `flowTouchesData` / `DATA_NODE_TYPES` exported beside `resolveRunDataContext`.\n- **Spec describe** (`@objectstack/spec`): `FlowSchema.runAs` now states a scheduled run has no user → under `user` it runs unscoped → declare `system`.\n- **Example fixes**: `stale_opportunity_sweep`, app-todo `task_reminder` / `overdue_escalation` now declare `runAs:'system'` — they read/write across owners and were running unscoped by default.\n\n## Tests (all green)\n\n- **service-automation unit** (`crud-runas.test.ts`): engine warns **once** for a user-less user-mode data run; **silent** for `system`, for an identified user, and for a data-less flow; plus `runIsUnscopedUserMode` / `flowTouchesData` units. (221 pass)\n- **dogfood gate** (`flow-runas-schedule.dogfood.test.ts`): drives **user-less** runs through the real automation + security + data stack via `kernel.getService('automation').execute` — a `runAs:'user'` run **reads + writes an owner-scoped note a member cannot** (audibly), while `runAs:'system'` is the explicit, warning-free equivalent. (8 pass)\n- **cli lint** (`lint-flow-patterns.test.ts`): fires on schedule + user/unset + data node; silent for `system`, no-data, and non-schedule triggers. (35 pass)\n\nRefs #1888, ADR-0049.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

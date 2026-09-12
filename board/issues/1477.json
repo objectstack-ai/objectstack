@@ -1,0 +1,30 @@
+{
+  "number": 1477,
+  "kind": "issue",
+  "title": "Exotic chart families (heatmap/sunburst/candlestick/geo/word-cloud/…) — provide via opt-in renderer plugin",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-01T14:35:57Z",
+  "updated_at": "2026-06-27T14:31:31Z",
+  "closed_at": "2026-06-27T14:31:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1477",
+  "body": "## Background\nThe `ChartType` taxonomy was trimmed (framework #1471) to the ~27 families the default **Recharts** renderer can draw (incl. treemap/sankey added in objectui#1438). 11 families were removed because they need data shapes the platform doesn't model (OHLC → candlestick/stock; per-record distributions → box-plot/violin), geographic data (choropleth/bubble-map/gl-map), or a renderer Recharts lacks (sunburst, heatmap, word-cloud, waterfall).\n\n## Why not bundle ECharts in core\nEvaluated and rejected: ~1 MB engine for a handful of approximated charts, a second charting engine to maintain, and the showcase's single-value aggregate can't honestly feed candlestick/boxplot/geo/word-cloud anyway.\n\n## Proposal\nWhen there's real demand, add an **opt-in** `@object-ui/plugin-charts-echarts` package that registers ECharts-backed renderers (heatmap, sunburst, treemap, sankey, candlestick, boxplot, geo via registerMap, word-cloud via echarts-wordcloud) through the `ComponentRegistry`. Core stays lean; consumers install only if needed. Reintroduce the corresponding `ChartType` enum members at that point.\n\n## Prerequisite\nSome types also need a richer data/aggregate model (OHLC, distributions, geo) before they can render meaningfully — track alongside.\n\n_Spun out of the ChartType taxonomy trim (framework #1471)._"
+}

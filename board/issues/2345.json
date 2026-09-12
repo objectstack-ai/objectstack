@@ -1,0 +1,32 @@
+{
+  "number": 2345,
+  "kind": "pull_request",
+  "title": "fix(auth): resolve OIDC-gate session hook-order-independently (D5.1)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-26T12:07:19Z",
+  "updated_at": "2026-06-26T12:07:39Z",
+  "closed_at": "2026-06-26T12:07:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-26T12:07:25Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2345",
+  "body": "Follow-up to #2343. The gate before-hook resolved the subject only via `getSessionFromCtx`, which returns null in a global before-hook for a **bearer** request (the bearer plugin converts Authorization→session *after* this hook), so the gate was skipped (fail-open). Adds explicit token resolution (bearer / session-cookie token) + sys_session lookup, hook-order-independent.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

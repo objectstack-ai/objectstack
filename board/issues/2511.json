@@ -1,0 +1,33 @@
+{
+  "number": 2511,
+  "kind": "pull_request",
+  "title": "docs(builder-ui): document Automation/Interface as built + design Access/Settings (#2506)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-02T02:32:24Z",
+  "updated_at": "2026-07-02T02:37:37Z",
+  "closed_at": "2026-07-02T02:37:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-02T02:37:35Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2511",
+  "body": "Follow-up to ADR-0084 and the living `docs/design/builder-ui.md` (merged in #2503). Closes the remaining-pillars design tracked in #2506.\n\n## What\n\n- **Writeback** the Data pillar + shell sections to the **shipped** `StudioDesignSurface` reality: the field-edit affordance is the per-column **pencil** (a bare header click sorts — the grid is the runtime `ListView`); three pillars ship first (Access/⚙ pending); Save/Publish render per-pillar; the Interface rail is the app's real nav tree. Added an honest **Implementation status** note and per-surface **[built] / [designed]** markers.\n- Replace the §5 *\"to design\"* stub with **four real sections**:\n  - **§5 Automation [built]** — flow canvas (`FlowCanvas`) + node inspector + Runs peek.\n  - **§6 Interface [built]** — source+preview (`SchemaRenderer`) / structured canvas + component props.\n  - **§7 Access [designed]** — permission matrix (`PermissionMatrixEditor`) + role protocol form.\n  - **§8 Settings [designed]** — General (`app` form) + Advanced/Code (hooks), grouped by audience.\n- Each pillar gets an annotated HTML **mockup** under `builder-ui/` composed from `shell.css`, every region tagged `data-build=\"shell\"` or `data-reuse=\"<component>\"` (dashed = reused). Added the shared canvas / matrix / split / settings primitives to `shell.css`.\n\n## Scope\n\nDocs only. Deliberately **excludes** the unrelated `console-sha-drift-guard` changes present in the working tree — this PR is the six builder-ui doc files only.\n\nCloses #2506.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

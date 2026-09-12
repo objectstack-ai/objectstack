@@ -1,0 +1,33 @@
+{
+  "number": 2323,
+  "kind": "pull_request",
+  "title": "feat(auth): multi-org enablement — system-scoped adapter reads + onOrganizationCreated hook",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-25T09:45:21Z",
+  "updated_at": "2026-06-25T11:47:19Z",
+  "closed_at": "2026-06-25T11:47:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-25T11:47:17Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2323",
+  "body": "Two framework changes that together make cloud multi-org usable. Paired with cloud PR **objectstack-ai/cloud#507**.\n\n## 1. System-scoped adapter reads — fixes empty `organization.list()`\n\nA user who belongs to ≥1 org got an **empty** `GET /api/v1/auth/organization/list` (HTTP 200, `[]`), so the org switcher / Organizations page showed nothing — even with correct `sys_member` rows.\n\n**Root cause:** better-auth resolves a user's orgs by querying the `member` model through the ObjectQL adapter. Those `find/findOne/count` calls carry **no caller context**. The cloud control-plane org-scope read hook scopes `sys_member`/`sys_organization` by the caller's user id, **skipping only when `context.isSystem`** — so context-less adapter reads were filtered to zero. (The active-org session hook was unaffected — it reads via the raw control *driver*, bypassing the engine hook.)\n\n**Fix:** `withSystemReadContext(engine)` wraps a data engine so its reads (`find`/`findOne`/`count`) carry `context.isSystem: true` (merged; caller context wins on other keys). Applied in both `createObjectQLAdapterFactory` (prod) and the legacy `createObjectQLAdapter`. Writes untouched. Correct because better-auth already authenticated the session and scopes by its own where-clauses.\n\n## 2. `onOrganizationCreated` seam — born-with-environment for user-created orgs\n\nbetter-auth's org-plugin models (`organization`/`member`) don't fire core `databaseHooks`, so a host stack had no server-side seam to run side effects on org creation. Add an optional `onOrganizationCreated` config callback, invoked from the org plugin's `afterCreateOrganization` hook with `{ organizationId, userId, name, slug }`. Failure-isolated (org creation is never rolled back). The cloud control plane (#507) wires it to provision each new org's production environment — upholding its 1-prod-env-per-org \"born-with-env\" invariant for the 2nd+ org a user creates (the signup hook only covers the first org).\n\n## Verification\n\n- **Unit:** 124/124 plugin-auth tests pass, incl. new `withSystemReadContext` coverage (isSystem on reads, context merge, writes untouched).\n- **E2E** (local cloud control plane): `organization.list()` returns all of a user's orgs (console org switcher + page render them; switching active org works); creating a 2nd org via `createOrganization` provisions its `os-<id>` production env, immediately usable.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

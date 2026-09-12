@@ -1,0 +1,33 @@
+{
+  "number": 2358,
+  "kind": "pull_request",
+  "title": "test(dogfood): full package-lifecycle gate for package-first authoring (ADR-0070 D3/D4/D5)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T11:34:09Z",
+  "updated_at": "2026-06-27T14:08:42Z",
+  "closed_at": "2026-06-27T14:08:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T14:08:40Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2358",
+  "body": "## What\n\nExtends the ADR-0070 dogfood gate from the D1/D2 backstop alone to the **full package-lifecycle contract**, against the real booted stack.\n\nUntil now `package-first-authoring.dogfood.test.ts` only proved D1/D2 (the kernel rejects a runtime-only create into a read-only code package with `writable_package_required`). ADR-0070's other guarantee — *\"the package is the authoring & delete unit\"* (D3/D4/D5) — was only ever **live-verified by hand** (the ADR's `app.iojn` dogfood). This closes the Epic [#2278](https://github.com/objectstack-ai/framework/issues/2278) \"Dogfood gate\" item by automating that chain.\n\n## New coverage (3 added blocks, all green)\n\n- **D3/D4 full chain** — `create → bind → publish → editable → discoverable → delete-cascade`:\n  - create a draft into a writable base, assert it is *bound* (real `package_id`, never orphaned)\n  - publish, then re-publish an edit — the **editable** step is a direct guard for the #2252 read-only-after-publish trap (a writable base stays writable after it accrues registered objects)\n  - **discoverable** via `getMetaItems({ packageId })` — not lost in a null bucket\n  - **delete-cascade** via `deletePackage` empties the base\n- **D5 migration** — `reassignOrphanedMetadata` rebinds a legacy package-less row (the #2252/#1946 stopgap shape, `package_id = null`) onto a base\n- **D4 duplicate** — `duplicatePackage` clones ACTIVE items into a new base, re-namespacing object names and rewriting intra-package references\n\nRegressing `deletePackage` / `duplicatePackage` / `reassignOrphanedMetadata` now turns this red, alongside the original D1 backstop.\n\n## Notes\n\n- Test-only change to the private `@objectstack/dogfood` package → no changeset.\n- Asserts against the durable `sys_metadata` store (what every lifecycle method reads), so the checks are deterministic.\n- Local run: `5 passed (5)`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

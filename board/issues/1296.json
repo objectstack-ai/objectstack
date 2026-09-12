@@ -1,0 +1,34 @@
+{
+  "number": 1296,
+  "kind": "issue",
+  "title": "[P0] field-type: `file` field has no upload UI; no `attachment_list` type — attachments end-to-end blocked",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "enhancement",
+    "priority:p0"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:20:35Z",
+  "updated_at": "2026-06-27T14:30:00Z",
+  "closed_at": "2026-06-27T14:30:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1296",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 3 + 第 28 条（**P0，合并**）。\n> 实证发现自 `contracts` / `compliance` / `procurement` / `helpdesk` 4 个模板。\n>\n> 本 issue 把缺陷 #3（单文件字段无上传 UI）与 #28（附件 / 附件列表）合并处理：两者是同一组件能力的两个 step（单文件 → 多文件 + 拖拽 + 缩略图）。\n\n## 现象\n\n- `file` 字段类型存在于 spec 里，**但没有端到端可用的上传 UI**：表单 / 详情页里看不到「上传」按钮。\n- 没有「附件列表 / 多文件」字段类型：合同附件、整改证据、报销发票、客户截图全部无落地。\n- 即使勉强通过 API 上传到 storage，UI 也无法预览、下载、删除。\n\n## 复现\n\n```bash\n# contracts 模板 contracts_contract 对象上加：\n{ name: 'signed_pdf', type: 'file' }\n# pnpm dev 后打开记录详情页 — 字段呈现为空白或被吞掉，没有上传控件\n```\n\n## 当前 workaround\n\n- `contracts` 在 README 里写「附件请通过外部链接（OneDrive / Notion）记录 URL」。\n- `compliance` 把证据材料降级成 textarea，让用户贴链接。\n- `helpdesk` 直接不实现客户截图。\n\n均不符合企业级体验。\n\n## 业务覆盖矩阵\n\n| 场景 | 文件数 | 类型 | 备注 |\n|---|---|---|---|\n| 合同签署 PDF | 1-3 | pdf | 主合同 + 附录 |\n| 整改证据 | 多 | image / pdf / docx | 多次补充 |\n| 报销凭证 | 多 | image / pdf | 拍照为主 |\n| 客服截图 | 0-N | image | 高频 |\n| KB 文章配图 | N | image | 富文本内嵌 |\n| 工单附件 | 0-N | 任意 | 含日志 zip |\n\n## 建议范围\n\n**M1：`file` 单文件字段端到端**\n- spec：`file` 字段在 form / detail / list 都有渲染：拖拽 / 选择 / 进度 / 替换 / 下载 / 删除\n- storage 后端：用现成 `StorageServicePlugin`，先 local fs，扩展点支持 S3 / OSS\n- 显示：列表小 chip（含文件名 + size），详情大卡片（含预览 thumbnail）\n\n**M2：`attachment_list` 字段类型（多文件）**\n- spec 新增字段类型 `attachment_list`，子项是 `{ file, name, mime, size, uploadedBy, uploadedAt, caption? }`\n- UI：拖拽多文件 / 排序 / 单独删除 / 内联预览\n\n**M3：与 message composer 集成**\n- gap #26 的撰写器能内嵌附件输入（共用此组件）\n- 与富文本编辑器 #31 整合：可在文中插入图片\n\n**M4：访问控制**\n- 通过 sharing 规则继承父记录权限\n- 短时签名 URL 防止越权直链\n\n## 验收\n\n- [ ] `file` 字段在表单 / 详情 / 列表都可用\n- [ ] `attachment_list` 字段在 spec + UI 全栈打通\n- [ ] `helpdesk` 模板：message 上挂 attachment_list，客服可上传截图 + 客户能看到\n- [ ] `contracts`：signed_pdf 单文件字段，可上传、预览、下载\n- [ ] `compliance`：证据 attachment_list，外审 portal 只读访问\n- [ ] 缺陷库 gap #3 + #28 同时标记为已解决\n\n## 关联\n\n- 依赖 / 配合：#26 内联撰写器、#31 富文本（图片插入）、#21 外审 portal 只读访问\n- 涉及插件：`StorageServicePlugin`\n"
+}

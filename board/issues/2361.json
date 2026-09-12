@@ -1,0 +1,35 @@
+{
+  "number": 2361,
+  "kind": "pull_request",
+  "title": "feat(plugin-auth): reject breached passwords via HIBP (ADR-0069 D1, P1)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T12:15:16Z",
+  "updated_at": "2026-06-27T12:25:13Z",
+  "closed_at": "2026-06-27T12:25:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T12:25:10Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2361",
+  "body": "Implements the first slice of **ADR-0069 (enterprise authentication hardening)** — tracking issue #2281 — and establishes the **enforcement-wired pattern template** the rest of the ADR copies.\n\n## What\n\nAdds a `password_reject_breached` auth setting (default **off**) wired end-to-end to better-auth's native `haveibeenpwned` plugin: a k-anonymity range check on sign-up / change-password / reset-password. The plaintext password never leaves the process (only the first 5 SHA-1 hex chars hit `api.pwnedpasswords.com`).\n\nThe trace — *manifest setting → `bindAuthSettings` patch → `applyConfigPatch` → `buildPluginList` gate → live enforcement* — is the seam every subsequent ADR-0069 item reuses.\n\n| File | Change |\n|---|---|\n| `packages/spec/.../auth-config.zod.ts` | new `passwordRejectBreached` flag on `AuthPluginConfigSchema` |\n| `packages/services/service-settings/.../auth.manifest.ts` | \"Reject breached passwords\" toggle in the password-policy group (`global`, `manage_platform_settings`) |\n| `packages/plugins/plugin-auth/src/auth-plugin.ts` | `bindAuthSettings` maps the setting into plugin config |\n| `packages/plugins/plugin-auth/src/auth-manager.ts` | `buildPluginList` gates + mounts `haveIBeenPwned` (env `OS_AUTH_PASSWORD_REJECT_BREACHED` wins over config, mirroring `OS_AUTH_TWO_FACTOR`) |\n| `packages/cli/src/commands/serve.ts` | surface the knob in the `serve` boot config alongside `twoFactor` |\n\n## Why this slice first\n\nPer the issue's recommendation: HIBP is **native** (ships in better-auth 1.6.18, no new dep), **stateless** (no identity columns / migration / hot-path session logic), and its default check paths already match ADR-0069 D1. Lowest-risk, highest-value, and a clean template.\n\n## ADR-0049 compliance\n\nThe toggle ships **with** its enforcement — no false surface. Default-off and additive, so existing environments are unchanged on upgrade. No new identity fields are added (the `[custom]` D1 items — complexity / expiry / history — land in follow-up PRs that actually read them).\n\n## Verification\n\n- **Unit**: 102/102 plugin-auth + 128/128 service-settings green\n- **Build**: spec / service-settings / plugin-auth (incl. strict DTS) / cli green\n- **Live dogfood** (showcase, both sides of the gate):\n  - toggle **ON** → the same breached password `Password123!` is intercepted by the HIBP plugin on `/sign-up/email` (fail-closed when the corpus is unreachable)\n  - toggle **OFF** → the same breached password is accepted (HTTP 200)\n\n## Out of scope (follow-up ADR-0069 PRs)\n\nD1 `[custom]` complexity / expiry / history; D2 lockout + rate-limit; D3 enforced MFA; D7 identity fields; P2 sessions / IP allowlist / OIDC trust-list; P3 SAML.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 1306,
+  "kind": "issue",
+  "title": "[P1] templates: no first-class canned response / macro — every template rolls its own",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:24:02Z",
+  "updated_at": "2026-06-27T14:30:04Z",
+  "closed_at": "2026-06-27T14:30:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1306",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 32 条（**P1**）。\n\n## 现象\n\n平台**没有「Canned Response / Macro」一等公民**。重复发送的回复模板，每个模板都得自己造对象 + 自己造选择器 + 自己写 flow 插值，没有标准能力。\n\n适用场景：\n- 客服坐席每天打 30 遍「请提供您的订单号」\n- 销售标准化跟进话术\n- HR 标准 Offer 邮件 / 通知模板\n- 合规整改回执模板\n\n## 复现\n\n`helpdesk` 模板没有 canned response。坐席必须手敲或者自己维护笔记。\n\n## 当前 workaround\n\n- 自定义对象 `canned_response`，在撰写器里下拉选择并插入\n- 占位符要么硬编码字符串替换、要么走 flow 后台插值\n- 多语言无标准\n\n每个模板都重复造，且不能跨模板复用。\n\n## 建议范围\n\n**M1：系统级 canned response**\n- 新对象 `system.canned_response`：`{ id, label, body (rich), category, scope: 'global' | 'team' | 'user', variables: [...] }`\n- 与具体业务对象解耦：能用在 `helpdesk_message`、`crm_activity`、`hr_offer` 任意 long_text 字段\n\n**M2：占位符**\n- `{{customer.name}}` / `{{ticket.ticket_number}}` 渲染时按上下文解析\n- 缺值高亮提示\n\n**M3：撰写器集成**\n- 内联消息撰写器（#26）下拉「Insert Canned Response」\n- 类别筛选 / 关键词搜索 / 最近使用\n\n**M4：多语言**\n- 一个 canned response 支持多 locale 文本\n- 按当前 user / customer 的 locale 选\n\n## 验收\n\n- [ ] system 级 canned_response 对象 + 撰写器集成\n- [ ] `helpdesk` 模板内置 5 条示例 + 占位符 + zh-CN/en 双语\n- [ ] 缺陷库 gap #32 标记为已解决\n\n## 关联\n\n- 依赖 #26（撰写器）才有用武之地\n- 配合 #31（富文本格式）\n"
+}

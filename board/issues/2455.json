@@ -1,0 +1,32 @@
+{
+  "number": 2455,
+  "kind": "pull_request",
+  "title": "feat(spec):detail 块补 typed stageField 键",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-29T04:22:27Z",
+  "updated_at": "2026-06-29T14:04:08Z",
+  "closed_at": "2026-06-29T14:04:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2455",
+  "body": "## 问题\n\nobjectui 详情页 synth(`@object-ui/plugin-detail` 的 `buildDefaultPageSchema` / `detectStatusField`)在**没有手写 record page** 时会自动合成详情页,自动探测状态字段在记录顶部渲染有序状态进度条(Lightning Path 风格的 `record:path`)。非线性 `status`(正常/暂停/作废)被画成进度条不合适;objectui objectstack-ai/objectui#2066 已支持 `detail: { stageField: false }` 关闭(synth 读 `def.detail?.stageField`)。\n\n但 `detail.stageField` 此前只靠 `detail` 块的 `.passthrough()` 放行,**没有 typed 键** → 作者(及 AI)写它时没有任何类型 / 自动补全,也无从发现这个开关。\n\n## 改动\n\n`packages/spec/src/data/object.zod.ts` 的 `detail` 块里,与 `renderViaSchema` / `hideReferenceRail` / `hideRelatedTab` 并列,补一个 typed `stageField` 键(带 `.describe()`),并在块上方的 doc-comment 补一条说明。保留 `.passthrough()`。\n\n```ts\nstageField: z.union([z.string(), z.literal(false), z.null()]).optional()\n  .describe('record:path status field name; false/null disables the auto status-path stepper'),\n```\n\n类型与 synth 读取的 `string | false | null` 一致:字段名 → 强制用该字段;`false`/`null` → 关闭进度条;省略 → synth 自动探测。\n\n## 自测\n\n- `pnpm gen:schema` ✅(1681 schemas,eager 求值新 union 无误)\n- `tsc --noEmit` ✅\n- changeset:`@objectstack/spec` patch\n\n纯类型 / 发现性改动,运行时行为不变(passthrough 早已放行)。原 skill 文档方案(#2453)一次加太多,已放弃。\n\nCloses #2452"
+}

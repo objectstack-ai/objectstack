@@ -1,0 +1,33 @@
+{
+  "number": 2453,
+  "kind": "pull_request",
+  "title": "docs(skill): 补充自动状态进度条 & detail.stageField:false 开关",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-29T04:12:53Z",
+  "updated_at": "2026-06-29T04:18:10Z",
+  "closed_at": "2026-06-29T04:18:10Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2453",
+  "body": "## 问题\n\n这是 AI 开发场景:AI 作者装的是 `objectstack-ai/framework` 的 skills。但分发的 `skills/objectstack-ui/SKILL.md` **完全没提**:\n\n- 无手写 record page 时,objectui synth 会**自动合成详情页 + 自动探测状态字段**,在顶部画有序状态进度条 `record:path`;\n- objectstack-ai/objectui#2066 新增的 `detail: { stageField: false }` **关闭开关**。\n\n`detail.stageField` 只靠 spec 的 `.passthrough()` 放行、没有 typed 键,所以也无类型/补全提示——对 AI 而言唯一可靠的发现渠道就是 skill。缺这段,别的 AI 会重复踩\"非线性 status 被画成进度条且关不掉\"的坑。\n\n## 方案\n\n在 `skills/objectstack-ui/SKILL.md` 的 `record:path` 示例之后补一段:\n\n1. 自动详情页 & 状态进度条说明 + `detectStatusField` 探测优先级(含 `detail.stageField === false|null` 显式关闭);\n2. `ObjectSchema.create({ detail: { stageField: false }, ... })` 示例,并强调**必须放 `detail` 块、不能放顶层**(顶层未知键被 `ObjectSchema.create()` 拒绝;`detail` 是 `.passthrough()` 的 synth 提示落点)。\n\n仅改文档一处(+29 行),无代码/无包变更。\n\nCloses #2452\n配套:objectstack-ai/objectui#2066(行为实现)\n"
+}

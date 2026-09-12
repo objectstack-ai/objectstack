@@ -1,0 +1,33 @@
+{
+  "number": 2405,
+  "kind": "pull_request",
+  "title": "docs(auth): document ADR-0069 enterprise auth hardening + SAML SSO",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T19:06:35Z",
+  "updated_at": "2026-06-27T19:13:17Z",
+  "closed_at": "2026-06-27T19:13:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T19:13:15Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2405",
+  "body": "## What\n\nThe hand-written authentication guides predated [ADR-0069](https://github.com/objectstack-ai/framework/issues/2281) (now fully shipped) and were stale — they listed none of the P1/P2 controls and had no SAML coverage. This updates them to match what's live.\n\n## Changes\n\n- **`content/docs/guides/auth-sso.mdx`** — only covered OIDC. Added an **\"Enterprise SSO (SAML 2.0)\"** section (Register SAML Provider action, IdP fields table, SP ACS + metadata URLs, SAML sign-in flow) and reframed the ADR-0069 note around the admin-managed **Setup → SSO Providers** UI (no-code OIDC *and* SAML).\n- **`content/docs/guides/authentication.mdx`** — \"Key Features\" listed none of the hardening controls. Added them and a canonical **\"Enterprise Authentication Hardening (ADR-0069)\"** settings reference (password policy / anti-abuse / enforced MFA / sessions / network) plus a note on how the shared session-validation gate works. Reframed the now-contradicted *\"do not expose 2FA\"* caveat to point at enforced MFA + the Console remediation flow.\n- **`docs/HARDENING.md`** — expanded the TL;DR auth row, added an **\"Authentication hardening\"** production-settings section, and noted the new session-control settings in the session-lifecycle table.\n- **`content/docs/guides/security.mdx`** — cross-linked authentication hardening as the first security layer and added it to the security checklist.\n\n`content/docs/references/**` are generated from object/action metadata (the new `register_saml_provider` action shows up there automatically on regen) — **not** hand-edited.\n\n## Verification\n\n- `scripts/check-doc-authoring.mjs` → clean (164 files, no bare metadata literals).\n- No bare `<…>` outside code fences (the classic MDX break).\n- Additions are plain markdown (tables / blockquotes / fenced code) — no JSX components. The **Build Docs** CI job is the authoritative MDX compile gate.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

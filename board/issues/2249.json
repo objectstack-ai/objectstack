@@ -1,0 +1,35 @@
+{
+  "number": 2249,
+  "kind": "pull_request",
+  "title": "fix(setup): first-run admin polish — nav pin, widget service-gate, i18n, settings PUT envelope",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-23T17:45:32Z",
+  "updated_at": "2026-06-23T17:46:17Z",
+  "closed_at": "2026-06-23T17:46:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-23T17:46:15Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2249",
+  "body": "## What\n\nFirst-run system-administration polish found by dogfooding the Setup app (系统设置) as a brand-new admin standing up the platform. Fixes the bounded items; the larger gaps stay tracked in #2246.\n\n| Area | Fix |\n|------|-----|\n| **Discoverability** | Pin **Localization** + **Company** in the Setup sidebar Configuration group — both are registered `service-settings` manifests (the two lowest-`order` Workspace settings) but were reachable only via the \"All Settings\" hub. |\n| **Coherence** | Tag `widget_organizations` with `requiresService: 'org-scoping'` and **extend the ADR-0057 D10 server-side visibility gate to dashboard widgets** (`rest-server`) — single-tenant runtimes no longer render an orphan \"Organizations\" KPI (matching the already-hidden org nav entries). |\n| **i18n** | Translate nav labels Cloud Connection → 云连接, Datasources → 数据源, Capabilities → 能力; add missing zh `help` for the Localization settings fields. |\n| **API DX** | `PUT /api/settings/:ns` now also accepts the `{ values: { … } }` envelope that `GET` returns (symmetry; was a confusing `UNKNOWN_KEY`). |\n\n## Why\n\nA real admin's first hour hit these: the two most important first-run settings (company identity, locale) weren't in the sidebar; the overview dangled an \"Organizations: 0\" KPI with no way to act on it; several nav/help strings leaked English in a zh session; and reading then writing a setting back failed.\n\nThe widget gate is the one non-trivial change: widget visibility was enforced **client-side only** (the console honors `requiresObject` but not `requiresService`), whereas ADR-0057 D10 makes the **server** the authoritative gate (\"client filtering is courtesy\"). This adds the missing server-side `requiresService` enforcement for widgets, mirroring the existing app-nav gate.\n\n## Verification\n\n- Builds green: `platform-objects`, `service-settings`, `rest` (incl. DTS typecheck).\n- Tests: `service-settings` **128** (+2), `rest` **133** (+6 dashboard-gate tests).\n- **Browser-verified** on `examples/app-showcase` (`objectstack dev`, zh session): Localization & Company pages reachable from the sidebar; Organizations KPI gone from the overview; 云连接 / 能力 shown; `PUT {values:{…}}` → 200.\n\nRelates to #2246.\n"
+}

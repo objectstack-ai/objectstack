@@ -1,0 +1,35 @@
+{
+  "number": 2285,
+  "kind": "pull_request",
+  "title": "feat(objectql): package-first authoring — reject runtime creates into read-only packages (ADR-0070 D1/D2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T13:12:00Z",
+  "updated_at": "2026-06-24T13:17:31Z",
+  "closed_at": "2026-06-24T13:17:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T13:17:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2285",
+  "body": "## What\n\nImplements ADR-0070 **D1 (no orphans) + D2 (writable-package predicate)** in the kernel.\n\n- A runtime-only metadata **create** targeting a read-only code/installed package now throws **`writable_package_required`** (status 422) instead of silently coercing `package_id` to `null` (the #2252 stopgap). The coercion unblocked editing but scattered orphans into a package-less bucket with no container to delete (#1946).\n- `isLoadedPackage` → **`isWritablePackage`** (D2): writable unless the package is a booted code package (engine manifest map) or a `system`/`cloud`-scoped installed package. The old \"owns ≥1 registered object\" heuristic is **dropped** — it was the read-only-after-publish trap (#2252), since a writable base accrues registered objects once its drafts publish.\n- `override-artifact` overlays (ADR-0005) are unchanged; `null` is still accepted as the legacy org-overlay destination (D5 retires it after the orphan migration).\n\n## Why\n\nA Studio business-user dogfood pass surfaced a bug family rooted in the absence of a package-first contract: read-only-after-publish (#2252), the orphan pile with no delete unit (#1946), and AI's `com.workspace` catch-all. See `docs/adr/0070-package-first-authoring.md`.\n\n## Verification\n\n- `pnpm --filter @objectstack/objectql test` — 706 green (updated `protocol-save-meta-repo-path*.test.ts` to assert rejection instead of null-coercion).\n- `tsc` clean. Kernel is the enforcement backstop; the Studio (objectui) and AI (cloud) surfaces resolve/redirect to a base before hitting it.\n\nPart of the ADR-0070 package-first epic (kernel slice). Studio + AI surface PRs follow.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

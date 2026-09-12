@@ -1,0 +1,33 @@
+{
+  "number": 1323,
+  "kind": "issue",
+  "title": "[P2] channel: no inbound channel abstraction — email-to-ticket / webhook-to-lead need external ETL",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:27:06Z",
+  "updated_at": "2026-06-27T14:31:28Z",
+  "closed_at": "2026-06-27T14:31:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1323",
+  "body": "> 来源：`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 39 条（**P2**）。\n\n## 现象\n\n平台没有「入站 channel」抽象。从外界（邮件、Webhook、表单）进入系统的记录都得**自己写脚本 + 外部 ETL**才能落到对象上。\n\n具体场景：\n- 客户发邮件到 `support@xx.com` → 不能自动转工单\n- 第三方系统 POST → 不能自动创建 lead / 记录\n- 表单提交 → 不能自动加到对应对象\n- 入站消息附件 → 没有抓取通道\n\n## 复现\n\n`helpdesk` 模板：客户回复邮件 → 期望追加到现有工单的 messages → 今天必须用户登录 portal 手动回复。\n\n## 建议范围\n\n**M1：inbound channel 抽象**\n- 系统对象 `inbound_channel`：`{ id, type: 'email' | 'webhook' | 'form', config, targetObject, mapping, onReceive: flowRef }`\n- 入站消息进入队列 → flow 处理 → upsert 到对象\n\n**M2：邮件入站**\n- IMAP / inbound SMTP（与 #1 SMTP 发件配套）\n- 主题 / In-Reply-To 解析关联工单\n- 附件落到 storage（#28）\n\n**M3：webhook 入站**\n- 公共 URL + 鉴权（签名 / Bearer）\n- payload mapping → 对象字段\n\n**M4：表单入站**\n- 公开 form 渲染（与 portal #27 联动）\n- 防垃圾（rate limit + CAPTCHA）\n\n## 验收\n\n- [ ] inbound_channel 抽象 + 邮件 / webhook / form 三类实现\n- [ ] `helpdesk` 模板：客户邮件追加到工单 messages\n- [ ] 缺陷库 gap #39 标记为已解决\n\n## 关联\n\n- 配合 #1 通知（出栈）形成对称\n- 配合 #27 portal、#28 附件\n"
+}

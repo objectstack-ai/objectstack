@@ -1,0 +1,32 @@
+{
+  "number": 2336,
+  "kind": "pull_request",
+  "title": "fix(runtime): accept integer ai_access (Turso) in AI-seat synthesis",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-26T03:17:30Z",
+  "updated_at": "2026-06-26T03:22:52Z",
+  "closed_at": "2026-06-26T03:22:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-26T03:22:50Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2336",
+  "body": "Third issue caught by real staging: `sys_user.ai_access` reads back as integer `1` on Turso, but the synthesis checked `=== true` → `1 !== true` → seated users denied. Memory driver returns boolean, masking it locally. Accept `true | 1 | '1'` in resolveExecutionContext (gate) + hono-plugin (data-route). 🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 2274,
+  "kind": "issue",
+  "title": "feat(ai): flow-authoring agent should emit the ADR-0044 revise-loop shape (revise + type:'back')",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T08:16:32Z",
+  "updated_at": "2026-06-27T14:28:11Z",
+  "closed_at": "2026-06-27T14:28:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2274",
+  "body": "## Context\n\nADR-0044 (approval send-back-for-revision) is implemented engine-side, and the **Studio designer** authoring is now done in objectui — authors can draw a `revise` branch, mark an edge `type: 'back'`, see un-declared cycles flagged, and one-click an \"add revision loop\" (objectstack-ai/objectui#1954, #1955, #1958).\n\nThe remaining gap is the **AI Build path**. When the flow-authoring agent generates an approval flow with a send-back, it must emit the full revise-loop shape — otherwise the result is rejected at registration. This is the AI-authoring follow-up flagged in #1770 (\"designer support … AI flow authoring all need the same reduced-graph rule\").\n\n## Problem — the failure chain\n\nThe canonical revise loop is:\n\n```\napproval ──approve──▶ …\n         ──reject───▶ …\n         ──revise───▶ wait (signal)\n                        └──resubmit──[type:'back']──▶ approval   (round N+1)\n```\n\n`registerFlow` validates **graph-minus-declared-back-edges must be a DAG**. So if the agent generates the `revise → wait → resubmit` loop but **forgets to mark the closing edge `type: 'back'`**, `registerFlow` **hard-rejects** it as an un-declared cycle. The generated flow won't save — the user gets an error instead of a working loop.\n\nThe shape knowledge exists in schemas the agent *may* consume (`FlowEdgeSchema.type` describes `back`; `ApprovalNodeConfigSchema.maxRevisions` is documented), but schema-visibility ≠ reliable generation. We need a deterministic safety net, not just prompt adherence.\n\n## Proposed work (prioritized by reliability)\n\n1. **Deterministic guardrail in `packages/cli/src/utils/lint-flow-patterns.ts`** (its stated purpose: \"guide the author — very often an AI generating templates — toward the robust pattern\"). Add a revise-loop rule that detects an approval node sitting on a cycle whose closing edge is **not** `type: 'back'`, and either:\n   - **auto-repair**: mark the closing edge `type: 'back'` (turn a hard `registerFlow` rejection into a working flow), or\n   - **structured feedback**: surface the precise fix so the agent self-corrects on the next turn.\n   Auto-repair is preferred — it doesn't depend on the model \"remembering.\"\n2. **Agent prompt + few-shot** — add the revise-loop shape to the flow-authoring guidance and point at the canonical `examples/app-showcase/src/flows/index.ts` → `showcase_budget_approval`. Also nudge `maxRevisions` when a `revise` edge is emitted.\n3. **Spec completeness** — `packages/spec/src/studio/flow-builder.zod.ts` edge visual registry currently covers normal/default/fault but **not `back`**; add a `back` edge style so every flow-builder-protocol consumer (not just objectui's hand-rolled canvas) renders the return arc.\n4. **Eval** — a small eval set: given prompts that imply send-back/rework, assert the generated flow (a) registers cleanly and (b) contains a `revise` out-edge + a `type:'back'` closing edge. Guards against regressions in the agent's adherence.\n\n## Acceptance criteria\n\n- An AI-generated approval flow with a send-back **registers cleanly** (no un-declared-cycle rejection) — verified by the guardrail + eval.\n- `lint-flow-patterns` covers the revise-loop anti-pattern (unit-tested, like the existing #1874 rule).\n- The flow-builder spec describes the `back` edge style.\n- Eval demonstrates reliable generation of the `revise` + `type:'back'` shape.\n\n## References\n\n- Parent: #1770 (designer authoring — objectui side done)\n- objectui PRs: objectstack-ai/objectui#1954 (authoring), #1955 (simulate decisions), #1958 (inline cycle surfacing)\n- `packages/cli/src/utils/lint-flow-patterns.ts` — flow anti-pattern linter (guardrail home)\n- `packages/spec/src/studio/flow-builder.zod.ts` — flow-builder protocol (edge styles)\n- `packages/spec/src/automation/flow.zod.ts` — `FlowEdgeSchema.type` (`'back'`); `registerFlow` DAG-modulo-back-edges rule\n- `packages/spec/src/automation/approval.zod.ts` — `APPROVAL_BRANCH_LABELS` (`revise`), `maxRevisions`\n- `examples/app-showcase/src/flows/index.ts` — `showcase_budget_approval` (canonical shape)\n"
+}

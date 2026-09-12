@@ -1,0 +1,35 @@
+{
+  "number": 2468,
+  "kind": "pull_request",
+  "title": "feat(spec): add userActions.editInline toggle for inline record editing",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-29T16:44:13Z",
+  "updated_at": "2026-06-29T18:05:02Z",
+  "closed_at": "2026-06-29T18:05:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-29T18:05:00Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2468",
+  "body": "## What\n\nAdd `editInline: boolean` (default `false`) to **`UserActionsConfigSchema`** — the shared toggle set behind both a view's toolbar and a page's `interfaceConfig.userActions`.\n\n## Why\n\nInline cell editing is meant to be a first-class, author-controlled list property, and the objectui runtime already honors it (`InterfaceListPage` reads `userActions.editInline === true` → `inlineEdit`). But the schema had no field for it, so the metadata-admin **\"Interface (list pages)\"** panel — which auto-renders these booleans as checkboxes (sort/search/filter/rowHeight/addRecordForm) — had no toggle to expose. This adds the missing schema field so the panel renders an **\"Edit Inline\"** checkbox, sitting right alongside `addRecordForm`.\n\nDefault `false`: a list stays read-only unless the author opts in. When on, cells edit with the field's **type-aware widget** (the same control the form uses — select→dropdown, boolean→checkbox, date→picker, …).\n\n## Tests\n\n`view.test.ts` → `UserActionsConfigSchema` asserts the new default (`false`) and the accepted (`true`) value. `pnpm vitest run src/ui/view.test.ts -t UserActionsConfigSchema` → 3 passed.\n\n## Downstream\n\nobjectui mirrors this in `ListViewSchema.userActions` (objectstack-ai/objectui#feat/inline-edit-view-toggle). The metadata-panel checkbox appears once a runtime serves this spec via `/meta/types`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

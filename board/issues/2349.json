@@ -1,0 +1,33 @@
+{
+  "number": 2349,
+  "kind": "pull_request",
+  "title": "feat(auth): SSO-only (\"enforced\") login primitive + identity-source provenance (ADR-0024 D5.2/D4)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-26T14:03:24Z",
+  "updated_at": "2026-06-26T14:20:51Z",
+  "closed_at": "2026-06-26T14:20:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-26T14:20:50Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2349",
+  "body": "Open mechanism (ADR-0002) for per-deployment **SSO-only (\"enforced\") login** — drives the cloud per-env enforced mode AND self-host OSS/EE (via `OS_AUTH_SSO_ONLY`). Generic over the IdP (cloud-as-IdP or a customer's own OIDC/SAML). **Inert until a consumer sets `ssoOnlyMode`.**\n\n## What\n- **`AuthConfig.ssoOnlyMode` + `AuthFeatures.ssoEnforced`** (spec). When on: `emailAndPassword.disableSignUp` forced `true` + `/auth/config` emits `features.ssoEnforced` so the login UI hides the local password form + self-registration. **`enabled` stays `true`** → the env owner keeps a **break-glass** password escape hatch (managed users simply hold no credential). Self-host knob `OS_AUTH_SSO_ONLY` mirrors the existing `OS_DISABLE_SIGNUP` pattern.\n- **`sys_user.source`** (`idp-provisioned`|`env-native`, ADR-0024 D4 provenance), stamped by a framework-generic `account.create.after` hook composed with any host `databaseHooks`. **Break-glass safe + idempotent**: a user holding a local credential stays `env-native`; a credential gained *after* an SSO link flips a previously-managed owner back (covers the owner-set-password-after-first-SSO timing).\n- **Managed-vs-native gating**: `change_my_password` / `change_my_email` / `delete_my_account` hide for `idp-provisioned` users (can't self-mint a local password that bypasses enforced SSO).\n- **Break-glass guard**: refuse to delete/ban the **last** holder of a local credential (`LAST_LOCAL_CREDENTIAL`) so an IdP outage can never lock the org out.\n\n## Open-core\nFramework = the mechanism (open). The **cloud** drives `ssoOnlyMode` per-env + Business+ plan-gating + Free/Team=enforced default (separate cloud PR). Self-host configures via `OS_AUTH_SSO_ONLY`.\n\n## Verify\n`turbo run build` green across all 68 packages (dts/typecheck clean). Browser E2E of the enforced login + managed-vs-native surface lands with the cloud wiring.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 2338,
+  "kind": "pull_request",
+  "title": "docs: close week-of doc gaps (os publish removal, RLS current_user, search, authz, SDUI, dataset joins, package-first)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-26T06:12:28Z",
+  "updated_at": "2026-06-26T06:22:08Z",
+  "closed_at": "2026-06-26T06:22:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-26T06:22:05Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2338",
+  "body": "## What & why\n\nA documentation-gap audit of **~1 week of changes** (298 commits, 3 breaking, 20 new ADRs) found hand-written docs that were either **stale/wrong** or **missing** for shipped features. All shapes were verified against the current spec/CLI before writing.\n\n## P1 — docs were actively wrong\n\n- **`os publish` / `os rollback` removed (#2237).** Rewrote `publish-and-preview.mdx` around `os package publish` (publish → package version → optional `--env --install`); fixed `cloud-deployment`, `cloud-artifact-api`, `protocol/objectos/{index,lifecycle}`, `protocol/objectql/{index,schema}`, `README`, and the platform skill. Migration `os rollback` is gone too — `os migrate plan|apply`, forward-only.\n- **RLS `current_user` (ADR-0068).** `permission.mdx` + `core-concepts.mdx` dropped the **removed** singular `current_user.role` / `current_user.region`; `current_user.roles` is a string array (`'x' in current_user.roles`).\n- **`sharingModel` enum (ADR-0055/0056).** `metadata/object.mdx` adds `public_read` / `public_read_write` / `controlled_by_parent` + documents the legacy aliases.\n\n## P2 — shipped but undocumented\n\n| ADR | Doc | Added |\n|---|---|---|\n| 0061 record search | `data-modeling.mdx` | `searchableFields` + the `$search` filter operator |\n| 0066 unified authz | `security.mdx` | `sys_capability` registry, object `access` posture, object `requiredPermissions` |\n| 0065 SDUI styling | `metadata/page.mdx` | `responsiveStyles` (preferred styling channel) |\n| 0071 dataset joins | `analytics-datasets.mdx` | multi-hop dotted paths, ≤3 hops, to-one only |\n| 0070 package-first | `concepts/metadata-lifecycle.mdx` | writable-base authoring contract |\n\n## P3 — minor / polish\n\n- Built-in identity roles (ADR-0068: `platform_admin` / `org_owner` / `org_admin` / `org_member`) added to `security.mdx`.\n- `auth-sso.mdx`: note the per-env `@better-auth/sso` external-IdP path + `features.sso` public-config flag (ADR-0069).\n- Status-header correction on ADR-0061 / ADR-0071 (code shipped; headers said \"Proposed / nothing implemented\").\n\n## Scope notes\n\nVerified **not** gaps (already covered or not yet shipped): ADR-0062, ADR-0057-erp-authz, ADR-0057-data-lifecycle (P0/internal), ADR-0073 (proposed/M2), ADR-0059/0060/0072 (internal). Builds on #2337 (AI-edition docs).\n\nDocs-only. The **Build Docs** CI job validates the MDX.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

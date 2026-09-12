@@ -1,0 +1,35 @@
+{
+  "number": 2279,
+  "kind": "pull_request",
+  "title": "feat(cli): lint ADR-0044 approval revise-loop footguns at compile time",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T09:46:05Z",
+  "updated_at": "2026-06-24T09:46:27Z",
+  "closed_at": "2026-06-24T09:46:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T09:46:09Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2279",
+  "body": "## What & why\n\nFirst slice of #2274 (AI Build-mode awareness of the ADR-0044 revise loop). `objectstack compile`'s flow anti-pattern linter (`lint-flow-patterns.ts`) — whose stated job is to \"guide the author, very often an AI generating templates, toward the robust pattern\" — now catches the two send-back-for-revision shapes an approval flow most commonly gets wrong:\n\n- **Dead-end revise** — an approval node has a `revise` out-edge but **no path loops back** to it. This is a valid DAG, so `registerFlow` **accepts** it — yet the submitter reworks the record with nowhere to resubmit. The linter is the *only* place that catches this footgun.\n- **Un-declared revise loop** — the loop returns to the approval but the closing edge isn't `type: 'back'`, so `registerFlow` **rejects** it as an un-declared cycle. The lint fires at **compile time** with the specific fix (\"mark the resubmit edge `type: 'back'`\"), so the author/agent corrects it before registration.\n- **`maxRevisions: 0` + a `revise` edge** — self-contradictory (send-back disabled → the branch always auto-rejects); flagged too.\n\nAdvisory warnings only — never fails the build (consistent with the existing #1874 rules). This mirrors, server-side, the client-side cycle surfacing shipped in objectui ([#1958](https://github.com/objectstack-ai/objectui/pull/1958)).\n\n## Scope\n\nThis is the **deterministic guardrail** piece of #2274 (compile-time structured feedback). The remaining #2274 work — agent prompt/few-shot, `flow-builder.zod.ts` `back` edge style, and an eval, plus the optional auto-repair — stays tracked on #2274.\n\n## Files\n\n- `packages/cli/src/utils/lint-flow-patterns.ts` — `scanApprovalReviseLoops()` + 3 rule ids (`flow-approval-revise-dead-end`, `-unmarked-backedge`, `-disabled`).\n- `packages/cli/src/utils/lint-flow-patterns.test.ts` — 5 new cases.\n\n## Verification\n\n- `@objectstack/cli` tests: **28 passing** (5 new — declared loop accepted; unmarked loop flagged; dead-end flagged; `maxRevisions:0` flagged; normal approval not flagged).\n- `tsc -p tsconfig.build.json` clean for the changed files; `eslint` clean.\n\nRefs #2274, #1770 (ADR-0044). Pairs with objectui #1954 / #1955 / #1958.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

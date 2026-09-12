@@ -1,0 +1,33 @@
+{
+  "number": 2485,
+  "kind": "pull_request",
+  "title": "chore(spec): ratchet react-block spec↔frontend conformance at console-build time (ADR-0081)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-30T13:19:13Z",
+  "updated_at": "2026-06-30T13:31:57Z",
+  "closed_at": "2026-06-30T13:31:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-30T13:31:55Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2485",
+  "body": "## What\n\nWires the spec↔frontend react-block conformance check in as a **baseline ratchet** at the one place the registry-inputs manifest is produced for free: `scripts/build-console.sh`, right after it dumps `sdui.manifest.json` from the freshly-built console registry.\n\nRunning the full conformance check on every framework PR isn't worth it — the manifest only exists at console-build time. So instead of taxing every PR, the ratchet catches **new** divergence at that point at near-zero marginal cost.\n\n## How\n\n- **`check-react-blocks-conformance.ts`** gains:\n  - `--baseline <path>` — compare the current dump against a committed baseline and report **only regressions**: a component exposing a NEW undocumented prop, or a previously-present block vanishing. The soft `spec-only` signal is not gated.\n  - `--update` — accept the current frontend state as the new baseline (after an intentional change).\n  - `--strict` — exit 1 on regression (default is warn / exit 0).\n- **`packages/spec/react-conformance.baseline.json`** — the accepted state (per block: frontend-only prop set + missing flag). Current baseline: `ListView` frontend-only `fields`/`options`, `ObjectChart` `data`; everything else clean after #2113 (record:* inputs) and #2484 (object-form presentation props).\n- **`scripts/build-console.sh`** — runs the ratchet **warn-only** after a successful manifest dump. Never fails the console build; surfaces new divergence at the release point.\n- **audit doc** — documents the ratchet + how to re-accept the baseline.\n\n## Verification\n\n- `--baseline` against the same manifest → `✓ no new divergence`.\n- Injected a bogus `list-view` input → ratchet flags `<ListView>: new frontend-only prop(s) not in baseline: bogusNewProp`; `--strict` exits 1, default warn exits 0.\n- `bash -n scripts/build-console.sh` clean; `@objectstack/spec build` green.\n\nNo public API-surface change (scripts + committed baseline + docs only).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

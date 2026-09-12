@@ -1,0 +1,35 @@
+{
+  "number": 2330,
+  "kind": "pull_request",
+  "title": "feat(auth): surface features.sso in public /auth/config",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-25T15:59:05Z",
+  "updated_at": "2026-06-25T16:20:07Z",
+  "closed_at": "2026-06-25T16:20:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-25T16:20:04Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2330",
+  "body": "## Problem\n\nThe console login page renders a **\"Sign in with SSO\"** button unconditionally. On a deployment where enterprise SSO isn't wired (default for self-hosted / `os dev`), the `/sign-in/sso` route isn't mounted, so the button is a dead end that only reveals \"No SSO provider is configured for this email domain.\" **at click time**.\n\nRoot cause on the server side: `getPublicConfig()` (the `/auth/config` payload the SPA reads) advertised every other capability flag — `oidcProvider`, `twoFactor`, `multiOrgEnabled`, `deviceAuthorization`, … — but **omitted enterprise SSO**, even though the manager already computes whether `@better-auth/sso` is wired (`OS_SSO_ENABLED` / `plugins.sso`). The login UI had no signal to gate on.\n\n## Fix\n\nTwo layers, so the advertised capability matches reality at both granularities:\n\n1. **Coarse (sync, cheap)** — `getPublicConfig().features.sso` now reports whether the plugin is **wired**, resolved with the EXACT logic that decides whether it's mounted in `buildPlugins()` (factored into a private `isSsoWired()`). This honours the invariant the existing comment already demands: *\"the `/auth/config` response MUST match what's actually wired, otherwise the frontend will render UI for endpoints that 404.\"*\n\n2. **Precise (async, at the route)** — the `/auth/config` handler refines that flag to **usable** via the new `AuthManager.isSsoUsable()`: wired **AND** at least one `sys_sso_provider` row exists. This also hides the button when SSO is enabled but no IdP is configured yet. It only queries when wired, and **fails open** to the wired flag on any introspection error (no data engine, query throws) so the login config never 500s. Applied in both the plugin-auth route and the hono adapter `/config` path (the latter guarded as a no-op against an older auth service).\n\nPer-email domain→IdP matching still happens at `/sign-in/sso`; `isSsoUsable()` answers the coarser \"is there any point showing the button at all\".\n\n## Tests\n\n`auth-manager.test.ts`:\n- `features.sso` (coarse): default-off, on-via-`plugins.sso`, `OS_SSO_ENABLED` env override.\n- `isSsoUsable()` (precise): not-wired (skips query), zero-providers → false, ≥1 provider → true, no-engine fail-open, query-throws fail-open.\n\n95 plugin-auth tests green, hono suite green (67), `tsc --noEmit` clean on `index.ts` (3 pre-existing `hono.test.ts` context-typing errors are unrelated). Browser end-to-end verification of the live `/auth/config` + login page done alongside the objectui PR.\n\n## Pairs with\n\nClient-side consumer that hides the button: objectstack-ai/objectui#2006\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

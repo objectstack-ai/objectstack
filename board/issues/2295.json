@@ -1,0 +1,32 @@
+{
+  "number": 2295,
+  "kind": "pull_request",
+  "title": "docs(readme): layered architecture diagram, grouped key features, community",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T15:32:45Z",
+  "updated_at": "2026-06-24T15:47:57Z",
+  "closed_at": "2026-06-24T15:47:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T15:47:55Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2295",
+  "body": "## What\n\nRound 2 of homepage polish (follow-up to #2290).\n\n- **Architecture** — replace the ASCII microkernel diagram with a generated layered diagram (`docs/screenshots/layers.png` + editable `.svg`): the ObjectQL / ObjectOS / ObjectUI protocol layers on the microkernel, with \"everything else is a plugin\" called out. Matches the `How it works` diagram style.\n- **Key Features** — consolidate 14 flat bullets into 4 themed groups (AI-native · protocol-first runtime · data & framework reach · governance & built-ins). Same coverage, far less wall-of-text.\n- **Community** — add a short section (star nudge · issues · contributing). No Discord/Discussions links — those aren't set up on the repo.\n\nDocs-only; no source code touched.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 2306,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0072 — reference scope & resolvability (the data-picker model) (objectui#1934)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T16:48:06Z",
+  "updated_at": "2026-06-24T17:02:04Z",
+  "closed_at": "2026-06-24T17:02:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T17:02:02Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2306",
+  "body": "**Status: Proposed — for architect review (do not auto-merge).**\n\nFiled here (with the expression-layer ADRs [0032](./docs/adr/0032-unified-expression-layer.md) / [0058](./docs/adr/0058-expression-and-predicate-surface.md)) because the decision is grounded in framework **engine + spec** semantics. The implementation surface — the flow variable data-picker — lives in **objectui** ([#1973](https://github.com/objectstack-ai/objectui/pull/1973) → [#1981](https://github.com/objectstack-ai/objectui/pull/1981), already shipped as Slice 0/1).\n\nWritten after a research sweep of this repo's engine, prompted by the objectui #1934 follow-up ask \"expand `record.account.name`\" — which the investigation showed would be a **footgun**.\n\n## The decision in one line\nThe picker + its inline validator surface **only references that actually resolve at runtime.** Per-surface scope, drillable object outputs, the relational story, and validation all follow from that invariant.\n\n## Why an ADR (not just an objectui PR)\n- Cross-cuts **engine** semantics (`service-automation`), the **spec** (`FlowNode.outputSchema`), and the **designer** (objectui).\n- Sets a long-lived, **counter-intuitive** invariant: `record.account.name` must NOT be offered — the engine injects the *raw* trigger record and never expands lookups (`packages/services/service-automation/src/engine.ts:946-964`), so a lookup dot-walk resolves to `undefined`. Without writing this down, the next contributor re-introduces the footgun.\n- Research found each expression surface has a **different** scope + token shape (flow flattens the record → bare refs valid; formula/validation/RLS/sharing → `record.x` only). Per-surface evidence table is in the ADR.\n\n## Key decisions\n**D1** resolvability invariant · **D2** per-surface graph-aware scope + surface-specific token shape · **D3** lazy one-level drilling of object outputs (from `config.objectName`) · **D4** relationships = guided \"add Get Records\", never lookup dot-walk · **D5** validator reuses the engine's canonical CEL roots (`cel-engine.ts:52-62`) · **D6** evolve `FlowNode.outputSchema` with `objectName` (**spec change in this repo**) · **D7** degrade gracefully.\n\n## Review asks\n- **D4** — confirm the runtime stance (no lookup dot-walk; guided fetch).\n- **D6** — `outputSchema.objectName` is a `@objectstack/spec` change owned here; needs sign-off + a populating change in the CRUD executors.\n\nDocs-only; no changeset.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

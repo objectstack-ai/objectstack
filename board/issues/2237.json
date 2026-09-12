@@ -1,0 +1,32 @@
+{
+  "number": 2237,
+  "kind": "pull_request",
+  "title": "feat(cli)!: remove legacy os publish / os rollback commands",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-23T10:45:38Z",
+  "updated_at": "2026-06-23T14:43:02Z",
+  "closed_at": "2026-06-23T14:42:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-23T14:42:59Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2237",
+  "body": "## What\n\nRemoves the legacy CLI commands:\n\n- `packages/cli/src/commands/publish.ts` — `os publish` (direct-to-environment, wrote `sys_environment_revision`)\n- `packages/cli/src/commands/rollback.ts` — `os rollback` (switched the active revision)\n\nAlso:\n- Cleans up the now-dangling \"legacy `objectstack publish` path\" reference in the `os package publish` header comment.\n- Removes the unused `activateRevision()` helper from `@objectstack/client` (`packages/client/src/index.ts`) — it had no callers in the workspace.\n\n## Why\n\nThe legacy direct-to-environment publish flow is superseded by the versioned-package flow (`os package publish`, ADR-0006 v4 Phase B). oclif discovers commands by file (pattern strategy), so deleting the files removes the commands — no registry to update. `src/index.ts` only exported `PackagePublishCommand`, and the README already documents only `os package publish`.\n\n## Breaking change\n\n`os publish` and `os rollback` no longer exist. Use `os package publish` (+ `os package install`).\n\n## Not included (needs a decision)\n\nThe backend route `POST /api/v1/cloud/environments/:id/revisions/:commit/activate` may still be implemented server-side. This PR only removes the CLI + the unused client helper. If other consumers (Console UI, direct REST) still rely on it, the endpoint should be retired separately.\n\n## Docs\n\nCompanion docs PR in objectstack-ai/objectos removes these from the CLI reference."
+}

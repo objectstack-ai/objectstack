@@ -1,0 +1,33 @@
+{
+  "number": 2398,
+  "kind": "pull_request",
+  "title": "docs(content): align docs site with 11 breaking changes (Hono-only, removed APIs)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T17:53:38Z",
+  "updated_at": "2026-06-27T17:59:39Z",
+  "closed_at": "2026-06-27T17:59:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T17:59:38Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2398",
+  "body": "The user-facing docs site (`content/docs/**`, docs.objectstack.ai) still documented removed packages/APIs. This sweeps it for everything removed in 11.\n\n## Fixed\n- **`packages.mdx` + `concepts/packages.mdx`** — Framework Adapters → **Hono-only**; removed the 6 non-Hono adapter sections + `plugin-msw` sections + fixed the dependency ASCII tree.\n- **`deployment-vercel.mdx`** — removed the broken Next.js \"Option A\" (`@objectstack/nextjs`); Hono is the server path; intro reframed + a `<Callout>` flags the removed MSW mode.\n- **`environment-variables.mdx`** — alias table reframed: ecosystem names (`DATABASE_URL`, `AUTH_SECRET`, …) are permanent/silent; added a \"Removed in 11\" note for `OS_MULTI_TENANT` / `OBJECTSTACK_METADATA_WRITABLE` / `AUTH_BASE_URL`.\n- **One-liners** — `flow.mdx`/`business-logic.mdx` (`http_request`→`http`), `client-sdk.mdx` (query aliases removed), `metadata-service.mdx` (`IUIService` removed), `references/index.mdx` (`PolicySchema` row), `plugins.mdx` (`plugin-msw`), `schema.mdx`/`security.mdx`/`adding-a-metadata-type.mdx` (env renames), `authentication.mdx` (removed the `MSWPlugin` example).\n\n## Left as-is (intentional)\n- `docs/adr/**` + `docs/audits/**` (historical), `http_requests_total` **metric** names, and `@objectstack/service-ai` (correctly documented as cloud/Enterprise — open = MCP-only).\n\n## Deferred → follow-up\n- `deployment-vercel.mdx` MSW-mode how-to section + its checklist/comparison entries (flagged by the callout).\n- `implementation-status.mdx` QA-table `plugin-msw` column (snapshot doc).\n\nContent-only (no package changes). `<Callout type=\"warn\">` matches existing usage.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

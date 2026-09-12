@@ -1,0 +1,34 @@
+{
+  "number": 2522,
+  "kind": "pull_request",
+  "title": "chore(console): refresh vendored objectui SPA to d006128c",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-02T15:17:37Z",
+  "updated_at": "2026-07-02T15:23:53Z",
+  "closed_at": "2026-07-02T15:23:49Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-07-02T15:23:49Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2522",
+  "body": "## What\n\nRefresh the vendored `@object-ui/console` SPA pinned in `.objectui-sha` from `46a12ef9` → `d006128c` (6 upstream commits) and ship the changeset that bumps `@objectstack/console` (minor).\n\n## Upstream changes pulled in\n\n- feat(detail): wire object fieldGroups into detail sections; read hints from spec-writable `detail.*` block (objectstack-ai/objectui#2148)\n- fix(form): render object fieldGroups in create/edit modal; auto-layout parity for grouped ObjectForm (objectstack-ai/objectui#2152)\n- fix(grid): refresh list after a bulk/row action succeeds (objectstack-ai/objectui#2159)\n- fix(grid): inline-edit toggle takes effect immediately + staged editor closes on save (objectstack-ai/objectui#2151)\n- fix(components): keep dialog/drawer open when a click closes an open dropdown (objectstack-ai/objectui#2157)\n\n## Verification\n\n- `pnpm run build` (70/70) → `scripts/build-console.sh` at `d006128c` → 35/35 turbo tasks green, dist 42112 KB.\n- Bundle canary `import/jobs` present — confirms THIS framework's `@objectstack/client` is injected into the SPA (the fix from `console-bundle-own-client`, which also lands in this release, guards against the stale-client bug that broke 11.5.0's console at runtime).\n- `check:console-sha` gate passes (dist stamp matches pin).\n- `packages/console/dist` is gitignored and rebuilt in CI at publish."
+}

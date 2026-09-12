@@ -1,0 +1,35 @@
+{
+  "number": 2236,
+  "kind": "pull_request",
+  "title": "fix(cli): let single-node `os start` auto-mint a crypto key",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-23T10:03:35Z",
+  "updated_at": "2026-06-23T14:43:18Z",
+  "closed_at": "2026-06-23T14:43:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-23T14:43:16Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2236",
+  "body": "## 问题\n\n照官网「60 秒启动」文档 (`npm i -g @objectstack/cli && os start`) 在干净机器上启动会**直接崩**:\n\n- `os start` 默认强制 `NODE_ENV=production`（[start.ts](packages/cli/src/commands/start.ts)）\n- production 模式下 `LocalCryptoProvider` 拒绝自动生成加密密钥\n- 干净机器既无 `OS_SECRET_KEY` 也无持久化 key 文件 → 在 secret 字段接线处 `throw` → 启动 abort（[serve.ts:2016](packages/cli/src/commands/serve.ts)）\n\n文档承诺「零配置」，代码却要求先配 `OS_SECRET_KEY`，两者冲突。\n\n## 修复\n\n职责分离——机制在 provider，策略在 `os start`：\n\n- **`LocalCryptoProvider`**：production 模式新增 `OS_CRYPTO_AUTOKEY` opt-in。命中时 mint **并持久化** key 到 `~/.objectstack/dev-crypto-key`；但持久化失败（只读/临时 FS）仍 `throw`，**绝不**退化成 ephemeral——守卫的核心保证（production 不在易失 key 上裸跑）原样保留。\n- **`os start`**：仅当**单机**（未设 `OS_CLUSTER_DRIVER` 且未设 `OS_SECRET_KEY`）时注入 `OS_CRYPTO_AUTOKEY=1`。多节点部署仍 fail-loud，强制共享 `OS_SECRET_KEY`。\n- **文档**：在 `cloud-deployment.mdx` 环境变量表补上 `OS_SECRET_KEY` / `OS_CLUSTER_DRIVER`，并加 callout 说明容器/多节点必须显式配 key。\n- **测试**：覆盖 production+AUTOKEY 的 mint-and-persist 路径，以及持久化失败时仍 fail-loud 的路径。\n\n直接 `os serve` + `NODE_ENV=production`（K8s 典型）的行为完全不变，仍严格。\n\n## 效果\n\n`os start` 单机开箱即用（首启打印一行 minted+persisted 提示），集群仍强制显式 key。\n\n## 测试\n\n```\nnpx vitest run packages/services/service-settings/src/local-crypto-provider.test.ts\n# 17 passed (17)\n```"
+}

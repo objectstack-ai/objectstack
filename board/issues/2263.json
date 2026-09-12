@@ -1,0 +1,34 @@
+{
+  "number": 2263,
+  "kind": "pull_request",
+  "title": "docs(guides): formula fields declare result type via `returnType`, not `type`",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T04:21:38Z",
+  "updated_at": "2026-06-24T04:52:41Z",
+  "closed_at": "2026-06-24T04:28:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T04:28:08Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2263",
+  "body": "## Why\nWhile reviewing the `returnType` feature (#2255) I found the formula guides teach a **broken** pattern:\n\n```ts\nField.formula({ type: 'currency', expression: F`…` })   // ❌\n```\n\n`Field.formula`'s config is `FieldInput = Omit<Partial<Field>, 'type'>`, so `type` is a **type error**. And untyped (as in an .mdx snippet), the spread `{ type:'formula', ...config }` lets `type:'currency'` **override** `type:'formula'` — and objectql computes a formula virtual field from `def.expression` **only** (`engine.ts:55`, no `defaultValue` fallback), so the field **silently never computes**. Some examples also used a `formula:` key that isn't on `FieldSchema` (the source key is `expression`).\n\nSo there's no real `type`/`returnType` overlap — `type` simply can't be set on a formula; `returnType` is the intended mechanism.\n\n## Fix\n- All `Field.formula` examples in `formula.mdx` + `business-logic.mdx`: `type: X` → `returnType: <number|text|boolean|date>`, `formula:` → `expression:`, valid `scale` preserved.\n- Added a Callout in `formula.mdx`: a formula field's `type` is always `formula`; declare the computed value type with `returnType` (inferred/stamped by the AI build path); CEL source is `expression`.\n\nDocs-only; other guides (`data-modeling.mdx`, `metadata/field.mdx`) already used the correct pattern.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

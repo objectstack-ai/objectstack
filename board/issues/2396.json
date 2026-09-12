@@ -1,0 +1,34 @@
+{
+  "number": 2396,
+  "kind": "pull_request",
+  "title": "docs: Upgrading-to-11 guide + keep breaking batch in the 11 line (11.1.0)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T17:34:23Z",
+  "updated_at": "2026-06-27T17:40:14Z",
+  "closed_at": "2026-06-27T17:40:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T17:40:13Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2396",
+  "body": "## Why\n11.0.0 is published. Four pending breaking changesets (DriverInterface #2378, env renames #2379, PolicySchema #1882, adapter trim #2391) carried `major` → next release would be **12.0.0**. There's no 12 planned — the whole batch is the **10 → 11** upgrade.\n\n## Changes\n- **Re-level 4 changesets `major → minor`** → next release is **11.1.0** (not 12.0.0); `changeset status` confirms no `major` pending. All breaking changes stay within the 11 line.\n- **`docs/upgrading-to-11.md`** — one comprehensive 10 → 11 migration guide with before/after for every breaking change: MCP-only open edition · Hono-only adapters (+ MSW removed) · flow `http_request/http_call/webhook` → `http` · client-react `select/filters/sort/top/skip` → canonical · `IUIService` → `IMetadataService` · `DriverInterface` → `IDataDriver` · env renames (kept ecosystem names listed) · `PolicySchema`/`definePolicy` removed. Plus a non-breaking \"auth hardening behavioral changes\" heads-up (ADR-0069).\n- **README** — adapters table → Hono-only; removed the `plugin-msw` row; added an \"Upgrading from 10.x\" link.\n\n## Verification\nGrep confirms no removed package/symbol references remain in current docs/READMEs (ADRs + `docs/audits/**` left as historical). Fixed-group check passes.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

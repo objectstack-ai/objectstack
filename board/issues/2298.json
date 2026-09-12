@@ -1,0 +1,33 @@
+{
+  "number": 2298,
+  "kind": "pull_request",
+  "title": "feat(service-ai): headless AI runtime — move the `ask` data-Q&A agent to closed cloud",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/l",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T15:52:14Z",
+  "updated_at": "2026-06-24T15:53:54Z",
+  "closed_at": "2026-06-24T15:53:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T15:53:51Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2298",
+  "body": "## What\nMakes the open-source `@objectstack/service-ai` AI runtime **headless**: it no longer ships or registers the in-UI AI **Q&A `ask` agent** (the *intelligence*). Per ADR-0023 (open-core: \"open mechanism, close intelligence\"), the `ask` data-Q&A agent moves to the closed cloud `@objectstack/service-ai-studio` package, attaching via the same `ai:ready` hook the `build` agent already uses.\n\n**Stays open here (the mechanism):** the data tools (`registerDataTools`, `query-data`, `visualize-data`, `action-tools`), `SCHEMA_READER_SKILL`, the agent-alias registry + `ASK_AGENT_NAME`/`LEGACY_DATA_AGENT_NAME` constants, the agent runtime, and all chat routes (they serve whatever agents are registered — empty in CE). **`@objectstack/mcp` is byte-unchanged** — MCP remains the open \"BYO-AI\" path for self-host.\n\n## Changes\n- Deleted `agents/ask-agent.ts`, `skills/data-explorer-skill.ts`, `skills/actions-executor-skill.ts`.\n- Relocated `ASK_AGENT_NAME` + `LEGACY_DATA_AGENT_NAME` into `agents/agent-aliases.ts` so the names stay exported without the `ASK_AGENT` object.\n- `plugin.ts`: removed the data-engine-gated built-in registration block (data tools + `ASK_AGENT` + skills + legacy cleanup) → replaced with a note comment; dropped now-dead helpers/imports.\n- Index/exports stop exporting `ASK_AGENT` + the two ask skills; keep the mechanism exports.\n- Tests updated to exercise the generic runtime/route mechanism against local persona stubs (the persona-as-subject specs move to cloud).\n\n## Verification\n- Build green (esm+cjs+dts); **401/401 tests pass**.\n- `0` references to the `ASK_AGENT` object / moved skills in production source or built `dist`.\n- `@objectstack/mcp` diff: empty.\n\n## ⚠️ Must land together with the cloud companion\nThis removes `ask` from the OSS runtime; the closed cloud PR **objectstack-ai/cloud#485** adds it back to `service-ai-studio`. Merge both together (or cloud first) so no full runtime loses `ask`. Reviewers verifying the cloud branch in isolation must point its `link:`-resolved `@objectstack/service-ai` at this branch (it resolves to the framework **main** checkout by default).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

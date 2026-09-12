@@ -1,0 +1,33 @@
+{
+  "number": 2331,
+  "kind": "pull_request",
+  "title": "fix(metadata): provision sys_metadata_commit for env kernels (ADR-0067)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-25T16:41:43Z",
+  "updated_at": "2026-06-25T16:47:08Z",
+  "closed_at": "2026-06-25T16:47:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-25T16:47:06Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2331",
+  "body": "## Problem\nAn AI build into a tenant env logs a hard `SqliteError: no such table: sys_metadata_commit`. The build still lands (objects/views/dashboard register), but the ADR-0067 commit-history write fails, so every AI build/edit spams the error and the commit timeline silently records nothing.\n\n## Root cause\nThe metadata-storage objects are registered through **two parallel paths that must stay in sync**:\n1. `ObjectQLPlugin` registers the full set `[sys_metadata, history, commit, audit, view_definition]` — but only when `environmentId === undefined` (platform / standalone kernels).\n2. `MetadataPlugin.queryableMetadataObjects` is what per-project **cloud env kernels** actually provision (`artifact-kernel-factory` boots it with `registerSystemObjects:true` + ObjectQL `skipSchemaSync:false` → boot-sync DDLs every registered object).\n\nADR-0067 added `SysMetadataCommitObject` to list (1) but **not** (2), so env DBs never got the `sys_metadata_commit` table. Every build's `publishPackageDrafts` writes a commit row (`op='apply'`) → `no such table`. Same class as the already-merged audit/messaging lazy-table provisioning fix.\n\n## Fix\nAdd `SysMetadataCommitObject` to `queryableMetadataObjects`, next to its `sys_metadata_history` sibling (+ import + unit test). One object, +70 lines.\n\n## Verification\n- **Unit test** (`plugin.test.ts`): a new test asserts `init()` registers `sys_metadata_commit` — **fails without the fix** (`expected [4 elements] to include 'sys_metadata_commit'`), passes with it. Full metadata suite: **254 passed**.\n- **Real-engine before/after**: a kernel booted with the exact env-kernel triple (`DriverPlugin('cloud')` + `ObjectQLPlugin(skipSchemaSync:false)` + `MetadataPlugin(registerSystemObjects:true)`) over real better-sqlite3 — boot-sync goes **`synced:4 → 5`**, and the writer's `insert('sys_metadata_commit', …)` **reproduces the exact reported error unfixed / succeeds fixed**.\n\n## Deploy\nAfter merge, bump cloud `.framework-sha` to pull this into staging/prod (same flow as the audit/messaging fix).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

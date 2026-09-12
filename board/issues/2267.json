@@ -1,0 +1,34 @@
+{
+  "number": 2267,
+  "kind": "pull_request",
+  "title": "chore(liveness): bring `page` under the spec liveness gate",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T05:26:32Z",
+  "updated_at": "2026-06-24T05:26:51Z",
+  "closed_at": "2026-06-24T05:26:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T05:26:49Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2267",
+  "body": "Final follow-up to the Studio page-design dogfood. Brings the `page` metadata type under the codebase's own **spec liveness gate** (ADR-0049 / #1919) — the \"declare every authorable property's status with evidence, or CI fails\" ratchet. `page` was not yet a governed type.\n\n## What\n- New ledger `packages/spec/liveness/page.json` — all **17** top-level PageSchema properties classified (containers declared at one drill level, matching `action.json`):\n  - **14 `live`** — objectui renderer consumers cited as prose in `note` (per the README convention for objectui-repo paths).\n  - **1 `experimental`** — `variables` (PageVariablesProvider + usePageVariables exist, but no end-to-end writer/`visible`-CEL consumer).\n  - **2 `dead`** — `recordReview` / `blankLayout`: their page types were removed in framework#2265 and objectui dropped all references in objectui#1949; the fields stay `@deprecated` pending hard-removal (tracked, enforce-or-remove).\n- `page` added to `GOVERNED` in `check-liveness.mts`.\n\n## Verification\n- ✅ `check-liveness.mts` exits 0: *\"page 17 classified (live 14, experimental 1, dead 2) … all governed-type properties are classified.\"*\n- ✅ Adds **zero** new warnings vs the origin/main baseline (the 4 \"missing file\" + 5 \"unregistered proof\" warnings are all pre-existing on other types).\n- ✅ Page schema tests 81/81.\n\n## Follow-ups (noted, not in this PR)\n- Hard-remove the `dead` `recordReview`/`blankLayout` fields + `BlankPageLayoutSchema`/`RecordReviewConfigSchema` + `page-builder.zod.ts` (now fully unblocked — objectui#1949 merged).\n- Complete or remove `variables` (the `experimental` entry).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

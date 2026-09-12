@@ -1,0 +1,35 @@
+{
+  "number": 2387,
+  "kind": "pull_request",
+  "title": "feat(spec)!: remove dead PolicySchema / definePolicy + stack policies (#1882, 11.0)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T15:56:19Z",
+  "updated_at": "2026-06-27T16:22:13Z",
+  "closed_at": "2026-06-27T16:22:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T16:22:12Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2387",
+  "body": "Closes #1882. Part of the 11.0/next-major breaking-change batch (#2364), ADR-0049 enforce-or-remove.\n\n## Why\n`PolicySchema` (org security policy — password/network/session/audit) is **100% unenforced**: no runtime consumer ever reads it. Removed rather than implemented.\n\n## Changes\n- `@objectstack/spec`: delete `security/policy.zod.ts` (`PolicySchema`, `Password/Network/Session/AuditPolicySchema`, `definePolicy`); drop the `policies` stack field + its collection wiring (`MAP_SUPPORTED_FIELDS`, `METADATA_ALIASES`, stack key list). api-surface regenerated (diff is exactly the 8 Policy exports).\n- `@objectstack/downstream-contract`: drop `DcPolicy` fixture + contract case.\n- Examples `app-crm` / `app-showcase`: drop unused policy definitions.\n\n## Downstream check (../hotcrm, ../templates)\nVerified both: **zero Policy-API usage**. hotcrm imports none; templates only imports `SharingRule` from `@objectstack/spec/security` (untouched — the barrel keeps `SharingRule`/`PermissionSet`). **No changes needed in either repo.** The `@objectstack/downstream-contract` gate (the framework's standing representation of downstream consumers) stays green.\n\n## Not touched\n`SharingRule`, `PermissionSet`, RLS, and every unrelated `*PolicySchema` (Retry/Retention/Concurrency/RLS/KeyRotation/…).\n\n## Verification\nspec security **123**, downstream-contract **14**, objectql **718** green; `check:api-surface` ✓; spec + downstream-contract + example-crm + example-showcase build green (57 tasks).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

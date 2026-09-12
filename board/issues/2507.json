@@ -1,0 +1,37 @@
+{
+  "number": 2507,
+  "kind": "pull_request",
+  "title": "fix(cli): guard against @objectstack/console objectui-SHA drift",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-01T16:01:58Z",
+  "updated_at": "2026-07-01T16:07:30Z",
+  "closed_at": "2026-07-01T16:07:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-01T16:07:24Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2507",
+  "body": "## Problem\nPull a branch that bumps the objectui pin (`.objectui-sha`) but forget to re-run `pnpm objectui:refresh`, and `pnpm build` does **not** regenerate the Console — a Console built from a *different* objectui commit gets served silently.\n\nRoot cause: `packages/console/dist` is gitignored and produced **only** by `scripts/build-console.sh`; `turbo run build` never rebuilds it, and the existing CLI resolver guard compares only the npm **major** of `@objectstack/console` (blind to the objectui SHA underneath).\n\nScope: **local dev only** — the release pipeline always rebuilds the Console from the pin, so published artifacts are never affected.\n\n## Fix — fail-loud drift guard\n- **Provenance stamp**: `build-console.sh` writes the built SHA into `dist/.objectui-sha` (travels with `dist/`; a cloud Docker overlay that replaces `dist/` restamps it).\n- **`pnpm check:console-sha`**: compares stamp vs the committed pin. Hard-gates `pnpm dev` / `dev:crm` / `dev:todo`; no-ops when the Console isn't built yet.\n- **Serve-time warn**: `resolveConsolePath` warns when it selects a drifted dist — covers every boot path (`os serve`, self-host), not just `pnpm dev`. No-op for published installs (no pin up-tree, so the stamped dist stays authoritative).\n- **CI self-test**: `showcase-smoke` runs `check:console-sha` right after `build-console.sh` so the stamping mechanism can't silently rot.\n\nRemediation the guard prints is **`pnpm objectui:build`** (rebuild at the *pinned* SHA) — not `objectui:refresh`, which would re-bump the pin to your local `../objectui` HEAD.\n\n## Verification\n- Three states exercised manually: in-sync ✓ (exit 0), drift ✗ (exit 1), unstamped dist → non-fatal warn.\n- `@objectstack/cli` `tsc` clean; `console-resolve.test.ts` **11 passed** (7 existing + 4 new guard cases: drift / in-sync / unstamped / published-install).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

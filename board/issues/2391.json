@@ -1,0 +1,36 @@
+{
+  "number": 2391,
+  "kind": "pull_request",
+  "title": "chore!: remove unused HTTP adapters (keep Hono only) + MSW plugin (12.0)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T16:50:26Z",
+  "updated_at": "2026-06-27T16:56:39Z",
+  "closed_at": "2026-06-27T16:56:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T16:56:37Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2391",
+  "body": "Strategic trim for a solo-maintained framework: ship only the adapter actually used.\n\n## Why\nThe `express` / `fastify` / `nextjs` / `nestjs` / `nuxt` / `sveltekit` adapters and `@objectstack/plugin-msw` have **zero internal consumers** and aren't dogfooded — pure release/maintenance surface and an untested-integration liability (\"supported framework\" that may silently break). `@objectstack/hono` is the one actually wired in (via `@objectstack/client`).\n\n## Changes\n- **Delete 7 packages**: 6 non-Hono adapters + `@objectstack/plugin-msw` (changeset fixed group 73 → 66).\n- `@objectstack/client`: drop `plugin-msw` / `msw` usage (removed `client.msw.test.ts`); rest of client unaffected.\n- Correct `HttpDispatcher`'s misleading `@deprecated → createDispatcherPlugin` note — `createDispatcherPlugin` is a kernel route-registering plugin, **not** a drop-in for a callable adapter dispatcher. The class is now used only by the Hono adapter + the internal dispatcher-plugin.\n- Docs: `rest/README` + `hono/README` adapter references → Hono-only.\n\n## Resolves #2380\nThe HttpDispatcher removal was risky because of the 7-adapter blast radius. With those gone, `HttpDispatcher` has ~2 consumers (Hono + internal) — the class is fine to keep as-is; no factory migration needed. The misleading deprecation is fixed.\n\n## Verification\n- No source imports any deleted package (grep clean).\n- `check-changeset-fixed` ✓ (66 public packages).\n- **Full workspace build green (69 tasks)**; `@objectstack/client` tests 101 pass.\n\n## Follow-up (not in this PR)\nA docs pass for incidental mentions of the removed frameworks (e.g. `docs/HARDENING.md` Fastify recipe, some ADRs) — historical/strategic docs, non-blocking.\n\nBreaking (removes published packages) → lands in 12.0.0. Anyone needing another adapter can build on the public `HttpDispatcher` API or maintain it out-of-tree.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

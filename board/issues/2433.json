@@ -1,0 +1,34 @@
+{
+  "number": 2433,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0076 — D12 honest capabilities + correct the analytics claim (fallback, not collision)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-28T15:49:33Z",
+  "updated_at": "2026-06-28T16:07:42Z",
+  "closed_at": "2026-06-28T16:07:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-28T16:07:40Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2433",
+  "body": "## What\n\nAdds **D12 (honest capabilities)** to ADR-0076 and corrects the D10 analytics claim — both stem from a read-only investigation prompted by *\"many fake services; the AI fake confused an agent.\"*\n\n## D12 — honest capabilities\n\n**Root cause of agents being misled:** stub/dev/fallback services are registered under canonical names, and `runtime/http-dispatcher.ts`'s `svcAvailable` hardcodes `{ enabled:true, status:'available', handlerReady:true }` for *any* present service — ignoring stub markers. So `discovery.services.*` claims capabilities that are only stubbed, and agents/console trust them.\n\n**Inventory:** plugin-dev's ~8 dev stubs (incl. `ai`, `analytics`; already carry `_dev:true` that nothing respects); ObjectQLPlugin's analytics fallback; the dispatcher hardcode.\n\n**Decision:** stubs self-identify (standard marker) → discovery reports `status:'stub'`/`handlerReady:false` (never `available`) → consumers trust only real services. Fixes the whole class **without deleting any fallback** (no `/analytics` 404) — they stop *lying*, not stop working. Runtime enforcement of the D9-refinement principle.\n\n## Analytics correction (D10)\n\nThe earlier \"duplicated and collides / delete it\" claim was wrong: `registerService` throws on duplicate, so it's a deliberate fallback + `replaceService` pattern. The fix is to **mark it honestly (D12)**, not delete it.\n\n## Execution\n\nFramework (marker + `svcAvailable` + discovery `stub` status) and console (read honest status) land **together at the cross-repo window** — discovery is a cross-repo contract.\n\n## Scope\n\nDocs only — `docs/adr/0076-objectql-core-tiering.md` (→ D1–D12). No code. Empty changeset.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

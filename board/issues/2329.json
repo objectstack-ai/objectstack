@@ -1,0 +1,32 @@
+{
+  "number": 2329,
+  "kind": "pull_request",
+  "title": "feat(serve): thread api.enforceProjectMembership to the dispatcher (ADR-0024 D9)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-25T15:45:54Z",
+  "updated_at": "2026-06-25T15:51:20Z",
+  "closed_at": "2026-06-25T15:51:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-25T15:51:18Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2329",
+  "body": "Threads `api.enforceProjectMembership` from the served app's config through to `createDispatcherPlugin` (it was sourcing `enableProjectScoping`/`projectResolution` but silently dropping membership).\n\n**Why:** `enforceProjectMembership` defaults to `scoping.enableProjectScoping` — so the `sys_environment_member` 403 gate was forced ON for any project-scoped host with no way to opt out. ADR-0024 D9 makes **env-native auth the membership** (a valid env session = a member; cross-env is already protected by per-env sessions), so a host needs to disable the redundant cloud-mirror gate. This adds that seam.\n\n**Backward-compatible:** `apiConfig.enforceProjectMembership` is `undefined` for every app that doesn't set it → the dispatcher keeps its existing default (`= enableProjectScoping`). Only an app that explicitly sets `api.enforceProjectMembership: false` changes behavior.\n\nConsumed by cloud `objectos-stack` (forthcoming PR) to retire the `sys_environment_member` access gate.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 2280,
+  "kind": "pull_request",
+  "title": "docs(adr): renumber package-first ADR 0069 → 0070 (number collision)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-24T09:54:46Z",
+  "updated_at": "2026-06-24T10:55:45Z",
+  "closed_at": "2026-06-24T10:55:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-24T10:55:43Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2280",
+  "body": "ADR-0069 was concurrently merged twice (enterprise-auth + package-first, #2277). This renames the **package-first** ADR to the next free number **0070** (content unchanged) to resolve the collision. The enterprise-auth ADR keeps 0069.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

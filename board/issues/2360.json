@@ -1,0 +1,32 @@
+{
+  "number": 2360,
+  "kind": "pull_request",
+  "title": "feat(spec): blueprint dashboard widget gains explicit measure/groupBy slots",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T12:00:30Z",
+  "updated_at": "2026-06-27T12:11:36Z",
+  "closed_at": "2026-06-27T12:11:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T12:11:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2360",
+  "body": "## Why\n\nThe plan-first blueprint dashboard widget carried only `{id, title, object, chart}`, so cloud's deterministic `dashboardBody()` had to **guess** which measure/dimension a widget binds from the title alone. Two heuristic gaps produced structurally-valid-but-semantically-wrong bindings that BVL graph-lint cannot catch (cloud #476):\n\n- a non-count value metric took the **next-unused measure by field order** → on `[score(percent), amount(currency)]` a \"total revenue\" card bound `avg_score`;\n- a grouped chart took the **first** category dimension → a \"by region\" bar grouped by `status`.\n\nThe propose prompt already said \"group by the field the user named\", but the widget had **no slot** to express it.\n\n## What\n\nAdd optional `measure` / `groupBy` to the blueprint dashboard widget, in **both** the lenient `BlueprintDashboardSchema` (optional, snake_case) and the strict `StrictDashboard` mirror — the `generateObject` contract the model emits against (nullable + present, per OpenAI strict). `stripNulls` in the cloud blueprint tools already drops the emitted nulls so the lenient schema sees them absent.\n\n`measure` names the **field** to aggregate (`\"amount\"`, `\"win_rate\"`) or the literal `\"count\"`; cloud maps the field to its semantic measure (`total_*` SUM / `avg_*` AVG) so aggregation coherence (percent→avg) is preserved automatically. `groupBy` names the breakdown field. Additive + optional → no behavior change for existing blueprints; the cloud builder keeps its title heuristics as the fallback.\n\n## Tests\n\n`packages/spec` suite green (6629 tests), incl. new coverage: lenient widgets carrying / omitting `measure`+`groupBy`, snake_case rejection, and the strict mirror requiring + accepting the nullable keys.\n\nConsuming cloud change: objectstack-ai/cloud `fix/dashboard-widget-semantic-binding`. Cloud bumps `.framework-sha` to this commit once merged.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 2411,
+  "kind": "pull_request",
+  "title": "feat(observability): per-request performance timing → Server-Timing (perf-tuning mode)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-28T02:20:17Z",
+  "updated_at": "2026-06-28T03:33:19Z",
+  "closed_at": "2026-06-28T03:33:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-28T03:33:17Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2411",
+  "body": "## What\n\nAdds opt-in **per-request performance timing** surfaced via the W3C [`Server-Timing`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Server-Timing) response header — so a slow request's phase breakdown renders directly in the browser DevTools **Network → Timing** panel, no profiler attach required.\n\n```\nServer-Timing: total;dur=18.7;desc=\"Total server time\", parse;dur=0.4;desc=\"Body parse\", handler;dur=17.9;desc=\"Route handler\"\n```\n\n## Why opt-in (\"perf-tuning mode\")\n\nThe header discloses internal phase durations, which is great for profiling but also lets a caller fingerprint the backend. So it's **off by default** and treated as a toggle you flip in staging (or briefly in prod behind an allowlist), consistent with how `OS_CORS_*` / `OS_MCP_*` gate other adapter behaviour.\n\n## How\n\n**`@objectstack/observability`** (new `perf-timing.ts`)\n- `PerfTiming` — tiny, dependency-free per-request collector (`record` / `start` / `measure`).\n- Ambient API over `AsyncLocalStorage`: `runWithPerfTiming` / `currentPerfTiming`, plus the **no-op-when-disabled** free functions `measureServerTiming` / `startServerTiming` / `recordServerTiming`, so any code on the request's async chain can add a phase without threading a request object through every layer.\n- `formatServerTiming` serializes to the spec grammar, coercing names to tokens and stripping `\"` / `\\` / control chars from descriptions (**no header injection**).\n\n**`@objectstack/plugin-hono-server`**\n- Outer middleware (registered **before** CORS) brackets the whole request as `total` and establishes the ambient collector.\n- The HTTP adapter contributes `parse` (body parse) and `handler` (route handler) sub-phases into whatever collector is active — no-ops when the feature is off.\n- Enable via `new HonoServerPlugin({ serverTiming: true })` or `OS_SERVER_TIMING=true` (works through the default `os serve`, which constructs the plugin for you). Explicit option wins over the env var.\n\n## Enabling\n\n```ts\nnew HonoServerPlugin({ serverTiming: true });\n```\n```bash\nOS_SERVER_TIMING=true os serve\n```\n\n## Tests\n\n- **17 unit** (`perf-timing.test.ts`): serializer formatting/rounding/token-sanitization/injection-stripping, `PerfTiming` record/start-idempotency/measure-on-throw, ambient propagation across `await`.\n- **4 integration** (`server-timing.test.ts`, real Hono adapter): header **absent by default**, present with `total`+`handler` when `serverTiming: true`, enabled via `OS_SERVER_TIMING=true`, and explicit `serverTiming: false` overrides the env var.\n- Full suites green: observability 51/51, plugin-hono-server 44/44. `turbo build` (incl. tsup DTS) and root `eslint` clean.\n\n## Docs\n\nNew **\"Server-Timing (perf-tuning mode)\"** section + go-live checklist item in `docs/OBSERVABILITY.md`.\n\n## Risk\n\nDefault behaviour is unchanged — the header only appears when explicitly enabled, and all timing call sites are zero-overhead no-ops when disabled. No existing response-header assertions are affected.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

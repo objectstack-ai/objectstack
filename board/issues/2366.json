@@ -1,0 +1,34 @@
+{
+  "number": 2366,
+  "kind": "pull_request",
+  "title": "chore(release): major changeset — open edition is MCP-only (cut 11.0)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T13:10:02Z",
+  "updated_at": "2026-06-27T14:08:55Z",
+  "closed_at": "2026-06-27T14:08:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-06-27T14:08:54Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/2366",
+  "body": "## What\nAdds the missing **major** changeset so the next release cuts **11.0.0**.\n\n## Why\nThe breaking removal of the bundled AI service — [#2325](https://github.com/objectstack-ai/framework/pull/2325) `feat(framework)!: remove service-ai — open edition is MCP-only (ADR-0025 S2)` — is merged to `main` but **unreleased** (81 commits past the `10.3.0` tag) and **shipped no changeset** (it only edited `.changeset/config.json` to drop service-ai from the fixed group).\n\nThe 44 pending changesets are all `minor`/`patch` (**0 major**), so whoever triggers the next release would bump the fixed group to **10.4.0** — leaking the removal of a published package out as a *minor*, violating SemVer. This adds the one major changeset needed to flip it to 11.0.0; the fixed group of 73 packages bumps together, so every pending change folds into 11.0.\n\n## Notes\n- Wording is deliberately low-key/factual — \"open edition is MCP-only\" — not a marketing announcement. The open edition keeps a working AI-integration surface via `@objectstack/mcp` plus the documented opt-in seam (`@objectstack/service-ai` / `-studio`).\n- No code change — changeset only. `check-changeset-fixed.mjs` passes; `changeset status` projects a **major** bump.\n- Other intentionally-`minor` breaking removals (e.g. `page-hard-remove-dead-schemas`) ride along into 11.0 unchanged.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}
