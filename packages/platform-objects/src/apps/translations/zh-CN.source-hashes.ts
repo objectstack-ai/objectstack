@@ -66,6 +66,7 @@ export const zhCNSourceHashes: Readonly<Record<string, string>> = {
   'apps.account.navigation.nav_account_sessions.label': '05a759e3a230615e',
   'apps.account.navigation.nav_account_api_keys.label': '8cda9851248b0490',
   'apps.account.navigation.nav_account_oauth_apps.label': '1b26cce61a4c10eb',
+  'apps.account.navigation.nav_connect_agent.label': 'eeb174613510e87d',
   'apps.setup.label': 'e4bb0d8bcd47c273',
   'apps.setup.description': 'deacdfc679232a4a',
   'apps.setup.navigation.group_overview.label': 'eebdbe1cc7b59cdf',
