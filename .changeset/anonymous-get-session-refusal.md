@@ -1,48 +1,56 @@
 ---
-"@objectstack/plugin-auth": minor
+'@objectstack/plugin-auth': minor
 ---
 
-fix(plugin-auth)!: `GET /api/v1/auth/get-session` refuses an anonymous caller with `401 UNAUTHENTICATED` instead of `200 null` (#17238)
+**BREAKING** — `GET /api/v1/auth/get-session` answers an anonymous caller with the
+declared ADR-0112 failure envelope and HTTP 401, instead of HTTP 200 wrapping a JSON `null`.
 
-**Observable behaviour change on a published endpoint.** An unauthenticated
-`GET /api/v1/auth/get-session` used to answer **HTTP 200 with the literal JSON
-`null`**. It now answers the platform's standard ADR-0112 failure envelope:
+Until now an unauthenticated session read answered:
 
 ```
-before:  200  null
-after:   401  {"success":false,"error":{"code":"UNAUTHENTICATED","message":"Sign in first"}}
+HTTP 200
+null
 ```
-
-A caller that branches on the `null` body will not see one any more, and a
-caller that treats every 2xx as "the session read succeeded" now sees a 4xx.
-
-## Why the code moved and not the schema
 
 `ObjectStackClient.auth.me()` declares `Promise<SessionResponse>`, and
-`SessionResponseSchema` requires `data.session` and `data.user` — so no value
-of that type means "nobody is signed in", and the most ordinary call a
-logged-out caller can make resolved to something outside the method's own
-declared type. Ruled B by the director seat (decision batch #117 item 4):
-「spec 与代码不一致默认改代码,改协议单独立卡非选项」. `SessionResponseSchema`
-is untouched; the implementation is corrected to it.
+`SessionResponseSchema` requires `data.session` and `data.user` — so no value of that type
+means "nobody is signed in", and the most ordinary call a logged-out caller can make
+resolved to something outside the method's own declared type. Ruled by the director seat
+(decision batch #117 item 4) under the charter rule
+「spec 与代码不一致默认改代码,改协议单独立卡非选项」: the implementation is corrected to
+the published contract. `SessionResponseSchema` is untouched.
 
-⇒ Every value `auth.me()` **returns** is now inside `SessionResponse`. The
-anonymous case is delivered as a rejection: the SDK's `fetch` wrapper throws on
-a non-2xx, handing the caller an error with `code: 'UNAUTHENTICATED'` and
-`httpStatus: 401`.
+What changes on the wire:
 
-## FROM → TO for callers
+- **An anonymous or unresolvable credential ⇒ `401` with `error.code: 'UNAUTHENTICATED'`**
+  and the message `Sign in first`, the same body a raw `/admin/` mount already answers the
+  same caller with. No error code is minted: `UNAUTHENTICATED` is an existing
+  `StandardErrorCode` member, derived from the status through ADR-0112's own map, so
+  `ERROR_CODE_LEDGER` is unchanged.
+- **Unchanged:** a signed-in read still answers `200` with `{ user, session }`,
+  byte-identical. Every other `/auth/*` route is untouched, and so is the `404` that a
+  method this route does not serve already answered — this change never invents a route.
+- **Also unchanged:** better-auth's JS API. `auth.api.getSession()` still returns `null` for
+  an anonymous caller, so every internal identity read — execution-context resolution, the
+  platform-admin gates, the SSO bridges — behaves exactly as before. Only the wire moves.
 
-| you wrote | now |
-|---|---|
-| `const s = await client.auth.me(); if (s === null) …` | `try { const s = await client.auth.me(); … } catch (e) { if (e.code === 'UNAUTHENTICATED') … }` |
-| `if (res.status === 200 && body === null) // signed out` | `if (res.status === 401 && body.error.code === 'UNAUTHENTICATED') // signed out` |
+**`@objectstack/client`:** `client.auth.me()` now **rejects** for an anonymous caller
+instead of resolving with `null` — the SDK throws on every non-2xx before unwrapping. Every
+value the method resolves with is now inside its declared `SessionResponse`. Callers that
+inspected the resolved value must move to a `catch`:
 
-No error code is minted: `UNAUTHENTICATED` is an existing `StandardErrorCode`
-member, derived from the status through ADR-0112's own map, so
-`ERROR_CODE_LEDGER` is unchanged.
+```ts
+try {
+  const session = await client.auth.me();
+  // …signed in
+} catch (err: any) {
+  if (err.code === 'UNAUTHENTICATED') {
+    // …signed out; err.httpStatus is 401
+  }
+}
+```
 
-⛔ Unchanged: the signed-in answer (`200 { user, session }`, byte-identical),
-every other `/auth/*` route, and better-auth's JS API — `auth.api.getSession()`
-still returns `null` for an anonymous caller, so every internal identity read
-behaves exactly as before. Only the wire answer of this one route moves.
+A caller that branches on the HTTP status directly reads `401` plus
+`error.code: 'UNAUTHENTICATED'` where it used to read `200` plus an empty body.
+
+<!-- adr-0087: not-required (no-migration-prescription) retires no metadata surface: no Zod schema, no authorable key, no export, no config field, and no stored sys_metadata row changes shape, so `objectstack migrate meta` has nothing to rewrite and no ledger entry can be written for it. What changes is an HTTP status plus an SDK method's promise contract, and the only channel that reaches those consumers is this changeset itself. -->
