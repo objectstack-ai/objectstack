@@ -200,6 +200,7 @@
     "Doc (type)",
     "DocSchema (const)",
     "DocTranslation (type)",
+    "EMAIL_TEMPLATE_FLOOR_LOCALE (const)",
     "ENVIRONMENT_ARTIFACT_SCHEMA_VERSION (const)",
     "EmailAddressConfig (type)",
     "EmailAddressConfigSchema (const)",
