@@ -44,12 +44,54 @@
  * the authoring commands) and the ledgered `record:line_items`. An error gate
  * with zero live findings breaks no one and refuses the next `global:serch` at
  * the door instead of in front of a user.
+ *
+ * ## The EXACT-name arm: a retired type, reported with the spec's own words
+ *
+ * A type the vocabulary RETIRED is `isKnownComponentType` — deliberately, so
+ * the kept `ComponentPropsMap` row keeps carrying the prescription at the props
+ * door — and it was therefore the one reserved-namespace string this rule
+ * walked past in silence, while `PageComponentSchema.type` refuses it by name
+ * at the parse. Lint saying "the stack is fine" about a name the parser then
+ * refuses is the declared-not-enforced shape inverted: the author's EARLIEST
+ * feedback channel was the one that stayed quiet. So the arm below reports it,
+ * and the reported text is `RETIRED_PAGE_COMPONENT_TYPES`'s own entry —
+ * relayed verbatim, never re-authored, so this file cannot drift from the enum
+ * error map and the kept props row that carry the same string. The pin is byte
+ * equality against the map (`validate-component-types.test.ts`), which is also
+ * what makes a member retired tomorrow arrive here already covered.
+ *
+ * ⛔ `isKnownComponentType` is NOT the seam for this. Flipping it would MOVE
+ * the refusal out of the props door instead of ADDING a report here, and would
+ * strip the retired row of the dispatch that makes its prescription reachable.
+ *
+ * ### Why the arm runs BEFORE the namespace guard
+ *
+ * `RESERVED_COMPONENT_TYPE_NAMESPACES` is derived from the enum, and a
+ * retirement can take the namespace out with the member: `user:profile` was the
+ * `user:` namespace's ONLY member, so since its removal
+ * `hasReservedComponentNamespace('user:profile')` is `false` — measured, not
+ * assumed — and a retired-type check placed after that guard would report the
+ * two elements and stay silent on exactly the member that has been refused
+ * longest. Retirement is an EXACT-name fact and needs no namespace claim to be
+ * true, so it is judged first. The guard keeps its own job unchanged for every
+ * other string: what is outside a reserved namespace and not retired is the
+ * open arm's declared story and stays untouched.
+ *
+ * The corpus this arm landed on was measured the way severity was: zero
+ * authored instances of any retirement-map member across the in-repo page
+ * sources (`examples/**`, `packages/platform-objects/src/pages/**`), with live
+ * types as the lit control in the same query. Every in-tree occurrence of a
+ * retired name is the map itself, a tombstone prescription, conversion or
+ * migration registry data, a test, or prose. ⚠️ That reading covers authored
+ * config-file metadata only — the same scope limit the rule's `surfaceReason`
+ * records for stored tenant rows.
  */
 
 import {
   hasReservedComponentNamespace,
   isKnownComponentType,
   KNOWN_COMPONENT_TYPE_CANDIDATES,
+  RETIRED_PAGE_COMPONENT_TYPES,
 } from '@objectstack/spec/ui';
 import { findClosestMatches, formatSuggestion } from '@objectstack/spec/shared';
 import { walkPageComponents, type AnyRec } from './page-walk.js';
@@ -93,6 +135,26 @@ export function validateComponentTypes(stack: AnyRec): ComponentTypeFinding[] {
     for (const { component, path } of walkPageComponents(page, `pages[${pi}]`)) {
       const type = strName(component.type);
       if (!type) continue;
+
+      // EXACT-name arm, judged before the namespace guard (header: `user:`
+      // stopped being a reserved namespace when its only member was retired).
+      // The message IS the map's entry — relayed, never re-authored.
+      const prescription = RETIRED_PAGE_COMPONENT_TYPES.get(type);
+      if (prescription !== undefined) {
+        findings.push({
+          severity: 'error',
+          rule: COMPONENT_TYPE_UNKNOWN,
+          where: `page "${pageName}" · ${type}`,
+          path: `${path}.type`,
+          message: prescription,
+          hint:
+            `Apply the prescription above: \`${type}\` is a retired component type, refused by ` +
+            'name at the parse door (`PageComponentSchema.type`), so this page cannot validate or ' +
+            'publish while the node is present.',
+        });
+        continue;
+      }
+
       if (!hasReservedComponentNamespace(type)) continue; // the open arm's half — deliberately untouched
       if (isKnownComponentType(type)) continue;
 
