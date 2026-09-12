@@ -65,6 +65,8 @@ import { describe, expect, it } from 'vitest';
 
 import { lintConfig } from '../src/commands/lint';
 import { scoreMetadata } from '../src/lint/score';
+import { lowerCallables } from '../src/utils/lower-callables';
+import { authoringRuleUnionStack } from '../src/utils/stack-collections';
 
 // ─── One set of definitions, three shapes ───────────────────────────────────
 
@@ -242,6 +244,35 @@ describe('#17528 — os lint judges the stack the author declared, in either ADR
       'a packages[]-only project with six lint defects must not score 100',
     ).toBeLessThan(100);
     expect(fromPackages.counts.warnings).toBeGreaterThan(0);
+  });
+
+  it('THE CHAIN — `lowerCallables` carries the folded collections through, so the `parsed` tier really is folded', () => {
+    // `lintConfig` folds ONCE, at its entry, and then hands the rule registry
+    // `normalized: stack` and `parsed: lowered`, where `lowered` is
+    // `lowerCallables(stack)`. Dropping the second `authoringRuleUnionStack(…)`
+    // call that used to wrap `parsed` rests on a claim — that `lowerCallables`
+    // shallow-clones the top level it is handed, so the folded collections
+    // survive it — and `test/validate-build-gate-parity.test.ts`'s resolver now
+    // trusts that claim when it follows the binding chain. A claim a guard
+    // trusts belongs in a test, not only in a comment. This is that test.
+    const stack = authoringRuleUnionStack(packagesShape() as unknown as Record<string, unknown>);
+    const { lowered } = lowerCallables(stack);
+
+    for (const key of ['objects', 'views', 'apps', 'flows', 'agents', 'hooks']) {
+      const folded = (stack as Record<string, unknown>)[key];
+      expect(Array.isArray(folded), `the fold did not fill \`${key}\` — the fixture moved`).toBe(true);
+      expect(
+        ((lowered as Record<string, unknown>)[key] as unknown[] | undefined)?.length,
+        `lowerCallables dropped or truncated \`${key}\`, so the \`parsed\` tier would be judged ` +
+          `over less than the author declared.`,
+      ).toBe((folded as unknown[]).length);
+    }
+
+    // …and re-folding the lowered stack is a no-op BY IDENTITY, which is why
+    // the second call was removed rather than kept as a cheap insurance policy:
+    // a call that can only ever return its argument is not insurance, it is a
+    // spelling a guard can be satisfied by while the surrounding code rots.
+    expect(authoringRuleUnionStack(lowered)).toBe(lowered);
   });
 
   it("THE CARD'S REPRO — one object, authored two ways, judged the same", () => {
