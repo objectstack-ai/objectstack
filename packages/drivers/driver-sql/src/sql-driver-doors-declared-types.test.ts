@@ -105,6 +105,35 @@ type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B
 
 type Resolved<F> = F extends (...args: never[]) => PromiseLike<infer R> ? R : never;
 
+/**
+ * [#17690] `IsAny<T>` answers about T ITSELF, which is honestly `false` for
+ * `any[]` and for `Record<string, any>` — and those are exactly the two shapes
+ * every door on this card had regressed to. Used as the "is not `any`" half of
+ * a nested-`any` door it is a PHANTOM CHECK: it evaluates, it is green, and it
+ * is green against the very mask it is supposed to name. Measured: with
+ * `find()` put back to `Promise<any[]>`, `IsAny<Resolved<SqlDriver['find']>>`
+ * stayed `false` and only the `Equals` leg red — one half, not the two this
+ * family requires.
+ *
+ * That is the card's own lesson turning up inside its own instrument: an
+ * instrument's silence is only evidence if the instrument could have spoken.
+ * `ContainsAny` looks one and two levels in — the ROW of an array-shaped door
+ * and the CELL of a record row — so `any[]`, `Record<string, any>` and
+ * `Record<string, any>[]` all answer `true` while the contract's own
+ * `Record<string, unknown>[]` / `Record<string, unknown>` / `unknown` answer
+ * `false`. The branch order matters: `IsAny<T>` is asked FIRST so a bare `any`
+ * never reaches a distributive conditional, where it would split across both
+ * arms and answer `boolean`.
+ */
+type ContainsAny<T> = IsAny<T> extends true
+  ? true
+  : T extends readonly (infer Row)[]
+    ? ContainsAny<Row>
+    : T extends Record<string, infer Cell>
+      ? IsAny<Cell>
+      : false;
+
+
 // `explain` is optional on the contract (`explain?(...)`), so its function type
 // is read through `NonNullable` — the door is the member, not its presence.
 type ContractFindOne = Resolved<IDataDriver['findOne']>;
@@ -160,16 +189,16 @@ const sqlExplainIsAny: IsAny<SqlExplain> = false;
 const sqlExplainIsContract: Equals<SqlExplain, unknown> = true;
 const sqlAggregateIsAny: IsAny<SqlAggregate> = false;
 const sqlAggregateIsContract: Equals<SqlAggregate, Record<string, unknown>[]> = true;
-const sqlFindIsAny: IsAny<SqlFind> = false;
+const sqlFindHasAny: ContainsAny<SqlFind> = false;
 const sqlFindIsContract: Equals<SqlFind, Record<string, unknown>[]> = true;
-const sqlUpsertIsAny: IsAny<SqlUpsert> = false;
+const sqlUpsertHasAny: ContainsAny<SqlUpsert> = false;
 const sqlUpsertIsContract: Equals<SqlUpsert, Record<string, unknown>> = true;
-const sqlBulkUpdateIsAny: IsAny<SqlBulkUpdate> = false;
+const sqlBulkUpdateHasAny: ContainsAny<SqlBulkUpdate> = false;
 const sqlBulkUpdateIsContract: Equals<SqlBulkUpdate, Record<string, unknown>[]> = true;
 // `temporalFilterValue` lands on `unknown`, so the `IsAny` leg carries most of
 // the weight here: `Equals<any, unknown>` is already `false`, and without it a
 // regression to `any` would be reported only as "not `unknown`".
-const sqlTemporalFilterValueIsAny: IsAny<SqlTemporalFilterValue> = false;
+const sqlTemporalFilterValueHasAny: ContainsAny<SqlTemporalFilterValue> = false;
 const sqlTemporalFilterValueIsContract: Equals<SqlTemporalFilterValue, unknown> = true;
 
 describe('SqlDriver declared return types on the five remaining IDataDriver doors (#15267)', () => {
@@ -272,8 +301,9 @@ describe('SqlDriver declared return types on the five remaining IDataDriver door
   });
 
   // [#17690] The four doors a literal-string census could not see. Both halves
-  // each: put any one annotation back and `IsAny` flips to `true` while
-  // `Equals` flips to `false`, reding this file twice for that door.
+  // each: put any one annotation back and `ContainsAny` flips to `true` while
+  // `Equals` flips to `false`, reding this file twice for that door — verified
+  // by ablating all four, two errors apiece and nothing else.
   it('pins both halves of find(), upsert(), bulkUpdate() and temporalFilterValue()', () => {
     expect([contractFind, contractUpsert, contractBulkUpdate, contractTemporalFilterValue]).toEqual([
       true,
@@ -281,7 +311,7 @@ describe('SqlDriver declared return types on the five remaining IDataDriver door
       true,
       true,
     ]);
-    expect([sqlFindIsAny, sqlUpsertIsAny, sqlBulkUpdateIsAny, sqlTemporalFilterValueIsAny]).toEqual([
+    expect([sqlFindHasAny, sqlUpsertHasAny, sqlBulkUpdateHasAny, sqlTemporalFilterValueHasAny]).toEqual([
       false,
       false,
       false,

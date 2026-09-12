@@ -105,6 +105,35 @@ type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B
 
 type Resolved<F> = F extends (...args: never[]) => PromiseLike<infer R> ? R : never;
 
+/**
+ * [#17690] `IsAny<T>` answers about T ITSELF, which is honestly `false` for
+ * `any[]` and for `Record<string, any>` — and those are exactly the two shapes
+ * every door on this card had regressed to. Used as the "is not `any`" half of
+ * a nested-`any` door it is a PHANTOM CHECK: it evaluates, it is green, and it
+ * is green against the very mask it is supposed to name. Measured: with
+ * `find()` put back to `Promise<any[]>`, `IsAny<Resolved<SqlDriver['find']>>`
+ * stayed `false` and only the `Equals` leg red — one half, not the two this
+ * family requires.
+ *
+ * That is the card's own lesson turning up inside its own instrument: an
+ * instrument's silence is only evidence if the instrument could have spoken.
+ * `ContainsAny` looks one and two levels in — the ROW of an array-shaped door
+ * and the CELL of a record row — so `any[]`, `Record<string, any>` and
+ * `Record<string, any>[]` all answer `true` while the contract's own
+ * `Record<string, unknown>[]` / `Record<string, unknown>` / `unknown` answer
+ * `false`. The branch order matters: `IsAny<T>` is asked FIRST so a bare `any`
+ * never reaches a distributive conditional, where it would split across both
+ * arms and answer `boolean`.
+ */
+type ContainsAny<T> = IsAny<T> extends true
+  ? true
+  : T extends readonly (infer Row)[]
+    ? ContainsAny<Row>
+    : T extends Record<string, infer Cell>
+      ? IsAny<Cell>
+      : false;
+
+
 type ContractFindOne = Resolved<IDataDriver['findOne']>;
 type ContractCreate = Resolved<IDataDriver['create']>;
 type ContractBulkCreate = Resolved<IDataDriver['bulkCreate']>;
@@ -153,17 +182,17 @@ const tursoExecuteIsAny: IsAny<TursoExecute> = false;
 const tursoExecuteIsContract: Equals<TursoExecute, unknown> = true;
 const tursoAggregateIsAny: IsAny<TursoAggregate> = false;
 const tursoAggregateIsContract: Equals<TursoAggregate, Record<string, unknown>[]> = true;
-const tursoFindIsAny: IsAny<TursoFind> = false;
+const tursoFindHasAny: ContainsAny<TursoFind> = false;
 const tursoFindIsContract: Equals<TursoFind, Record<string, unknown>[]> = true;
-const tursoUpsertIsAny: IsAny<TursoUpsert> = false;
+const tursoUpsertHasAny: ContainsAny<TursoUpsert> = false;
 const tursoUpsertIsContract: Equals<TursoUpsert, Record<string, unknown>> = true;
-const tursoBulkUpdateIsAny: IsAny<TursoBulkUpdate> = false;
+const tursoBulkUpdateHasAny: ContainsAny<TursoBulkUpdate> = false;
 const tursoBulkUpdateIsContract: Equals<TursoBulkUpdate, Record<string, unknown>[]> = true;
 // `RemoteTransport` is not an `IDataDriver` implementer, but it is the remote
 // branch of every door above, so the same two halves are owed here. The
 // `IsAny` leg carries most of the weight on an `unknown` destination:
 // `Equals<any, unknown>` is already `false`.
-const remoteBeginTransactionIsAny: IsAny<RemoteBeginTransaction> = false;
+const remoteBeginTransactionHasAny: ContainsAny<RemoteBeginTransaction> = false;
 const remoteBeginTransactionIsContract: Equals<RemoteBeginTransaction, unknown> = true;
 
 /**
@@ -253,7 +282,8 @@ describe('TursoDriver declared return types on the doors it overrides (#15267)',
 
   // [#17690] The three further overridden doors, plus the remote branch's own
   // `beginTransaction`. Both halves each: put any one annotation back and
-  // `IsAny` flips to `true` while `Equals` flips to `false`.
+  // `ContainsAny` flips to `true` while `Equals` flips to `false` — verified by
+  // ablating all four, two errors apiece and nothing else.
   it('pins both halves of find(), upsert(), bulkUpdate() and RemoteTransport.beginTransaction()', () => {
     expect([contractFind, contractUpsert, contractBulkUpdate, contractBeginTransaction]).toEqual([
       true,
@@ -261,7 +291,7 @@ describe('TursoDriver declared return types on the doors it overrides (#15267)',
       true,
       true,
     ]);
-    expect([tursoFindIsAny, tursoUpsertIsAny, tursoBulkUpdateIsAny, remoteBeginTransactionIsAny]).toEqual([
+    expect([tursoFindHasAny, tursoUpsertHasAny, tursoBulkUpdateHasAny, remoteBeginTransactionHasAny]).toEqual([
       false,
       false,
       false,
