@@ -7,8 +7,9 @@
  * against a normalized stack, threading the (immutably updated) stack through
  * each entry and turning each rewrite into a structured {@link ConversionNotice}.
  * It is wired into `normalizeStackInput`, so it fires on the single seam every
- * load path funnels through — `defineStack`, `objectstack validate`, `lint`,
- * `info`, and `doctor`.
+ * AUTHORING path funnels through — `defineStack`, `objectstack validate`,
+ * `lint`, `info`, and `doctor`. Data-at-rest load paths reach it by their own
+ * route and with `includeRetired` set; see that option below.
  */
 
 import { ALL_CONVERSIONS } from './registry.js';
@@ -29,9 +30,32 @@ export interface ApplyConversionsOptions {
   onNotice?: (notice: ConversionNotice) => void;
   /**
    * Also apply conversions marked `retiredFromLoadPath` (default `false`).
-   * The load seam never sets this — a retired entry is chain history, not a
-   * live window. The migration chain and the fixture CI set it so graduated
-   * transforms stay replayable forever (ADR-0087 D3).
+   *
+   * **Retirement is an AUTHORING-SURFACE event**, and the default posture is
+   * that surface: `normalizeStackInput` — the single funnel for `defineStack`,
+   * `validate`, `lint`, `compile`, `info`, `doctor`, i18n extraction and
+   * scaffold validation — never sets this, so a live author meets the
+   * tombstone and is taught the canonical spelling instead of having the old
+   * shape silently rewritten. That funnel is the whole jurisdiction the flag
+   * has; it is not a claim about every load path.
+   *
+   * **Data-at-rest load paths set it deliberately** — three call sites today:
+   * `applyConversionsToStoredItem` (`./stored.js`), where it is *pinned*
+   * rather than offered (`StoredConversionOptions` omits the key, so no caller
+   * can turn it off); flow rehydration in the automation engine; and the
+   * artifact-ingestion door (`applyArtifactForwardConversions` in
+   * `@objectstack/metadata-core`, reached from two callers), which opens the
+   * window by comparing the artifact's declared `engines.protocol` floor with
+   * the running spec version. A stored row, a stored flow and a built artifact
+   * have no author to teach, so each replays the FULL chain, retired entries
+   * included — ADR-0087's `## Addendum (2026-07-31)` for the first two, the
+   * #12772 ruling for the third. The fixture CI sets it as well, so graduated
+   * transforms stay covered forever (ADR-0087 D3).
+   *
+   * `objectstack migrate meta` is NOT one of these callers: `applyMetaMigrations`
+   * (`../migrations/chain.js`) looks each step's conversion up in
+   * `ALL_CONVERSIONS` by id and calls its `apply` directly, so it never reaches
+   * this option at all.
    */
   includeRetired?: boolean;
   /**
@@ -65,8 +89,11 @@ export function applyConversions(
 
   for (const conversion of ALL_CONVERSIONS) {
     // A retired entry is graduated chain history (ADR-0087 D2 window, second
-    // half): the loader no longer accepts its old shape — only `migrate meta`
-    // (and the fixture CI) replays it, via `includeRetired`.
+    // half): the AUTHORING funnel (`normalizeStackInput`) no longer replays it,
+    // so the tombstone teaches the author instead. The data-at-rest seams —
+    // stored-row rehydration, flow rehydration, the artifact-ingestion door —
+    // opt back in via `includeRetired`, as do the fixture CI and any caller
+    // rehydrating rows nobody can be taught (see `includeRetired` above).
     if (conversion.retiredFromLoadPath && !includeRetired) continue;
     const retiresIn = conversion.toMajor + 1;
     const context: ConversionContext = {
