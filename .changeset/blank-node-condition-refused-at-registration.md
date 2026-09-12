@@ -30,7 +30,7 @@ nodes:
 ```
 
 > An expression in an evaluated slot needs a non-blank `source`: the expression
-> engine evaluates `source` (the canonical persisted form of phase M9.1) and
+> engine evaluates `source` (the canonical persisted form) and
 > cannot evaluate `ast` alone, so an envelope carrying only `ast`, or a `source`
 > that is blank after trimming, would validate and register and then fault at
 > run time. Write `{ dialect: 'cel', source: '…' }`.

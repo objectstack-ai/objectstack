@@ -84,7 +84,8 @@ Formatters: `currency[:CODE]`, `number[:decimals]`, `percent[:decimals]`,
 
 At **input** time you may write a bare string for shorthand — the spec
 transforms it into the right envelope based on the field type. The compiled
-artifact always contains the full envelope (and, after M9.2, the AST).
+artifact always contains the full envelope: `source` is the canonical persisted
+form, and `ast` is an optional opaque structured value.
 
 {/* os:check */}
 ```ts
