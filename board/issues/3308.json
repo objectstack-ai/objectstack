@@ -1,0 +1,30 @@
+{
+  "number": 3308,
+  "kind": "issue",
+  "title": "Remove deprecated `aiStudio`/`aiSeat` capability aliases after one deprecation cycle (follow-up to #3265)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T17:17:45Z",
+  "updated_at": "2026-07-20T02:19:24Z",
+  "closed_at": "2026-07-20T02:19:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3308",
+  "body": "Follow-up cleanup from #3265 (which unified the `requires` capability vocabulary to canonical kebab-case). The legacy camelCase spellings `aiStudio` → `ai-studio` and `aiSeat` → `ai-seat` are currently honored as **deprecated aliases** (canonicalized on input with a deprecation warning) so bundles/configs authored before the rename keep booting for one release.\n\n## When\n\nAfter the alias-warning release has actually shipped (≥ 1 published release, or at the next major) — **not before**. Precondition: confirm no in-flight bundle/config/artifact still uses the legacy spelling.\n\n## What to remove\n\n- **framework** `packages/spec/src/kernel/platform-capabilities.ts`: delete `DEPRECATED_PLATFORM_CAPABILITY_ALIASES` + `canonicalizePlatformCapability` (or make the latter identity), and drop the alias-rewrite branch in `defineStack`'s `canonicalizeStackRequires`. After removal, a legacy token becomes an *unknown-token* `defineStack` error (the reject added in #3302) — which is the intended end state.\n- **framework** `packages/cli/src/commands/serve.ts`: remove the raw-artifact alias canonicalization.\n- **cloud** `packages/objectos-runtime/src/capability-loader.ts`: `canonicalizeCapabilityToken` now delegates to the spec helper (cloud#863), so it follows automatically once the spec drops aliases — but verify, and remove the now-noop delegate if desired.\n- Update the tests that assert alias canonicalization (framework `stack-requires.test.ts`, `platform-capabilities.test.ts`; cloud `capability-loader.test.ts`).\n\n## Context / merged work\n\nThe #3265 design work is complete and merged: framework #3281 (vocabulary + aliases + warn), #3302 (reject unknown tokens); cloud #862 (token migration), #863 (bump + shared helpers). This issue tracks only the final time-gated alias drop."
+}

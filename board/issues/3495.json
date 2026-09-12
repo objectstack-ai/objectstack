@@ -1,0 +1,35 @@
+{
+  "number": 3495,
+  "kind": "pull_request",
+  "title": "fix(approvals): resolve field/manager approvers against the live record at node entry (#3447)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-25T03:29:06Z",
+  "updated_at": "2026-07-25T03:43:14Z",
+  "closed_at": "2026-07-25T03:43:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-25T03:43:12Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3495",
+  "body": "## What\n\nApproval nodes resolved `field` / `manager` approvers against the **trigger snapshot** the flow froze into `$record` at submit time. Once a run was in flight, nothing an earlier step wrote could reach a later approval node's approver resolution — so dynamic routing (one step decides the next step's approvers), dynamic co-sign, and \"pick the co-review departments mid-flow\" were all impossible to express declaratively. Fixes #3447.\n\n## Root cause\n\nResolution timing was already lazy / per-node — each approval node resolves on entry via `openNodeRequest` → `expandApprovers`. The defect was the **data source**: the node reads `variables.get('$record')`, seeded once at flow start and carried verbatim through every suspend / resume, never re-read from the DB. `{type:'field'}` just indexed that frozen object.\n\nTell-tale that this was a leftover and not a design choice: in the *same* node, `team` / `department` / `position` approvers query the graph **live**, while `field` / `manager` read the frozen snapshot.\n\n## Change (P1)\n\n- Re-read the record's live state by id at node entry (`loadLiveRecord`, system identity — approver routing is a platform concern and the record is the flow's own subject, so submitter RLS/FLS must not narrow it). `field` / `manager` now bind to current data; graph types were already live.\n- Falls back to the trigger snapshot (warn, don't throw) when the record can't be re-read — hard-deleted mid-flow, or a backend that can't serve a point read. Matches the existing \"warn but proceed\" stance (#3424) and the \"record is gone\" enrichment fallback that already relies on the payload snapshot.\n- `payload_json` still snapshots `input.record` — its contract is \"the record as submitted\", deliberately unchanged.\n\n### Two latent defects fixed on the same path\n\n- **Multi-select fan-out was working only by coincidence**: `String(['u1','u2'])` → `'u1,u2'` happened to match the `pending_approvers` CSV format. Now fans out explicitly into one slot per user.\n- **OOO delegation silently no-op'd for multi-value fields** — the whole `'u1,u2'` string was looked up as one delegator id. Now applied per fanned-out user.\n\n## Tests\n\n6 new tests. Verified they go red against the pre-fix implementation (stash the impl, keep the tests): **5 red** (live-read, live-wins-over-stale-snapshot, array fan-out, CSV fan-out, per-user OOO) and **1 green** (snapshot fallback — behaviour intentionally unchanged). Full suite **142 passed**; `tsup` DTS build (type-check) green.\n\n## Not in this PR\n\nP2 (`type: 'expression'` approvers evaluated over flow variables + a node-level empty-approver policy) and P3 (resolver hook) are the more general evolutions; both are written up on #3447 for follow-up. This PR is the minimal P1 that fixes the reported scenario.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

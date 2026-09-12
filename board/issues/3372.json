@@ -1,0 +1,34 @@
+{
+  "number": 3372,
+  "kind": "issue",
+  "title": "Record-detail action bar doesn't apply globalActions label translations (object-action labels do)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-20T17:52:27Z",
+  "updated_at": "2026-07-21T13:54:41Z",
+  "closed_at": "2026-07-21T13:54:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3372",
+  "body": "Found dogfooding a downstream app on `16.0.0-rc.1` in a zh-CN locale; **confirmed the translation exists** against a local framework checkout, so this is a console/objectui rendering gap.\n\n### Symptom\nOn a record **detail action bar**, an object's own actions translate but a **globalAction does not**. On a `crm_case` detail (locale zh-CN):\n- `escalate_case` → **升级工单** ✓ (object action, translated)\n- `close_case` → **关闭工单** ✓ (object action, translated)\n- `log_call` → **\"Log a Call\"** ✗ (globalAction, shows English)\n\n### The translation exists — this is rendering\nThe bundle has:\n```ts\nglobalActions: { log_call: { label: '记录通话', successMessage: '通话记录成功！' } }\n```\nand `log_call` is a normal globalAction. The same action surfaced elsewhere resolves; on the record-detail action bar the globalActions label overlay isn't applied, so it falls back to the metadata literal `Log a Call`.\n\n### Ask\nApply globalActions label translations when a globalAction is surfaced on a record-detail action bar (as object-action labels already are). Likely a small resolver/overlay wiring gap. (Filing here per the platform-issue process; route to objectui if applicable.)\n"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 3415,
+  "kind": "issue",
+  "title": "showcase: 4/5 projects and 9/10 tasks are silently rejected on every boot (FSM initialStates vs seed data)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-22T21:16:21Z",
+  "updated_at": "2026-07-24T13:16:49Z",
+  "closed_at": "2026-07-24T13:16:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3415",
+  "body": "## Summary\n\nThe showcase seeds **4 of 5 projects and 9 of 10 tasks are silently rejected on every boot**. The running app has exactly **one project and one task**. Nothing in the boot log says so.\n\nThe platform is behaving correctly — this is a self-contradictory fixture plus a surfacing gap.\n\n## Root cause\n\n`showcase_project` declares its own FSM entry gate (#3165):\n\n```ts\n// project.object.ts\nevents: ['insert', 'update'],\ninitialStates: ['planned'],   // \"without it a project could be born already completed\"\n```\n\nThe project seed in the same repo creates 5 projects with `status`:\n\n| Project | seeded status | legal on insert? |\n|---|---|---|\n| Website Relaunch | `active` | ✗ rejected |\n| Data Platform | `active` | ✗ rejected |\n| Compliance Audit | `on_hold` | ✗ rejected |\n| **Mobile App** | **`planned`** | **✓ survives** |\n| Legacy Sunset | `completed` | ✗ rejected |\n\nSeeds deliberately run validation — `SeedLoaderService.SEED_OPTIONS = { isSystem: true, skipTriggers: true }`, commented *\"Lifecycle HOOKS (derived/default fields, validation) still run.\"* So the gate fires and correctly rejects the four.\n\n`showcase_task.project` is a **master-detail** to project, and 9 of the 10 seeded tasks point at the three projects that were never created. Only `App wireframes` → `Mobile App` survives.\n\n`showcase_project_membership` (references team + project) lands **0 of 3** for the same reason.\n\n## Evidence\n\nBuilt artifact is correct — the loss is at load time:\n\n```\ndist/objectstack.json:  showcase_project records=5   showcase_task records=10\nsqlite dev.db:          showcase_project 1 row       showcase_task 1 row\n                        showcase_project_membership 0 rows (3 declared)\n```\n\nknex debug on a wiped DB shows exactly **one** single-row insert per table:\n\n```\ninsert into `showcase_project` (…) values (?, …) returning *      ← 1 statement\ninsert into `showcase_task`    (…) values (?, …) returning *      ← 1 statement\ninsert into `showcase_account` (…) select ? … union all select ?  ← batched, 14 rows ✓\n```\n\n## Impact\n\nThe showcase's own seed docstring says it is *\"sized to feed every view: every Kanban column is populated, tasks carry due/start/end/created dates (calendar, gantt, timeline) and a work location (map)\"*. None of that is true at runtime:\n\n- **Chart Gallery** — \"One widget per chart family… honest visual coverage\" — renders **14 charts on a single data point**. Total Tasks `1`, every bar/pie/funnel/radar/treemap/sankey degenerate, both month-bucketed trend lines a single point.\n- Kanban: 1 card in 1 column (5 columns were intended).\n- Gantt / timeline / calendar / map: one item each.\n- Project list: 1 row of 5; no status or health variety, so the health-progression FSM demo has nothing to show either.\n- This also blocks #3358 §3 *\"Report drill-through range\"* — there is no meaningful date bucket to drill.\n\n## Silent failure\n\n`SeedLoader` does record each rejection (`this.logger.warn('[SeedLoader] …')`, and `buildResult` carries the errors), but **not one `[SeedLoader]` line reaches `os dev` output** — I ran with `OS_LOG_LEVEL=debug LOG_LEVEL=debug DEBUG=*` (19k lines of knex tracing) and grepped case-insensitively: zero hits. The boot banner's only seed mention is `seeded on empty DB · dev only`.\n\nSo a fixture can lose 90% of its rows with no signal at all. Even if the fixture below is fixed, **a boot-time summary of seed inserts/rejections would have caught this immediately** — and would catch the next one.\n\n## Options for the fixture\n\n1. **Two-phase seed (respects and demonstrates the FSM).** Insert all 5 as `planned`, then walk them to their target status via `mode: 'update'` datasets. The transition map allows `planned→active` and `active→{on_hold, completed}`, so it needs **two** update passes (a single pass cannot do the 2-hop jumps). Needs confirmation that ordering between multiple datasets on the same object is deterministic.\n2. **Seed everything as `planned`.** One-line fix, but the project list loses all status/health variety and several demos flatten.\n3. **Widen `initialStates`.** Cheapest, but it deletes the point of #3165 — \"a project could be born already `completed`\" is exactly what the gate exists to prevent.\n\nI'd take (1) if same-object dataset ordering is guaranteed, otherwise (2) plus a follow-up. Flagging rather than picking, since it's a showcase-design call.\n\nFound during the #3358 v16 browser sweep (§3).\n"
+}

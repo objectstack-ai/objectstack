@@ -1,0 +1,35 @@
+{
+  "number": 3471,
+  "kind": "pull_request",
+  "title": "feat(lint): warn on seed values outside the declared state machine (#3433 follow-up)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-24T16:28:55Z",
+  "updated_at": "2026-07-24T16:35:44Z",
+  "closed_at": "2026-07-24T16:35:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-24T16:35:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3471",
+  "body": "#3433 的三项 follow-up(用户明确要求 1+2+3+4)。\n\n## 背景\n[#3433](https://github.com/objectstack-ai/objectstack/pull/3454) 让种子写入豁免 `state_machine` 校验。这带来一个\"无声后门\":FSM 层的\"这是不是我认识的态?\"检查对种子不再运行。本 PR 把这层以 author-time 形式补回来,并把 marketplace 链路与文档收尾。\n\n## 改动\n\n**① lint 门(task 2)** — `validateSeedStateMachine`:纯 `(stack) => Finding[]` 规则,`os validate`/`os lint` 跑。种子记录的 `state_machine` 字段值若 ∉ 机器声明态集(`initialStates ∪ transition 键 ∪ transition 值)→ warning。字段级 `select` 仍在运行时拒非法 option,但自由文本状态字段、或\"合法 option 但非 FSM 声明态\"会静默漏过——这个门抓它。Advisory(与 #3434 的 replay-safety 门对称)。规则 id `seed-value-outside-state-machine`。8 个单测(含 typo 验红);os lint showcase 实测 0 误报。\n\n**② marketplace 实测(task 1)** — cloud-connection 集成测试:驱动真实 install handler → runInlineSeed → 真 SeedLoaderService,引擎 stub 复现 #3165 的 initialStates 强制。一个种子铺满 pipeline(prospecting→negotiation→closed_won→closed_lost)的模板包 install 后**全量入库**。已验红(关闭 stub 豁免立即红 3/4 丢行),坐实 #3433 在 marketplace seam 真绿。\n\n**③ 文档同步(task 4)** — state-machine / validation / seed-data 三处 narrative 补种子豁免说明(种子是既成事实非生命周期事件;其他校验照跑;`os lint` 抓 typo)。references/ 生成物不动。\n\n**④ #3434(task 3)** — mode:'insert' 种子重放翻倍,**已被 [#3442](https://github.com/objectstack-ai/objectstack/pull/3442)(组合 externalId)+ [#3460](https://github.com/objectstack-ai/objectstack/pull/3460)(replay-safety 门)修复合并**,本 PR 无需改代码。\n\n## 验证\n- lint 全包 301 测试绿;cloud-connection 新测试真绿+验红;cli build typecheck 过;os lint showcase 门 0 误报。\n- changeset:@objectstack/lint + @objectstack/cli patch(照 #3460 惯例)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

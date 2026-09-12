@@ -1,0 +1,30 @@
+{
+  "number": 3493,
+  "kind": "issue",
+  "title": "data import: a \"historical\" import can't preserve original timestamps / audit fields — updated_at is stamped now, readonly fields stripped on upsert (#3479 follow-up)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-25T03:25:28Z",
+  "updated_at": "2026-07-27T01:13:17Z",
+  "closed_at": "2026-07-27T01:13:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3493",
+  "body": "## 现象\n\n[#3479](https://github.com/objectstack-ai/objectstack/issues/3479) / [#3483](https://github.com/objectstack-ai/objectstack/pull/3483) 让 `treatAsHistorical` 导入跳过 `state_machine`,解决了「历史 mid-lifecycle 行被 initialStates 拒」。但历史数据迁移的**另一半诉求——保留原始时间线**——仍不成立:\n\n- 导入一张 2020 年创建、2021 年关闭的工单,存储后 `updated_at` 显示**导入当天**,`updated_by` 显示**导入者**,而不是原始值。\n- 用 `upsert` 刷新一批历史行时,业务 `readonly` 字段(如 `closed_at`、`resolved_by`)被静默 strip 掉。\n\n结果:迁移进来的历史数据时间线错乱(所有记录看起来都是今天改的),报表/审计/排序全部失真。`treatAsHistorical` 只解决了 FSM 那一半。\n\n## 机制(两层,均有确切落点)\n\n**① 审计 auto-stamp**(`packages/objectql/src/plugin.ts:762-772`)——code-registered hook,`skipAutomations` **不豁免**它:\n```ts\nif (isInsert) record.created_at = record.created_at ?? now;   // ✓ client 优先\nrecord.updated_at = now;                                       // ✗ 无条件覆盖(insert+update)\nif (isInsert && hasField(..., 'created_by')) record.created_by = record.created_by ?? session.userId; // ✓ client 优先\nif (hasField(..., 'updated_by')) record.updated_by = session.userId;                                  // ✗ 无条件覆盖\n```\n`created_at` / `created_by` 用 `??`,insert 时能保留 client 提供的历史值;但 `updated_at` / `updated_by` 是无条件覆盖,历史「最后修改」信息**永远丢失**。\n\n**② readonly 字段 strip**(`packages/objectql/src/engine.ts:2869` 与 `:2924`,规则见 #2948):\n```ts\nif (!opCtx.context?.isSystem) {\n    hookContext.input.data = stripReadonlyFields(updateSchema, preRo, suppliedKeys, this.logger);\n}\n```\nimport 的 writeCtx 是**非 system**(context 由 `resolve-execution-context.ts` 从 session 派生,`isSystem: false`),所以 `upsert` 刷新走 update 路径时,调用方提供的业务 `readonly` 字段(`closed_at` 等)被 strip。\n\n## 字段保真度现状\n\n| 字段类 | insert | upsert 刷新(update) |\n|---|---|---|\n| 业务 readonly(`closed_at`) | ✓ 可设 | ✗ stripReadonlyFields strip |\n| `created_at` / `created_by` | ✓ `??` client 优先 | (update 不写) |\n| `updated_at` / `updated_by` | ✗ 无条件 stamp now / 导入者 | ✗ 无条件 stamp |\n\n## 影响面\n\n- **历史数据迁移是 `treatAsHistorical` 的核心场景**,但只做了一半:FSM 不拦了,时间线却仍被平台改写。用户从旧系统迁一批工单/订单/case,`updated_at` 全变成迁移日 → 「最近修改」排序、SLA 报表、审计全错。\n- 与 #3479 是**同一诉求的两半**:「导入既成事实」既包括状态,也包括**它发生的时间和人**。\n\n## 候选修法(需拍板)\n\n方向是让 `treatAsHistorical`(或一个更聚焦的子选项如 `preserveAudit`)在**这一次导入**里,让审计/时间戳字段 client 优先:\n\n1. **auto-stamp 尊重 client 值**:当 context 带 `skipStateMachine`/`treatAsHistorical`(或新 `preserveAudit` 旗标)时,`updated_at`/`updated_by` 也改成 `?? `(client 优先),与 `created_at` 对齐。\n2. **readonly strip 放宽**:同一旗标下,`stripReadonlyFields` 放行**白名单内**的历史字段(而非无差别放行,避免变成篡改 `created_by`/`owner` 的后门)。或收窄到「审计/时间戳字段族 + 对象显式声明可迁移的 readonly 字段」。\n\n**设计约束**:\n- 必须保持 **opt-in**(`treatAsHistorical` 已是),普通写入绝不能让 client 篡改 `updated_at`/审计字段。\n- 不能退化成「非 system = 随便改审计」——建议**白名单**而非 `isSystem` 全豁免。\n- objectui 导入向导已有「Import as historical data」复选框(objectui#2815),此项若落地,该复选框的语义自然延伸,无需新 UI。\n\n## 复现\n\n1. `treatAsHistorical: true` 导入一行显式带 `updated_at: '2021-03-01T...'` 的记录 → 查库,`updated_at` = 导入当天,非 2021。\n2. `writeMode: 'upsert'` + `treatAsHistorical: true` 刷新一行,payload 带一个声明为 `readonly` 的业务字段(如 `closed_at`)→ 该字段被 strip,未写入。\n\n## 参考\n\n- #3479 / #3483(`treatAsHistorical` — FSM 那一半)、objectui#2815(向导复选框)、`packages/objectql/src/plugin.ts`(auto-stamp hook)、`packages/objectql/src/engine.ts` + #2948(stripReadonlyFields)、`packages/runtime/src/security/resolve-execution-context.ts`(import 是非 system context)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 3518,
+  "kind": "pull_request",
+  "title": "chore(spec): flip webhook liveness ledger dead→live + webhook-materialization proof (#3490)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T02:27:49Z",
+  "updated_at": "2026-07-27T04:31:28Z",
+  "closed_at": "2026-07-27T03:37:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T03:37:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3518",
+  "body": "Closes #3490. Follow-up to #3489 (the materializer bridge).\n\n## Why\n\n#3489 made stack-authored webhooks reach the dispatcher — but the webhook liveness ledger (`packages/spec/liveness/webhook.json`) still classified all 16 authorable props `dead`, from the pre-bridge \"nothing materializes an authored webhook\" vantage point. Because `webhook` rides the gate's `SPEC_ONLY_SCHEMAS` walk-only path, the liveness CI **did not catch** the dead→live drift (it passed green on #3489 while the ledger silently went stale). This corrects it by hand.\n\n## What changed\n\n- **`webhook.json` — flip to `live` (with evidence)** the props the materializer + dispatcher actually consume: `object`/`isActive`/`url`/`triggers`/`method`/`name`/`headers`/`secret`/`timeoutMs`, plus display-only `label`/`description`. Evidence cites the materializer (`bootstrap-declared-webhooks.ts`) and the dispatcher read points (`auto-enqueuer.ts`). The `url` `authorWarn` is dropped (authoring is live now).\n- **Stay `dead`**: `body`/`payloadFields`/`includeSession`/`retryPolicy`/`tags` — folded into `definition_json` by the bridge but `parseRow` never reads them, so still no consumer (the #1878 delivery-layer enforce-or-remove worklist). `authentication` stays `experimental` (HMAC-`secret`-only).\n- **New ADR-0054 proof class `webhook-materialization`** (`proof-registry.mts`, `bound: true`, bound to `webhook.object`) + its dogfood proof `packages/qa/dogfood/test/webhook-materialization.dogfood.test.ts`. It boots the real stack with the messaging + webhook plugins but **no realtime**, and asserts the `sys_webhook` row materializes with `object→object_name` / `isActive→active`. This pins the #3461 integration seam: the bridge was first gated behind the realtime dispatch guard, silently materializing nothing without realtime.\n- **Refresh stale prose** in `check-liveness.mts` and `webhook.json`'s `_note` (\"enforce-or-remove pending #3461\" → closed by #3489).\n\n## Verification\n\n- **Liveness gate green**: `webhook 17 classified (live 11, dead 5, experimental 1)`; `✓ all governed-type properties are classified; all bound high-risk proofs resolve.`\n- **Red-proofed**: breaking the proof tag → `webhook/object → proof tag \"@proof: webhook-materialization-BROKEN\" not found` → exit 1.\n- **Dogfood proof passes** — and the logs are the proof's own evidence: `[webhook-auto-enqueuer] disabled … hasRealtime:false` yet the `sys_webhook` row still materializes (materialization is engine-only, independent of the dispatch guard).\n\n## Scope\n\nLiveness-ledger + gate assets (`packages/spec/liveness` + `scripts/liveness`, not in the published spec runtime) and the private `@objectstack/dogfood` package only — empty changeset, no package release. Whether to fold `webhook` back onto the metadata-type registry (out of `SPEC_ONLY_SCHEMAS`) is noted in the ledger as a deferred reassessment (the Studio-CRUD + create-seeds cost the #3462 note flagged).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

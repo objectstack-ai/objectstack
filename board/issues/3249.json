@@ -1,0 +1,32 @@
+{
+  "number": 3249,
+  "kind": "issue",
+  "title": "Driver-native tenant scope hides platform-global (NULL-org) rows from an org-context read (sys_license: admin sees 0, anon sees row)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T05:29:39Z",
+  "updated_at": "2026-07-19T12:36:08Z",
+  "closed_at": "2026-07-19T12:36:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3249",
+  "body": "## Symptom\nOn the cloud control plane (`apps/cloud`), a **platform admin who also owns an org** reads `sys_license` and gets **0 rows**, while the row exists in the control DB and an **unauthenticated** request to the same endpoint returns it.\n\n```\nrow in control DB : lic_… (organization_id = NULL, signed_token present)\nanon  GET /api/v1/data/sys_license → 1 row\nadmin GET /api/v1/data/sys_license → { records: [], total: 0 }   ← bug\n```\n\n`sys_license` is declared `tenancy: { enabled: false }` + `access: { default: 'private' }` + `requiredPermissions: ['manage_platform_settings']` (ADR-0066). The admin holds the capability and passes the CRUD + requiredPermissions gates (HTTP 200, not 403) — they just get **0 rows**.\n\n## What is NOT the cause (ruled out by tracing)\n- **Not the ADR-0066 authz kernel / RLS.** plugin-security applies **no** row filter for the admin — traced `astWhere = undefined` in the security middleware. requiredPermissions/RLS are correct.\n- **Not the objectos KernelResolver.** Instrumented `createCloudKernelResolver.resolveKernel` (console.error at the top) → **0 hits** in both cloud.log and objectos.log for the read. apps/cloud runs no env kernels.\n- **Not the runtime http-dispatcher.** Instrumented `HttpDispatcher.callData` → **0 hits**. apps/cloud serves data via **`@objectstack/rest` (`rest-server.ts`)**, whose `resolveProtocol(undefined)` returns the **control-plane protocol** for both admin and anon.\n\nSo admin and anon hit the **same** control-plane protocol / engine / driver, with the **same unfiltered query** (`astWhere=undefined`), yet get different results. The only difference is the execution context's `tenantId`.\n\n## Root cause — engine/driver-native tenant scope (separate from RLS)\nThe tenant `WHERE` is injected **below** plugin-security:\n\n- **`packages/objectql/src/engine.ts:805`** — `buildDriverOptions` copies the request tenant into driver options:\n  ```ts\n  if (hasTenant && opts.tenantId === undefined) { opts.tenantId = execCtx!.tenantId; }\n  ```\n  Admin → `opts.tenantId = <activeOrganizationId>`; anon → `tenantId` undefined (no scope).\n\n- **`packages/plugins/driver-sql/src/sql-driver.ts:2764` `applyTenantScope`** (called from `find`/`findOne`, lines 691/776):\n  ```ts\n  const tenantId = options?.tenantId;\n  if (tenantId == null || tenantId === '') return builder;      // anon: no scope → sees the row\n  const field = this.resolveTenantField(object);                // ← the crux\n  if (!field) return builder;\n  return builder.where(b => b.where(field, String(tenantId)).orWhereNull(field));  // (#2734)\n  ```\n\n`resolveTenantField` reads a **cached** `tenantFieldByTable[table]` (2728), populated at registration from `computeTenantField` (1965), which **does** honor the posture:\n```ts\nif (tenancyDecl?.enabled === false) return null;                 // 1968 — correct\nif (fields has 'organization_id')   return 'organization_id';    // 1974 — default heuristic\n```\n\nSo the intended behavior is: `sys_license` (tenancy disabled) ⇒ `computeTenantField` → `null` ⇒ **no tenant scope** ⇒ admin sees the row. It doesn't happen, so one of:\n\n1. **Stale / mis-timed `tenantFieldByTable` cache** — `sys_license`'s table was registered (and its tenant field cached as `organization_id`, via the 1974 heuristic on its `organization_id` lookup column) **before** the `tenancy.enabled:false` posture propagated to the driver, and the cache is never invalidated. `resolveTenantField('sys_license')` then returns `organization_id` despite the posture.\n2. **Global-row (`orWhereNull`) rule missing on the running build** — if `applyTenantScope` used strict equality (pre-#2734) rather than `field = tenantId OR field IS NULL`, an org-context read excludes the NULL-org row. (Current `main` has the `orWhereNull`; if it's applied, the NULL-org row *should* survive even when scoped — so (1) is the more likely primary cause, with a real-column mismatch.)\n\n## Definitive one-line probe\n```ts\n// sql-driver.ts applyTenantScope, top:\nif (object === 'sys_license') console.error('[TSCOPE]', { object, tenantId: (options as any)?.tenantId, field: this.resolveTenantField(object) });\n```\nRead `sys_license` as admin vs anon and compare `field`. Expected finding: admin has `tenantId=<org>` and `field='organization_id'` (posture not honored at the driver) → the row is scoped out.\n\n## Fix options\n- **Framework (root cause):** make `resolveTenantField` reflect the object's **live** posture — recompute/invalidate `tenantFieldByTable` when a schema registers with `tenancy.enabled:false` (or resolve `computeTenantField` from the current registered schema rather than a one-time cache). Then a platform-global object is never tenant-scoped. Also keep the `orWhereNull` global-row inclusion (#2734) as defense-in-depth so NULL-org rows survive any legitimate scope.\n- **ADR-0066 alignment:** the driver tenant-scope decision should treat `access:{default:'private'}` / `tenancy.enabled:false` as platform-global (never org-scoped) — the same posture the authz kernel already honors.\n- **Cloud mitigation (optional):** apps/cloud need not stamp `execCtx.tenantId` for control-plane object reads.\n\n## Repro (local stack)\n`CLOUD_PORT=<p> OBJECTOS_PORT=<p2> OS_LICENSE_PRIVATE_KEY_PEM=<ed25519> bash scripts/dev-local/run-stack.sh --with-ui --prod-like --seed --keep`, issue a license as `admin@local.test`, then `GET /api/v1/data/sys_license` as the admin (0) vs anon (1).\n\nSurfaced while implementing ADR-0066 (secure-by-default `sys_license`); the authz kernel itself is correct — this is the pre-existing engine/driver tenant-scope layer."
+}

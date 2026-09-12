@@ -1,0 +1,35 @@
+{
+  "number": 3601,
+  "kind": "pull_request",
+  "title": "fix(analytics): enforce read scope on the ObjectQL aggregate path (#3597)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T09:07:53Z",
+  "updated_at": "2026-07-27T09:40:25Z",
+  "closed_at": "2026-07-27T09:40:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T09:40:23Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3601",
+  "body": "Closes #3597.\n\n## 问题\n\n`ObjectQLStrategy` 从不消费 `getReadScope`,导致走该路径的 analytics 查询**无任何 RLS/租户谓词** —— 已认证用户拿到的是在**所有租户**行上算出来的聚合。\n\n**两层防御同时失效**,不是纵深防御下的单点缺口:\n\n1. **analytics 层**:`getReadScope` 在 strategies 里只出现在 `native-sql-strategy.ts:200-201`;`objectql-strategy.ts` 零命中。而 spec 契约(`spec/src/contracts/analytics-service.ts:262-285`)明写这个谓词是 **MUST**。\n2. **engine 层**:`executeAggregate` 桥不传 `ExecutionContext`,于是 plugin-security 中间件在 `security-plugin.ts:775-781` 命中无 principal 的 fall-open `return next()`,把自己第 939 行往后的 RLS 注入整个跳过。driver 层同样不兜底(`sql-driver.ts:2829` 无 tenantId 即视为 unscoped/admin),全仓也**不存在** ambient context 可以救(plugin-auth 的对应中间件是个 no-op)。\n\n**触发面不限于冷门 driver。** NativeSQL 在三种情况下声明失败并回落到本路径:\n\n- **任意带 granularity 的日期分桶查询**(`native-sql-strategy.ts:30`)—— 最常见的 dashboard 形状,**Postgres/SQLite 上照样命中**;\n- `RAW_SQL_UNSUPPORTED`(in-memory driver);\n- external/federated 对象(ADR-0062 D6)。\n\n## 修复\n\n**1. 把 read scope AND 进 filter**(`withReadScope`)\n\n用 `$and` 组合,**不做 key 合并**。查询自带的 filter 和 scope 可能命名同一个字段(比如 dashboard 自己筛 `organization_id`),spread 会让调用方输入**静默顶掉安全谓词**;`$and` 让这件事结构上不可能。\n\n**2. 联表对象 fail-closed**(`assertJoinedScopesEnforceable`)\n\n`engine.aggregate` 的 `where` 寻址的是**基对象**。点号成员(`account.region`)由 engine 经 lookup 字段遍历,但这个调用形状里**没有地方挂被联对象的谓词**。NativeSQL 能表达(每个 join 一个 alias-qualified WHERE)且已经这么做了;本路径表达不了,于是拒绝而不是跑一个只加了一半 scope 的查询 —— 与 `resolveReadScopes`(宁可抛错也不发未加 scope 的 SQL)和 `compileScopedFilterToSql`(宁可抛错也不丢谓词)同一姿态。\n\n只检查查询**实际引用到**的 join:scope map 是被扫描对象的**刻意超集**,只看 map 会误杀根本没碰联表的查询。\n\n## 为什么这个洞活了这么久\n\n现有 `dataset-rls-integration.test.ts` **每个用例**都钉死 `queryCapabilities: () => ({ objectqlAggregate: false })` —— 整个 RLS 测试套件**从来没走过 ObjectQL 路径**。\n\n## 验证\n\n- 新增 9 个用例直接打 ObjectQL 路径;**回退本 PR 的 strategy 改动后 7 个立刻变红**(另 2 个断言的是\"不该变\"的行为:无 provider 时维持 unscoped、只有基对象有 scope 时正常放行)。\n- 覆盖:基础 scope、`RAW_SQL_UNSUPPORTED` 回落、日期分桶回落、`$and` 组合、**调用方用同字段 filter 试图顶掉安全谓词**、同实例双租户隔离、无 provider 契约不变、联表 fail-closed。\n- service-analytics **179 passed**(原 170 + 新 9)。\n- 下游 `@objectstack/cli` + `@objectstack/verify` 54 个 task 全绿。\n- `tsc --noEmit` 未引入新错误(该包原有 2 个测试文件的类型错误与本改动无关,已核对为存量)。\n\n## 未纳入本 PR(已在 issue 记录)\n\n- **纵深防御第 2 层**:让 `executeAggregate` 契约携带 `context`,使 engine 侧 RLS 也能生效。要动 `packages/spec`(`executeAggregate` options + `StrategyContext` 透传 ExecutionContext),会碰 api-surface 门,单独开 PR 更干净。本 PR 已从第 1 层彻底堵死泄露。\n- **`fetchRecordLabels` 复用同一条无 scope 的桥**(`plugin.ts:355`):它按 `groupBy: ['id', displayField]` 返回**真实记录显示名**。本 PR 修好聚合后,喂给它的 id 已经是加过 scope 的,实际越权已被消除;其自身无 scope 属**残留债**,单独跟进。\n- **`generateSql` 预览不含 scope**:`/analytics/sql` 的展示性 SQL 无 WHERE。不执行、不构成泄露,单独跟进。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

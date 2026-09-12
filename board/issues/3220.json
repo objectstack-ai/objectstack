@@ -1,0 +1,35 @@
+{
+  "number": 3220,
+  "kind": "issue",
+  "title": "The `managedBy: 'system'` bucket is overloaded (engine-only vs. admin-writable) — split the taxonomy; don't guard it wholesale",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T14:20:32Z",
+  "updated_at": "2026-07-20T01:22:11Z",
+  "closed_at": "2026-07-20T01:22:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3220",
+  "body": "> **Rewritten 2026-07-18 after a blast-radius audit.** The original proposal here was to generalize the ADR-0092 engine write guard + `apiMethods` reconciliation from `better-auth` to the `system`/`append-only` buckets. The audit **disproved that as a wholesale change** and narrowed the real, safe work to two latent holes (shipped in #3222). This issue now tracks the actual root cause it surfaced: the `system` bucket conflates two incompatible write policies.\n\n## What the audit found\n\nFor the better-auth case (#1591/#3213) the guard was clearly right: `admin_full_access` (wildcard, no RLS) could raw-write identity columns via the generic API. The premise for extending it — \"`system`/`append-only` also mean *no user writes*, just enforce it\" — turned out to be **false in this codebase**.\n\n**1. The genuinely engine-only tables are already safe.** `sys_audit_log`, `sys_activity`, `sys_automation_run`, approval/share/notification/job/settings/secret/metadata-history are all written via `isSystem: true` or a service engine with no user session (`audit-writers.ts:385`; `approval-service.ts` `SYSTEM_CTX`; messaging/jobs service engines). A user-context guard would reject nothing they do today — pure speculative defense-in-depth. And the key audit tables already expose `['get','list']`, so they're locked at the HTTP layer already.\n\n**2. append-only immutability already effectively holds.** No `append-only` object receives a user-context UPDATE/DELETE. The only append-only UPDATE is `sys_email` status, under `SYSTEM_CTX`.\n\n**3. `system` is overloaded — the real bug.** Several `system`-bucketed objects are **user-writable by design**, so a blanket affordance-driven guard would break them:\n\n| Object | Why it takes real user-context writes |\n|---|---|\n| `sys_user_position` | delegated admin \"add position\" — `delegation-of-duty.dogfood.test.ts:83` POSTs under a user token; `DelegatedAdminGate` governs it |\n| `sys_user_permission_set` | delegated `manageBindings` direct grants — `showcase-permission-zoo.dogfood.test.ts:175` |\n| `sys_position_permission_set` | `suggested-audience-bindings.ts:371` writes with `context: callerCtx` (explicitly *not* `isSystem`) |\n| `sys_user_preference` | user authors their own prefs (RLS self-grant `default-permission-sets.ts:213`) |\n| `sys_import_job` | REST import route writes under the user session (`rest-server.ts:3727`) |\n\nThese conflate with the engine-only rows under one bucket. That is the defect: **`managedBy: 'system'` means both \"engine-owned, never user-written\" and \"platform-defined schema, admin-writable data\".** No single write policy is correct for the bucket.\n\n## What shipped instead (the safe slice) — #3222\n\nOnly the two objects with a genuine latent hole (write verbs their bucket forbids **and** no legitimate user-write path):\n- `sys_presence` (`append-only`, even listed `update`/`delete`) → `['get','list']` (written over the realtime path, never ObjectQL).\n- `sys_metadata` (`system`) → `['get','list']` (authored via metadata-protocol RPC; confirmed no `/data/sys_metadata` write in framework or objectui).\n\n## The remaining work this issue now tracks\n\n**Split the `system` taxonomy** so write policy is expressible and enforceable without breaking admin-writable data:\n- [ ] Introduce a distinction between *engine-owned* rows (no user writes — e.g. `sys_automation_run`, `sys_job`, `sys_notification`) and *platform-schema / admin-writable data* (e.g. the RBAC/delegation trio, `sys_user_preference`, `sys_import_job`). Options: a new bucket value, or an explicit `userActions` declaration on the writable ones so `resolveCrudAffordances` reflects reality.\n- [ ] Only after the taxonomy is correct, reconsider an engine-level guard for the genuinely engine-owned set (defense-in-depth for non-REST callers) — driven off the corrected affordances, with `isSystem` bypass.\n- [ ] Fix the remaining `apiMethods` contradictions on the writable objects by **declaring their true policy** (not by stripping verbs they legitimately need).\n\nThis is an ADR-scale taxonomy decision (touches delegated administration), not a mechanical guard extension — hence tracked here rather than folded into #3222.\n\n## Explicitly out of scope\nThe `writeVia: '<endpoint>'` capability for third-party-managed objects — no such object exists today; speculative until a concrete need arises.\n\n## Related\n- #1591 / #3213 (better-auth half — landed) · #3222 (the safe slice — sys_presence/sys_metadata)\n- ADR-0049 (enforce-or-remove), ADR-0092 (identity write guard mechanism)\n\n_Rewritten by [Claude Code](https://claude.ai/code)_"
+}

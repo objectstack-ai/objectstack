@@ -1,0 +1,30 @@
+{
+  "number": 3549,
+  "kind": "issue",
+  "title": "data import undo: 撤销一次「historical」导入无法还原被保留的 readonly / 审计字段 — undo 的 writeCtx 缺 preserveAudit (#3493 follow-up)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T03:54:26Z",
+  "updated_at": "2026-07-27T04:45:52Z",
+  "closed_at": "2026-07-27T04:45:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3549",
+  "body": "## 现象\n\n#3493 / #3497 让 `treatAsHistorical` 导入通过 `preserveAudit` 保留原始时间线:client 提供的 `updated_at`/`updated_by` 被保留,审计/业务 `readonly` 字段(`closed_at`、`resolved_by` …)进白名单、不再被 strip。\n\n但**导入 undo(逻辑回滚)没有对称地带上 `preserveAudit`**,所以撤销一次历史 `upsert` 刷新时,**恰恰是这个功能保留下来的那些字段无法被如实还原**——被撤销的行并没有回到导入前的状态。\n\n## 机制(确切落点)\n\n`packages/rest/src/rest-server.ts:4052`(`POST /data/import/jobs/:jobId/undo`):\n\n```ts\nconst writeCtx = { ...(context ?? {}), skipAutomations: true, skipStateMachine: true };\n```\n\nundo 通过 `updateData({ data: u.before, context: writeCtx })` 把每行「被导入触碰的字段」还原成导入前快照 `u.before`。但 `writeCtx` **没有 `preserveAudit`**,于是这条 restore-update 走的是普通写路径:\n\n- `u.before` 里的业务 `readonly` 字段(如 `closed_at`)被 `stripReadonlyFields` drop(非 system + 无 preserveAudit)→ **该字段的还原被静默丢弃**,行保持导入值;\n- 审计 hook 把 `updated_at`/`updated_by` 重新 stamp 成**撤销当下 / 撤销者**,driver 再强制 stamp `updated_at = now`(#3497 的 hook/driver 只在 `preserveAudit` 下才尊重 client 值)。\n\n结果:一次历史 upsert 把既有行的 `closed_at` 改成历史值,撤销后这行的 `closed_at` **仍是导入值**(未回滚)。这正是 #3493 在 undo 路径上的镜像。undo 的代码注释本身写着「an undo reinstates an established fact, it does not walk the FSM」——「reinstate established fact」正是 `preserveAudit` 服务的语义,却没带上。\n\n## 影响面\n\n窄但真实:仅影响「`treatAsHistorical` + `upsert` 刷新既有行 + 之后 undo」。created-only 行的 undo 是 delete,不受影响;非历史导入不触碰 readonly 字段,也不受影响。\n\n## 候选修法(需拍板)\n\n1. **对称补齐**(最小改动):undo 的 `writeCtx` 也带 `preserveAudit: true`(与 `skipStateMachine` 并列),让 restore-update 如实还原 `u.before` 里的审计/readonly 字段。一行改动 + 一条测试。\n\n2. **一个需拍板的语义点(`updated_at`)**:「undo 本身算不算一次修改」存在分歧。\n   - 若视 undo 为「回滚到导入前」→ 连 `updated_at` 一起还原(方案 1 直接达成);\n   - 若视 undo 为「一次新的写、`updated_at` 该记撤销时刻」→ `updated_at` 不还原可接受,但**业务 `readonly` 字段(`closed_at`)仍应还原**(否则 undo 不完整)——这部分正是 `preserveAudit` 白名单覆盖的、争议最小的部分。\n\n倾向方案 1(最小、对称、符合 undo 的「逻辑回滚」语义);`updated_at` 的哲学取舍留给维护者定。\n\n## 复现\n\n1. `treatAsHistorical:true` + `writeMode:'upsert'` 刷新一行**既有**记录,payload 带一个声明为 `readonly` 的业务字段(如 `closed_at:'2021-03-01T…'`)→ 被保留写入(#3497)。\n2. 对该 import job 调 `POST /data/import/jobs/:jobId/undo`。\n3. 查库:该行 `closed_at` **仍是导入值**,未还原成导入前的值。\n\n## 参考\n\n- #3493 / #3497(`preserveAudit` — 正向导入那半)\n- `packages/rest/src/rest-server.ts:4052`(undo 的 writeCtx)\n- `packages/objectql/src/plugin.ts`(审计 hook 的 `preserveAudit` 分支)、`packages/objectql/src/validation/rule-validator.ts`(`stripReadonlyFields` 白名单)、`packages/plugins/driver-sql/src/sql-driver.ts`(update stamp)"
+}

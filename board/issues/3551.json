@@ -1,0 +1,35 @@
+{
+  "number": 3551,
+  "kind": "pull_request",
+  "title": "feat(runtime): /auth /ai 两域 handler 体抽出 — ADR-0076 D11 步骤③ PR-7 (#2462)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T03:59:20Z",
+  "updated_at": "2026-07-27T05:41:45Z",
+  "closed_at": "2026-07-27T04:36:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T04:36:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3551",
+  "body": "## 动机（#2462 D11 步骤③，系列第七刀）\n\n抽出 `/auth`（better-auth 服务桥 + MSW/浏览器 mock fallback，浏览器安全 `randomUUID` 包装随唯一消费方走）和 `/ai`（分派 AI 插件缓存在 kernel 上的 `__aiRoutes` 路由表，逐路由 auth 契约强制 + actor 透传）。\n\n## 关键点\n\n- `/ai` 接收**完整 cleanPath**（旧分支整传、matcher 内部拼回 `/api/v1`）——原样保真。\n- `DomainHandlerDeps` 扩两个惰性成员：`isAuthRequired()`（requireAuth 字段初始化晚于 deps 对象，TS2729 抓到的构造顺序陷阱——惰性读取绕开）+ `getRegisteredAiRoutes()`。\n- **`/mcp` 有意排除**：调查发现 `buildMcpBridge` 耦合 action 执行家族（callData/actionPermissionError/invokeBusinessAction 等，正是 handleActions 的 helper 群）——MCP 家族整体归 /actions /meta /data 深耦合批。\n\n## 验证\n\n接缝套件 42 测试（新增 5：auth 服务桥 / mock sign-up / ai agents 空列表非 404 / ai 404 / kernel 路由表分派含 params+actor）；runtime 全量 647 绿；conformance 41 绿；闭包 `--force` 含 DTS 绿。\n\n关联 #2462（D11 步骤③ PR-7）。机械批至此收官；剩余全部为深耦合批：/actions /meta /data /mcp /graphql（共享 action 执行 + env 解析状态设施，需单独设计 deps 形态）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

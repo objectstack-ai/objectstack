@@ -1,0 +1,34 @@
+{
+  "number": 3573,
+  "kind": "pull_request",
+  "title": "feat(runtime): /meta /data 终刀抽出 — D11 步骤③ 收官，if 链清空 (#2462)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T07:03:37Z",
+  "updated_at": "2026-07-27T07:15:30Z",
+  "closed_at": "2026-07-27T07:15:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T07:15:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3573",
+  "body": "## 终刀（#2462 D11 步骤③ 系列第十刀）\n\n最后两个域离开 dispatcher：\n\n- **`domains/meta.ts`**（327 行）：元数据读写面（ADR-0033 草稿感知协议路径、org 作用域读取、requireAuth 门经 `deps.isAuthRequired()`），独占 helper `slimDocList`（ADR-0046 文档瘦身）随体走，`CoreServiceName`/匿名拒绝家族/`pluralToSingular` import 随体迁移。\n- **`domains/data.ts`**（122 行）：CRUD/查询跑在 actionExec.callData 桥上；多租户未解析环境的 428 改 keyed 语义化的 **`deps.isMultiTenantHost()`**（替代直捅 `this.kernelResolver`）。\n\n## 里程碑\n\n**dispatch() 的 if 链域分支清零**——18 个域全部经 `DomainHandlerRegistry` 解析，dispatch() 只剩关卡序（env 解析→身份→auth gate→membership→scoped strip）+ 查表。`createHonoApp` catch-all 具备退役条件（#2462 步骤①解锁）。\n\nhttp-dispatcher.ts 从步骤③启动时的 **4765 行**降至终态骨架；18 个域模块 + action-execution 子系统各自独立可读。\n\n## 验证\n\nruntime 649 绿；http-conformance 41 绿；dogfood 351 绿；全仓 build 绿。零行为变化。\n\n关联 #2462（D11 步骤③ 收官刀）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

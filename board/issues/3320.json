@@ -1,0 +1,34 @@
+{
+  "number": 3320,
+  "kind": "issue",
+  "title": "[P2] Retire DashboardRenderer's legacy/object-bound analytics branches (follow-up to #3251)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T18:18:08Z",
+  "updated_at": "2026-07-20T04:57:56Z",
+  "closed_at": "2026-07-20T04:57:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3320",
+  "body": "Follow-on from the dashboard analytics migration #3251 (umbrella #1878 · ADR-0021 #1890). #3251 shipped the two endpoints — Studio authors only the dataset shape (objectui#2703) and `DashboardWidgetSchema.strict()` is enabled (#3316). This tracks the **one deferred item** from that work: retiring the renderer's now-unauthored legacy branches.\n\n## Why this was deferred (not done in #3251)\n\nThe `.strict()` endpoint only required that **authoring** stop emitting legacy keys — which it now does. The renderer's legacy read-branches were **kept on purpose**:\n\n- They are the **backward-compat path for stored/static widget metadata** — a runtime consumer that may extend into the `cloud` repo, which #3251 could not fully trace.\n- Deleting a live runtime consumer is hard to reverse; per AGENTS.md #0.1 (contract-first) the correct sequence is *migrate producers → migrate stored data → then remove the renderer branch*, not renderer-side coercion.\n\nSo this is genuinely gated on stored-dashboard migration, hence a separate P2.\n\n## Scope (all in `objectui`, `packages/plugin-dashboard`)\n\nOnce no stored dashboard carries the pre-ADR-0021 inline shape:\n\n- [ ] Remove the legacy object-bound branches in `DashboardRenderer.tsx` `getComponentSchema` that read `object` + `categoryField`/`valueField`/`aggregate` (metric/metric-like ~`:506-568`, object-bound chart emission ~`:570-664`) and the legacy pivot block (`rowField`/`columnField`/`valueField`/`aggregation` → `object-pivot`/`pivot`, ~`:718-774`), plus the `widget.object`-keyed `objectFieldSets` machinery (~`:864-871`).\n- [ ] Decide the fate of the dashboard-flow `ObjectPivotTable`/`PivotTable` emission. **Keep the component files** — they are public SDUI blocks (`core/src/registry/public-blocks.ts`) usable by other surfaces; only stop the dashboard renderer from emitting them.\n- [ ] **Keep** the objectui-internal static paths (`options.data`/`widget.data`, `widget.component`) — per the #3251 decision tree these stay renderer-internal.\n- [ ] Drop the `@deprecated` inline-analytics keys (`object`/`categoryField`/`categoryGranularity`/`valueField`/`aggregate`/`measures`) from `@object-ui/types` `DashboardWidgetSchema` (they were retained in objectui#2703 only so the renderer could read legacy/static metadata during the transition) and remove the `as any` casts they backed.\n- [ ] Migrate the legacy-fixture tests in `__tests__/DashboardRenderer.filters.test.tsx` (bar/line/pie with `object`+`aggregate`) to the dataset shape.\n\n## Precondition (blocking)\n\nA stored-dashboard audit/migration confirming no persisted dashboard (framework examples, `cloud`, customer metadata) still carries the inline analytics keys. Framework examples are already dataset-shaped; `cloud` and stored customer metadata need verification. A visible error placeholder for any surviving legacy widget (rather than a blank) is the graceful fallback if full migration can't be guaranteed.\n\n## Links\n\n- Parent: #3251 · umbrella #1878 · ADR-0021 #1890 · inverse-drift #1894\n- Shipped precursors: author-side lint #3238 · Studio dataset authoring objectstack-ai/objectui#2703 · strict flip #3316\n- objectui files: `packages/plugin-dashboard/src/DashboardRenderer.tsx`, `ObjectPivotTable.tsx`, `PivotTable.tsx`, `index.tsx`\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

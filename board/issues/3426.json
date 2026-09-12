@@ -1,0 +1,32 @@
+{
+  "number": 3426,
+  "kind": "issue",
+  "title": "notify node templates can't resolve formula/lookup fields — renders blank silently",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-23T17:38:16Z",
+  "updated_at": "2026-07-25T03:40:03Z",
+  "closed_at": "2026-07-25T03:40:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3426",
+  "body": "## Summary\n\nA `notify` node's message templates (`title` / `body`) cannot traverse lookup or formula fields of the triggering record. `{record.full_name}` (a formula field) and `{record.account.name}` (a lookup hop) render as **empty strings**, silently producing notifications like `\"New lead to assign: \"` with the name missing.\n\n## Environment\n\n- `@objectstack/*` **16.1.0** (open edition), single-tenant, sqlite-wasm driver\n\n## Steps to reproduce\n\n1. On an object, define a formula field, e.g. `crm_lead.full_name = F\\`record.first_name + \" \" + record.last_name\\``.\n2. In a `record_change` flow's `notify` node, use it in a template:\n   ```ts\n   title: 'New lead to assign: {record.full_name}',\n   body: '{record.full_name} from {record.company}',\n   ```\n3. Trigger the flow (insert a lead) and read the resulting `sys_inbox_message`.\n\n## Actual behaviour\n\n- The inbox message title is `\"New lead to assign: \"` — `{record.full_name}` resolved to empty.\n- Same for a lookup hop like `{record.crm_account.name}`.\n- Non-computed scalar columns on the same record (`{record.company}`, `{record.first_name}`) interpolate correctly.\n\n## Expected behaviour\n\nThe `record` seeded into a record-change run should expose the **same computed/related fields the record has when read via the data API** — at minimum formula fields, ideally single-hop lookups. If traversal genuinely isn't supported, templates referencing an unresolvable path should be documented as unsupported and ideally warn at build time, rather than silently emitting blanks.\n\n## Impact\n\nMedium. Notifications and alerts are a primary flow output; silently blank names/values make them look broken to end users and there's no design-time signal.\n\n## Workaround\n\nRecompose from raw scalar columns in the template, e.g. `{record.first_name} {record.last_name}` instead of `{record.full_name}`. Works for formula fields built from local columns; doesn't help for lookup traversal.\n"
+}

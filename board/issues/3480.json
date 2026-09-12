@@ -1,0 +1,33 @@
+{
+  "number": 3480,
+  "kind": "pull_request",
+  "title": "fix(cli): include readonly flow-write warnings in `os validate --json` (#3465 follow-up)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-25T01:30:12Z",
+  "updated_at": "2026-07-25T01:36:42Z",
+  "closed_at": "2026-07-25T01:36:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-25T01:36:40Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3480",
+  "body": "Small follow-up to #3465 (spotted while merging #3472).\n\n## Problem\n\n`validateReadonlyFlowWrites` (added in #3465) surfaces two things: **errors** for a static-`readonly` + literal write (a certain silent no-op — these gate and exit), and **warnings** for a `readonlyWhen` field (per-record-state → advisory). The warnings are printed in human mode:\n\n```ts\nif (!flags.json) {\n  for (const f of readonlyWriteWarnings.slice(0, 50)) { … }\n}\n```\n\n…but `readonlyWriteWarnings` was **omitted from the `--json` summary's `warnings` array**, where every *other* advisory category is aggregated:\n\n```ts\nwarnings: [...exprWarnings, …, ...flowReadinessWarnings, ...flowTemplateWarnings, ...securityAdvisories, ...capProviderWarnings],\n```\n\nSo `os validate --json` consumers (CI gates, editor integrations) silently never saw the readonly `readonlyWhen` warnings, while human output showed them — the two modes disagreed.\n\n## Fix\n\nAdd `...readonlyWriteWarnings` to the JSON summary array, positioned by execution order (right after `...flowTemplateWarnings`, before the security advisories). One line; mirrors the nine existing warning spreads exactly.\n\n## Testing\n- `@objectstack/cli`: `tsc --noEmit` clean.\n- No behavior change in human mode; JSON mode now includes the readonly advisory that was already computed and printed. (The CLI's JSON `warnings` aggregation has no dedicated test seam — none of the other nine categories is asserted there either; each underlying validator, including `validateReadonlyFlowWrites`, is unit-tested in `@objectstack/lint`.)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

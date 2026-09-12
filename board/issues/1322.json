@@ -1,0 +1,34 @@
+{
+  "number": 1322,
+  "kind": "issue",
+  "title": "[P3] approvals: OOO auto-skip + self-service delegation (community core)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-05-25T05:27:06Z",
+  "updated_at": "2026-07-25T02:40:45Z",
+  "closed_at": "2026-07-25T02:40:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1322",
+  "body": "> 来源:`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 20 条(与 #5 强关联)。\n>\n> **范围调整(2026-07):** 原 issue 混装了 delegation / OOO / proxy。经代码盘点(见下),委派的**权威原语已在开源核心**(ADR-0091 职务代理 + `ApprovalService.reassign`),而**治理 / 合规 / 代办访问(act-as)属企业版**,已拆分至 **objectstack-ai/cloud#855**。本 issue 收敛为社区版必备的“审批不冻结”连续性底线。\n\n## 现象\n\n审批人是具体的人,休假 / 出差 / 离岗会让流程冻结、客户 SLA 跳水。\n\n## 平台现状(已在 OSS 核心)\n\n- 审批人解析中枢 `ApprovalService.expandApprovers()`(`plugin-approvals/src/approval-service.ts:300`)\n- 任务级转交 `reassign()`(`plugin-approvals/src/approval-service.ts:1036`),已带审计 + 通知\n- 职位限时委派(ADR-0091 职务代理):`delegatable` 职位 + `sys_user_position.{delegated_from, valid_from, valid_until, reason}`,`isGrantActive()` 解析时过滤;explain-engine 已能显示 “via delegation from A until Y”\n- 审计(`sys_approval_action`)+ 通知(service-messaging)基础设施\n\n## 建议范围(社区版)\n\n**M1 · OOO 自动跳过 + 候补**\n- 新增自助 OOO / 委派状态对象(仿 `sys_user_position`,独立对象,`valid_from` / `valid_until` + `delegate_to` + `reason` + `trackHistory`),**不**挂在锁定的 `sys_user` 标量上\n- `expandApprovers` 解析出具体 user 后,命中生效中 OOO → 替换 / 追加候补人;覆盖 `type: user` / `manager` / `field`(职位路径 ADR-0091 已覆盖)\n- 复用 `core/src/security/grant-validity.ts` 的 `isGrantActive()` 做时间窗判定\n\n**M2 · 临时委派(单任务)**\n- 引擎能力已在(`reassign`);补“委派人自助声明”语义 + 前端按钮(objectui)\n\n**M4 · 审计 + 通知(布线)**\n- 替换 / 委派发生时写 `sys_approval_action`(如 action=`ooo_substitute`,记 `A → B` + reason),保证社区版“谁替了谁、为什么”可追溯;通知双方\n\n> 语义注记:`expandApprovers` 在**请求开启时**快照具体 user id,故“请求开启后才生效的 OOO”不追溯(职位 / tier 路径实时重算)——需显式决定。\n\n## 不在本 issue 范围(→ 企业版 objectstack-ai/cloud#855)\n\n代办访问 / act-as 收件箱 · 委派治理 / SoD · 组织级 OOO/代理管理控制台(代管他人) · 委派合规报表 / 导出 / 认证复核\n\n## 验收\n\n- [ ] OOO 自动跳过对 `type: user` / `manager` / `field` 生效,窗口外恢复\n- [ ] 自助临时委派单任务可用,保留审计\n- [ ] `procurement` / `compliance` 审批流:审批人休假不再冻结\n- [ ] 替换 / 委派事件入审计 + 通知双方\n- [ ] 缺陷库 gap #20 标记为已解决(社区版部分)"
+}

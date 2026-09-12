@@ -1,0 +1,35 @@
+{
+  "number": 3578,
+  "kind": "pull_request",
+  "title": "feat(metadata-protocol,objectql): MetadataProtocolPlugin + registerProtocol 退出开关 — ADR-0076 Step 2 PR-A (#2462)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T07:48:55Z",
+  "updated_at": "2026-07-27T07:58:07Z",
+  "closed_at": "2026-07-27T07:58:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T07:58:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3578",
+  "body": "## 跨仓窗口开启（用户授权 cloud 可修改）——Step 2 三段式第一腿（纯加性）\n\n按记忆中预写的 Step 2 配方执行：\n\n- **`createMetadataProtocolPlugin()`**（metadata-protocol 包）接管 ObjectQLPlugin 历史内联装配：`ObjectStackProtocolImplementation` 构造 + `protocol` 注册、元数据存储平台对象（同 `environmentId===undefined` 门）、D12 `degraded` analytics fallback。模式照抄 plugin-security（命名插件 + `dependencies:['com.objectstack.engine.objectql']` + `ctx.getService('objectql')`）。装配冲突守卫把 kernel 的泛型重复抛错转为带修法的配置指引。\n- **`ObjectQLPlugin` 增 `registerProtocol?: boolean`**（默认 `true` 零行为变化）：`false` 跳过装配段；authored hook/action 重绑订阅抽为共享私有方法、delegated 模式下从 `start()` 惰性 arm（所有 init 已跑完，时序安全）；DB hydration 本就经 `getService('protocol')`+类型守卫消费——零改动。\n- 组合测试放 **objectql 侧**（metadata-protocol 不得依赖 objectql 连 devDep 也不行——turbo 判环，PR#2415 教训）：面等价 / protocol-free boot / 冲突守卫 / 默认模式回归。\n\n## 后续两腿\n\n- **PR-B（cloud）**：3 处 boot 站点（objectos-runtime×2 + control-plane-preset）装 MetadataProtocolPlugin + `registerProtocol:false`。\n- **PR-C（framework）**：删内联装配 + objectql 的 protocol re-exports + dependency（breaking，launch-window minor）。\n\n## 验证\n\nobjectql 1086 / metadata-protocol 70 / runtime 653 / dogfood 351 / 全仓 build 全绿。\n\n关联 #2462（Step 2 PR-A）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

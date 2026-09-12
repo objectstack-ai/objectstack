@@ -1,0 +1,35 @@
+{
+  "number": 3283,
+  "kind": "pull_request",
+  "title": "fix(driver-sql): drop vestigial sqlite3 peerDependency; SQLite uses better-sqlite3 (#3277)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T13:50:56Z",
+  "updated_at": "2026-07-19T14:02:05Z",
+  "closed_at": "2026-07-19T14:02:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-19T14:02:03Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3283",
+  "body": "Fixes #3277.\n\n## Problem\n\n`packages/plugins/driver-sql/package.json` declared `peerDependencies.sqlite3: \"^5.0.0\"`, but the driver **never loads `sqlite3` at runtime**. Every first-party SQLite construction site builds a `client: 'better-sqlite3'` Knex driver:\n\n- `resolveSqliteDriver` in `@objectstack/service-datasource` (`sqlite-driver-fallback.ts`) — the native → wasm → memory step-down of #2229\n- `default-datasource-driver-factory.ts` (both `sqlite3` and `better-sqlite3` aliases resolve to a `better-sqlite3` client)\n- the entire `driver-sql` test suite\n\n`better-sqlite3` is already an `optionalDependency` (auto-installed, with the wasm/memory fallback covering a failed native build), so the SQLite requirement was already satisfied without the consumer installing anything. The README already documents `pnpm add @objectstack/driver-sql better-sqlite3`.\n\n**Impact of the stale peer:** a consumer resolving peer deps could `pnpm add sqlite3` (never used) while believing they'd satisfied the SQLite requirement.\n\n## Fix\n\n- Remove `sqlite3` from `peerDependencies` + `peerDependenciesMeta`. `better-sqlite3` stays an `optionalDependency` — the intentional default-engine design (pg/mysql2/tedious remain peer-provided production opt-ins).\n- Regenerate `pnpm-lock.yaml`: the `sqlite3 → node-gyp` native-build subtree drops out (−548 lines), and packages shared with `better-sqlite3`'s `prebuild-install` are retained. Verified idempotent.\n- Patch changeset (`driver-sql` is in the fixed group).\n\nNo source/behavior change: the `sqlite3` string **alias** still maps to `better-sqlite3` in the driver factory and `isSqlite` dialect detection, so `driver: 'sqlite3'` config keeps working — it just resolves to `better-sqlite3` like everything else.\n\nFound during the #1880 docs implementation-accuracy audit (PR #3243); out of scope for that docs-only PR.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

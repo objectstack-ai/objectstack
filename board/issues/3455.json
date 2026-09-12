@@ -1,0 +1,32 @@
+{
+  "number": 3455,
+  "kind": "issue",
+  "title": "rest/protocol: 把 droppedFields 写路径观测扩展到 bulk / GraphQL / client SDK(#3431 D2 波及面 follow-up)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-24T15:11:42Z",
+  "updated_at": "2026-07-25T00:38:46Z",
+  "closed_at": "2026-07-25T00:38:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3455",
+  "body": "## 背景\n\n#3448(closes #3431)已接通**单条**写路径的字段剥离观测通道:`updateData` 转发引擎的 `onFieldsDropped`(`readonly` #2948 / `readonlyWhen` #3042),`createData` 通过 payload 差集 surface #3043 入口剥离;两者在协议结果上附带可选 `droppedFields`,REST 的 PATCH/POST 输出 `X-ObjectStack-Dropped-Fields` 响应头并在 body 保留结构化列表(状态码不变)。\n\n本 issue 跟踪 #3431「设计待拍板 D2:波及面」里**有意延后**的剩余项。\n\n## 待办\n\n- [ ] **bulk update(`updateManyData`)—— 真实缺口。** 它逐行 `engine.update(object, record.data, { where: { id } })`,**未挂 `onFieldsDropped`**,同一批 readonly/readonlyWhen 剥离照样静默发生。接法:逐行挂 collector,把掉的字段塞进该行结果;给 `BatchOperationResultSchema`(`packages/spec/src/api/batch.zod.ts`)加可选 `droppedFields`。\n      - 顺带:`updateManyData` 当前也**不透传 `context`**(独立的既存小问题,可一并修)。\n- [ ] **bulk create(`createManyData` / `batchData` / `insertManyData`)。** 走同一个 `stripReadonlyForInsert` 入口(#3043),逐行差集即可,per-row `droppedFields`。\n- [ ] **GraphQL mutation。** 写 mutation 若走同一套协议 `updateData`/`createData`,**运行时现在已自动带上 `droppedFields`**;只差在 GraphQL schema 上暴露一个 typed 的 payload 字段。\n- [ ] **`@objectstack/client` typed warnings。** 给 `UpdateDataResult` / `CreateDataResult`(`packages/client/src/index.ts`)加 `droppedFields?: DroppedFieldsEvent[]`,让正规 body 通道有类型。\n- [ ] **(低优先)CORS expose。** 把 `X-ObjectStack-Dropped-Fields` 加进 Hono 的 `defaultExposeHeaders`(`packages/adapters/hono` + `packages/plugins/plugin-hono-server`,注意\"三处 CORS 站点 lockstep\"),让跨域浏览器能读**header**。价值有限——body 的 `droppedFields` 本就是跨域安全通道。\n\n## 设计注记(#3448 里得到的经验)\n\n- **header 不适配 bulk:** 一个响应只有一个 `X-ObjectStack-Dropped-Fields`,无法表达逐行剥离。→ **body 的逐行 `droppedFields` 才是正规通道;header 只是单条写的便利镜像。**\n- **RPC / 远程引擎边界:** `onFieldsDropped` 是进程内函数,跨不了 Virtual Data Engine 的 RPC 边界,所以 **update 侧的 `droppedFields` 是\"进程内引擎才保证\"的 best-effort**(#3413 契约已承认)。create 侧的 #3043 差集在**协议层**计算,即使远程引擎也能 surface —— 两条路径在远程部署下不对称。\n- **开放问题:** 保持精确的 `droppedFields`(复用 `DroppedFieldsEventSchema`),还是引入通用 `warnings` 信封以容纳未来更多写路径告警类(值被截断、类型强转、字段废弃…)?两者可共存;若预计短期会出现多类告警,值得一开始就上通用信封,省一次迁移。\n\n## 参考\n\n- #3431(parent,单条已修)/ #3448(落地 PR,已合并)\n- #3413(引擎级通道)/ #3407(流程侧同类缺口)\n- `DroppedFieldsEventSchema` — `packages/spec/src/data/data-engine.zod.ts`\n- `updateManyData` / `BatchOperationResultSchema` — `packages/metadata-protocol/src/protocol.ts` / `packages/spec/src/api/batch.zod.ts`"
+}

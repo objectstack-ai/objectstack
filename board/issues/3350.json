@@ -1,0 +1,35 @@
+{
+  "number": 3350,
+  "kind": "pull_request",
+  "title": "fix(objectql): enforce per-option visibleWhen on checkboxes + string-match option values (objectui#2729)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-20T06:00:15Z",
+  "updated_at": "2026-07-20T06:07:43Z",
+  "closed_at": "2026-07-20T06:07:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-20T06:07:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3350",
+  "body": "Addresses **objectstack-ai/objectui#2729** (server-side enforcement of role-gated / dependent option values).\n\n## Context\n\nServer-side per-option `visibleWhen` enforcement already exists (`packages/objectql/src/validation/rule-validator.ts` → `evaluateOptionVisibility`, wired into insert / single-update / bulk-update). Investigating objectui#2729 surfaced that it covered `select` / `multiselect` / `radio` but left **two holes** that let gated values through on write — the exact \"client hides it, server must reject it\" boundary the issue is about.\n\n## Fixes\n\n1. **`checkboxes` was not enforced.** `CHOICE_FIELD_TYPES` omitted `checkboxes`, so `fieldHasOptionVisibility` returned false for it and its options were never re-evaluated. Since objectui#2735 shipped client-side `checkboxes` cascading, a gated `checkboxes` option was hidden in the UI yet accepted from a crafted write. Added `checkboxes` to the enforced set — picked values are now checked element-wise against each option's `visibleWhen` (record + `current_user`), like `multiselect`. (`checkboxes` is already treated as a multi-value option field by the enum validator, so this closes an inconsistency between the two validators.)\n\n2. **Numeric option values could slip the gate.** Option matching used strict `===`, but the enum-membership validator (`record-validator.ts`) compares by `String(...)`. A numeric option value submitted as a string (a normal REST/JSON round-trip) passed the enum check but its `visibleWhen` gate found no matching option and fail-opened. Matching now coerces both sides with `String(...)`, so the enum and visibility validators agree on which option a written value denotes.\n\n## Not changed / by design\n\n- `select` / `multiselect` / `radio` behavior is unchanged.\n- Fail-open on unbound `current_user` (system writes) or unevaluable predicates is preserved — a broken cascade predicate must never brick a write; authorization gating depends on the engine binding `current_user`, as before.\n- `dependsOn` remains a client form-gating hint only; server enforcement keys off each option's `visibleWhen` (a cascade parent is expressed inside the child's predicate, e.g. `record.country == 'cn'`), matching the existing design.\n\n## Tests\n\n- Extended `rule-validator.option-visibility.test.ts`: `checkboxes` element-wise gating (+ `needsPriorRecord`), and numeric-value coercion (both are real regression guards — they fail on the pre-fix code).\n- Verified green: objectql `src/validation/` + `engine.test.ts` (**206 passed**) and `plugin.integration.test.ts` real-registry path (**36 passed**). `tsc --noEmit` clean; `eslint` 0 errors (one pre-existing unrelated `no-new` warning).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

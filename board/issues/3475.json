@@ -1,0 +1,30 @@
+{
+  "number": 3475,
+  "kind": "issue",
+  "title": "Flow lookup-field template resolution (`{record.account.name}`) needs a read-identity design decision (follow-up to #3426)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-25T00:45:07Z",
+  "updated_at": "2026-07-25T02:29:24Z",
+  "closed_at": "2026-07-25T02:29:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3475",
+  "body": "Follow-up to #3426. PR #3472 closed the **formula** half of `{record.<path>}` template resolution (via the #3445 re-read) and added a build-time warning for unresolvable paths. The remaining piece — **single-hop lookup traversal** like `{record.account.name}` — is deferred here because it hinges on a design decision, not plumbing.\n\n## Problem\n\nIn a record-change flow, a node template `{record.account.name}` (where `account` is a lookup) renders as an **empty string**. The seeded flow record carries the relation as a scalar foreign-key id, not an expanded object, so the template walk `.name` on a string id yields nothing — silently. Same for a `notify` node's `title`/`body`, start conditions, etc.\n\n## Scoping — the plumbing is easy (no spec/engine/automation changes)\n\n- `FlowTriggerBinding.config` already carries the start node's config **by reference** (`service-automation/src/engine.ts` `resolveTriggerBinding`), so a `config.expand` opt-in surfaces on the binding with no automation-engine change.\n- `IDataEngine.findOne` already accepts an `expand: Record<string, QueryAST>` map, and `expandRelatedRecords` (`objectql/src/engine.ts`) infers the target object from the field's `reference` — passing `expand: { account: {} }` is enough; no nested `object` needed.\n- The flow start node's `config` is an open `z.record`, so an `expand` key validates today with **no spec schema change**.\n\n## The blocker — a read-identity / authorization decision\n\nThe `trigger-record-change` re-read that hydrates the record runs as an elevated **system** principal (so formula virtuals aren't FLS-masked). If we expanded a relation *there*, the expand sub-read would also run as system — **bypassing the triggering user's RLS/FLS on the referenced object**. For a `runAs:'user'` flow, `{record.account.secret}` in a notify template would then leak fields the user can't otherwise see.\n\nReading the expand **as the user** is not feasible in the trigger: the ObjectQL hook session carries only `userId`, not the user's resolved positions/permissions — the automation engine resolves those only at flow-run setup (see #3356). So the trigger structurally lacks the identity needed to scope a safe expand.\n\n## Proposed direction (needs a small ADR)\n\nDo the lookup expansion **inside the automation engine's flow run**, which already resolves the triggering user's full grants for `runAs:'user'`, rather than in the trigger's system re-read. Alternatively, a lazy template-time resolve that uses the flow's execution identity. Either keeps the RLS/FLS check intact.\n\nDesign points to settle:\n- Where `expand` is declared (flow/start-node `config.expand: string[]` vs per-node) and its shape.\n- Merge semantics: an opted-in relation becomes an **object** on the record, so `{record.account}` (bare id) and #1872 multi-lookup arrays must stay untouched for *non*-expanded relations.\n- Read identity for the expand (must respect the triggering user under `runAs:'user'`; system only for `runAs:'system'`).\n\n## Meanwhile\n\n- `os validate` now warns on these paths (`flow-template-lookup-traversal`, added in PR #3472), so authors get a design-time signal instead of a silent blank.\n- Workaround: add a `formula` field on the source object that projects the related value (e.g. `account_name`) and reference that, or recompose from local scalar columns.\n\n## Acceptance\n\n- `{record.account.name}` resolves in flow templates/conditions under `runAs:'user'` **without** exposing fields the triggering user could not read directly.\n- Opt-in per relation; bare `{record.<lookup>}` ids and `multiple` lookup arrays (#1872) are unaffected for relations not expanded.\n- The `flow-template-lookup-traversal` lint warning is suppressed for a relation once expansion is declared."
+}

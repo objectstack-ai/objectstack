@@ -1,0 +1,30 @@
+{
+  "number": 3233,
+  "kind": "issue",
+  "title": "perf(runtime): sandbox pump loop idle-spins ~200k setImmediate wake-ups/sec while awaiting a host call",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T15:56:11Z",
+  "updated_at": "2026-07-19T12:35:41Z",
+  "closed_at": "2026-07-19T12:35:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3233",
+  "body": "## 背景\n\n在排查 #1867 时顺带发现的一处 CPU 效率问题(**非 bug**,与 #1867 无关,按 AGENTS.md Prime Directive #10 单独立项)。\n\n`QuickJSScriptRunner.execute`(`packages/runtime/src/sandbox/quickjs-runner.ts`)驱动脚本异步续体的 pump 循环大致是:\n\n```js\nfor (;;) {\n  await new Promise((resolve) => setImmediate(resolve)); // 让出事件循环\n  const pending = runtime.executePendingJobs();          // 排空 VM 任务\n  // 读取 __error / __result,检查 deadline\n}\n```\n\n当脚本在 `await` 一个**尚未 settle** 的宿主调用(例如一次较慢的 DB 查询、或一次嵌套写入链)时,这一轮 `executePendingJobs()` 无事可做、`__result` 仍为 `undefined`,循环立即进入下一轮 —— 于是在整段等待期间以 setImmediate 的节奏空转。\n\n## 实测\n\n用一个「永不 settle」的宿主调用触发 250ms 超时,错误信息里带出了迭代计数:\n\n```\nhook 'slow' exceeded timeout of 250ms (after 50864 pump iterations)\n```\n\n即 250ms 内约 **5 万次**空转(≈ 20 万次/秒)。一个 30s 预算的 action 会累计约 **600 万次**唤醒。`setImmediate` 每轮都会让出事件循环,所以**不是硬 busy-spin、不会阻塞其它任务**,但这些唤醒纯属浪费(每次 setImmediate 调度 + `executePendingJobs` 的固定开销)。\n\n## 建议\n\n让宿主侧在某个 deferred 真正 settle 时**通知** pump 循环(共享一个「有新结果」的信号,例如一个每次宿主 leaf settle 时 resolve 的 Promise),循环只在**确有工作**时才 `executePendingJobs` 并检查结果;deadline 用一个独立的定时器兜底,而不是靠每轮轮询。退一步的最小改动:对连续空轮引入极小的自适应退避。\n\n需要保留的现有语义:\n\n- 慢但在推进的宿主调用必须能在其 `timeoutMs` 内跑完(#1867 的 pump-budget 回归);\n- 卡死/永不 settle 的宿主调用仍要被 deadline 截断。\n\n## 影响\n\n`@objectstack/runtime`(hook/action 沙箱执行)。纯 CPU 效率,优先级低(P3)。\n"
+}

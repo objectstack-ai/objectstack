@@ -1,0 +1,36 @@
+{
+  "number": 3591,
+  "kind": "pull_request",
+  "title": "feat(objectql,metadata-protocol)!: 装配单一来源化 + 删 protocol re-exports — Step 2 PR-C 收官 (#2462)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T08:39:29Z",
+  "updated_at": "2026-07-27T08:53:50Z",
+  "closed_at": "2026-07-27T08:53:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T08:53:48Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3591",
+  "body": "## Step 2 第三腿（收官）+ 一处配方修正\n\n- **`assembleMetadataProtocol()`**（metadata-protocol）成为唯一装配（对象 + protocol shim + D12 degraded analytics）：`createMetadataProtocolPlugin`（cloud 委托模式）与 `ObjectQLPlugin` 的 `registerProtocol` 便利模式挂载**同一条代码路径**——引擎插件删除 ~112 行内联重复；shim 返回值同步喂给引擎的 mutation-rebind 订阅。\n- **objectql 六条 protocol re-export 删除**（`ObjectStackProtocolImplementation`/`SysMetadataRepository`/`SeedLoaderService`/`runBuildProbes` + 类型）——直接从 `@objectstack/metadata-protocol` import（breaking-as-minor 按 launch-window 惯例，#3486/#3488 先例）。已知消费方仅 5 个测试文件已改指；runtime 补直接依赖。cloud 有 1 处测试 import 同款（control-plane-org-scope.integration.test.ts）——下次 SHA bump 时一行修，已在 issue 标注。\n- **配方修正（记录于 #2462，A2/步骤① 同类\"评估后修正\"）**：objectql→metadata-protocol **依赖有意保留**——`./core` 入口本就零 protocol，强迫 framework 内 ~20 个 boot 站点双插件纯属样板税。Step 2 目标落地为\"**零装配所有权、单一来源**\"。\n\n## 验证\n\n全仓 build；objectql 1086 / rest 380 / runtime 653 / dogfood 并行 60/61（semantic-roles 10s hook 偶发，单跑过）。\n\n关联 #2462（Step 2 PR-C）。合并后 Step 2 三腿闭环：#3578（A）→ cloud#877（B）→ 本 PR（C）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

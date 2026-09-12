@@ -1,0 +1,30 @@
+{
+  "number": 3479,
+  "kind": "issue",
+  "title": "data import: mid-lifecycle rows rejected by state_machine.initialStates — historical-data migration blocked (#3433 sibling)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-25T01:30:10Z",
+  "updated_at": "2026-07-25T02:37:01Z",
+  "closed_at": "2026-07-25T02:37:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3479",
+  "body": "## 现象\n\n用户通过数据导入(CSV / 批量 API)导入**历史 mid-lifecycle 记录**时,凡是记录的状态字段值 ∉ 对象 `state_machine.initialStates`,该行被拒。典型场景:迁移一批已 `closed` 的历史工单、已 `closed_won` 的历史商机、已 `completed` 的历史项目——这些正是数据迁移的核心内容,却被 FSM 入口校验挡下。\n\n与 #3433(种子重放被 initialStates 拒)**完全同构**,只是换了入口:#3433 修了种子写路径,但**数据导入这条平行路径没修**。区别是导入不静默——import-runner 有 per-row 结果,会报 `invalid_initial_state`,所以用户看得到\"导入 100 行,拒了 80 行\",但合法的历史迁移场景被功能性挡住。\n\n## 机制\n\n1. #3188(实现 #3165)让 `state_machine.initialStates` 在 INSERT 上强制 FSM 入口:创建值必须 ∈ initialStates,否则 `400 invalid_initial_state`(`packages/objectql/src/validation/rule-validator.ts`)。\n2. #3433 让**种子写路径**豁免 `state_machine`:`SeedLoaderService.SEED_OPTIONS` 带 `ExecutionContext.seedReplay` → 引擎传 `skipStateMachine` → rule-validator 跳过。\n3. 但**数据导入**的写入 context 没带这个旗标:`packages/rest/src/import-runner.ts:265`\n   ```ts\n   const writeCtx = { ...(context ?? {}), skipAutomations: !runAutomations };\n   ```\n   只有 `skipAutomations`,没有 `seedReplay`/`skipStateMachine`。导入写入经 `createManyData`/`insertManyData`(`packages/metadata-protocol/src/protocol.ts:3377/3405`)→ 引擎 → 照跑 `state_machine` initialStates 校验。\n\n## 影响面\n\n- **任何声明了 `initialStates` 的对象 + 用户导入其历史态数据** = 丢行。历史数据迁移(平台的常见 onboarding 场景)被 FSM 挡住。\n- 声明 initialStates 的对象会越来越多(#3165 是新能力,鼓励用),所以这个缺口会随采用面扩大。\n- 与种子不同,导入是用户**显式高频操作**,可见性更高(per-row 报错),但也更容易被当成\"平台不支持历史数据导入\"而流失。\n\n## 候选修法(需拍板)\n\n**不能照抄种子的一刀切豁免。** 种子是平台/包策展的既成事实,无条件豁免合理;用户导入的意图是**二义**的:\n- **历史数据迁移** → 导入的是既成事实,应豁免 `state_machine`(和种子同理);\n- **批量新建** → 真的在创建新记录,应走 `initialStates`(否则用户能批量绕过 FSM 入口)。\n\n所以应该是一个**用户可选开关**,而非默认豁免。好消息:\n- **引擎管道已就绪**(#3433 建的 `seedReplay → skipStateMachine`),import 只需在开关打开时往 `writeCtx` 塞对应 context 旗标即可,几乎零引擎改动。\n- **有现成的开关先例**:import 已有 `runAutomations` / `run_automations`(`import-runner.ts:104`、`rest-server.ts:3833`)映射到 `skipAutomations`。平行地加一个 `treatAsHistorical`(或 `skipLifecycleValidation`)选项,映射到 `skipStateMachine`/`seedReplay` context,默认**关**(保持新建走 FSM),迁移历史数据时由用户显式开。\n- 配套:导入向导(objectui)加一个复选框「作为历史数据导入(跳过生命周期校验)」;REST 导入 API 加对应参数;`import_job` 记录该标志(便于审计 + undo 语义一致)。\n\n倾向:加显式开关(默认关),复用 #3433 的引擎豁免管道。\n\n## 复现\n\n对一个声明了 `state_machine` + `initialStates: ['prospecting']`(events 含 insert)的对象,通过导入 API 批量导入若干 `stage: 'closed_won'` 的记录 → 每行 `400 invalid_initial_state`,import 结果 per-row errored,历史行全部丢失。\n\n## 参考\n\n- #3433(种子写路径豁免 state_machine;引擎 `skipStateMachine` 管道)、#3165 / #3188(initialStates 强制)、`packages/rest/src/import-runner.ts`(writeCtx 构造点 + runAutomations 开关先例)、`packages/metadata-protocol/src/protocol.ts`(createManyData/insertManyData)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

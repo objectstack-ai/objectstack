@@ -1,0 +1,33 @@
+{
+  "number": 3598,
+  "kind": "pull_request",
+  "title": "fix(service-settings): complete zh-CN coverage for auth/sms/ai settings (objectui#2851 P1)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "size/l",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T09:01:24Z",
+  "updated_at": "2026-07-27T09:42:25Z",
+  "closed_at": "2026-07-27T09:42:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T09:42:23Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3598",
+  "body": "## What\n\nComplete zh-CN coverage for the **auth / sms / ai** built-in settings manifests. These manifests grew new groups and fields but the zh-CN translation bundle wasn't updated, so those settings rendered English under a Chinese UI.\n\nPart of objectstack-ai/objectui#2851 (P1).\n\n## Changes\n\n`packages/services/service-settings/src/translations/zh-CN.ts` — fill every missing group title + field label/help for:\n\n- **auth**: breach/complexity/min-classes/history/expiry password policy, `anti_abuse` (lockout + rate-limit), `multi_factor` (MFA + grace), extra session controls (idle / absolute / concurrent), `network` allow-list.\n- **sms**: the whole `SMS Delivery` namespace (provider select + Aliyun + Twilio groups/keys, test action).\n- **ai**: DeepSeek / DashScope / Cloudflare / SiliconFlow / OpenRouter provider groups + keys + select options, and the conversation-title group.\n\nPlus `zh-CN.coverage.test.ts` — a guard that pins zh-CN to full title/group/key coverage of **every** built-in settings manifest, so a future manifest addition can't silently regress into English. Dropdown *option* labels are intentionally excluded (some are codes / format specimens like `date_format` = \"YYYY-MM-DD\" that must not be translated).\n\n## Test\n\n`pnpm --filter @objectstack/service-settings test` → **12 files / 155 tests pass**, including the new coverage guard and the manifest schema-parse tests.\n\n## Follow-ups (not in this PR)\n\n- `localization` option labels (timezones / currencies / format specimens) — low value, several are codes.\n- `ja-JP` / `es-ES` parity — currently sparser than zh-CN (missing whole groups).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

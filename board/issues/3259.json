@@ -1,0 +1,32 @@
+{
+  "number": 3259,
+  "kind": "issue",
+  "title": "Flaky: `nested-write.integration.test.ts` sandbox hook exceeds the 250ms deadline on CI (Test Core)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T07:11:11Z",
+  "updated_at": "2026-07-19T13:05:41Z",
+  "closed_at": "2026-07-19T13:05:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3259",
+  "body": "## Summary\n\n`packages/runtime/src/sandbox/nested-write.integration.test.ts` → **\"#1867 nested cross-object write from a hook (real engine + sandbox)\" → \"a child afterInsert hook writes the parent rollup without crashing (parent has its own hook → real nested VM)\"** fails intermittently in the **Test Core** job with:\n\n```\nSandboxError: hook 'rollup_parent_total' exceeded timeout of 250ms (after N pump iterations)\n ❯ QuickJSScriptRunner.execute src/sandbox/quickjs-runner.ts:260:17\n ❯ boundBodyHandler src/sandbox/body-runner.ts:68:24\n ❯ runWithTimeout ../objectql/src/hook-wrappers.ts:115:7\n ...\n```\n\nResult each time: `564 passed | 1 failed (565)` — only this one test.\n\n## Evidence (3 occurrences across 2 unrelated PRs)\n\n| PR | run | detail |\n|----|-----|--------|\n| #3227 | 29652626394 | `nested-write` timeout **after 215 pump iterations**; a re-kick then flaked *differently* (`@objectstack/http-conformance` vitest worker `write EPIPE`); a 2nd re-kick went **fully green** |\n| #3258 | 29677316696 | `nested-write` timeout **after 246 pump iterations** |\n\nBoth PRs are unrelated to the sandbox/hook path (one adds `summaryOperations.filter` to spec/objectql; the other only edits a `fieldForm` metadata layout) — and the test is not even in those branches except via the merge-with-`main` commit. The **variable pump count (215 vs 246)** before hitting the same wall-clock deadline is the signature of a load/timing flake, not a logic bug.\n\n## Likely cause\n\nThe QuickJS sandbox enforces a **250ms wall-clock** deadline (`quickjs-runner.ts:260`). This test is the heaviest sandbox scenario — a child `afterInsert` hook that triggers the *parent's* hook → a **real nested VM**. On a loaded CI runner the nested pump loop legitimately needs >250ms, so the deadline trips even though the VM is making progress. It's green on a fast/idle runner, red on a loaded one → flaky.\n\n## Suggested directions\n\n1. Give this nested-VM integration test a **larger/looser deadline** (it is inherently heavier than a single-hook run), or make the sandbox deadline **env-overridable** so CI can raise it (`OS_SANDBOX_*` per the `OS_{DOMAIN}_*` convention).\n2. Or trim the test's hook bodies so the nested run completes with comfortable headroom under 250ms.\n3. Separately track the `@objectstack/http-conformance` vitest worker `EPIPE` (worker-pool crash) seen on #3227's first re-kick — likely a distinct runner-resource transient, not the same root cause.\n\n## Impact\n\nNon-deterministic red on `Test Core` for PRs that have nothing to do with the sandbox, requiring manual re-kicks (2 needed on #3227). Wastes CI cycles and erodes trust in the required check.\n\n_Filed per AGENTS.md Prime Directive #10 while babysitting #3258; the flake is upstream on `main`, not introduced by that PR._"
+}

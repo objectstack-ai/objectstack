@@ -1,0 +1,35 @@
+{
+  "number": 3605,
+  "kind": "pull_request",
+  "title": "feat(spec)!: remove the dead static capabilities-descriptor cluster",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T09:15:40Z",
+  "updated_at": "2026-07-27T09:42:50Z",
+  "closed_at": "2026-07-27T09:42:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T09:42:48Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3605",
+  "body": "Same ADR-0056 D8 family as the AuditConfig prune (objectstack-ai/objectstack#3593), surfaced by its flagged follow-up (the `auditLogging` dead boolean led here). Umbrella #1878.\n\n## What this is\n\nThe \"RUNTIME CAPABILITIES PROTOCOL\" tail of `stack.zod.ts` (214 lines): `ObjectQLCapabilitiesSchema` / `ObjectUICapabilitiesSchema` / `KernelCapabilitiesSchema` / `ObjectStackCapabilitiesSchema` / deprecated `ObjectOSCapabilitiesSchema` alias + all five types — a static fixed-boolean self-portrait of the platform.\n\n**Verified zero consumers** (framework source, objectui apart from bare re-exports, cloud, downstream-contract): never authorable (`defineStack` has no such key), never registered, never fed any endpoint.\n\n**Worse than dead — it lied.** `fieldLevelSecurity` / `rowLevelSecurity` / `auditLogging` / `backgroundJobs` all `default(false)` while every one is live and enforced; `odataApi` advertised an API that has never existed. An AI reading this schema builds a systematically wrong model of the platform — the exact failure mode the metadata protocol exists to prevent.\n\n**The live surfaces** (declared === enforced): `GET /api/v1/discovery` builds its `capabilities` record dynamically — #3298 advertises `transactionalBatch` only when the route is mounted AND the engine supports transactions; `/.well-known` has `WellKnownCapabilitiesSchema` (`spec/api`); drivers have `Driver`/`DatasourceCapabilities` (`spec/data`). The changeset carries the full dead-boolean → live-discovery migration table.\n\n## Changes\n\n- Delete the cluster + four dead `stack.test.ts` describe blocks + `src/index.ts` explicit re-exports + two now-orphan imports (`ClusterCapabilityConfigSchema` / `FeatureFlagSchema` — both modules untouched; `ApiEndpointSchema` stays, consumed by the stack `apis` key).\n- api-surface: **10 exports, pure removal**. No manifest keys existed; no doc page was generated for them.\n- Companion objectui PR drops the `@object-ui/types` re-exports (must land before objectui's next spec bump): objectstack-ai/objectui#chore/drop-capabilities-reexports.\n\n## Verification\n\n6716 spec tests green (incl. protocol-map link gate) · `tsc --noEmit` clean · `check:docs` / `check:api-surface` / `check:skill-refs` / `check:react-blocks` in sync · downstream-contract typecheck clean.\n\nRefs #1878, #3593.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

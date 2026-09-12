@@ -1,0 +1,32 @@
+{
+  "number": 2462,
+  "kind": "issue",
+  "title": "ADR-0076: remaining objectql/protocol layering work (cross-repo window)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-29T14:03:05Z",
+  "updated_at": "2026-07-27T09:17:28Z",
+  "closed_at": "2026-07-27T09:17:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2462",
+  "body": "Tracking issue for the **remaining** work from [ADR-0076](https://github.com/objectstack-ai/framework/blob/main/docs/adr/0076-objectql-core-tiering.md) (objectql layering / protocol segmentation / honest capabilities).\n\n## Done (for context)\n- ✅ protocol relocated out of the engine → `@objectstack/metadata-protocol`; lean `@objectstack/objectql/core` entry + boundary ratchet (#2415).\n- ✅ **D9 step-1**: `ObjectStackProtocol` segmented into per-domain interfaces (`DataProtocol`/`MetadataProtocol`/…), composed alias for back-compat — non-breaking (#2429).\n- ✅ ADR D1–D12 recorded (rev.9).\n\n## Remaining — all gated to a coordinated **cross-repo window** (framework + cloud + ../objectui), unless noted\n\n- [ ] **D10 — distribute protocol implementations to domain packages.** Data facade → transport; analytics/feed/realtime impls owned by their existing services (`service-analytics`/`service-messaging`/`service-realtime`); the metadata-management impl **stays in `@objectstack/metadata-protocol`** (name retained — OQ#7). Dissolve the central facade. *Risk: med; cross-repo.*\n- [ ] **D11 — decompose the transport god-implementation.** `runtime/http-dispatcher.ts` (~3.8k) + `rest/rest-server.ts` (~5.1k) → thin framework-agnostic port + per-domain **normalized** handlers (NOT framework-specific routes — keep multi-adapter). Confirm dispatcher↔rest-server overlap; **validate multi-adapter by writing a 2nd `IHttpServer` adapter** (thin Workers/Express) to prove the port is free of Hono-isms. *Risk: high; cross-repo.*\n- [ ] **D12 — honest capabilities (fixes agents being misled by fake services).** Standardize a stub/dev/fallback marker; make `http-dispatcher` `svcAvailable` respect it (report `status:'stub'`/`handlerReady:false`, never `available`); add the `stub` status to the discovery schema; update consumers (agents, console) to trust only real services. Mark the analytics fallback + plugin-dev stubs honestly — **do not delete** (no `/analytics` 404). *Risk: med; cross-repo (console reads `discovery.services`).* See OQ#11 (marker convention).\n- [ ] **Step 2 — make the `@objectstack/objectql` package itself protocol-free.** Turn the protocol wiring into a `MetadataProtocolPlugin` (capability plugin, like plugin-security); update framework boot sites + **cloud's ~8 `new ObjectQLPlugin()` sites** to also register it. *Risk: high; breaking boot contract; cross-repo (cloud).*\n- [ ] **D7 — engine repo-split (trigger-gated).** Only when the cross-package commit ratio of `engine.ts`/`registry.ts` (currently **88%**) falls to a low, stable level. Track the metric in CI. Then extract on the objectui sibling-link model. *Risk: high; deferred.*\n- [ ] *(optional, low-risk, any time)* **A1.5 — narrow consumers to the new sub-interfaces** (e.g. data-only callers → `DataProtocol`), per the D9 incremental guidance.\n\n## Notes\n- **Resolved, no action:** A2 (delete the \"duplicated\" analytics) — it's a deliberate fallback+`replaceService`, not a collision; handled by D12 (mark honestly).\n- Sequencing: D9 contract segmentation is spec/type-level and already started (#2429). The implementation-level items above touch cloud boot and/or the console discovery contract, so they batch into one coordinated window.\n\n_Generated from the ADR-0076 kernel review._"
+}

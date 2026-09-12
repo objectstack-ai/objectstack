@@ -1,0 +1,34 @@
+{
+  "number": 3306,
+  "kind": "issue",
+  "title": "Shipped template formula fields silently evaluate to null on @objectstack 15.1.1 — daysBetween / Timestamp−Timestamp / floor in stored formulas (hr tenure_years, time_off days)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T17:07:36Z",
+  "updated_at": "2026-07-20T07:45:46Z",
+  "closed_at": "2026-07-20T07:45:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3306",
+  "body": "## Summary\n\nWhile converting the `templates` repo's roll-ups (framework#1867 follow-up) I boot-verified several **stored `Field.formula` fields that silently evaluate to `null`** on the pinned runtime (`@objectstack/formula@15.1.1`). No parse error, no runtime error, no `objectstack build` warning — the field just returns `null`. This is the exact silent-miss class ADR-0053 / ADR-0032 exist to kill, but for **function calls / arithmetic**, not the `== today()` equality case that #3183 just fixed.\n\nTwo of these are **real, user-facing fields in the shipped `hr` template**:\n\n| Field | Expression (origin/main) | Runtime value (15.1.1) |\n|---|---|---|\n| `hr_time_off_request.days` | `(record.end_date - record.start_date) + 1` | **null** for every request |\n| `hr_employee.tenure_years` | `floor((today() - record.hire_date) / 365)` | **null** for every employee |\n\n`hr_time_off_request.days` is the leave-duration in the **core time-off workflow** — every seeded request shows a blank \"Calendar Days\".\n\n## Verified repro\n\nFresh `objectstack dev --fresh` on `hr` (@objectstack 15.1.1), signed in, `GET /api/v1/data/...`:\n\n- `hr_time_off_request.days` → `null` (all 6 seeded rows).\n- `hr_employee.tenure_years` → `null` (all 7 rows), and I could not get a non-null result with any of:\n  - `floor((today() - hire_date) / 365)` (original)\n  - `daysBetween(record.hire_date, today())`  ← bare, still null\n  - `daysBetween(date(record.hire_date), today())`  ← explicit coercion, still null\n  - `daysBetween(...) / 365`, `daysBetween(...) / round(365)`  ← still null\n\nBy contrast, `today()`, `daysFromNow(n)`, `addDays(date, n)`, `round`, `abs`, and date **ordering** comparisons all work in 15.1.1 (I used `daysFromNow`/`addDays` to fix two sibling formulas — see below).\n\n## What appears to be going on\n\n`daysBetween` **is** correct in framework HEAD — implemented in `packages/formula/src/stdlib.ts:176`, listed in `CEL_STDLIB_FUNCTIONS` (`validate.ts:446`), and engine-tested (`cel-engine.test.ts:449,456`, including a date-string field arg). But calling it from a **stored formula field** on the published 15.1.1 returns null, and templates pin 15.1.1 (the latest published — there is nothing newer to bump to). So either the working `daysBetween` stored-formula path never shipped in 15.1.1, or the end-to-end stored-formula path has a gap the engine-level unit tests don't cover. Two related operators have no support at all and also null out silently: `Timestamp − Timestamp` (→ a number) and a `floor` builtin — both things template authors reach for naturally.\n\nRelated prior work: #1302 (original \"missing daysBetween/date-arithmetic\", closed not_planned then implemented via ADR-0053), #1979 (thread ctx into `applyFormulaPlan`), #3183 (silent `dateField == today()`, fixed 2026-07-18). This is the same silent-null family, one layer over: **function/arith calls in stored formulas** rather than equality.\n\n## Ask\n\n1. **Confirm end-to-end + release**: add a test that a *stored* formula field (via `engine.find()` → `applyFormulaPlan`, real driver `YYYY-MM-DD` round-trip) using `daysBetween` returns the right value, and make sure it ships in the next published `@objectstack/formula`. Then templates can restore `time_off.days` / `tenure_years`.\n2. **Fail loudly, don't null**: an unresolved function / unsupported operator in a formula should be a build-time error (like #3183's philosophy — `cel-to-filter` already fails closed), not a silent runtime `null`. Silent null is the trap here.\n3. **Template regression coverage**: nothing currently catches that a shipped template's formula field evaluates to null on the pinned release — a boot-and-assert-non-null smoke over template formula fields would have caught all of these.\n\n## What I already shipped template-side (using functions that DO work in 15.1.1)\n\nSame root class, fixable without `daysBetween`, so done in `templates`:\n- `compliance_control.is_overdue_for_review`: `last_assessed_at + freq*86400000` → `addDays(last_assessed_at, freq) < today()` (templates#92, merged).\n- `hr_document.is_expiring_soon` / `expiry_status`: `today() + 30/60` → `daysFromNow(30/60)` (templates#93).\n\n`time_off.days` and `tenure_years` are **left for this framework fix** — they need a working `daysBetween` (or `Timestamp` subtraction), which 15.1.1 doesn't provide in stored formulas.\n"
+}

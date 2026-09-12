@@ -1,0 +1,32 @@
+{
+  "number": 3343,
+  "kind": "issue",
+  "title": "managedBy taxonomy — remaining follow-ups after #3220 / #3325 (de-dup completion, optional enum split, dogfood verification)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-20T02:50:04Z",
+  "updated_at": "2026-07-20T14:01:41Z",
+  "closed_at": "2026-07-20T14:01:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3343",
+  "body": "Tracking issue for the leftover follow-ups after the `managedBy` taxonomy line landed. The core work is **done and merged** — this issue captures only the genuinely useful remainder so nothing is lost, with clear priority. None of it is blocking.\n\n## What already shipped\n\n- **#3315** (closes #3220, ADR-0103) — split the overloaded `managedBy: 'system'` bucket into engine-owned vs. admin/user-writable (`userActions`), added the `assertEngineOwnedWriteAllowed` engine guard, generalized `reconcileManagedApiMethods` + the `/me/permissions` clamp.\n- **objectui#2705** — Console badge/empty-state distinguish writable-`system` objects.\n- **#3326** (closes #3325) — the default-permission-set managed deny-list is now derived from the live registry (fixed a 17/22 drift) and pinned by test.\n- **objectui#2712** — consolidated the three hand-mirrored `managedBy` bucket declarations into a single shared source of truth (`@object-ui/types` union + `@object-ui/core` runtime helpers) and tightened the open-ended schema type.\n- **#3333** — documented the bucket taxonomy + write policy in the hand-written docs.\n\n## Remaining follow-ups\n\n### 1. Finish the objectui de-dup (recommended — small, completes #2712)\n**Repo: objectui.** #2712 consolidated the three union/set *mirrors* but deliberately left three small inline `userActions` handlers that still parse the override shape by hand:\n- `packages/app-shell/src/utils/managedByEmptyState.ts` — inline `userActions?.create === true` + its local `EmptyStateUserActions` interface. Replace with the shared `resolveCrudAffordances({ managedBy, userActions }).create` (or a small `canCreate` helper) from `@object-ui/core`.\n- `packages/plugin-form/src/ObjectForm.tsx` (~the `managed = managedBy !== 'platform'` lock + userActions unlock) — replace with the shared `isObjectInlineEditable` / resolved affordance so the form's editability gate matches detail/grid exactly.\n- `packages/plugin-grid/src/rowCrudAffordances.ts` — its `isOptedOut` / predicate-parsing helpers overlap `@object-ui/core`'s `normalizeOverride`; consolidate the userActions-normalizer so there's one parser.\n\nAcceptance: no package re-parses the `userActions` override shape locally; existing affordance/edit-gate tests stay green; add coverage for the newly-shared paths. Behavior-preserving.\n\n### 2. (Optional / future) Enum split as a pure rename\nADR-0103 chose `userActions` over a new `managedBy` enum value to avoid the fully-editable fallthrough on deployed Console clients. Now that the resolved-affordance policy is the enforced contract and the objectui type is a closed union, splitting `system` into an explicit engine-owned bucket value would be a **mechanical rename** rather than a behavioral change. Low priority — only worth doing if a more self-documenting taxonomy is wanted; the current `userActions` model is fully sufficient. Would touch: the spec enum + affordance matrix (`packages/spec/src/data/object.zod.ts`), the objectui union (`@object-ui/types`), ~30 object declarations, and the badge/empty-state copy.\n\n### 3. (Optional) Browser dogfood verification of the ADR-0103 write policy\nEnd-to-end validation the unit + dogfood-test suites can't fully cover: boot the showcase app, and as an admin confirm (a) a writable-`system` object like Notification Preferences is editable, (b) engine-owned objects (audit log, automation run, jobs) render read-only with no New/Edit/Delete, (c) a generic `/data` write to an engine-owned or better-auth object is rejected. Use the internal `dogfood-verification` tooling.\n\n## Explicitly out of scope\n\n- **`writeVia` capability** for third-party-managed objects — deferred (#1878); no such object exists today, speculative until a concrete need arises.\n- The recurring `Check Changeset` red (an inherited `major` changeset on `main`, `remove-session-tenantid-alias.md` / #3305) — a release-window decision unrelated to this taxonomy line; not tracked here.\n\n## Related\n#3220 · #3315 · #3325 · #3326 · #3333 · objectui#2705 · objectui#2712 · ADR-0092 · ADR-0103 · ADR-0049"
+}

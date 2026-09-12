@@ -1,0 +1,34 @@
+{
+  "number": 3618,
+  "kind": "issue",
+  "title": "security(analytics): read-scope 自动桥是插件顺序依赖的 — security 晚注册则 analytics RLS 静默全关",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T09:53:40Z",
+  "updated_at": "2026-07-27T10:27:46Z",
+  "closed_at": "2026-07-27T10:27:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3618",
+  "body": "写 #3597 的端到端门时发现的**独立缺陷**:analytics 的 read-scope 自动桥是**插件注册顺序依赖**的,顺序不利时整个 analytics RLS 静默关闭 —— 两条 strategy 都不加 scope。\n\n## 代码与它自己的注释矛盾\n\n`packages/services/service-analytics/src/plugin.ts:277-306`:\n\n```ts\n// ADR-0021 D-C — wire the read-scope provider. Prefer an explicit option;\n// otherwise auto-bridge to a registered `'security'` service that exposes\n// `getReadFilter(object, context)` (resolved at call time so plugin-init\n// order does not matter).                                    ← 注释这么说\n...\nif (trySecurity()) {                                          ← 但赋值卡在 init 时刻的探测上\n  getReadScope = (object, context) => trySecurity()?.getReadFilter(object, context);\n  autoBridgedReadScope = true;\n}\n```\n\n闭包本身确实是懒的,但**它只在 security 于 init 时刻已存在时才被赋值**。security 晚注册 ⇒ `getReadScope` 永远是 `undefined` ⇒ `AnalyticsService.callCtx` 直接 `return this.baseCtx`(`analytics-service.ts:332`)⇒ 无论 NativeSQL 还是 ObjectQL 都不加 scope。\n\n**两个兄弟桥都是对的**,只有这个不是:\n\n- `executeAggregate`(`plugin.ts:181-182`):\"Probe now (warn if missing) but resolve at call time so plugin order does not matter\"\n- `executeRawSql`(`plugin.ts:229-231`):\"**Always wire the bridge** — resolution happens at call time... This way plugin-init order does not matter\"\n\n## 影响面\n\n**生产 CLI 路径不受影响。** `os serve` 里 SecurityPlugin 在 `packages/cli/src/commands/serve.ts:1658`,AnalyticsServicePlugin 由 capability resolver 在其**之后**加载(静态表 `serve.ts:303-305`),顺序正确 ⇒ 桥接上。\n\n**受影响的是:**\n\n1. **自建 kernel 的 embedder** —— 框架是按库分发的,谁把 AnalyticsServicePlugin 排在 SecurityPlugin 前面,谁就静默拿到无 scope 的 analytics。唯一提示是一条 WARN,而且那条 WARN 的措辞还把问题说小了(见下)。\n2. **仓库自己的 `bootStack` harness** —— `packages/verify/src/harness.ts` 里 AnalyticsServicePlugin 在 **:159**,SecurityPlugin 在 **:232**。**整个 dogfood/verify harness 的 analytics RLS 一直是关的**,所以在那里写的任何 analytics RLS 断言都是空过的。这正是我写 #3597 端到端门时撞上的:门先红了,红的原因不是 #3597,而是这条。\n\n## WARN 措辞也是错的\n\n`plugin.ts:463-467` 说\"the **raw-SQL** analytics path will NOT enforce tenant/RLS scoping **on joined objects**\"。实际上没有 provider 时,**所有路径、所有对象**都不加 scope,不只是 raw-SQL、不只是联表。\n\n## 复现\n\n`packages/qa/dogfood/test/analytics-rls.dogfood.test.ts`(随修复一起提交):owner-scoped RLS fixture + 真实 HTTP + 非管理员 member。修复前 member 的聚合返回全表 5 行,修复后返回自己的 2 行;回退 `plugin.ts` 改动后 4 个用例红 3 个。\n\n## 修法\n\n`getReadScope` 无条件接线,只用 init 时刻的探测决定日志措辞 —— 与两个兄弟桥完全一致。\n\n## 待核\n\n`cloud` 是独立仓库,我没检查它的插件注册顺序。**如果任何已发布的 composition 用了不利顺序,这条应升级到 p1。**\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

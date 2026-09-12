@@ -1,0 +1,32 @@
+{
+  "number": 3596,
+  "kind": "pull_request",
+  "title": "fix(verify): multiTenant boot requests the isolated tenancy posture — ADR-0105 D1",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T08:49:08Z",
+  "updated_at": "2026-07-27T08:59:22Z",
+  "closed_at": "2026-07-27T08:59:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T08:59:21Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3596",
+  "body": "## Root cause\n\nSince #3559 (ADR-0105 Phase 0/1), a walled tenancy posture is an explicit operator request — resolved from `OS_TENANCY_POSTURE` / `OS_MULTI_ORG_ENABLED` when AuthPlugin registers the `tenancy` service — and mounting the enterprise organizations plugin only **entitles** it (#3570, D12). `bootStack`'s `multiTenant: true` opt-in predates that split: it mounted the plugin but requested nothing, so multi-org fixtures silently boot **`single`** — no Layer 0 wall, D3 default-org write stamping — and every cross-tenant proof asserts against the wrong posture.\n\nFirst surfaced by cloud's `security-enterprise` multi-org integration test (the licensed path open-core CI cannot run): 3/4 assertions fail against any framework checkout at or past #3559 — writes get stamped into the ADR-0081 default org (`org_<ts><rand>`) instead of the caller's active org, and an org admin's scoped `viewAllRecords` grant sees `[]`. Cloud CI stays green only because its `.objectstack-sha` pin predates #3559 — **any pin bump past #3559 without this fix turns cloud CI red.**\n\n## Fix\n\n`bootStack({ multiTenant: true })` now sets `OS_TENANCY_POSTURE=isolated` (the posture `OS_MULTI_ORG_ENABLED=true` historically meant) before AuthPlugin snapshots the requested posture:\n\n- an explicit caller-provided `OS_TENANCY_POSTURE` always wins;\n- the request is restored on `stop()` and on a failed multi-tenant boot, so later single-tenant boots in the same worker are unaffected.\n\nThe verify package also gains a `test` script — `turbo run test` never ran its suite before (the existing `derive.test.ts` was dead weight in CI) — so the new regression pin actually gates.\n\n## Verification\n\n- `packages/verify`: 7/7 pass (3 new posture-contract cases with a faked `org-scoping` entitlement surface + 4 existing derive cases), rebased on latest `main` (post-#3581) with the chain rebuilt.\n- Cross-repo E2E: cloud's `multi-org-tenant-isolation.integration.test.ts` run against this branch's verify (temp alias, live `@objectstack/organizations` with its D12 posture declaration): **4/4 pass with no external env** — previously 3/4 failed. The Layer 0 fail-closed UPDATE denial logs confirm the wall is real.\n- `pnpm --filter @objectstack/verify lint` reports 7 pre-existing \"Definition for rule '@typescript-eslint/no-explicit-any' was not found\" errors on a pristine checkout too (package-level lint config gap, untouched here).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

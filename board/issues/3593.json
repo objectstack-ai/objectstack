@@ -1,0 +1,35 @@
+{
+  "number": 3593,
+  "kind": "pull_request",
+  "title": "feat(spec)!: remove the dead AuditConfig cluster from @objectstack/spec/system (#1878)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T08:43:39Z",
+  "updated_at": "2026-07-27T08:57:34Z",
+  "closed_at": "2026-07-27T08:57:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T08:57:32Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3593",
+  "body": "Closes loose-end #1 of the 2026-07 security-props recheck (objectstack-ai/objectstack#3503, umbrella #1878). Scope was verified larger than the recheck recorded: not just `AuditRetentionPolicySchema` — the **entire `system/audit.zod.ts` module is dead**.\n\n## The design question this answers\n\n审计要不要元数据定义?要 —— 而且**已经有了**,分三层(与 Salesforce/Dynamics/ServiceNow 的两/三级模式同构):\n\n| 关切 | 归属 | 现状 |\n| --- | --- | --- |\n| 审计什么、History UI | 应用作者 → **元数据** | ✅ 活:object/field `trackHistory`(ADR-0052)+ feed/comment 开关 |\n| 是否捕获(合规底线) | **平台**,故意不可配 | ✅ 活:plugin-audit 引擎钩子无条件写 `sys_audit_log`(\"audit capture itself is always on for compliance\") |\n| 保留/归档(组织策略) | 元数据默认 + **管理员** settings 覆盖 | ✅ 活:object `lifecycle` `audit` 类目 + `retention_overrides`(ADR-0057) |\n\n`AuditConfigSchema` 是与这三层平行的第四份从未接线的\"配置文档\",且 `enabled: false` 直接抵触 always-on 合规账本契约。同族先例:`compliance.zod` / `masking.zod` / `RLSAuditConfig` / `PolicySchema` 的 ADR-0056 D8 移除(\"compliance-grade config must never merely look live\")。\n\n## What changed\n\n- **Delete** `system/audit.zod.ts` (696 lines: `AuditConfig` / `AuditStorageConfig` / `AuditRetentionPolicy` / `AuditEventFilter` / `SuspiciousActivityRule` / `DEFAULT_SUSPICIOUS_ACTIVITY_RULES` + the `AuditEvent*` shape schemas) and its test file. Zero consumers repo-wide — plugin-audit imports none of it; the `sys_audit_log` row shape is owned by plugin-audit's own object definition.\n- Drop the export from `system/index.ts` with a removal note (house pattern next to the compliance/masking note); fix the stale `security-context.zod.ts` module doc (3 of its 4 referenced subsystems are now removed).\n- Drop 11 manifest ratchet keys; regenerate JSON schemas, reference docs (`references/system/audit.mdx` removed by regen), API surface (**21 exports, pure removal**).\n- Drop the `PROTOCOL_MAP.md` row — the protocol-map gate caught the dangling link and its error message prescribed exactly this.\n- Annotate the 2026-07 recheck doc: loose-end #1 **done** (this PR), #2 **done** (#3557).\n- Changeset (`minor` per launch-window breaking-as-minor policy) carries the **dead-knob → live-surface migration table**, so an upgrading AI greps straight into the correct authoring path (`trackHistory` + `lifecycle`).\n\n## Verification\n\n- 6679 spec tests green (254 files); `tsc --noEmit` clean.\n- `check:docs` / `check:api-surface` / `check:skill-refs` / `check:react-blocks` all in sync.\n- downstream-contract typecheck clean — the frozen third-party gate pins none of the removed exports.\n- `defineStack` never accepted an `audit` key, so no stack/example changes needed (the sibling dead `auditLogging` boolean in the stack features block is deliberately out of scope — flagged for the aspirational-flags family follow-up).\n\nRefs #1878, #3503.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

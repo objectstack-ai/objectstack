@@ -1,0 +1,35 @@
+{
+  "number": 3352,
+  "kind": "pull_request",
+  "title": "feat(spec): explicit `engine-owned` managedBy bucket (ADR-0103 addendum, #3343)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-20T06:33:57Z",
+  "updated_at": "2026-07-20T07:12:08Z",
+  "closed_at": "2026-07-20T07:12:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-20T07:12:06Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3352",
+  "body": "Item **#2** of the `managedBy` taxonomy tracking issue [#3343](https://github.com/objectstack-ai/framework/issues/3343) — the enum split ADR-0103 explicitly deferred (\"revisitable later as a rename\"), landed for **v16** as an **additive**, self-documenting relabel.\n\n## Why now (the ADR-0103 D1 objections, resolved)\n\nADR-0103 chose `userActions` over a new enum value for two reasons, both now retired:\n\n1. **Silent fully-editable fallthrough on deployed clients** — neutralised by the server-side enforcement ADR-0103 itself added (the engine write guard, `apiMethods` reconciliation, `/me/permissions` clamp). An unknown bucket resolving to the `platform` default on an old client is now **cosmetic** — the write is rejected regardless of what the client renders. (Re-verified: a generic `/data` create on an engine-owned object returns 405.)\n2. **Open-ended UI type across three mirrors** — closed by objectui#2712; the `ManagedByBucket` union is now a single closed type, so a missed reference is a compile error.\n\nFull rationale in the **ADR-0103 addendum** (in this diff).\n\n## What changed (additive — `system` is retained)\n\n- **New enum value `engine-owned`** with the same all-locked default affordance row as `system`. Joins `ENGINE_OWNED_BUCKETS` (guard) + `GUARDED_WRITE_BUCKETS` (clamp). The guard / `reconcileManagedApiMethods` / clamp **mechanisms are unchanged** — engine-owned is an explicit member of the set they already covered by resolved affordance.\n- **20 objects relabelled `system → engine-owned`** — the ones the engine owns end to end with no write-opening `userActions` (metadata store, jobs, approval runtime rows, sharing rows, `sys_automation_run`, messaging delivery/receipt, secrets, settings). One-line, behaviour-identical each.\n- **8 admin/user-writable objects keep `managedBy: 'system'`** (RBAC link tables, `sys_user_preference`, `sys_approval_delegation`, messaging config grids) — `system` now reads as \"engine-managed schema, writable via `userActions`\".\n\n## Not a behaviour/enforcement change\n\nResolved affordances, the guard verdict, the 405 reconciliation, and the permissions clamp are identical before and after — a self-documenting relabel. No data migration (`managedBy` is schema metadata), and **no code branches on the `'system'` literal** (all enforcement keys off `resolveCrudAffordances` / bucket-set membership — verified by grep).\n\n## Tests / gates\n\n- New `engine-owned` coverage: `system-write-guard.test` (guard fires on the explicit bucket), `fold-wildcard-superuser.test` (`/me/permissions` clamp), `object.test` (affordance matrix parity + enum accepts the value). All existing affordance/guard tests green (spec 107, plugin-security 12, hono 10, registry 73, identity 15).\n- `tsc --noEmit` clean; generated references regenerated (`check:docs` / `check:api-surface` / `check:spec-changes` / `check:upgrade-guide` / `check:skill-refs` / `check:react-blocks` all green).\n- ADR-0103 addendum + `objects.mdx` updated.\n\n## Companion / sequencing\n\nPaired with objectui#2739 (the `ManagedByBucket` union + badge). The vendored console is re-pinned before v16 GA; during any sync window an old console renders an `engine-owned` object editable but the server still 405s the write. Retiring the overloaded `system` (moving the 8 writable objects to a dedicated bucket) is a breaking rename deferred to **v17**.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

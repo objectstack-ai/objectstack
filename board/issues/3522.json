@@ -1,0 +1,35 @@
+{
+  "number": 3522,
+  "kind": "pull_request",
+  "title": "feat(runtime): /keys /storage /ui 三域 handler 体抽出 — ADR-0076 D11 步骤③ PR-3 (#2462)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T02:30:38Z",
+  "updated_at": "2026-07-27T02:41:20Z",
+  "closed_at": "2026-07-27T02:41:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T02:41:19Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3522",
+  "body": "## 动机（#2462 D11 步骤③，系列第三刀）\n\n复制 PR-2（#3507）模式的第三批：`/keys`、`/storage`、`/ui` 三个 handler 体从 dispatcher 抽到 `domains/` 独立模块。\n\n## 改动\n\n- **`domains/keys.ts`**：完整搬迁 `sys_api_key` 铸造的零容忍安全契约（user_id 钉死调用者、body 白名单、raw key 仅返回一次、hash 不进日志）。旧分支的 `'/keys?'` query-string 变体用第二条注册项精确复刻（segment 匹配 + `/keys?` prefix 两条）。\n- **`domains/storage.ts`**：删除严格冗余的 `|| this.kernel.services?.['file-storage']` 第二腿——论证：`resolveService` 的 fallback 链本就终于 services map；且当 services 为 Map 形态时索引访问恒 undefined（该腿本就是死的），object 形态时与 resolveService 末步重复。\n- **`domains/ui.ts`**：直搬。\n- **`DomainHandlerDeps` 扩展 `getObjectQL`**（env-scoped + registry 形状校验）——/keys 现用，/data /meta 迁移时必需。\n- dispatcher 删三个 if 分支 + 三个薄委托保留 + 清除 unused `generateApiKey` import。\n\n## 验证\n\n- 接缝套件 25 测试（新增 6：keys 匿名 401 / 405 / segment 边界 / user_id 钉死+hash 不回显、storage 501/upload、ui 200/503）。\n- runtime 全量 630 绿；http-conformance 41 断言绿；25 包下游 `--force` 含 DTS 全绿。\n\n关联 #2462（D11 步骤③ PR-3）。剩余域：/share-links /packages（小）、/automation /actions /auth /meta /data /mcp /ai（大头）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

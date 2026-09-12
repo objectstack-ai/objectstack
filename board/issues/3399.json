@@ -1,0 +1,35 @@
+{
+  "number": 3399,
+  "kind": "pull_request",
+  "title": "fix(auth): map ObjectQL ValidationError to 4xx on better-auth paths (#3398)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-22T01:12:06Z",
+  "updated_at": "2026-07-22T01:40:02Z",
+  "closed_at": "2026-07-22T01:40:00Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-07-22T01:40:00Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3399",
+  "body": "## What\n\nOn the better-auth endpoints, a field-level validation failure raised by the ObjectQL record-validator surfaced to the HTTP client as a **raw 500 with an empty body**, instead of a clean 4xx carrying the validation message.\n\nRepro: sign in, then `POST /api/v1/auth/update-user` with `{\"image\":\"notaurl\"}` → `500` empty body (should be ~`400` with `\"image must be a valid URL\"`).\n\nFixes #3398.\n\n## Why\n\nThe better-auth `update-user` endpoint writes through the objectql-adapter into the ObjectQL engine. When the engine's record-validator (`packages/objectql/src/validation/record-validator.ts`) throws a `ValidationError`, better-auth does not map it — better-auth only turns its *own* `APIError`s into structured responses, and any other error thrown from an adapter method propagates to better-call's router as an unhandled fault → `500 {}`.\n\nThe REST data layer already handles this via `mapDataError` / `sendError` (`packages/rest/src/rest-server.ts`), translating an ObjectQL `ValidationError` into `400 { code: 'VALIDATION_FAILED', fields }`. The better-auth path had no equivalent.\n\n## How\n\n`packages/plugins/plugin-auth/src/objectql-adapter.ts`:\n\n- `isObjectQLValidationError` — duck-typed by `code === 'VALIDATION_FAILED'` / `name === 'ValidationError'`, so plugin-auth keeps **no** hard dependency on `@objectstack/objectql` and cross-realm `instanceof` can't bite.\n- `rethrowAsBetterAuthError` — on a hit, lazily imports `better-auth/api`'s `APIError` and re-throws `APIError('BAD_REQUEST', { message, code: 'VALIDATION_FAILED', fields })` (→ HTTP 400 with the human message + per-field detail); every other error is re-thrown verbatim.\n- `withValidationErrorMapping` — wraps each function-valued adapter method in a try/catch; non-function props pass through. Applied to the production `createObjectQLAdapterFactory` adapter.\n\nNet effect: `update-user` (and any other better-auth write) now returns `400 { code: 'VALIDATION_FAILED', message, fields }` instead of a `500` empty body.\n\n## Test\n\n`packages/plugins/plugin-auth/src/objectql-adapter.test.ts` — a new suite (4 cases), including an end-to-end case **through the production `createObjectQLAdapterFactory`**: a real engine that rejects an invalid `image` on `update` → asserts the caught error is better-auth's real `APIError`, `statusCode === 400`, body carries `VALIDATION_FAILED`. Also covers: non-validation errors re-thrown verbatim, and success / non-function props passing through untouched.\n\n`vitest run src/objectql-adapter.test.ts` → **37 passed**. Changed files are clean under `tsc --noEmit` (the one pre-existing `secondary-storage.ts` error is unrelated).\n\n## Notes\n\nNoticed while fixing the avatar-upload 500 (data: URIs rejected by the url validator — fixed separately on `claude/user-avatar-upload-error-d4c8e5`). This PR is the *generic* mapping gap, independent of that specific validator case.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

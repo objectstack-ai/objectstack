@@ -1,0 +1,34 @@
+{
+  "number": 3576,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0076 OQ#9 裁决 — catch-all 洗白、步骤①吸收完成 (#2462)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T07:29:35Z",
+  "updated_at": "2026-07-27T07:37:37Z",
+  "closed_at": "2026-07-27T07:37:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T07:37:34Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3576",
+  "body": "## 裁决（防止将来执行者按旧文本行动）\n\nADR D11/OQ#9 原文写\"until the catch-all is retired by step ③\"——步骤③ 用**相反的刀法**达成了目标：18 个域体全部搬出、dispatch() 缩成关卡序 + first-match 注册表、if 链域分支清零。\n\n**病根从来不是 catch-all 本身，而是它委托进的那个不可枚举的上帝 if 链**（\"declared≠mounted≠implemented\" 的 v16 缝 bug 类就藏在那里）。委托进\"关卡+注册表\"薄管线是合理终态：路由表可枚举（`DomainHandlerRegistry.list()`）、每条有 owner 模块与接缝测试、cloud fallback 织物（/share-links per-env 主面、/notifications 唯一 owner）走同一管线并被 conformance 41 断言 + dogfood 351 端到端锁定。\n\n**步骤①（\"删死分支\"）被吸收**：已无分支可删，只有有主的注册表条目。cloud 侧验证：objectos-runtime 240 测试（含 kernel-resolver 策略）对拆解后 dispatcher 原样通过。\n\n可选 polish（adapter 枚举注册表挂显式路由）需把关卡序 middleware 化——成本大于收益，**有意不排期**（conformance + route-parity 门在位）。\n\n纯 docs（skip-changeset）。关联 #2462。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

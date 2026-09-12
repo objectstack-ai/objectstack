@@ -1,0 +1,35 @@
+{
+  "number": 3428,
+  "kind": "pull_request",
+  "title": "fix(objectql): bridge late-registered manifest objects into the metadata service",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-23T17:55:58Z",
+  "updated_at": "2026-07-24T11:27:52Z",
+  "closed_at": "2026-07-24T11:27:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-24T11:27:49Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3428",
+  "body": "## 问题\n\nMarketplace 安装的模板包对象(manifest 服务 → `ql.registerApp`)只进 ObjectQL registry,**永远不进 metadata 服务(IMetadataService)**:`bridgeObjectsToMetadataService` 只在 `ObjectQLPlugin.start()` 里一次性运行,而 marketplace 的 install / ledger rehydrate 都发生在 `kernel:ready` 之后。\n\n后果:所有 IMetadataService 消费者对 marketplace 对象 miss——AI `describe_object`、Studio 对象清单、`metadata.listObjects` 等。种子加载器的引用图盲区已由 #3422 用 engine.getSchema fallback 单独修复,但那只救了 seed 一条路。\n\n## 修复\n\nmanifest 服务的 `register` 在注册进 engine registry 后,把该 manifest 自己的对象 bridge 进 metadata 服务(`packages/objectql/src/plugin.ts`):\n\n- **调用时刻解析 metadata 服务**——objectql plugin init 时 MetadataPlugin 可能还没注册它;\n- **载荷取自 registry**(`registry.getAllObjects(packageId)`):数组/映射两种 `objects` 形态、extension 合并、`applySystemFields`/`provisionPrimary` 归一化都拿到规范形状,且盖上 `_packageId` 印记;\n- **`register('object', name, obj, { notify: false })`**——与启动 bridge 同一 #3112 通知契约理由:定义本来就来自 SchemaRegistry,announce 会经我们自己的 `subscribe('object')` 回环并把 provenance 覆盖成 `metadata-service`;\n- **不覆盖别人的条目**:已存在且非本 bridge 同包印记的条目一律跳过(authored / artifact 解析副本安全);同包再注册(热升级)则刷新自己的副本;\n- **旗标门控**:只在 `start()` 跑完一次性 bridge 后才生效(启动期行为零变化,启动期注册仍由一次性 bridge 覆盖),且项目级 kernel(`environmentId` 有值)永不生效——与一次性 bridge 同门;\n- `register` 返回 bridge promise(从不 reject);marketplace install/rehydrate 两处 await 它,安装返回 200 后立刻读 metadata 是确定性的(`packages/cloud-connection/src/marketplace-install-local-plugin.ts`)。\n\n## 测试\n\n`plugin.integration.test.ts` 新增 4 个真 kernel 集成测试(`late manifest.register bridges objects to the metadata service`):\n\n1. bootstrap 后经 manifest 服务安装 → `metadata.getObject('crm_contact')` 返回 registry 解析形状(`_packageId` 印记、字段完整),`listObjects` 可见;\n2. 同包重装(热升级)→ bridged 副本刷新;\n3. 已有同名 authored 条目 → 不被覆盖(护栏);\n4. 启动期注册仍走一次性 bridge(路径不回归)。\n\n**门先证红**:还原 `plugin.ts` 后测试 1/2 失败、3/4 通过(护栏测试本就该绿),确认非假绿。\n\n- `@objectstack/objectql` 72 文件 / 1040 测试全绿;`@objectstack/cloud-connection` 9 文件 / 55 测试全绿;两包 build(含 dts)通过。\n- 与 #3422 无文件重叠。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

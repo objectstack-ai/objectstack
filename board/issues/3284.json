@@ -1,0 +1,35 @@
+{
+  "number": 3284,
+  "kind": "pull_request",
+  "title": "feat(spec,objectql): unify developer-facing org identifier in hooks — organizationId is blessed (#3280)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T13:52:51Z",
+  "updated_at": "2026-07-19T14:06:14Z",
+  "closed_at": "2026-07-19T14:06:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-19T14:06:11Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3284",
+  "body": "Closes #3280.\n\n## Problem\n\nThe caller's active organization was surfaced to third-party hook authors as **`ctx.session.tenantId`**, while everything else on the developer surface — the `organization_id` column, `current_user.organizationId` (RLS/sharing), and seed rows — already said **`organization`**. A developer had to internalize the hidden equation `tenantId === organizationId` to move between authoring modes. The ergonomic `ctx.user` shortcut had no org field at all, forcing hook authors onto `session.tenantId`.\n\n## Change — additive, non-breaking\n\n- **`ctx.session.organizationId`** added as the blessed name; **`ctx.session.tenantId`** kept as a `@deprecated` alias carrying the identical value. Both come from the resolved `ExecutionContext.tenantId` (kernel-derived from `session.activeOrganizationId`).\n- **`ctx.user.organizationId`** added to the ergonomic `user` shortcut. The engine now populates `ctx.user` (`{ id, email?, organizationId? }`) at **every hook event that already carries a `session`** (before/after find/insert/update/delete); it stays `undefined` for system / unauthenticated writes.\n- Hook-authoring docs teach `organizationId` and add a note distinguishing the **two isolation axes**: org row-scoping (`organization_id`, shared DB) vs environment / database-per-tenant (`service-tenant`, `driver-turso`).\n\n## Non-goals (untouched, per the issue)\n\nThe generic driver-layer tenancy abstraction — `ExecutionContext.tenantId`, `DriverOptions.tenantId`, `SqlDriver.applyTenantScope`, `TenancyConfig.tenantField` — is deliberately left as-is. That layer's isolation column is configurable and legitimately carries an *environment* id in database-per-tenant kernels; renaming it would bake an \"org\" assumption into a generic layer and be a wide public-API break.\n\n## Acceptance criteria\n\n- [x] `ctx.user.organizationId` available in JS hooks (all events that populate `session`), typed in `HookContext` (spec).\n- [x] `ctx.session.organizationId` available; `ctx.session.tenantId` still works, marked deprecated in TSDoc.\n- [x] Both fields always equal `execCtx.tenantId` — unit tests cover a populated org, the unscoped/no-org case, and the system/no-user case.\n- [x] Hook authoring docs/examples updated to `organizationId`.\n- [x] Note distinguishing the two isolation axes (in `skills/objectstack-data/references/data-hooks.md`).\n- [x] No behavior change, no breaking rename; changeset added (`@objectstack/spec` + `@objectstack/objectql`, patch).\n\n## Verification\n\n- `@objectstack/spec` `tsc --noEmit` ✓; full spec suite 6765 passed.\n- `@objectstack/objectql` DTS build ✓; full engine suite 955 passed (incl. 3 new `#3280` tests).\n- `@objectstack/runtime` sandbox body-runner 11 passed (L2 JS hooks now receive the populated `ctx.user`).\n- Drift/lint gates green: `check:docs` (regenerated `hook.mdx`), `check:skill-refs`, `check:skill-docs`, `check:doc-authoring`, `check:api-surface`, `check:spec-changes`, `check:role-word`, `check:nul-bytes`; `downstream-contract` typecheck.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

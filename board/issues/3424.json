@@ -1,0 +1,32 @@
+{
+  "number": 3424,
+  "kind": "issue",
+  "title": "Approval routed to an empty position permanently locks the record (no admin override, no recovery)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-23T17:38:00Z",
+  "updated_at": "2026-07-24T15:30:35Z",
+  "closed_at": "2026-07-24T15:30:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3424",
+  "body": "## Summary\n\nWhen a record-change flow with an `approval` node routes to a **position that has no holders**, the approval request becomes permanently undecidable AND the underlying record stays `RECORD_LOCKED` forever, with no admin escape hatch. This is a data-availability dead-end: the record can never be edited or re-approved again.\n\n## Environment\n\n- `@objectstack/*` **16.1.0** (open edition), single-tenant, sqlite-wasm driver\n- Repro app: a CRM with `opportunity_approval` (a `record_change` flow, tiered `approval` nodes routed to `{ type: 'position', value: 'sales_manager' }`)\n\n## Steps to reproduce\n\n1. Define an `approval` node with `lockRecord: true` and `approvers: [{ type: 'position', value: 'sales_manager' }]`.\n2. Ensure the `sales_manager` position exists but has **zero** `sys_user_position` rows (the default in a fresh org — seeds create positions but assign no holders).\n3. Trigger the flow (update a record so the entry condition matches).\n4. Observe the approval request is created with `pending_approvers: [\"position:sales_manager\"]` and the opportunity is locked.\n\n## Actual behaviour\n\n- `POST /api/v1/approvals/requests/:id/approve` as the org owner → **403** `{\"code\":\"FORBIDDEN\",\"error\":\"actor '…' is not a pending approver\"}` — the owner is not in the (empty) resolved approver set.\n- `POST …/:id/withdraw` → **404 Not Found** (no withdraw route for a flow-launched request).\n- `PATCH /api/v1/data/crm_opportunity/:id` → **400** `{\"error\":\"RECORD_LOCKED: record is locked while an approval is in progress\"}`.\n- Re-triggering the flow is suppressed by the in-flight re-entrancy guard, and the paused run’s `mark_approved` node fails with the same `RECORD_LOCKED` if resumed.\n- Net result: the request is stuck `pending`, the record is stuck locked, and **the only way out is editing the sqlite DB directly** (`UPDATE sys_approval_request SET status='approved'; UPDATE crm_opportunity SET approval_status='approved'` with the server stopped).\n\n## Expected behaviour\n\nAt least one of:\n1. **Empty-approver detection at request creation** — if a resolved approver set is empty, either auto-approve/auto-reject with a clear audit entry, or refuse to lock the record and surface a config error, rather than creating an undecidable request.\n2. **Admin override / reassign** — a privileged actor (org owner, `modify_all_data`, or a delegated approvals admin) should always be able to approve, reject, reassign, or withdraw a pending request and release the lock.\n3. **Unlock on terminal failure** — if the approval run dies (`mark_approved` throws `RECORD_LOCKED`), the lock should be released so the record isn’t orphaned.\n\n## Impact\n\nHigh. Any approval routed to an unstaffed position permanently bricks the target record with no in-product recovery. This is very easy to hit in fresh/demo orgs (positions seeded, holders not) and in production whenever a role is vacated.\n\n## Workaround\n\nAdd a guaranteed-staffed fallback approver, e.g. `{ type: 'org_membership_level', value: 'owner' }`, alongside the position approver so the set is never empty. This side-steps the dead-end but doesn’t address the missing override or the orphaned-lock-on-failure.\n"
+}

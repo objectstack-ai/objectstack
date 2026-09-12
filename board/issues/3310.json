@@ -1,0 +1,32 @@
+{
+  "number": 3310,
+  "kind": "issue",
+  "title": "[P3] approvals: server-computed viewer capability on getRequest (precise approver gating for declared actions)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T17:19:02Z",
+  "updated_at": "2026-07-22T20:42:07Z",
+  "closed_at": "2026-07-22T20:42:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3310",
+  "body": "## Goal\n\nGate the declared **approver** actions on `sys_approval_request` by *whether the current viewer can actually act*, computed server-side — instead of the coarse `record.status == \"pending\"` they use today.\n\n## Why\n\nAfter objectui#2697, the inbox renders decision actions from the object's declared set via `DeclaredActionsBar`. The approver-side actions (`approval_send_back` / `approval_request_info` / `approval_reassign`) are gated only on:\n\n```\nvisible: 'record.status == \"pending\"'\n```\n\nSo a **submitter** viewing their own pending request also sees \"Send back / Request info / Reassign\" — clicking them just 403s (`FORBIDDEN: actor is not a pending approver`). The service is the authority so it's safe, but it's a UX wart: buttons that can't work.\n\nThe old hardcoded inbox gated these behind `canApproveReject` = `identities.some(id => pending_approvers.has(id))`, where `identities` was built **client-side** (`buildApproverIdentities`: user id + email + `role:*`). That's both duplicated client logic *and* incomplete — it never resolved position/team/department membership, so a position-addressed approver could be wrongly hidden.\n\n## Design — mirror `decision_progress` (server computes, client zero-logic)\n\n`getRequest(requestId, context)` already has the caller's full `SharingExecutionContext` (id, roles, **positions**, permissions) and already attaches a per-request computed block via `attachDecisionProgress` (→ `decision_progress`, added in #3274). Add a sibling **per-viewer** block the same way:\n\n- New computed field on `ApprovalRequestRow` (contract `packages/spec/src/contracts/approval-service.ts`, next to `decision_progress` at ~L109):\n  ```ts\n  viewer?: { can_act: boolean; is_submitter: boolean };\n  ```\n  - `can_act` = is the caller a current pending approver, using the **same resolution the service uses to authorize a decision** (reuse `expandApprovers` / the pending-approver check — id + email + roles + positions + teams), so it's strictly more accurate than the old client heuristic.\n  - `is_submitter` = `submitter_id == context.userId` (lets the frontend drop its own `submitter_id == ctx.user.id` comparisons too, for symmetry).\n- Compute it in `getRequest` only (the drawer's single-request read); no need to burden list endpoints.\n- Point the declared actions' `visible` at it (in `sys-approval-request.object.ts`):\n  - approver actions: `visible: 'record.status == \"pending\" && record.viewer.can_act'`\n  - submitter actions (remind/recall/resubmit): `visible: '… && record.viewer.is_submitter'` (equivalent to today, but consistent + server-sourced).\n- `viewer` is absent on list rows → the CEL must fail-closed gracefully (a `record.viewer.can_act` on an undefined `viewer` should hide, not throw). Confirm the CEL engine's null-nav behavior; if needed keep `status == pending` as the outer guard so list contexts stay predictable.\n\n## Files\n\n- `packages/spec/src/contracts/approval-service.ts` — add `viewer?` to `ApprovalRequestRow`.\n- `packages/plugins/plugin-approvals/src/approval-service.ts` — compute `viewer` in `getRequest` (reuse the pending-approver resolution; mirror `attachDecisionProgress`).\n- `packages/plugins/plugin-approvals/src/sys-approval-request.object.ts` — tighten the declared `visible` predicates.\n- Tests: service test that `getRequest` returns `can_act:true` for a pending approver (incl. a position/team-addressed one) and `false` for the submitter; `can_act:false` once finalized.\n- objectui: sync the `ApprovalRequestRow` contract type (`apps/console/src/services/approvalsApi.ts`) — no UI code change; the drawer already renders from declared `visible`. Optional: drop the now-redundant client `buildApproverIdentities`-based `canApproveReject`/`canRecall` gating if nothing else uses it.\n\n## Acceptance criteria\n\n- [ ] Submitter viewing their own pending request no longer sees Send back / Request info / Reassign.\n- [ ] A position/team-addressed approver **does** see them (fixes the old client-side blind spot).\n- [ ] Submitter still sees Remind / Recall; Resubmit only on `returned`.\n- [ ] `viewer` computed only on `getRequest`; list endpoints unaffected; CEL fails closed when `viewer` absent.\n- [ ] plugin-approvals suite green; browser-verify both viewpoints in the inbox drawer.\n\n## Refs\nobjectui#2697 (button retirement) · #3274 (`decision_progress`, the pattern to mirror) · framework#3300 (declared action set)"
+}

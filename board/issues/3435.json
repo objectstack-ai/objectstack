@@ -1,0 +1,35 @@
+{
+  "number": 3435,
+  "kind": "pull_request",
+  "title": "fix(showcase): seed all five projects through the FSM + surface seed outcomes in the boot banner (#3415)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-24T13:10:14Z",
+  "updated_at": "2026-07-24T13:16:49Z",
+  "closed_at": "2026-07-24T13:16:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-24T13:16:48Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3435",
+  "body": "Fixes #3415 — both halves: the self-contradictory fixture AND the surfacing gap that let it ship silently.\n\n## Fixture: walk the FSM instead of violating it\n\n`project_status_flow` gates inserts to `initialStates: ['planned']`; the seed wrote terminal statuses directly, so **4/5 projects, 9/10 tasks (master-detail), 3/3 memberships were rejected on every boot**. Now the seed runs in three phases (same-object datasets execute in declaration order — stable topological sort):\n\n1. **Phase 1 — enter**: all five projects insert as `planned`, explicitly (seed inserts do not apply select defaults — the Accounts seed documents this), with `mode: 'ignore'` so replays leave walked rows untouched.\n2. **Phase 2 — activate**: `planned → active` for the four that move on.\n3. **Phase 3 — settle**: `active → on_hold` (Compliance Audit) and `active → completed` (Legacy Sunset).\n\nThe walk doubles as a live demo of the state machine the seed used to violate. A new **`completed → active` reopen transition** (a real PM affordance — `cancelled` could already be revived via `planned`) keeps the replay walk legal instead of dead-ending; `initialStates` is untouched, so the #3165 entry gate is exactly as strong as before.\n\n## Surfacing: a Seeds line in the boot banner\n\nSeedLoader's own logs are double-swallowed (info < default warn level, and serve's boot-quiet stdout window). Following the `seededAdmin`/automation-summary precedent: AppPlugin stashes per-boot counters on the kernel (`seed-summary` service, accumulating across apps), serve reads them back after `restoreOutput()`, and the banner prints:\n\n- clean: `Seeds: 130 inserted · 6 updated` (dim)\n- dropped rows: `⚠ Seeds: 114 inserted · 30 REJECTED — run with OS_LOG_LEVEL=info to see each reason` (yellow)\n\nThat yellow line is literally what the old fixture prints under this banner — it could never have shipped broken with the line in place.\n\n## Verification\n\n- **Fresh boot** (wiped SQLite): 5 projects across four statuses (`active×2 / on_hold / completed / planned`), 10 tasks, 3 memberships; banner `Seeds: 130 inserted · 6 updated` — the 6 updates are exactly the FSM walk. Before the fix on the same runtime: 1/1/0 and `⚠ 114 inserted · 30 REJECTED`.\n- **Replay boot**: walked statuses preserved, zero rejections (`3 inserted · 123 updated · 10 skipped`).\n- **New gates, proven red first**: `seed.test.ts` statically replays every FSM-gated object's seed phases — two rounds, fresh boot AND replay — against `initialStates`/`transitions` (red on the old fixture and red without the reopen edge); `format.seed-summary.test.ts` covers the banner contract (3 cases). `@objectstack/runtime` and `@objectstack/cli` suites pass.\n\n## Known pre-existing follow-up\n\n#3434 — `mode: 'insert'` datasets (memberships) duplicate on every replay boot (3→6). Masked until now because the rows never inserted at all; needs composite `externalId` or an explicit key, filed separately.\n\nConsole UI assets aren't present in a fresh worktree (`objectui:refresh` artifact), so browser-level kanban verification ran on DB counts + the earlier dogfood evidence that the board renders correctly the moment status-matched rows exist; this PR touches no renderer code.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

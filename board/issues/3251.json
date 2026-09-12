@@ -1,0 +1,34 @@
+{
+  "number": 3251,
+  "kind": "issue",
+  "title": "[P2] Finish the dashboard analytics migration: Studio → dataset shape, then enable DashboardWidgetSchema strict validation",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T06:06:18Z",
+  "updated_at": "2026-07-19T18:06:20Z",
+  "closed_at": "2026-07-19T18:06:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3251",
+  "body": "Follow-on from the metadata-liveness umbrella #1878 (inverse-drift cluster #1894) and the ADR-0021 analytics migration #1890. This tracks the **remaining, deferred workstream** after the author-side lint landed in #3238.\n\n## Context — what's already true\n\n- **AI authoring is correct.** AI writes dashboards in the ADR-0021 semantic shape (`dataset` + `dimensions` + `values`); every framework example is dataset-shaped, and the renderer routes dataset-bound widgets through `DatasetWidget` (`objectui packages/plugin-dashboard/src/DatasetWidget.tsx`), which fully implements the dataset pivot/chart cross-tab and is unit-tested (`DatasetWidget.test.tsx`). **There is no rendering bug** — an earlier \"showcase `pivot_tasks` is broken\" claim was wrong; the `datasetBound` short-circuit (`DashboardRenderer.tsx:493, 927-928, 956-958`) renders it correctly.\n- **The author-side lint is shipped (#3238).** `validateWidgetBindings` now flags the removed pre-ADR-0021 inline keys (`categoryField`/`valueField`/`xAxisField`/`yAxisFields`/`aggregate`/`aggregation`/`rowField`/`columnField`):\n  - **warning** (`widget-legacy-analytics-shape`) when a data source is present (widget still renders; keys are ignored);\n  - **error** (`widget-legacy-analytics-unrenderable`) when the legacy keys are the *only* data wiring (no `dataset`/`object`/`data`) → renders nothing → hard-fails `objectstack compile`/CI.\n  - This runs **only in the CLI author path** (compile/validate/doctor/lint), so it's decoupled from Studio.\n\n## The remaining gap\n\n1. **Studio still authors the dead legacy shape.** `objectui packages/plugin-dashboard/src/WidgetConfigPanel.tsx` is object-driven and emits `categoryField`/`valueField`/`aggregate` (charts) and `rowField`/`columnField`/`valueField`/`aggregation` (pivots) — see `sanitizeDraftForType` (`:620-666`) and the field defs (`:192-290`). Human-authored dashboards therefore ship the removed shape.\n2. **We cannot enable the strongest AI-error guardrail — `DashboardWidgetSchema.strict()` — while Studio emits legacy keys**, because strict would reject Studio's own output. `packages/spec/src/ui/dashboard.zod.ts:75` (`DashboardWidgetSchema`) is a non-strict `z.object`, so hallucinated/legacy top-level keys are silently stripped instead of hard-erroring.\n\n## Why this matters (AI writes / humans review)\n\nThe platform's model is **AI writes metadata, humans review**. A stripped legacy key is a **silent no-op** — exactly what a human reviewer misses. `.strict()` moves that class of error from fallible human review to deterministic CI (hard error at author time). That is the endpoint this issue drives toward.\n\n## Proposed work\n\n- [ ] **Migrate Studio `WidgetConfigPanel` (objectui) to author the dataset shape** (`dataset` + `dimensions` + `values`) for chart AND pivot widgets. **Product decision required** (see decision below).\n- [ ] **Retire the renderer's legacy branches** once nothing authors legacy keys: `DashboardRenderer.tsx` pivot block (`:718-774`) + chart legacy fallbacks, and the `ObjectPivotTable`/legacy `PivotTable` path.\n- [ ] **Enable `.strict()` on `DashboardWidgetSchema`** (`packages/spec/src/ui/dashboard.zod.ts:75`) — reject unknown top-level keys; keep `options: z.unknown()` as the renderer-extras escape hatch. Consider a stored-dashboard migration + gating behind a major version (breaking for any stored dashboard carrying extra keys).\n- [ ] **Browser-verify** via the console preview gallery + `DashboardPreview` (objectui `verify` skill) — unit tests do not cover the new authoring/render paths.\n\n## Decision tree (for renderer-read-but-undeclared props)\n\nFor each such prop, ask: **is it meant to be AI/declaratively authored?**\n- **Yes** → declare it in the spec (and let strict enforce it).\n- **No (pro-code / internal)** → quarantine it out of the authorable schema.\n- **Bypasses the semantic layer** (e.g. inline `data`) → forbid on the AI path.\n\nApplying it (settled during triage):\n- **`component`** (custom React widget) → objectui-only capability, not modeled server-side, unused in examples → **keep OUT of the framework spec** (objectui-internal).\n- **inline `data`** → unused in examples → **not an author capability**; keep out of the framework spec.\n- **pivot `rowField`/`columnField`/… ** → legacy shape; the dataset pivot path already renders → **migrate authoring**, don't declare the legacy keys.\n\n## Studio authoring-model decision (needed before implementation)\n\n- **A — dataset-picker rewrite** *(recommended)*: the panel picks a named dataset, then its dimensions/measures. One canonical shape shared by AI and humans → easiest review. Cost: authors must pre-create a dataset.\n- **B — transparent auto-dataset**: keep the object→field→aggregate UX, auto-materialize/find a dataset on save. No UX change, but a translation layer that itself can drift and needs materialization infra.\n\n## Links\n\n- Umbrella: #1878 · analytics migration: #1890 · inverse-drift: #1894\n- Shipped precursor (author-side lint): #3238 · spec hygiene: #3223\n- objectui side: `WidgetConfigPanel.tsx`, `DashboardRenderer.tsx`, `DatasetWidget.tsx`\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

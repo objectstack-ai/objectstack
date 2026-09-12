@@ -1,0 +1,35 @@
+{
+  "number": 3273,
+  "kind": "pull_request",
+  "title": "fix(tenancy): platform-global (tenancy.enabled:false) objects are never driver-org-scoped (#3249)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T12:09:22Z",
+  "updated_at": "2026-07-19T12:36:09Z",
+  "closed_at": "2026-07-19T12:36:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-19T12:36:07Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3273",
+  "body": "Fixes #3249.\n\n## Problem\n\nOn the cloud control plane, a platform admin (whose ExecutionContext carries an active-org `tenantId`) reads `sys_license` and gets **0 rows**, while an anonymous request to the same endpoint returns the row. `sys_license` is declared `tenancy: { enabled: false }` (platform-global, ADR-0066); the authz kernel applies no row filter — the rows vanish in the driver-native tenant-scope layer, below plugin-security:\n\n1. **Engine**: `buildDriverOptions` stamped `execCtx.tenantId` into driver options unconditionally — it never received the object name and never consulted the object's tenancy posture.\n2. **SQL driver**: the tenant field is resolved from a write-once cache (`tenantFieldByTable`). `computeTenantField` correctly returns `null` for `tenancy.enabled === false`, but any **re-registration with a `tenancy`-stripped schema** — e.g. the lifecycle archive path (`lifecycle-service.ts` passes a `LifecycleObjectLike` with only `{ name, fields }` to `cold.syncSchema`), or a schema-drift re-sync — falls through to the implicit `organization_id` heuristic and overwrites the cache with `'organization_id'`. Nothing ever recomputes it, so the platform-global object becomes org-scoped and its NULL-org rows are hidden from org-context reads.\n\n## Fix\n\n- **`@objectstack/spec`** — new `isTenancyDisabled(schema)` export from `@objectstack/spec/data`: single source of truth for the ADR-0066 platform-global posture. Previously the `tenancy?.enabled === false` semantic was re-derived independently in the registry, the engine, and the driver.\n- **`@objectstack/objectql`** — `buildDriverOptions` is now object-aware and withholds `execCtx.tenantId` for objects whose registered schema declares `tenancy.enabled: false`. This protects **every** driver at the source, independent of per-driver cache state. An explicitly-passed base `tenantId` still wins (deliberate caller intent). `registry.ts` now uses the shared predicate for tenant-column injection.\n- **`@objectstack/driver-sql`** (inherited by `driver-sqlite-wasm`) — sticky opt-out record (`tenantOptOutByTable`): a registration that carries a `tenancy` declaration is authoritative (sets/clears the record); a registration **without** one preserves a previously declared opt-out instead of re-scoping via the `organization_id` heuristic. Rotation shards inherit the base table's opt-out.\n- The `orWhereNull` global-row inclusion (#2734) is unchanged, as defense-in-depth for legitimately scoped objects.\n\nOut of scope (mechanical follow-up): `plugin-security/src/security-plugin.ts:2794/2882` carry the same inline posture check combined with `systemFields.tenant === false`; converting them touches the RLS compiler and is left for a follow-up. The issue's optional apps/cloud mitigation is unnecessary once the engine guard lands.\n\n## Tests\n\n- **driver-sql** (`sql-driver-tenant-scope.test.ts`): the previously untested corruption path — a tenancy-less `syncSchema` / `registerExternalObject` re-registration preserves the opt-out (scoped read still returns the NULL-org + cross-org rows); an explicit `tenancy.enabled:true` re-registration is authoritative and re-enables scoping.\n- **driver-sqlite-wasm**: ported the entire missing `tenancy.enabled:false` describe block (incl. the sticky re-registration regressions) — the subclass had no coverage for this posture.\n- **objectql** (`engine.test.ts`): tenantId is withheld for tenancy-disabled objects on reads and writes; still stamped for undeclared / `enabled:true` objects; timezone and the rest of the context still thread; explicit base `tenantId` still reaches the driver.\n- **spec**: unit tests for `isTenancyDisabled`.\n\n## Verification\n\n- `pnpm --filter @objectstack/spec test` — 254 files / 6778 tests pass\n- `pnpm --filter @objectstack/driver-sql test` — 32 files / 284 tests pass\n- `pnpm --filter @objectstack/driver-sqlite-wasm test` — 10 files / 125 tests pass\n- `pnpm --filter @objectstack/objectql test` — 72 files / 1016 tests pass\n- `pnpm build` — all 71 packages build\n- `pnpm test` — full suite green except one load-flaky 20s-timeout in `plugin-audit`'s i18n summary test (framework#3039 area, unrelated; passes in isolation)\n\nA `@objectstack/spec` minor changeset is included for the new `isTenancyDisabled` export.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017YcGcBgUxeeKXXxv189kqR\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017YcGcBgUxeeKXXxv189kqR)_"
+}

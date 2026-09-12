@@ -1,0 +1,33 @@
+{
+  "number": 3312,
+  "kind": "issue",
+  "title": "tracking(authz): ADR-0099 posture 裁决分级 — P0–P3 实现分期",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "security",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T17:27:14Z",
+  "updated_at": "2026-07-19T17:28:07Z",
+  "closed_at": "2026-07-19T17:28:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3312",
+  "body": "## 背景\n\n[ADR-0099](https://github.com/objectstack-ai/framework/blob/main/docs/adr/0099-posture-adjudicated-tiering-and-external-rung.md)（#3109 合并，maintainer 已同意）定夺：**posture 成为分级裁决的唯一输入**（D1）、**posture→每层动作映射表 + 六条不变量**（D2）、**EXTERNAL rung 激活链**（D3）、**拒绝显式 deny**（D4）。\n\n本 issue 跟踪其分期实现。**严格串行、每期过矩阵门再进下一期**；P1/P2 行为保持，P3 需求门控。与 ADR-0096（执行面准入）正交——若 P1–P3 出现 breaking 面，与 0096 D5 翻转共乘同一 major 窗口。\n\n## 分期\n\n### P0 — 矩阵门先行（纯测试，无行为变更）\n- [ ] `authz-matrix-gate.test.ts` 落「探针 vs 携带 rung 等价」格：对每种 seed 主体形态断言 `hasPlatformAdminPosture(permissionSets)` 与 `ctx.posture === 'PLATFORM_ADMIN'` 一致\n- [ ] I1–I6 不变量格（TENANT_ADMIN 永不越 Layer 0；层内嵌套；仅 resolver 派生；enforcement=explain 同值；只定级不定边；不绕 system-only 写护栏）\n- [ ] EXTERNAL 死分支格（fixture 共享下断言「仅显式共享」注入规则，OWD/共享规则不放大）\n\n### P1 — Layer 0 豁免门 + explain 收敛（行为保持，#2956 后已解锁）\n- [ ] Layer 0 豁免门读 `ctx.posture === 'PLATFORM_ADMIN'`；`hasPlatformAdminPosture` 探针降为 fallback（仅无 resolver 上下文时；两信号并存时取**更窄**者并记录分歧）\n- [ ] explain 引擎只读携带值；退休 #2949 的兜底重算（resolver 路径保证后）\n- [ ] 退休 `security-plugin.ts:71-77` 过时注释（「posture 未透传」的前提已被 #2956 消除）\n- [ ] P0 矩阵全绿证明行为保持\n\n### P2 — Layer 1 短路级判定收敛（行为保持）\n- [ ] Layer 1 短路的「级」判定读 posture（`>= TENANT_ADMIN`）；读/写 super 位继续各管各**边**（I5）\n- [ ] P0 矩阵全绿证明行为保持\n\n### P3 — EXTERNAL rung 激活（需求门控：外部主体类型 / 门户立项，ADR-0090 后续 #6）\n- [ ] `audience:'external'` → `derivePosture` 返回 `EXTERNAL`\n- [ ] sharing/RLS 缝隙按 rung 编译「仅显式共享」过滤器（无共享行 → deny 哨兵，fail-closed）\n- [ ] 写侧：需含 edit 的显式共享；`owner` 型共享规则（`sharing.zod.ts:104` experimental）保持在 rung 之外直至单独 enforce\n- [ ] cloud 多组织 e2e 冒烟（cloud#835 系）追加 EXTERNAL 格\n\n## 关联\n\nADR-0099（#3109）· ADR-0095（阶梯，Accepted）· ADR-0096（准入，正交轴）· #2946 Finding 2 / #2949（本 ADR 关闭的分叉类）· #2947→#2956（posture 透传，P1 前置）· #2920（B 轨总跟踪，已收口）"
+}

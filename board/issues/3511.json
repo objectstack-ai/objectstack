@@ -1,0 +1,33 @@
+{
+  "number": 3511,
+  "kind": "pull_request",
+  "title": "chore(ci)(deps): bump google/osv-scanner-action/osv-scanner-action from a82132c0bd6c7261ffcb78e754c46c70ab57ad9a to 9fd1bcce27f67e3bd819a0a7620e332803dc43bc",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "dependabot[bot]",
+    "id": 49699333,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T02:07:02Z",
+  "updated_at": "2026-07-27T08:36:59Z",
+  "closed_at": "2026-07-27T08:36:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T08:36:57Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3511",
+  "body": "Bumps [google/osv-scanner-action/osv-scanner-action](https://github.com/google/osv-scanner-action) from a82132c0bd6c7261ffcb78e754c46c70ab57ad9a to 9fd1bcce27f67e3bd819a0a7620e332803dc43bc.\n<details>\n<summary>Commits</summary>\n<ul>\n<li><a href=\"https://github.com/google/osv-scanner-action/commit/9fd1bcce27f67e3bd819a0a7620e332803dc43bc\"><code>9fd1bcc</code></a> Merge pull request <a href=\"https://redirect.github.com/google/osv-scanner-action/issues/138\">#138</a> from google/fix/gotoolchain-auto</li>\n<li><a href=\"https://github.com/google/osv-scanner-action/commit/01a87d56220b68b35ceebc4a7a3f3de666173da6\"><code>01a87d5</code></a> fix: add GOTOOLCHAIN=auto env to osv-scanner calls</li>\n<li>See full diff in <a href=\"https://github.com/google/osv-scanner-action/compare/a82132c0bd6c7261ffcb78e754c46c70ab57ad9a...9fd1bcce27f67e3bd819a0a7620e332803dc43bc\">compare view</a></li>\n</ul>\n</details>\n<br />\n\n\nDependabot will resolve any conflicts with this PR as long as you don't alter it yourself. You can also trigger a rebase manually by commenting `@dependabot rebase`.\n\n[//]: # (dependabot-automerge-start)\n[//]: # (dependabot-automerge-end)\n\n---\n\n<details>\n<summary>Dependabot commands and options</summary>\n<br />\n\nYou can trigger Dependabot actions by commenting on this PR:\n- `@dependabot rebase` will rebase this PR\n- `@dependabot recreate` will recreate this PR, overwriting any edits that have been made to it\n- `@dependabot show <dependency name> ignore conditions` will show all of the ignore conditions of the specified dependency\n- `@dependabot ignore this major version` will close this PR and stop Dependabot creating any more for this major version (unless you reopen the PR or upgrade to it yourself)\n- `@dependabot ignore this minor version` will close this PR and stop Dependabot creating any more for this minor version (unless you reopen the PR or upgrade to it yourself)\n- `@dependabot ignore this dependency` will close this PR and stop Dependabot creating any more for this dependency (unless you reopen the PR or upgrade to it yourself)\n\n\n</details>"
+}

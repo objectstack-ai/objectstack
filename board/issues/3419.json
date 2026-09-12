@@ -1,0 +1,30 @@
+{
+  "number": 3419,
+  "kind": "issue",
+  "title": "setup: 侧边栏「数据源」点击无跳转,URL 停留在 system_overview",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-23T16:01:28Z",
+  "updated_at": "2026-07-24T15:28:39Z",
+  "closed_at": "2026-07-24T15:28:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3419",
+  "body": "## 现象\n\n在系统设置(Setup)里点击侧边栏「数据源」导航项,页面不跳转,URL 始终停留在 `/_console/apps/com.objectstack.setup/dashboard/system_overview`。重复点击两次结果一致(a11y 树确认点中的是 `link \"数据源\"`)。\n\n## 复现\n\n1. `pnpm -C examples/app-showcase exec objectstack dev --ui --seed-admin -p 3777`(main,2026-07-23)\n2. dev admin 登录 Console → 首页点「系统设置」→ 落在 system_overview\n3. 点侧边栏「数据源」→ **URL 与页面均不变**\n\n同页的「浏览应用市场」链接跳转正常(→ `/_console/apps/setup/system/marketplace`),说明不是侧边栏整体坏,是该导航项的绑定。\n\n## 影响\n\n外部数据源管理是 ADR-0062 的门面能力,管理员核心路径不可达;dogfood 时想演示 Setup → Datasources 页面直接做不到。\n\n## 根因线索\n\n- 怀疑 nav item 指向的 surface/route 未挂载或绑定错误——与 #3361/#3362 记录过的「discovery 广告了 ≠ 实际挂载」是同族模式(dispatcher vs hono seam),值得先查该 nav 的目标在 `os dev` 的 hono 路径上是否存在。\n- 也可能该项被渲染成 link 但目标解析为空(fail-silent)。\n\n## 建议\n\n1. 修复绑定本身;\n2. 导航项目标解析失败时 fail-loud(至少 console warn),不要渲染成看起来可点的死链接;\n3. e2e 给 Setup 每个 nav 项加「点击后 URL/surface 变化」断言。\n\n---\n*来源:内部培训 PPT 制作过程中的 dogfood(浏览器实测,非代码走读)。*\n"
+}

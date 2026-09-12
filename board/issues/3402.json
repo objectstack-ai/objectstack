@@ -1,0 +1,34 @@
+{
+  "number": 3402,
+  "kind": "issue",
+  "title": "上传文件后收到大量「系统文件 xxx 已分配给你」噪音通知",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-22T03:15:06Z",
+  "updated_at": "2026-07-22T06:19:03Z",
+  "closed_at": "2026-07-22T06:19:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3402",
+  "body": "## 现象\n\n上传文件后,消息中心(铃铛)里会收到一堆 **「系统文件 \"xxx.png\" 已分配给你」** 的通知。同一个文件常常重复好几条。这些通知对用户完全没有意义,属于噪音刷屏。\n\n![截图见 issue 附图]\n\n## 通俗解释:为什么会这样\n\n平台有一个「**分配提醒**」功能:当一条业务记录(比如线索、客户、派工单)的负责人字段被改成某个人时,系统会给那个人发一条铃铛通知——「XX 已分配给你」。这本身是好功能。\n\n问题出在:**这个提醒被无差别地挂在了所有对象上,包括存储系统内部用来记录文件的 `sys_file` 对象。**\n\n- 每次上传文件,存储服务都会新建一条 `sys_file` 记录,并把它的 `owner_id`(文件归属人)填成上传者本人。\n- 「分配提醒」逻辑一看:哦,`owner_id` 有值,那就是「分配」了,发通知!\n- 于是每传一个文件,上传者自己就被通知一次「系统文件 xxx 已分配给你」。\n\n本来有一条保护:**给自己分配不发通知**。但它失效了——因为 `sys_file` 记录是存储服务在后台直接写库的,不带用户身份上下文,系统以为「操作人是空、归属人是你」,判定成「别人把文件分给了你」,于是照发。\n\n一句话:`sys_file.owner_id` 是**存储层的文件归属(ACL)**,压根不是业务意义上的「指派给某人」,但分配提醒逻辑把这两个概念当成一回事了。\n\n## 影响\n\n- 每上传/引用一个文件都刷一条无意义通知,附件多的记录会瞬间刷屏,淹没真正重要的分配/审批通知。\n- 纯噪音,无法关闭。\n\n## 定位(代码线索)\n\n- 分配通知逻辑:`packages/plugins/plugin-audit/src/audit-writers.ts` 的 `writeAssignmentNotifications`\n  - hook 是**全局**挂在所有对象的 `afterInsert`/`afterUpdate` 上(无对象过滤)。\n  - 判定负责人字段的 `OWNER_FIELDS` 包含 `owner_id`。\n  - 「自我分配静默」守卫 `if (newOwner === actorId) return`,因 `sys_file` 由裸引擎写库(`actorId=null`)而失效。\n- `sys_file` 对象有 `owner_id` 字段:`packages/services/service-storage/src/objects/system-file.object.ts`\n- `owner_id` 在上传时被填成上传者:`packages/services/service-storage/src/storage-routes.ts`\n- `sys_file` 写库不带用户上下文:`packages/services/service-storage/src/metadata-store.ts`(`engine.insert('sys_file', ...)`)\n- `SKIP_OBJECTS` 排除了一批 `sys_*` 噪音对象,但**漏了 `sys_file`**。\n\n## 建议的修复方向(供讨论,最终以维护者决定为准)\n\n- **A(推荐)**:让分配通知跳过平台内部对象(object 名以 `sys_` 开头一律不发分配铃铛),一并挡住 `sys_file` / `sys_attachment` 等,保留审计记录。\n- **B**:把 `sys_file`(及 `sys_upload_session`)加入 `SKIP_OBJECTS`——简单,但会连同审计/活动记录一起关掉,粒度偏粗。\n- **C**:从 `OWNER_FIELDS` 移除 `owner_id`,只认 `assigned_to` / `assignee_id`——会误伤合法使用 `owner_id` 的 CRM 业务对象,不推荐。\n\n## 复现步骤\n\n1. 在任意记录上传一个文件 / 添加附件。\n2. 打开右上角消息中心 → 通知。\n3. 出现「系统文件 \"文件名\" 已分配给你」,附件越多刷得越多。\n"
+}

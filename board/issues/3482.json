@@ -1,0 +1,35 @@
+{
+  "number": 3482,
+  "kind": "pull_request",
+  "title": "feat(automation): opt-in single-hop lookup expansion for record-change flow templates (#3475)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-25T02:23:33Z",
+  "updated_at": "2026-07-25T02:29:25Z",
+  "closed_at": "2026-07-25T02:29:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-25T02:29:23Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3482",
+  "body": "Closes #3475 (the lookup half of #3426). Implements the plan posted on #3475, after mapping the automation engine.\n\n## What\n\nA record-change flow can now declare which lookup relations to expand, so node templates traverse them:\n\n```ts\nnodes: [\n  { id: 'start', type: 'start', config: { objectName: 'crm_lead', triggerType: 'record-created', expand: ['crm_account'] } },\n  { id: 'n1', type: 'notify', notify: { title: 'New lead from {record.crm_account.name}', body: '…' } },\n]\n```\n\n`{record.crm_account.name}` now resolves instead of rendering blank.\n\n## How — expand engine-side, as the run's own identity\n\nThe key finding from scoping #3475: the triggering user's grants are resolved **engine-side** (`resolveRunContext`, #3356), and there's already a user-scoped data path (`resolveRunDataContext`). So expansion belongs in the engine, not the trigger:\n\n- **`AutomationEngine.setRecordExpander(fn)`** — new injectable, mirroring `setUserGrantsResolver`. In `resolveRunContext`, *after* identity resolution, the engine reads `startNode.config.expand`, calls the expander, and grafts the expanded relations onto the run record **in place** (the same object the run's variable map already references, so every per-node `{record.<lookup>.<field>}` resolves with no per-node change). Placed in `resolveRunContext`, it covers both `execute()` and `executeWithoutRetry()`.\n- **Plugin bridge** — wires the expander to a `findOne(object, { where: { id }, expand, context: resolveRunDataContext(runContext) })` on the same data engine the CRUD nodes use. `resolveRunDataContext` honors `runAs`, so:\n  - `runAs:'user'` → the referenced object is read **as the triggering user** (RLS/FLS enforced) — closing the leak that made a trigger-side (system-elevated) expand unsafe. The trigger structurally can't do this: its hook session carries only `userId`, not resolved grants.\n  - `runAs:'system'` → elevated, as intended.\n\n## Safety & semantics\n\n- **Only declared relation keys are grafted.** Bare lookup ids, `multiple` lookup arrays (#1872), and the formula fields the trigger already hydrated stay untouched. Formula hydration (trigger, system, own-row) and lookup expansion (engine, user-scoped, cross-object) remain **separate layers** — deliberately *not* unified, since a whole-record user-scoped re-read would FLS-mask formula fields the trigger returns unmasked.\n- **Opt-in** ⇒ zero cost when `expand` is absent. **Best-effort** ⇒ a re-read failure logs and leaves the record unexpanded (template renders the scalar id); expansion never breaks the flow.\n- **No spec-schema / trigger / ObjectQL change** — `config` is an open passthrough, `findOne` already supports `expand`, and `expandRelatedRecords` infers the target from the field's `reference` and applies the referenced object's RLS/FLS.\n- **Lint consistency**: `flow-template-lookup-traversal` (#3472) is suppressed once a relation is declared in `config.expand`.\n\n## Testing\n- **`@objectstack/service-automation`**: 358 tests pass (33 files), including a new `record-lookup-expand.integration.test.ts` (4 cases): user-scoped expansion resolves `{record.account.name}` and the re-read carries the user context (not system); `runAs:'system'` reads elevated; only the declared relation is grafted (a non-declared lookup stays a scalar id, #1872); a re-read error is fail-safe (flow still succeeds, record unexpanded). `tsc` clean.\n- **`@objectstack/lint`**: 323 tests pass; the flow-template rule gains two cases (declared `expand` suppresses the traversal warning; a non-covered relation still warns). `tsc` clean.\n\n## Follow-up (optional, out of scope)\nMulti-hop expansion, and a typed `StartNodeConfigSchema` for Studio/AI discoverability of `expand` (today it rides the generic passthrough `config`).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

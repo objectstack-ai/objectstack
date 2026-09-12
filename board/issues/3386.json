@@ -1,0 +1,35 @@
+{
+  "number": 3386,
+  "kind": "pull_request",
+  "title": "test(route-parity): declared===enforced gate + honest standalone hono discovery (#3369)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-21T13:58:41Z",
+  "updated_at": "2026-07-21T15:13:17Z",
+  "closed_at": "2026-07-21T15:13:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-21T15:13:15Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3386",
+  "body": "## Summary\n\nThe route-parity `declared === enforced` gate for HTTP routes #3369 asks for — the \"one boot-the-real-server test\" that closes the class of \"works in the dispatcher, dead on `os serve`\" bugs (#3361, #3362, MCP 501).\n\n**Rebased & slimmed.** While this was in flight, the two underlying fixes landed independently on `main`:\n- **#3361** (admin-gated `Server-Timing`) → **#3384**, with a more correct fix (opens the disclosure gate in `RestServer.resolveExecCtx`, since `@objectstack/rest` *shadows* the hono plugin's own CRUD on `os serve`; homes `isPerfDisclosurePrincipal` in `@objectstack/observability`).\n- **#3362** (notifications mark-read) → **#3354** + the e2e test in **#3388**.\n\nSo this PR now carries only the **net-new, non-overlapping** work: the discovery route-parity gate.\n\n## Changes\n\n**1. Route-parity e2e gate** (`packages/runtime/src/route-parity.integration.test.ts`).\nBoots the real hono app the way `os serve` mounts it (hono server + dispatcher plugin, services provisioned), opens a socket, reads `/api/v1/discovery`, and asserts:\n- every advertised / dispatcher-registered route is reachable — **never 404/405/501** — for an anonymous AND an admin principal (covers `/notifications`, `/notifications/read[/all]`, `/mcp`, `/health`, `/ready`);\n- discovery is **service-aware in both directions** — a route is advertised iff its backing service is present (no dead advertisement);\n- the MCP discovery↔route lockstep holds (advertised ⇒ reachable, never 501).\n\nIt deliberately does **not** duplicate the Server-Timing coverage (#3384's `server-timing-e2e.test.ts` / `rest-server-timing.test.ts`), the notifications mark-read coverage (#3388), or the REST-owned `/data`·`/meta`·`/ui` coverage (`@objectstack/client` integration suite).\n\n**2. Documented the MCP discovery lockstep** (`http-dispatcher.ts`, comment-only): why `routes.mcp` is advertised on the `isMcpServerEnabled()` flag (the #2698 auto-load lockstep) rather than gated on service presence — keeps the dispatcher symmetric with `@objectstack/rest`.\n\nTest + comment only; no runtime code changes (no-release changeset).\n\n## Verification\n- `@objectstack/runtime`: route-parity gate green; `@objectstack/plugin-hono-server` + `@objectstack/client` suites green locally.\n- `eslint` / `tsc --noEmit` clean.\n\n## Note\nAn earlier revision also trimmed the standalone `HonoServerPlugin` discovery to advertise only its mounted routes (`/data` + `/auth/me/*`). That was dropped: it's a shadowed fallback path (never served under real `os serve`), and it changed a discovery contract the `@objectstack/client` suite depends on (`client.hono.test.ts` expects `metadata` advertised). Not worth altering a cross-package contract for a shadowed path; can be revisited deliberately if desired.\n\nRefs: #3369, #3361 (fixed in #3384), #3362 (#3354 / #3388), #2698, #3358.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_015si15Q1KWMKpVQWYsEvgcS"
+}

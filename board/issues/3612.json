@@ -1,0 +1,30 @@
+{
+  "number": 3612,
+  "kind": "issue",
+  "title": "21 client SDK methods target routes no server surface mounts — delete on the open major train, or build the servers (#3587 finding)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T09:24:09Z",
+  "updated_at": "2026-07-27T10:00:13Z",
+  "closed_at": "2026-07-27T10:00:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3612",
+  "body": "Found by the #3587 tranche-2 audit (client-side sweep for PR #3609). Five client surface families build URLs that exist on **no** server surface — not the dispatcher, not `@objectstack/rest`, not the autonomous service mounts. Every call is a guaranteed 404. They are the SDK-side siblings of the disease #3595 just deleted server-side: each family is underwritten only by a spec `DEFAULT_*_ROUTES` table that **nothing consumes**.\n\n## The dead families (`packages/client/src/index.ts`)\n\n| Surface | Methods | Client lines | Ghost spec table |\n|---|---|---|---|\n| `permissions` | `check`, `getObjectPermissions`, `getEffectivePermissions` (3) | :2775, :2784, :2793 | `DEFAULT_PERMISSION_ROUTES` (`plugin-rest-api.zod.ts:962-1012` — and its prefix is `/api/v1/auth`, so it wouldn't even match) |\n| `realtime` | `connect`, `disconnect`, `subscribe`, `unsubscribe`, `setPresence`, `getPresence` (6) | :2807-:2863 | `DEFAULT_REALTIME_ROUTES`; `service-realtime` registers **zero** HTTP routes; the dispatcher deliberately never advertises `/realtime` (`http-dispatcher.ts:1128-1133`) |\n| `workflow` | `getConfig`, `getState`, `transition` (3) | :2877-:2895 | `DEFAULT_WORKFLOW_ROUTES` |\n| `views` | `list`, `get`, `create`, `update`, `delete` (5) | :3024-:3066 | `DEFAULT_VIEW_ROUTES` — no `/ui/views` route anywhere (both surfaces serve only `/ui/view/:object…`); note the client even disagrees with its own ghost table (PUT vs the table's PATCH, `plugin-rest-api.zod.ts:1077`) |\n| `notifications` devices/prefs | `registerDevice`, `unregisterDevice`, `getPreferences`, `updatePreferences` (4) | :3082-:3114 | ADR-0012:376 describes the intended `/notifications/devices` server that was never built; dispatcher mounts only `''`, `read`, `read/all` |\n\n(`client.events` is fine — it's an explicitly local in-memory buffer, no HTTP.)\n\n## Why now\n\nA **major/breaking train is loading** (#3562, #3581, #3593, #3595 all shipped `feat(…)!` this window). Deleting these methods is client-breaking and will never be cheaper. Leaving them means the #3587 reverse-direction guard (\"every client method's target route provably exists\") must carry 21 permanent exemptions — the guard would be born lying.\n\n## Proposal\n\n1. **Delete the five families** from the client (+ their tests/README rows), changeset per the launch-window convention (`minor` + `feat(client)!`).\n2. **Delete the four ghost `DEFAULT_*_ROUTES` tables** from `plugin-rest-api.zod.ts` (same tombstone treatment as `DEFAULT_DISPATCHER_ROUTES`, #3595); regenerate `api-surface.json`.\n3. Where a product story exists (realtime per ADR; notification devices per ADR-0012), re-adding the surface comes back **with** its server and a ledger row — the guard then keeps it honest.\n4. Then land the reverse-direction guard with zero exemptions.\n\nAlternative — implement the missing servers instead — is a per-family product decision (views CRUD, device registry, workflow FSM HTTP, realtime HTTP session protocol); nothing in the audit suggests these are imminent, and the guard shouldn't wait on them.\n\n## Acceptance\n\n- No client method builds a URL that no server surface mounts (guard-enforced, no exemption list).\n- `api-surface.json` regenerated; docs sweep for the removed namespaces.\n\nRefs: #3587, PR #3609; precedent #3595/#3586."
+}

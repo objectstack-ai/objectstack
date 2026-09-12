@@ -1,0 +1,32 @@
+{
+  "number": 3376,
+  "kind": "pull_request",
+  "title": "ci(changeset-check): gate on changesets the PR adds, not a non-empty dir",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-21T04:18:48Z",
+  "updated_at": "2026-07-21T04:34:20Z",
+  "closed_at": "2026-07-21T04:34:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-21T04:34:18Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3376",
+  "body": "## Why\n\n`changeset 是不是坏了` — no. But the **`Check Changeset` gate is falsely green**, which is why real changes (e.g. the #3373 spec fix) slipped onto `main` with no changeset and won't be released.\n\nThe gate counted every `.md` in `.changeset/`:\n\n```bash\nCHANGESET_COUNT=$(find .changeset -name '*.md' ! -name 'README.md' | wc -l)\n```\n\nThat only asserts the **directory is non-empty** — never that *this PR* added a changeset. In **pre-release (RC) mode** `changeset version` **retains** consumed changeset files, so the directory is permanently non-empty and the gate can **never go red**. Evidence: [#3373](https://github.com/objectstack-ai/framework/pull/3373) merged a real `@objectstack/spec` / `api-surface.json` fix with **no changeset** while this step reported `Found 104 changeset(s)`.\n\n## What\n\n- **Rewrite the check to diff against the base commit** and count only the changesets the PR itself adds (`git diff --diff-filter=A \"$BASE_SHA\" HEAD -- '.changeset/*.md'`). RC residue no longer masks a missing changeset. An empty-frontmatter changeset still counts — it is the sanctioned \"this PR releases nothing\" declaration, on par with the `skip-changeset` label.\n- **Backfill the missing #3373 changeset** (`@objectstack/spec` patch) so the ViewFilterRule operator-enum fix actually ships in the next RC instead of being stranded on `main`.\n\n## Proof it can go red (防假绿)\n\nRan the new one-liner against real commits:\n\n| Diff | Added changesets | Verdict |\n|---|---|---|\n| old gate @ main HEAD | `find` = 104 | always **GREEN** (the bug) |\n| #3373 `d419826a8^..d419826a8` (spec fix, no changeset) | 0 | **RED** ✅ |\n| #3360 `2b5d7258d^..2b5d7258d` (adds a changeset) | 1 | **GREEN** ✅ |\n\nThis PR adds its own changeset, so it passes its own gate.\n\n> Note: `Check Changeset` is not a *required* status check, so it still won't hard-block merges on its own — but it will now actually go red and show up as a failed check instead of silently passing.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

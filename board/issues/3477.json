@@ -1,0 +1,30 @@
+{
+  "number": 3477,
+  "kind": "issue",
+  "title": "decision: keep precise droppedFields vs. introduce a generic write-path warnings envelope",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-25T00:45:23Z",
+  "updated_at": "2026-07-25T01:59:30Z",
+  "closed_at": "2026-07-25T01:59:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3477",
+  "body": "Split out from #3455 / #3468 (the issue's open question).\n\n## Context\n\nSingle-write (#3448) and bulk (#3468) write responses now carry a precise, typed `droppedFields: DroppedFieldsEvent[]` — `{ object, fields, reason: 'readonly' | 'readonly_when' }` — surfacing caller-supplied fields that were legally stripped before the write.\n\nThe current decision (shipped) is **precise `droppedFields`, reusing `DroppedFieldsEventSchema`**, chosen for symmetry between the single-write and bulk paths.\n\n## The open question\n\nIf more **write-path warning classes** are anticipated — e.g. value truncation, silent type coercion, deprecated-field writes, unit/precision normalization — a per-class field on every write response (`droppedFields`, `truncatedFields`, `coercedFields`, …) does not scale. A single generic envelope would:\n\n```\nwarnings?: Array<{ code: string; object?: string; fields?: string[]; message?: string; meta?: … }>\n```\n\nwith `droppedFields` becoming one `code`.\n\n## Trade-off\n\n- **Keep precise** (status quo): strongly typed, self-documenting, zero migration; but a new warning class = a new response field each time.\n- **Generic envelope**: one extensible channel; but a **breaking-ish migration** that must move single **and** bulk together (both shipped with `droppedFields`), and loses per-class static typing unless the union is well-modeled.\n\n## Recommendation\n\nDefer unless/until a **second** concrete warning class is on the roadmap. If one appears, do the envelope migration once, across single + bulk simultaneously, and keep `droppedFields` as a typed alias/`code` for backward compatibility during a deprecation window.\n\nRefs: #3455, #3468, #3448."
+}

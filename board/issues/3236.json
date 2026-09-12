@@ -1,0 +1,32 @@
+{
+  "number": 3236,
+  "kind": "issue",
+  "title": "批量导入用户：默认走 invite，temporary（临时密码）降级为不可投递行的兜底",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T16:04:12Z",
+  "updated_at": "2026-07-19T17:21:04Z",
+  "closed_at": "2026-07-19T17:21:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3236",
+  "body": "## 背景\n\n审查 seed-loader 的「失败被静默吞掉却报告成功」类问题（#2805）时，顺带审计到 `admin-import-users` 的一个同类隐患：`temporary` 策略下 `engine.update('sys_user', { must_change_password: true })` 失败时只打 warn、不 surface，账号仍以 created/success 返回，且临时密码照常下发——结果是一个**带临时密码却未被强制轮换**的账号静默存在。\n\n单用户路由 `admin-user-endpoints.ts` 的 `stampMustChangePassword` 已经把这条设计立场写成文档：闸是 **fail-open、best-effort，失败不阻断操作，但要 surface 真实状态**。`admin-import-users` 只是没对齐这条立场（连状态都没 surface）——那部分作为 bug 单独修。\n\n本 issue 记录的是更上一层的**产品/架构建议**：与其在最脆弱的 `temporary` 路径上继续加固，不如**减少对它的依赖**。\n\n## 问题定位：`temporary` 是最弱且负债最重的策略\n\n导入已支持三种 `policy`（`admin-import-users.ts`）：\n\n| 策略 | 机制 | 是否分发长期共享秘密 |\n|---|---|---|\n| `temporary` | 生成临时密码、返回一次、靠 `must_change_password` 强制轮换 | **是**（经不安全渠道分发） |\n| `invite` | 无凭证账号 + 一次性邀请链接（邮件/短信）→ 用户自设密码 | 否 |\n| `none` | 仅身份，凭证事后经重置流按需铸造 | 否 |\n\n临时密码是 95+ bit 高熵，所以风险**不是**被爆破，而是：\n\n- **分发渠道暴露**：临时密码必然经不安全渠道（Slack / 邮件 / 口头 / 便签）交到用户手里，整个安全模型全押在「用一次就被强制换掉」；\n- **一旦强制轮换的闸没落下**（就是上面那个 bug），它就退化成**经弱渠道分发、却永久有效**的凭证；\n- **批量放大**：一次 DB 抖动可能让一整段连续行盖闸失败，几十个账号同时留永久临时密码，现场只有 warn 日志、无人察觉。\n\n`invite`/`none`（以及已挂载的 `magicLink` 插件）**全程不分发任何长期共享秘密**，因此根本不需要 `must_change_password` 这道会 fail-open 的事后补写闸——那道闸本质是 `temporary` 专属的负债。\n\n## 建议\n\n**把导入默认策略从 `temporary` 挪到 `invite`，`temporary` 只对不可投递的行兜底。**\n\n- 有可投递的邮箱 / 手机号 → 走 `invite`（一次性链接，用户自设密码）；\n- 仅对 placeholder 邮箱 / 纯手机号 / 明确不可投递的行 → 回退 `temporary`。\n\n这一步**不改任何安全机制**，只改**策略选择逻辑**，却能把临时密码的爆炸半径从「整批」收缩到「真正没渠道的少数行」，随之大幅缩小上述 bug 的影响面。\n\n## 待确认（决定该不该直接落地）\n\n**部署环境是否普遍具备可用的邮件 / 短信投递？**\n\n- 若普遍具备 → 本建议直接成立，`temporary` 应退居兜底；\n- 若很多是内网 / 无投递 → `temporary` 是刚需，方向应转为「把临时性下沉到凭证自过期（`credential_expires_at`），从架构上让它 fail-closed」，作为独立 issue 跟进。\n\n## 关联\n\n- #2805（同类「静默吞失败」问题，已修复合并）\n- 先行的止血项：`admin-import-users` 对齐 `admin-user-endpoints.ts` 的 `stampMustChangePassword`（重试 + 逐行 surface 真实盖闸状态），单独修复。"
+}

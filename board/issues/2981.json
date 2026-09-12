@@ -1,0 +1,33 @@
+{
+  "number": 2981,
+  "kind": "issue",
+  "title": "Security: Knowledge/RAG retrieval fall-opens to unfiltered corpus when ExecutionContext is missing or system — agent data ceiling escape",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-15T15:27:01Z",
+  "updated_at": "2026-07-22T20:34:13Z",
+  "closed_at": "2026-07-22T20:34:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2981",
+  "body": "Surfaced by the ADR-0096 execution-surface audit. The knowledge/RAG retrieval permission filter fails **open** when no caller identity is supplied — returning semantic-search hits across the entire corpus, unscoped by RLS.\n\n## Detail\n\n`packages/services/service-knowledge/src/knowledge-service.ts` `applyPermissionFilter(hits, ctx)` (`:308`):\n```ts\nif (!ctx || ctx.isSystem) return hits;   // :312 — no ctx OR system ⇒ every hit passes through\n```\nWhen `ctx` is present and non-system, the function correctly re-queries each source object under the caller's context and drops hits the caller can't see (`:332-342`). But with **`ctx` omitted** (or system), the RLS re-scope is skipped and **all** hits — including `sourceRecordId`-backed object rows the caller may not be permitted to read — are returned.\n\n## Why it's reachable (agent angle)\n\nThe AI tool loop that drives retrieval passes identity via `ToolExecutionContext.actor`, which the contract declares **optional with a system-level fallback**:\n\n`packages/spec/src/contracts/ai-service.ts` (`:378,393`) — *\"Optional… when omitted, tools fall back to system-level behaviour\"* / *\"Omit for internal/system invocations.\"*\n\nSo an agent/chat path whose (out-of-framework, cloud-side) route does not populate `actor` from `req.user` gets **unfiltered semantic search over the whole knowledge corpus** — another instance of the D10 agent data ceiling being escaped (cf. #2849/#2845), this time on the read/retrieval side.\n\n## Suggested fix\n\n- Make `applyPermissionFilter` **fail closed** on missing identity: no `ctx` ⇒ drop object-source hits (the same conservative branch already used when `dataEngine` is unbound, `:313-318`), rather than returning everything. Reserve the pass-through strictly for an **explicit** `systemContext(reason)` (ADR-0096 D2), not for \"context happened to be absent.\"\n- Harden the `ToolExecutionContext` contract (`ai-service.ts`): retrieval/data tools should require an actor, or the framework should refuse to run them system-level unless an explicit trusted-run flag is set. Coordinate with the cloud `chatWithTools` implementation.\n\n## Relationship to ADR-0096\n\nDirect instance of the class — a data path that treats \"no context\" as \"full access.\" Exactly the seam ADR-0096 D1/D5 (fail-closed on principal-less non-system calls) closes. Tracking under the ADR-0096 evidence base.\n\nRefs: ADR-0096 (PR #2975), #2849, #2845 (agent data ceiling framing)."
+}

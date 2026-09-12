@@ -1,0 +1,32 @@
+{
+  "number": 3290,
+  "kind": "issue",
+  "title": "Remove the deprecated hook/action `ctx.session.tenantId` alias in the next major (converge on `organizationId`)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T14:25:09Z",
+  "updated_at": "2026-07-19T17:52:32Z",
+  "closed_at": "2026-07-19T17:52:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3290",
+  "body": "## Background\n\n#3280 converged the developer-facing org identifier onto **`organizationId`** across the JS authoring surface:\n\n- Hooks — `ctx.user.organizationId` / `ctx.session.organizationId` (#3280, merged in #3284).\n- Actions — `ctx.user.organizationId` / `ctx.session.organizationId` (#3288).\n- Build-time guard keeping our reference apps off the deprecated name (#3289).\n\n`ctx.session.tenantId` was kept as a **deprecated alias** carrying the identical value, marked `@deprecated` in TSDoc. This issue tracks its eventual **removal from the hook/action `ctx.session` surface**, once a deprecation window has passed.\n\n## Scope of the removal (when it happens)\n\n- [ ] Drop `session.tenantId` from `HookContextSchema.session` (spec) — keep only `organizationId`.\n- [ ] Drop the `tenantId` alias emitted by the engine's `buildSession()` and the runtime's `buildActionSession()` / action `ctx.user`.\n- [ ] Flip `scripts/check-org-identifier.mjs` from a hard-fail authoring guard to also covering `packages/**` where those are authoring-example bodies (leave the driver layer alone).\n- [ ] Changeset as a **breaking** change for `@objectstack/spec` + `@objectstack/objectql` (+ `@objectstack/runtime`).\n\n## Explicit non-goals (do NOT remove/rename)\n\nThe generic **driver-layer** tenancy abstraction stays as-is — it is not \"org\", the isolation column is configurable, and it legitimately carries an *environment* id in database-per-tenant kernels:\n\n- `ExecutionContext.tenantId`, `DriverOptions.tenantId`\n- `SqlDriver.applyTenantScope` / `tenantFieldByTable`, `TenancyConfig.tenantField`\n- `ExecutionLog.tenantId` (flow-execution audit isolation field)\n\n## Timing\n\nSchedule for the next **major** (v11/v12 train). Do not land before a real deprecation window — the alias must stay green for at least one minor cycle so third-party `.hook.ts` / `.action.ts` authors can migrate. The `@deprecated` TSDoc + the #3289 guard are the migration aids in the meantime.\n\n## Related\n\n- #3280 (the convergence), #3284, #3288, #3289.\n- Distinct from #3249 (a standalone driver-native tenant-scope correctness bug — same layer name, different problem)."
+}

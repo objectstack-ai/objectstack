@@ -1,0 +1,35 @@
+{
+  "number": 3516,
+  "kind": "pull_request",
+  "title": "feat(spec)!: prune still-dead aspirational config from Theme / Translation / Webhook (#3494)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T02:17:39Z",
+  "updated_at": "2026-07-27T04:00:37Z",
+  "closed_at": "2026-07-27T03:05:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T03:05:25Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3516",
+  "body": "Part of #3494 (do not auto-close — the Job build-out PR completes it). Follow-up to the 2026-06 liveness audit; same enforce-or-remove treatment as #2377 / #3464 (PR #3486).\n\n## What\n\nRemoves every authorable-but-never-consumed prop the audit flagged that is **still dead on main**, re-verified before deletion:\n\n**Theme** — `spacing`, `breakpoints`, `logo`, `density`, `wcagContrast`, `rtl`, `touchTarget`, `keyboardNavigation` + their dedicated sub-schemas (`SpacingSchema`, `BreakpointsSchema`, `DensityModeSchema` (+alias), `WcagContrastLevelSchema` (+alias)) and types. Verified against the **objectui** theme engine (`packages/core/src/theme/ThemeEngine.ts`): `generateThemeVars` consumes colors/typography/borderRadius/shadows/animation/zIndex/customVars only — none of the removed props is ever emitted as a CSS var. `TouchTargetConfigSchema`/`FocusManagementSchema` stay (owned by touch/keyboard schemas with their own consumers).\n\n**Translation** — `fileOrganization`, `messageFormat`, `lazyLoad`, `cache` + `MessageFormatSchema`, `TranslationFileOrganizationSchema`. There is no ICU engine anywhere; interpolation is always simple `{variable}` substitution. File layout stays documented as a pure authoring convention. (`supportedLocales` is **kept** — it has a live reader: the pinyin-search toggle in `serve.ts:743`.)\n\n**Webhook** — `body`, `payloadFields`, `includeSession`, `authentication` (bearer/basic/api-key were never attached; **HMAC via `secret` stays**), `retryPolicy` (outbox owns a fixed retry schedule), `tags`, and the entire inbound `WebhookReceiverSchema` (zero references repo-wide). The #3489 materializer reads none of the removed fields (`mapWebhookToRow` maps name/label/object/triggers/url/method/description/isActive and stashes the envelope in `definition_json`), so bridged delivery is unaffected. Removed props' liveness-ledger entries are dropped; the dead→live flip for materialized props stays with #3490.\n\n## Versioning\n\n`minor` + `feat(spec)!:` + migration note, per the #2377/#3464 precedent (the launch-window guard rejects majors).\n\n## Verification\n\n- spec vitest: **6810 passed** (dead-prop assertions removed, incl. the `WebhookConfigSchema` retry test that inherited the prune via `extends`)\n- `check:api-surface` / `check:docs` (253 files) / `check:spec-changes` / `check:upgrade-guide` / `check:liveness` all green\n- `gen:schema` manifest ratchet: 7 retired schema keys removed deliberately (`automation/WebhookReceiver`, `system/MessageFormat`, `system/TranslationFileOrganization`, `ui/Breakpoints`, `ui/DensityMode`, `ui/Spacing`, `ui/WcagContrastLevel`); `integration/MessageFormat` (message-queue serialization — different schema) untouched\n- Full-repo `turbo type-check --force`: green\n- Examples cleaned: showcase webhook `retryPolicy`, crm/showcase/todo i18n dead knobs\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 3505,
+  "kind": "pull_request",
+  "title": "fix(approvals+storage): decision attachments — name, open, correct download filename (#3504)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-26T07:56:47Z",
+  "updated_at": "2026-07-27T08:36:35Z",
+  "closed_at": "2026-07-27T08:36:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T08:36:33Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3505",
+  "body": "Fixes #3504. Frontend companion: objectstack-ai/objectui#2820.\n\n## Problem\n\nA decision attachment in the approval inbox timeline (审批动态) showed a nameless \"附件\" chip that did nothing when clicked — and even when the file did download, it was named after the opaque signed-URL token (`eyJrIjoiYXR0YWNo…`) as `application/octet-stream`.\n\n## Root cause 1 — approvals read path stringified descriptors\n\n`sys_approval_action.attachments` is a `Field.file`, which stores rich descriptors `{ id, name, url, mimeType, size }` (a fileId is resolved to a full descriptor on write) — not fileId strings. `rowFromAction` mapped the column with `.map(String)`, collapsing each descriptor to the literal `\"[object Object]\"`. Every `listActions` consumer received garbage.\n\n## Root cause 2 — storage download had no filename/type\n\nPresigned downloads served `application/octet-stream` with **no `Content-Disposition`**, and the signed token carried no filename, so browsers saved files under the URL token.\n\n## Changes\n\n**approvals** (`@objectstack/spec`, `@objectstack/plugin-approvals`)\n- New `ApprovalActionAttachment`; `ApprovalActionRow.attachments` is now `ApprovalActionAttachment[]`. `rowFromAction` passes descriptors through (tolerating a bare-string fileId). Decision *input* stays `string[]`. Consumers no longer need read access to the system `sys_file` object.\n\n**storage** (`@objectstack/spec`, `@objectstack/service-storage`)\n- `getSignedUrl` / `getPresignedDownload` take optional `PresignedDownloadOptions { filename, contentType, disposition }`.\n- REST download routes (`GET /storage/files/:id/url`, `/:id`) pass the `sys_file` `name` + `mime_type`.\n- Local adapter carries them in the signed token; `_local/raw` emits `Content-Type` + RFC 5987 `Content-Disposition` (ASCII fallback + `filename*=UTF-8''…`). S3 adapter uses `ResponseContentType` / `ResponseContentDisposition`. Default `inline` preserves in-browser preview.\n\n## Testing\n\n- `@objectstack/plugin-approvals`: 165/165 (incl. new descriptor-passthrough cases).\n- `@objectstack/service-storage`: 104/104 (incl. new token-metadata + Content-Disposition helper cases).\n- End-to-end in `app-showcase` (approvals + storage): chip shows `signed-contract.pdf`, click opens the real PDF, and the download responds `content-type: application/pdf` + `content-disposition: inline; filename=\"signed-contract.pdf\"`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

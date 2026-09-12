@@ -1,0 +1,32 @@
+{
+  "number": 3244,
+  "kind": "issue",
+  "title": "explain: `os explain object` documents `ownership` as \"own\" | \"extend\" — real values are user | org | none",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T16:43:48Z",
+  "updated_at": "2026-07-19T17:07:45Z",
+  "closed_at": "2026-07-19T17:07:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3244",
+  "body": "`packages/cli/src/commands/explain.ts:37` documents the object `ownership` field as:\n\n```ts\n{ name: 'ownership', type: '\"own\" | \"extend\"', description: 'Whether this object is owned or extended' }\n```\n\nBut the real `ObjectSchema.ownership` field is the **record-ownership model** (`packages/spec/src/data/object.zod.ts:632`):\n\n```ts\nownership: z.enum(['user', 'org', 'none'])   // user (default, injects owner_id) | org | none\n```\n\n`own` / `extend` is the *package contribution kind* — a distinct concept the spec explicitly calls out as separate from record-ownership (object.zod.ts:627,637). So `os explain object` prints the wrong allowed values and a misleading description for `ownership`.\n\n**Fix:** update the explain entry to `type: \"'user' | 'org' | 'none'\"` with a description like _\"Record-ownership model: user (default, injects a reassignable owner_id) | org | none (no per-record owner)\"_.\n\n_Found during the #1880 docs implementation-accuracy audit (PR #3243); out of scope for that docs-only PR._"
+}

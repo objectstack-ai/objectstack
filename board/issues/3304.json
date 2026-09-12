@@ -1,0 +1,30 @@
+{
+  "number": 3304,
+  "kind": "issue",
+  "title": "ActionDescriptor configSchema: adopt an `xExpression` marker so designer forms render expression vs template semantics (objectui #2670 Phase 3 counterpart)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T16:59:02Z",
+  "updated_at": "2026-07-20T01:39:35Z",
+  "closed_at": "2026-07-20T01:39:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3304",
+  "body": "## Background (ADR-0018)\n\nThe flow designer's node config forms are generated **server-first** from each node type's published `ActionDescriptor.configSchema` (the JSON Schema compiled from the executor's Zod), falling back to a hardcoded client form only when no schema is published. objectui already consumes UI hints carried on schema properties via the Zod `.meta()` channel — `xRef` (typed reference picker) and `xEnumDeprecated` (drop a deprecated enum spelling).\n\nThere is currently **no way for a schema to say whether a string property is a bare-CEL expression or an `interpolate()` `{var}` template**. So the adapter maps every string to plain `text`, dropping the mono editor, the data-picker brace mode, and — critically — the correct validation. Now that the engine publishes a `loop` `configSchema`, this has become a live split:\n\n- **Offline** (hardcoded form): `loop.collection` renders as an `expression` field.\n- **Online** (schema→adapter): the same field renders as plain `text`.\n\nAnd before the objectui-side gating fix, the offline `expression` rendering also **false-positived** the CEL brace-trap on the legal `{leadList}` template. objectui #2670 Phase 3 (PR incoming) fixes the consumer side and defines the contract below; this issue is the **producer side** — teach the descriptors to emit the marker so the online form matches.\n\n## Contract: `xExpression`\n\nA string property MAY carry `xExpression: 'expression' | 'template'` (Zod `.meta({ xExpression })`, same channel as `xRef`):\n\n- **`'expression'`** — bare CEL (a predicate / value expression). Mono editor, predicate validation (ADR-0032 brace-trap applies), data-picker inserts **bare** refs.\n- **`'template'`** — an `interpolate()` single-brace `{var}` template. Mono editor, data-picker inserts `{var}`, **no** predicate validation (its `{…}` is legal; only a soft unknown-ref check applies).\n- **`format: 'multiline'`** combines: `expression + multiline` → textarea in bare-ref (script-body) mode; `template + multiline` → textarea in template mode.\n- **Unknown value** degrades to plain text (forward-compatible).\n- Precedence in the adapter: `xRef > enum > xExpression > scalar`.\n\nThe objectui adapter mapping (the consumer spec) lives in `packages/app-shell/src/views/metadata-admin/inspectors/json-schema-to-fields.ts` (`scalarField` / `exprModeOf`), with the rendering semantics in `FlowNodeConfigField` and the canvas scan in `flow-expr-problems.ts`.\n\n## Work items\n\nAnnotate the executor Zod schemas so `z.toJSONSchema` emits `xExpression`:\n\n- [ ] `loop` / `map` `collection` → **`template`** (values are `{leadList}` / `{items}`).\n- [ ] `start` entry `condition`, `decision` branch `expression` / `condition`, edge guards, screen `visibleWhen` → **`expression`**.\n- [ ] `script` code body → **`expression` + `multiline`** (bare refs; `{x}` is illegal in JS/TS).\n- [ ] Audit connector / plugin descriptors for expression/template string fields and mark them.\n- [ ] **Fill the ~11 node types that publish no `configSchema` at all** — use objectui's hardcoded `flow-node-config.ts` field groups as the spec of record, so online and offline forms converge.\n\n## Non-goals\n\n- No change to engine/runtime behavior — this is designer metadata only. `xExpression` is ignored everywhere except the designer form generator.\n\n## Acceptance\n\n- With the engine running, the online `loop` config form renders `collection` identically to the offline hardcoded form (mono expression editor, `{var}` picker), with **no** false-positive brace-trap on `{leadList}`.\n- A genuine CEL predicate (`start` / `decision` condition) still validates.\n\n## Current evidence\n\nThe online (schema→text) and offline (hardcoded→expression) `loop.collection` forms already diverge today; that divergence is what this marker closes.\n\nRef: objectui #2670 (Phase 3)."
+}

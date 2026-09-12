@@ -1,0 +1,35 @@
+{
+  "number": 3369,
+  "kind": "issue",
+  "title": "Route parity: discovery-advertised routes must be reachable on the hono server (os serve/dev) — declared === enforced",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-20T15:42:35Z",
+  "updated_at": "2026-07-24T12:32:46Z",
+  "closed_at": "2026-07-22T13:36:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3369",
+  "body": "## Problem\n\nTwo v16.0 regressions found in the #3358 sweep — #3361 (per-request admin-gated `Server-Timing`) and #3362 (mark-notification-read) — share **one root cause**: the handler is registered on the **runtime `HttpDispatcher` / `createDispatcherPlugin`** path, but `os serve` / `os dev` / `os start` actually run the **hono server** (`@objectstack/plugin-hono-server`), which resolves identity via its own self-contained `resolveCtx` and mounts only a subset of routes. Handlers on the dispatcher path silently **404 / no-op** on the shipped server, even though **discovery advertises them** (`hono-plugin.ts:688` advertises `notifications:` → 404). `/api/v1/mcp` returns `501` from the same block (`dispatcher-plugin.ts:660`). This is a `declared ≠ enforced` gap for HTTP routes.\n\nBecause unit tests exercise the two registration paths in isolation (e.g. `server-timing.test.ts` calls `allowPerfDisclosure()` manually \"as the dispatcher would\"), the integration gap is invisible.\n\n## Ask — make route reachability `declared === enforced`\n\n- [ ] **Audit** which `/api/v1/*` routes are hono-native vs dispatcher-only, and reconcile the two registration paths so a route registered once is served by the actual `os serve` entrypoint (or the hono server delegates the dispatcher's routes, as it does for `/data`).\n- [ ] **Add an e2e gate** that boots the **real hono app** (the way `os serve` mounts it) and asserts every route advertised in `/api/v1/discovery` (and every dispatcher-registered route) responds — **not 404** — for both an anonymous and an admin principal. This gate would have caught #3361, #3362, and the MCP `501`.\n- [ ] Fix the two known instances (#3361 Server-Timing disclosure gate; #3362 `/notifications` + `/notifications/read[/all]`) as part of, or ahead of, the reconciliation.\n\n## Why\nA metadata/discovery-driven platform must not advertise routes that 404 on its own default server. One reconciliation + one boot-the-real-server test closes an entire class of \"works in the dispatcher, dead on `os serve`\" bugs.\n\nRefs: #3358 (sweep), #3361, #3362. Also surfaced in objectstack-ai/objectui#2762.\n"
+}

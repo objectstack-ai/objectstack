@@ -1,0 +1,32 @@
+{
+  "number": 3490,
+  "kind": "issue",
+  "title": "Flip webhook liveness ledger dead→live now that #3461 bridged the authoring surface (+ reassess type registration)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-25T03:07:52Z",
+  "updated_at": "2026-07-27T03:37:34Z",
+  "closed_at": "2026-07-27T03:37:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3490",
+  "body": "Follow-up from #3461 / #3489 (bridge merged). **Supersedes this issue's original framing** — I opened it before finding that #3462 / #3485 already enrolled `webhook` in the liveness `GOVERNED` set. Corrected scope below.\n\n## Current state (verified on main)\n\n- `webhook` **is already in `GOVERNED`** (`packages/spec/scripts/liveness/check-liveness.mts:57`), enrolled by #3462 / #3485 via a **`SPEC_ONLY_SCHEMAS` override** — it is deliberately **not** a registered metadata type (registering turns on Studio CRUD + `saveMetaItem` overlay + create-seeds, punted while the surface was disconnected).\n- `packages/spec/liveness/webhook.json` classifies all 16 authorable props as `dead` (+ `authentication` experimental), from the **author's vantage point** — correct *when the bridge did not exist*. Its `_note` pre-scripted the next step: *\"When the bridge lands, the mapped props flip to live (cite the materializer).\"*\n- #3461 **option A landed** in #3489: `bootstrapDeclaredWebhooks` materializes stack/connector-declared webhooks into `sys_webhook` rows (`object → object_name`, `isActive → active`, envelope → `definition_json`), dispatched by `AutoEnqueuer`. So the mapped props are now **live**.\n\n## Why the liveness gate didn't catch the drift\n\n`webhook` rides the `SPEC_ONLY_SCHEMAS` gate path, which only *walks* the schema for presence — it does **not** verify each prop's `dead`/`live` claim against runtime reality. So #3489's CI `Spec property liveness` check passed green **while the ledger silently went stale**. This must be updated by hand.\n\n## Scope\n\n1. **Flip mapped props `dead → live` in `webhook.json`**, citing the materializer (`packages/plugins/plugin-webhooks/src/bootstrap-declared-webhooks.ts`): `name`, `label`, `object`, `triggers`, `url`, `method`, `description`, `isActive`, and the `definition_json`-carried `secret` / `headers` / `timeoutMs` the enqueuer reads. Drop the `url` `authorWarn`/`authorHint` (no longer a no-op).\n2. **Keep `dead`/experimental** the props with no runtime sink — `body`, `payloadFields`, `includeSession`, `retryPolicy`, `tags`, `authentication` (delivery-layer, not executed; the #1878 domain). Record that boundary in the notes: #3489 fixed \"the definition reaches the dispatcher\", not \"every field is executed\".\n3. **ADR-0054 prove-it-runs**: `live` props with proof must point at a `packages/qa/dogfood/**` test carrying a matching `@proof:` tag. The bridge's unit tests live in `plugin-webhooks` (`bootstrap-declared-webhooks.test.ts`) — a qa/dogfood webhook-materialization proof test is needed to satisfy the gate.\n4. **Refresh stale prose**: `check-liveness.mts:65-69` (\"enforce-or-remove pending, #3461\") and `webhook.json` `_note` (the whole \"THE DISCONNECT / THE TRAP … all 16 props DEAD\" narrative) — the disconnect is now closed by #3489.\n5. **Reassess (optional, not required)**: whether to move `webhook` out of `SPEC_ONLY_SCHEMAS` and register it as a first-class metadata type now that the surface is live. Weigh the Studio-CRUD + create-seeds cost the #3462 note flagged; may still be worth deferring.\n\n## Related\n- #3489 (the bridge) / #3461 (parent)\n- #3485 / #3462 (liveness enrollment via SPEC_ONLY)\n- #1878 (metadata property liveness audit — parent)\n- #3197 (connector webhooks never read at registration)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 3315,
+  "kind": "pull_request",
+  "title": "feat(security): split managedBy:'system' into engine-owned vs admin-writable, guard engine-owned writes (#3220)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T17:48:19Z",
+  "updated_at": "2026-07-19T18:04:17Z",
+  "closed_at": "2026-07-19T18:04:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-19T18:04:14Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3315",
+  "body": "Closes the root cause tracked in #3220 (follow-through on #3222 / #1591 / #3213). ADR-0103.\n\n## Problem\n\n`managedBy: 'system'` conflated two incompatible write policies:\n\n1. **Engine-owned** — rows a platform service owns end to end, written only via `isSystem` / a service `SYSTEM_CTX` / a context-less engine call (jobs, notifications, approvals, sharing, automation runs, the messaging delivery pipeline, settings/secrets/audit).\n2. **Platform-schema, admin/user-writable data** — the RBAC link tables (`DelegatedAdminGate`-governed), `sys_user_preference`, `sys_approval_delegation`, and the messaging config grids surfaced in Setup.\n\nThe bucket carried the same all-false affordance row as `better-auth`/`append-only` but, unlike `better-auth`, had **no engine enforcement** — a wildcard admin could raw-write engine-owned rows through the generic data API (ADR-0049 gap). #3222 could only patch two latent holes; this is the taxonomy fix.\n\n## Approach — resolved affordance is the policy (no new enum value)\n\nA new `managedBy` value would fall through to the fully-editable `platform` default on already-deployed Console clients. Instead, write policy is `resolveCrudAffordances` (bucket default + `userActions`), and *engine-owned* ≔ a `system`/`append-only` object granting no write. Guard, `apiMethods` reconciliation, and the `/me/permissions` clamp all key off that one contract.\n\n## What's in the diff\n\n- **Writable set declares `userActions{create,edit,delete}`** — `sys_user_position`, `sys_user_permission_set`, `sys_position_permission_set`, `sys_user_preference`, `sys_approval_delegation`, `sys_notification_preference` / `_subscription` / `_template`. Affordance only — `DelegatedAdminGate` / RLS / permission sets stay the authz.\n- **Engine-owned objects locked to `apiMethods: ['get','list']`** where absent. `sys_secret` read-locked explicitly (an empty `apiMethods` array fails **open**).\n- **`sys_import_job`** stays engine-owned — the REST import route writes its job rows `isSystem`-elevated (attribution preserved via the explicit `created_by` stamp).\n- **New engine write guard** `assertEngineOwnedWriteAllowed` (plugin-security) — fail-closed on user-context generic writes to engine-owned objects; `isSystem` / context-less writes bypass. Wired into the security middleware alongside the other data-layer gates.\n- **`reconcileManagedApiMethods`** now runs for every managed bucket (was `better-auth`-only) — the drift backstop.\n- **`clampManagedObjectWrites`** now clamps `system`/`append-only` too.\n\n## Audit finding (write-context, the guard's precondition)\n\nConfirmed every engine-owned writer uses `isSystem` / `SYSTEM_CTX` / a context-less engine call (incl. the metadata-protocol repository, whose transaction context carries no `userId`). The audit **expanded the writable set from 5 to 8**: `notification_preference` / `_subscription` / `_template` are Setup nav grids users/admins author, so they joined the writable set rather than being locked down.\n\n⚠️ Not to be confused with the row-level `managed_by` provenance vocabulary (`platform`/`package`/`admin`, ADR-0066) — a different axis, untouched.\n\n## Verification\n\nAll green:\n- `spec` (6795) · `objectql` (1023, incl. new reconcile cases) · `plugin-security` (521, incl. new `system-write-guard` suite) · `plugin-auth` identity-write-guard (15) · `plugin-hono-server` (92, updated fold/clamp) · `rest` (323) · `platform-objects` / `plugin-approvals` / `service-messaging` / `service-automation` / `plugin-sharing` / `metadata-core`.\n- **Dogfood** `delegation-of-duty` + `showcase-permission-zoo` (18) — confirm delegated administration and direct permission-set grants under user context still work with the guard in place.\n\n## Potentially breaking\n\nA downstream/third-party `system` object that advertised generic write verbs relying on today's fail-open will have those verbs stripped (with a warning) and user-context generic writes rejected — declare `userActions` opening the verbs it legitimately takes. `better-auth` keeps plugin-auth's identity guard unchanged.\n\nThe Console copy refinements (badge/empty-state for the writable-system case) ship in the paired objectui PR; they are not required for correctness (the UI already honours `userActions`).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Fp9yZxRQ3mb7p4vVwqFXKE)_"
+}

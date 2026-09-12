@@ -1,0 +1,33 @@
+{
+  "number": 3397,
+  "kind": "pull_request",
+  "title": "feat(showcase): enable the record History tab on Account",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-22T00:11:46Z",
+  "updated_at": "2026-07-22T00:18:24Z",
+  "closed_at": "2026-07-22T00:18:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-22T00:18:21Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3397",
+  "body": "## Why\nThe #3358 v16 sweep (§4 \"Record History tab\") couldn't exercise the tab: no showcase object opted in. The console gates the History tab on **object-level `enable.trackHistory`** (`RecordDetailView`) — audit *capture* is always on, but the *tab* is opt-in — and the showcase only set `trackHistory` at the **field** level (industry/status), which merely selects which diffs get summarized. So the tab never rendered anywhere, and #2691/#3293 (display-value diffs, computed-field exclusion) were undemonstrated.\n\n## What\n`enable: { trackHistory: true }` on **Account** — which already declares field-level `trackHistory` on `industry`/`status`, so those changes summarize cleanly.\n\n## Verified in the running app\n- The Account detail now shows a **历史 / History** tab (it didn't before).\n- After editing `industry`, the tab renders **\"Dev Admin · UPDATE · 行业: ~~Retail~~ → Technology\"** — the field label + the select **display values** (not raw codes/ids), a single real change, no phantom value→null rows.\n- `os validate` ✓ · `tsc --noEmit` ✓.\n\nFollow-up to #3364 / #3393; from the #3358 sweep §4. `@objectstack/example-showcase` is private → no changeset (skip-changeset).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

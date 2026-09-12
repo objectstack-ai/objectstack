@@ -1,0 +1,35 @@
+{
+  "number": 3285,
+  "kind": "pull_request",
+  "title": "fix(cli): dispatch OS_DATABASE_DRIVER=memory to the mingo InMemoryDriver (#3276)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T13:57:05Z",
+  "updated_at": "2026-07-19T16:49:32Z",
+  "closed_at": "2026-07-19T16:19:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-19T16:19:26Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3285",
+  "body": "## Problem\n\nFixes #3276.\n\n`os dev` / `os start` / `os serve` all advertise a `memory` database driver —\n`--database-driver … | memory` ([dev.ts:88-90](packages/cli/src/commands/dev.ts), [start.ts:99-100](packages/cli/src/commands/start.ts)),\n`OS_DATABASE_DRIVER=memory`, and a `memory://` URL scheme in the help text — but\n`serve.ts`'s driver dispatch had **no `memory` branch**. So selecting it silently\nfell through to the dev SQLite `:memory:` default (`resolveSqliteDriver` →\n**SQLite-in-memory**, a *different* engine), or, in production, registered **no\ndriver at all**. The mingo `InMemoryDriver` was only ever reached as the last\nresort when *both* native `better-sqlite3` and the wasm fallback failed to load.\n\n**Declared ≠ enforced** — picking `memory` gave a different engine than intended.\n\n## Fix\n\n- **Extract** the driver kind-resolution + construction out of `serve.ts`'s inline\n  if/else chain into `packages/cli/src/utils/storage-driver.ts`, mirroring the\n  existing `utils/telemetry-datasource.ts` / `utils/plugin-detection.ts` pattern,\n  so the whole dispatch is **unit-testable in isolation** (it previously required a\n  full HTTP boot to exercise). Net **−75 lines** in `serve.ts`.\n- **Add the missing `memory` branch** (aliases `mingo`, `in-memory`) that builds the\n  mingo `InMemoryDriver`, honored in **dev AND production** — an explicit operator\n  choice is enforced, not silently swapped.\n- **Recognize the advertised `memory://` / `mingo://` URL scheme** in\n  `inferDriverTypeFromUrl`, kept deliberately **distinct** from sqlite's `:memory:`\n  pseudo-file (which stays SQLite's own in-memory mode).\n- **Telemetry-datasource provisioning is preserved exactly** — keyed on an explicit\n  SQLite primary path (`sqliteFilePath`), never the memory driver nor the dev-default\n  `:memory:` store, matching pre-extraction behavior.\n\n## Tests\n\n`storage-driver.test.ts` (14 cases) covers the full URL→kind mapping, explicit>URL\nprecedence, and every construction branch. Proven to go **red** without the fix\n(verified by disabling the branch): `memory` → `SqlDriver` in dev, `null` in prod.\n\n- ✅ `vitest run` — new file 14/14; existing serve/dev tests 29/29\n- ✅ `tsc -p tsconfig.build.json` clean\n- ✅ `eslint` clean\n\n## Out of scope (flagged separately)\n\nThe same \"declared ≠ enforced\" gap exists for **`turso`/libsql**: URLs infer to\n`driverType = 'turso'` but there is no `'turso'` dispatch branch and no\n`driver-turso` package, so it also falls through to SQLite. Left for a follow-up\n(either implement a turso driver, or stop advertising it).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

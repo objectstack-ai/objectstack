@@ -1,0 +1,32 @@
+{
+  "number": 3500,
+  "kind": "issue",
+  "title": "审批收件箱:富化下发 payload_labels(快照字段标签)供摘要显示",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-26T06:23:19Z",
+  "updated_at": "2026-07-27T06:03:12Z",
+  "closed_at": "2026-07-27T06:03:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3500",
+  "body": "## 问题\n审批收件箱(objectui ApprovalsInboxPage)的记录快照摘要只能拿到原始机器名字段 key,只能用 `prettifyKey` 生造英文标签(`assessment_status` → \"Assessment Status\"),读不到目标对象真正的字段 label。中文项目里本该显示\"考核状态\",却是一串英文。\n\n后端富化 `enrichRows` 已经下发 `object_label` 和 `payload_display`(lookup 值),但**没有下发字段 label**,客户端无从本地化。\n\n## 方案\n`ApprovalService.enrichRows` 新增 `payload_labels`(快照字段 key → 目标对象 schema 的字段 label),与既有 `payload_display` 对称:\n- `ApprovalRequestRow` contract 增加 `payload_labels?: Record<string,string>`。\n- `enrichRows` 按对象解析字段 label,只附带快照里实际存在的 key。\n- 单语言项目里 `schema.label` 本身即本地化串,客户端直接可用;缺失时回退。\n\n客户端消费在 objectstack-ai/objectui 对应 issue。"
+}

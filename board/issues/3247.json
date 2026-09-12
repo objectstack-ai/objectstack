@@ -1,0 +1,33 @@
+{
+  "number": 3247,
+  "kind": "issue",
+  "title": "authz: 高危位（viewAllRecords/modifyAllRecords）授予的授权期 advisory lint",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T02:12:16Z",
+  "updated_at": "2026-07-19T10:40:11Z",
+  "closed_at": "2026-07-19T10:40:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3247",
+  "body": "## 背景\n\nADR-0099 两轴 Amendment（#3245）确立：**per-object 超级位 `viewAllRecords`/`modifyAllRecords` 是 Layer 1 的范围轴**——一个合法的、可委派给非管理员岗位的原语（审计员读全部发票 = Salesforce 对象级 View All 同款）。这是刻意保留的能力，不做运行时收窄。\n\n本 issue 原提议给它加一条授权期 advisory lint。\n\n---\n\n## 关闭（not planned，2026-07-18）\n\n复审后判定**不做**。理由：\n\n1. **与 ADR-0099 立场自相矛盾**：上一轮刻意**拒绝** P2 收窄，理由正是「view-all 委派是一等合法能力」。再对每次使用它都 warn，等于一边确立原语、一边警告使用者——典型的 lint 反模式（对常见合法配置报警 = 告警疲劳）。企业软件里给审计员/风控/客服主管授对象级 view-all 是日常，不是可疑操作。\n\n2. **原动机（#3005）挂钩不准确**：#3005 的困惑是 `viewAllRecords` 在 **public 对象上「不生效」**（以为生效、其实没有）；本 lint 的 warn 是反向的（「你会看到全行」），并不解决 #3005 那个困惑。\n\n3. **授权期本已可见**：Studio 权限矩阵编辑器勾 `viewAllRecords` 时授权者即知在授 view-all；真正的 AI 防错手段是 explain（归因「这个位让谁看到什么」），已存在。lint warn 冗余。\n\n考虑过的窄版本（仅对 `isDefault:true`/全员基线集在敏感对象上授 view-all → warn）也不成立：「敏感对象」无法客观判定、全员基线授 view-all 也可能有意（公开知识库），收益低。\n\n两轴模型已把语义讲清（位定对象内范围、posture 定租户边界），explain 可解释，无需再加一个制造噪音的 lint。避免留伪待办误导后来者，故 close not-planned。若未来出现真实误配面（如统计上频发的\"全员集意外授 view-all\"事故），再以数据驱动重开。\n\n关联：ADR-0099 两轴 Amendment（#3245）· #3211（已收口）· #3005。"
+}

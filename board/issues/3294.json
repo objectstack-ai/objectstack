@@ -1,0 +1,35 @@
+{
+  "number": 3294,
+  "kind": "pull_request",
+  "title": "ci(release): unblock the release train — HOTCRM_REF v2.1.0 + console e164196801bd",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T16:08:36Z",
+  "updated_at": "2026-07-19T16:15:25Z",
+  "closed_at": "2026-07-19T16:15:23Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-07-19T16:15:23Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3294",
+  "body": "The last 4 Release runs on main all failed at the pre-publish downstream-compat smoke: #3216 (ADR-0056 D8) removed the unenforced agent `visibility` field from the spec, but the smoke pins hotcrm **v2.0.0**, whose two copilot agents still author it — typecheck goes red, so npm publish is blocked and the changesets version PR (#3098) has gone stale.\n\nTwo changes:\n\n1. **Bump `HOTCRM_REF` v2.0.0 → v2.1.0** in `.github/workflows/release.yml`. hotcrm v2.1.0 (objectstack-ai/hotcrm#449) drops the removed field; hotcrm main is already on ObjectStack 14.7 with package.json at 2.1.0. Verified locally by replicating `downstream-smoke.sh` against the freshly built spec dist from latest main: hotcrm `typecheck` + `validate` both green.\n2. **Refresh the console pin** (`scripts/bump-objectui.sh`): `.objectui-sha` 2e7d7f0f7ee7 → e164196801bd, with the usual `@objectstack/console` changeset covering the objectui range (bumped to minor — the range contains feats).\n\nMerging this should turn the next Release run on main green, refresh #3098, and let the release ship.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

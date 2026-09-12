@@ -1,0 +1,35 @@
+{
+  "number": 3478,
+  "kind": "pull_request",
+  "title": "fix(runtime,cloud-connection): multi-tenant seed replay covers every source, not just the first (#3453)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-25T01:29:27Z",
+  "updated_at": "2026-07-25T02:16:32Z",
+  "closed_at": "2026-07-25T02:16:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-25T02:16:29Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3478",
+  "body": "## What & why\n\nFixes #3453. In multi-tenant deployments (enterprise `@objectstack/organizations`) a brand-new org gets its own private copy of demo data by **replaying the kernel's `seed-datasets` list** on the `sys_organization` insert. That list is supposed to hold the **union of every seed source** — every config-declared app *plus* every marketplace package — but two framework traps (the same pair #3444 fixed for `seed-summary`) silently shrank it to **just the first source**:\n\n1. **No `.kernel` handle.** The standard `PluginContext` (`packages/core/src/kernel.ts:76`) exposes `getService`/`registerService` but has **no `.kernel` property**, so `(ctx as any).kernel?.getService('seed-datasets')` always read `undefined`. Each source then saw \"nothing registered\" and **overwrote** the list with only its own datasets.\n2. **Duplicate-register throw.** `registerService` (`kernel.ts:195`) **throws on a duplicate name**, so the second source's re-register was swallowed by the surrounding `try/catch` — its datasets (and, for a config app, its replayer) **silently lost**.\n\n**Net effect:** with two config apps, or a config app + marketplace packages, a new org replayed **only the first app's seeds**.\n\n## The fix — register-once-then-mutate (pattern from #3444's `recordSeedOutcome`)\n\nNew `packages/runtime/src/seed-datasets.ts` helper:\n\n- `mergeSeedDatasets(ctx, datasets)` — registers **one** shared array the first time and **mutates it in place** for every later source, reading through the context's **own resolver first** (`ctx.getService`), kernel second. Never re-registers → no duplicate-register throw; always accumulates → no clobber.\n- `readSeedDatasets(ctx)` — reads the **live** shared array.\n- `registerSeedReplayerOnce(ctx, replayer)` — registers the per-org replayer once; later config apps reuse it.\n\nWired into both seams the issue names:\n\n- **`packages/runtime/src/app-plugin.ts`** — the config-app seed path now `mergeSeedDatasets(...)` into the shared array, and the per-org replayer reads `readSeedDatasets(ctx)` **at invoke time** instead of the captured `merged` snapshot, so an org created after a *later* app/marketplace install still replays their seeds.\n- **`packages/cloud-connection/src/marketplace-install-local-plugin.ts`** — the marketplace merge now routes through the runtime helper via a lazy `import('@objectstack/runtime')` + `typeof`-guard (mirroring the existing `recordSeedSummary`), with an equivalent inline fallback so the two test files that mock `@objectstack/runtime` without the helper don't crash.\n\n## Testing\n\n`packages/runtime/src/seed-datasets.test.ts` (7 tests):\n\n- **Helper units** against a faithful kernel fake (`getService` throws on miss, `registerService` throws on dupe, **no `.kernel`** — mirrors `seed-summary.test.ts`): reads the live service despite no `.kernel` (defect ①); a second source accumulates with **no duplicate-register throw** (defect ②); the live array grows for a captured reference; `registerSeedReplayerOnce` registers once then reuses.\n- **Seam**: boots the **real** `AppPlugin` twice + a marketplace-style merge and invokes the registered `seed-replayer`, asserting it replays the **full union** `[crm_account, crm_contact, hot_lead]` in source order, tenant-scoped.\n\n**Red-proof:** against the pre-fix `app-plugin.ts` the seam test fails exactly as #3453 describes — the replayer drops `crm_contact` (the second config app's seeds).\n\nResults:\n- `@objectstack/runtime` — 44 passed (`app-plugin`, `app-plugin.seed`, `seed-datasets`, `seed-summary`)\n- `@objectstack/cloud-connection` — 18 passed (all `marketplace-install-local-*`, incl. the two that mock the runtime module and exercise the fallback)\n- forced `build` (DTS type-check) green for both packages\n\n## Scope note\n\nThis repo only carries **seam-level** coverage. True multi-tenant end-to-end coverage requires the enterprise `@objectstack/organizations` plugin (which drives the `sys_organization`-insert replay), and that lives in the **cloud** repo — out of tree here.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

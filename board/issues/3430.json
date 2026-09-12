@@ -1,0 +1,32 @@
+{
+  "number": 3430,
+  "kind": "issue",
+  "title": "os dev: surface seed / sample-data-heal outcomes in the boot summary (info logs are swallowed by the default warn log level)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-24T12:19:45Z",
+  "updated_at": "2026-07-24T15:06:58Z",
+  "closed_at": "2026-07-24T15:06:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3430",
+  "body": "## 背景\n\n`os dev` 转发给 serve 的默认 log-level 是 **warn**,而种子链路最关键的结果行全是 `logger.info`:\n\n- `[Seeder] Seed loading complete {inserted, updated, skipped, errored}`(AppPlugin,packages/runtime/src/app-plugin.ts)\n- `[MarketplaceInstallLocal] rehydrated <id>@<version>` / `inline seed … inserted=… errors=…` / `healed sample data …`(packages/cloud-connection/src/marketplace-install-local-plugin.ts)\n\n后果:默认 dev 环境下,「marketplace 包装了但 0 行」「种子部分失败」这类状态在启动输出里**完全不可见**。#3421 的排查中两度被拖慢:第一次复现时 boot 日志里连 rehydrate 是否跑过都看不出来;验证 heal 时也只能靠直接查库确认。errors 计数被 info 吞掉的问题同理——行级 seed 失败(如 #3422 修的 lookup 悬空)在默认日志级别下零信号。\n\n## 提案\n\n仿照 Flows 启动摘要行的先例(#3099,flow 静默不触发的修复就是把绑定审计提为 boot 摘要),在 `✓ Server is ready` 的摘要块里加一行种子结果,始终打印、不受 log-level 影响,例如:\n\n```\n  Seeds:   showcase 162 rows ok · hotcrm(marketplace) 157 ok / 5 errors ⚠\n```\n\n要点:\n\n1. config app(AppPlugin)与 marketplace 包(rehydrate/heal)各自的 inserted/updated/skipped/**errored** 汇总;\n2. errored > 0 或「装了包但全部对象 0 行」时用显眼标记(⚠ / ERROR 升级),不许静默;\n3. heal 发生时明确标注(`healed on fresh db`),让换库自愈这件事可观察;\n4. 摘要行在 kernel:ready 后、ready banner 处输出一次,不依赖 `--log-level info`。\n\n## 参考\n\n- #3421(rehydrate 空库 heal;排查过程即本 issue 动机)\n- #3422(seed lookup 引用解析;行级错误默认不可见的实例)\n- #3099(Flows 启动摘要行先例)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 3533,
+  "kind": "pull_request",
+  "title": "feat(runtime): /share-links 域 handler 体抽出 — ADR-0076 D11 步骤③ PR-4 (#2462)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T02:52:50Z",
+  "updated_at": "2026-07-27T03:01:09Z",
+  "closed_at": "2026-07-27T03:01:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T03:01:07Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3533",
+  "body": "## 动机（#2462 D11 步骤③，系列第四刀）\n\n抽出 `/share-links`（ADR-0047 capability-token 分享面）。这是 **cloud per-env kernel 的设计主面**（`registerShareLinkRoutes: false`，host dispatcher 在 kernel swap 后服务——步骤① re-scope 的关键发现），行为保真是本刀的全部意义。\n\n## 改动\n\n- `domains/share-links.ts`：186 行体逐字搬迁（公共 resolve/messages 的 token 即授权语义、SYSTEM_CTX 取记录 + redactFields 剥除、管理路由鉴权分层全保留）。\n- `DomainHandlerDeps` 扩两个方法：\n  - **`getRequestKernelService`**——从 per-request **已解析** kernel 读服务（非 defaultKernel、非 scoped-factory 路径）：token 行与被分享记录必须和 shareLinks 服务绑定的 engine 同库。域侧 getEngine 保留原 try/fallback 形状。\n  - **`routeNotFound`**——共享 404 envelope（dispatcher 内 4 处使用）。\n- dispatcher 薄委托保留；与域模块重复的 JSDoc 去重。\n- packages 域**有意不在本刀**：其全家桶约 680 行（含仅它使用的 applyPublishedSeeds/assemblePackageManifest）且刚被步骤② #3142 改过管线，单独成刀便于审阅。\n\n## 验证\n\n接缝套件 30 测试（新增 5：无服务 501 / segment 边界 / 匿名 UNAUTHENTICATED / 公共 token-resolve 含 redaction 剥除 / ROUTE_NOT_FOUND envelope）；runtime 全量 635 绿；http-conformance 41 断言绿；下游闭包 `--force` 含 DTS 全绿。\n\n关联 #2462（D11 步骤③ PR-4）。剩余域：/packages（下一刀）+ 大头（/automation /actions /auth /meta /data /mcp /ai）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

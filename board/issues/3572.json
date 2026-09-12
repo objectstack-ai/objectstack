@@ -1,0 +1,35 @@
+{
+  "number": 3572,
+  "kind": "pull_request",
+  "title": "fix(import): sanitize row errors — never leak raw SQL, friendly constraint messages (#3566)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T07:02:45Z",
+  "updated_at": "2026-07-27T08:38:19Z",
+  "closed_at": "2026-07-27T08:38:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T08:38:17Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3572",
+  "body": "Fixes objectstack-ai/objectstack#3566 (server side). Companion UI PR: objectstack-ai/objectui#2840.\n\n## Problem\nA failing import row surfaced the driver's raw error verbatim. When a write hit a DB constraint (e.g. `sys_user.phone_number` is `unique`), the query builder embeds the entire failing statement in `err.message`, and `toFailedResult` handed it straight back — the importer saw:\n\n```\ninsert into `sys_user` (`__search`, `ai_access`, ... `phone_number`, ...) values ('zhoujunyi zjy', false, 0, '2026-07-2... - UNIQUE constraint failed: sys_user.phone_number\n```\n\nUnreadable, and an information disclosure of the schema.\n\n## Changes\n- **`sanitizeRowError()`** (`packages/rest/src/import-runner.ts`) — maps common constraint failures to human wording and never lets a raw SQL statement reach the client:\n  - `UNIQUE` (SQLite / MySQL / Postgres) → \"A record with this `<column>` already exists.\"\n  - `NOT NULL` → \"`<column>` is required.\"\n  - Anything still reading as a SQL statement → salvage the driver's trailing reason, else a generic message.\n  - Already-friendly messages (e.g. better-auth's \"User already exists. Use another email.\") pass through unchanged.\n  - Applies to **every** import path (generic `/data/:object/import` and the identity import).\n- **`isLikelyEmail`** (`packages/plugins/plugin-auth/src/admin-user-endpoints.ts`) — now rejects non-ASCII, so an address like `x@柴仟.com` fails the import **dry-run** pre-check instead of passing client + dry-run validation only to be rejected by better-auth's strict ASCII validator at real-import time. Single linear char-class test — no ReDoS.\n\n## Tests\n- `packages/rest/src/import-runner-error-sanitize.test.ts` — 8 cases (SQLite/MySQL/PG unique, not-null, SQL backstop, friendly passthrough, empty).\n- `admin-user-endpoints.test.ts` — non-ASCII rejection cases.\n- rest import-runner suite (30) and plugin-auth (59) green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

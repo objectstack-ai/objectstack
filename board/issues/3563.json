@@ -1,0 +1,30 @@
+{
+  "number": 3563,
+  "kind": "issue",
+  "title": "Audit @objectstack/client against the dispatcher: whole route domains have no SDK expression (root cause class of #3528)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T05:55:23Z",
+  "updated_at": "2026-07-27T08:12:55Z",
+  "closed_at": "2026-07-27T08:12:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3563",
+  "body": "## Why\n\n#3528 (\"screen-flow Submit never calls resume\") was reported as a Console bug. The Console turned out to be mostly fine — but the reporter's own note pinned the real root cause:\n\n> `@objectstack/client`'s `automation` surface exposes `getFlow`, `execute`, `listRuns`, `getRun` — but **no `resume`**. That looks like the root cause: the SDK the Console builds on has no way to express the call.\n\nThat was exactly right, and it stranded a real consumer: the Developer → Flow Runs test-runner could trigger a screen flow but had no way to finish it, leaving orphan `paused` runs behind. Fixed in #3552 by adding `automation.resume()` / `getScreen()`.\n\nThe point of this issue is that the *fix* was one instance of a class. A route can exist, work, be documented, and still be unreachable from the SDK every consumer builds on — and nothing catches it.\n\n## The gap is not small\n\nThe dispatcher has 18 domain handlers (`packages/runtime/src/http-dispatcher.ts`):\n\n```\nhandleAI          handleActions     handleAnalytics   handleApiEndpoint\nhandleAuth        handleAutomation  handleData        handleGraphQL\nhandleKeys        handleMcp         handleMcpSkill    handleMetadata\nhandleNotification handlePackages   handleSecurity    handleShareLinks\nhandleStorage     handleUi\n```\n\nGrepping `packages/client/src/index.ts` for the corresponding surfaces, several domains appear to have **zero** SDK expression — no method, no URL string, nothing:\n\n| Domain | Occurrences in the client |\n|---|---|\n| share-links | 0 |\n| keys (API keys) | 0 |\n| mcp / mcp-skill | 0 |\n| security | 0 |\n\n(Rough grep, not a verdict — confirming these is step 1 of the work, and a couple may be intentionally server-only.)\n\nWorth noting alongside: the `resume` and `screen` routes had **no tests at all** before #3552 — the dispatcher tests added there were the first. \"Route exists, no SDK method, no test\" showed up as a cluster, which suggests looking for that combination rather than only for missing methods.\n\n## Proposed work\n\n1. Enumerate dispatcher routes per domain (method + path + shape) and diff against the client surface. Mechanical and scriptable — `api-surface.json` may already carry enough to automate it.\n2. Triage the diff into: **should be in the SDK** / **deliberately server-only** (document why) / **dead route**.\n3. Close the \"should be\" gaps, each with a dispatcher test if one is missing.\n4. Consider a CI guard so the diff can't silently regrow — a checked-in ledger of intentionally-unexposed routes, failing when an unlisted route has no SDK method, would make the next `resume` impossible to ship unnoticed.\n\n## Acceptance\n\n- A written inventory of dispatcher routes vs SDK coverage, with every gap classified.\n- Gaps in the \"should be exposed\" bucket either closed or filed with rationale.\n- A guard that fails when a new route lands with neither SDK expression nor an explicit exemption."
+}

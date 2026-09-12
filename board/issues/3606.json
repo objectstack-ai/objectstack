@@ -1,0 +1,30 @@
+{
+  "number": 3606,
+  "kind": "issue",
+  "title": "spec: 删除 ObjectStackProtocol 组合别名（D9 解散的最后一步，下个大版本窗口）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T09:15:45Z",
+  "updated_at": "2026-07-27T09:52:10Z",
+  "closed_at": "2026-07-27T09:52:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3606",
+  "body": "从 #2462 拆出。ADR-0076 D9 已把 70 方法的上帝接口拆为 13 个 per-domain 接口（#2429），`ObjectStackProtocol` 保留为 `extends` 全部子接口的**组合别名**以向后兼容。终态（ADR rev.7 裁决）：联合接口应当解散——\"统一\"由 runtime discovery services 注册表 + 共享信封/错误脊承担，别名只是 services map 的静态劣化副本。\n\n## 待办（下个大版本 / spec breaking 窗口）\n\n1. 删除 `spec/src/api/protocol.zod.ts` 的 `ObjectStackProtocol` 接口与 `ObjectStackProtocolSchema`（若仍存在）。\n2. 消费方改为按需组合子接口（先例：A1.5 已把 REST 收窄到 `DataProtocol & MetadataProtocol`，#3028）。\n3. `gen:api-surface` 重生成（#2429 的 ratchet 坑）。\n\n无行为影响（纯类型层）。changeset 按当时是否在 launch window 定 major/minor（先例 #3486/#3488/#3562）。"
+}

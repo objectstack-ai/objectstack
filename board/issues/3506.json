@@ -1,0 +1,34 @@
+{
+  "number": 3506,
+  "kind": "pull_request",
+  "title": "test(dogfood): reclassify flow runAs as enforced in the authz conformance ledger (#1888)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T01:09:37Z",
+  "updated_at": "2026-07-27T01:19:09Z",
+  "closed_at": "2026-07-27T01:19:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T01:19:06Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3506",
+  "body": "Small correctness fix surfaced by the 2026-07 security-props recheck (objectstack-ai/objectstack#3503, umbrella #1878).\n\n## Problem\n\n`packages/qa/dogfood/test/authz-conformance.matrix.ts` still filed `flow-run-as` under **\"Removed — by ADR-0049 (roadmap M2)\"** with note `ADR-0049 → roadmap M2`. That contradicts the live code: **#1888 implemented flow `runAs`** for data nodes — `crud-nodes.ts` runs create/update/delete/query under the run's effective identity (`runAs:'system'` → RLS-bypassing; `runAs:'user'` → the trigger user, RLS enforced as them), with the authorization envelope in the `service-automation` engine (`runtime-identity.ts`). It is proven by two dogfood tests (`flow-runas.dogfood.test.ts`, `flow-runas-schedule.dogfood.test.ts`).\n\nLeaving it marked \"removed/roadmap\" is exactly the declared≠actual drift this ledger exists to prevent — here in the *safe* direction (understating enforcement), but still a stale entry.\n\n## Fix\n\nMoved the entry to the **\"Enforced (unit-proven; e2e proof is a follow-on)\"** section with its runtime `enforcement` site + `proof` file, and a note recording the ADR-0049 → #1888 history. Its neighbor `allow-transfer-restore-purge` correctly **stays** removed/roadmap (those ops genuinely do not exist in ObjectQL yet).\n\n## Verification\n\n`authz-conformance.test.ts` **9/9 green** — the reclassified entry satisfies the ledger invariants (`enforced`-has-site, proof-file-exists).\n\nRefs #1878, #1888.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

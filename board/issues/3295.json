@@ -1,0 +1,30 @@
+{
+  "number": 3295,
+  "kind": "issue",
+  "title": "sandbox Phase 1 — charge script CPU time, not wall clock",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T16:08:53Z",
+  "updated_at": "2026-07-19T16:59:26Z",
+  "closed_at": "2026-07-19T16:59:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3295",
+  "body": "Part 1 of #3275 — see its **Phase 1** section for the full implementation-ready spec. **Can start now (no dependency).**\n\n**Change** (`packages/runtime/src/sandbox/quickjs-runner.ts`): make the `resolveTimeout()` budget a **VM-active-time (CPU) budget**, and add a separate **wall-clock ceiling** (`wallCeilingMs`, default 30s) as the stuck-host backstop. Slice-stopwatch every VM entry (`evalCode` / `evalCodeAsync` / `executePendingJobs`); idle host waits + nested-hook execution stay uncharged. Interrupt handler: `(cpuMs + currentSlice) > cpuBudget || now > wallDeadline`. Distinct errors — `exceeded CPU budget of Xms` vs `exceeded wall-clock ceiling of Yms while awaiting host calls` — and map the mid-slice interrupt error to the clean budget message.\n\n**Why:** the wall-clock budget conflated \"tolerate a slow host\" with \"kill a runaway script\", and billed nested hooks to the parent — the #3259 flake. See #3275 §Why.\n\n**Acceptance criteria**\n- [ ] CPU-budget + wall-ceiling semantics; the three interrupt-error sites map to clean messages.\n- [ ] Test deltas per #3275 §1.2: rewrite the never-settling-host timeout tests → `while(true){}` CPU-burn asserting `/CPU budget of Nms/`; add the wall-ceiling test, the **#3259 root-cause guard** (idle host time not charged → resolves), and a nested-hook-charged-to-itself test.\n- [ ] `nested-write*.integration.test.ts` drop the explicit `hookTimeoutMs: 10_000` (pass at stock 250 ms).\n- [ ] Changeset (`@objectstack/runtime` minor — semantics change, FROM→TO), docs (`environment-variables.mdx`: CPU-time wording; `OS_SANDBOX_WALL_CEILING_MS` if adopted), ADR-0102.\n- [ ] Whole `src/sandbox/` suite green.\n\n**Decide first (§1.5):** wall ceiling as constructor option only, or also `OS_SANDBOX_WALL_CEILING_MS`.\n\n**Separate small PR after soak:** drop `OS_SANDBOX_HOOK_TIMEOUT_MS=10000` from `.github/workflows/ci.yml`.\n\nRefs: #3275 (parent) · #3259 (flake) · #3270 (mitigation).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

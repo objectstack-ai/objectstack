@@ -1,0 +1,30 @@
+{
+  "number": 3574,
+  "kind": "issue",
+  "title": "Dashboard widget filters do not interpolate {current_user_id} — user-scoped widgets silently render 0",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T07:09:59Z",
+  "updated_at": "2026-07-27T09:13:32Z",
+  "closed_at": "2026-07-27T09:13:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3574",
+  "body": "## Summary\n\nDashboard widget filters do not interpolate `{current_user}` / `{current_user_id}`. The literal string reaches the query, matches no owner, and the widget renders `0` — silently, with no error in the console or the server log.\n\nThe same token works correctly in ListView filters, so a user-scoped list view and a user-scoped dashboard widget over the same data disagree.\n\n## Reproduction\n\nOne dashboard, three metric widgets over the same dataset and the same seeded data (all records owned by the signed-in user):\n\n| widget filter | rendered |\n|---|---|\n| `filter: { owner: '{current_user}', … }` | **0** |\n| `filter: { owner: '{current_user_id}', … }` | **0** |\n| `filter: { … }` (no owner clause) | **10,100,081** ✓ |\n\nSame session, same user, same `opportunity_metrics` / `task_metrics` datasets. The only variable is the owner clause.\n\nControl: the identical token in a ListView resolves correctly —\n\n```ts\n// crm_lead listView `my_leads` — returns 21 rows for the signed-in user\nfilter: [{ field: 'owner', operator: 'equals', value: '{current_user_id}' }]\n```\n\n## Where it comes from\n\n`{current_user_id}` interpolation is implemented in `@objectstack/platform-objects` (the ListView / data path). Grepping `@objectstack/service-analytics` for `current_user` returns nothing — the dataset query path has no equivalent substitution step, so the placeholder is passed through to SQL as a literal.\n\n## Impact\n\nAny \"my …\" dashboard is impossible to build. Every widget silently reports zero, which reads as \"you have no work\" rather than \"this filter did not resolve\" — the worst possible failure mode for a landing page.\n\nThis is not hypothetical: `service_dashboard.my_open_cases_by_priority` in the HotCRM template has been broken this way since it was written. It was never noticed because until recently no seeded record had an owner, so the widget was expected to be empty.\n\n## Environment\n\n- `@objectstack/*` 16.1.0\n- Repro app: [HotCRM](https://github.com/objectstack-ai/hotcrm) at `fc8716d`\n- dev server, wasm SQLite\n\n## Expected\n\nDashboard widget filters resolve `{current_user_id}` (and `{current_user}`, whichever is canonical) the same way ListView filters do. Failing that, an unresolved placeholder should raise rather than silently produce an empty result set.\n"
+}

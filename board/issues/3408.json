@@ -1,0 +1,33 @@
+{
+  "number": 3408,
+  "kind": "pull_request",
+  "title": "fix(showcase): stop passing a non-existent org column when seeding the phone demo user",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-22T14:11:25Z",
+  "updated_at": "2026-07-22T14:17:50Z",
+  "closed_at": "2026-07-22T14:17:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-22T14:17:48Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3408",
+  "body": "## The bug\n`ensurePhoneDemoUser` (from #3364) inserted `sys_user` with an `organization_id` key. **`sys_user` has no such field** — not in the object definition (25 fields, none org/tenant), and not physically (26 columns, no `organization_id`). Org membership lives on `sys_member`.\n\nThe key is **not** silently dropped on the way down — it reaches SQL as a real column:\n\n```\nERROR Insert operation failed {\"object\":\"sys_user\", …\n  table sys_user has no column named organization_id}\n```\n\nBecause the insert sits in a best-effort `try/catch`, this only ever showed up as a warn line plus an ERROR in the boot log. The consequence was invisible but total: **the phone demo user was never provisioned on any boot**, so #3358 §6 \"Phone sign-in surfaces\" (All Users list, record detail) had nothing to show.\n\n## The fix\n- Drop the `organization_id` key from the `sys_user` insert (and the now-unused param).\n- Drop the dead `admin.organization_id` read in `run` — the same missing field made it permanently `undefined`, so only the `sys_member` fallback ever ran. Resolve from `sys_member` directly, and fix the comment that claimed the column existed but was null.\n\n## Verified\nOn a wiped dev DB:\n- boot log: **1 ERROR → 0**\n- `sys_user` now holds `usr_showcase_phone_demo` · `Mei Phone (demo)` · `+8613800138000`\n- approval fixtures unaffected: 2 pending requests + 3 admin positions (`finance`/`legal`/`manager`), all stamped with the org\n- `tsc --noEmit` ✓\n\nFollow-up to #3364. Found while collecting per-item evidence for #3358 §1. `@objectstack/example-showcase` is private → no changeset.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

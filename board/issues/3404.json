@@ -1,0 +1,35 @@
+{
+  "number": 3404,
+  "kind": "pull_request",
+  "title": "remove(plugin-audit): drop kernel-built-in assignment notifications (#3403)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-22T08:03:53Z",
+  "updated_at": "2026-07-22T09:19:37Z",
+  "closed_at": "2026-07-22T09:19:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-22T09:19:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3404",
+  "body": "Closes #3403. Takes over and closes #3402.\n\n## 背景\n\n上传文件会刷「系统文件 \"xxx\" 已分配给你」噪音通知(#3402)。根因:分配通知作为**全局行为**硬编码在 plugin-audit 的 `afterInsert`/`afterUpdate` 钩子(`writeAssignmentNotifications`),靠**字段名启发式**(`OWNER_FIELDS` 含 `owner_id`)猜「负责人」,把 `sys_file.owner_id`(存储层 ACL 归属)误判成业务指派;`sys_file` 由存储服务裸引擎写库(`actorId=null`)穿透自我分配守卫,多次写库(`pending→committed`)重复刷屏。\n\n经维护者讨论,结论是问题不在缺一个跳过名单或开关,而在这个功能放错了层。\n\n## 决策\n\n**移除内核内置分配通知,「分配通知」回归用户态**:平台只提供机制(记录变更触发器 + `notify` 节点 + 消息模板),通知策略由应用/管理员用自动化流程按需配置,文案可自定义。业界同类产品(Salesforce / ServiceNow / Odoo)均为「机制内置、策略配置」,且没有平台对文件/附件等系统记录发分配通知。\n\n## 改动\n\n- **`audit-writers.ts`** — 删 `writeAssignmentNotifications`、`OWNER_FIELDS`、`pickOwner` 及 `writeAudit` 内调用点(含 `makeTitle`)。**保留** `sys_audit_log`/`sys_activity` 写入、@mention 通知(`writeCommentMentions`)。\n- **`translations/messages.ts`** — 删 en/zh-CN/ja-JP/es-ES 四处 `assignedToYou` key(`mentionedYou` 等保留)。`TranslationData['messages']` 是开放 `z.record`,非枚举,spec 无需改。\n- **`audit-writers.test.ts`** — 删两条 assignment 用例,补一条回归用例「设置 owner 字段不再产生 `collab.assignment`」。全套 44 passed。\n- **`recipient-resolver.ts`** — `DEFAULT_OWNER_FIELDS` 注释更新;`owner_of:` audience 是独立、调用方显式请求的机制,**保留**。\n- **设计文档**(`notification-platform-convergence.md` / `adr-0030-notification-convergence.md`)assignment 段落加废弃标注,历史不重写。\n- **changeset(minor + FROM→TO 迁移)** — 想保留分配通知的用户,按 `showcase_task_assigned_notify` 范例给目标对象配一条 `record-after-update` + `notify` 流程。\n\n## 迁移(FROM → TO)\n\n```ts\n{ id: 'start', type: 'start', config: {\n    objectName: 'your_object',\n    triggerType: 'record-after-update',\n    condition: 'assignee != previous.assignee',\n} },\n{ id: 'notify_assignee', type: 'notify', config: {\n    topic: 'task.assigned',\n    recipients: ['{record.assignee}'],\n    channels: ['inbox'],\n    title: 'New assignment: {record.title}',\n    actionUrl: '/your_object/{record.id}',\n} },\n```\n\n## 真机验证(showcase :3377,真实运行,REST API 驱动)\n\n全量 build(71/71),`plugin-audit/dist` grep `collab.assignment` = 0。\n\n| 场景 | 操作 | 结果 |\n|---|---|---|\n| #3402 本体 | 完整上传三步,`sys_file.owner_id=admin`、committed | ✅ 0 条 `collab.assignment`、0 条「已分配给你」/文件噪音 |\n| 业务对象分配 | PATCH task `assignee`→admin(owner_id 亦为 admin) | ✅ 内核未发铃铛 |\n| 替代路径 | 同一次 assignee 变更 | ✅ 范例流程 `showcase_task_assigned_notify` 照常触发,收件箱「New task assigned」 |\n| 保留功能 | 发带 mention 的评论 | ✅ `collab.mention` 正常产生 |\n\n最终 `sys_notification` topic 分布:`collab.mention:1, project.digest:4, task.assigned:1` —— 无 `collab.assignment`。\n\n## 验收\n\n- 上传文件不再产生任何「已分配给你」通知(#3402 现象消失,`sys_saved_report`/`sys_report_schedule` 同类潜在噪音一并消除);\n- 业务对象 owner/assignee 变更默认不再自动发铃铛;showcase 范例流程照常可发;\n- plugin-audit 测试更新后全绿;changeset 携带迁移说明。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

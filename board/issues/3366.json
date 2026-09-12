@@ -1,0 +1,34 @@
+{
+  "number": 3366,
+  "kind": "issue",
+  "title": "Preflight that required capabilities have an installable provider in the current edition",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-20T15:16:09Z",
+  "updated_at": "2026-07-21T14:26:01Z",
+  "closed_at": "2026-07-21T14:26:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3366",
+  "body": "### Summary\n\nA capability listed in `requires: [...]` is fail-fast at `serve` time when its provider package is missing. But when the provider has **no installable version in the current edition**, this is not an install mistake the developer can fix by adding a dependency — and nothing in the static gate (`os validate` / `os build`) or in a `validate && build && test` CI script ever surfaces it, because none of them resolve provider packages or boot the runtime. The failure appears only at `os start` / `os dev`, with a generic message that does not mention the edition boundary.\n\nSurfaced upgrading a production (open-edition) app from `14.7` to `16.0.0-rc.1`.\n\n### Repro\n\n`requires: ['ai', ...]`. At boot:\n\n```\n✗ [AI] required but @objectstack/service-ai is not installed.\n  Add it to the app's dependencies, or drop the capability from `requires`.\n ELIFECYCLE  Command failed with exit code 1.\n```\n\nBut `@objectstack/service-ai` was removed from the open edition (11.3.0 / ADR-0025 S2) — the AI runtime is cloud-only now, and the package's last open-registry version is `10.3.0`. So under 16 there is **no version to install**; the \"add it to your dependencies\" advice cannot be followed on the open edition.\n\n`os validate` passes (its **\"Checking capability references (ADR-0066)\"** only checks the token against the known-capability vocabulary, not whether a provider is resolvable). `os build` passes (it never resolves providers). A typical `verify = validate && typecheck && build && test` never boots, so CI never catches it either.\n\n### Proposed check (`os build`, or a new `os preflight`)\n\nResolve each `requires` capability's provider package and classify:\n\n1. **installed** → ok.\n2. **absent but installable in the current edition** → actionable hint: `run pnpm add @objectstack/<pkg>`.\n3. **no installable version in the current edition** (e.g. `service-ai` on open) → error with edition context, not the generic \"not installed\":\n   > `ai` resolves to `@objectstack/service-ai`, which is not available in the open edition (cloud-only since 11.3.0 / ADR-0025 S2). Remove `ai` from `requires`, or run under a cloud runtime that provides the `ai` tier.\n\nCategory (3) requires the resolver to know each capability's edition/availability — the same knowledge `serve`'s CAPABILITY_PROVIDERS map + tier gating already encode; this just reads it earlier and reports instead of aborting.\n\n### Acceptance criteria\n\n- `os build` (or `os preflight`) fails fast on a `requires` entry whose provider has no installable version in the active edition, with the edition-aware message above.\n- An installable-but-absent provider yields a `pnpm add` hint rather than a hard error.\n- A satisfied `requires` list passes unchanged.\n- Ideally the same classification backs the `serve`-time message so boot and preflight read identically.\n\n\n---\n_Related shift-left checks from the same 14.7 → 16 upgrade: #3365, #3366, #3367._"
+}

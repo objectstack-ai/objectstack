@@ -1,0 +1,32 @@
+{
+  "number": 3434,
+  "kind": "issue",
+  "title": "seed-loader: mode:'insert' datasets duplicate on every replay boot — showcase memberships 3→6→9 (needs composite externalId or explicit key)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-24T13:04:45Z",
+  "updated_at": "2026-07-24T15:04:57Z",
+  "closed_at": "2026-07-24T15:04:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3434",
+  "body": "## 现象\n\n`mode: 'insert'` 的 dataset 在每次 boot 重放时**无条件重插**——`decideWriteAction` 的 `insert` case 直接落到 `return { action: 'insert' }`,不查 existing。showcase 的 `showcase_project_membership`(3 条,mode:'insert')实测:首 boot 3 行 → 重启 6 行 → 每次重启 +3。\n\n此前从未暴露,因为 #3415 让 membership 的 master-detail 父项目缺失、0 行入库;#3415 修复后(PR 见关联)它立即显形。\n\n## 根因与修法方向\n\nmembership 没有单字段天然唯一键(team+project 组合才唯一),所以 fixture 无法简单换 `upsert`/`ignore` —— SeedLoader 的 `externalId` 只支持单字段。两个方向任选:\n\n1. **引擎**:`externalId` 支持组合键(`externalId: ['team','project']`),fixture 换 `mode:'ignore'`;\n2. **fixture 侧最小修**:给 membership 对象/种子加一个显式唯一 `name`(如 `'Experience@Website Relaunch'`)作为 externalId,换 `ignore`。\n\n方向 1 更根治(任何 join 表种子都会遇到);方向 2 一行可落。\n\n## 复现\n\n`os dev --seed-admin -d file:/tmp/x/data.db` 起 showcase(含 #3415 修复)→ 重启一次 → `select count(*) from showcase_project_membership` = 6。boot banner(新增的 Seeds 行)每次重启显示 `3 inserted`。\n"
+}

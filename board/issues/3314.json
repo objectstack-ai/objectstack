@@ -1,0 +1,33 @@
+{
+  "number": 3314,
+  "kind": "pull_request",
+  "title": "docs(skills): document the sandboxed hook `body` ctx/capability contract",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T17:38:03Z",
+  "updated_at": "2026-07-19T18:08:06Z",
+  "closed_at": "2026-07-19T18:08:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-19T18:08:03Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3314",
+  "body": "## What & why\n\nThe `objectstack-data` hooks docs explained lifecycle **events** and **registration**, but never the sandboxed **`body`** form — the metadata-native shape (`{ language, source, capabilities }`) that a metadata-only runtime actually executes and that ships inside every build artifact. A third-party evaluator on 15.1.x got hooks working only by **reverse-engineering `@objectstack/runtime`'s dist** (memory `project_thirdparty_eval_15_1_findings`). This fills that gap.\n\n## Adds a \"Sandboxed Hook Bodies (`body`)\" section to `references/data-hooks.md`\n\nVerified against runtime source **and** a live `create-objectstack@15.1.1` repro:\n\n- **`body` vs the deprecated inline `handler`** — where each runs (QuickJS VM vs full Node), how each ships, that `body` wins when both are present.\n- **The sandbox `ctx`** — `input` / `previous` (`undefined` on insert → `!ctx.previous` = create) / `result` / `user` / `session` / `event` / `object` / `api` / `log` / `crypto`, marshalled as a JSON snapshot.\n- **`ctx.api.object(n)` repo** — `find` / `findOne` / `count` / `insert` / `update({ id, ...fields })` / `upsert` / `delete`. **Query key is `where`** (object + `$`-operators) — **not** `filter: [['id','=',x]]` (that array-of-triples value matches nothing).\n- **The six legal `HookBodyCapability` tokens** (`api.read`, `api.write`, `api.transaction`, `crypto.uuid`, `crypto.hash`, `log`) + call-time gating/throw behaviour.\n- **Sandbox globals** — verified available (`Date`/`Math`/`JSON`/`Promise`/`Map`/…) vs absent (`console`/`fetch`/`setTimeout`/`URL`/…), and build-rejected identifiers (`import`/`process`/`eval`/free identifiers).\n- **Gotcha 1** — afterUpdate `ctx.result` is a **partial** patch → re-query for a lookup FK it doesn't carry.\n- **Gotcha 2** — cross-object writes obey the **target's** sharing model (`public_read` → `FORBIDDEN: insufficient privileges`, **admin not exempt**).\n- A **copy-paste afterUpdate example** (gated by the `<!-- os:check -->` tsc gate) + `[BodyRunner]` troubleshooting (incl. `ctx.log` emission is best-effort).\n\nPlus: a quick-ref `body` block in `rules/hooks.md`, a `SKILL.md` pointer, a stale **\"14 events\" → 8** fix, and the handler-form Cross-Object API example switched to canonical `where`.\n\n## Correction vs the source brief\n\nThe brief specified `findOne({ filter: [['id','=',id]] })`. Source + the #1867 real-engine/real-sandbox integration test + the objectstack-query skill all show the canonical key is **`where`** with an object value; `filter` is only a tolerated object-valued alias, and the triple-array value isn't supported. The docs teach `where` accordingly.\n\n## Verification\n\n- **Live repro:** scaffolded `npx create-objectstack@latest` (15.1.1), added `candidate`/`position` objects + the doc's hook verbatim, `os dev`, drove it over REST → hook fired, re-query + cross-object `update` landed (`position.status = filled`), **zero `[BodyRunner] threw`**. A `beforeInsert` probe confirmed the globals table.\n- **Gates green:** `check:skill-docs`, `check:skill-refs`, `check:skill-examples` (new example type-checks against built `@objectstack/spec`), `check:doc-authoring`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

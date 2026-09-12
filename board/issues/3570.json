@@ -1,0 +1,35 @@
+{
+  "number": 3570,
+  "kind": "pull_request",
+  "title": "fix(authz)!: make the `group` posture an entitlement again — ADR-0105 D12 correction",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T06:44:14Z",
+  "updated_at": "2026-07-27T07:03:20Z",
+  "closed_at": "2026-07-27T07:03:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T07:03:18Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3570",
+  "body": "Follow-up to #3559. Tracking: #3541.\n\n## What was wrong\n\n#3559 read ADR-0105 D12 as \"the `group` wall ships open\" and made the posture **self-activating** — `tenancy-service` returned `isolationActive: true` for `group` without ever probing for `@objectstack/organizations`.\n\nTwo consequences, both bad:\n\n1. **`group` became a free multi-org path around the `isolated` gate** (ADR-0081 D2). Anyone wanting multi-org would simply pick `group`. The *weaker* isolation ended up as the free one — not a boundary anyone would draw deliberately.\n2. **A silent-degradation hole.** `os serve` still gated the enterprise package load on `OS_MULTI_ORG_ENABLED`, so `OS_TENANCY_POSTURE=group` skipped both the package load *and* the ADR-0093 D5 fail-fast — booting an unwalled multi-org deployment with no warning. That is precisely the ADR-0049 class the D5 guard exists to close.\n\n## The distinction that was missed\n\n**Open code is not free activation.** The wall's implementation has always lived in the open packages — equally true of `isolated`, whose Layer 0 wall sits in `plugin-security` and is gated on a service the enterprise package registers. Cloud ADR-0016's 铁律 (强制免费、治理收费) guarantees that a deployment **running** a multi-org shape is safe; that is satisfied by **refusing to run one unwalled**, not by giving the posture away.\n\n## Changes\n\n- **`tenancy-service`** — `group` probes `org-scoping` exactly like `isolated`. Without it the posture resolves to `single` and reports `degraded`.\n- **`os serve`** — the D5 boot guard now keys off the resolved **posture**, not `OS_MULTI_ORG_ENABLED`, and its message is posture-aware. A `group` request without the runtime refuses to boot unless `OS_ALLOW_DEGRADED_TENANCY=1`.\n- **New seam: the runtime declares what it entitles.** `org-scoping` may expose `supportedPostures` (`OrgScopingEntitlement`, `@objectstack/spec/security`); the open side honours it and fails closed on anything unlisted. Whether `group` and `isolated` are one commercial tier or two is *packaging policy*, which belongs to the commercial runtime rather than hard-coded in open core. Omitting the field entitles every walled posture, so existing runtimes are unaffected.\n- **`organization_id` stamping returns to the enterprise runtime.**\n\n  This one is worth spelling out. #3559 moved auto-stamping into the open engine, which removed the closed package's only load-bearing runtime duty. The framework checks the gate by service *truthiness*, so after that change a five-line forged registration —\n\n  ```ts\n  class Fake { async init(ctx) { ctx.registerService('org-scoping', this); } }\n  ```\n\n  — would have yielded a **fully working** multi-org deployment. Before it, the same forgery gave you a wall with no stamper: rows land with `organization_id = NULL`, the wall hides them, and you get a broken deployment instead of an unlicensed working one. Stamping is back where it was.\n\n  **Write-side validation stays open and is unchanged, bulk-insert coverage included** — rejecting a forged `organization_id` is a security property, not a packaging one. Only filling an *absent* value moved back.\n- Default-organization bootstrap returns to `single`-only; every walled posture keeps its existing owner (ADR-0081 D1).\n\n## Still open (not this PR)\n\nPresence-of-service remains a coarse gate — cloud ADR-0081 already listed licence-gating beyond package presence as a deferred ADR-0022 follow-up. The `supportedPostures` seam added here is the right carrier for a real licence check when that lands. Worth stating plainly: any check living in open code can be patched out, so the realistic goal is raising effort and making circumvention a deliberate licence violation, not technical prevention.\n\n## Verification\n\n- `pnpm build` — 71/71\n- `pnpm test` — 131/131 (serial). In the default parallel run `packages/lint/src/lazy-deps.test.ts` fails reproducibly: it spawns child `node` processes that import `packages/lint/dist` while turbo restores that same `dist` from cache. Pre-existing infrastructure race, not related to this diff — the rule added in #3559 is a pure, import-free module and the test's structural check passes. Confirmed by `TURBO_CONCURRENCY=1 pnpm test` going green.\n- `pnpm lint` + all five repo grep guards — clean\n- Spec drift gates (`api-surface` regenerated, `docs`, `spec-changes`, `upgrade-guide`) — in sync\n\nNew coverage in `tenancy-service.test.ts`: `group` degrades without the runtime; entitlement honoured / withheld / empty / throwing; entitlement never consulted when the runtime is absent. `security-plugin.test.ts` and `authz-matrix-gate.test.ts` assert the engine does **not** stamp while still rejecting forged values, bulk included.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_015FebXPaaGrLhGKw1LHPbpL\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015FebXPaaGrLhGKw1LHPbpL)_"
+}

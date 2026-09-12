@@ -1,0 +1,34 @@
+{
+  "number": 3243,
+  "kind": "pull_request",
+  "title": "docs: finish implementation-accuracy audit — durable reference grouping + hand-written doc sync (#1880)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T16:42:01Z",
+  "updated_at": "2026-07-19T13:04:44Z",
+  "closed_at": "2026-07-19T13:04:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-19T13:04:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3243",
+  "body": "Continues the docs implementation-accuracy effort (#1880; follows #1866 / #1904). **Wave 1 audit complete — 164/164 hand-written docs.**\n\n## Summary\n- **Wave 1 — hand-written doc audit: 164/164 docs** via a multi-agent pipeline (per doc: locate the implementation in `packages/` → surgical fix → adversarial verify), all in a dedicated worktree.\n  - **335 evidence-backed fixes** across **116 docs** (the other 48 were already accurate → no change).\n  - **14 of those were verifier repairs** — the adversarial pass catching and correcting a wrong audit edit before it landed (e.g. a fabricated `permissionSet:` stack key → the real `permissions:`; a fabricated projection claim removed).\n  - **259 report-only residuals** logged — ambiguous / aspirational / frontmatter-locked items the agents correctly did **not** \"fix\".\n- **Wave 2.1 — durable reference grouping**: moved #1862's per-category sidebar grouping into `build-docs.ts` (fumadocs `---Section---` separators, drift-safe). `gen:docs --check` green.\n- **Wave 2.2 — generated-reference quality**: generator formatting verified solid (no dangling links, valid tables); filled `ui/view` describe strings. The ~1,180-property describe backlog (mostly self-documenting `z.literal` discriminants) is tracked continuation.\n\nRepresentative fixes: removed the retired `feed` client namespace; `password` fields are masked-on-read, not hashed; the `certified` measure flag is ADR-0021-not-yet-implemented; removed `softDelete` / `versioning` / `fileAttachmentConfig` / `vectorConfig` (all removed in 16.x, #2377); `referenceFilters` → `lookupFilters`; fabricated `definePlugin()` / `defineObject()` → `ObjectSchema.create`; `error-handling` fabricated SCREAMING_SNAKE codes + WebSocket/Business-Logic sections → real `StandardErrorCode` values.\n\n## Method / quality notes\n- Every fix cites file:line evidence; unverifiable claims were left unchanged per rule (e.g. I reverted one `percent` 0-1↔0-100 change I couldn't confirm in this repo — the scale lives in the `objectui` renderer).\n- A few batches had their adversarial-verify phase cut short by usage limits; those docs were audit-only and hand-checked against the spec before commit. The two protocol docs whose first audit was interrupted mid-edit were reverted and cleanly re-audited.\n- Vercel docs build (`gen:schema && gen:docs && next build`) green on every push.\n\n## Flagged follow-ups from the issue — both resolved\n- `os init` scaffold no longer emits a stale `ownership` literal (uses `sharingModel`; `ownership` is now a first-class field, #3175).\n- `ai-capabilities.mdx` was removed in the docs reorg — moot.\n\n## CODE / frontmatter follow-ups surfaced by the audit (out of scope for this docs-only PR)\nReal implementation gaps the audit found but couldn't fix here:\n- #3244 — `os explain object` documents `ownership` as `\"own\" | \"extend\"` (real: `user | org | none`). *(filed)*\n- `kernel/contracts/cache-service.mdx` **frontmatter** claims \"namespaces, and bulk operations\" the contract doesn't have (preserve-frontmatter rule blocked the body-only fix).\n- `OS_DATABASE_DRIVER=memory` has no branch in `serve.ts` dispatch (falls through to SQLite in-memory).\n- `@objectstack/driver-sql` declares peerDep `sqlite3` but loads `better-sqlite3` at runtime.\n- formula `js` dialect is registered only as a stub (`hasDialect('js')` is false).\n- `protocol/knowledge.mdx` has broken `ai-capabilities.mdx` cross-references (target removed in the reorg).\n- glossary \"TCK (Technology Compatibility Kit)\" is grep-empty (aspirational term).\n\n## Wave 2.2 describe-string backlog (continuation of #1880)\n~1,180 generated-reference properties still lack descriptions — most are self-documenting `z.literal` discriminants; the genuine gaps concentrate in internal protocol schemas (e.g. `data-engine`). Left for a follow-up.\n\n---\nLeft as a **draft** for maintainer review — not auto-merging.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_012urEihGTAsQP2xizAqfCwt"
+}

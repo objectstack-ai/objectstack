@@ -1,0 +1,35 @@
+{
+  "number": 3531,
+  "kind": "pull_request",
+  "title": "fix(i18n): translate SSO/SCIM/user-position/import-job admin objects",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T02:42:11Z",
+  "updated_at": "2026-07-27T03:13:16Z",
+  "closed_at": "2026-07-27T03:13:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T03:13:15Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3531",
+  "body": "## What\n\nAn audit following the bundle-ownership guard rollout (#3502) found **live, registered, UI-facing system objects** that were never added to their package's `i18n-extract.config.ts` and carried **no translation bundle entry** — so non-English admins saw raw English `label` metadata. The orphan-only guards from #3502 catch *stray* bundle keys, not *owned-and-live-but-never-extracted* objects, so this gap was invisible.\n\nThis adds i18n coverage for four such objects, with **real** zh-CN / ja-JP / es-ES translations (not `--fill=default` English placeholders):\n\n| Object | Package | UI surface |\n|---|---|---|\n| `sys_sso_provider` | platform-objects | listViews + Register SSO/SAML + Verify-Domain actions |\n| `sys_scim_provider` | platform-objects | admin grid |\n| `sys_user_position` | plugin-security | `userActions` create/edit/delete (sibling `sys_user_permission_set` already translated) |\n| `sys_import_job` | platform-objects | Import-Wizard history / Setup import grid / dashboards |\n\nThe three verified-internal objects (`sys_approval_approver`, `sys_approval_token`, `sys_audience_binding_suggestion`) are correctly left untranslated.\n\n## `sys_import_job` — why included\n\nLower-confidence at audit time (engine-owned, view-only, no `listViews`). Confirmed genuinely UI-surfaced: the objectui `@object-ui/plugin-grid` **Import Wizard has a real import-history view** (`importHistory.test.ts`, `isImportJobActive`/`isImportJobUndoable`), its own docstring names the *Setup import grid* + *dashboards*, and its structurally-identical siblings `sys_job` / `sys_job_run` are already translated. Leaving it out would reproduce the very sibling-inconsistency this audit fixes.\n\n## How\n\nPer object: added the schema to its package's extract config (import + `objects[]`), added the translation block to all four locale bundles, and extended the `bundle-ownership.test.ts` `OWNED_OBJECTS`. English blocks were tool-scaffolded via `os i18n extract` (proven regen-stable — a no-op run on the unmodified config produced a 0-line diff), then non-English leaves were hand-translated. Out-of-scope `metadata-forms` regen and pre-existing plugin-security object drift were reverted so the diff is exactly these four objects.\n\n## Verify\n\n- `pnpm turbo test --filter=@objectstack/platform-objects --filter=@objectstack/plugin-security` — green (both ownership guards pass; platform-objects guard re-run fresh to rule out cache)\n- `pnpm turbo build --filter=... --force` — green, DTS type-check active (`OS_SKIP_DTS` unset) → bundles are valid `TranslationData`\n- Structural parity confirmed across all four locales for every object; non-English strings differ from English except intentional keep-tokens (`ID`, OAuth/SAML placeholders, `urn:` NameID format)\n\nSingle `patch` changeset (both packages share one `fixed` group).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 3323,
+  "kind": "pull_request",
+  "title": "fix(showcase): call ctx.log.info/.warn in hook bodies — sandbox ctx.log is an object",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T18:47:50Z",
+  "updated_at": "2026-07-19T23:56:59Z",
+  "closed_at": "2026-07-19T23:56:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-19T23:56:57Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3323",
+  "body": "## 背景\n\n`examples/app-showcase` 的两个 hook body 用 `if (typeof ctx.log === 'function') ctx.log(...)` 守卫日志行,但沙箱 hook 运行时把 `ctx.log` 装成**对象** `{ info, warn, error }`(见 `packages/runtime/src/sandbox/quickjs-runner.ts` 的 `installCtx` 与 `script-runner.ts` 的 `ScriptContext.log`),所以 `typeof ctx.log === 'function'` **恒为 false**,这两行审计/告警日志是**死代码**,从不触发。\n\n## 改动\n\n改用正确的对象方法 API:\n\n| Hook | 改后 |\n|---|---|\n| `AuditTaskCompletionHook`(审计) | `ctx.log.info(...)` |\n| `WarnOverBudgetHook`(告警) | `ctx.log.warn(...)` |\n\n两个 hook 都已声明 `capabilities: ['log']`,无需改能力。body 保持极简(去掉死守卫后更短,便于当文档阅读)。\n\n> 说明:告警 hook 用了语义匹配的 `.warn`(hook 名 `WarnOverBudget`、描述 \"Emits a warning\"),它与 `.info` 同属正确 API,还顺带在 showcase 里演示了第二个日志级别,契合本文件\"exercise the full hook designer surface / read as documentation\"的定位。\n\n`ctx.log` 的发射本身是 best-effort(转发到 `ctx.log?.[level]?.()`,hook 路径下 host logger 可能缺省 → 静默 no-op),所以本改动修的是\"调对 API\",不改变可观测性;未把它们改造成写数据的 hook(超出范围)。纯 bug 修复,无需 changeset(AGENTS.md §263)。\n\n## 验证\n\n- `os validate` 通过(showcase 全量,仅有与本改动无关的预存权限/master-detail 警告)。\n- showcase `vitest run`:9 文件 / 55 测试全绿。\n- 契约核对:`quickjs-runner.ts` installCtx 把 `ctx.log` 装为对象、每 level 转发 `ctx.log?.[level]?.(...)`;`ScriptContext.log` 类型为 `{ info, warn, error }`。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

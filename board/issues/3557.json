@@ -1,0 +1,35 @@
+{
+  "number": 3557,
+  "kind": "pull_request",
+  "title": "feat(security)!: reconcile SharingRule authoring with the enforced runtime — group→team, +business_unit, prune guest + owner-type (#1878)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T04:32:56Z",
+  "updated_at": "2026-07-27T04:43:02Z",
+  "closed_at": "2026-07-27T04:43:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T04:43:00Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3557",
+  "body": "Closes the SharingRule loose end from the 2026-07 security-props recheck (objectstack-ai/objectstack#3503, umbrella #1878). Decision per owner directive: the system has **team**, not group; the rest judged against mainstream platforms, long-term surface honesty, and AI-authoring safety (ADR-0078).\n\n## Problem\n\nThe authoring `ShareRecipientType` enum drifted behind both the ADR-0090 D3 rename **and** the enforced runtime. `expandRecipient` already expands `team` (`sys_team`/`sys_team_member` via `TeamGraphService`) and `business_unit` (`BusinessUnitGraphService`) — but the authoring enum still offered the pre-rename **`group`** (silently skipped at seed time with a warn) and **omitted both live recipients**. `guest` had no runtime mapping at all, and **owner-type rules** (`type: 'owner'`, `ownedBy`) validated and were then skipped wholesale. The spec's own JSDoc claimed team/business_unit support the enum didn't deliver.\n\n## What changed\n\n| Authoring surface | Before | After |\n|---|---|---|\n| `group` | parsed, **silently skipped** | **renamed → `team`**, wired to the live `TeamGraphService` expansion |\n| `business_unit` | not authorable (runtime enforced it) | **added** — one unit's members, no subtree |\n| `guest` | parsed, silently skipped | **removed** — anonymous access is the public-form grant / share-link surface |\n| `type: 'owner'` (`ownedBy`) | parsed, skipped wholesale | **removed** — returns if membership-reactive re-materialisation is designed |\n| `queue` | never authorable | unchanged — runtime-reserved (no `sys_queue` yet) |\n\nNet invariant: **every authorable recipient and rule type now enforces** — nothing on this surface validates and then silently does nothing.\n\n- **spec**: enum surgery; `OwnerSharingRuleSchema` + type export deleted; `SharingRuleSchema` = the criteria form (`SharingRuleType = ['criteria']`, union slot documented for future enforced types); JSDoc rewritten.\n- **plugin-sharing bootstrap**: `team` mapped; retired shapes kept as **defensive skips** (stale pre-built packages) — never seeded as match-all (ADR-0049).\n- **examples**: both never-enforced owner rules migrated to enforced criteria rules (`share_open_tasks_with_manager`, `share_active_leads_with_manager`).\n- **dogfood**: the \"owner rule honestly skipped\" test flips to \"criteria replacement seeds + enforces\" — proven on a real boot: **ruleCount 4→5**, `showcase_task` now hook-bound, `criteria_json` compiles to exactly `{done: false}`. authz-conformance `sharing-rules` row updated.\n- **docs**: recipient table now all-enforced + a retired-shapes note; references regenerated; manifest key dropped; api-surface −2 exports.\n\n## Verification\n\n- spec **6882** + plugin-sharing **101** + crm **20** + showcase **58** + dogfood **17** tests green (incl. a real kernel boot seeding the migrated rules).\n- spec / downstream-contract / all-examples `tsc --noEmit` clean (the frozen third-party consumer uses none of the removed exports).\n- `check:docs` / `check:api-surface` / `check:skill-refs` / `check:skill-examples` in sync; skills contain no retired shapes.\n\n**Breaking → ships as `minor`** per the launch-window breaking-as-minor policy; the changeset carries the FROM→TO migration (stale definitions fail parse with the valid options listed — loud at authoring time, exactly the ADR-0078 posture).\n\nRefs #1878, #2077, #1887.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 3398,
+  "kind": "issue",
+  "title": "better-auth update-user validation failure returns raw 500 empty body (should be a 4xx)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-22T01:10:40Z",
+  "updated_at": "2026-07-22T01:40:01Z",
+  "closed_at": "2026-07-22T01:40:01Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3398",
+  "body": "## Summary\n\nOn the better-auth endpoints (`packages/plugins/plugin-auth`), a field-level validation failure raised by the ObjectQL record-validator surfaces to the HTTP client as a **raw 500 with an empty body**, instead of a clean 4xx carrying the validation message.\n\n## Repro (against a running dev server)\n\n1. Sign in.\n2. `POST /api/v1/auth/update-user` with `{\"image\":\"notaurl\"}`.\n\n**Actual:** `HTTP 500`, empty body.\n**Expected:** ~`HTTP 400` with `{ code: 'VALIDATION_FAILED', message: \"image must be a valid URL (scheme://...)\", fields: [...] }`.\n\n## Root cause\n\nThe better-auth `update-user` endpoint writes through the objectql-adapter (`packages/plugins/plugin-auth/src/objectql-adapter.ts`) into the ObjectQL engine. When the engine's record-validator (`packages/objectql/src/validation/record-validator.ts`) throws a `ValidationError`, better-auth does **not** map it: better-auth only turns its *own* `APIError`s into structured responses. Any other error thrown from an adapter method propagates to better-call's router as an unhandled fault → `500 {}`.\n\nThe REST data layer already handles this via `mapDataError` / `sendError` (`packages/rest/src/rest-server.ts`), translating an ObjectQL `ValidationError` into `400 { code: 'VALIDATION_FAILED', fields }`. The better-auth path has no equivalent.\n\n## Fix direction\n\nAdd the auth-path analogue of `mapDataError`: detect the ObjectQL validation envelope at the adapter boundary (duck-typed by `code` / `name`, no hard dependency on `@objectstack/objectql`) and re-throw it as a better-auth `APIError('BAD_REQUEST', …)` so the endpoint answers with a 400 carrying the message + per-field detail. Add a unit test.\n\n## Context\n\nNoticed while fixing the avatar-upload 500 (data: URIs rejected by the url validator; that specific case is fixed on branch `claude/user-avatar-upload-error-d4c8e5`). This issue is the *generic* mapping gap, independent of that specific validator case.\n"
+}

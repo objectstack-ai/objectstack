@@ -1,0 +1,34 @@
+{
+  "number": 2502,
+  "kind": "issue",
+  "title": "Rule: when chart data stays inline vs. requires a dataset (expressibility boundary)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-01T01:09:17Z",
+  "updated_at": "2026-07-21T15:15:24Z",
+  "closed_at": "2026-07-21T15:15:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2502",
+  "body": "## Why\n\nCharts can carry their data query **inline** (self-contained: `objectName` + `aggregate` + `filter`) or reference a named **dataset**. We need one **mechanical, checkable rule** so an author — especially the build agent — deterministically picks the right one. Without it we get drift both ways: datasets created for trivial queries (over-abstraction, hidden coupling) and inline queries that quietly can't express what's asked (under-abstraction).\n\n## Decision principle\n\nThe choice is made **purely on expressibility** — *can the inline chart-query engine express this query?* It is **not** made on reuse, on \"a dashboard filter drives it\", or on \"it might change later\". \n\n\"Should this be a governed / canonical metric\" is a **separate human promotion** (`save as dataset`), layered on top — never something the agent infers from the query. The agent's rule is expressibility only.\n\n## The rule (draft — details below to standardize)\n\n**Default inline. A dataset is required only when the query cannot be expressed inline.**\n\n### Inline envelope (what a chart's own query may hold)\n- exactly one object (+ its direct lookup fields for filtering / labels)\n- filters: field/op/value, `and`/`or` compound — all resolvable on that object (or a direct lookup)\n- group by: 0..N fields on that object\n- aggregate: one function (`count`/`sum`/`avg`/`min`/`max`) over one field\n- sort + limit\n\nFits entirely inside this → **inline**; do not create a dataset.\n\n### Dataset triggers (any one → dataset)\n1. **Join across objects that changes grain** — mixes rows/fields from >1 object, beyond \"aggregate a child by a parent field\". e.g. revenue (Invoice) by industry (Account).\n2. **Computed / derived column** — a field that must be expressed, not stored (`margin = revenue - cost`; a CASE bucket).\n3. **Aggregate of an aggregate** (multi-level) — e.g. average of per-account totals.\n4. **Window / sequential** — rolling N-day, running total, rank, period-over-period.\n5. **Pivot / reshape** — rows→columns (matrix), or a grain group-by can't produce.\n6. **Union of sources** — one series combining rows from two objects.\n7. **A parameter that reshapes the query** (grain / window / join) — not one that plugs into a `WHERE` (that's a dashboard filter → #2501).\n\n### Explicitly NOT triggers (stay inline)\n- Appears in 2+ charts (agent writes multiple copies; harmless drift).\n- A dashboard filter drives it (dashboard variable + per-chart field binding → #2501).\n- Might change later (agent edits inline).\n- \"Want it governed / canonical\" — a human promotion, not an agent inference.\n\n## Details to standardize (the point of this issue)\n\nThe rule above is the shape; the edges need pinning to the real engine:\n\n- [ ] **Pin the inline envelope to what `ObjectChart` / `analytics.query` actually supports** — this is the source of truth, not the prose above. Enumerate: relationship rollups, multiple series, multiple group-by fields, HAVING-style filters on the aggregate, date-bucketing (by month/quarter).\n- [ ] **Is a direct parent→child relationship aggregate inline or a join trigger?** (e.g. \"task count per project\" over a lookup.) Decide and document; it's the most common ambiguous case.\n- [ ] **Computed column boundary** — display formatting / unit conversion (still inline?) vs. a real derived expression (dataset). Where's the line.\n- [ ] **Filter depth on lookups** — one hop inline; multi-hop → dataset?\n- [ ] **Promotion flow** — inline → `save as dataset`: how the chart switches from an inline query to `datasetRef`, and whether it's reversible.\n- [ ] **Encoding** — write the rule into the `objectstack-ui` skill (datasets/analytics section) so the build agent reads it (same pattern as the react-blocks contract). \n- [ ] **Optional enforcement** — an `os build` lint that flags (a) a dataset created for an inline-expressible query, and (b) an inline query using a construct the engine can't express (should have been a dataset).\n\n## Acceptance\n\nGiven a data need, the build agent deterministically picks inline vs dataset per the pinned envelope; a lint (if built) flags both over- and under-abstraction; the ambiguous cases above have a documented answer.\n\nRelated: #2501 (dashboard-level filters — the \"parameter that plugs into a WHERE\" side of trigger #7)."
+}

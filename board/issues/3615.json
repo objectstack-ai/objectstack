@@ -1,0 +1,35 @@
+{
+  "number": 3615,
+  "kind": "pull_request",
+  "title": "feat(spec)!: 解散 ObjectStackProtocol 组合别名 — D9 终态（v17 开窗，#3606）",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "allow-major",
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T09:40:41Z",
+  "updated_at": "2026-07-27T09:52:11Z",
+  "closed_at": "2026-07-27T09:52:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T09:52:09Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3615",
+  "body": "## v17 大版本第一刀（用户拍板开窗）\n\nADR-0076 D9 的最后一步：过渡期组合别名解散。\n\n- **spec**：12 契约 extends 别名 + `ObjectStackProtocolSchema`（171 行 Zod）+ `ObjectStackProtocolZod` 推断类型删除；注释改指按域窄依赖指引。\"统一\"由 runtime discovery services 注册表承担——静态 union 是它的劣化快照（rev.7 裁决原文）。\n- **metadata-protocol**：`ObjectStackProtocolImplementation` 的 implements 收窄到**真实实现的四域**（Data/Metadata/Analytics/Package）——旧 12 路 implements 触发的 TS2559 恰是 D10 证据的编译器可见版：门面从未实现其余八域，它们在各自服务里、经 discovery 到达。\n- 生成物三链同步（api-surface 重生 / references 251 文件 / skill-refs sync ✓）。\n- **跨仓核查**：cloud/objectui 零别名 import（已扫）。\n\n## 验证\n\n全仓 build 72 任务 + test 132 任务全绿。零运行时行为变化（纯类型/schema 层）。\n\nchangeset **major**（v17 窗口）——已加 `allow-major` label 走护栏白名单通道。\n\nCloses #3606。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

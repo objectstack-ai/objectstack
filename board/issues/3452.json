@@ -1,0 +1,35 @@
+{
+  "number": 3452,
+  "kind": "pull_request",
+  "title": "fix(seed-summary): count the marketplace rehydrate heal in the boot banner, and make the counter accumulate",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-24T15:02:41Z",
+  "updated_at": "2026-07-24T15:41:36Z",
+  "closed_at": "2026-07-24T15:41:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3452",
+  "body": "## 背景\n\n#3435 刚合并,给启动 banner 加了 `Seeds:` 行(由 kernel 的 `seed-summary` 计数器驱动),并修了 showcase 项目种子的 FSM 出生态问题。但那个计数器**只有 AppPlugin 的 config app 种子会写**。marketplace 的 rehydrate heal(#3421,在同一个 boot-quiet 窗口把已装包的样例数据补进空库)什么都不写 —— 于是 marketplace 包 heal 出来的行、以及最关键的「装了但 0 行」空状态,在 banner 上完全不可见(而这正是这条 Seeds 行存在的意义)。showcase 实测:banner 读 `130 inserted · 6 updated`,而 HotCRM 在旁边静默 heal 了 162 行,一个数都没进 banner。\n\n## 两个把「直接 fold-in」卡住的潜伏 bug\n\n排查中发现 #3435 的计数器本身就不工作,只是单 config app 场景掩盖了:\n\n1. **读永远 undefined**:它用 `(ctx as any).kernel?.getService('seed-summary')` 读旧值,但插件 `PluginContext`(`packages/core/src/kernel.ts:76`)根本没有 `.kernel` 句柄 —— 只有 `getService`/`registerService`。所以每次读都是 undefined,每次写都是盲覆盖,从不累加。\n2. **第二次 register 抛异常**:`registerService(name, …)`(kernel.ts:195)遇到重名直接 `throw 'already registered'`。第二个写入方的注册抛出被 try/catch 吞掉。两者叠加,#3435 注释里的 \"accumulates across apps\" 从来没成立过 —— 谁最后写谁赢。showcase 的 130 行多阶段 FSM 种子超过 8s budget 后台晚写,正好把 marketplace 的值覆回 `130·6`。\n\n## 修复\n\n`@objectstack/types` 新增共享的 `accumulateSeedSummary(ctx, delta)`:**注册一个可变计数对象一次,之后所有写入方就地 mutate 它** —— 与种子来源顺序无关、且不受 kernel `getService` 缓存影响,race/cache 双安全(第一个注册者赢,后来者 catch 掉 already-registered 并取回同一个对象继续 mutate)。AppPlugin 与 marketplace heal 都改用它。heal 把补进的行记为 inserted/updated;**heal 落 0 行时强制 rejected≥1**,让「装了但 0 行」升级成 banner 的黄色告警。\n\n## 验证\n\nshowcase fresh boot 现在 banner 读 **`292 inserted · 6 updated`**(130 config + 162 HotCRM heal),不再是 `130 · 6`;`crm_opportunity`=61、`crm_contact`=5 实测在库。新增单测:`@objectstack/types` accumulateSeedSummary 6 例(含「第二写入方必须累加不被 already-registered 吞掉」「已被读取方持有的对象引用能看到后续写入」),marketplace heal 6 例(healed 计入 / 空 heal 升 rejected / loader 错误数透传 / present·purged 不动计数器 / 叠加在 config 之上)。types 32、cloud-connection 69、runtime 587 全绿。\n\n## 与 #3435 的关系\n\n只在 #3435 之上做**加法**:复用它的 `seed-summary` 服务与 banner 渲染(`printSeedSummary` 未改动),补齐它没覆盖的 marketplace 路径,并修好它那个单 config app 场景没暴露的累加 bug。\n\n## 备注\n\n发现但不在本 PR 范围:`(ctx as any).kernel` 的死用法在仓库里还有两处(`app-plugin.ts:752` 与 `marketplace-install-local-plugin.ts:887` 的 `seed-datasets` 注册)—— 它们的**写**靠 `?? ctx.registerService` 兜底能工作,但**读** prev 同样恒 undefined。多租户 per-org replay 依赖 seed-datasets,值得单独 audit(已在我的多租户时序 audit 待办里)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

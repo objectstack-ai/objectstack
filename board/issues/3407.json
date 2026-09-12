@@ -1,0 +1,32 @@
+{
+  "number": 3407,
+  "kind": "issue",
+  "title": "service-automation: update_record reports `success` when written fields are silently stripped — no observability for dropped writes (split from #3356)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-22T14:10:17Z",
+  "updated_at": "2026-07-24T12:12:08Z",
+  "closed_at": "2026-07-24T12:12:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3407",
+  "body": "## 背景\n\n从 #3356 的「次级问题(可拆单)」拆出。#3356 的**主因**(`runAs:'user'` 凭证空心 —— 触发上下文从不携带触发人的权限集/岗位)已由 #3389 修复,随 **16.1.0** 发布。本单只跟进剩下的**可观测性**缺口。\n\n## 现象\n\n`update_record` 节点**无条件**返回 `success`,即使请求写入的字段被服务端丢弃:\n\n```ts\n// packages/services/service-automation/src/builtin/crud-nodes.ts\nconst result = await data.update(objectName, fields, { where: filter, context: dataCtx });\nreturn { success: true, output: { result, object: objectName } };\n```\n\n字段丢弃发生在数据层若干处,**各自都是合法语义**:\n\n- 静态 `readonly: true` 字段的 caller-supplied 写 —— `stripReadonlyFields`(#2948);\n- `readonlyWhen` 条件只读;\n- FLS 写门 / 字段级权限不足。\n\n数据层确实打了 warn(`packages/objectql/src/validation/rule-validator.ts:335`),但那条日志落在**服务端 logger**,不进**流程运行的步骤日志**。作者看 run trace 只看到一条 3ms 的 `success`。\n\n这正是 #3356 里两条审批流的 stage 回写整链失效被掩盖的原因:`sharingModel: 'public_read_write'` 对象上对象级不拦,readonly 镜像字段被静默剥离,节点报 success 而 DB 真值恒空,极难察觉。\n\n需要说明的是:#3356 的授权根因修好之后,「因为零权限集被剥离」这一类已经不再发生;但 `readonly` / `readonlyWhen` / FLS 这些**语义上正确**的剥离依旧静默,所以这条可观测性缺口独立存在,不随 #3389 消失。\n\n## 期望\n\n`update_record`(以及同理的 `create_record`)在「请求写 N 个字段、实际生效 < N」时,至少在步骤结果上带一条 **warning**,列出被丢弃的字段名。\n\n`success` 与否可以维持不变(剥离本身是合法语义,不该升级成失败),关键是**不要沉默**。\n\n## 设计要点 / 待拍板\n\n需要一个把「被剥离的键」从数据层回传到调用方的通道。今天 `IDataEngine.update` 的返回类型是 `any`,节点侧拿不到「哪些键没落」的结构化信息。可选方向:\n\n1. **引擎回传**:update 结果里附带 `droppedFields`(或经 options 回填),节点直接读。最干净,但要动 `data-engine` 契约(`packages/spec/src/contracts/data-engine.ts`)。\n2. **节点侧 diff**:比对请求的 `fields` 键集与返回行的实际值。脆 —— 返回行不一定回显全部字段,值相等也可能是巧合。不推荐。\n3. **日志路由**:把数据层已有的 warn 通过 run-scoped logger 路由进流程步骤日志。侵入最小,但依赖 logger 上下文透传。\n\n倾向 1 或 3,需要先拍板再动手。\n\n**边界**:\n\n- `runAs: 'system'` 走系统上下文本就跳过 readonly 剥离,不受影响;\n- 批量 update(`where` 匹配多行)的措辞要留意 —— `readonlyWhen` 已经是「≥1 matched row」语义,不是逐行精确。\n\n## 参考\n\n- 原始 issue #3356(「次级问题(可拆单)」一节)\n- 主因修复 PR #3389\n- 剥离点:`stripReadonlyFields` — `packages/objectql/src/validation/rule-validator.ts:299`\n- 节点实现:`packages/services/service-automation/src/builtin/crud-nodes.ts`\n"
+}

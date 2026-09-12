@@ -1,0 +1,32 @@
+{
+  "number": 3248,
+  "kind": "issue",
+  "title": "docs(skills): platform feature-flags example teaches a non-existent authoring surface",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T05:26:03Z",
+  "updated_at": "2026-07-19T17:37:19Z",
+  "closed_at": "2026-07-19T17:37:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3248",
+  "body": "## Context\n\nSurfaced by the new `check:skill-examples` gate (#3094 / #3215's sibling PR #3224). When tagging self-contained skill examples for type-checking, the **feature-flags example** in `skills/objectstack-platform/SKILL.md` failed to compile against `@objectstack/spec`. Unlike the other drifts fixed in that PR (simple wrong import paths), this one is a **deeper, structural** problem, so the block was deliberately **left as-authored and untagged** rather than shipping a guessed correction. This issue tracks the real fix.\n\n## The example (paraphrased)\n\n```typescript\nimport { defineStack } from '@objectstack/spec';\n\nexport default defineStack({\n  featureFlags: [\n    {\n      name: 'experimental_ai_copilot',\n      enabled: true,\n      strategy: 'percentage',\n      conditions: { percentage: 25 },\n      environment: ['production'],\n    },\n    // ...\n  ],\n});\n```\n\n## Why it's wrong (three concrete problems)\n\n1. **`featureFlags` is not a key on the `defineStack` input.** `ObjectStackDefinitionInputSchema` (in `packages/spec/src/stack.zod.ts`) has no `featureFlags` (nor `features`) top-level key. A consumer copying this hits `TS2353: 'featureFlags' does not exist in type 'ObjectStackDefinitionInput'`.\n\n2. **The only related schema is not an authoring input.** `features: z.array(FeatureFlagSchema)` lives inside `KernelCapabilitiesSchema` → mounted at `ObjectStackCapabilitiesSchema.system` (`packages/spec/src/stack.zod.ts`). But `ObjectStackCapabilitiesSchema` is a **runtime capabilities descriptor** — it's exported only as a type and is **not referenced by `ObjectStackDefinitionInputSchema`**. So feature flags currently have **no authoring home** in `objectstack.config.ts` via this path. Renaming `featureFlags` → `features` does **not** fix it (verified: `features` is not a top-level input key either).\n\n3. **`environment` shape/value is also wrong.** `FeatureFlagSchema.environment` (`packages/spec/src/kernel/feature.zod.ts`) is a **single** enum `z.enum(['dev','staging','prod','all']).default('all')` — not an array, and `'production'` is not a valid value (`'prod'` is). The example writes `environment: ['production']`.\n\n## What a fix needs to decide (not a mechanical rename)\n\nThe core question is a **product/spec decision**: *how (or whether) feature flags are authored in a stack.* Options include:\n- Add a real top-level (or nested) authoring key to `ObjectStackDefinitionInputSchema` that accepts `FeatureFlagSchema[]`, then rewrite the example against it; **or**\n- If feature flags are not author-declared (only a runtime descriptor), **remove/replace** the example with the actual mechanism (e.g. how flags are seeded/registered at runtime).\n\nWhoever owns the feature-flags surface should confirm the intended authoring path before the example is rewritten.\n\n## Definition of done\n\n- The `skills/objectstack-platform/SKILL.md` feature-flags example compiles against `@objectstack/spec` (correct key, correct `environment` scalar, valid enum value), **or** is replaced with the real mechanism.\n- Re-add the `<!-- os:check -->` marker above the block so `check:skill-examples` covers it going forward.\n\nRefs: PR #3224 (the gate + the deferral note in its description)."
+}

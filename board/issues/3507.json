@@ -1,0 +1,35 @@
+{
+  "number": 3507,
+  "kind": "pull_request",
+  "title": "feat(runtime): 首批四域 handler 体抽到 domains/ 模块 — ADR-0076 D11 步骤③ PR-2 (#2462)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T01:15:58Z",
+  "updated_at": "2026-07-27T02:00:11Z",
+  "closed_at": "2026-07-27T02:00:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T02:00:10Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3507",
+  "body": "## 动机（#2462 D11 步骤③，系列第二刀）\n\nPR-1（#3491）落了注册表接缝；本 PR 开始搬体：`/analytics`、`/i18n`、`/notifications`、`/security` 四个 handler 体从 `HttpDispatcher` 上帝类抽到 `packages/runtime/src/domains/` 独立模块。**http-dispatcher.ts 净瘦 235 行**，每个域一个文件——\"agent 改一个域只读一个域\"开始兑现。\n\n## 关键决策：注册权留 dispatcher（修正原计划）\n\n原 issue 清单写\"按域抽取 handler 到**所属服务包**\"，实施调查推翻了它对多数域的适用性：**服务槽是多方提供的**——`i18n` 由 I18nServicePlugin **或** AppPlugin 内存 fallback（app-plugin.ts 对声明了 translations 的 stack 自动注册）提供；`analytics` 由 service-analytics **或** ObjectQLPlugin fallback 提供。路由是**槽的桥**，不是某个提供方包的私产——注册权移进任一提供方，另一提供方的部署就 404（正是 A2 调研警告过的回归形状）。独占槽的外部包仍可经 `registerDomainHandler()` 自注册。\n\n## 改动\n\n- `domains/analytics.ts` / `i18n.ts` / `notifications.ts` / `security.ts`：体逐字搬迁，运行在显式 `DomainHandlerDeps` 契约上（resolveService / getService / success / error——域可触碰的全部 dispatcher 面，从此可见可审）。\n- dispatcher 保留薄 `handleXxx` 委托（测试等直调方零改动）。\n- `/notifications` + `/security` 撤出 if 链进注册表；registry 新增 `match: 'segment'`（精确复刻 `=== p || startsWith(p+'/')` 分支形状，`/securityfoo` 不误吞）。\n- 清除 dispatcher 不再使用的 `resolveLocale` import。\n\n## 验证\n\n- 接缝套件 18 测试（新增 segment 语义 + notifications 401/列表 + security 503/匿名拒绝/segment 边界）。\n- runtime 全量 617 绿；http-conformance 跨适配器 41 断言绿；25 包下游 `--force` 含 DTS 全绿。\n\n关联 #2462（D11 步骤③ PR-2）。后续 PR 逐域复制该模式（keys/storage/ui/share-links/packages/…），全部迁完后 catch-all 退役解锁步骤①。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

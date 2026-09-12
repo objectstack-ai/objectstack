@@ -1,0 +1,30 @@
+{
+  "number": 3540,
+  "kind": "issue",
+  "title": "P0: organization_admin wildcard VAMA is contained only by the tenant wall — wall-less postures yield env-wide superusers (ADR-0105 F2 → D4)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T03:23:28Z",
+  "updated_at": "2026-07-27T05:50:29Z",
+  "closed_at": "2026-07-27T05:50:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3540",
+  "body": "## Problem\n\nThe `organization_admin` default permission set carries a wildcard superuser grant (`packages/plugins/plugin-security/src/objects/default-permission-sets.ts` ~L150-160):\n\n```ts\nobjects: {\n  '*': {\n    allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true,\n    viewAllRecords: true, modifyAllRecords: true,\n  },\n  ...\n}\n```\n\nand is auto-granted to **every** `sys_member` whose role contains `owner`/`admin` (`plugin-security/src/auto-org-admin-grant.ts`). The `viewAllRecords`/`modifyAllRecords` superuser bit short-circuits Layer 1 business RLS and sharing.\n\nIn the **isolated** posture, Layer 0 contains it (the W2 fix, cloud #2937 lineage — `tenant-layer.ts` requires the `PLATFORM_ADMIN` rung to cross the wall). But in any **wall-less** posture (`single`, or a hand-built multi-org shape) **nothing** contains it. Combined with automatic personal-org creation on signup, a wall-less multi-org deployment makes effectively every user an environment-wide superuser while operating in an org where they hold owner/admin.\n\nVerified on `main` (2026-07-27). This is finding **F2** of [ADR-0105](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0105-group-tenancy-posture-and-first-class-org-scope.md); the ADR marks it P0, shipping in the open edition **independent of the rest of the ADR** (decision D4).\n\n## Fix direction (ADR-0105 D4)\n\n- `viewAllRecords`/`modifyAllRecords` mean \"bypass ownership, sharing, and business RLS **within the caller's org access set**\" — never \"cross the org boundary\".\n- The Layer 1 superuser bypass no longer implies skipping the org predicate in any posture where one applies (already true in `isolated` per ADR-0095 W2; extend the invariant).\n- Wall-less postures get a **de-VAMA'd `organization_admin` variant** from `auto-org-admin-grant`, closing the personal-org amplification path.\n- Crossing org scope remains exclusively the `PLATFORM_ADMIN` rung on posture-permitting objects — unchanged.\n\n## Risk / guardrail\n\nD4 touches the superuser hot path. Land behind the `authz-matrix-gate` snapshot exactly as ADR-0095 did — any visibility delta outside the intended F1/F2 corrections is a bug.\n\n## Acceptance\n\n- [ ] In wall-less postures, an org owner/admin's VAMA no longer bypasses org-scoped predicates on other orgs' data.\n- [ ] Personal-org auto-creation no longer amplifies to env-wide superuser.\n- [ ] Conformance-matrix row: wall-less-VAMA (per ADR-0105 Phase 0).\n- [ ] `authz-matrix-gate` snapshot delta reviewed and limited to the intended corrections.\n\nRefs: ADR-0105 (F2/D4), ADR-0095 (W2), ADR-0066 (superuser bypass), cloud #2937."
+}

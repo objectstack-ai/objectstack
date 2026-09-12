@@ -1,0 +1,35 @@
+{
+  "number": 3496,
+  "kind": "pull_request",
+  "title": "feat(spec)!: prune dead aria/performance from ReportSchema + dogfood the live report chart (report-liveness close-out)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-25T03:46:03Z",
+  "updated_at": "2026-07-26T07:36:12Z",
+  "closed_at": "2026-07-26T07:36:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-26T07:36:10Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3496",
+  "body": "Report-liveness close-out — follow-up to #3463. Closes out the 2026-06 ReportSchema liveness audit (`docs/audits/2026-06-reportschema-property-liveness.md`), whose remaining findings were re-verified against current code.\n\n## What changed\n\n**1. Prune dead `aria` / `performance` from `ReportSchema`** (spec, breaking→`minor`)\nThe audit flagged both as dead — declared on `ReportSchema` (editable in the Studio report form) but read by **no renderer**. Confirmed still dead in objectui (zero readers on the render path). Removed them + the now-orphan `AriaPropsSchema` / `PerformanceConfigSchema` imports. Both schemas stay exported (still used by views/pages/charts); `ReportChart` keeps its own `aria` from `ChartConfigSchema`. No manifest-key or public-export change; `report.mdx` regenerated.\n\n**2. Refresh the stale audit doc + index**\nEvery finding in the 2026-06 audit is now resolved, and one was **wrong**: `report.chart` is *live*, not dead — `DatasetReportRenderer` plots `chart.xAxis`/`yAxis` via `DatasetReportChart` (`DatasetReportRenderer.tsx:429-465,773-786`). Added a resolution banner (chart=WIRED, aria/performance=pruned, re-exports=removed via #3463, joined-preview=fixed) and annotated the audits README section 2 (leaving the still-open chart-view/dashboard debt untouched).\n\n**3. Dogfood the live report chart**\n`report.chart` had **no showcase coverage** — none of the three showcase reports declared a `chart`. Added `showcase_hours_by_status_chart` (a `summary` report with a `chart` block: `est_hours` by `status`, bar) + an Analytics nav item, so the `DatasetReportChart` path is exercised by the showcase smoke.\n\n## Verification\n\n- `@objectstack/spec` build + 6850 tests pass; `check:api-surface` (unchanged — properties, not exports) ✓; `check:docs` (report.mdx in sync) ✓.\n- `examples/app-showcase` typecheck clean; backend boots with the new report (valid `chart` shape parses).\n- **Browser-verified** against the showcase backend: the new **Hours by Status (Chart)** report renders a bar chart (In Progress 100, In Review 54, …) via `DatasetReportChart`, with the summary table below; `POST /api/v1/analytics/dataset/query` all 200.\n\nRefs #3463, #1878, #1890.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

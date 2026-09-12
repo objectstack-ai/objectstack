@@ -1,0 +1,30 @@
+{
+  "number": 1880,
+  "kind": "issue",
+  "title": "docs: finish implementation-accuracy audit (remaining 82 hand-written docs + generated references)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T06:20:42Z",
+  "updated_at": "2026-07-22T21:01:13Z",
+  "closed_at": "2026-07-22T21:01:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1880",
+  "body": "Continuation of the docs implementation-accuracy effort. Two PRs already landed:\n\n- #1862 — nav reorg (Protocol Reference grouping, `Protocol` → `Protocol Overview`, removed empty `contracts/`)\n- #1866 — synced 46 hand-written docs (getting-started, concepts, 20 core guides) with actual code; 299 verified fixes\n\nThis issue tracks the **remaining** work, in two waves.\n\n## ⚠️ Important: #1862's per-module grouping is NOT durable\n\n`packages/spec/scripts/build-docs.ts` regenerates `content/docs/references/**` on every `gen:docs` (which runs in the docs production build: `gen:schema && gen:docs && next build`). It `rmSync`s each category folder and rewrites `references/{category}/meta.json` as a **flat alphabetical list** (build-docs.ts:326, 379), plus regenerates every `references/{category}/index.mdx` (line 420) and `references/meta.json` (line 448).\n\nSo the section grouping added to `references/{system,api,…}/meta.json` in #1862 gets overwritten the next time anyone runs `gen:docs`, and likely isn't even reflected on the deployed (Vercel-built) site. **The grouping must be moved into the generator to be durable.** (The `Protocol Overview` rename and root `content/docs/meta.json` are safe — they are outside `references/`.)\n\n## Wave 1 — remaining hand-written docs (82 files)\n\nAudit each against the real implementation in `packages/`, adversarially verify, apply fixes (surgical, preserve frontmatter, no file moves). Same process as #1866. Exclude `references/*/index.mdx` (generated).\n\n<details><summary>The 82 files</summary>\n\n- `content/docs/index.mdx`\n- **guides/** (top-level): airtable-dashboard-analysis, analytics-datasets, cloud-deployment, data-flow, driver-configuration, environment-variables, error-handling-client, error-handling-server, index, kernel-services, objectql-migration, plugin-chatbot-integration, production-readiness, publish-and-preview, single-project-mode, standards, troubleshooting\n- **guides/cheatsheets/**: backward-compatibility, error-catalog, field-type-decision-tree, field-type-gallery, field-validation-rules, permissions-matrix, protocol-diagram, query-cheat-sheet, quick-reference, wire-format\n- **guides/contracts/**: index, auth-service, cache-service, data-engine, metadata-service, storage-service\n- **guides/metadata/**: index, app, dashboard, doc, field, flow, object, page, permission, validation, view, workflow\n- **guides/runtime-services/**: index, audit-service, data-service, email-service, examples, queue-service, settings-service, sharing-service, storage-service, versioning\n- **protocol/**: index, knowledge\n- **protocol/objectos/**: index, config-resolution, error-handling, http-protocol, i18n-standard, lifecycle, metadata-service, plugin-spec, realtime-protocol, runtime-capabilities\n- **protocol/objectql/**: index, query-syntax, schema, security, state-machine, types\n- **protocol/objectui/**: index, actions, concept, layout-dsl, record-alert, widget-contract\n- **releases/**: index, v9\n\n</details>\n\n## Wave 2 — generated references (223 pages) + generator\n\nThese live under `content/docs/references/**` and are generated, so fixes go to the **source**, not the `.mdx`:\n\n1. **Make grouping durable** — port #1862's per-category section grouping into `build-docs.ts` (emit `---Section---` separators in each category `meta.json` instead of a flat sorted list). Define the grouping map there.\n2. **Improve generated content quality** — fill in / improve zod `.describe()` strings across `packages/spec/src/**/*.zod.ts` so the generated reference prose is accurate and useful; improve the generator's output formatting where needed.\n3. Re-run `gen:docs`, verify `next build`, browser spot-check.\n\n## Smaller follow-ups already flagged\n\n- `os init` scaffold still emits a stale `ownership` literal on the starter object (not a valid `ObjectSchema` key). _(noticed during #1866 quick-start audit)_\n- `ai-capabilities.mdx` frontmatter still mentions \"RAG pipelines\" (body was corrected in #1866; frontmatter left per preserve-frontmatter rule).\n\n## Method (reusable)\n\nThe #1866 pipeline worked well: a multi-agent audit workflow (one agent per doc → locate impl in `packages/` → adversarially verify each finding), then an apply workflow (one agent per doc → surgical edits in a dedicated worktree), then `next build` + browser verify + PR. Note: editing must happen in a dedicated git worktree (the repo's `guard-main-checkout` hook blocks edits on the shared `main` checkout)."
+}

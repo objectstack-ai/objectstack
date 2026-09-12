@@ -1,0 +1,32 @@
+{
+  "number": 3263,
+  "kind": "pull_request",
+  "title": "fix(platform-objects): surface sys_user phone_number in list views and detail highlights",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T07:42:58Z",
+  "updated_at": "2026-07-19T13:44:55Z",
+  "closed_at": "2026-07-19T13:44:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-19T13:44:53Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3263",
+  "body": "Fixes #3262\n\n## 问题\n\n启用 phoneNumber 插件后新建带手机号的用户，`phone_number` 正确落库，但 UI 无处显示：\n\n- `sys_user` 所有列表视图的 `columns` 都没有 `phone_number`；\n- 默认详情页是 slotted 定制页，亮点条与正文分区均为显式白名单，也不含 `phone_number`。\n\n纯手机号用户在各处只显示随机占位邮箱（`u-…@placeholder.invalid`），看起来像手机号丢了。\n\n## 修复（2 文件 / 4 行）\n\n- `sys-user.object.ts`：`all_users`、`me` 列表视图的 `columns` 加 `phone_number`（紧跟 email）。\n- `sys-user.page.ts`：详情页亮点条加 `phone_number`（与邮箱并列，同为登录标识），并同步加入亮点去重 `hideFields` 列表。\n\n字段的 zh-CN/ja-JP/es-ES 翻译（「手机号码」等）随 #2766 已存在，列标签与亮点标签自动生效，无需改翻译文件。\n\n## 验证\n\n- 真机实测（showcase 示例 + `OS_AUTH_PHONE_NUMBER_ENABLED=true` + 最新 objectui HMR console）：`/admin/create-user` 创建纯手机号用户 → 「全部用户」列表出现「手机号码」列并显示 `+8613800001111` → 记录详情页亮点条显示手机号。\n- `packages/platform-objects` 213 个测试全部通过；包构建（含 DTS）通过。\n\n纯 bug 修复，无 changeset（per AGENTS.md）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

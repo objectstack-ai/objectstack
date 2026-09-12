@@ -1,0 +1,34 @@
+{
+  "number": 3488,
+  "kind": "pull_request",
+  "title": "feat(spec)!: prune dead ReportColumnSchema/ReportGroupingSchema exports + unread report chart groupBy (#3463)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-25T03:07:03Z",
+  "updated_at": "2026-07-25T03:21:19Z",
+  "closed_at": "2026-07-25T03:21:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-25T03:21:17Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3488",
+  "body": "Closes #3463 (item 1 — the spec-side prune).\n\n## Context\n\nDeep-cleanup close-out of the report-chart disposition (follow-up to #3441, umbrella #1878/#1890). After the ADR-0021 single-form cutover a dataset-bound report expresses columns/grouping as dataset **measure/dimension name arrays** (`values`/`rows`/`columns` = `z.array(z.string())`), so `ReportColumnSchema` / `ReportGroupingSchema` were referenced by **no schema body** — they survived only as public type exports and were marked `@deprecated` in #3441.\n\n## What changed\n\n- Removed `ReportColumnSchema` / `ReportGroupingSchema` and their type exports (`ReportColumn` / `ReportGrouping` / `ReportColumnInput` / `ReportGroupingInput`) from `@objectstack/spec/ui`; dropped the now-orphan `ResponsiveConfigSchema` import.\n- Removed `ReportChart.groupBy` — the `[EXPERIMENTAL — not enforced]` series-split field flagged in #3441. The dataset-bound `DatasetReportRenderer` plots a single `xAxis`×`yAxis` series and never read it; only the retired legacy `ReportViewer` fallback consumed a top-level `groupBy`. `ReportChartSchema` is non-strict, so residual `chart.groupBy` in stored metadata is silently stripped on parse — no tombstone needed.\n- Dropped manifest ratchet keys `ui/ReportColumn` / `ui/ReportGrouping`; regenerated `content/docs/references/ui/report.mdx` and the spec API-surface snapshot.\n\n**Breaking → ships as `minor`** per the launch-window breaking-as-minor policy (precedent: `remove-enable-trash-mru`). The changeset carries the FROM→TO migration.\n\n## Migration\n\nNothing an author writes changes — no first-party or example report authored `ReportColumn` / `ReportGrouping` objects or `chart.groupBy`. TypeScript consumers importing the removed types from `@objectstack/spec/ui` have no replacement: model report columns as the dataset's measure names and grouping as its dimension names. The objectui `SpecReportColumn*` / `SpecReportGrouping*` re-exports are removed in the companion PR (objectstack-ai/objectui#chore/3463-retire-reportviewer-fallback).\n\n## Verification\n\n- `@objectstack/spec` build + 6857 tests pass; `tsc --noEmit` clean.\n- `check:api-surface` (6 exports removed, snapshot regenerated) ✓\n- `check:docs` (report.mdx regenerated, in sync) ✓\n- `check:skill-refs` / `check:react-blocks` in sync ✓\n- downstream-consumer-contract `tsc --noEmit` clean (the spec-break guard) ✓\n- `turbo build` across the cli dependency closure clean.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

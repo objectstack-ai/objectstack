@@ -1,0 +1,35 @@
+{
+  "number": 3485,
+  "kind": "pull_request",
+  "title": "chore(spec,cli): enroll webhook in the liveness GOVERNED set (#3462)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-25T02:45:10Z",
+  "updated_at": "2026-07-25T03:01:43Z",
+  "closed_at": "2026-07-25T03:01:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-25T03:01:41Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3485",
+  "body": "Closes the **final third of #3462** (umbrella #1878). `report` + `dashboard` landed in #3474; this enrolls `webhook`, which was deferred for two reasons — both handled here.\n\n## Why webhook was hard (and how it's resolved)\n\n**1. Not a registered metadata type.** `webhook` is absent from the metadata-type registry, so the gate can't resolve it via `getMetadataTypeSchema`. Registering it would switch on Studio webhook CRUD + `saveMetaItem` overlay acceptance + diagnostics sweeping — the wrong move while the authoring surface is still disconnected. Instead the gate **walks** it via a small `SPEC_ONLY_SCHEMAS` override in `check-liveness.mts` (consulted before the registry). Zero runtime blast radius — the accommodation is isolated to the gate script.\n\n**2. The whole authoring surface is dead (#3461, re-confirmed at HEAD).** Nothing materializes an authored `webhooks:` entry (stack / connector) into a `sys_webhook` dispatcher row — the runtime `AutoEnqueuer` reads only admin-authored `sys_webhook` rows (`auto-enqueuer.ts:175`). So `liveness/webhook.json` classifies **all 16 authorable props `dead`** + `authentication` `experimental` (HMAC-`secret`-only, its existing marker).\n\n## What's in the ledger\n\nPer-prop notes double as the **future materializer's mapping table** (#3461 option A): which props have a `sys_webhook` column equivalent (`object`→`object_name`, `isActive`→`active`, with the name mismatches flagged), which are `definition_json`-only (headers/secret/timeoutMs), and which have no sink anywhere (body/payloadFields/includeSession/retryPolicy/tags). It also documents the `objectql` `engine.ts:1183/1343` **dead-end** that registers `webhooks:` as inert in-memory metadata items nothing reads back — the trap that makes the surface *look* connected.\n\n## Author-warning wired (`@objectstack/cli`)\n\nAdded `{ type: 'webhook', key: 'webhooks' }` to `TYPE_COLLECTIONS` in `lint-liveness-properties.ts`, so `os compile` now advises that `webhooks:` is a silent no-op. The required `url` prop carries the **single warning per webhook** (one heads-up per artifact, not one per dead prop); `isActive` is left unmarked (default(true) boolean). The showcase's `TaskChangedWebhook` — which authors a `retryPolicy` that never fires — is the canonical real-world example.\n\n## Verification\n\n- **Gate red→green.** With `webhook` in `GOVERNED` and no ledger: `16 UNCLASSIFIED, exit 1`. With the ledger: `webhook 17 classified (dead 16, experimental 1)`, `✓ all governed-type properties are classified`.\n- **Lint contract test red→green.** 3 new positive tests fail before the `TYPE_COLLECTIONS` wire, pass after; all run against the **real** shipped ledger.\n- `@objectstack/spec` **6857** tests pass (258 files); `@objectstack/cli` **640** pass (61 files). Both packages build clean (CLI `tsc` with declarations).\n- README `Current state` count corrected 13→16 (it was stale after #3474) + webhook row + `SPEC_ONLY_SCHEMAS` exemption note.\n\n## Scope\n\n**Enrollment only** — this does **not** decide #3461's build-the-bridge vs retire-the-surface question. When that lands, the mapped props flip to `live` (cite the materializer) or the ledger is removed with the schema. No spec shape/behavior change (ledger + gate/lint config only).\n\nRefs #3461, #1891, #1878, #3197.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

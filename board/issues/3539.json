@@ -1,0 +1,30 @@
+{
+  "number": 3539,
+  "kind": "issue",
+  "title": "P0: collectRLSPolicies silently strips authored org-scoped RLS policies when org-scoping is inactive (ADR-0105 F1 → D3)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T03:23:16Z",
+  "updated_at": "2026-07-27T05:50:29Z",
+  "closed_at": "2026-07-27T05:50:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3539",
+  "body": "## Problem\n\n`collectRLSPolicies` (`packages/plugins/plugin-security/src/security-plugin.ts` ~L2785-2793) drops **any** RLS policy whose `using` expression contains the substring `current_user.organization_id` whenever org scoping is inactive (`!this.orgScopingEnabled`):\n\n```ts\nif (\n  !this.orgScopingEnabled &&\n  policy.using &&\n  policy.using.includes('current_user.organization_id')\n) {\n  continue;\n}\n```\n\nThe comment states the intent: strip the platform's **own wildcard tenant policies** in single-tenant deployments. But the substring match also swallows **app-authored** policies that legitimately reference `current_user.organization_id`. A declared, authored security policy is silently unenforced — exactly the ADR-0049 (\"no unenforced security properties\") defect class.\n\nVerified on `main` (2026-07-27). This is finding **F1** of [ADR-0105](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0105-group-tenancy-posture-and-first-class-org-scope.md); the ADR marks it P0, shipping in the open edition **independent of the rest of the ADR** (decision D3).\n\n## Fix direction (ADR-0105 D3)\n\n- Stop substring-matching. Tag the platform's own wildcard `tenant_isolation` policies with a provenance flag (or match on `object === '*'` ∧ shipped-by-default), and strip **only tagged** policies when isolation is inactive.\n- An authored policy referencing an unavailable context variable follows the existing availability path: fails closed at resolution, surfaced by the `isSupportedRlsExpression` authoring lint. It is never silently dropped.\n\n## Acceptance\n\n- [ ] Authored policy with `current_user.organization_id` in `using` survives collection in a deployment without org scoping (fails closed at resolution, with lint surfacing — not dropped).\n- [ ] Platform wildcard tenant policies are still stripped when isolation is inactive (no behavior change for the intended case).\n- [ ] Conformance-matrix row: authored-policy-survival (per ADR-0105 Phase 0).\n- [ ] No visibility delta in the `authz-matrix-gate` snapshot beyond the intended correction.\n\nRefs: ADR-0105 (F1/D3), ADR-0049."
+}

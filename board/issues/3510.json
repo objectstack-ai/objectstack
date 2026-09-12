@@ -1,0 +1,35 @@
+{
+  "number": 3510,
+  "kind": "pull_request",
+  "title": "fix(runtime): notifications 域尾斜杠正则 polynomial-redos 修复（#3507 暴露的 CodeQL high）",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T02:04:49Z",
+  "updated_at": "2026-07-27T02:11:46Z",
+  "closed_at": "2026-07-27T02:11:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T02:11:45Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3510",
+  "body": "## 背景\n\n#3507 把 handleNotification 体逐字搬进 `domains/notifications.ts`，搬迁让这行成为\"changed code\"，CodeQL 首次扫到 `path.replace(/\\/+$/, '')` 的 `js/polynomial-redos`（high）——该模式自 ADR-0030 就潜伏在原方法里，security 域的同款早已被拦并改为 split+filter（注释里就引用了这条规则），notifications 一直漏网。\n\n## 修复\n\n照 security 域先例：`path.split('/').filter(Boolean).join('/')`——不再对请求可控输入跑带量词回溯的正则。语义微差：子路径中的冗余斜杠折叠（`//read//` → `read`），与 security 域一致、方向更宽容，新增测试锁定。\n\n## 验证\n\n接缝套件 19 测试、runtime 全量 624 绿、DTS build 绿。\n\n关联 #2462 / #3507。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

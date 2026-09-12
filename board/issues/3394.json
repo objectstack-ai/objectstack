@@ -1,0 +1,35 @@
+{
+  "number": 3394,
+  "kind": "pull_request",
+  "title": "fix(platform-objects): allow import/export on sys_business_unit_member (#3025 / #3391 P0)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-21T15:53:40Z",
+  "updated_at": "2026-07-21T16:04:14Z",
+  "closed_at": "2026-07-21T16:04:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-21T16:04:12Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3394",
+  "body": "## 背景\n\n延续 #3025 / PR #3392。#3392 给 `sys_business_unit` 补上了 `enable.apiMethods` 白名单里的 `'import'`/`'export'`,解掉了业务单元列表页 Import/Export 按钮的 405(`OBJECT_API_METHOD_NOT_ALLOWED`)。但 **HRIS 组织树同步的完整场景是「单元表 + 成员表」两张一起批量导入**——`sys_business_unit_member` 仍停在 CRUD-only 白名单上,成员导入/导出路径照样 405。#3391 的 P0 清单本就把两张表配对,本 PR 补上 #3392 漏掉的那一半。\n\n## 改动\n\n- `packages/platform-objects/src/identity/sys-business-unit-member.object.ts:104` — `apiMethods` 追加 `'import'`, `'export'`。导入复用对象已授予的 `create`/`update` affordance,导出是批量读。\n- 回归测试(`platform-objects.test.ts`):锁死 `import`/`export` 存在 + 保留 CRUD 五件套。**已防假绿**:回退对象改动后测试如实变红(`expected [...] to include 'import'`)。\n- **Reconcile 安全**:该对象 `managedBy:'platform'`,但 `reconcileManagedApiMethods` 只剥通用写动词(`create/update/upsert/delete/purge` — `MANAGED_WRITE_VERB_AFFORDANCE`);`import`/`export` 不在其中,永不被剥离,声明的白名单原样到达 REST gate(`apiAccessDenialFromEnable`),故静态测试断言即运行时行为,无假绿。\n\n## 过渡态\n\n按 **#3391 P2**,per-object 的 `import`/`export` 显式声明将被一张派生映射表替代(import ⊆ create/update、export ⊆ list),届时两张业务单元对象的显式条目一起回收。测试与对象注释均已写明此过渡语义,防止后续被当样板回退。\n\n## 验证\n\n- `pnpm -C packages/platform-objects exec vitest run` → 214/214 全过。\n- `tsc --noEmit` → 0 错。\n\n---\n\n## 附:全仓「显式 apiMethods 白名单」对象盘点(#3026 §4 缺口盘点)\n\n扫描 `packages/**`(`cloud/` 在本仓无 `apiMethods` 声明;`objectui` 为独立仓,其 ImportWizard 405 兜底已由 #3391 P0 objectui 项跟踪)。判据:import ≈ 批量 create/upsert,export ≈ 批量 read;区分**无意缺口**(补)vs **刻意限制**(留,通常带注释/测试锁死)。\n\n### ✅ 本 PR 放开(无意缺口,#3391 P0 已授权)\n| 对象 | 原白名单 | 处置 |\n|---|---|---|\n| `sys_business_unit` | CRUD | #3392 已放开 |\n| **`sys_business_unit_member`** | CRUD | **本 PR 放开** |\n\n### ⏸ 全 CRUD 但**不宜现在显式加**——等 #3391 P1/P2 派生契约统一处理\n`sys_user_position`、`sys_user_permission_set`、`sys_position_permission_set`、`sys_position`、`sys_capability`、`sys_permission_set`(RBAC 配置/授权)、`sys_approval_delegation`、`sys_user_preference`、`sys_view_definition`(元数据走 metadata protocol)。\n\n> 理由:#3391 已定稿契约明确「显式声明模式全仓 60+ 对象 100% 遗漏」,长期方案是**派生**而非继续堆显式声明;逐个加只会增加 #3391 P2 待回收的过渡债。**且 #3025 开发计划把 `sys_permission_set` 用作反例控制项(必须继续 405)**——现在给 RBAC 对象加 import/export 会与该反例冲突。这些留给 P1 派生表统一放开更稳。\n\n### 🔒 刻意限制 / 天然不该导入——保持封死\n- **完全封死** `apiMethods: []`:`sys_jwks`、`sys_oauth_resource`、`sys_oauth_client_resource`、`sys_oauth_access_token`、`sys_oauth_consent`、`sys_oauth_client_assertion`、`sys_oauth_refresh_token`(OAuth/密钥/令牌内部件)。\n- **凭据/认证敏感**:`sys_api_key`、`sys_two_factor`、`sys_secret`、`sys_device_code`、`sys_verification`、`sys_account`、`sys_session`、`sys_scim_provider`、`sys_sso_provider`。\n- **身份走认证/邀请流**:`sys_user`(`get,list,update`——创建/删除走邀请+auth,另有专用批量用户导入流 #3236,不走通用 data import)、`sys_member`、`sys_organization`、`sys_invitation`。\n- **运行时/作业记录**:`sys_job`、`sys_job_run`、`sys_job_queue`、`sys_automation_run`、`sys_import_job`(**有 ADR-0103 引擎自持锁死注释**,导入「导入作业」本身无意义)。\n- **审计/日志(只读)**:`sys_email`、`sys_notification`、`sys_setting`、`sys_setting_audit`、`sys_audit_log`、`sys_activity`、`sys_metadata*`。\n- **消息 outbox**:`notification_receipt`、`notification_delivery`、`http_delivery`。\n- **其它运行时**:`sys_presence`、`sys_record_share`、`sys_share_link`、`sys_approval_request/approver/token/action`、`sys_audience_binding_suggestion`、`sys_team`、`sys_team_member`。\n- **OAuth 应用** `sys_oauth_application`:刻意锁死(注释 + `platform-objects.test.ts` 断言 `not.toContain('create'/'update'/'delete')`,所有写经 better-auth 包装器)。\n\n> 通用「UI 按钮 ↔ apiMethods 前后端一致性」设计问题已有独立 issue **#3391**(契约 **#3026**)跟踪,本 PR 不撞车、只做具体对象白名单补齐。\n\nRefs #3025, #3391.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

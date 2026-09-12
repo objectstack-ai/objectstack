@@ -1,0 +1,32 @@
+{
+  "number": 3353,
+  "kind": "issue",
+  "title": "中文工作区:分配类站内消息未国际化,且未读状态无法清除",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-20T06:59:05Z",
+  "updated_at": "2026-07-20T07:58:28Z",
+  "closed_at": "2026-07-20T07:58:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3353",
+  "body": "## 现象\n\n在中文(zh-CN)工作区,收到一条「分配给你」的站内消息,整条链路都是英文且未读状态无法清除。复现见截图:消息中心里显示 `sys_file \"repro.png\" assigned to you`(英文 + 裸对象 API 名),点击后进入 `sys_file` 详情页也是英文(FILE ID、SCOPE、Pending Upload / Committed / Deleted 状态条),且该消息点击后始终保持未读。\n\n## 三个独立缺陷\n\n1. **协作通知标题未国际化**(framework / `@objectstack/plugin-audit`)\n   `audit-writers.ts` 里 assignment(`collab.assignment`)与 @mention(`collab.mention`)的铃铛标题是硬编码英文字面量,且直接拼对象 API 名(`sys_file` 而非显示标签)。\n\n2. **`sys_file` / `sys_upload_session` 无翻译包**(framework / `@objectstack/service-storage`)\n   这两个对象从未提供 i18n bundle,导致文件详情页的字段标签与状态选项(待上传/已提交/已删除)在任何 locale 都渲染英文。\n\n3. **未读状态永远无法清除**(objectui / `@object-ui/app-shell`)\n   ADR-0103 把 `sys_notification_receipt` 改为引擎自持(`enable.apiMethods = get/list`),铃铛点击时仍用通用数据接口直接 create/update 回执,写入被拒且异常被静默吞掉,10s 轮询把行刷回未读。\n\n## 预期\n\n- 通知标题按**接收人** locale 显示(如「系统文件\"repro.png\" 已分配给你」),对象名用翻译后的显示标签。\n- 文件详情页字段/状态条显示中文。\n- 点击通知后未读状态持久清除。\n\n## 修复落点\n\n- framework:`plugin-audit`(新增 `messages.assignedToYou/mentionedYou/mentionedYouAnonymous` 四语言 + 按接收人 locale 渲染)、`service-storage`(新增 ADR-0029 D8 翻译包,`kernel:ready` 注册)。\n- objectui:`app-shell` 铃铛已读改走 `POST /api/v1/notifications/read[/all]`。\n\n注:①③ 生效需新版 framework + console 一起部署;历史英文通知行不会被回写,仅新通知生效。\n"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 3564,
+  "kind": "issue",
+  "title": "Guard against the `pipefail` + early-exit-reader race that intermittently broke the console bump-type rule",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T05:56:07Z",
+  "updated_at": "2026-07-27T06:24:02Z",
+  "closed_at": "2026-07-27T06:23:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3564",
+  "body": "> **Correction (edited after filing):** the first version of this issue said the rule failed on *every* refresh and cited 23 `feat` commits. Both were wrong — measurements below. The failure is a **race**, not a deterministic break, and the commit count depends on the objectui clone's shallow boundary. The fix in #3558 is unaffected; the framing is.\n\n## What happened\n\n`scripts/bump-objectui.sh` decides whether a console refresh is `minor` or `patch` — `minor` if the objectui commit range contains any `feat`. It tested that with:\n\n```bash\ngit -C \"$OBJECTUI_ROOT\" log --format=%s \"${OLD_SHA}..${NEW_SHA}\" | grep -qiE '^feat'\n```\n\n`grep -q` exits on its **first match**. If `git log` is still writing when that happens, git takes **SIGPIPE** and the pipeline's last-failing status is 141. Under `set -o pipefail` (line 32) that 141 becomes the pipeline's status, the `if` takes the else branch, and the range is stamped `patch` — even though the match that killed grep *proves* a `feat` exists.\n\nThe whole condition inverts on the strength of its own evidence, which is what makes it hard to spot in review.\n\n## It is a race, and that is the interesting part\n\nSame command, same range, same machine:\n\n```\n$ R=cf2d56e..2cb8d78\n$ (set -o pipefail; git log --format=%s $R | grep -qiE '^feat'); echo $?\n141          # first run, cold cache\n0            # immediately after, warm\n```\n\nTallying 20 warm runs: **rc=141 once, rc=0 nineteen times.** The first cold run hit it. The range is only 44 commits / 3877 bytes — far below the 64 KiB pipe buffer — so whether git finishes writing before grep exits comes down to cache state and scheduling. The first `feat` sits at line 2 of the output, so grep exits almost immediately, which is what makes the race tight in the first place.\n\nIt failed for real on the #3558 refresh: the script emitted `\"@objectstack/console\": patch` for a range containing `feat` commits, and after the fix the identical invocation emitted `minor`.\n\nTwo consequences worth noting:\n\n- **The wrong answer is always the quiet one.** SIGPIPE can only make the test *under*-report, so the mistake is always `patch`-instead-of-`minor` — a smaller version bump, no error, a plausible-looking changeset. Nothing draws attention to it.\n- **Intermittent is worse than broken here.** A rule that fails 5% of the time on one machine and on the first cold run of another will pass every casual attempt to reproduce it.\n\n(Counting the range with `grep -c` gives 16 today. An earlier measurement in the same clone gave 23 — `git log A..B` shifts as fetches move a shallow clone's graft points, so treat any single count as a snapshot, not a constant.)\n\n## The fix already landed\n\n#3558 replaced the test with a count:\n\n```bash\nFEAT_COUNT=\"$(git … log --format=%s \"${OLD}..${NEW}\" | grep -ciE '^feat' || true)\"\n[[ \"$FEAT_COUNT\" -gt 0 ]] && BUMP=minor || BUMP=patch\n```\n\n`grep -c` reads to EOF, so the writer is never signalled and the race is gone by construction.\n\n## Scope of the remaining exposure — small\n\nSwept both repos before filing:\n\n- **objectstack `scripts/*.sh`** — 8 set `pipefail`. After #3558 the only early-exit pipeline left is `bump-objectui.sh:89` (`… | grep -iE … | head -40 || true`), where `|| true` absorbs the status and the output is correct.\n- **objectstack workflows** — 3 hits, all `echo \"$VAR\" | grep -q`. A single `write()` that completes before grep can exit; safe *because the producer is atomic*, not because the shape is.\n- **objectui** — no `.sh` sets `pipefail`; the two `find … | head -1` hits are in `performance-budget.yml`, whose steps don't set `shell: bash`, so pipefail isn't in effect.\n\nNo second live instance. What is left is recurrence — and note from the bullets above that safety here rests on *how fast the producer is*, which is not a property anyone checks when editing a script.\n\n## Proposed work\n\n1. A shellcheck or grep-based CI rule flagging `| grep -q` / `| head` inside a `pipefail` scope under `scripts/**`, demanding a rewrite or an explicit `|| true` with a comment.\n2. Document the GitHub Actions subtlety in the same place: a step with explicit `shell: bash` runs `-eo pipefail`, a bare `run:` does not — the same line is safe in one step and a trap in the next.\n\nLow priority as a defect (nothing is currently broken). Filed because the failure mode — a rule that reads as enforced, fails silently, fails *intermittently*, and always errs quiet — is the kind that survives review indefinitely."
+}

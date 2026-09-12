@@ -1,0 +1,35 @@
+{
+  "number": 3345,
+  "kind": "pull_request",
+  "title": "feat(discovery): broadcast `transactionalBatch` capability bit so clients negotiate atomic batch declaratively (#3298)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-20T03:09:32Z",
+  "updated_at": "2026-07-20T03:30:28Z",
+  "closed_at": "2026-07-20T03:30:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-20T03:30:26Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3345",
+  "body": "Closes #3298.\n\n## Problem\n\nThe atomic cross-object batch endpoint (`POST {basePath}/batch`, #1604 / ADR-0034 item 4) and its typed SDK surface (`client.data.batchTransaction`, #3271) already shipped — but **discovery never told a client whether a backend supports it**. Consumers (notably ObjectUI's `ObjectStackAdapter`) had to **runtime-probe**: fire a `/batch`, read `404`/`405` (no route) or `501` (no runtime transaction), and only then fall back to non-atomic client-side simulation.\n\nThat is \"find out by calling\", not declarative capability negotiation — it can't be decided at connect time, and can't serve as the \"minimum backend has `/batch`\" gate that's currently blocking the hard-delete of ObjectUI's non-atomic fallback (objectui#2679).\n\n## Change\n\nAdd a required `transactionalBatch: boolean` to `WellKnownCapabilitiesSchema`, and fill it **honestly in every discovery producer** (`declared === enforced`) so it never becomes a declared-but-unpopulated bit — the exact failure mode #3271 avoided by *not* adding a `batch` key with mismatched producers.\n\n| Producer | Value | Rationale |\n|---|---|---|\n| `@objectstack/metadata-protocol` (`getDiscovery`) | `typeof engine.transaction === 'function'` | The `/batch` handler runs inside `engine.transaction()`, which degrades to a non-atomic passthrough / `501` without one. |\n| `@objectstack/rest` (`/discovery`) | protocol signal **AND** `api.enableBatch` | ANDs the runtime signal with whether it actually mounts the route, so a batch-disabled server reports `false` even on a tx-capable engine (never advertise a route that `404`s). |\n| `@objectstack/plugin-hono-server` (standalone discovery) | `false` | This minimal surface mounts CRUD only, not `/batch` (that ships with `@objectstack/rest`). Under-reporting is the **safe** direction — the client keeps its correct-but-slower fallback rather than losing atomicity. |\n| `@objectstack/client` | (exposed) | Already normalizes hierarchical `capabilities` → flat booleans, so `client.capabilities.transactionalBatch` is exposed and now typed. |\n\nSemantics match the existing capability flags: `true` ⟺ the `/batch` route is mounted **and** the runtime can honour a transaction — precisely when the endpoint returns `200` rather than `404`/`405`/`501`.\n\n## Acceptance (from #3298)\n\n- [x] discovery schema adds the batch capability bit (`WellKnownCapabilitiesSchema.transactionalBatch`)\n- [x] rest-server / hono-plugin / metadata-protocol producers all populate it\n- [x] tests assert `GET /discovery` returns the bit\n- [x] `@objectstack/client` exposes the capability for consumers (the optional item)\n\n## Tests\n\n- **spec** — `transactionalBatch` is a required field (a payload missing only it fails), described, accepted true/false.\n- **metadata-protocol** (via objectql `protocol-discovery.test.ts`) — reports `{enabled:true}` on the real engine (has `transaction()`), `{enabled:false}` on an engine without one.\n- **rest** — `true` when runtime supports tx + `/batch` mounted; `false` when `api.enableBatch` off; `false` when the engine can't honour a tx; always populated even if the protocol omitted capabilities.\n- **hono** — standalone discovery advertises `false`, and there is genuinely no `POST /batch` route on that surface.\n- **client** — hierarchical `{enabled:true}` → flat `true`.\n\nRegenerated `content/docs/references/api/discovery.mdx` (the only committed generated artifact affected; `json-schema/` is gitignored). Changeset added (minor × 5).\n\n## Note (out of scope)\n\n`pnpm gen:spec-changes` / `gen:upgrade-guide` surfaced pre-existing drift unrelated to this change — the protocol 15→16 `DashboardWidgetSchema` `.strict()` migration (`dashboard-widget-strict-unknown-keys`, from #3251) whose committed projection is stale. I **reverted** those regenerated files so this PR doesn't absorb #3251's changelog; that drift belongs to #3251's follow-up.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

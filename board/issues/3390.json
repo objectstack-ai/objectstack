@@ -1,0 +1,34 @@
+{
+  "number": 3390,
+  "kind": "pull_request",
+  "title": "docs(readme): 新首屏标语 \"A complete business system in 16k tokens\" 并融入 ontology 叙事",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-21T15:13:20Z",
+  "updated_at": "2026-07-21T15:34:04Z",
+  "closed_at": "2026-07-21T15:31:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-21T15:31:19Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3390",
+  "body": "## 背景\n\n原首屏标语 \"AI writes the app. ObjectStack is what it writes.\" 过于自我指涉,没有类别、受众和收益,信息量不足。经讨论选定 \"16k tokens\" 路线,并要求在 README 中体现 ontology 叙事,以及与 objectos 的核心区别口径(build &amp; ask with Claude Code vs online)。\n\n## 改动\n\n- 首屏大标语改为:**A complete business system in 16k tokens.**\n- 首屏引言重写:整个应用(数据模型、UI、工作流、权限)压缩为 AI 智能体可整体装入上下文、推理和重构的类型化元数据(完整 CRM 不到 2,000 行);并点明这份元数据就是企业自有的 **business ontology**(开放、可版本化的对象/权限/流程定义)。\n- 定位段落更新为核心区别口径:本仓库的工作流是 **build &amp; ask with Claude Code**(智能体在你的仓库里写元数据、经 MCP 操作运行中的应用);想 **build &amp; ask online**(浏览器内、零安装)则是商业平台 [ObjectOS](https://github.com/objectstack-ai/objectos)(objectos 侧对应改动:objectos#55)。\n- 数字(16k tokens、2,000 行)均出自正文 \"Why the mistakes don't ship\" 一节,无新增声明。附空 changeset(README-only,不发版)。\n\n## 建议同步更新仓库 About(需管理员修改)\n\n> A complete business system in 16k tokens. ObjectStack compresses an entire app — data model, UI, workflows, permissions — into typed metadata an AI agent can hold in context, reason about, and refactor whole. Open source, Apache-2.0.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_0145qhfty9sRLm3HUvNBFxpk"
+}

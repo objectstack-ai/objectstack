@@ -1,0 +1,35 @@
+{
+  "number": 3489,
+  "kind": "pull_request",
+  "title": "fix(webhooks): materialize stack-declared webhooks into the dispatcher (#3461)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-25T03:07:06Z",
+  "updated_at": "2026-07-25T03:21:30Z",
+  "closed_at": "2026-07-25T03:21:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-25T03:21:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3489",
+  "body": "Closes #3461.\n\n## Problem\n\nThe spec `WebhookSchema` authoring surface was **disconnected** from the runtime dispatcher — not merely a naming drift. A webhook authored declaratively (`defineStack({ webhooks })` / `defineWebhook()`, declaring `object` / `isActive`) is decomposed into the ObjectQL registry as `webhook` metadata, but the dispatcher (`AutoEnqueuer`) fans out off `sys_webhook` **data rows** (`object_name` / `active`) that until now were only ever written by hand through the object's CRUD UI. **No ingestion path** turned a declared webhook into a dispatchable row, so authoring `webhooks:` on a stack was a silent no-op (ADR-0078). The showcase app itself shipped a `webhooks:` entry that did nothing — and, separately, never required the `webhooks` capability, so the dispatcher plugin wasn't even mounted.\n\nPer the issue's decision, this is **Option A — build the bridge** (Option B would retire a public authoring surface the showcase already uses).\n\n## What changed\n\n- **`bootstrap-declared-webhooks.ts`** — reads declared `webhook` metadata from the registry (falling back to the metadata service), validates each through `WebhookSchema.parse()` (the spec schema finally has a real consumer + default-fill), and materializes a `sys_webhook` row: `object → object_name`, `isActive → active`, full validated envelope → `definition_json` (whence the enqueuer reads headers/secret/timeout). Modeled on the sibling `bootstrapDeclaredSharingRules`.\n- **Runs on the data engine alone**, before the auto-enqueuer's first cache refresh — deliberately **not** gated behind the realtime/messaging dispatch prerequisites. (An earlier revision gated it inside `bootAutoEnqueue`, which meant a realtime-less deployment silently failed to materialize — the very no-op class this closes. Caught during the real-boot dogfood.)\n- **Seed-not-clobber provenance** (mirrors `sys_sharing_rule`, #2909): `sys_webhook` gains `managed_by` / `customized`. Declared webhooks re-seed every boot as `managed_by: 'package'`; a row an admin created (`admin`) or edited (`customized`, stamped by a `beforeUpdate` hook in `webhook-provenance.ts`) is never overwritten — a deactivated noisy webhook survives redeploys.\n- **showcase** — require the `webhooks` + `realtime` capabilities so the dispatcher actually mounts, and ship the demo webhook **inactive** (the `hooks.example` URL is a placeholder; activate it in Setup).\n- **spec** — `WebhookSchema` docstring documents the materialization contract. Connector `webhooks` remain not-yet-enforced (#3197).\n- Fixed a pre-existing dangling `SysWebhookDelivery` import in the i18n extract config (dead since delivery moved to `service-messaging`).\n\n## Verification\n\n**9 new unit tests** (`bootstrap-declared-webhooks.test.ts`) — mapping, idempotency, declared-change propagation, seed-not-clobber, admin-name-collision, invalid-webhook skip, no-op-when-empty, and end-to-end dispatch (declared → materialized → `AutoEnqueuer` fires with headers/secret from `definition_json`). Red-proofed (breaking the mapping + the skip guard fails the right tests). Full suite: 23 passing.\n\n**Real showcase boot** (`objectstack dev`, SQLite):\n- declared webhook materializes into a `sys_webhook` row — `object_name=showcase_task`, `active=0`, `managed_by=package` ✅\n- same-DB reboot stays idempotent (1 row, not duplicated) ✅\n- an admin's `customized` edit (`active=1`) survives redeploy despite the declared `isActive:false` ✅\n\nBuild + DTS type-check green.\n\n## Follow-ups (out of scope)\n\n- Register `webhook` as a first-class metadata type + enroll it in the liveness `GOVERNED` set (would have caught this automatically) — tracked.\n- Connector `webhooks` enforcement (#3197).\n- Remove stale `sys_webhook_delivery` i18n blocks (pre-existing migration debt).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

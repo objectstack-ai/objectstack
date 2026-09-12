@@ -1,0 +1,32 @@
+{
+  "number": 3420,
+  "kind": "issue",
+  "title": "dev: 启动日志三种固定噪音(field-zoo password 警告 / Better Auth WARN×2 / Registry re-register)— 官方示例应零警告启动",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-23T16:01:29Z",
+  "updated_at": "2026-07-24T15:48:06Z",
+  "closed_at": "2026-07-24T15:48:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3420",
+  "body": "## 现象\n\n`os dev` 每次启动固定打印三类噪音,官方 showcase 示例零改动即触发,训练用户忽略警告(狼来了效应):\n\n1. **field-zoo password 大段警告**:`ObjectSchema.create('showcase_field_zoo'): field(s) f_password use type 'password' on a non-auth object …`(≈6 行)。showcase 是刻意演示该字段类型,警告文案自己也说 \"If this is intended … this warning is safe to ignore\" —— 但没有提供任何表达 \"this is intended\" 的开关。\n2. **Better Auth well-known 警告 ×2**:`Please ensure '/.well-known/oauth-authorization-server/api/v1/auth' exists. Upon completion, clear with silenceWarnings.oauthAuthServerConfig.` 同一条连打两遍,且提示的是框架内部该做的事,不是应用作者能行动的事。\n3. **Registry 重复注册输出**:`[Registry] Overwriting package: com.objectstack.metadata-objects` + 5 条 `Re-registering owned object: sys_metadata*` —— 看起来像出错,实际是正常路径。\n\n复现:`pnpm -C examples/app-showcase exec objectstack dev --ui --seed-admin`(main,2026-07-23),看启动日志即见。\n\n## 建议\n\n1. 给 password 类警告加显式确认开关(如字段级 `ackPlaintextMasking: true` 或对象级注解),让官方示例达成**零警告启动**;\n2. Better Auth 的 well-known 配置在框架层修好或按其提示用 `silenceWarnings.oauthAuthServerConfig` 收掉,并去重;\n3. Registry 的 re-register 输出降到 debug 级。\n\n启动摘要本身质量很高(46 plugins / 43 flows / 凭据 / MCP 端点一屏可见)——正因为如此,固定噪音显得更突兀,值得清零。\n\n---\n*来源:内部培训 PPT 制作过程中的 dogfood。*\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 3472,
+  "kind": "pull_request",
+  "title": "fix(#3426): build-time warning for unresolvable flow templates + guard the formula re-read",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-24T16:29:08Z",
+  "updated_at": "2026-07-25T00:53:52Z",
+  "closed_at": "2026-07-25T00:53:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-25T00:53:50Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3472",
+  "body": "Two follow-ups to #3426, after #3445 closed the **formula** half of `{record.<path>}` template resolution. Keeps #3426 open — see the third section for the remaining lookup-expand piece and why it's deferred.\n\n## 1. Build-time signal for unresolvable flow templates (the issue's fallback ask)\n\n`os validate` now flags a record-change flow node whose `{record.<path>}` template can't resolve, turning the previous **silent blank** into an advisory warning. New `@objectstack/lint` rule `validateFlowTemplatePaths` (pure `(stack) => Finding[]`, ADR-0019), wired into `os validate` right beside the existing flow-trigger-wiring check.\n\nTwo findings:\n- **`flow-template-unknown-field`** — `{record.<x>}` where `<x>` is neither a declared field nor a system column (a typo like `{record.full_naem}`).\n- **`flow-template-lookup-traversal`** — `{record.<lookup>.<field>}`, a cross-object hop the seeded record carries only as a scalar id (still unsupported; see §3).\n\nDeliberately quiet to keep false positives near zero: formula fields, bare lookup ids, numeric indexes into `multiple` lookups (#1872), `json` sub-paths, and system columns are **not** flagged, and flows bound to an object this stack doesn't define are skipped (no schema to compare against).\n\n## 2. Hydration re-read guards (evaluation finding on #3445)\n\nThe `trigger-record-change` computed-field re-read from #3445 was unconditional and per-binding. Two guards keep it off the hot path:\n- **Schema gate** — skip the re-read entirely when the object declares no `formula` field (the only thing the re-read adds; `summary` is stored on write). Uses the engine's optional `getObjectConfig`; when unsure, re-reads (correctness over the optimization).\n- **Per-write memoization** — N flows bound to the same written record share **one** re-read, keyed on the shared `HookContext` (the engine passes one ctx reference to every handler for a single write). A `WeakMap`, so entries drop when the context is GC'd.\n\n## 3. Lookup expansion (`{record.account.name}`) — intentionally deferred, needs a direction\n\nScoping shows the plumbing is *easy* (no spec/engine/automation changes: `binding.config` already carries the start-node config, `findOne` already accepts an `expand` map, and `expandRelatedRecords` infers the target from the field's `reference`). **But it hits a read-identity security decision:** the trigger's re-read runs as an elevated **system** principal, so expanding a relation there would read the *referenced* records as system — bypassing the triggering user's RLS/FLS. For a `runAs:'user'` flow, `{record.account.secret}` in a notify template would then leak fields the user can't see. Reading the expand as the user isn't feasible in the trigger: the hook session carries only `userId`, not the resolved grants (the engine resolves those only at flow-run time, #3356).\n\nSo safe lookup expansion belongs in the **automation engine's flow run** (which has the user's grants), not the trigger's system re-read. That's the \"decide direction first (small ADR)\" call from the issue thread — deferring rather than shipping a system-read expand. The new lint rule flags the traversal as unsupported in the meantime, and the formula workaround (`{record.first_name} {record.last_name}`, or a projecting formula field) still applies.\n\n## Testing\n- `@objectstack/lint`: 282 tests pass (15 new for `validateFlowTemplatePaths`); `tsc --noEmit` clean.\n- `@objectstack/trigger-record-change`: 46 tests pass (5 new for the gate + memoize, existing formula-context integration test still green); `tsc --noEmit` clean.\n- `@objectstack/cli`: `tsc --noEmit` clean; `os validate` runs end-to-end on `examples/app-crm` (new \"Checking flow template references…\" step present, exit 0, no crash on real metadata).\n\nCloses part of #3426 (formula-side build signal + re-read guards); the lookup-expand piece stays open pending the direction decision in §3.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

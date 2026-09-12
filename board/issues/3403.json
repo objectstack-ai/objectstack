@@ -1,0 +1,32 @@
+{
+  "number": 3403,
+  "kind": "issue",
+  "title": "废弃内核内置「分配通知」(writeAssignmentNotifications),改由自动化流程承载",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-22T06:18:40Z",
+  "updated_at": "2026-07-22T09:19:36Z",
+  "closed_at": "2026-07-22T09:19:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3403",
+  "body": "# 背景\n\n#3402 暴露:上传文件会刷「系统文件 \"xxx\" 已分配给你」噪音通知。直接原因链:\n\n- 分配通知作为**全局行为**硬编码在 plugin-audit 的 `afterInsert`/`afterUpdate` hook 里(`packages/plugins/plugin-audit/src/audit-writers.ts` 的 `writeAssignmentNotifications`),唯一过滤是 `SKIP_OBJECTS`;\n- 「谁是负责人」靠**字段名启发式**(`OWNER_FIELDS` 含 `owner_id`)猜测,把 `sys_file.owner_id`(存储层 ACL 归属)误判成业务指派;\n- 「自我分配静默」守卫 `newOwner === actorId` 因 `sys_file` 由存储服务裸引擎写库(`service-storage/src/metadata-store.ts` 的 `engine.insert('sys_file', …)`,无用户上下文 → `actorId=null`)而穿透;\n- `sys_file` 生命周期多次写库(`pending → committed`),dedupKey 按 `updated_at` 变化,同一文件重复刷屏。\n\n经维护者讨论,结论是:**问题不在于缺一个跳过名单或开关,而在于这个功能本身放错了层。**\n\n# 决策\n\n**移除内核内置分配通知,「分配通知」回归用户态**:平台只提供机制(记录变更触发器 + `notify` 节点 + 消息模板),通知策略由应用/管理员用自动化流程按需配置,文案可自定义。\n\n理由:\n\n1. **业务策略不该硬编码在平台内核。** 内核版无法自定义文案、条件、渠道;字段名启发式对语义的误判正是 #3402 这类 bug 的土壤(`owner_id` 在不同对象上语义不同)。\n2. **业界同类产品均为「机制内置、策略配置」**:Salesforce(Assignment Rules 逐规则勾选通知 / Flow 自建,文件类对象从不触发)、ServiceNow(按表逐条配置 Notification 记录)、Odoo(模型字段显式声明 tracking)。没有平台对文件/附件等系统记录发分配通知。\n3. **替代能力已经完整存在**(见下),showcase 应用已有现成范例流程演示同一场景。\n4. **否决 per-object 开关方案**(`enable.assignmentNotifications`):平台替用户做业务决策、再发一个反悔开关,分层仍然是错的,且徒增 metadata-protocol 面积和逐对象配置负担。\n\n# 替代路径(现已可用,无需新开发)\n\n- **触发**:`record-after-update` / `record-after-create`,条件可用 `previous` 访问更新前的行(`service-automation/src/engine.ts` 触发上下文注入 `record` / `previous`);\n- **动作**:`notify` 节点(`service-automation/src/builtin/notify-node.ts`):`recipients` 支持记录字段插值,`title` / `message` / `actionUrl` 全部模板插值,走 ADR-0030 messaging 单一入口;\n- **现成范例**:`examples/app-showcase/src/automation/flows/index.ts` 的 `showcase_task_assigned_notify`:\n\n```ts\n{ id: 'start', type: 'start', config: {\n    objectName: 'showcase_task',\n    triggerType: 'record-after-update',\n    condition: 'assignee != previous.assignee',\n} },\n{ id: 'notify_assignee', type: 'notify', config: {\n    topic: 'task.assigned',\n    recipients: ['{record.assignee}'],\n    channels: ['inbox'],\n    title: 'New task assigned: {record.title}',\n    actionUrl: '/showcase_task/{record.id}',\n} },\n```\n\n# 拆除清单\n\n- `packages/plugins/plugin-audit/src/audit-writers.ts`:删除 `writeAssignmentNotifications`、`OWNER_FIELDS`、`pickOwner`、`writeAudit` 内的调用点及 `makeTitle`。**保留**:`sys_audit_log` / `sys_activity` 写入不受影响;@mention 通知(`writeCommentMentions`)是独立功能,保留;\n- `packages/plugins/plugin-audit/src/translations/messages.ts`:删各语言 `assignedToYou` key(`mentionedYou` 等保留;注意同步 spec 侧 `TranslationData['messages']` 类型如有枚举);\n- `packages/plugins/plugin-audit/src/audit-writers.test.ts`:删两条 assignment 用例(`localizes the assignment notification title …`、`falls back to an English title …`),mention 用例保留;\n- `packages/services/service-messaging/src/recipient-resolver.ts`:`owner_of:` audience 与 `DEFAULT_OWNER_FIELDS` 是独立机制,**保留**,仅更新\"Mirrors the audit writer's OWNER_FIELDS\"注释;\n- 设计文档 `docs/design/notification-platform-convergence.md`、`docs/handoff/adr-0030-notification-convergence.md` 中 assignment 段落加废弃标注(历史记录不重写);\n- **changeset(breaking)**:必须携带 FROM→TO 迁移说明——想保留分配通知的用户,按上面 showcase 范例给目标对象配一条流程;\n- 可选:`examples/app-crm` 预置一条 lead 分配通知流程作迁移范例(注意 `crm_lead.assigned_to` 目前是自由文本字段,要真正可通知需先改为用户 lookup,实施时一并决定)。\n\n# 已知差异(实施时确认)\n\n1. **收件人 locale 本地化**:内核版按收件人语言渲染标题(#3039 `makeTitle`);流程模板是单语言的。实施时确认消息模板的 i18n 能力,或接受差异;\n2. **自我分配静默**:内核版有 `newOwner === actorId` 守卫;流程触发上下文目前未注入操作人变量,自我变更也会通知。可评估为触发上下文注入操作人变量(供条件使用)或在 messaging 层支持自我抑制,或接受差异;\n3. **去重**:内核版有 `updated_at` 版本 dedupKey;流程版靠 `previous` 条件天然只在真实变更时触发,可接受。\n\n# 验收\n\n- 上传文件不再产生任何「已分配给你」通知(#3402 现象消失,`sys_saved_report` / `sys_report_schedule` 的同类潜在噪音一并消除);\n- 业务对象 owner/assignee 变更默认不再自动发铃铛;showcase 范例流程照常可发;\n- plugin-audit 测试更新后全绿;changeset 携带迁移说明。\n\n取代并关闭 #3402。"
+}

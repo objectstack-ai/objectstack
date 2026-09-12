@@ -1,0 +1,35 @@
+{
+  "number": 3537,
+  "kind": "pull_request",
+  "title": "feat(runtime): /packages 域 handler 体抽出（最大单域）— ADR-0076 D11 步骤③ PR-5 (#2462)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T03:10:23Z",
+  "updated_at": "2026-07-27T03:31:35Z",
+  "closed_at": "2026-07-27T03:31:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T03:31:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3537",
+  "body": "## 动机（#2462 D11 步骤③，系列第五刀）\n\n抽出 `/packages`——迄今最大单域（~680 行）：handlePackages 本体 + 两个**独占** helper（`assemblePackageManifest` 离线导出、`applyPublishedSeeds` 发布后种子落地）。覆盖 list/install/enable/disable、ADR-0033 草稿 publish/discard、ADR-0067 commit 历史与回滚、ADR-0070 export/认领孤儿/复制、删除。\n\n## 改动\n\n- `domains/packages.ts`（679 行）：体逐字搬迁；`setPackageDisabled`/`PLURAL_TO_SINGULAR` import 随体走；动态 `'./seed-loader.js'` import 改 `'../seed-loader.js'`（PR#2415 的教训——动态 import 是搬迁暗雷，这次随调用方一起搬）。\n- `resolveActiveOrganizationId` **留 dispatcher**（metadata 域多处共用）经 deps 暴露。\n- `DomainHandlerDeps` 扩四项：`errorFromThrown`（spec 校验 issues 透传为字段锚定 422）、`resolveActiveOrganizationId`、`announceKernelEvent`（发布后 `metadata:reloaded` 广播——changed 判断留域侧、trigger 存在性判断进 deps）、可选 `logger`。\n- 步骤②（#3142）的单管线行为保持；`/packages` 裸 startsWith 匹配原样复刻。\n- dispatcher 再瘦 ~680 行。\n\n## 验证\n\n接缝套件 34 测试（新增 4：列表 / 无 registry 503 / **409 重复安装护栏 + ?overwrite=true** / 缺 id 400）；runtime 全量 639 绿；http-conformance 41 断言绿；下游闭包 `--force` 含 DTS 全绿。\n\n关联 #2462（D11 步骤③ PR-5）。小体量域至此**全部迁完**；剩余全是大头：/automation /actions /auth /meta /data /mcp /ai。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

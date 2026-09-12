@@ -1,0 +1,35 @@
+{
+  "number": 3291,
+  "kind": "pull_request",
+  "title": "fix(formula): retire the `js` expression dialect (#3278)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T14:26:39Z",
+  "updated_at": "2026-07-19T16:42:21Z",
+  "closed_at": "2026-07-19T16:21:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-19T16:21:45Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3291",
+  "body": "Closes #3278.\n\n## What & why\n\nThe `js` **expression** dialect was declared in `ExpressionDialect` but never shipped — it existed only as a registry *stub* with no engine and no author helper (`cel`/`F`/`P` → CEL, `tmpl` → template, `cron` → cron; nothing ever emitted `js`). Given CEL already covers L1 declarative predicates and **sandboxed JS already exists at L2** (`ScriptBody { language: 'js' }`), a js-as-expression layer is redundant and works against the AI-native safety story (CEL is non-Turing, statically lintable/explainable/diffable; arbitrary js is not). Per ADR-0049 (enforce-or-remove), retire it.\n\nThis also corrects the issue's original premise: `hasDialect('js')` actually returned a **false-positive `true`**, because the stub-detection (`dialect.startsWith('stub:')`) was dead code — stubs are registered under their real name, so the check never fired.\n\n## Changes\n\n- **spec** — narrow `ExpressionDialect` to `{cel, cron, template}`; regenerate the 37 reference docs (js drops from the ~50 Expression-holding declarations — the only generated churn, verified diff is *exclusively* the enum narrowing).\n- **formula** — remove the js stub + the dead stub-detection; `hasDialect` now reports only registered real engines; the registry test asserts `hasDialect('js') === false` (the false-green test previously only checked the `cel` case, so the broken detection shipped green).\n- **ADR-0058** — addendum + inline amendments recording the retire.\n- **comments** — fix stale references (registry module doc called `cron` a stub; cel-engine bounds comment pointed at `dialect: js` instead of the L2 ScriptBody).\n\n## L1 vs L2 — the two `js` surfaces (kept distinct)\n\n| Surface | Slot | This PR |\n|---|---|---|\n| `js` **expression dialect** | L1 expression envelope (same slot as CEL) | **removed** |\n| `ScriptBody { language: 'js' }` | L2 hook/action body, sandboxed + capability-gated (separate `z.literal('js')` enum) | **unaffected** |\n\n## Verification\n\n- ✅ `@objectstack/spec` `tsc --noEmit`; **all 57 packages build** (no downstream consumer of the enum breaks)\n- ✅ formula tests (233) + full spec suite (6763) green\n- ✅ generated-artifact gates: `check:docs` (regenerated, in sync), `check:skill-refs`, `check:react-blocks`\n- ✅ `check:role-word` / `check:nul-bytes` / `check:doc-authoring`\n- ✅ Blast radius: `dialect: 'js'` producers = 0 in framework/cloud/objectui (only test fixtures reference it)\n\n## Breaking-change note\n\nNarrows a public `@objectstack/spec` enum. Marked `patch` (fixes declared≠enforced drift; no valid artifact ever used `js`). Maintainers may reclassify if preferred.\n\n## Follow-up (non-blocking)\n\nobjectui `clientValidation.fieldRules.test.ts` uses `{ dialect: 'js' }` as a bad-input fixture; it consumes published spec so it won't break until objectui bumps. Tracked separately.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

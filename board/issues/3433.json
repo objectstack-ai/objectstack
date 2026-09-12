@@ -1,0 +1,32 @@
+{
+  "number": 3433,
+  "kind": "issue",
+  "title": "seed replay vs state_machine initialStates: mid-lifecycle fixture rows are silently rejected on INSERT (showcase kanban can never repopulate)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-24T12:37:38Z",
+  "updated_at": "2026-07-24T15:40:40Z",
+  "closed_at": "2026-07-24T15:40:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3433",
+  "body": "## 现象(可复现)\n\n当前 main,空库 `objectstack dev --seed-admin` 起 examples/app-showcase:\n\n- `showcase_project` 只种进 **1/5**(唯一 `status:'planned'` 的 'Mobile App')\n- `showcase_task` 只种进 **1/10**(唯一引用幸存 project 的任务;其余 9 条因 required `project` lookup 悬空级联被 drop)\n\n同一份种子在 7 月 17 日的构建上是 **5/5、10/10 全量入库**。整个失败在默认 log-level 下**零信号**(行级错误被 [Seeder] info 摘要吞掉,另有 boot stdout 静默窗口;参见 #3430)。REST 端同样可复现:`POST /api/v1/data/showcase_project` with `status:'active'` → `400 VALIDATION_FAILED / invalid_initial_state`。\n\n## 机制\n\n1. #3188(feat #3165)让 `state_machine.initialStates` 在 **INSERT** 上强制 FSM 入口:`packages/objectql/src/validation/rule-validator.ts`(创建值必须 ∈ initialStates,fail-closed)。\n2. #3359 给 `showcase_project` 声明了 `project_status_flow`:`events:['insert','update']`、`initialStates:['planned']`(examples/app-showcase/src/data/objects/project.object.ts)。\n3. 但 showcase 种子(src/data/seed/index.ts)刻意让 project 铺满 active/on_hold/completed 各状态、让每个看板列都有卡——**对象自己的状态机与自己的种子自相矛盾**,种子重放没有任何豁免,4/5 project 在出生态校验上被拒。\n\n## 影响面\n\n- showcase 的项目/任务看板、gantt、dashboard 演示永远缺数据,且删掉的行永远无法靠 boot 重放恢复。\n- **所有 marketplace 模板包同理**:模板种子几乎必然包含 mid-lifecycle 行(CRM 里 closed_won 的商机、已结案的 case)。一旦模板对象声明 initialStates,安装时 inline seed、#3421 的 rehydrate heal、per-org replay 全部会静默丢行——「装了没数据」家族的新成员。\n- 语义上种子是**策展的既成事实**(Salesforce sandbox 式拷贝),不是用户发起的状态流转;用 FSM 入口校验拦它,等于要求所有 demo 数据都从出生态开始。\n\n## 候选修法(需拍板)\n\nA. **SeedLoader 写路径豁免 state_machine 校验**(isSystem/seed context 明确跳过 rule-validator 的 FSM 规则,或只跳过 initialStates 保留 transitions):平台级修,一次解决 showcase + 全部模板 + heal/replay 路径。需配套:`os build`/`os validate` 增加「种子值须显式标注绕过或通过对象校验」的 lint,避免种子变成无声后门。\nB. 只改 showcase 种子为合法出生态:演示价值尽失(看板只剩一列),且救不了第三方模板,不推荐单独采用。\n\n倾向 A(+可选的 validate 门)。修复验收:空库 boot 后 showcase_project=5、showcase_task=10;hotcrm 安装/heal 在对象声明 initialStates 的假想包上不丢行;新增回归测试覆盖「seed 含非初始态行」。\n\n## 参考\n\n- #3188 / #3165(initialStates 强制)、#3359(showcase 声明)、#3421(rehydrate heal,同受影响)、#3422(seed lookup 解析)、#3430(种子结果可观测性——本次三个 bug 均因它排查翻倍耗时)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

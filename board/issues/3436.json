@@ -1,0 +1,35 @@
+{
+  "number": 3436,
+  "kind": "pull_request",
+  "title": "fix(objectql): arm the late-manifest metadata bridge on project kernels too",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-24T13:13:26Z",
+  "updated_at": "2026-07-24T13:25:22Z",
+  "closed_at": "2026-07-24T13:25:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-24T13:25:20Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3436",
+  "body": "## 问题(#3428 的 dogfood 后续)\n\n浏览器 dogfood #3428 的安装链路时发现:**`os dev` 以项目级 kernel 启动(`environmentId: 'env_local'`)**,而 per-manifest bridge 的旗标 arming 沿用了一次性 bridge 的 `environmentId === undefined` 门控——于是修复在 marketplace install-local 的最主流宿主(`os dev`)下**完全不生效**:一次性 bridge 不跑、旗标永不翻、装包对象照旧进不了 metadata 服务。#3428 的集成测试全部用裸 kernel(无 environmentId),没暴露这一点。\n\n## 修复\n\n翻旗标移出 `environmentId === undefined` 块,改为 `start()` 末尾**无条件**执行(`packages/objectql/src/plugin.ts`):\n\n- 该门控对一次性 bridge 是对的:它拷贝**整个**进程级 SchemaRegistry,多环境服务器上会把兄弟项目对象漏进本 kernel 的 metadata 服务;\n- 对 per-manifest bridge 不适用:它只拷贝**本 kernel 刚注册的那一个包**的对象——无可泄漏;\n- 各 kernel 形态的启动期行为不变(旗标仍在启动路径完成后才翻),一次性 bridge 保留原门控。\n\n## 测试\n\n新增回归测试:`environmentId: 'env_local'`(精确复刻 `os dev` 形态)的 kernel,bootstrap 后经 manifest 服务装包 → `metadata.getObject('crm_contact')` 有定义。**已证红**(修正前该测试失败:getObject undefined)。\n\n- `@objectstack/objectql` 72 文件 / 1041 测试全绿。\n- Dogfood 过程另核实:进程加载的确是 workspace dist(ps + require.resolve),排除全局 CLI/陈旧 dist;`os dev` 默认日志级 warn 会吞 bridge 的 info 行,勿以日志静默判 bridge 失效。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

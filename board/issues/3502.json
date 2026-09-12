@@ -1,0 +1,32 @@
+{
+  "number": 3502,
+  "kind": "pull_request",
+  "title": "chore(i18n): purge dead sys_webhook_delivery bundle block + roll out bundle-ownership guards",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/l"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-26T07:35:44Z",
+  "updated_at": "2026-07-26T07:44:45Z",
+  "closed_at": "2026-07-26T07:44:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-26T07:44:43Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3502",
+  "body": "## What\n\nPurges the dead `sys_webhook_delivery` i18n block and hardens every i18n-bundle package against the same class of bug.\n\n`sys_webhook_delivery` was removed when webhook delivery moved to `@objectstack/service-messaging` (`sys_http_delivery`, ADR-0018 M3), but a full translation block for it lingered in the plugin-webhooks bundles — and nothing was stopping the next `os i18n extract` from silently dropping it (and, elsewhere, curated strings) on other packages too.\n\n## Changes\n\n**Cleanup**\n- Remove the stale `sys_webhook_delivery` block from the 4 plugin-webhooks locale bundles (en/zh-CN/ja-JP/es-ES) — surgical, `sys_webhook` untouched (−444 lines).\n- Fix 3 stale `sys_webhook_delivery` doc comments (platform-objects `integration/index.ts` + `setup.app.ts`, plugin-webhooks `sys-webhook.object.ts`).\n\n**Guard rollout**\n- Add the `bundle-ownership` test guard (#2834 ⑤ / ADR-0029 D8) — previously only in platform-objects — to the 8 packages that own i18n bundles (plugin-webhooks/audit/approvals/security/sharing + service-messaging/realtime/storage). A generated bundle carrying an object its extract config doesn't own now **fails the build** instead of silently losing curated translations on the next `os i18n extract`.\n\n**Live-object fix the new guard caught** ⚠️ *reviewer note*\n- plugin-security's bundles carried `sys_capability` — a **live, registered** object (defined, exported, in `manifest.ts`, tested) with **curated** zh-CN/ja-JP/es-ES translations — but its extract config had dropped it. This is the guard comment's case (a) \"config gained an object → add it here\", **not** case (b) \"delete the leftover\". So `SysCapability` was re-added to the extract config to preserve the strings, rather than deleted. (Deleting would have destroyed live-object translations — the exact loss this guard prevents.)\n\n## Verification\n- All 8 packages' suites green; the 8 new guards pass (2 assertions each). plugin-security 542 tests pass, confirming the config change breaks nothing.\n- Guard proven able to go **red**: temporarily pointed an `OWNED` set at a bogus value → both assertions failed with clear, actionable messages → reverted.\n\n## Notes\n- All touched published packages are in one changeset `fixed` group → one `patch` changeset bumps them together.\n- Out of scope (observed, not touched): plugin-security `sys_user_position`/`sys_audience_binding_suggestion` and plugin-approvals `sys_approval_approver`/`sys_approval_token` are intentionally not translated (absent from both config and bundles — consistent), noted in the respective test comments.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

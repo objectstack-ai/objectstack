@@ -1,0 +1,30 @@
+{
+  "number": 3457,
+  "kind": "issue",
+  "title": "flow record trigger: consider multi-event `triggerType` (array / unions beyond create-or-update)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-24T15:19:52Z",
+  "updated_at": "2026-07-25T02:14:16Z",
+  "closed_at": "2026-07-25T02:14:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3457",
+  "body": "## Context\n\n#3427 asked for a way to fire a single `record_change` flow on **both** create and update. It was resolved (PR #3446) by adding **`record-after-write`** / **`record-before-write`** — the create-OR-update union — rather than a general array of `triggerType`s.\n\nThat was a deliberate, scoped choice:\n\n- `write` covers the **canonical** \"created or updated\" case (mirrors Salesforce's record-trigger option and Rails' `after_save`), which is the only combination #3427 and industry precedent actually ask for.\n- A single canonical token keeps the start-node contract simple (`triggerType` stays a `string`), needs no engine/spec change (the engine already forwards any `record-*` token to the trigger), and avoids N authoring dialects (contract-first, AGENTS.md Prime Directive #12).\n- An arbitrary array (`triggerType: ['record-after-create', 'record-after-delete']`) or other unions (create+delete, update+delete) would add real pipeline complexity — engine parsing `string | string[]`, an ambiguous `binding.event`, per-event condition/`ctx.event` semantics — for combinations no concrete scenario needs yet (YAGNI).\n\n## The deferred question\n\nDo we ever need record-trigger unions **other than** create-OR-update — e.g. create+delete, update+delete, or a fully general array?\n\n## Promotion criteria (AGENTS.md-style)\n\nRevisit and implement a general multi-event form when **two independent real projects** need a non-`write` combination, or when a Tier-1 feature requires it. Until then, the surface stays: the single-op tokens plus the `write` union.\n\nIf we do build it, the likely shape is an array on the start node (`triggerType: string | string[]`), with the engine expanding it into a `binding.events: string[]` and the trigger binding one hook per token (the trigger already maps a token → N hook events via `triggerTypeToHookEvents`, so the trigger side is mostly there).\n\n## References\n\n- Issue #3427 (the create-or-update request)\n- PR #3446 (`record-after-write` implementation)\n- `packages/triggers/trigger-record-change/src/record-change-trigger.ts` (`triggerTypeToHookEvents`)\n- `packages/services/service-automation/src/engine.ts` (`resolveTriggerBinding`)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 3491,
+  "kind": "pull_request",
+  "title": "feat(runtime): dispatcher 薄域注册表接缝 — ADR-0076 D11 步骤③ PR-1 (#2462)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-25T03:13:30Z",
+  "updated_at": "2026-07-25T03:39:18Z",
+  "closed_at": "2026-07-25T03:39:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-25T03:39:16Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3491",
+  "body": "## 动机（#2462 D11 步骤③，系列第一刀）\n\n`dispatch()` 把所有域塞在一条手写 `startsWith` if 链里、所有 handler 挂在 dispatcher 类上（4.7k 行且 30 天 34 次提交还在长）——正是 ADR-0076 D11 点名的\"干净 port + 上帝实现\"。本 PR 落下拆解接缝，刀口刻意切小。\n\n## 改动\n\n- **`DomainHandlerRegistry`**：first-match `{prefix, match, methods, handler}` 表。无通配/无参数/无中间件——只回答\"这个路径归哪个域\"。匹配语义**保真复刻旧 if 链，毛边照留**（裸 `startsWith` 会匹配 `/i18nxx` 的行为原样保留，修毛边不是接缝的职责）。\n- `dispatch()` 在旧链之前查表；四个种子前缀与其余分支前缀互斥，前置查表与原链位置**顺序等价**。\n- 种子四个内建域，示范三种 handler 形状：`/health` + `/ready`（无服务依赖探针）、`/analytics`（服务桥——fallback vs replace 语义留在服务层，见 D10/D12，故其注册权暂留 dispatcher）、`/i18n`（可选服务、handler 内 501 自兜）。\n- **`registerDomainHandler()`** 公共缝：后续每域一个 PR 把 handler 体 + 注册权移交所属服务包（缺席语义 501→404 在那时逐域决定，配合 D12 honest capabilities 的 discovery 联动）。\n\n## 迁移纪律（注册表先行、代码后搬、归属最后）\n\n本 PR handler **体不动**（仍是 dispatcher 方法，注册项只是包装）——diff 最小、行为零变化最可证。后续 PR 逐域搬体移权，全部迁完后 `createHonoApp` catch-all 退役（解锁 D11 步骤①）。\n\n## 验证\n\n- 新增 11 条接缝测试（注册序 / exact vs prefix / 方法过滤 / 四域行为回归含 `/ready` 503 分支与 `/i18n` 501 / 公共缝注册命中）。\n- runtime 全量 610 测试绿；`@objectstack/http-conformance` 跨适配器 41 断言绿；`--force` 重建 runtime 及 25 个下游包含 DTS 全绿。\n\n关联 #2462（D11 步骤③ PR-1）。与 #3487（D11 步骤④）相互独立、可并行评审。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

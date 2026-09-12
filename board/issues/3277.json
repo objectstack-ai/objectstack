@@ -1,0 +1,32 @@
+{
+  "number": 3277,
+  "kind": "issue",
+  "title": "driver-sql: SQLite peerDependency is `sqlite3` but the driver loads `better-sqlite3` at runtime",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T12:58:27Z",
+  "updated_at": "2026-07-19T14:02:04Z",
+  "closed_at": "2026-07-19T14:02:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3277",
+  "body": "`packages/plugins/driver-sql/package.json` declares `peerDependencies.sqlite3: \"^5.0.0\"`, but the SQLite driver actually loads **`better-sqlite3`** at runtime (`client: 'better-sqlite3'` — e.g. `sqlite-driver-fallback.ts` and the driver test suite).\n\nThe docs' install guidance (`pnpm add @objectstack/driver-sql better-sqlite3`) is correct; the mismatch is in the package's declared peer dependency.\n\n**Impact:** a consumer relying on peerDependency resolution could install `sqlite3` (unused) and still be missing the real requirement, `better-sqlite3`.\n\n**Fix:** change the SQLite peerDependency from `sqlite3` to `better-sqlite3` (or mark it optional and document both). Full current peerDeps: `{mysql2, pg, sqlite3, tedious}`.\n\n_Found during the #1880 docs implementation-accuracy audit (PR #3243); out of scope for that docs-only PR._"
+}

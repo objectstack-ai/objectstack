@@ -1,0 +1,34 @@
+{
+  "number": 3289,
+  "kind": "pull_request",
+  "title": "chore(lint): org-identifier authoring guard for deprecated session.tenantId (#3280 follow-up)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T14:23:56Z",
+  "updated_at": "2026-07-19T14:34:06Z",
+  "closed_at": "2026-07-19T14:34:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-19T14:34:04Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3289",
+  "body": "Follow-up to #3280 (merged in #3284) and #3288. Makes the `session.tenantId` deprecation **discoverable at build time** for our own reference apps.\n\n## Why\n\n#3280 made `organizationId` the blessed developer-facing name for the caller's active org in hook/action bodies; `ctx.session.tenantId` is now a deprecated alias. TSDoc `@deprecated` only nudges an author whose editor surfaces it — nothing stopped our own reference apps (`examples/`, `apps/`), which authors and AIs copy from, from re-introducing `session.tenantId`.\n\n## What\n\n`scripts/check-org-identifier.mjs` — a **hard-fail** guard (authoring surfaces carry **zero** occurrences today, so any match is new), wired into the `lint` workflow next to `check:nul-bytes` / `check:role-word`. Deliberately narrow:\n\n- **Scope:** author-facing reference code only (`examples/`, `apps/`). Internal framework packages legitimately read `session.tenantId` (the engine's own `buildSession`, the record-change trigger) — that's the driver-layer alias, a #3280 **non-goal**, and is not flagged.\n- **Excludes** `skills/` + `content/docs/`: they deliberately show the deprecated form when *teaching* the deprecation.\n- **Precise pattern:** matches only the `session.tenantId` token, never `execCtx.tenantId` / `opts.tenantId` / `DriverOptions.tenantId` (the generic driver-layer tenancy knob, explicitly out of scope).\n- **Escape hatch:** `os-allow-tenant-id` comment on the line, for a genuine driver-layer use in an example.\n\n## Proven red (防假绿)\n\n- Injected `ctx.session.tenantId` into a tracked example hook → guard **fails** (exit 1, points to `organizationId`).\n- Reverted → **green** (194 files scanned, 0 occurrences).\n- Same line with `os-allow-tenant-id` → **suppressed**.\n- New script carries no raw NUL byte (passes `check:nul-bytes`); ESLint clean.\n\nTooling-only (no package touched) → no changeset needed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

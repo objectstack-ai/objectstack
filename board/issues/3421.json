@@ -1,0 +1,35 @@
+{
+  "number": 3421,
+  "kind": "pull_request",
+  "title": "fix(marketplace): heal missing sample data when rehydrating installed packages onto a new database",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-23T16:29:26Z",
+  "updated_at": "2026-07-24T12:10:43Z",
+  "closed_at": "2026-07-24T12:10:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-24T12:10:40Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3421",
+  "body": "## 问题\n\n`examples/app-showcase` 用 `objectstack dev --ui --seed-admin` 起在**全新 SQLite 库**上时,已安装的 marketplace 模板包(`app.objectstack.hotcrm`)完全没有业务种子数据:`crm_opportunity` / `crm_account` / `crm_lead` 等全部 0 行,executive_dashboard 所有 KPI 为 0,Sales Pipeline 看板 7 列全空。\n\n## 根因\n\n安装 ledger(`<cwd>/.objectstack/installed-packages/*.json`)锚定在项目目录,而数据库可以在它脚下被整个换掉(`os dev --fresh` 的临时库、删掉的 `dev.db`、`--database` 切换)。重启时 `MarketplaceInstallLocalPlugin.rehydrate()` 会重新注册 manifest + `syncSchemas()` 建表,但**刻意 `seedNow:false` 不重放种子**(注释假设\"装机时的行还在库里\")。于是出现不对称:\n\n- config 声明的 app(showcase 自己)走 AppPlugin,单租户下**每次 boot 都 inline 重放种子** → 新库有数据;\n- marketplace 安装的包 rehydrate **永不重放** → 新库上 app 可见、表存在、永远 0 行。\n\n已在 worktree 复现(拷贝 ledger + 新库):安装产物本身带全 12 个数据集 162 条种子,安装当天 inline seed 正常 —— 问题只出在\"换库后的 rehydrate\"。\n\n## 修复\n\nrehydrate 后新增 `maybeHealSampleData()`:当且仅当\n\n1. 缓存 manifest 确实带 `data` 种子数据集;\n2. 用户从未显式 purge(新增 `sampleDataPurged` ledger 标记,purge 端点落章、install/reseed 落行后清除);\n3. 单租户模式(多租户仍归 per-org replay 所有,数据集照旧合并进 `seed-datasets` 服务);\n4. **每个**被种对象都是空表 —— 任何一行幸存都视为数据仍在,完全不动库;\n\n才以 upsert + multiPass 重放种子。因此对重启幂等,且永远不会覆盖用户对 demo 行的编辑。\n\n顺手修正:install 的 seed 全部 `skipped`(行已在库,如对着有数据的库重装)时,`withSampleData` 现在如实置 `true`,不再在有数据的库上留着 `false` 假装没有样例数据。\n\n## 验证\n\n- 新增 7 个回归用例(`marketplace-install-local-heal.test.ts`):空库愈合+标志翻转、任一对象有行即跳过、purge 后重启不复活(经真实端点端到端)、多租户跳过、0 行落地保持 false 并大声告警、all-skipped install 标志修正;包内 62 测试全绿。\n- 真机验证(worktree showcase + 真实 hotcrm 产物 + 新库):boot 后 REST 计数 61/5/21/38/4 全部到位,executive_dashboard KPI(378,366 / 5 / 5 / 21)与 Sales Pipeline 看板(51 条记录分列)在浏览器确认;再次重启行数与 `updated_at` 逐字节不变(幂等)。\n\n## 顺带发现(不在本 PR 范围)\n\nmarketplace 包种子的 lookup/master_detail 引用自装机第一天起就未解析成 id(`crm_contact.crm_account` 列存的是 \"Acme Corporation\" 字符串)——`crm_contact` 因 `sharingModel: controlled_by_parent` 的 RLS join 悬空而对所有人(含平台管理员)整表不可见。疑似 SeedLoader 引用图只认 metadata 服务、不认 marketplace 注册进 objectql registry 的对象定义。已另立任务跟进。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

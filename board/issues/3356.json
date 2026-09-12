@@ -1,0 +1,32 @@
+{
+  "number": 3356,
+  "kind": "issue",
+  "title": "service-automation: runAs:'user' runs data ops with a credential-less user — trigger context never carries the actor's permission sets/positions (follow-up to #1888)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-20T08:00:01Z",
+  "updated_at": "2026-07-22T14:10:39Z",
+  "closed_at": "2026-07-22T14:10:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3356",
+  "body": "## 版本 / 包\n\n16.0.0-rc.0 · `@objectstack/service-automation` + `@objectstack/trigger-record-change`(dist 7.3.0)。#1888 的后续:runAs 现已被引擎消费(system 提权正常),但 **`runAs:'user'` 的凭证传播是空心的**。\n\n## 现象\n\n`runAs` 缺省 `'user'` 的 record_change 流,其数据节点(update_record 等)并不按「触发用户的实际授权」执行,而是按**只剩 member/everyone 兜底的零权限集用户**执行——即便触发用户本身对目标对象有完整授权(权限集 *_ALL)。真实项目(os-tianshun-ehr,单租户)两条审批流双双中招,病征按对象配置分两副面孔:\n\n1. **`access.default:'private'` 对象**:流内 update_record 直接 403,话术\n   `not permitted for positions [org_member, everyone]`——权限集授权完全不可见,整条流卡死;\n2. **`sharingModel:'public_read_write'` 对象**:对象级不拦,但 readonly 镜像字段(审批 stage 回写)走用户态被**静默剥离**——节点报 `success`(3ms)而 DB 真值恒空,极难察觉(见下「次级问题」)。\n\nadmin 触发同样中招(流上下文无 admin 直通)。\n\n## 根因(代码级)\n\n`trigger-record-change` `buildContext()`:\n\n```js\nuserId: session.userId,\n// Forward the writer's roles/org so a `runAs:'user'` flow enforces\n// RLS exactly as the user who made the change, not a member fallback (#1888).\n...Array.isArray(session.positions) && session.positions.length ? { positions: session.positions } : {},\n...session.organizationId ? { tenantId: session.organizationId } : {},\n```\n\n- **`permissions`(权限集)从未透传**——context 里压根没有这个键;\n- `positions` 仅在 hook session 恰好携带且非空时透传;实测 ObjectQL hook session 并不带,实际恒缺省。\n\n`service-automation` `resolveRunDataContext()` 端如实消费:\n\n```js\nif (context?.runAs === \"system\") return { isSystem: true, positions: [], permissions: [] };\nif (!context?.userId) return void 0;\nreturn { isSystem: false, userId, positions: context.positions ?? [], permissions: context.permissions ?? [] };\n```\n\n两端各自\"正确\",但中间没人负责把触发用户的岗位/权限集查出来塞进去——注释承诺的「enforces RLS exactly as the user who made the change」实际落空,落到的是 member 兜底。\n\n## 期望\n\n二选一(倾向前者):\n\n- **修实现**:user 模式在触发时(或 resolveRunDataContext 端惰性)解析触发用户的 `sys_user_permission_set` 绑定与岗位,构造完整数据上下文——让 `runAs:'user'` 兑现\"按触发人授权执行\"的承诺;\n- **修文档/契约**:若短期不做凭证解析,明确文档化「`runAs:'user'` 数据操作 = bare member 语义」,并给含 CRUD 节点且未显式声明 runAs 的流加 build 告警(现有的 unscoped-schedule 告警只覆盖\"无 user\"链路,不覆盖\"有 user 但零凭证\"链路)。\n\n## 次级问题(可拆单):update_record 静默丢写不可观测\n\nreadonly 字段被服务端剥离时(录入语义本身没错),流步骤日志仍记 `success`,无任何 warning。建议 update_record 节点在「请求写 N 个字段、实际生效 < N」时至少 warn 一条——这次两条审批流被假 success 掩盖了整个 stage 回写链路失效。\n\n## 应用侧现状(参考)\n\nos-tianshun-ehr 两条审批流已按语义改声明 `runAs:'system'`(这些 CRUD 节点本就是引擎记账,审批决策仍由 approvals API 强制 actor∈pendingApprovers),项目侧不阻塞;但**任何真需要\"以触发人身份+其授权跑数据操作\"的流**(如按触发人行级过滤的查询节点)在 16rc 上暂无法实现。\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 3565,
+  "kind": "pull_request",
+  "title": "feat(runtime): 抽出 action-execution 子系统 — ADR-0076 D11 步骤③ PR-8 (#2462)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T06:07:22Z",
+  "updated_at": "2026-07-27T06:17:35Z",
+  "closed_at": "2026-07-27T06:17:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T06:17:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3565",
+  "body": "## 动机（#2462 D11 步骤③，深耦合批第一刀）\n\n`/actions` 与 `/mcp`（经 buildMcpBridge）共享 16 个 dispatcher 私有 helper（~560 行）：action 声明收集/解析、ADR-0104 参数强制、权限/AI 暴露门、engine facade + session 形状、调用执行、`callData` 协议/ObjectQL 数据桥。本刀把它们抽成 `action-execution.ts` 独立模块——这是让 PR-9 的两域抽体变回机械刀的前置。\n\n## 设计\n\n- **`ActionExecutionDeps` 刻意窄**：只有 `resolveService` + `getObjectQL`——**env 解析状态（kernel/resolver）一概不进**，留在路由 handler 层。调查证实 16 个体内零 kernel 依赖。\n- ADR-0104 warn-once 静态成员（`actionParamsStrict`/`warnActionParamsOnce`）随体搬为模块函数——抽出的体引用 `HttpDispatcher.` 静态会形成回环。\n- dispatcher 保留 **4 个**有类内调用点的薄委托；12 个纯内部 helper 的 5 处调用点（buildMcpBridge/handleActions 内）改直调模块。\n\n## 验证\n\nruntime 649 绿；http-conformance 41 绿；dogfood 全套 **351 绿**（须先全仓 build——套件依赖全部 example/connector dist）；下游闭包 DTS 绿。零行为变化。\n\n关联 #2462。下一刀 PR-9：/actions + /mcp 两域抽体。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

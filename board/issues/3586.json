@@ -1,0 +1,30 @@
+{
+  "number": 3586,
+  "kind": "issue",
+  "title": "Retire DEFAULT_DISPATCHER_ROUTES and the stale `graphql` entry in ApiRoutesSchema (spec-major) — #3563 follow-up",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T08:12:11Z",
+  "updated_at": "2026-07-27T09:02:41Z",
+  "closed_at": "2026-07-27T09:02:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3586",
+  "body": "Split from #3563. Two stale spec artifacts describe a route surface that does not exist, and one of them silently underwrote a false compliance claim for months.\n\n## 1. `DEFAULT_DISPATCHER_ROUTES` (`packages/spec/src/api/dispatcher.zod.ts:141-164`)\n\n- **Consumed by nothing in `packages/runtime`** — only its own tests and `api-surface.json`.\n- Lists `/workflow` and `/realtime` as dispatcher routes; neither dispatcher branch exists (`/realtime` is deliberately never advertised, `http-dispatcher.ts` discovery block).\n- Omits eight real prefixes: `/keys`, `/mcp`, `/mcp/skill`, `/actions`, `/security`, `/share-links`, `/ready`, `/openapi.json`.\n- Real-world damage already done: `packages/client/CLIENT_SPEC_COMPLIANCE.md` anchored a \"✅ FULLY COMPLIANT\" verdict on this table while 27 real routes had no SDK expression (doc retired to a tombstone in #3571).\n\n## 2. `graphql` in `ApiRoutesSchema` (`packages/spec/src/api/discovery.zod.ts`)\n\nThe server removed GraphQL entirely (`http-dispatcher.ts`: \"/graphql removed — GraphQL is not in the product plan (#2462 follow-on)\"), but the schema still requires the key. Concrete cost today: bare `tsc -p tsconfig.json` in `packages/client` fails with\n\n```\nerror TS2741: Property 'graphql' is missing in type '{...}' but required in type 'Record<ApiRouteType, string>'\n```\n\nbecause `getRoute()`'s fallback map (`index.ts` routeMap) sensibly does not carry a route the server deleted. The error is masked only because CI's type check runs through a different entry point.\n\n## Why one issue\n\nBoth removals are **spec-major** (public `@objectstack/spec` exports / schema fields), so they should ride the same major-version train rather than each waiting for its own. Until then, the cheap interim is a `@deprecated` JSDoc on `DEFAULT_DISPATCHER_ROUTES` pointing at the runtime route ledger (`packages/runtime/src/route-ledger.ts`), which is the maintained source of truth since #3569.\n\n## Proposed work\n\n1. Now (non-breaking): `@deprecated` tags on both, pointing at the ledger; regenerate `api-surface.json`.\n2. Next major: delete `DEFAULT_DISPATCHER_ROUTES` (+ its tests), drop `graphql` from `ApiRoutesSchema`, remove stale graphql fixtures (`packages/spec/src/api/registry.test.ts:417-424`, `query-adapter.test.ts:147`).\n3. Confirm the client's bare `tsc -p` goes clean once `graphql` is gone.\n\n## Acceptance\n\n- Deprecation tags shipped in a minor; removals staged behind the next spec major.\n- `api-surface.json` regenerated at each step (the export-surface CI gate enforces this).\n- No consumer breakage: a repo-wide grep already shows zero runtime consumers — the removal PR should re-verify.\n\nRefs: audit doc `docs/audits/2026-07-dispatcher-client-route-coverage.md` §3."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 3484,
+  "kind": "pull_request",
+  "title": "fix(automation): array-form flow triggerType fails loudly, not silently never firing (#3481)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-25T02:43:43Z",
+  "updated_at": "2026-07-25T02:54:16Z",
+  "closed_at": "2026-07-25T02:54:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-25T02:54:14Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3484",
+  "body": "Closes #3481.\n\n## Problem\n\nAn array `triggerType` on a flow start node — the shape an author (or an AI authoring pass) naturally reaches for to fire on more than one event:\n\n```ts\nconfig: { objectName: 'app_task', triggerType: ['record-after-create', 'record-after-delete'] }\n```\n\nwas **accepted everywhere and armed nowhere**. Multi-event unions are deliberately unsupported (only the single tokens plus the `record-after-write` create-OR-update union exist — see #3457), but nothing said so:\n\n1. **spec** — start-node `config` is an open `z.record`, so `defineFlow` passes the array.\n2. **engine** — `resolveTriggerBinding`'s `typeof config.triggerType === 'string'` check folds the array to `undefined` → the flow is misclassified as **manual**.\n3. **binding audit** — `getTriggerBindingAudit` skips flows with no resolved trigger, so it never appears in the CLI startup summary.\n4. **lint** — `validate-flow-trigger-readiness` used the same `typeof` narrowing → `isRecordTriggered` false → zero findings.\n\nNet result: the flow binds to nothing and never fires, with **zero output at any layer** — the same silent-never-fire class as #3427 / #3472, and the last authoring shape still slipping past every guard.\n\n## Fix (defensive — arrays stay unsupported, they now fail loudly)\n\nContract-first (AGENTS.md Prime Directive #12): reject at authoring, don't add a consumer-side tolerance for the unsupported shape.\n\n- **lint** (`validate-flow-trigger-readiness`): an array `triggerType` containing any `record-*` element now yields a `flow-trigger-unknown-event` warning at `os validate` time, steering to `record-after-write` (created-or-updated) or one flow per event.\n- **engine** (`resolveTriggerBinding`): such an array is routed to the `record_change` trigger — exactly as an unmappable single token (`record-after-updated`) already is — instead of folding to a manual flow, so it reaches the trigger's bind-time rejection.\n- **trigger** (`record-change`): the bind-time rejection detects the array shape and emits a **targeted** warning (names the flow, points at `record-after-write` and #3457) rather than the generic unknown-token line.\n\nScope is intentionally narrow: no new authoring form, no array semantics — that stays deferred under #3457. This only makes the unsupported shape loud.\n\n## Tests\n\nEach new test proves red against the pre-fix code first, then green:\n\n- `packages/lint/src/validate-flow-trigger-readiness.test.ts` — array flagged (incl. arrays of individually-valid tokens); non-record array left alone.\n- `packages/services/service-automation/src/trigger-dispatch-observability.test.ts` — array routed to `record_change` (binding handed to the trigger, appears in `getActiveTriggerBindings`); non-record array stays manual.\n- `packages/triggers/trigger-record-change/src/record-change-trigger.test.ts` — targeted array warning, not bound; generic warning preserved for non-array bad tokens.\n\nFull suites green: lint 326, service-automation 356, trigger-record-change 49. DTS type-check clean for all three packages.\n\nRefs #3457 (the deferred multi-event design + restart criteria), #3427 / #3446 (`record-after-write`), #3472 (same-family silent defect).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

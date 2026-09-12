@@ -1,0 +1,35 @@
+{
+  "number": 3569,
+  "kind": "pull_request",
+  "title": "feat(runtime): route ledger + conformance guard for the dispatcher↔client surface (#3563)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T06:41:11Z",
+  "updated_at": "2026-07-27T06:54:19Z",
+  "closed_at": "2026-07-27T06:54:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T06:54:17Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3569",
+  "body": "PR-1 of #3563: the inventory, the classification, and the ratchet. No runtime behavior change.\n\n## What this establishes\n\n#3528's root cause was a *class*, not an instance: a route can exist, work, and be documented while `@objectstack/client` has no way to call it — and nothing fails. This PR makes the class visible and un-growable:\n\n- **`packages/runtime/src/route-ledger.ts`** — the audited disposition of every dispatcher route: `sdk` (client method named) / `gap` / `server-only` / `public` / `dynamic` / `mismatch`, each non-sdk row carrying its rationale.\n- **The guard, split along the package boundary** (each package verifies its own half):\n  - `packages/runtime/src/route-ledger.conformance.test.ts` — every dispatcher domain (enumerated live from `DomainHandlerRegistry.list()`, plus the pinned legacy if-chain prefixes) must have a ledger entry, in both directions; ledger hygiene (sdk rows name their method, non-sdk rows carry a rationale); and the gap count **ratcheted at 27** — closing a gap lowers the bound, raising it is an explicit reviewed decision.\n  - `packages/client/src/route-ledger-coverage.test.ts` — every ledger entry naming a client method must resolve to a real function on an instantiated `ObjectStackClient`. The ledger is imported as a relative source file: pure data, zero imports.\n- **`docs/audits/2026-07-dispatcher-client-route-coverage.md`** — full findings + follow-up slicing.\n\n## Headline findings\n\n| Finding | Scale |\n|---|---|\n| Dispatcher routes with no SDK expression | **27 gaps across 6 domains** |\n| `/actions` (server-registered actions, 3 shapes) | **entirely unreachable from the SDK** — the largest functional hole |\n| `/keys` | no SDK path to mint an API key at all |\n| `/share-links`, `/security` | zero expression |\n| `/packages` | 6 of 17 lifecycle routes expressed |\n| Shape mismatches (client speaks REST dialect at dispatcher routes) | 4 (`analytics.meta/explain`, both storage methods) |\n| `DEFAULT_DISPATCHER_ROUTES` (spec) | consumed by **nothing** in runtime; lists 2 nonexistent domains, omits 8 real ones — and `CLIENT_SPEC_COMPLIANCE.md` anchors \"FULLY COMPLIANT\" on it |\n| Client surfaces with zero tests | 5 surfaces / 62 methods (~36% of the SDK) |\n| Client README | documents 6 methods that do not exist |\n| `client.events` (`RealtimeAPI`) | non-functional in-memory stub |\n\nAlso documented: dispatch branches with no HTTP mount (the dispatcher has no catch-all — `/security/*`, `/share-links/*`, `/ui/view/*` etc. are dead over HTTP in a plain runtime and only reachable through `@objectstack/rest` or a host catch-all), and the un-audited REST second surface (search / forms / reports / sharing rules / …) proposed as the next tranche.\n\n## Design notes\n\n- The ledger lives in **runtime, not spec**, deliberately: routes are declared in runtime, and the ledger is the guard's data, not public API. Promotion to `@objectstack/spec` (and retiring `DEFAULT_DISPATCHER_ROUTES`, a spec-major) is follow-up work.\n- The guard is **split across the two packages** because no runtime→client edge is buildable: `@objectstack/client`'s own devDependencies point back at runtime (its Hono tests boot a real server), so a package edge closes a turbo build cycle (verified — turbo rejects the graph), and CI's per-package test tasks build only their own dependency closure, so a dist import is equally unavailable (the first push failed Test Core exactly this way). Skipping-when-absent was rejected: the client direction would never run in CI, and this guard exists precisely so that failure mode cannot go quiet.\n\n## Test plan\n\n- Both guard halves verified to **bite**: deleting the `/keys` ledger entry fails the runtime direction with the intended message; renaming `automation.resume` → `automation.resumeRun` in the ledger fails the client direction.\n- Full suites: runtime **653 passed**, client **117 passed** (guards included).\n- ESLint clean on all touched files; the pre-existing `action-execution.ts` TS6133s under bare `tsc -p` reproduce identically on `main` and are untouched.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01LX9ut3MK3KykE11S9bJmv5"
+}

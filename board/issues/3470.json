@@ -1,0 +1,35 @@
+{
+  "number": 3470,
+  "kind": "pull_request",
+  "title": "fix(automation): flow string templates serialize object tokens readably, never `[object Object]` (#3450)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-24T16:22:19Z",
+  "updated_at": "2026-07-25T00:38:43Z",
+  "closed_at": "2026-07-25T00:38:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-25T00:38:41Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3470",
+  "body": "## What & why\n\nCloses #3450 (split from #3425; the readonly-strip half shipped in #3465).\n\nA flow string field that **embeds an object-valued token** rendered as the useless `[object Object]`. The most common trigger is a fault handler surfacing the engine's `$error` — set as an object `{nodeId, message, output}` (engine.ts:2585) — in a `notify` body (`message: 'Conversion failed: {$error}'`), or any node writing an object token into a string field.\n\nTwo coercion sites produced it:\n- `interpolateString`'s **multi-token** branch did `String(value)` (`builtin/template.ts`).\n- `notify-node` did `String(interpolate(...))` for title/body — a **sole** `{$error}` token resolves to the raw object, then `String()` → `[object Object]`.\n\n## Fix\n\n- New shared `stringifyForTemplate(value)` helper: objects/arrays → `JSON.stringify` (legible, still carries the message), primitives → `String`, `null`/`undefined` → `''`.\n- Used in `interpolateString`'s embedded branch and `notify-node`'s title/body.\n- **Unchanged**: the sole-token branch still returns the raw value so typed config fields keep their type (`fields: { count: '{n}' }` stays a number), and `{$error.message}` still resolves to just the message string — the documented cleanest author form.\n\n## Notes on scope\n\nThe originally-reported 16.1.0 symptom (a failed `create_record`'s own error as `[object Object]`) is already fixed on main — `crud-nodes` returns `(err as Error).message`, and both objectui runs surfaces render readably (`FlowRunsPanel` via a `.message` helper, `FlowRunsPage` via `JSON.stringify`). This PR closes the remaining, demonstrable platform path: object tokens in flow **string templates**.\n\n## Verification\n\n- New `template-object-token.test.ts` (7 cases): embedded `$error` → readable JSON (asserts **not** `[object Object]`, contains the message); `{$error.message}` → message string; sole token preserves the raw object; primitives unchanged; circular object doesn't throw.\n- **Red-proof**: reverting the multi-token branch to `String()` fails exactly the embedded-object test.\n- Full `@objectstack/service-automation` suite green (354 tests, incl. notify-node).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

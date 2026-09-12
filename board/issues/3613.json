@@ -1,0 +1,34 @@
+{
+  "number": 3613,
+  "kind": "pull_request",
+  "title": "fix(auth): spell isLikelyEmail ASCII guard with printable bounds (no control char)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T09:28:32Z",
+  "updated_at": "2026-07-27T09:43:32Z",
+  "closed_at": "2026-07-27T09:43:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T09:43:30Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3613",
+  "body": "Tiny hygiene follow-up to the merged objectstack-ai/objectstack#3572 (framework#3566).\n\nThe non-ASCII guard added there was written as `[^\\x00-\\x7f]`, whose regex literal embeds a control character (`\\x00`) — flagged by eslint `no-control-regex`. Rewrite as `[^\\x20-\\x7e]`:\n\n- **Identical behaviour** — anything outside printable ASCII fails the email pre-filter (emails are printable ASCII; whitespace is already rejected separately).\n- No control character in the pattern.\n- Matches the objectui side's `isPlausibleEmail`, keeping the two implementations spelled the same.\n\nPure cleanup; `admin-user-endpoints.test.ts` (non-ASCII rejection cases) stays green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

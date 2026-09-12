@@ -1,0 +1,30 @@
+{
+  "number": 3363,
+  "kind": "pull_request",
+  "title": "fix(spec): enforce ViewFilterRuleSchema operator enum + typed sort",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "akarma-synetal",
+    "id": 112554634,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-20T13:55:23Z",
+  "updated_at": "2026-07-21T01:03:22Z",
+  "closed_at": "2026-07-21T01:03:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3363",
+  "body": "## Summary\n- `operator`: `z.string()` → `z.enum([19 valid operators])` so SchemaForm auto-renders a Select dropdown\n- `sort`: `z.union([z.string(), z.array(...)])` → `z.array(...)` so RepeaterField renders sort sub-fields correctly\n- Updated fixtures and share-link object to use valid operators\n- All 6807 spec tests pass\n\n## Test plan\n- [x] `pnpm --filter @objectstack/spec test` — 6807 passed, 0 failed\n- [x] Verify Edit View Config in ObjectUI console shows operator dropdown + smart value input (paired with objectui PR)\n\nMade with [Cursor](https://cursor.com)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 3614,
+  "kind": "pull_request",
+  "title": "chore(deps): OSV batch — clear all 21 known vulnerabilities across 8 packages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T09:29:08Z",
+  "updated_at": "2026-07-27T09:43:51Z",
+  "closed_at": "2026-07-27T09:43:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T09:43:48Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3614",
+  "body": "## Summary\n\nThe non-required **Validate Package Dependencies** job (OSV-Scanner, runs on `pnpm-lock.yaml` changes) reports 21 known vulnerabilities across 8 packages ([failing run](https://github.com/objectstack-ai/objectstack/actions/runs/30250739745)). This PR clears all of them.\n\n### Direct bumps (published manifests — downstream installs get the fixes)\n\n| Package | Where | From → To | Advisories |\n|---|---|---|---|\n| next | apps/docs (private) | 16.2.10 → 16.2.11 | 9 (4 High incl. GHSA-6gpp-xcg3-4w24, GHSA-89xv-2m56-2m9x, GHSA-m99w-x7hq-7vfj, GHSA-p9j2-gv94-2wf4) |\n| tar | create-objectstack | ^7.5.20 → ^7.5.21 | GHSA-r292-9mhp-454m |\n| js-yaml | metadata | ^5.2.1 → ^5.2.2 | GHSA-pm4m-ph32-ghv5 |\n\n### Workspace overrides (transitive-only; no publishable package declares these, so the override-consistency gate is unaffected)\n\n| Override | Why an override |\n|---|---|\n| `brace-expansion@>=5.0.0 <5.0.8 → ^5.0.8` | via minimatch@10.x (GHSA-mh99-v99m-4gvg) |\n| `sharp@>=0.34.0 <0.35.0 → ^0.35.0` | next's optionalDep range `^0.34.5` excludes the fix (GHSA-f88m-g3jw-g9cj) |\n| `react-router@<8.3.0 → ^8.3.0` | GHSA-qwww-vcr4-c8h2 (CSRF, High) has **no 7.x fix**; fumadocs-core peer allows `7.x.x \\|\\| 8.x.x` and docs uses the next adapter |\n| `@sveltejs/kit@<2.69.1 → ^2.69.1` | better-auth optional peer (GHSA-866w-xmhq-wj7x, GHSA-wqjv-9729-c5q2) |\n| `@hono/node-server@<2.0.5 → ^2.0.10` | GHSA-frvp-7c67-39w9 has **no 1.x fix**; @modelcontextprotocol/sdk (latest, 1.29.0) declares `^1.19.9` and only imports `getRequestListener`, still exported by 2.x — dedupes onto the workspace's existing 2.0.10 |\n\nNote: react-router and @sveltejs/kit were optional peers pulled in by auto-install; re-resolution **drops both from the graph entirely** (lockfile −119 lines). The overrides remain as guards against reintroduction.\n\n## Verification\n\n- `turbo build` 72/72, fresh (no cache, dts typegen exercised)\n- `turbo test` 131/131 (a first-pass `@objectstack/lint#test` failure was cross-contamination from a concurrently running docs build regenerating spec artifacts; clean rerun is green, 349/349 in that package)\n- docs site `build` (410+ pages prerendered; og-image generation exercises sharp 0.35.3) and `types:check` with next 16.2.11\n- `scripts/check-override-consistency.mjs` and `scripts/check-changeset-fixed.mjs` both pass\n- MCP SDK `server/streamableHttp.js` import smoke against @hono/node-server 2.0.10\n- OSV querybatch API over all 1453 lockfile packages: **zero known vulnerabilities**\n- Changeset: patch for @objectstack/create-objectstack + @objectstack/metadata\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

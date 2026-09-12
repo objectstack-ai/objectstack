@@ -1,0 +1,30 @@
+{
+  "number": 3297,
+  "kind": "issue",
+  "title": "sandbox Phase 3 — precompile the WASM module once, instantiate per invocation",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T16:09:33Z",
+  "updated_at": "2026-07-19T18:07:24Z",
+  "closed_at": "2026-07-19T18:07:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3297",
+  "body": "Part 3 of #3275 — see its **Phase 3** section for the full spec. **Blocked by #3296 (Phase 2).**\n\n**Verified API (`quickjs-emscripten@0.32.0`):** `newVariant(baseVariant, { wasmModule })` where `wasmModule?: OrLoader<WebAssembly.Module>` — *\"Emscripten will instantiate the WebAssembly.Instance from this existing WebAssembly.Module.\"* The compiled `WebAssembly.Module` is stateless bytecode; each `newQuickJSWASMModule(variant)` still allocates a **fresh linear memory** (isolation preserved) **as long as `wasmMemory` is NOT also passed** (that would share memory = the rejected model).\n\n**Change** (`packages/runtime/src/sandbox/quickjs-runner.ts`), module-level once per process:\n```ts\nconst wasmModule = await WebAssembly.compile(baseWasmBytes);      // compile ONCE\nconst FAST_VARIANT = newVariant(RELEASE_SYNC, { wasmModule });    // reuse across instantiations\n```\nthen Phase 2's `newQuickJSWASMModule()` → `newQuickJSWASMModule(FAST_VARIANT)`.\n- **Confirm how to obtain `baseWasmBytes` once** for the `RELEASE_SYNC` variant (variant `wasmLocation`; `CustomizeVariantOptions.wasmBinary`). **Fallback:** the Emscripten `instantiateWasm(imports, onSuccess)` hook via `emscriptenModule` — `new WebAssembly.Instance(cachedModule, imports)` per call.\n- If clean bytes access proves awkward in 0.32, use the `instantiateWasm` fallback; if neither is clean, **this phase is deferrable** — Phase 2 already removes the asyncify cost.\n\n**Acceptance criteria**\n- [ ] Compiled module cached once; per-invocation instantiate only.\n- [ ] **Isolation invariant asserted** (RSS soak): fresh instance ⇒ fresh linear memory; RSS returns on dispose across N invocations.\n- [ ] Bench shows the compile-cost removal vs Phase 2.\n- [ ] Sandbox suite green unchanged.\n\n**Do NOT** take the shared-singleton-module route (see #3275 §REJECTED — cross-tenant blast radius + RSS ratchet).\n\nRefs: #3275 (parent) · #3296 (Phase 2).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

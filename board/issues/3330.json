@@ -1,0 +1,34 @@
+{
+  "number": 3330,
+  "kind": "pull_request",
+  "title": "chore(spec): regenerate stale ADR-0087 artifacts (spec-changes.json + upgrade guide)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "allow-major",
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-20T01:55:32Z",
+  "updated_at": "2026-07-20T02:33:19Z",
+  "closed_at": "2026-07-20T02:33:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-20T02:33:17Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3330",
+  "body": "Two **generated** ADR-0087 artifacts went stale on `main` — never regenerated when the protocol moved to major **16** (the dashboard-widget `.strict()` migration, `dashboard-widget-strict-unknown-keys`, changeset `dashboard-widget-strict-3251`). Both are enforced by the **Check Generated Artifacts** CI job, so it fails on **every open PR** — a `main`-health issue surfaced while validating the ADR-0102 sandbox work (#3275 / #3328).\n\n## Stale artifacts (both pure projections of the ADR-0087 registries)\n\n1. `packages/spec/spec-changes.json` — the machine-readable change manifest (ADR-0087 D4) · `check:spec-changes`\n2. `docs/protocol-upgrade-guide.md` — the human upgrade guide · `check:upgrade-guide` (the job fails fast on #1, so this only surfaced once #1 was fixed)\n\n## Fix\n\nRegenerated both with the committed generators — pure re-projection of already-merged registries, no source or behaviour change:\n\n- `pnpm --filter @objectstack/spec gen:spec-changes` → `protocolVersion` 15.0.0 → 16.0.0; aggregate `to` 15 → 16; new 15→16 `migrated` record\n- `pnpm --filter @objectstack/spec gen:upgrade-guide` → current protocol 15.0.0 → 16.0.0; new \"Protocol 15 → 16\" section\n\nAll three checks in the job (`check:skill-docs`, `check:spec-changes`, `check:upgrade-guide`) pass locally.\n\n## Notes\n\n- **No new changeset**: the underlying migration already shipped its own (`dashboard-widget-strict-3251`); this is a generated-artifact re-sync only.\n- `allow-major` bypasses the unrelated pre-existing `@objectstack/console: major` changeset already on `main`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_011iJLjqToxNv1aYP3syQtRp"
+}

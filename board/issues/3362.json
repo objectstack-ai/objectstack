@@ -1,0 +1,35 @@
+{
+  "number": 3362,
+  "kind": "issue",
+  "title": "v16.0: mark-notification-read 404s on os dev/serve — unread never clears (#3354 not effective on hono server)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-20T13:29:29Z",
+  "updated_at": "2026-07-21T14:23:24Z",
+  "closed_at": "2026-07-21T14:23:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3362",
+  "body": "Found during the #3358 v16.0 verification sweep. This is the §7 ⚠️ item *\"Notifications actually clear\"* — and it does **not**, on the standard `os dev` / `os serve` (hono) server.\n\n## Summary\nOn `os dev` / `os serve` (the standalone hono server), **marking a notification read has no working endpoint**, so the unread badge never clears — the exact regression #3354 set out to fix. Both paths the Console can use fail:\n\n- `POST /api/v1/notifications/read`  → **404 Not found**\n- `POST /api/v1/notifications/read/all` → **404 Not found**\n- `GET  /api/v1/notifications` → **404 Not found**\n- Data-API fallback `PATCH /api/v1/data/sys_notification_receipt/:id` → **405** `API operation 'update' is not allowed … allowed: [\"get\",\"list\"]` (ADR-0103 engine-owned)\n\n## Repro\n1. `objectstack dev --ui --seed-admin` on the showcase; sign in as admin.\n2. Open the message center (bell) — several unread notifications (the `showcase_scheduled_digest` flow generates one/min); badge shows `未读 20` / `9+`.\n3. Click a notification or **全部标记为已读** (Mark all read). The badge does **not** clear.\n4. Confirm the failing calls:\n```\ncurl -b <cookies> -X POST http://localhost:<port>/api/v1/notifications/read/all   # → 404\ncurl -b <cookies> -X POST http://localhost:<port>/api/v1/notifications/read        # → 404\ncurl -b <cookies> http://localhost:<port>/api/v1/notifications                     # → 404\n```\n\n## Why it's user-visible\nThe Console marks read via those dedicated routes — `packages/app-shell/src/layout/AppHeader.tsx:483`:\n```\nawait fetch(`${serverUrl}/api/v1/notifications/${subPath}`, { method: 'POST', ... })  // subPath = 'read' | 'read/all'\n```\nWith the routes 404, the receipt is never upserted; the direct `sys_notification_receipt` write is separately rejected by the ADR-0103 engine-owned gate (405, get/list only). **No path works** → unread state is permanent.\n\n## Root cause (same class as the Server-Timing gap)\nThe #3354 fix mounts these routes in the **runtime dispatcher plugin** — `packages/runtime/src/dispatcher-plugin.ts:704-729`, whose own comment states the intent:\n> \"the standalone / `os dev` server mounts ONLY the explicit routes here, so every `/api/v1/notifications*` request 404'd … Mount them explicitly so read-state actually persists in every deployment.\"\n\nBut on `os serve` the **hono** server (`@objectstack/plugin-hono-server`) owns HTTP and only *advertises* the prefix in discovery (`hono-plugin.ts:688`) without mounting the `/notifications*` handlers; the dispatcher-plugin's `server.get/post(...)` registrations for `/notifications*` are not reachable on the hono listener (mirrors F1 / the Server-Timing per-request path, where `allowPerfDisclosure()` also lives only on the runtime-dispatcher path). Discovery therefore advertises a 404ing route (`declared !== enforced`).\n\nNote: `/api/v1/mcp` — registered a few lines up the same block (dispatcher-plugin.ts:660) — is also not reachable as expected (returns 501 from a hono-native handler), consistent with the dispatcher-plugin registrations not landing on the hono app.\n\n## Suggested fix\nMount the `/notifications` GET + `read` + `read/all` routes on the hono server too (e.g. in `@objectstack/plugin-hono-server`, delegating into the same dispatcher, exactly as `/data` is), or ensure the dispatcher-plugin's explicit route registrations bind to the hono app under `os serve`. Add an e2e test that boots the hono app, POSTs `/notifications/read/all` as a user, and asserts the receipt state flips to read (and the unread count drops).\n\n## Severity\nP2 (borderline P1): a core, always-present notification UX is non-functional on the flagship OSS dev/standalone server; not data-loss or security. Distinct from #3361 (Server-Timing) but same underlying seam.\n\nResponsible: #3354 (didn't take effect on the hono server). Refs release notes `content/docs/releases/v16.mdx` (\"i18n — collaboration notifications … the notifications REST routes are wired (#3354)\").\n"
+}

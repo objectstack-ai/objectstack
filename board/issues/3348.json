@@ -1,0 +1,35 @@
+{
+  "number": 3348,
+  "kind": "pull_request",
+  "title": "fix(formula): null-guarded numeric formulas + floor/ceil + reject date arithmetic (#3306)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-20T05:19:48Z",
+  "updated_at": "2026-07-20T07:45:47Z",
+  "closed_at": "2026-07-20T07:45:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-20T07:45:45Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3348",
+  "body": "Fixes #3306.\n\nShipped template `Field.formula` fields silently evaluated to `null` on the pinned runtime — no parse error, no build warning, no runtime error. Root-caused to **three independent CEL-engine gaps** (full ground-truth diagnosis in [#3306](https://github.com/objectstack-ai/framework/issues/3306#issuecomment-5018518170)); this closes all three.\n\n## The three gaps\n\n| # | Gap | Before | After |\n|---|---|---|---|\n| ① | `cond ? <number> : null` (the null-guard idiom) | cel-js ternary unifier rejects `int`≠`null` — even `true ? 5 : null` faulted → whole formula nulls | compiles **and** evaluates |\n| ② | `floor` / `ceil` unregistered | `floor(...)` → `no matching overload` → null | registered + in the catalog |\n| ③ | date arithmetic (`end - start + 1`, `today() + 30`) | compiles clean (dyn), **nulls at runtime** — the silent gate hole | **build ERROR** → `daysBetween`/`daysFromNow`/`addDays` |\n\n## How\n\n- **① Null-guard** — AST pre-pass wraps the non-null branch of `cond ? x : null` in `dyn(...)` (value-preserving, null-branch-only, idempotent), so a concrete branch unifies with `null`. Mirrors the merged #3183 `rewriteTemporalEquality`; applied in `compile()`, `evaluate()`, and the build soundness check.\n- **② floor/ceil** — registered in `stdlib` (return `int`, round toward −∞/+∞ — **not** trunc, so `floor(-1.2) == -2`), added to `CEL_STDLIB_FUNCTIONS` + `objectstack-formula` SKILL.md (the anti-drift `skill-catalog-sync` gate enforces this).\n- **③ Date-arith gate** — the soundness check types `date`/`datetime` fields as `google.protobuf.Timestamp` and flags date/duration **arithmetic against a number** as a hard error. **Sound by construction** — only arithmetic-against-a-number is flagged; ordering (`date < today()`, `date < \"2026-01-01\"` string-lex), equality (#3183), and concatenation (`\"Due: \" + date`) are runtime-tolerated and stay clean. A `!= null` guard no longer masks the inner fault (`== null` no-op overloads registered in the check-only env).\n\n## Result\n\nThe two fields from the issue now compute:\n\n```\ntenure_years: record.hire_date == null ? null : daysBetween(record.hire_date, today()) / 365   → 6\ndays:         ... ? daysBetween(record.start_date, record.end_date) + 1 : null                  → 5\n```\n\n## Tests\n\n- **null-guard**: compile + eval (incl. both hr templates, null branch → null), genuine mismatch still errors.\n- **floor/ceil**: semantics incl. `floor(-1.2) == -2`, double-arg coercion, catalog drift-guard.\n- **date-arith**: RED on the shipped `time_off.days` bug **and behind a `!= null` guard**; GREEN on all 6 runtime-tolerated date uses; stack-level `validateStackExpressions` RED-on-broken / GREEN-on-rewrite.\n\n242 formula tests + 239 lint tests green; `@objectstack/formula` typecheck + DTS clean.\n\n> **Downstream heads-up:** ③ adds a new build-time error. A formula/predicate doing arithmetic on a `date`/`datetime` field that previously built (and nulled at runtime) will now fail `objectstack build` — this only fires for expressions that were already returning `null`. Corrective message names the fix.\n\nThe template-side rewrites (`hr_employee.tenure_years`, `hr_time_off_request.days`) ship in a companion PR against the `templates` repo, plus wiring `validateStackExpressions` into templates CI.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 3265,
+  "kind": "issue",
+  "title": "Unify optional-plugin loading: framework `serve.ts` and cloud `objectos-runtime` are parallel implementations with divergent capability tokens (`ai-studio` vs `aiStudio`)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T09:07:20Z",
+  "updated_at": "2026-07-19T17:18:02Z",
+  "closed_at": "2026-07-19T17:18:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3265",
+  "body": "## Context\n\nSurfaced while finishing #1597 (#3228) and bumping cloud's framework pin (objectstack-ai/cloud#857). #1597 made framework's **standalone** `os serve` / `os start` path (`packages/cli/src/commands/serve.ts`) load optional service plugins by declared **intent** — `requires` → required (fail-fast if the provider package is missing), declared-as-dep → auto (best-effort), otherwise skip with no speculative import; tier gating stays an orthogonal deny.\n\nWhile verifying the cloud side, I found the multi-tenant control plane does **not** boot through `serve.ts` — it uses its own `packages/objectos-runtime/src/capability-loader.ts`, which **already** implements the same intent model independently. So there are now two implementations of one contract.\n\n## Finding 1 — two parallel implementations of the same contract\n\n- **Framework** — `serve.ts`: `CAPABILITY_PROVIDERS`, `CAPABILITY_TO_TIER`, the AI block, and the `requires` resolver loop (now intent-driven after #3228).\n- **Cloud** — `objectos-runtime/capability-loader.ts`: its own `CAPABILITY_PROVIDERS` map with `optional` flags, `failedRequired` + `probeRequiredCapabilities` (loud on required-missing, quiet on optional-missing), and it already classifies the ESM `Cannot find package` shape (the #1595 fix).\n\nThey encode the same rules but can drift: #1597 had to bring framework up to what cloud already did. A future fix to one won't automatically reach the other — declared ≠ enforced across the repo boundary (Prime Directive #10).\n\n## Finding 2 — divergent capability tokens (`ai-studio` vs `aiStudio`)\n\n- Framework `requires` uses **kebab-case**; #3228 added `ai-studio` (matching `pinyin-search`, `hierarchy-security`).\n- Cloud uses **camelCase**: `defaultRequires: ['ai','aiStudio',…]` (`apps/objectos/objectstack.config.ts`), `requires: ['aiStudio']` (`capability-loader.test.ts`), and the provider key `aiStudio` in `capability-loader.ts`.\n\nSo `requires: ['ai-studio']` is honored by framework's serve path but ignored by cloud's runtime, and `['aiStudio']` vice-versa. For an app author moving between the standalone and cloud runtimes, the same declaration doesn't mean the same thing — a one-contract violation (Prime Directive #12). Note that unknown `requires` tokens are silently ignored on both sides, so the mismatch fails **silently** rather than loudly.\n\n## Not a runtime bug today\n\nBoth loaders currently behave correctly on their own path (framework after #3228; cloud already). apps/cloud still boots clean (`aiStudio` is `optional: true` → quiet skip, cloud#107). This is a **maintainability / contract-consistency** concern, not an outage — filed rather than silently expanded into #1597's scope.\n\n## Proposed directions (decision needed)\n\n1. **Extract a shared loader (preferred long-term):** lift the capability-provider registry + required/optional resolution into a framework-owned module consumed by both `serve.ts` and `objectos-runtime`, so there is structurally one implementation. Cloud's version is the more complete starting point (optional flags, `failedRequired`, `probeRequiredCapabilities`).\n2. **At minimum, reconcile the token vocabulary:** pick one canonical spelling for the AI-Studio capability (and any other multiword tokens), alias the other through a deprecation path, and validate `requires` tokens against a shared allowlist so an unknown/misspelled token is **rejected at authoring** instead of silently ignored.\n3. **Or document a deliberate split:** if standalone vs multi-tenant genuinely need different loading, document the boundary + token mapping so it reads as intentional, not accidental drift.\n\n## Evidence\n- framework `packages/cli/src/commands/serve.ts` (post-#3228): `CAPABILITY_TO_TIER['ai-studio'] = 'ai'`, `Serve.resolveOptionalPluginLoad(...)`, the `for (const cap of requires)` resolver loop.\n- cloud `packages/objectos-runtime/src/capability-loader.ts`: `CAPABILITY_PROVIDERS.aiStudio { optional: true }`, `failedRequired`, `probeRequiredCapabilities`, ESM `Cannot find package` classification.\n- cloud `apps/objectos/objectstack.config.ts`: `defaultRequires: ['ai', 'aiStudio', 'analytics', 'automation', 'triggers']`."
+}

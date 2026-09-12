@@ -1,0 +1,32 @@
+{
+  "number": 3379,
+  "kind": "issue",
+  "title": "sort on ListView renders blank repeater in Edit View Config — z.union hides items from SchemaForm 🐛 ",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "akarma-synetal",
+    "id": 112554634,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-21T07:10:30Z",
+  "updated_at": "2026-07-21T14:36:48Z",
+  "closed_at": "2026-07-21T14:36:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3379",
+  "body": "## Problem\n\nIn Edit View Config → Columns & Filters → Sort, clicking \"Add sort\" produces an empty row with no field picker or order dropdown. Users cannot configure default sort at all.\n\n## Cause\n\n`ListViewSchema.sort` is defined as a union wrapping both a legacy string form and the canonical array form. The array definition ends up inside an `anyOf` branch, but the ObjectUI SchemaForm repeater only reads `schema.items` at the top level — it finds `undefined` and renders zero sub-fields.\n\n## Suggested fix\n\nDrop the legacy string variant and use the canonical `z.array(z.object({ field, order }))` directly. The string form was already deprecated in #3373 and its removal was deferred to a separate cycle.\n\n## Related\n\n- #3373 kept the union intact intentionally\n- Companion fix possible in objectui (repeater scanning `anyOf` as fallback) but the spec fix is the true root cause"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 2408,
+  "kind": "issue",
+  "title": "feat(observability): per-request performance timing → Server-Timing (perf-tuning mode)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-28T02:02:30Z",
+  "updated_at": "2026-07-25T02:41:18Z",
+  "closed_at": "2026-07-25T02:41:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2408",
+  "body": "## Problem\n\nWe currently cannot answer \"where did a request's time go?\" from inside the platform. When the cloud control-plane data API feels slow (e.g. a `/api/v1/data/sys_environment` console request measured at ~360ms of *row-count-independent* server time on top of network), external black-box probing **cannot** break it down. The cost is split across auth/session resolution, org-scope `beforeFind` hooks, the `find` + `count` SQL, and serialization — all invisible from outside.\n\nPerformance analysis should be a **basic platform capability**: a \"perf-tuning mode\" where an operator can see, per request, exactly how the time was spent — without standing up an external tracing backend.\n\n## What already exists (reuse, don't reinvent)\n\n- `MetricsRegistry` (counter/histogram/gauge) — `packages/observability/src/contracts.ts:40`\n- `instrumentRouteHandler` already times **every** HTTP request and assigns `X-Request-Id` — `packages/runtime/src/observability/instrument.ts:52` (emits `http_request_duration_ms`)\n- `HookMetricsRecorder` already times **every** hook execution — `packages/objectql/src/hook-metrics.ts:41`\n- `ObservabilityServicePlugin` registers the metrics service — `packages/runtime/src/observability/observability-service-plugin.ts:71`\n\n## What's missing (this card)\n\n1. **No per-request `Server-Timing` response header.** Metrics only flow to aggregate OTLP; nothing comes back to the browser, so a developer can't open DevTools → Network and see the breakdown for *the request they just made*.\n2. **The SQL driver does not time individual queries.** `packages/plugins/driver-sql/src/sql-driver.ts` never wires knex `.on('query'|'query-response')`, so we have no per-query duration or per-request query **count** — the single most useful number for diagnosing \"N sequential round-trips\".\n3. **No request-scoped collector.** No `AsyncLocalStorage` threads a \"current request\" through `find`/`count`/hook/driver, so per-query timings can't be attributed back to the originating HTTP request.\n\n## Proposed design\n\nA request-scoped **timing collector**, gated, that emits a standard `Server-Timing` header.\n\n- **Collector**: an `AsyncLocalStorage<TimingCollector>` in `@objectstack/runtime` (or `@objectstack/observability`). When inactive, `record()` is a no-op → **zero overhead** when the mode is off.\n- **Entry/exit**: `instrumentRouteHandler` (`instrument.ts:52`) opens the scope at request start; at response it serializes the collected spans into a `Server-Timing` header. The dispatcher result already supports `headers` — `http-dispatcher.ts` (`HttpDispatcherResult.response.headers`).\n- **SQL spans**: wire knex `.on('query')` + `.on('query-response')` in `SqlDriver` (constructor, `sql-driver.ts:523`), keyed by `__knexQueryUid`, recording `{ sql, durationMs }` into the active collector. Surfaces total DB time + **query count** + slowest query.\n- **Hook spans**: feed the existing `HookMetricsRecorder` durations (`hook-metrics.ts`) into the collector too — splits \"hook time\" from \"DB time\".\n- **Auth/session span**: time the identity/session resolution in the dispatcher (`http-dispatcher.ts` executionContext resolution) — the prime suspect for the unexplained overhead.\n- **Header shape** (RFC: `Server-Timing`):\n  ```\n  Server-Timing: auth;dur=42, db;dur=210;desc=\"6 queries\", hooks;dur=18, serialize;dur=7, total;dur=355\n  ```\n\n## Gating\n\n- Off by default. Enabled per-request via a debug header (`X-OS-Debug-Timing: 1`) **requiring admin/service identity**, or globally via an env flag (`OS_PERF_TIMING=1`) for an environment under investigation.\n- Optional richer JSON (per-query SQL list, slowest query) only for admin/service — never leak SQL text to ordinary users.\n\n## Open-core boundary\n\nThis is a **mechanism** → lives in the framework (the request path, driver, engine all do). Policy (who may see it, whether it's exposed in the cloud console as a \"perf panel\") is **cloud-side**. Mirrors the existing observability split (mechanism in framework, exporter/gating in cloud — see `docs/design/observability.md`).\n\n## Acceptance criteria\n\n- [ ] With the mode on, a `/api/v1/data/<object>` response carries a `Server-Timing` header decomposing total into at least: auth, db (with query count), hooks, serialize.\n- [ ] Per-query SQL timing attributed to the originating request (works under concurrency — ALS, not globals).\n- [ ] Zero measurable overhead when the mode is off (no ALS scope, no-op `record()`).\n- [ ] Gated to admin/service identity (or env flag); SQL text never exposed to non-admins.\n- [ ] Unit test: collector accumulates + serializes; integration test: header present on a real find and reflects query count.\n\n## Why now\n\nThis is the tool that finally breaks down the ~360ms control-plane data-path overhead we've been chasing by external probing (see cloud perf investigation). It's both the diagnostic we need *and* a permanent platform capability.\n"
+}

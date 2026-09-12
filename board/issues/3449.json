@@ -1,0 +1,35 @@
+{
+  "number": 3449,
+  "kind": "pull_request",
+  "title": "fix(dev): eliminate three fixed startup log warnings so official examples boot clean (#3420)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-24T14:58:08Z",
+  "updated_at": "2026-07-24T16:01:32Z",
+  "closed_at": "2026-07-24T15:48:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-24T15:48:04Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3449",
+  "body": "## Summary\n\nCloses #3420. `os dev` on the stock showcase printed **three fixed noise sources** on every boot, with zero example-side changes — training users to ignore warnings (cry-wolf). This clears all three so an official example boots warning-free, adds regression guards so it *stays* clean, and makes the debug output discoverable — without weakening any real diagnostic.\n\nRepro: `pnpm -C examples/app-showcase exec objectstack dev --ui --seed-admin`.\n\n## The three fixes\n\n### 1. field-zoo `password` warning → field-level opt-out\n`ObjectSchema.create('showcase_field_zoo')` warned that `f_password` uses `password` on a non-auth object (plaintext-at-rest, masked-on-read — ADR-0100). The text said *\"if this is intended … safe to ignore\"* but gave authors **no way to express that intent**.\n\n- Add a field-level **`ackPlaintextMasking: true`** opt-out (`packages/spec/src/data/field.zod.ts`). When set on a `password` field, `warnGenericPasswordFields` skips it; the warning text now points authors at the flag.\n- Set it on field-zoo's deliberately-exhaustive demo field.\n- Diagnostic-only: masking, the echoed-mask write guard, and the `better-auth` exemption are unchanged.\n\n### 2. Better Auth well-known warning (printed twice) → silence the false positive\n`@better-auth/oauth-provider` emitted *\"Please ensure `/.well-known/oauth-authorization-server/api/v1/auth` exists. Upon completion, clear with `silenceWarnings.oauthAuthServerConfig`.\"* — but `registerOidcDiscoveryRoutes` **already mounts those documents** at the issuer root (RFC 8414 §3 requires them there, outside better-auth's own routing, so the plugin can't see them).\n\n- Pass the documented **`silenceWarnings: { oauthAuthServerConfig: true }`** to `oauthProvider(...)`. Verified against `@better-auth/oauth-provider@1.7.0-rc.1`: the option is a member of `OAuthOptions` and gates the exact `logger.warn`.\n- **Root cause of the double print** (investigated): the notice fires in oauth-provider's `init(ctx)`, run once per `betterAuth()` construction, and the auth instance is built more than once at boot — an initial lazy build, then a rebuild after boot-time auth *settings* are applied (`applyConfigPatch` nulls the cached instance so the next request rebuilds with the new policy). Gating the emitter covers **every** build path, so the count no longer matters.\n\n### 3. Registry re-register output → debug level\n`[Registry] Overwriting package: …` and `Re-registering owned object: …` are normal rebuild / HMR / seed-replay paths, but were emitted via `console.warn` (always on) and looked like errors.\n\n- Add a debug-only `SchemaRegistry.debug()` (emits only at `logLevel === 'debug'`) and route both lines through it.\n- Make it discoverable: a new `logLevel` construction option resolved from **`OS_REGISTRY_LOG`** (unknown value → `info`), so a developer chasing a registration issue can surface the lines with `OS_REGISTRY_LOG=debug`.\n\n## Regression guards (keep the boot log at zero)\n- **password** — examples assert every generic (non-better-auth) `password` field affirms `ackPlaintextMasking` (`examples/app-showcase/test/no-startup-warnings.test.ts`; `examples/app-crm/test/smoke.test.ts`, future-proofing an example with none today).\n- **better-auth** — `auth-manager.mcp-oauth.test.ts` asserts `oauthProvider` is wired with `silenceWarnings.oauthAuthServerConfig: true`.\n- **registry** — `registry-log-level.test.ts` asserts the re-register / package-overwrite lines are silent at the default `info` level and only emit via `console.debug` at `debug` (never `console.warn`), plus the `OS_REGISTRY_LOG` resolution.\n\n## Other examples\nOnly showcase declared a generic password field; the better-auth and registry fixes are framework-level, so `app-crm` / `app-todo` inherit clean boots. `app-crm` now carries the same password guard; `app-todo` ships no password fields and uses the custom `objectstack test` runner (no vitest guard added there).\n\n## Docs\n- ADR-0100 §B5 records the `ackPlaintextMasking` opt-out and its rationale; the generated `content/docs/references/data/field.mdx` and the spec liveness ledger (`field/ackPlaintextMasking`) are updated; a changeset covers the three packages.\n\n## Verification (local, real test runner)\n- `packages/spec` — `object.test.ts` + `field.test.ts`: **200 passed** (incl. 3 new: ack suppresses, partial-ack still warns about the un-acked field, warning text names the flag).\n- `packages/objectql` — registry suites: **122 passed** (incl. new `registry-log-level.test.ts`).\n- `packages/plugins/plugin-auth` — auth-manager suites (incl. mcp-oauth, which builds the real `oauthProvider`): **215 passed**.\n- `examples/app-showcase` (1) + `examples/app-crm` (20) guards: **pass** — confirms `ackPlaintextMasking` survives `ObjectSchema.create` end-to-end.\n- Spec `check:liveness` + `check:docs`: green. ESLint on changed files: clean.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01TXHXXHnquzVUjeQYPs9bmy"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 3486,
+  "kind": "pull_request",
+  "title": "feat(spec)!: remove the dead PortalSchema — never-enforced no-op projection (#3464)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-25T02:45:19Z",
+  "updated_at": "2026-07-25T02:59:37Z",
+  "closed_at": "2026-07-25T02:59:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-25T02:59:36Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3486",
+  "body": "## What & why\n\nIssue #3464 disposition **A — prune**. `PortalSchema` (`packages/spec/src/ui/portal.zod.ts`, ~350 lines) was the largest dead schema in the spec: not registered as a metadata type, no dispatcher route family / auth scope / renderer consumer, and already marked `[EXPERIMENTAL — not enforced]` with \"authoring a portal today is a no-op\". This removes it rather than building a portal runtime (disposition B).\n\n## Changes\n\n- **Spec**: delete `ui/portal.zod.ts` + `ui/portal.test.ts`; drop the `portals` collection from `StackSchema` / `defineStack()` and every `Portal*` export. A comment records the removal next to the `apps` key (matching the ADR-0019/0020 removed-collection precedent).\n- **Showcase**: remove the dead `ClientPortal` fixture (`src/ui/portals/`) and its config wiring. The `client_portal_user` position and `guest_portal` permission set stay — independent security metadata that only shares the word \"portal\".\n- **Generated artifacts** regenerated in-PR: `api-surface.json` (−28), `json-schema.manifest.json` (−13 keys), `content/docs/references/ui/portal.mdx` removed.\n- **Hand-written docs/skills** stop advertising portals as a live surface (`content/docs/ui/index.mdx`, `skills/objectstack-platform/SKILL.md`, `docs/NEXT_STEP.md`). The real public-forms path (`guest_portal` + anonymous entry) is untouched — it never depended on `PortalSchema`.\n\n## Versioning\n\n`@objectstack/spec` **minor**, matching the #2377 enforce-or-remove pruning precedent and satisfying the launch-window no-major guard (`check-changeset-no-major.mjs`). The changeset carries the migration note: authoring a portal had no runtime effect, so there is no behavioral migration — drop any `portals: [...]` from a `defineStack()` config (now an excess-property type error). To project a scoped UI to external users today, compose `apps` / `views` and gate admission with `positions` + permission sets.\n\n## Verification\n\n- `turbo type-check --force` (full repo, cache-busted) ✓\n- `@objectstack/spec` vitest: 257 files / 6850 tests ✓\n- spec drift gates: `check:api-surface`, `check:docs`, `check:spec-changes`, `check:upgrade-guide`, `check:liveness`, `check:skill-refs`, `check:skill-docs` ✓\n- root gates: `check:doc-authoring`, `check:role-word`, `check:nul-bytes` ✓\n\nFixes #3464.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

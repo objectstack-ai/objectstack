@@ -1,0 +1,32 @@
+{
+  "number": 3543,
+  "kind": "issue",
+  "title": "P2:ApiMethod 枚举收缩至 6 原语(breaking,独立版本)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T03:35:52Z",
+  "updated_at": "2026-07-27T08:28:02Z",
+  "closed_at": "2026-07-27T08:28:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3543",
+  "body": "#3391 的 **P2**(枚举清理),breaking,独立版本发。P1 契约已落地(框架 #3498、前端 objectui#2823),派生真源 `resolveEffectiveApiMethods` 已是唯一裁决表;本阶段收缩底层枚举并回收过渡逻辑。\n\n## 范围\n\n- [ ] **spec**:`ApiMethod`(`packages/spec/src/data/object.zod.ts`)收缩至 6 原语(`get/list/create/update/delete/bulk`);`z.preprocess` 剥除 legacy 8 值(`upsert/aggregate/history/search/restore/purge/import/export`)并告警(**canonicalize-and-warn,不做解析硬失败**)。CHANGELOG major + codemod;移除枚举旧值需在 `UNKNOWN_KEY_GUIDANCE`/相应 tombstone 里带 FROM→TO 提示(见 AGENTS.md Post-Task #3)。\n- [ ] **platform-objects**:60+ 样板白名单审计 —— 等价全开的直接删 `apiMethods`;7 个 `[]` 声明(均配 `apiEnabled:false`,identity 域)删除;**回收 P1 加的显式 `import/export`**(`sys-business-unit` / `sys-business-unit-member`;`bulk` 原语保留,是合法永久声明)。\n- [ ] 移除 P1 的「显式优先 + 注册期 deprecation warning」过渡逻辑(objectql `registry.ts` 的 `warnDeprecatedExplicitApiMethods`;`api-derivation` 里的 `explicitLegacy` 分支)。\n\n## 依据 / 风险\n\n派生真源已就位后,legacy 枚举值只剩过渡兼容意义;收缩后 spec 只暴露 6 原语,派生表继续负责 legacy 语义。这是 breaking(移除可 author 的枚举值),必须走 major + codemod + tombstone,单独一轮完成,不与其他改动混。\n\n关联:#3391(契约跟踪)、#3498(框架 P1)、objectui#2823(前端 PR-4)、ADR-0049。"
+}

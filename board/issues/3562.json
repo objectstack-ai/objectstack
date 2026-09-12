@@ -1,0 +1,35 @@
+{
+  "number": 3562,
+  "kind": "pull_request",
+  "title": "feat(spec)!: 移除从未实现的 GraphQL 面 — 不在产品计划 (#2462 后续)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T05:17:38Z",
+  "updated_at": "2026-07-27T05:46:46Z",
+  "closed_at": "2026-07-27T05:46:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T05:46:44Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3562",
+  "body": "## 决策背景\n\n用户拍板：**GraphQL 不在开发计划中，相关代码和文档直接删除**。\n\n现状证据（与记忆/审计一致）：GraphQL 自始至终 schema-only——spec 里 20+ 配置 schema（type/query/mutation/subscription/resolver/federation/persisted-query/rate-limit…）、`handleGraphQL` 恒 501（`kernel.graphql` 在 monorepo 从未被赋值）、**三处**挂载各自广告这个死端点（dispatcher if 链、dispatcher-plugin hono 路由、hono adapter）——\"declared ≠ mounted ≠ implemented\" 缝病的完整标本。\n\n## 删除面\n\n- **spec**：`api/graphql.zod.ts` + `contracts/graphql-service.ts` 整删；`CoreServiceName`/`ApiProtocolType`/查询方言/`graphql-playground` 枚举成员删；`graphqlApi`+network capability 布尔、discovery/router 路由字段删。**BREAKING**（照 #3488 先例 major）。\n- **runtime**：`handleGraphQL`、if 链分支、两处 hono 挂载、discovery 广告、连带死亡的 `resolveRequestExecutionContext` 全删。\n- **plugin-dev** stub 家族、**qa** 一致性矩阵两行 + ratchet 高危 id + discover 模式 + identity pin + showcase 匿名面用例、expression ledger covers。\n- **生成物**：api-surface（16 entries 重生）、json-schema manifest（22 键删）、references docs（graphql.mdx 自动删）+ 手写 docs 三处。\n\n## 有意保留\n\n- external-datasource 的 `'graphql'` 协议选项——第三方系统可能以 GraphQL 对外，我们作为**客户端**连它是合法场景。\n- cloud 的保留字 slug 'graphql'（防撞名）。\n- objectui 自有类型里的死 `'graphql'` 联合成员 → 跨仓清理项（不阻塞本 PR）。\n\n## 行为变化\n\n`POST /graphql` 从恒 501 变 404（诚实状态：面不存在）；匿名拒绝矩阵少两行（surface 消失非放开）。\n\n## 验证\n\n全 monorepo build+test 强制无缓存 **131 任务全绿**（spec 6675 / core 386 / runtime 647 / dogfood 60 / conformance 41 在内）。\n\n关联 #2462。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

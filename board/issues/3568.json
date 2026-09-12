@@ -1,0 +1,35 @@
+{
+  "number": 3568,
+  "kind": "pull_request",
+  "title": "feat(runtime): /actions /mcp 两域 handler 体抽出 — ADR-0076 D11 步骤③ PR-9 (#2462)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T06:38:01Z",
+  "updated_at": "2026-07-27T06:46:17Z",
+  "closed_at": "2026-07-27T06:46:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T06:46:14Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3568",
+  "body": "## 动机（#2462 D11 步骤③，深耦合批第二刀）\n\nPR-8 子系统就位后，`/actions` 与 `/mcp` 抽体成为机械刀。dispatch() 的 if 链至此只剩 `/meta` 与 `/data`。\n\n## 改动\n\n- **`domains/actions.ts`**：ADR-0066 D4 权限门 + ADR-0104 参数契约跑在 actionExec.* 上。env 预解析段收敛为两个新 deps 缝——`getDefaultEnvironmentId` + `resolveProjectKernelObjectQL`（ADR-0006 Phase 5 直调方 kernel 交换；`this.kernel` 写入副作用留 dispatcher）。顺删冗余首尾斜杠正则（#2462 预扫的 CodeQL redos 孪生），split+filter 已覆盖。\n- **`domains/mcp.ts`**：JSON-RPC transport + `/mcp/skill` 下载 + OAuth resource-metadata + principal-bound 工具桥全家。`/mcp/skill` 先于 `/mcp` 的匹配优先级用**有序注册项**复刻（含 `?` 变体共四条）。`buildMcpBridge` 留公共薄委托给直调方（测试）。\n- **静态坑第二例**：`HttpDispatcher.isMcpEnabled` 被抽出体引用——内联为 `isMcpServerEnabled()` 双站点，包装删除。\n- **authz identity pin 随体搬家**：`buildMcpBridge(context)` 的 discover file/re/key 指向 `domains/mcp.ts`（pin 语义不变）。\n\n## 验证\n\nruntime 649 绿；http-conformance 41 绿；dogfood 全套 351 绿；全仓 build 绿。零行为变化。\n\n关联 #2462。剩最后一刀：/meta + /data（终刀）→ catch-all 退役 → 解锁步骤①。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

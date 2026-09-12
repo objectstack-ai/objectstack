@@ -1,0 +1,35 @@
+{
+  "number": 3288,
+  "kind": "pull_request",
+  "title": "feat(runtime): expose organizationId to action-body ctx (user + session) — follow-up to #3280",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T14:18:00Z",
+  "updated_at": "2026-07-19T14:34:01Z",
+  "closed_at": "2026-07-19T14:34:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-19T14:34:00Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3288",
+  "body": "Follow-up to #3280 (merged in #3284). Extends the blessed `organizationId` org name from the **hook** surface to the sibling **action-body** surface, which shares the same sandbox runner.\n\n## Gap\n\n#3280 taught `ctx.user.organizationId` / `ctx.session.organizationId` in hooks. Action bodies were left behind:\n- REST dispatch (`handleActions`) exposed only `ctx.user.tenantId` (the deprecated name) and **no `ctx.session`**.\n- MCP `run_action` (`runAction`) exposed **neither** — `ctx.user` was `{ id, name }` only.\n\nAction bodies execute **trusted** (the `ctx.engine` / `ctx.api` facade bypasses RLS/FLS), so a body that must scope by org has to read it from `ctx` — and it should read it under the same name a hook author uses.\n\n## Change — additive, behavior-preserving\n\nBoth action-dispatch sites now populate:\n- **`ctx.user.organizationId`** — blessed name (matches the `organization_id` column + `current_user.organizationId` in RLS). `ctx.user.tenantId` kept as a deprecated alias with the identical value on the REST path.\n- **`ctx.session`** (`{ userId, organizationId, tenantId, roles? }`) via a shared `buildActionSession(ec)` helper mirroring the hook `ctx.session` shape; `undefined` for a context-less / self-invoked call (parity with hooks).\n\nThe sandbox body-runner already forwards `actionCtx.user` / `actionCtx.session`, so no runner change was needed. The `objectstack-ui` skill now documents the action-body `ctx` and the `organizationId` read (previously undocumented).\n\n## Verification\n\n- `@objectstack/runtime` full `http-dispatcher.test.ts` **185 passed** (incl. extended `action body ctx` block asserting `user.organizationId` + new `ctx.session.organizationId`/deprecated-`tenantId` test + anonymous → no-session test); `body-runner` **11 passed**.\n- Runtime DTS typecheck ✓.\n- Gates green: `check:doc-authoring`, `check:skill-docs`, `check:skill-refs`, `check:role-word`, `check:nul-bytes`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 3462,
+  "kind": "issue",
+  "title": "[P2] Enroll `dashboard` / `webhook` / `report` in the spec liveness GOVERNED set",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-24T15:31:03Z",
+  "updated_at": "2026-07-25T03:02:21Z",
+  "closed_at": "2026-07-25T03:02:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3462",
+  "body": "Systemic follow-up from the metadata-liveness audit (umbrella #1878).\n\n## Why\n\nThe spec liveness gate governs only the types in `GOVERNED` (`packages/spec/scripts/liveness/check-liveness.mts:56`):\n\n```\nobject, field, flow, action, hook, permission, position, agent, tool, skill, dataset, page, view\n```\n\n**`dashboard`, `webhook`, and `report` are authorable/round-trippable but NOT in this set**, so they have no `liveness/<type>.json` ledger and CI never checks them. That gap is the *systemic reason* several drifts survived undetected until the 2026-06 audit — e.g.:\n\n- dashboard root `title` vs `label` (fixed reactively in objectstack-ai/objectui#2806);\n- webhook `object`/`isActive` vs runtime `object_name`/`active` (#3461);\n- report `chart`/`ReportColumn`/`ReportGrouping` staleness (fixed reactively in #3441).\n\nEnrolling these three closes the ratchet so the next such drift is a **CI failure**, not an audit finding years later.\n\n## Scope\n\nFor each type, following the `view` precedent (#2998 Track B):\n- [ ] Author `packages/spec/liveness/<type>.json` classifying every top-level prop `live` / `experimental` / `dead` with `file:line` evidence (drill one level via `children` where sub-props diverge).\n- [ ] Add the type to `GOVERNED` in `check-liveness.mts` (requires it to resolve through the metadata-type registry — `report`/`dashboard` are registered; **`webhook` is not** yet, so it may need registration first, or a small gate accommodation).\n- [ ] Confirm `pnpm --filter @objectstack/spec check:liveness` is green.\n- [ ] `authorWarn` the genuinely-misleading dead props (per the ledger README rules).\n\nSuggested order: **report** first (its chart/column/grouping split is already characterized in #3441), then **webhook** (do it with the #3461 decision), then **dashboard**.\n\nRefs #1878, #1891, #3441, #3461, #2998."
+}

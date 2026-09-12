@@ -1,0 +1,34 @@
+{
+  "number": 3336,
+  "kind": "pull_request",
+  "title": "chore(ci)(deps): bump google/osv-scanner-action/osv-scanner-action from 8dc09193bb540e09b23da07ad7e30bd33bf87018 to a82132c0bd6c7261ffcb78e754c46c70ab57ad9a",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "dependabot[bot]",
+    "id": 49699333,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-20T02:07:45Z",
+  "updated_at": "2026-07-20T02:35:32Z",
+  "closed_at": "2026-07-20T02:34:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-20T02:34:51Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3336",
+  "body": "Bumps [google/osv-scanner-action/osv-scanner-action](https://github.com/google/osv-scanner-action) from 8dc09193bb540e09b23da07ad7e30bd33bf87018 to a82132c0bd6c7261ffcb78e754c46c70ab57ad9a.\n<details>\n<summary>Commits</summary>\n<ul>\n<li><a href=\"https://github.com/google/osv-scanner-action/commit/a82132c0bd6c7261ffcb78e754c46c70ab57ad9a\"><code>a82132c</code></a> Merge pull request <a href=\"https://redirect.github.com/google/osv-scanner-action/issues/135\">#135</a> from google/fix-zizmor-excessive-permissions</li>\n<li><a href=\"https://github.com/google/osv-scanner-action/commit/272ff57b30ae5bef2488ba122ab6852c0d735a2d\"><code>272ff57</code></a> fix: address zizmor template injection warnings</li>\n<li><a href=\"https://github.com/google/osv-scanner-action/commit/10621fba4fb802e4fbe82d664deb6d5c44d233d5\"><code>10621fb</code></a> refactor: move permissions to job level to satisfy zizmor</li>\n<li><a href=\"https://github.com/google/osv-scanner-action/commit/fa4ff678dd5d0a4fa3d628e57af8162873e93cd6\"><code>fa4ff67</code></a> Merge pull request <a href=\"https://redirect.github.com/google/osv-scanner-action/issues/131\">#131</a> from BeyondEvil/feat/add-runs-on-input</li>\n<li><a href=\"https://github.com/google/osv-scanner-action/commit/e3f946a0c00d3ec85c9f541240039e08069cf882\"><code>e3f946a</code></a> feat: add runs-on input to reusable workflows</li>\n<li><a href=\"https://github.com/google/osv-scanner-action/commit/b8ac13f90f0ad78cebdcdbe5d39fcc8ff11301ba\"><code>b8ac13f</code></a> Merge pull request <a href=\"https://redirect.github.com/google/osv-scanner-action/issues/127\">#127</a> from SVilgelm/patch-1</li>\n<li><a href=\"https://github.com/google/osv-scanner-action/commit/05957d45c705b7779285f099a80dd9b9002cea6b\"><code>05957d4</code></a> Merge pull request <a href=\"https://redirect.github.com/google/osv-scanner-action/issues/130\">#130</a> from google/gate-outputs-with-flag-20260519</li>\n<li><a href=\"https://github.com/google/osv-scanner-action/commit/3a7550f43ba5b58905a821ce3a0ed24c4858b3f4\"><code>3a7550f</code></a> feat: gate reusable workflow outputs with a flag</li>\n<li><a href=\"https://github.com/google/osv-scanner-action/commit/f6fb127369c122785bf90c4148a2721e7a9d3727\"><code>f6fb127</code></a> Pin download-artifact action to SHA</li>\n<li><a href=\"https://github.com/google/osv-scanner-action/commit/9a498708959aeaef5ef730655706c5a1df1edbc2\"><code>9a49870</code></a> Update unified workflow example to point to v2.3.8 reusable workflows</li>\n<li>Additional commits viewable in <a href=\"https://github.com/google/osv-scanner-action/compare/8dc09193bb540e09b23da07ad7e30bd33bf87018...a82132c0bd6c7261ffcb78e754c46c70ab57ad9a\">compare view</a></li>\n</ul>\n</details>\n<br />\n\n\nDependabot will resolve any conflicts with this PR as long as you don't alter it yourself. You can also trigger a rebase manually by commenting `@dependabot rebase`.\n\n[//]: # (dependabot-automerge-start)\n[//]: # (dependabot-automerge-end)\n\n---\n\n<details>\n<summary>Dependabot commands and options</summary>\n<br />\n\nYou can trigger Dependabot actions by commenting on this PR:\n- `@dependabot rebase` will rebase this PR\n- `@dependabot recreate` will recreate this PR, overwriting any edits that have been made to it\n- `@dependabot show <dependency name> ignore conditions` will show all of the ignore conditions of the specified dependency\n- `@dependabot ignore this major version` will close this PR and stop Dependabot creating any more for this major version (unless you reopen the PR or upgrade to it yourself)\n- `@dependabot ignore this minor version` will close this PR and stop Dependabot creating any more for this minor version (unless you reopen the PR or upgrade to it yourself)\n- `@dependabot ignore this dependency` will close this PR and stop Dependabot creating any more for this dependency (unless you reopen the PR or upgrade to it yourself)\n\n\n</details>"
+}

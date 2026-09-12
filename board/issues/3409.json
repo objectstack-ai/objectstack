@@ -1,0 +1,33 @@
+{
+  "number": 3409,
+  "kind": "pull_request",
+  "title": "feat(showcase): actually exercise the per-group (会签) approval demo",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-22T14:18:29Z",
+  "updated_at": "2026-07-22T14:28:14Z",
+  "closed_at": "2026-07-22T14:28:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-22T14:28:12Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3409",
+  "body": "## The gap\n`showcase_expense_signoff` is the **only** flow in the showcase authoring `behavior: 'per_group'` — but no request was ever opened against it, so #3358 §1 *\"Per-group sign-off (会签) — configure `per_group` with 2 named groups; confirm it needs one approval from each group\"* had nothing to look at. Two independent reasons:\n\n1. The approval demo seed launched only the `unanimous` invoice flow and the `quorum` committee flow.\n2. Nobody held `auditor` — the position behind the flow's `finance` group — so even if it had fired, that group would have resolved to an empty slate.\n\n## The fix\n- **`Ada Auditor (demo)`** persona holding **only** `auditor`. It must be a *different* user from the admin: with one user in both groups a single decision satisfies both tallies at once, and \"one approval per group\" is never observable.\n- Launch `showcase_expense_signoff` on **EXP-2001 ($1,500)** — deliberately **under** the $5,000 committee threshold, so the quorum flow doesn't also open a request on the same record and blur the two demos.\n- Housekeeping: generalise `ensurePhoneDemoUser` → `ensureDemoUser` (returns the id) and `assignAdminPositions` → `assignPositions`; fix a comment that labelled the `unanimous` invoice flow as 会签.\n\n## Verified\nOn a wiped dev DB the request opens with the slate resolved **across both groups**, not collapsed onto one user:\n\n```\nprocess_name      = flow:showcase_expense_signoff\nbehavior          = per_group,  minApprovals = 1\napprovers         = [ {position: manager, group: manager},\n                      {position: auditor, group: finance} ]\npending_approvers = <admin>, usr_showcase_auditor_demo\nstatus            = pending\n```\n\nBoot log stays at **0 ERROR**; the other two demos are untouched — 3 pending requests now, one per behavior (`unanimous` / `quorum` / `per_group`). `tsc --noEmit` ✓\n\nStacked on #3408. From the #3358 §1 evidence pass. Private example → no changeset.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

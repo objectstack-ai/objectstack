@@ -1,0 +1,30 @@
+{
+  "number": 3584,
+  "kind": "issue",
+  "title": "Reconcile the four dispatcher↔client shape mismatches (analytics ×2, storage ×2) — #3563 follow-up",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T08:11:51Z",
+  "updated_at": "2026-07-27T08:55:36Z",
+  "closed_at": "2026-07-27T08:55:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3584",
+  "body": "Split from #3563. The route audit found four routes where a client method **exists but speaks a different dialect** than the dispatcher — ledgered as `mismatch` in `packages/runtime/src/route-ledger.ts` (the only non-`sdk`/non-deliberate dispositions left after PR-1…PR-5 drove the gap ratchet 27→0).\n\n## The four\n\n| Dispatcher serves | Client calls | Ledger row |\n|---|---|---|\n| `GET /analytics/meta` (`domains/analytics.ts:49`) | `analytics.meta(cube)` → `GET /analytics/meta/:cube` | extra path segment only the REST server understands |\n| `POST /analytics/sql` (`analytics.ts:55`) | `analytics.explain()` → `POST /analytics/explain` | different route name entirely |\n| `POST /storage/upload` (`domains/storage.ts:47`) | `storage.upload()` → presigned/chunked protocol (`/upload/presigned`, `/upload/complete`, `/upload/chunked/*`) | client can't upload through a bare dispatcher |\n| `GET /storage/file/:id` (`storage.ts:56`) | `storage.getDownloadUrl()` → `GET /storage/files/:id/url` | ditto for download |\n\nConsequence: these client methods work only where `@objectstack/rest` fronts the dispatcher. Against a bare-dispatcher runtime they 404 — the method exists, the call fails, and nothing in types or tests says why.\n\n## The decision to make (API-shape call, needs an owner)\n\n- **Option A — server-side aliases** (compatible): the dispatcher additionally accepts the REST shapes (`/analytics/meta/:cube`, `/analytics/explain`, the presigned protocol). No client change, no breakage; the dispatcher grows a few routes whose ledger rows become `sdk`.\n- **Option B — client aligns to the dispatcher** (breaking): rename/reshape the four client methods. Clean long-term, but a breaking change for every SDK consumer and likely needs the REST server to serve the dispatcher shapes too.\n\nRecommendation from the audit: **A**, with the REST shapes documented as canonical and the dispatcher aliases marked as such in the ledger.\n\n## Acceptance\n\n- A decision recorded (ADR note or PR description) on which side moves.\n- The four ledger rows reclassified from `mismatch` to `sdk` (or a documented deliberate disposition).\n- The conformance guard keeps passing throughout — `mismatch` rows already require notes, so the reclassification is mechanical once shapes agree.\n\nRefs: audit doc `docs/audits/2026-07-dispatcher-client-route-coverage.md` §4; ledger rows at `route-ledger.ts` (analytics/storage sections)."
+}

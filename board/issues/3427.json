@@ -1,0 +1,32 @@
+{
+  "number": 3427,
+  "kind": "issue",
+  "title": "record_change flow start node binds to a single lifecycle event — no create-OR-update in one flow",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-23T17:38:17Z",
+  "updated_at": "2026-07-24T15:06:51Z",
+  "closed_at": "2026-07-24T15:06:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3427",
+  "body": "## Summary\n\nRequest for clarification / ergonomics: a `record_change` flow's `start` node binds to exactly one lifecycle event via `triggerType` (e.g. `record-after-create`). There's no supported way to bind one flow to *both* insert and update, so authors must duplicate a whole flow to react to \"created OR updated\". Documenting the intended pattern (or supporting a multi-event start) would help.\n\n## Environment\n\n- `@objectstack/*` **16.1.0** (open edition)\n\n## Context\n\nThe `start` node config takes a single `triggerType`:\n```ts\n{ id: 'start', type: 'start', config: { objectName: 'crm_lead', triggerType: 'record-after-create' } }\n```\nFor a rule that should run on both create and update (e.g. \"recompute SLA whenever a case is created or its priority changes\"), there's no obvious `triggerType: ['record-after-create','record-after-update']` or equivalent. The apparent options are:\n- duplicate the flow (two near-identical definitions), or\n- move to an object lifecycle **hook** (`afterInsert` + `afterUpdate`), leaving the visual-flow layer.\n\n## Ask\n\n1. Confirm the intended pattern for \"fire on create AND update\" in a single visual flow.\n2. If duplication is currently the only path, consider supporting an array of `triggerType`s (or a `record-after-write` alias) on the `start` node.\n3. Document it either way — the single-event constraint isn't obvious from the `start` node schema.\n\n## Impact\n\nLow/medium (ergonomics + docs). Not a correctness bug, but it pushes common \"create-or-update\" business rules out of the flow layer or into copy-pasted duplicates that drift.\n"
+}

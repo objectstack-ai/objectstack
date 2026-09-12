@@ -1,0 +1,33 @@
+{
+  "number": 3211,
+  "kind": "issue",
+  "title": "authz(ADR-0099): P0–P2 落地 — posture 成为分级裁决唯一输入（Layer 0 豁免门 + Layer 1 级判定收敛）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T12:41:34Z",
+  "updated_at": "2026-07-19T06:20:28Z",
+  "closed_at": "2026-07-19T05:31:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3211",
+  "body": "## 背景\n\nADR-0099（PR #3109，merged 2026-07-17）是 ADR-0095 posture 阶梯的裁决收尾篇：阶梯派生了（B2/B4，#2938）、#2956 把 rung 挂上了 `ExecutionContext`、explain 侧已收敛读 `ctx.posture`（#2949）——但 **enforcement 侧没有任何分级裁决读它**，每个判定站点仍从 capability 位重新推导主体等级。这类「多站点独立派生」已在一个发布周期里踩出两次分叉 bug：#2946 Finding 2（org admin 越租户墙）、#2949（explain 与 enforcement 的 posture 标签漂移）。\n\n本 issue 承接 ADR-0099 的 **P0 → P1 → P2′** 实现；从 tracking #2920（已收口）移交。\n\n## 修订说明\n\n**v1.1（2026-07-18）**：经落点级复核，P1 由原文「小改动、行为保持」**修正为「fail-safe 方向的收窄，但确有行为变更」**——探针与 rung 的证据不同源，P0 等价门预期不会全绿，其产出是需逐条裁决的 delta 名单。\n\n**v1.2（2026-07-18）**：加入完整开发计划（里程碑 PR 拆分 + 两个 maintainer 决策门、验证矩阵、风险与回滚、发布节奏）。\n\n**v1.3（2026-07-18，M3 裁决）**：M2 合并后、动 M3 前的核实**推翻了「M3 纯行为保持」**——Layer 1 短路的 tier 判据（持超级位）是**每主体×每对象**的委派原语（自定义集给非管理员岗授某对象 `viewAllRecords` = 审计员模式 = Salesforce 对象级 View All 同款），posture（每主体一个 rung）结构上无法表达；严格照 D2 收敛会让该位条件性失效（ADR-0049 禁止的 declared-but-unenforced 类）并砍掉主流委派能力。maintainer 四视角综合裁决（主流平台 / 长期架构 / 业务 / AI 防错，见 issue 讨论）：**选 B+ —— 原 P2 否决，ADR-0099 修正为两轴模型**（posture=边界轴管阶梯两端，per-object 位=范围轴管 Layer 1 tier，「单一裁决输入」精化为「每轴单一权威」，新增不变量 I7）。**ADR 修正已出 PR #3245**；原 M3 方案作废，替换为下方 M3′。\n\n## 进度\n\n- [x] **M1 — P0 等价门** + ADR-0099 Accepted（PR #3218 ✅ merged）\n- [x] **G1 — 裁决门**（两条收窄接受 + 三件配套 + 落下一 minor）\n- [x] **M2 — P1 Layer 0 豁免门翻转**（PR #3226 ✅ merged）\n- [x] **G-M3 — Layer 1 裁决**（原 P2 否决 → 两轴模型，v1.3）\n- [ ] **ADR-0099 两轴 Amendment**（PR #3245，评审中）\n- [ ] **M3′ — P2′ 钉住格**（见下，前置 #3245 合并）\n- [ ] **G2 — 收尾核查 + close**\n\n---\n\n# 开发计划（v1.3 修订后）\n\n## 已完成里程碑（存档）\n\n- **M1（P0 等价门）**：探针提为导出纯函数 + `authz-matrix-gate.test.ts` 等价格/KNOWN DIVERGENCE 格/I2/I3/I4 staging 格。产出分歧名单：(a) 作用域 `admin_full_access` grant、(b) 零散平台专属能力——两者探针 true / rung MEMBER。\n- **G1**：两条收窄裁决接受（(b) 实质封 #2946 能力拼装后门）；配套 defect 日志 + release-notes 自查指引 + 文档立规矩；发布落下一 minor（不进 15.2.0）。\n- **M2（P1 翻转）**：Layer 0 豁免门读携带 rung、探针降 resolver-less fallback、读写共用一决策、`[authz/ADR-0099]` defect 面包屑、`:71-77` 过时注释退役、dogfood ledger 更新。plugin-security 503 / dogfood 296 / build 71/71 全绿。\n- **G-M3**：Layer 1 tier 收敛**否决**。理由四视角：① 主流平台（Salesforce 对象级 View All / Dynamics org 级实体访问 / Frappe）委派原语一律不绑管理员人格；② posture（每主体）与位（每主体×对象）粒度不可互换，压轴=类型错误；③ 审计员/风控式 view-all 委派是低代码日常，砍掉逼出过度授权；④ 条件性死位正是 AI 作者最踩的静默 miss 类（#3003/#3005 同族）。\n\n## M3′ — P2′：两轴模型钉住格（≤1 PD，前置 PR #3245 合并）\n\n**性质**：纯测试 + 已随 #3245 的 ADR 修正。零行为变更。\n\n**落点与内容**：\n1. ~~ADR-0099 两轴 Amendment~~ → **PR #3245**（D2 Layer 1 行修正、每轴单一权威、I7、I2 澄清、P2 superseded 标记）。\n2. **矩阵钉住格**（`authz-matrix-gate.test.ts`）：\n   - **种子等价格**：种子面「持超级位的主体 ⟺ posture ≥ TENANT_ADMIN」一致（两轴在种子面重合的显式断言，未来漂移报警）；\n   - **委派格（核心）**：MEMBER + 自定义集对某 private 对象授 `viewAllRecords` → 组织内全行可见 **且** 被 Layer 0 墙住（I7）——把「合法委派」钉进 CI，防未来任何「posture 收敛清理」静默砍掉它；\n   - **I7 格**：同一委派主体供异租户 `organization_id` 的写被拒（若 M2 既有格已覆盖则引用注明）。\n3. **advisory lint 后续 issue**（独立小项，不阻塞收口）：member 可达权限集在 private 对象上授 `viewAllRecords`/`modifyAllRecords` 时的授权期提示（复用 `describeHighPrivilegeBits`）。\n\n**判据**：零行为变更；plugin-security 全套绿；docs 门绿。\n\n## G2 — 收尾核查\n\n- [ ] **每轴单一权威** grep 核查：边界事实仅 resolver 派生 + Layer 0 门消费（fallback 探针除外，且只收窄）；范围事实仅 `hasSuperuser*Bypass` 求值；全仓无第三处派生；\n- [ ] enforcement 与 explain 读同一携带值（#2949 教训格常绿）；\n- [ ] cloud 侧：framework pin 升级后跑 cloud#835 多组织 e2e smoke 确认无 fallout；\n- [ ] advisory lint issue 已开；\n- [ ] close 本 issue。P3（EXTERNAL）留 #2776 item 6。\n\n## 非目标\n\n- **P3（EXTERNAL rung 激活）**：demand-gated（ADR-0090 follow-up #6 / #2776 item 6）。\n- **Layer 1 tier 收敛（原 P2）**：**已否决**（G-M3，ADR-0099 Amendment 记录在案）。若未来要重启，须另立 ADR 面对「废掉对象级 view-all 委派」这一 breaking 并给出迁移路径——不是本 issue 范围。\n- **显式 deny/muting**：ADR-0099 D4 已 Rejected。\n- **运行时开关**：能调宽租户墙豁免的开关即 D4 否决之物；回滚 = revert PR。\n\n## 执行约束\n\n1. worktree-first（Prime Directive #11）。\n2. 每里程碑独立 PR；M3′ 待 #3245（ADR 修正）合并后落，保持「先定规范再落格」的顺序。\n3. 两轴模型给 AI 作者的规则一句话：**位定对象内行范围，posture 定租户边界**——所有后续文档/skill 以此口径。\n\n## 关联\n\nADR-0099 / #3109 · **#3218**（M1/P0）· **#3226**（M2/P1）· **#3245**（两轴 Amendment）· ADR-0095 · #2956 · #2949 · #2946 Finding 2 · #2937 · ADR-0049（declared-but-unenforced 禁令，G-M3 裁决依据）· tracking #2920（已收口）· #2776 item 6（EXTERNAL 产品轨）"
+}

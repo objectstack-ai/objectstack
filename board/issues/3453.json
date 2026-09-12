@@ -1,0 +1,32 @@
+{
+  "number": 3453,
+  "kind": "issue",
+  "title": "audit: multi-tenant per-org seed replay silently omits marketplace packages (and any 2nd app) — same dead-`ctx.kernel` + duplicate-`registerService` root cause as #3452",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-24T15:05:51Z",
+  "updated_at": "2026-07-25T02:16:30Z",
+  "closed_at": "2026-07-25T02:16:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3453",
+  "body": "## 范围与结论\n\n审计「多租户下换库/新建组织时,种子重放的时序与覆盖」。结论:**框架侧的 `seed-datasets` 重放接缝有和 #3452 完全相同的两个根因缺陷**,导致多租户下**新建组织的 per-org 种子重放会静默漏掉所有 marketplace 安装的包(以及第二个 config app),只重放第一个 config app 的种子**。这是本轮「装了没数据」bug 的多租户镜像。\n\n## per-org 重放住在哪\n\n开源框架里 **没有** `sys_organization` insert 的重放消费者 —— 它在 v11 被移到了企业版 `@objectstack/organizations`(`packages/plugins/plugin-security/src/security-plugin.ts:1874-1877` 明确注释:「Per-organization seed data replay … moved to @objectstack/organizations」)。框架只提供**接缝**:\n- AppPlugin 注册 `seed-datasets`(数据集清单)+ `seed-replayer`(闭包,`(orgId) => 重放`)。\n- marketplace 安装/rehydrate 时把包的数据集 merge 进 `seed-datasets`。\n- `@objectstack/organizations` 在建组织时调 `seed-replayer(orgId)`。\n\n## 三个具体缺陷(带 file:line)\n\n**① `(ctx as any).kernel` 恒 undefined。** 标准 `PluginContext`(`packages/core/src/kernel.ts:76`)只有 `getService`/`registerService`,**没有 `.kernel`**。所有靠它读旧值的点每次都读到 undefined:\n- `packages/runtime/src/app-plugin.ts:752-755`(读 existing seed-datasets)\n- `packages/runtime/src/app-plugin.ts:774-776`(replayer 重放时读 seed-datasets)\n- `packages/cloud-connection/src/marketplace-install-local-plugin.ts:860-865`(marketplace merge 读 existing)\n\n**② `registerService` 重名抛异常。** `kernel.ts:195` 遇到已注册的 name 直接 `throw 'already registered'`。AppPlugin 在 start() 先注册了 `seed-datasets`;marketplace 在 kernel:ready 再注册时(`marketplace-install-local-plugin.ts:867-868`,`(ctx as any).registerService('seed-datasets', merged)`)**抛异常被 line 870 的 try/catch 吞掉** → marketplace 的数据集根本没进 `seed-datasets`。\n\n**③ replayer 闭包捕获的是创建时的 `merged`,不是活服务。** `app-plugin.ts:774-776`:`datasetsNow = kernel?.getService?.('seed-datasets')`(恒 undefined)`?? merged`。`merged` 是 AppPlugin 自己 start() 时的数据集快照。即便 ② 修好让 marketplace 成功注册,replayer 也读不到 —— 它永远重放**第一个 config app 的数据集**。\n\n## 净影响\n\n多租户(cloud/EE 装了 `@objectstack/organizations`)+ 任意 marketplace 包:**新建的每个组织都拿不到 marketplace 包的种子数据**;有第二个 config app 时同理漏掉。single-tenant 不受影响(AppPlugin 直接 inline seed,不走 seed-datasets/replayer)。这正是 #3421/#3452 单租户「装了没数据」的多租户版本,同一批根因。\n\n## 附带缺口(建议但不强求本 issue 覆盖)\n\n**已存在组织没有 heal。** 换库/部分恢复后,已存在的组织不会再触发 `sys_organization` insert,因此其空的包数据表**永不重放**。单租户侧 #3421 用「空表 heal」补了,多租户没有等价物(可能属于 `@objectstack/organizations` 职责)。\n\n**时序。** 即便修好 ①②③,marketplace 的 merge 在 kernel:ready(rehydrate→applySideEffects),AppPlugin 的在 start();启动期若有组织在 merge 之前被插入,其重放会漏 marketplace 数据集。用共享可变累加器可一并解决顺序问题。\n\n## 建议修复(实现就绪)\n\n**直接复用 #3452 的 `accumulateSeedSummary` 同款模式**(`packages/types/src/seed-summary.ts` 的 register-once-then-mutate):把 `seed-datasets` 也改成**注册一个可变数组一次、所有来源 append 进同一个数组**;replayer 读**活服务**(`ctx.getService('seed-datasets')`)而非捕获的 `merged`。这样 config app + 所有 marketplace 包的数据集共享一份、与注册顺序无关、不受 kernel getService 缓存影响。\n\n- 落点:`app-plugin.ts:751-808`、`marketplace-install-local-plugin.ts:858-872`。\n- 可加一个 `@objectstack/types` 的 `appendSeedDatasets(ctx, datasets)` helper 收敛。\n- **验证**:接缝级单测可完全覆盖(seed-datasets 跨 app+marketplace 累加;replayer 读到两者)。真·多租户 e2e 需要 `@objectstack/organizations`(cloud),建议在 cloud 侧补一个「装包→建组织→组织内可见包数据」的冒烟。\n\n## 参考\n- #3452(姊妹修复,同根因,已修 seed-summary 计数器)、#3421(单租户 rehydrate heal)、#3435(seed-summary banner)。\n- 根因锚点:`packages/core/src/kernel.ts:76`(无 .kernel)、`:195`(重名抛错)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

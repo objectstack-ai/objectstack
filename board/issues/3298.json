@@ -1,0 +1,34 @@
+{
+  "number": 3298,
+  "kind": "issue",
+  "title": "discovery 广播「跨对象原子 batch」能力位(让客户端声明式协商,取代 404/405/501 运行时探测)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T16:15:42Z",
+  "updated_at": "2026-07-20T03:30:27Z",
+  "closed_at": "2026-07-20T03:30:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3298",
+  "body": "## 背景\n\n`POST /api/v1/batch`(跨对象原子批量,#1604 / ADR-0034 item 4)已落地。SDK 侧 `client.data.batchTransaction()` 也已合并(#3271)。但**服务端 discovery 响应目前不声明「本后端是否支持原子跨对象 batch」**。\n\n`GET /api/v1/discovery` 现在只产出 `routes` / `scoping` / `mcp`(见 `packages/rest/src/rest-server.ts` 的 discovery 生产者 + `packages/spec/src/api/discovery.zod.ts` 的 `ApiRoutesSchema`/capabilities),没有 batch 能力信号。\n\n## 问题\n\n客户端(尤其 ObjectUI 的 `ObjectStackAdapter`)现在只能靠**运行时探测**判断后端支不支持原子批量——打一次 `/batch`,看返回 404/405(端点不存在)或 501(运行时不支持事务),失败再降级到非原子客户端模拟。这是\"打了才知道\",不是声明式能力协商:\n\n- 无法在连接时提前决策;\n- 无法作为\"最低支持后端版本已具备 `/batch`\"的判据 —— 这正卡住了 ObjectUI 侧硬删除非原子模拟回退(见 objectui#2679 验收第 4 条 / 其配套 issue)。\n\n## 方案\n\n在 discovery 契约里新增一个能力信号(命名待定,如 `capabilities.transactionalBatch: true`,或一个最低版本号),由**所有** discovery 生产方真实填充:\n\n- `packages/spec/src/api/discovery.zod.ts` — schema 定义;\n- `packages/rest/src/rest-server.ts`(discovery 生产);\n- `packages/plugins/plugin-hono-server`(hono discovery);\n- `metadata-protocol`(protocol discovery)。\n\n## ⚠️ 关键约束(否则又是一个 declared-but-unpopulated 路由)\n\n加了 key 就必须每个生产方都真实填充,否则会变成\"声明了但没人填\"的空能力位——这正是 #3271 里**故意不**给 `ApiRoutesSchema` 加 `batch` key 的原因(避免 3+ 处生产者失配)。所以本 issue 的验收必须包含\"三处生产者同步填充 + 测试断言 discovery 里带该位\"。\n\n## 验收\n\n- [ ] discovery schema 新增 batch 能力位;\n- [ ] rest-server / hono-plugin / metadata-protocol 三处生产者均填充;\n- [ ] 测试断言 `GET /discovery` 返回该位;\n- [ ] `@objectstack/client` 暴露该能力供消费方读取(可选)。\n\n## 关联\n\n- 承接 #1604 / ADR-0034 item 4;SDK 方法见 #3271(已合并)。\n- 下游依赖:ObjectUI 侧\"硬删除非原子模拟回退\"以本 issue 为前提。"
+}

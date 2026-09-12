@@ -1,0 +1,32 @@
+{
+  "number": 3025,
+  "kind": "issue",
+  "title": "业务单元需要支持导入:列表页导入按钮 405(apiMethods 白名单缺 import/export)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T05:51:06Z",
+  "updated_at": "2026-07-21T15:44:41Z",
+  "closed_at": "2026-07-21T15:44:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3025",
+  "body": "## 现象\n\n业务单元列表(Setup → Business Units)点「导入」按钮报错:\n\n```\nAPI operation 'import' is not allowed on object 'sys_business_unit'\n(405, code: OBJECT_API_METHOD_NOT_ALLOWED)\n```\n\n「导出」按钮(`export` 操作)同样会被拒。\n\n## 根因\n\nREST 数据面按 ADR-0049 用对象上的 `enable.apiMethods` 白名单门控,而 `sys_business_unit` 的白名单只有 CRUD 五件套,没有 `import`/`export`:\n\n```ts\n// packages/platform-objects/src/identity/sys-business-unit.object.ts\napiMethods: ['get', 'list', 'create', 'update', 'delete'],\n```\n\n排查确认不是刻意限制(ADR-0057 与提交注释均未提及;真正刻意收紧的对象如 `sys_oauth_application` 都有注释 + 测试锁死),且该对象字段设计明确预期 HRIS 批量同步(`external_ref`、`effective_from/to` 标注 \"HRIS sync\"),组织树本来就该支持批量导入。\n\n## 修复\n\n白名单补上 `'import', 'export'` 两个操作,并加回归测试断言。已本地验证:platform-objects 198 条测试全过。\n\n## 复现\n\n1. 登录 console → Setup → Business Units\n2. 列表页点 Import,上传任意 CSV\n3. 观察 405 `OBJECT_API_METHOD_NOT_ALLOWED`\n\n---\n\n关联设计问题(UI 按钮与 apiMethods 白名单的前后端一致性)拆分至独立 issue。\n"
+}

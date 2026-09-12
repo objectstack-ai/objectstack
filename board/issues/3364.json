@@ -1,0 +1,33 @@
+{
+  "number": 3364,
+  "kind": "pull_request",
+  "title": "feat(showcase): make v16 approvals demonstrable out of the box",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-20T14:44:59Z",
+  "updated_at": "2026-07-21T03:08:33Z",
+  "closed_at": "2026-07-21T03:08:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-21T03:08:31Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3364",
+  "body": "## Why\nDuring the [#3358](https://github.com/objectstack-ai/framework/issues/3358) v16.0 verification sweep, the marquee **approval** features weren't demonstrable in the showcase out of the box — the checklist assumes \"seeds make most features demonstrable,\" but for §1 they didn't. Root causes:\n\n1. **Dangling positions (a real showcase bug):** the `showcase_invoice_signoff` and `showcase_committee_quorum` flows route to `finance` / `legal` positions that **were never defined** (`positions.ts` only had manager/exec/auditor/ops/…). So the flows were unroutable even if triggered manually.\n2. **No approver holders:** position assignments are runtime admin actions and users can't be seeded → every request resolved to an empty approver slate and waited forever.\n3. **No opened request:** the seed loader suppresses record-change flows (#2661), and `sys_approval_request` is engine-owned (ADR-0103, get/list only), so nothing seeded a pending request.\n\n## What\nMirrors the existing `bind-position-sets.ts` pattern (imperative, on `kernel:bootstrapped`):\n\n- **Define `finance` + `legal` positions** (`positions.ts`, now 9 positions).\n- **`seed-approval-demo.ts`** (new): assigns the dev admin to `manager`/`finance`/`legal` (`sys_user_position`), provisions a **phone-based demo user**, and launches both signoff flows through the real automation engine so **two genuine, resumable pending requests** land in the inbox on first boot.\n  - Org is resolved from **`sys_member`** (the admin's `sys_user.organization_id` is null) and threaded into both the position rows and the requests — otherwise the org-scoped approver resolution and `getRequest` (inbox drawer) silently return nothing.\n  - The engine's `execute()` evaluates the start-node condition and reads the target object from `context.object`, so the launch supplies `previous` (for the `previous.status != \"sent\"` gate) and `object` + `organizationId`.\n- **Seed a high-value `EXP-DEMO`** report ($8,900, submitted) for the 2-of-3 quorum flow.\n- **\"Submit for Sign-off\" invoice action** so the 会签 flow can be re-triggered from the UI on demand.\n\nIdempotent throughout (persistent DB keeps rows; duplicate-pending requests are rejected and swallowed). No changeset — `@objectstack/example-showcase` is private.\n\n## Verified\nFresh `objectstack dev --ui --seed-admin`:\n\n- Approval Center shows **2 pending requests** (待我审批 = 2): *High-Value Expense — Committee Quorum* (2 of 3) and *Invoice Dual Sign-off* (finance + legal).\n- The detail drawer renders **server-computed progress** (\"Approvals — 0 of 1\" — the 2→1 quorum clamp when all slots resolve to the one admin, i.e. the \"thresholds clamp so misconfiguration can't deadlock\" behavior) and the **metadata-driven action bar** (Approve / Reject / Reassign / Send back / Request info).\n- `?request=<id>` deep-links open the drawer directly.\n- `os validate` ✓ (9 Positions, 8 Actions) and `tsc --noEmit` ✓.\n\n### Known limitation\nBecause users can't be seeded, the admin holds all three approver positions, so the three approver slots all resolve to \"Dev Admin\" and the quorum collapses to 1 distinct approver. The decision *mechanics* (quorum tally, progress, actions, deep links) are fully exercised; a multi-user deployment would show distinct approvers.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 3347,
+  "kind": "pull_request",
+  "title": "feat(i18n): make action resultDialog copy translatable (schema slot + resolver + platform bundles)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-20T05:15:28Z",
+  "updated_at": "2026-07-20T07:46:55Z",
+  "closed_at": "2026-07-20T07:46:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-20T07:46:53Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3347",
+  "body": "## Problem\n\nThe post-success `resultDialog` (create-user temporary password, 2FA backup codes, OAuth client secrets) always rendered hardcoded English — even on fully-translated locales. Root cause: the translation protocol had **no slot** for `Action.resultDialog`, so neither the bundles nor any resolver could localize the dialog's title, description, acknowledge button, or field labels.\n\n## Changes\n\n- **spec** — `_actions.<action>` (object + object-first node) and `globalActions.<action>` gain an optional `resultDialog` translation node (`ActionResultDialogTranslationSchema`): `title`, `description`, `acknowledge`, and `fields` keyed by the **literal** result-field path (e.g. `\"user.email\"` — keys may contain dots; resolvers index the record directly, never split on `.`). New `resolveActionResultDialog` overlay resolver, wired into `translateAction`. json-schema manifest regenerated.\n- **cli** — `os i18n extract` emits the new `resultDialog.title/description/acknowledge` and `resultDialog.fields.<path>` entries (dotted paths stay one segment), so coverage/skeleton generation see them.\n- **platform-objects** — en / zh-CN / ja-JP / es-ES bundles ship resultDialog copy for all six shipped dialogs: `sys_user.create_user`, `sys_user.set_user_password`, `sys_two_factor.enable_two_factor`, `sys_two_factor.regenerate_backup_codes`, `sys_oauth_application.create_oauth_application`, `sys_oauth_application.rotate_client_secret`.\n\nPurely additive — untranslated locales keep falling back to the metadata literals. Client-side rendering lands in objectstack-ai/objectui (`actionResultDialog` resolver + result-dialog handlers).\n\n## Testing\n\n- spec 138 / cli 27 / platform-objects 213 tests pass; full-repo `pnpm build` (71 tasks) green\n- End-to-end against a live showcase instance + objectui HMR console: create-user and set-password dialogs render fully localized in zh-CN (title 「用户已创建」, fields 「邮箱/临时密码」, acknowledge 「我已保存该密码」), user actually created and temporary password minted\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

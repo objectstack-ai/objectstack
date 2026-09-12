@@ -1,0 +1,34 @@
+{
+  "number": 3461,
+  "kind": "issue",
+  "title": "[P2] Webhook: the spec `WebhookSchema` authoring surface is disconnected from the `sys_webhook` dispatcher",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-24T15:30:44Z",
+  "updated_at": "2026-07-25T03:21:29Z",
+  "closed_at": "2026-07-25T03:21:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3461",
+  "body": "Split out from the naming-drift issue #1891 (webhook row) after a current-state investigation. Umbrella #1878.\n\n## What the audit called \"naming drift\" is actually a full disconnect\n\n`#1891` listed webhook as `object → object_name` / `isActive → active` naming drift (spec key ≠ consumed key). On investigation it is **not** a live consumer reading a differently-named key — it's that the **entire spec `WebhookSchema` authoring surface is disconnected from the runtime dispatcher**:\n\n- **Spec side** — `WebhookSchema` (`packages/spec/src/automation/webhook.zod.ts:81,119`) declares `object` / `isActive`. It's authored inside a **Stack** (`stack.zod.ts:261 webhooks: z.array(WebhookSchema)`) and by connectors (`connector.zod.ts:271` `WebhookConfigSchema`). It is **not** a registered metadata type (absent from `kernel/metadata-type-schemas.ts`).\n- **Runtime side** — the dispatcher runs off the `sys_webhook` **data object** (`plugins/plugin-webhooks/src/sys-webhook.object.ts`), whose columns are `object_name` (:112) and `active` (:53). `AutoEnqueuer` reads `row.object_name` (`auto-enqueuer.ts:267`) and `where: { active: true }` (:176). These rows are **admin-authored via the object's CRUD UI** (`sys-webhook.object.ts:43-44` — \"so admins can at least toggle `active` and edit simple URL/method fields without round-tripping through code\"), and self-healed on `sys_webhook:changed`.\n- **The gap** — there is **no ingestion path** that turns a stack/connector `WebhookSchema` (`object`/`isActive`) into a `sys_webhook` row (`object_name`/`active`). Connector `webhooks` are explicitly *\"not yet enforced — never read at registration\"* (`connector.zod.ts:662`, #3197). So authoring `webhooks:` on a stack produces `webhook` metadata artifacts that nothing materializes into dispatchable rows.\n\n**Consequence:** a parse-time `object → object_name` alias on `WebhookSchema` (the \"quick fix\") would be **inert** — there is no consumer of the spec field to bridge to. Shipping it would be a false fix (ADR-0078). That's why this is split out rather than closed under #1891.\n\n## Decision needed (pick one)\n\n- **A — build the bridge.** Ingest stack/connector `WebhookSchema` into `sys_webhook` rows, mapping `object → object_name`, `isActive → active`, `triggers`/`url`/`method`/`secret`/… at that boundary. Closes the disconnect *and* the naming drift in one place. Overlaps #3197 (connector webhooks never read at registration). Larger; needs a home for the seeder (metadata ingestion or the webhooks plugin).\n- **B — retire the spec authoring surface.** Treat `sys_webhook` (admin-authored rows) as the single source of truth; demote/remove `stack.webhooks` + `WebhookSchema` (breaking — public export; needs a major + migration note), or mark it clearly `[EXPERIMENTAL — not enforced / author sys_webhook rows instead]` in the interim.\n\nRecommendation: **A** if declarative/stack-authored webhooks are on the roadmap (it's the ADR-0078-correct end state); otherwise **B**'s interim marking so authoring `webhooks:` isn't a silent no-op.\n\n## Related\n- Parent naming-drift issue #1891 (this row is moved here)\n- Write-only / disconnected metadata cluster (#1892)\n- Connector webhooks never read at registration (#3197)\n- Systemic: enrolling `webhook` in the liveness `GOVERNED` set would have caught this automatically (see the GOVERNED-enrollment follow-up)."
+}

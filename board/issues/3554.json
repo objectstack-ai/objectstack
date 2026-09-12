@@ -1,0 +1,32 @@
+{
+  "number": 3554,
+  "kind": "pull_request",
+  "title": "feat(approvals): typed decisionOutputs — record pickers for decision-output fields (#3447)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T04:24:26Z",
+  "updated_at": "2026-07-27T04:45:02Z",
+  "closed_at": "2026-07-27T04:45:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T04:45:00Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3554",
+  "body": "## What\n\nFollow-up to #3447 P2 (#3532/#3538): a `decisionOutputs` entry may now be a **typed declaration** alongside the bare-string form:\n\n```ts\ndecisionOutputs: [{ key: 'next_reviewers', label: 'Next Reviewers', type: 'user', multiple: true }]\n```\n\nA typed entry tells the decision UI to render the matching record picker — `user` → sys_user, `department` → sys_business_unit, `position` → sys_position, `team` → sys_team; `multiple` collects an id array (the natural fan-out shape for a downstream `expression` approver). This upgrades the scenario-② input experience from \"paste user ids into a text box\" to \"pick people\". objectui consumes it in the paired PR (renders pickers from `decision_output_defs`).\n\n## Design\n\n- **Type shapes the widget only.** The runtime whitelist works by `key` for both forms, via the new `normalizeDecisionOutputs` helper exported from `@objectstack/spec/automation` — the **single reader of the union** consumed by the service whitelist, the request read, and `os lint`, so a bare key and `{ key }` can never behave differently.\n- **Version-skew-safe surfacing.** The request read keeps `decision_outputs: string[]` (older consoles keep rendering text inputs) and adds `decision_output_defs` (normalized declarations) for picker-aware consoles.\n- **No decide-route change.** Multi-pickers submit real `string[]` values — the outputs channel has accepted arbitrary JSON since P2 (the integration tests use arrays).\n- The showcase `showcase_dynamic_approval` demo flow adopts the typed form; SKILL.md documents it and its end-to-end example is now a full `defineFlow` under `<!-- os:check -->` (type-checked against the spec in CI — 33 examples green).\n\n## Tests\n\nplugin-approvals 193 (new: typed normalize → key-list + defs surfacing + typed whitelist accepts array outputs), lint 335 (new: reserved-key check inside typed declarations). Generators re-run; spec/plugin DTS builds green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

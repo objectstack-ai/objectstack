@@ -1,0 +1,35 @@
+{
+  "number": 3292,
+  "kind": "pull_request",
+  "title": "fix(cli): fail loudly when turso/libSQL is selected in the open-core CLI (#3276 follow-up)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T14:27:20Z",
+  "updated_at": "2026-07-19T16:54:34Z",
+  "closed_at": "2026-07-19T16:31:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-19T16:31:30Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3292",
+  "body": "> **Stacked on #3285** (base = `fix/cli-memory-driver-dispatch`). It builds on the `storage-driver.ts` file that PR introduces. Merge #3285 first, then this retargets cleanly to `main`. Review just the top commit / the diff-vs-base.\n\n## Problem\n\nThe same \"declared ≠ enforced\" bug as #3276, for **`turso`/libSQL**:\n\n- `os dev` ([dev.ts:89](packages/cli/src/commands/dev.ts)) and `os start` ([start.ts:100](packages/cli/src/commands/start.ts)) advertise `turso` as a `--database-driver` option, and `libsql://` URLs in help/examples.\n- `inferDriverTypeFromUrl` maps `libsql://` and `*.turso.*` URLs to driver kind `turso`.\n- But the driver dispatch had **no `turso` branch** — so selecting it (via `OS_DATABASE_DRIVER=turso`, `--database-driver turso`, or a `libsql://` URL) silently fell through to the SQLite default and **ignored the requested remote libSQL connection**.\n\n## Why not just \"add a turso driver\" (option a)\n\nInvestigated: `@objectstack/driver-turso` is a **cloud / EE** package (`../cloud/packages/driver-turso`) — it extends `SqlDriver` over `@libsql/client`, is composed by the **cloud runtime's own kernel factory** (`cloud-stack.ts` / `environment-kernel-factory.ts` do `new TursoDriver({ url, authToken })`), and its spec schema lives in the cloud package *specifically to keep it out of open-core `@objectstack/spec`*. `runtime/standalone-stack.ts` explicitly stopped consuming its auth token. So turso is deliberately **not** an open-core engine — pulling it into open-core's dispatch would reintroduce the coupling the architecture removed.\n\n## Fix (option b, refined — recognize + fail loud)\n\n- `createStorageDriver` throws a typed **`UnsupportedDriverError`** for `turso`/`libsql`, with an actionable message (names `@objectstack/driver-turso`, explains cloud/EE vs. explicit config, lists the open-core alternatives).\n- `serve.ts` re-throws it from the driver block's catch so `run()`'s existing fatal handler restores output, prints the message, and **exits 1** (dev AND prod) — never a silent SQLite boot.\n- `inferDriverTypeFromUrl` **keeps** classifying `libsql://` / `*.turso.*` as `turso` (not `''`), so those URLs hit the same loud failure instead of the SQLite fall-through.\n- No `dev.ts` / `start.ts` changes: turso is a *real* driver in the cloud distribution (which reuses these commands and documents `OS_DATABASE_DRIVER=turso`), so the honest fix is a clear error — not un-advertising it.\n\n## Verification\n\n- ✅ **End-to-end** (real `os serve` on the host-config path): `OS_DATABASE_DRIVER=turso` **and** `OS_DATABASE_URL=libsql://my-db.turso.io` both **exit 1** with the fatal message; control `OS_DATABASE_DRIVER=memory` still boots.\n- ✅ Unit tests (`storage-driver.test.ts`) prove the branch goes **red** without it (dev→`SqlDriver`, prod→`null`) and assert the message is actionable. 18/18 in-file; 41/41 across serve/dev/storage suites.\n- ✅ `tsc -p tsconfig.build.json` + `eslint` clean.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

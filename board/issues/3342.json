@@ -1,0 +1,33 @@
+{
+  "number": 3342,
+  "kind": "pull_request",
+  "title": "ci: exempt Changesets pre-release (RC) mode from the no-major guard",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-20T02:30:16Z",
+  "updated_at": "2026-07-20T02:36:01Z",
+  "closed_at": "2026-07-20T02:36:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-20T02:36:00Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3342",
+  "body": "## What\n\nMake the launch-window **no-major guard** ([`scripts/check-changeset-no-major.mjs`](../blob/main/scripts/check-changeset-no-major.mjs)) stand aside while Changesets is in **pre-release (RC) mode**.\n\n## Why\n\nThe guard scans **every pending changeset in the tree** (not the PR diff), so a single `major` changeset sitting on `main` makes the **Check Changeset** job red on *every subsequent PR* that lacks the `allow-major` label. That is exactly what is happening now: [`.changeset/remove-session-tenantid-alias.md`](../blob/main/.changeset/remove-session-tenantid-alias.md) (#3290) declares three `major` bumps.\n\nBut the repo is **currently in `changeset pre enter rc` mode** (`.changeset/pre.json` → `\"mode\": \"pre\"`, `\"tag\": \"rc\"`). In pre-release mode a `major` only ever produces a `X.0.0-rc.N` **pre-release** — nothing final publishes until `changeset pre exit`. Accumulating the next major's breaking changes is precisely what an RC window is *for*, so the guard should not fight its own release process by reding every PR with a per-PR `allow-major` toll.\n\n## Change\n\n- If `.changeset/pre.json` exists with `mode: \"pre\"`, the guard **prints the pending majors as `::notice::` annotations** (so the RC curator can still eyeball them) and **exits 0** instead of failing.\n- Outside pre-mode the behavior is **unchanged**: any `major` still fails, escape hatch remains the `allow-major` label.\n- The exemption keys off the Changesets state machine itself, so it **re-arms automatically** on `changeset pre exit` — zero per-PR maintenance.\n\n## Verification (local, both branches)\n\n```\n# RC mode (pre.json present, one major changeset)\n✓ Changesets is in pre-release mode (tag: rc) — skipping the no-major guard.\n::notice ...pending major in .changeset/remove-session-tenantid-alias.md: @objectstack/spec, @objectstack/objectql, @objectstack/runtime\nexit=0\n\n# non-pre mode (pre.json moved aside)\n⛔ Changeset(s) declare a `major` bump.  ... exit=1\n```\n\nCI-tooling-only change (no publishable package touched) → `skip-changeset`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

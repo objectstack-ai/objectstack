@@ -1,0 +1,32 @@
+{
+  "number": 3276,
+  "kind": "issue",
+  "title": "cli: `OS_DATABASE_DRIVER=memory` is advertised but `serve.ts` has no dispatch branch (falls through to SQLite)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T12:58:22Z",
+  "updated_at": "2026-07-19T16:19:27Z",
+  "closed_at": "2026-07-19T16:19:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3276",
+  "body": "The CLI advertises `memory` as a database driver — `--database-driver … | memory` (`packages/cli/src/commands/dev.ts:88`), and `OS_DATABASE_DRIVER=memory` is special-cased in dev (`dev.ts:41`; `resolveDefaultDevDbUrl` at `dev.ts:40-42`).\n\nBut `packages/cli/src/commands/serve.ts`'s driver dispatch has **no `memory` branch** (verified by grep). So `OS_DATABASE_DRIVER=memory` falls through to the isDev SQLite default (`resolveSqliteDriver` at `:memory:`), yielding **SQLite-in-memory**, not the mingo `InMemoryDriver`. The `InMemoryDriver` is only reached if *both* native `better-sqlite3` and the wasm fallback fail to load.\n\n**Impact:** declared ≠ enforced — selecting the `memory` driver silently gives a different engine than intended.\n\n**Fix:** add a `driverType === 'memory'` branch in the `serve.ts` dispatch that returns the `InMemoryDriver`.\n\n_Found during the #1880 docs implementation-accuracy audit (PR #3243); out of scope for that docs-only PR._"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 3468,
+  "kind": "pull_request",
+  "title": "feat(rest/protocol): extend droppedFields write-observability to bulk paths + client SDK (#3455)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-24T15:56:47Z",
+  "updated_at": "2026-07-25T00:38:47Z",
+  "closed_at": "2026-07-25T00:38:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-25T00:38:45Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3468",
+  "body": "Closes #3455. Follow-up to #3448 (#3431 D2 波及面): single-write PATCH/POST `/data` already surfaces LEGALLY-stripped write fields (`readonly` #2948 / `readonlyWhen` #3042 / #3043 create ingress) as `droppedFields`; the **bulk** paths dropped them silently and the typed client warning + CORS mirror were deferred. This closes those out.\n\n## What changed\n\n### Bulk passthrough — `@objectstack/metadata-protocol`\n- **`updateManyData`** and **`batchData`** (update/upsert rows): register a per-row `onFieldsDropped` collector, attach events to that row's result.\n- **`insertManyData`**: per-row `droppedFields` on each outcome (ingress diff, 1:1 with rows).\n- **`createManyData`**: **aggregated** top-level `droppedFields` (one event per object/reason, union of field names) — its `{ records, count }` response has no per-row slot, and the insert-time strip is static-`readonly` only (schema-uniform), so aggregation is faithful, not lossy.\n- **Correctness fix bundled in:** `updateManyData` and `batchData` never threaded the caller's execution `context` — bulk writes ran **context-less**, so RLS/FLS and `readonlyWhen` evaluated without the caller's principal, and the batch create-ingress strip was hard-coded to a non-system context. All engine calls in both methods now run under the resolved `context`.\n\n### Contract — `@objectstack/spec`\n- `BatchOperationResultSchema` gains optional per-row `droppedFields` (covers `updateMany` + `batch`, which alias `BatchUpdateResponseSchema`).\n- `CreateManyDataResponseSchema` gains the optional aggregated `droppedFields`.\n- Both omit-when-empty → backward-compatible. **No `X-ObjectStack-Dropped-Fields` header for batches** by design: one response header cannot express per-row drops, so the per-row body field is the canonical bulk channel.\n\n### Typed client — `@objectstack/client`\n- `CreateDataResult` / `UpdateDataResult` gain `droppedFields?: DroppedFieldsEvent[]`.\n\n### CORS — `@objectstack/hono` + `@objectstack/plugin-hono-server`\n- `x-objectstack-dropped-fields` added to the default `Access-Control-Expose-Headers` (lockstep across both Hono CORS sites) so a cross-origin browser can read the single-write drop header. The body `droppedFields` remains the primary, cross-origin-safe surface.\n\n## Design decisions\n- **Envelope (issue open question):** kept **precise `droppedFields`** (reused `DroppedFieldsEventSchema`) over a generic `warnings` envelope, for symmetry with the already-shipped single-write path. A generic envelope, if wanted later, should migrate single + bulk together.\n- **GraphQL item — not applicable (documented).** GraphQL has **no runtime**: `kernel.graphql` is unassigned everywhere, `handleGraphQL` returns `501`, and discovery never advertises `/graphql`. There is no schema generator or mutation resolver to expose a typed payload field on — nothing to wire until a GraphQL engine lands, at which point the protocol-layer `droppedFields` is already present and only the GraphQL schema projection would remain.\n\n## Tests\n- `packages/metadata-protocol/src/protocol.dropped-fields.bulk.test.ts` — 10 cases: per-row (updateMany / batch / insertMany), aggregated (createMany), context-threading assertions, system-context exemption, `returnRecords:false` preserves `droppedFields`.\n- `packages/adapters/hono/src/hono.test.ts` — default expose-header assertion for the new header.\n- Full regression green on rebased main: metadata-protocol 70, spec batch+protocol 49, hono 68, plugin-hono-server 17, rest dropped/batch 19; spec drift gates (api-surface, spec-changes) clean; DTS type gate green across all 5 touched packages.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 3392,
+  "kind": "pull_request",
+  "title": "fix(platform-objects): allow import/export on sys_business_unit (#3025)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-21T15:26:49Z",
+  "updated_at": "2026-07-21T15:44:42Z",
+  "closed_at": "2026-07-21T15:44:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-21T15:44:40Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3392",
+  "body": "## 问题\n\n业务单元列表(Setup → Business Units)点「导入」/「导出」按钮报 405:\n\n```\nAPI operation 'import' is not allowed on object 'sys_business_unit'\n(405, code: OBJECT_API_METHOD_NOT_ALLOWED)\n```\n\n## 根因\n\nREST 数据面按 ADR-0049 用对象上的 `enable.apiMethods` 白名单门控。缺省语义是**无 `apiMethods` = 全放行**——支持导入的对象都是干脆不声明白名单。而 `sys_business_unit` 显式声明了限制性白名单,只有 CRUD 五件套,漏了 `import`/`export`:\n\n```ts\n// packages/platform-objects/src/identity/sys-business-unit.object.ts\napiMethods: ['get', 'list', 'create', 'update', 'delete'],\n```\n\n排查确认这是**无意的缺口而非刻意收紧**:ADR-0057 与提交注释均未提及;真正刻意收紧的对象(如 `sys_oauth_application`)都有注释 + 测试锁死。且该对象字段(`external_ref`、`effective_from/to`)明确为 HRIS 批量同步设计,组织树本就该支持批量导入。\n\n405 的门控落点在 `packages/rest/src/rest-server.ts`(`apiAccessDenialFromEnable`),import/export 路由(`/data/:object/import`、`/data/:object/export`)在执行前 `enforceApiAccess(..., 'import'|'export')`,故受此白名单门控。\n\n## 修复\n\n白名单补上 `'import'`、`'export'`。\n\n- 导入复用该对象已授予的 `create`/`update` affordance。\n- 已验证扛得过 managed-object 白名单回收:`sys_business_unit` 是 `managedBy:'platform'`,`reconcileManagedApiMethods` 只剥写动词(`create/update/upsert/delete/purge`),不动 `import`/`export`。\n\n## 测试\n\n- 新增回归断言:`sys_business_unit` 白名单必须含 `import`/`export`(且保留 CRUD 五件套)。**已验证防假绿**:临时回退修复后该测试如实变红(`expected [...] to include 'import'`)。\n- `@objectstack/platform-objects` 套件 214 条全过;`tsc --noEmit` 通过。\n\n## 备注(不在本 PR 范围)\n\n同类缺口:`sys_user`(`['get','list','update']`)、`sys_import_job`(`['get','list']`)等显式白名单对象同样不含 import/export。本 PR 按 #3025 单点修复 `sys_business_unit`;UI 按钮与白名单前后端一致性的通用设计问题按 issue 说明另开 issue 跟进。\n\nCloses #3025\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

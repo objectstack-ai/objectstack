@@ -1,0 +1,35 @@
+{
+  "number": 3483,
+  "kind": "pull_request",
+  "title": "feat(rest): treatAsHistorical import option — skip the state machine for historical-data migration (#3479)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-25T02:24:00Z",
+  "updated_at": "2026-07-25T02:37:01Z",
+  "closed_at": "2026-07-25T02:37:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-25T02:37:00Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3483",
+  "body": "Closes #3479. #3433(种子豁免)的同构缺口,换了一个入口。\n\n## 问题\n#3165 的 `initialStates` 在每次 INSERT 强制 FSM 入口,所以**导入历史既成事实**(一批已 `closed` 的工单、`closed_won` 的商机、`completed` 的项目)会被逐行 `invalid_initial_state` 拒,挡住数据迁移这个核心场景。与种子不同它可见(per-row 报错),但仍功能性挡住合法用途。\n\n## 方案(用户开关,默认关 —— 不照抄种子一刀切)\n导入意图二义:历史迁移该豁免,批量新建该走 FSM。所以加一个**显式开关**,默认走 FSM。引擎豁免管道已由 #3433 备好,本 PR 只接线。\n\n| 层 | 改动 |\n|---|---|\n| **spec** | `ExecutionContext.skipStateMachine`(通用 server-set 旗标,seedReplay 的姊妹)+ `ImportRequestSchema.treatAsHistorical`(默认 false,用户面选项) |\n| **objectql** | 引擎对 `seedReplay \\|\\| skipStateMachine` 都跳 state_machine(一个 `shouldSkipStateMachine` helper),覆盖种子重放 + 历史导入 |\n| **rest** | import runner 仅当请求 opt-in `treatAsHistorical` 时往 writeCtx 塞 `skipStateMachine`;默认关(正常导入仍走 FSM,严格是默认)。**undo 也带上**(恢复旧快照会重写一个非法 transition 的旧态) |\n| **platform-objects** | `sys_import_job.treat_as_historical` 审计列(加性) |\n\n`prepareImportRequest` 的输出经 `...prepared` spread 自动流入同步 + 异步 job worker 两条 runImport 路径,零额外接线。\n\n## 语义范围\n与种子豁免完全一致:**只跳 `state_machine` 规则**;字段 shape / format / cross_field / script 照跑。\n\n## 测试(均已验红)\n- **engine.test**:`skipStateMachine` 上下文豁免 FSM(seedReplay 的姊妹用例)。\n- **import-runner-historical**:选项 → writeCtx.skipStateMachine 接线,门控(默认关)、automation 开关独立;临时注释接线→2/4 红,证明有区分力。\n- 四包全绿:spec 6857 / objectql 1069 / rest 339 / platform-objects 215;gen:docs 已同步 references(execution-context + export)。\n\n端到端由引擎豁免 + import 接线两半单测覆盖;objectui 导入向导复选框是独立 follow-up。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

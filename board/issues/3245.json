@@ -1,0 +1,35 @@
+{
+  "number": 3245,
+  "kind": "pull_request",
+  "title": "feat(authz): ADR-0099 two-axis model — Layer 1 tier stays the per-object scope bit; amendment + P2′ pins (#3211 M3/M3′)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T01:54:09Z",
+  "updated_at": "2026-07-19T05:30:40Z",
+  "closed_at": "2026-07-19T05:30:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-19T05:30:39Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3245",
+  "body": "## 目的\n\n#3211 的收尾 PR：记录 M3 裁决（maintainer，2026-07-18）——**原 P2「Layer 1 tier 收敛读 posture」否决，ADR-0099 修正为两轴模型**——并落 P2′ 钉住格把修正后的模型钉进 CI。**docs + test，零行为变更。**\n\n## 背景：P2 前核实推翻了「行为保持」声明\n\nD2 表 Layer 1 行写着 tier 读 posture、「per today's semantics」——核实证明**不是今天的语义**：Layer 1 的 tier 输入是**每对象**超级位，一个可委派给非管理员的原语（自定义集给审计员岗授「某对象全部可见」= Salesforce 对象级 View All 同款）。posture 是**每主体**一个 rung，结构上装不下每对象范围。照原文强制会 (a) 让一个已声明、可授予的位条件性失效（ADR-0049 禁止的 declared-but-unenforced 类），(b) 砍掉主流委派能力、逼出过度授权。\n\n## 内容\n\n### 1. ADR-0099 两轴 Amendment（docs）\n\n- **两轴，每轴单一权威**：posture=边界轴（每主体，管阶梯两端——Layer 0 豁免 P1 已落 + EXTERNAL 替换 P3 门控）；per-object 超级位=范围轴（每主体×每对象，Layer 1 tier 唯一输入，语义不变）。\n- D1「单一裁决输入」精化为「**每轴单一权威**」——治的病（多站点派生）保持死透。\n- 新增 **I7**（I5 对偶）：范围轴永不越 posture 未开的边界（超级位持有者低于 PLATFORM_ADMIN 仍被租户墙——P1 已强制）。\n- **I2 澄清**：嵌套是每 rung 的 floor 不变量；加法式对象级授权在 rung 内加宽不违反阶梯。\n- **P2 → P2′**；四处内联标记（Status / D1 bullet / D2 表 / Sequencing）指向 Amendment。\n\n### 2. P2′ 钉住格（test，`authz-matrix-gate.test.ts`）\n\n- **种子等价格**：种子面「持超级位 ⟺ posture ≥ TENANT_ADMIN」一致（两轴在种子面重合——正是收敛「看似安全」的原因，直到委派格暴露它们是两个事实）。\n- **委派格（LOAD-BEARING）**：MEMBER 持 `invoice_auditor`（某 private 对象委派 view/modify all）→ Layer 1 短路（组织内全行）**且**被 Layer 0 墙住（org-1）。审计员模式,未来任何「posture 收敛清理」必须保持它绿、否则静默删掉该能力。\n- **I7 格**：该持有者写侧被墙(pre-image=org-1,非 BYPASS)、供异租户 org_id 的 insert 被拒。\n- **对照格**:无委派的 member 在 private 对象被 DENY → 证明位是真实可授予能力、非条件性死位。\n\n### 3. changeset\n\n`@objectstack/plugin-security` patch（test-only，循 #3218 先例）。\n\n## 裁决依据（四视角）\n\n① 主流平台（Salesforce 对象级 View All / Dynamics org 级实体访问 / Frappe）委派原语不绑管理员人格；② posture(每主体) 与位(每主体×对象) 粒度不可互换，压轴=类型错误；③ 审计员/风控式 view-all 委派是低代码日常；④ 条件性死位是 AI 作者最踩的静默 miss 类（#3003/#3005 同族）。两轴给 AI 的规则一句话：**位定对象内行范围，posture 定租户边界**。\n\n## 验证（全绿）\n\n- `pnpm --filter @objectstack/plugin-security test` — **510 passed / 20 files**（含 P2′ 全部钉住格）\n- `tsc --noEmit`（plugin-security）通过；`check:role-word` / `check:doc-authoring` clean；plugin-security build 绿\n- **G2 单一权威核查**：边界事实一处派生（core resolver）+ Layer 0 门消费（fallback 探针只收窄）；范围事实仅 `hasSuperuser*Bypass` 求值，无第三处派生 ✓\n\n## 收口\n\n合并后 #3211 走 G2 关闭（P3/EXTERNAL 留 #2776 item 6；advisory lint 另立后续 issue 追踪）。\n\nRefs #3211 · ADR-0099 / #3109 · #3218（P0）· #3226（P1）· ADR-0049 · #2946 Finding 2\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01DAHp4K7FvyMPBY1DPNkmRu"
+}

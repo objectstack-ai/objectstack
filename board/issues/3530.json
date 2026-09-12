@@ -1,0 +1,32 @@
+{
+  "number": 3530,
+  "kind": "issue",
+  "title": "Console: modal-typed actions resolve `target` as an object — submit fails with GET /meta/object/<target> 400",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T02:36:49Z",
+  "updated_at": "2026-07-27T03:59:54Z",
+  "closed_at": "2026-07-27T03:59:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3530",
+  "body": "## Summary\n\nSubmitting a `type: 'modal'` action fails with **\"Error loading form — Bad Request\"**. The Console resolves the action's `target` as an **object** name and issues `GET /api/v1/meta/object/<target>`, which 400s because `target` names a *page*, not an object.\n\nPer the spec, that is the wrong lookup:\n\n> `type: 'modal'` — `target` is **required** (the modal/page name to open).\n> — `@objectstack/spec/dist/action.zod-*.d.ts`, Action `target` docs\n\n## Environment\n\n- `@objectstack/*` **16.1.0**\n- Node 22.22.3, dev server (`objectstack dev`), wasm sqlite\n- App: HotCRM (open source, https://github.com/objectstack-ai/hotcrm)\n\n## Steps to reproduce\n\n1. Declare a modal action and a matching page:\n\n```ts\nexport const LogCallAction: Action = {\n  name: 'log_call',\n  label: 'Log a Call',\n  type: 'modal',\n  target: 'log_call',            // ← the modal PAGE name, per spec\n  body: { language: 'js', source: `/* insert a record */`, capabilities: ['api.write'] },\n  locations: ['record_header'],\n  params: [\n    { name: 'subject',  label: 'Call Subject',       type: 'text',     required: true },\n    { name: 'duration', label: 'Duration (minutes)', type: 'number',   required: true },\n    { name: 'notes',    label: 'Call Notes',         type: 'textarea' },\n  ],\n};\n\n// registered page\nexport const LogCallPage: Page = { name: 'log_call', type: 'utility', /* … */ };\n```\n\n2. Open a record, click **Log a Call**.\n3. The modal opens and the params form renders correctly from `params`.\n4. Fill it in, press **确认 / Confirm**.\n\n## Expected\n\nThe action body executes with the collected `input`, and the record is written.\n\n## Actual\n\nThe modal body is replaced with:\n\n```\nError loading form\nBad Request\n```\n\nNetwork:\n\n```\nGET /api/v1/meta/object/log_call → 400 Bad Request\n```\n\nThe body never runs; nothing is written.\n\n## Scope\n\nReproduced on every modal action in the app — `log_call`, `log_meeting`, `create_campaign`, `escalate_case`, `close_case`, `mass_update_stage`, `send_email`. A freshly authored one fails identically (`GET /api/v1/meta/object/schedule_followup → 400`), so it is not about any particular page definition.\n\nThe params form rendering correctly but the submit path resolving `target` differently suggests two code paths that disagree about what `target` means: the render path treats it as a page (correct), the submit path as an object.\n\n## Impact\n\nModal actions are the natural shape for \"collect a couple of fields and write something\" — the most common custom action in a business app. None of them can be completed. The only workaround we found is to re-author each one as a `type: 'flow'` screen flow.\n\n## Related\n\nScreen flows are also un-completable from the Console (Submit never calls the resume endpoint) — filed separately. Together these make every interactive custom action in the app non-functional.\n"
+}

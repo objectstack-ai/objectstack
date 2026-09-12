@@ -1,0 +1,35 @@
+{
+  "number": 3406,
+  "kind": "pull_request",
+  "title": "feat(spec): let an inline `lookup` action param declare its reference target (#3405)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-22T12:26:18Z",
+  "updated_at": "2026-07-22T20:46:26Z",
+  "closed_at": "2026-07-22T20:46:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-22T20:46:24Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3406",
+  "body": "Closes part 1 + 2 of #3405. Companion UI change: objectstack-ai/objectui#2786\n\n## 问题\n\n`ActionParamSchema` 没有任何键可以指定内联 record-picker 参数要搜哪个对象。作者很自然地写了字段 schema 同名的键：\n\n```ts\nparams: [\n  { name: 'inspector', label: '质检员', type: 'lookup', reference: 'sys_user', required: true },\n]\n```\n\nschema 是 `.strip`，`reference` 作为未知键被**静默丢弃**，不报错。下游的动作参数弹窗看到一个没有目标的 picker，降级成「粘贴记录 ID（UUID）」文本框。作者写对了，配置被吃掉了，用户拿到一个真人没法用的控件。\n\n真机场景（PLAT-DEF-005，天顺 EHR）：质检主管点【指派】/【转派】要选质检员，得先跑到别处把人的 UUID 复制出来再粘回去。同一套引用字段在新建/编辑弹窗里是正常的搜索式选择器。\n\n讽刺的是 schema 里已经有一段「Widget config for inline params」的注释，把 `multiple` / `accept` / `maxSize` 专门补给了内联参数 —— 唯独漏了 picker 需要的那一个。file/image 类内联参数能配全，lookup 配不全。\n\n## 改动\n\n- **`ActionParamSchema` 增加 `reference`**，键名对齐 `FieldSchema.reference`，让同一个拼法在两处都成立 —— 租户已经写出来的代码原样就合法，不需要为平台再学第二种拼法。位置就放在现有的内联 widget config 那一组。\n- **内联 `lookup` / `master_detail` 缺 `reference` → 解析期报错**，错误 `path` 指向 `reference`，message 同时给出两条出路（补 `reference` 或改成字段引用式）。挂在现有 `.refine()` 链上。\n  **字段引用式参数不受影响** —— 它从被引用字段的元数据继承目标，那在解析期不可见。\n- app-showcase 的动作参数 gallery 补上以前表达不出来的内联 picker 标本。\n\n## 验证\n\n`objectstack validate`（app-showcase）：\n\n- 删掉 `reference` → `✗ [\"reference\"] ActionParam with type \"lookup\"/\"master_detail\" requires \"reference\" (the target object) when declared inline …`\n- 加回去 → `✓ Validation passed`\n\n真机 UI（framework showcase :5311 + objectui console 指过去）：`GET /api/v1/meta/objects/showcase_field_zoo` 里 `p_account` 带上了 `reference: showcase_account`；弹窗渲染出搜索式选择器，`GET /api/v1/data/showcase_account?top=50&search=华宁` 服务端过滤命中，选中后按记录 ID 回填。全程不接触 UUID。\n\n`@objectstack/spec` 全量测试：256 文件 / 6822 用例通过。\n\n## 破坏性说明\n\n内联 `lookup` 参数漏配 `reference` 的既有元数据，之前是静默降级成文本框，现在会在 `validate` / 解析期报错。这正是本 PR 的意图 —— 那些参数本来就是坏的，只是坏得没声音。修法就是错误信息里给的两条。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

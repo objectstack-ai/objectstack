@@ -1,0 +1,33 @@
+{
+  "number": 3293,
+  "kind": "pull_request",
+  "title": "fix(plugin-audit): exclude computed fields from update diffs + treat undefined/null as equal",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T15:41:11Z",
+  "updated_at": "2026-07-19T15:52:50Z",
+  "closed_at": "2026-07-19T15:52:49Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-07-19T15:52:49Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3293",
+  "body": "## 问题\n\nobjectui 记录历史 Tab 实测(甘特 QA 项目)暴露出审计写入器 `diff()` 的两个数据层 bug:\n\n1. **计算字段幻影 diff**:`beforeUpdate` 快照经查询路径读回,带 formula/summary/rollup/autonumber 的计算值;`ctx.result` 是裸写入结果,不带。于是每次更新都为每个计算字段写入一条 `值 → null` 的假变更(前端表现为 `紧前依赖(渲染用): [id] → —` 逢改必现)。\n2. **undefined↔null 噪声行**:`safeStringify(undefined)` 按 `JSON.stringify` 契约返回 undefined(非字符串),与 `'null'` 比较必不等,导致\"字段缺失\"对\"显式 null\"被记成 old=new=null 的废行。\n\n## 修复\n\n- `diff()` 接受字段定义,跳过 `formula` / `summary` / `rollup` / `autonumber` 类型(派生值的变化由源字段的 diff 隐含);仅计算字段变化时不再写审计/活动行\n- 比较前对两侧做 `?? null` 归一化;真实的\"值 → null\"清空仍正常记录(守护用例覆盖)\n\n## 测试\n\n- 新增 4 条回归(plugin-audit 42/42 全绿);红绿闭环:暂存回旧实现后 3 条如预期失败,第 4 条为防过修守护\n- 真栈实弹:本分支全量构建(71/71)起 showcase 后端,更新 `showcase_project.health`(该记录 `task_count=5`/`total_estimate=100` 均在 before 快照内)→ 审计行为干净的 `{\"health\":\"green\"} → {\"health\":\"yellow\"}`,零幻影字段\n- 合栈 UI 验证:配合 objectui#2691 的 Playwright live 测试在本分支后端上通过\n\n配套展示层修复:objectstack-ai/objectui#2691(老数据幻影行由前端过滤兜底)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

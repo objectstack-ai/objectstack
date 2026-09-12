@@ -1,0 +1,30 @@
+{
+  "number": 3450,
+  "kind": "issue",
+  "title": "automation: step error objects can surface as \"[object Object]\" in run-history consumers (split from #3425)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-24T15:01:33Z",
+  "updated_at": "2026-07-25T00:38:42Z",
+  "closed_at": "2026-07-25T00:38:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3450",
+  "body": "## 背景（从 #3425 拆出）\n\n#3425 的「Related」小节报告:16.1.0 上一个实际失败的 `create_record` 节点(`crm_contact is required`),其错误对象在某条展示路径上被字符串化成 `\"[object Object]\"`,不可读。这与 readonly 剥离无关,是独立的错误序列化 bug,按分诊拆成本单。\n\n## main 现状核实(截至 2026-07-24)\n\n服务端的抛错/返回路径已基本 `.message` 化,单看这些点位已不能复现:\n\n- `crud-nodes.ts` 四个 CRUD 节点全部返回 `` `...failed: ${(err as Error).message}` ``;\n- `service-automation/engine.ts` 的兜底是 `err instanceof Error ? err.message : String(err)`;\n- `NodeExecutionResult.error` 类型已收紧为 `string`;\n- objectql `ValidationError extends Error`,`message` 是人类可读的 join(含 \"X is required\")。\n\n**剩余主要嫌疑**:`StepLogEntry.error` 是结构化对象 `{ code, message }`(见 `service-automation/engine.ts` 的 `executeNode`,`NO_EXECUTOR` / `EXECUTION_ERROR` / `NODE_FAILURE` 三处)。任何消费方把它整体当字符串渲染(模板字符串插值 / `String()` / React 直接输出)都会得到 `[object Object]`。嫌疑消费方:\n\n1. objectui Runs 面板的 step error 渲染(跨仓,objectstack-ai/objectui);\n2. CLI / rest-server 侧把 run history 摊平输出的路径;\n3. 16.1.0 的旧代码路径(可能已在 16.x 后续重构中消失——需先在 main 复现再定位)。\n\n## 建议动作\n\n1. 先复现:main 上跑一个必然失败的 `create_record`(缺 required 字段),沿 run history → REST → Studio Runs 面板全链路看 error 的最终呈现;\n2. 修掉消费方:凡渲染 `step.error` 的地方必须走 `.message`(保留 `.code` 作机器可读);\n3. 回归测试:step error 为结构化对象时,渲染/序列化输出必须包含 message 文本、不得出现 `[object Object]`(测试先验红)。\n\n## 验收\n\n- 失败节点在 Studio Runs 面板与任何日志/CLI 输出中都显示可读的 message;\n- 全链路(engine 记录 → 持久化 → REST → UI)无 `[object Object]`。\n\nRefs #3425 · #2948(原始观察上下文)\n"
+}

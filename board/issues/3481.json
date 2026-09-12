@@ -1,0 +1,32 @@
+{
+  "number": 3481,
+  "kind": "issue",
+  "title": "flow record trigger: array-form `triggerType` is silently dead at every layer (no lint, no audit, no runtime warn)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-25T02:13:40Z",
+  "updated_at": "2026-07-25T02:54:15Z",
+  "closed_at": "2026-07-25T02:54:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3481",
+  "body": "## 问题\n\n#3457 将多事件 `triggerType` 数组列为 deferred——受支持的写法是单 token（`record-{before,after}-{create,insert,update,delete}` + `write` 联合，#3427/#3446）。但作者若凭直觉写了数组形态（对 code-first 作者、尤其对 AI authoring 来说是最自然的猜测输出）：\n\n```ts\n{\n  type: 'start',\n  config: {\n    objectName: 'app_task',\n    triggerType: ['record-after-create', 'record-after-delete'], // ← 不受支持的猜测写法\n  },\n}\n```\n\n得到的是一个看起来注册成功、**永不触发、且每一层都保持沉默**的 flow：\n\n1. **spec** — start 节点 `config` 是 `z.record(z.string(), z.unknown())`（`packages/spec/src/automation/flow.zod.ts:102`），数组直接通过 `defineFlow` 校验。\n2. **engine** — `resolveTriggerBinding` 用 `typeof config.triggerType === 'string'` 收窄（`packages/services/service-automation/src/engine.ts:901`），数组折叠成 `undefined`，flow 被归类为 **manual/screen**。\n3. **binding audit** — `getTriggerBindingAudit` 对未解析出 trigger 的 flow 直接跳过（`engine.ts`，`if (!resolved) continue`），CLI 启动摘要里不出现任何条目。\n4. **lint** — `validate-flow-trigger-readiness` 用同样的 `typeof` 收窄（`packages/lint/src/validate-flow-trigger-readiness.ts:96`）→ `isRecordTriggered` 为 false，#3427 加的 never-fire 规则（`flow-trigger-unknown-event`）看不到它。零 finding。\n\n与 2026-07-17 三方评估 / #3427 / #3472 是同一 failure class（\"看起来武装好了、静默不发射\"）——数组形态是至今唯一还能绕过全部守卫的 authoring 形态。\n\n## 修复（纯防御——数组仍不支持，#3457 的 deferral 维持不变）\n\n契约优先（AGENTS.md Prime Directive #12）：在 authoring 侧响亮拒绝，不在 consumer 侧加容忍别名。\n\n1. **lint**（`validate-flow-trigger-readiness`）：`triggerType` 为数组且含 `record-*` 字符串元素 → warning（复用 `flow-trigger-unknown-event` 规则 id）——数组形态不受支持；create-or-update 用 `record-after-write`；其他组合一事件一 flow（见 #3457）。\n2. **engine**（`resolveTriggerBinding`）：把含 `record-*` 元素的数组路由到 `record_change` trigger（`event` 传字符串化值），而不是折叠成 manual——由 trigger 在绑定时响亮拒绝，与现有 typo-token 路径（如 `record-after-updated`）可观察行为一致。\n3. **trigger**（`record-change-trigger`）：拒绝时识别 `binding.config.triggerType` 的数组形态，给出针对性提示（`record-after-write` / 一事件一 flow / #3457）。\n\n## 验收\n\n- 对含数组形态 flow 的 stack 跑 `os validate` → 输出 warning，指明 flow 名、节点路径与修法。\n- 启动该 stack → 绑定期 warning 指名该 flow（而非全链路沉默）。\n- 每个新测试先对未修复代码证明能红。\n\nRefs: #3457（deferral + 设计归档）、#3427 / #3446（`record-after-write`）、#3472（同族静默缺陷）。\n"
+}

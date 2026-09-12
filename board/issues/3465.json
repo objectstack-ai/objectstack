@@ -1,0 +1,35 @@
+{
+  "number": 3465,
+  "kind": "pull_request",
+  "title": "feat(lint,cli): flag flow update_record writes to readonly fields at design time (#3425)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-24T15:33:13Z",
+  "updated_at": "2026-07-24T16:04:37Z",
+  "closed_at": "2026-07-24T16:04:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-24T16:04:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3465",
+  "body": "## What & why\n\nCloses the design-time half of #3425 (D1 + D2 from the [triage plan](https://github.com/objectstack-ai/objectstack/issues/3425)).\n\nA flow `update_record` node that writes a field the target object declares `readonly: true`, under the default `runAs: 'user'`, is a **silent no-op**: the objectql engine strips static-`readonly` fields from a non-system UPDATE payload (#2948), so the intended write never lands — yet the step still reports `success`. #3407/#3413 made the strip observable at **run time** (step warning + `droppedFields`); this PR shifts discovery **left** to `os validate` / `os build`, so an author finds the mismatch at design time instead of by reading server WARN logs days later.\n\n## Decision recorded on the issue\n\n`readonly` semantics are **kept as-is** and formalized, *not* loosened to exempt the flow engine (that would turn any user-triggerable flow into a readonly-bypass gadget and undo #2948). The formal contract:\n\n| Writer | static `readonly` | `readonlyWhen` |\n|---|---|---|\n| REST/UI, `runAs:'user'` flow (default) | stripped | stripped when predicate TRUE |\n| `runAs:'system'` flow, system hooks, seeds | **written** | **written** |\n| INSERT (all callers, engine path) | exempt | exempt |\n\n\"Users can't edit this, but automation maintains it\" = declare the field `readonly` **and** run the maintaining flow `runAs:'system'`.\n\n## Changes\n\n- **New rule** `validateReadonlyFlowWrites` (`@objectstack/lint`) — pure `(stack) => Finding[]` (ADR-0019). Static `readonly` + literal field under `runAs !== 'system'` → **error** (gates); `readonlyWhen` → **warning** (advisory). Deliberately narrow to be false-positive-free: skips `create_record` (INSERT is engine-exempt from the strip), `runAs:'system'` flows, templated object names, and non-literal `fields` maps.\n- **Wired** into `os validate` and `os compile`/`os build`, mirroring the security-posture gate (errors fail; advisories print dimmed).\n- **Docs** — the contract table + \"use `runAs:'system'`\" guidance added to the `objectstack-data` and `objectstack-automation` skills.\n\n## Verification\n\n- 16 unit tests (positive + every \"must-not-flag\" boundary). Red-proof: neutering the rule fails exactly the 8 positive tests.\n- Full `@objectstack/lint` suite green (283); DTS build clean; edited CLI files typecheck clean.\n- **No false positives** on `app-crm`, `app-showcase`, `app-todo` (`os validate` passes).\n- **End-to-end red**: pointing app-crm's `crm_convert_lead_wizard` (`runAs:'user'`) `update_record` at `crm_opportunity.approval_status` makes `os validate` fail with `Readonly flow-write check failed … flows[0].nodes[6].config.fields.approval_status` (reverted).\n\n## Out of scope (tracked separately)\n\n- The `create_record` failure error surfacing as `\"[object Object]\"` — split to #3450.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

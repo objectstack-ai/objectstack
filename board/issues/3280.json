@@ -1,0 +1,34 @@
+{
+  "number": 3280,
+  "kind": "issue",
+  "title": "Unify the developer-facing org identifier: hooks expose `session.tenantId` while RLS/seed/columns use `organizationId` (add `organizationId` as the blessed name)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T13:14:25Z",
+  "updated_at": "2026-07-19T14:06:13Z",
+  "closed_at": "2026-07-19T14:06:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3280",
+  "body": "## Problem\n\nThe same concept — **the caller's active organization** — is surfaced to third-party app developers under **two different names**, split by which authoring mode they're in. A developer writing a metadata app + hooks has to internalize the hidden equation `tenantId === organizationId` to move between the surfaces.\n\nThis is a **developer-experience / naming** issue only. It is **not** about the internal kernel or driver layer (see Non-goals). It surfaced while tracing the tenant-scope layer for #3249.\n\n### Where a developer sees each name today\n\n| What the developer is doing | Name they use | Value is |\n| --- | --- | --- |\n| Object metadata (`.object.yml`) | `tenancy.enabled` / `tenancy.tenantField` | mechanism / column knob |\n| Field definitions & query filters | `organization_id` | the org |\n| **JS hook — read the current org** | **`ctx.session.tenantId`** | **the org (named \"tenant\")** |\n| JS hook — `ctx.user` shortcut | `{ id, name, email }` — **no org field at all** | — |\n| RLS / sharing / permission expressions | `current_user.organizationId` | the org |\n| Seed data | `organizationId` | the org |\n\nThe value the developer actually cares about is **the org**, and it is called `organization_id` / `organizationId` **everywhere except the JS-hook `session`**, which calls it `tenantId`. Worse, the ergonomic `ctx.user` shortcut has **no org field**, so a hook author who needs \"the current org to filter by\" is forced onto `ctx.session.tenantId` and must know that `tenant == org`.\n\n### Evidence (spec/engine source)\n\n- `packages/objectql/src/engine.ts` — `buildSession()` emits `session.tenantId` (from `execCtx.tenantId`); `ctx.user` shortcut is only `{ id, name, email }`.\n- `packages/spec/src/data/hook.zod.ts` — `HookContext.session` exposes `tenantId`; the `user` object has no org field. Test `hook.test.ts` asserts `context.session?.tenantId`.\n- `packages/spec/src/identity/eval-user.zod.ts:104` — RLS `current_user` uses `organizationId` (\"Active organization ID (null = platform/unscoped)\").\n- `packages/spec/src/identity/identity.zod.ts:268` — `organizationId` (\"Scoped organization ID\").\n- `packages/spec/src/data/seed-loader.zod.ts` — seed rows use `organizationId`.\n- `packages/spec/src/system/metadata-persistence.zod.ts:103` — literally comments that Tenant ID is an \"alias of organizationId in some contexts\".\n- `packages/spec/src/kernel/execution-context.zod.ts:45` — `ExecutionContext.tenantId` is documented as \"resolved from `session.activeOrganizationId`\", i.e. it is always the org.\n\n## Proposed direction — additive, non-breaking, converge the dev surface on `organization`\n\nBecause `org` is already the majority term on the developer surface (column, `current_user`, seed) and matches the DB column `organization_id`, converge the JS-hook surface onto it. **Add** the org name; keep the old one as a deprecated alias. Do not rename internals.\n\n1. **Add `organizationId` to the hook `ctx.user` shortcut** (highest value). `buildSession()` already holds `execCtx.tenantId` — also expose it as `user.organizationId`. A hook author then writes `ctx.user.organizationId`, matching `current_user.organizationId` (RLS) and `organization_id` (filters) with zero relearning.\n2. **Add `organizationId` to `ctx.session` as the blessed name; keep `session.tenantId` as a deprecated alias.** Both carry the same value; new docs/examples teach only `organizationId`.\n3. **Leave the `tenancy.*` object-metadata knob as-is**, but document it clearly: `tenancy` is the isolation *mechanism* (on/off + custom `tenantField`); the *value* you read/write is your `organization_id` column.\n\n## Non-goals (do NOT touch)\n\n- `ExecutionContext.tenantId`, `DriverOptions.tenantId`, `SqlDriver.applyTenantScope` / `tenantFieldByTable`, `TenancyConfig.tenantField`. These are the **generic tenancy abstraction** at the driver layer — the isolation column is configurable (`tenant_id` / `workspace_id` / `organization_id`), and the same `DriverOptions.tenantId` legitimately carries an environment id in per-environment kernels (e.g. `service-ai` tools stamp `tenantId: ctx.environmentId`). Renaming these would (a) bake an \"org\" assumption into a generic layer and (b) be a wide public-API break. Keep them generic; only the developer-facing hook surface changes.\n\n## Acceptance criteria\n\n- [ ] `ctx.user.organizationId` is available in JS hooks (all hook events that today populate `session`), typed in `HookContext` (spec).\n- [ ] `ctx.session.organizationId` is available; `ctx.session.tenantId` still works but is marked deprecated in its TSDoc.\n- [ ] Both fields always equal `execCtx.tenantId` (the resolved active org). Unit test covering a populated org and the anonymous/undefined case.\n- [ ] Hook authoring docs/examples updated to use `organizationId` (drop `session.tenantId` from examples).\n- [ ] A short note (docs or ADR) distinguishing the two isolation axes: **org row-scoping** (`organization_id`, shared DB) vs **environment/database-per-tenant** (`service-tenant`, `driver-turso` — where \"tenant\" = environment).\n- [ ] No behavior change and no breaking rename; changeset added for the additive spec surface.\n\n## Notes\n\n- Context/background traced in the #3249 investigation (tenant-scope layer). Community edition never populates `tenantId`, so this is purely about naming clarity for multi-org (cloud + `@objectstack/organizations`) app developers.\n"
+}

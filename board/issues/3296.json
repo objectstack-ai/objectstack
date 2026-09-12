@@ -1,0 +1,30 @@
+{
+  "number": 3296,
+  "kind": "issue",
+  "title": "sandbox Phase 2 — drop asyncify (sync QuickJS variant), keep per-invocation modules",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T16:09:19Z",
+  "updated_at": "2026-07-19T17:54:08Z",
+  "closed_at": "2026-07-19T17:54:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3296",
+  "body": "Part 2 of #3275 — see its **Phase 2** section for the full spec. **Blocked by #3295 (Phase 1).**\n\n**Verified against the installed `quickjs-emscripten@0.32.0`:** the sync release variant `@jitl/quickjs-wasmfile-release-sync` (`RELEASE_SYNC`) is **already installed — no new dependency**. The sync `QuickJSContext` exposes `evalCode()` + `newPromise()`, and its `.runtime` exposes `executePendingJobs()` / `setInterruptHandler()` / `setMemoryLimit()` / `setMaxStackSize()` — identical to the async path.\n\n**Change** (`packages/runtime/src/sandbox/quickjs-runner.ts`):\n- `newAsyncContext()` → `const mod = await newQuickJSWASMModule(); const vm = mod.newContext();` — a **fresh isolated module (own linear memory) per invocation**, so the isolation model is UNCHANGED (confirmed in the `.d.ts`; only `newContext()` on a *shared* module shares memory, which we do not do).\n- `vm.evalCodeAsync(wrapped)` → `vm.evalCode(wrapped)`.\n- Imports/types: `newAsyncContext`/`QuickJSAsyncContext` → `newQuickJSWASMModule`/`QuickJSContext`.\n- **Disposal:** hold both `mod` and `vm`; in `finally` dispose the context then the module (verify whether disposing the context alone frees the module in 0.32 — dispose the module explicitly to be safe; it owns the linear memory).\n\n**Why it's safe now:** the original crashes were an ASYNCIFY limitation (one suspended stack per module); the deferred-promise + pump redesign already removed all wasm-stack suspension (`installApiMethod` uses plain `newPromise`, not `newAsyncifiedFunction`). See #3275 §Phase 2.\n\n**Acceptance criteria**\n- [ ] Sync variant wired; per-invocation module isolation preserved; disposal frees the linear memory.\n- [ ] Re-entrancy / fan-out / lvl4-nesting / real-sqlite suites green **unchanged**.\n- [ ] Bench (`quickjs-runner.bench.ts`, `npx vitest bench`) shows the expected compile/instantiate + per-instruction win vs asyncify.\n- [ ] Changeset (`@objectstack/runtime` patch/minor).\n\nRefs: #3275 (parent) · #3295 (Phase 1).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

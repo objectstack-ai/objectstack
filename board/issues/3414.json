@@ -1,0 +1,35 @@
+{
+  "number": 3414,
+  "kind": "pull_request",
+  "title": "feat(spec)!: remove dead enable.trash/mru capability flags (#2377 close-out, ADR-0049)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-22T21:12:00Z",
+  "updated_at": "2026-07-24T12:12:19Z",
+  "closed_at": "2026-07-24T12:12:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-24T12:12:16Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3414",
+  "body": "Final slice of #2377 (ADR-0049 enforce-or-remove), following #2402 and #3176. Removes the last two `dead` entries in the object liveness ledger: `enable.trash` and `enable.mru`.\n\n## Why these two are the worst kind of dead prop\n\nBoth parsed and **defaulted to `true`** with no runtime consumer: every delete has always been a hard delete (no recycle bin exists), and MRU tracking was never implemented. A default-true flag promising recoverability is an actively dangerous false affordance — first-party objects were authoring `trash: false // Never soft-delete audit logs` in the belief that a soft-delete existed to opt out of, and the API skill taught agents that `DELETE` is \"soft-delete if trash enabled\". Since `object.softDelete` was already removed in #3176 with a hard-delete migration note, keeping `enable.trash` had the schema telling two contradictory stories.\n\n## Changes\n\n- **`ObjectCapabilities` is now `.strict()`** (pattern of the tenancy block, #2763): the retired `trash`/`mru` reject with the upgrade prescription via a new `CAPABILITIES_RETIRED_KEY_GUIDANCE` map, and unknown keys/typos fail loudly instead of stripping silently (#1535). Strict immediately proved its worth by catching two latent bugs: `sys_secret` and `sys_setting_audit` authored a never-existent `enable.audit` flag (silently stripped until now).\n- **~46 first-party object definitions** drop their inert `trash:`/`mru:` lines (platform-objects, plugin-security/audit/approvals/sharing, metadata-core, service-realtime, examples/app-todo). Three spec test fixtures also carried the stale `feedEnabled` key (real flag: `feeds`) — fixed, and now guarded by the strict parse.\n- **Liveness ledger**: both entries deleted (removal precedent: `tags`/`recordName`); the README count table's object row now shows **0 dead**. Studio `object.form.ts` drops both authoring-form rows.\n- **Docs/skills** stop advertising a recycle bin / MRU tracking (`concepts/metadata-driven`, `data-modeling/objects`, `data-modeling/schema-design`, `protocol/objectql/schema`, data + API skills). The API skill's common-mistakes section now states the real contract: `DELETE` is a hard delete; use per-field `trackHistory` or a `lifecycle` policy for recoverability.\n- **Generated reference docs** regenerated (`gen:schema` + `gen:docs`); `api-surface.json` verified unchanged (no public exports were removed).\n\n## Migration\n\nDelete any `enable.trash` / `enable.mru` keys from object metadata — they never changed behavior. `ObjectSchema.create()` / `ObjectCapabilities.parse()` now reject them with this prescription in the error. A real recycle bin or MRU feature, if built, returns as a live enforced flag (#1893 prune-or-build).\n\n## Versioning\n\nBreaking spec-surface change, versioned as a **`minor`** changeset per the launch-window policy (fixed-group monorepo; precedent #2402/#3176).\n\n## Verification\n\n- Spec suite **6820 passed** (256 files) incl. new retired-key rejection tests; **liveness gate ✓**; `check:api-surface` ✓; `check:docs` ✓ (254 generated files in sync)\n- CLI **442 passed** (liveness author-warn lint repointed at `enable.searchable`)\n- All touched packages green: platform-objects, metadata-core, plugin-audit/security/approvals/sharing, service-realtime, example-todo\n- Repo-wide scans: no remaining `trash:`/`mru:` set-sites, no other unknown `enable` keys\n\nNote: the initial CI runs on this PR failed at workflow startup (3s, no logs) — a repo-wide Actions outage affecting every branch since ~20:57 UTC, not this diff; will re-run once Actions recover.\n\nCloses #2377\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01RRCHNGhKw8uVhA3ghXKDpA"
+}

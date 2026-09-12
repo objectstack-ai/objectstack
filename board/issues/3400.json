@@ -1,0 +1,35 @@
+{
+  "number": 3400,
+  "kind": "pull_request",
+  "title": "fix(objectql): accept relative and inline URLs on url fields",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-22T01:46:35Z",
+  "updated_at": "2026-07-22T05:52:37Z",
+  "closed_at": "2026-07-22T05:52:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-22T05:52:35Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3400",
+  "body": "## Problem\n\nUploading a user avatar failed — the Console profile page showed **`Auth request failed with status 500`** on `POST /api/v1/auth/update-user`.\n\nRoot cause: the Console avatar uploader (`createObjectStackUploadAdapter`) PUTs the image to the platform storage service, then writes `sys_user.image` (a `Field.url`) = the storage service's **root-relative** download URL, e.g. `/api/v1/storage/files/<id>`. The ObjectQL record-validator's `url`-type check (`URL_RE`) required an absolute `scheme://` URL, so it rejected that value with `invalid_url` → the write failed (and, pre-#3399, surfaced as a raw 500).\n\n## Fix\n\n`URL_RE` now accepts, in addition to `scheme://…`:\n- root-/protocol-relative refs (`/path`, `//host/path`) — the same-origin asset form the storage service returns\n- `data:` and `blob:` inline forms\n\nA bare scheme-less string with no leading `/` (e.g. `\"notaurl\"`) is still rejected.\n\n## Relationship to #3399\n\nComplementary, no file overlap:\n- **#3399** maps an ObjectQL `ValidationError` on the better-auth paths to a clean `400 { code: 'VALIDATION_FAILED', … }` instead of an opaque 500 — better *failure* ergonomics.\n- **This PR** makes the legitimate relative storage URL *pass* validation, so the avatar actually uploads.\n\n## Verification\n\n- `record-validator.test.ts`: +6 cases (incl. the real avatar value `/api/v1/storage/files/<id>`), 40/40 green.\n- End-to-end in the running Console (showcase dev): avatar **upload → display → replace → remove** all succeed; the stored `/api/v1/storage/files/<id>` resolves (302 → signed URL) to the real PNG bytes and renders in the profile card + top nav. No 500.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

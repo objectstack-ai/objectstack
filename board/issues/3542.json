@@ -1,0 +1,35 @@
+{
+  "number": 3542,
+  "kind": "pull_request",
+  "title": "feat(runtime): /automation 域 handler 体抽出 — ADR-0076 D11 步骤③ PR-6 (#2462)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T03:35:38Z",
+  "updated_at": "2026-07-27T03:46:24Z",
+  "closed_at": "2026-07-27T03:46:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T03:46:23Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3542",
+  "body": "## 动机（#2462 D11 步骤③，系列第六刀）\n\n抽出 `/automation`（flow CRUD、trigger/execute、runs 历史、pause/resume——ADR-0018/0019/0022 面，~260 行）。系列中最干净的一刀：**deps 契约零增长**（getService/resolveService/success/error 全覆盖）。\n\n## 改动\n\n- `domains/automation.ts`：体逐字搬迁。路由顺序精妙处原样保留——`/actions`、`/connectors`、`/_status` 三个守卫分支必须先于 `/:name → getFlow` catch-all（字面叫 \"actions\" 的 flow 不得遮蔽它们），新测试锁定守卫位置。\n- **`/actions`（handleActions）有意不在本刀**：调查确认它深耦合 env 解析状态（`this.kernel`/`kernelResolver`/`resolveDefaultProject` + 4 个私有 helper），归入 /data /meta 深耦合批单独设计。\n\n## 验证\n\n接缝套件 37 测试（新增 3：列表 / 守卫位置+过滤 / 无服务 fall-through）；runtime 全量 642 绿；http-conformance 41 断言绿；下游闭包 `--force` 含 DTS 全绿。\n\n关联 #2462（D11 步骤③ PR-6）。剩余：/auth /mcp /ai（中）+ /actions /meta /data（深耦合批，需单独设计）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

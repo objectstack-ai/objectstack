@@ -1,0 +1,35 @@
+{
+  "number": 3509,
+  "kind": "pull_request",
+  "title": "docs+test: harden treatAsHistorical audit-timeline follow-ups (#3493)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T01:24:52Z",
+  "updated_at": "2026-07-27T02:16:02Z",
+  "closed_at": "2026-07-27T02:16:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T02:16:00Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3509",
+  "body": "## What & why\n\nFollow-up hardening for #3497 (merged), which taught `treatAsHistorical` to preserve the original audit timeline (#3493). Two loose ends, neither releasing anything:\n\n### 1. Docs — make the shipped capability discoverable\n`content/docs/protocol/objectql/state-machine.mdx` is the one place `treatAsHistorical` is documented, but it only covered the **FSM-skip** half (#3479). One new bullet documents the **audit-timeline** half that shipped in #3497:\n\n- Under `treatAsHistorical`, the write context also carries `preserveAudit`, which makes `updated_at` / `updated_by` **client-preferred** (a supplied historical last-modified survives instead of being stamped now, symmetric with `created_at`/`created_by` on insert), and admits a **whitelist** through the static-`readonly` write strip — the audit/timestamp family plus author-declared business `readonly` fields (`closed_at`, `resolved_by`, …).\n- Platform-managed `system` columns outside that family (`organization_id`, tenancy/generated) stay stripped; permissions / RLS / FLS unchanged; opt-in.\n\n### 2. Test — pin the one untested wire\nEach layer of #3497 is tested (audit hook + readonly whitelist through the real engine in `plugin.integration.test.ts`; the driver's `updated_at` stamp in `sql-driver-timestamp-format.test.ts`; the runner wiring in `import-runner-historical.test.ts`) — but nothing asserted that the **engine threads `context.preserveAudit` into the driver options**, the wire that makes the driver's stamp reachable from a real write. Added that assertion in `engine.test.ts` via the shared `buildDriverOptions` observable (same pattern as the existing `tenantId` forwarding tests), plus its opt-in negative.\n\n## Notes\n\n- Docs page is hand-written protocol content — no `meta.json` change (existing page), no generated-doc impact.\n- Test-only + docs — **releases nothing**, so the changeset is intentionally empty (the sanctioned \"no version bump\" declaration the Check Changeset gate expects).\n- The `Check PR Size` red on an earlier commit was an infra flake — the size-labeler Docker action timed out pulling `alpine:3.15` from Docker Hub (`fail_if_xl:false`, so size never fails it); re-triggered by the test push.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

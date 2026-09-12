@@ -1,0 +1,33 @@
+{
+  "number": 3590,
+  "kind": "issue",
+  "title": "审批请求的可见性是「按租户」而非「按参与者」——getRequest 用 SYSTEM_CTX 读、只按 organization_id 收窄",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "approvals",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T08:36:43Z",
+  "updated_at": "2026-07-27T09:28:11Z",
+  "closed_at": "2026-07-27T09:27:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3590",
+  "body": "在为 #3580 做浏览器验证时顺带发现的。**不是 #3580 引入的,是既有行为。**\n\n---\n\n## ✅ 已由 #3599 修复(已合并)\n\n答案是**第 3 种**:租户级可见**不是**有意的设计,而是「绕过 RLS 之后只实现了一半」。\n\n`buildRequestWhere` 的注释自己点明了这一点:\n\n> we deliberately query with SYSTEM_CTX to bypass RLS on the engine (**the approver-visibility rule spans three identity forms, which RLS can't model cleanly**)\n\n——注释**点名了**审批人可见性规则,但代码只写了租户那一半,参与者那一半从未落地。\n\n### 修复后的规则\n\n一条请求对它的**参与者**可见:**提交人 / 当前审批人**(走归一化审批人索引,覆盖写路径记录的每种身份形态)**/ 已经在其上行动过的人**(槽位已流转的历史审批人、评论者)。具备 override 权限的管理员保留不受限视图;无 token 的上下文什么都看不到。\n\n`approverId` 明确定性为**过滤器,不是授权**。\n\n### 为什么用具体 user id 就够\n\n这点值得记下来,因为这里**授权不足会静默隐藏别人必须处理的审批**——比泄漏更难发现:\n\n- position / team / manager / field 类审批人在**开单时就已解析成具体 user id**\n- `type:value` 字面量**只是解析到「无人」时的兜底**,那种槽位任何人都无法行动(`can_act` 就是对已解析 id 的朴素成员测试)\n\n所以这条规则不可能把请求从真正能处理它的人眼前藏起来。\n\n### 一个实现上的坑(值得记录)\n\n每个写操作都通过 `getRequest` 回读它刚改过的请求作为返回值。第一版实现把这条路径也判了权,结果**对不带 `userId` 的上下文**(flow 驱动的 resume、服务间调用)会把一次成功的写入变成 `null`。4 个既有测试正好抓到了它 —— 回读现在走不判权的 `readBackRequest`,因为操作在写之前**已经用自己的规则授过权**。\n\n### 浏览器验证(app-showcase)\n\n| 场景 | 修复前 | 修复后 |\n|---|---|---|\n| Ada(非管理员,只是 expense 的审批人)不带过滤器列请求 | 3 条(整个租户) | **1 条**(只有她的) |\n| Dev Admin 列请求 | 3 条 | **3 条**(控制台视图保留) |\n| Ada 下载自己经手请求的附件 | 200 | **200**,真实 PDF(#3580 正常复合) |\n| Ada 读她无关请求的时间线 | 200,2 行 | **空** |\n\n### 第 2 个问题的答案\n\n「直接读被 `PERMISSION_DENIED`、经服务读却放行」这个不一致**依然存在**,但现在方向是对的:服务侧的规则比对象权限**更精确**(它能表达 RLS 表达不了的审批人身份),而不是**更松**。这是有意的分工,已在 `content/docs/automation/approvals.mdx` 中写明谁能看到什么。\n\n相关:#3580(文件读权限委托)、#3505(决策附件的名称/下载)。"
+}

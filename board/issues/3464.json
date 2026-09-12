@@ -1,0 +1,34 @@
+{
+  "number": 3464,
+  "kind": "issue",
+  "title": "[P2] PortalSchema disposition: prune the dead schema or build a portal runtime",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-24T15:32:24Z",
+  "updated_at": "2026-07-25T02:59:37Z",
+  "closed_at": "2026-07-25T02:59:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3464",
+  "body": "Split out from the aspirational-config issue #1893 (Portal row). Umbrella #1878.\n\n## State\n`PortalSchema` (`packages/spec/src/ui/portal.zod.ts`) is **100% dead**:\n- Already marked `[EXPERIMENTAL — not enforced]` on the schema (describe says \"authoring a portal today is a no-op\").\n- **Not registered** as a metadata type (absent from `kernel/metadata-type-schemas.ts`).\n- No route, no dispatcher, no renderer consumes it.\n\nIt's the largest single dead schema in the spec, and marking it experimental was the interim (#1893). This issue is the permanent disposition.\n\n## Decision needed (pick one)\n- **A — prune.** Remove `PortalSchema` + its exports. Breaking (public export) → schedule with a major + a one-line migration note (same batch/treatment as the #2377 enforce-or-remove pruning). Recommended unless a portal feature is on the roadmap.\n- **B — build.** Register `portal` as a metadata type + a runtime route + a renderer so authoring a portal takes effect. A real feature — only if portals are planned.\n\nInterim (already shipped): the `[EXPERIMENTAL — not enforced]` marker keeps authoring it from being a *silent* no-op.\n\nRefs #1878, #1893."
+}

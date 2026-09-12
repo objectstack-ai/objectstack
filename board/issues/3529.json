@@ -1,0 +1,35 @@
+{
+  "number": 3529,
+  "kind": "pull_request",
+  "title": "feat(job): honor the authored retryPolicy / timeout in the job scheduler (#3494)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T02:36:34Z",
+  "updated_at": "2026-07-27T04:19:54Z",
+  "closed_at": "2026-07-27T03:49:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T03:49:55Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3529",
+  "body": "Part of #3494 (together with #3516 this completes the issue — closes #3494 once both land). The Job row of the aspirational-config cluster is **built, not pruned**: retry/backoff and per-run time limits are semantics job authors reasonably expect.\n\n## What\n\n`JobSchema.retryPolicy` / `JobSchema.timeout` were parsed-but-ignored — the cron adapter's `execute()` was a bare try/catch with no retry, backoff, or time limit. Now enforced end to end:\n\n- **spec** — `IJobService.schedule` gains an optional 4th `options` argument (`JobScheduleOptions` with `retryPolicy`/`timeout`, mirroring the authorable `RetryPolicySchema`); new `JobRetryPolicy` type. Backward compatible: existing 3-arg callers/implementations unchanged. `JobSchema` describe strings drop their `[EXPERIMENTAL — not enforced]` markers.\n- **service-job** — new `runWithPolicy` helper (exported, with `JobTimeoutError`) wraps the handler invocation in **CronJobAdapter** and **IntervalJobAdapter**; **DbJobAdapter** threads options to its inner adapters, so the persisted path records one `sys_job_run` row per attempt. Semantics: failed attempts (including timeouts) retry with exponential backoff `backoffMs * backoffMultiplier^(retry-1)` up to `maxRetries` retries after the initial attempt; an attempt exceeding `timeout` records execution status **`'timeout'`** (the pre-existing but never-used `JobExecution` status). No `options` → exactly the legacy single-attempt behavior, guarded by a dedicated test.\n- **runtime** — AppPlugin's declarative-jobs registration forwards the authored `retryPolicy`/`timeout` (previously dropped at this layer).\n\n## Test discipline\n\nThe 6 new adapter tests were written first and **verified red** on the old adapters (flaky handler called once instead of retrying; slow handler recorded `success` instead of `timeout`), then green on the implementation. service-job: 37/37. Affected-package sweep (`turbo test --filter='...[origin/main]' --force`): green (one unrelated flake in service-automation passes standalone). Full-repo `turbo type-check --force`: green.\n\n## Notes\n\n- JavaScript cannot forcibly cancel an in-flight handler — a timed-out attempt is abandoned, not killed (documented on the schema and helper).\n- `RetryPolicySchema` has no maxDelay knob; delay growth is bounded only by `maxRetries`. Left as-is — adding knobs is out of scope for reconnecting the existing ones.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 3476,
+  "kind": "issue",
+  "title": "tracking: droppedFields write-observability is asymmetric across the Virtual Data Engine RPC boundary (update best-effort, create surfaces)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-25T00:45:09Z",
+  "updated_at": "2026-07-25T01:59:18Z",
+  "closed_at": "2026-07-25T01:59:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3476",
+  "body": "Split out from #3455 / #3468 (design note #3413).\n\n## The asymmetry\n\n`droppedFields` (write-observability for LEGALLY-stripped fields — `readonly` #2948 / `readonlyWhen` #3042 / #3043 create ingress) reaches the caller via two different mechanisms with different reach:\n\n- **create side** — the #3043 static-`readonly` strip is computed at the **protocol layer** (`stripReadonlyForInsert` + a before/after payload diff in `metadata-protocol`), so it surfaces **even when the data engine is remote** (Virtual Data Engine / RPC). Applies to `createData`, `createManyData`, `insertManyData`, and batch `create` rows.\n- **update side** — the `readonly`/`readonlyWhen` strips happen **inside the engine**, reported via the in-process `onFieldsDropped` listener (#3413). That callback **does not cross the RPC boundary**, so for a **remote** engine the update-side `droppedFields` is **best-effort / absent**. Applies to `updateData`, `updateManyData`, and batch `update`/`upsert` rows.\n\n#3468 extended both channels to the bulk paths, so bulk now inherits the exact same asymmetry the single-write path already had (acknowledged in #3413).\n\n## Why it matters\n\nA cross-process deployment (Virtual Data Engine) gets reliable drop reporting on creates but silent success on updates — the very silent-success class #3407 set out to remove, re-appearing only at the process seam.\n\n## Options to consider\n\n1. Carry `onFieldsDropped` events across the RPC envelope (add a `droppedFields` field to the engine's remote write-response contract) so the remote engine reports its own strips.\n2. Recompute the update strip at the protocol layer via a before/after diff (as the create side does) — costs an extra read to know the pre-write values.\n3. Document the boundary as a known limitation and leave update-side remote reporting best-effort.\n\nNo runtime bug today (single-process/ObjectQL deployments are fully covered); this tracks closing the remote gap.\n\nRefs: #3455, #3468, #3413, #3407."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 3360,
+  "kind": "pull_request",
+  "title": "chore(create-objectstack): drop deprecated @types/tar devDependency",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-20T12:44:48Z",
+  "updated_at": "2026-07-20T14:26:40Z",
+  "closed_at": "2026-07-20T14:26:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-20T14:26:38Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3360",
+  "body": "## What\n\nRemove the `@types/tar` devDependency from `packages/create-objectstack`.\n\n## Why\n\n`tar` v7 ships its own TypeScript declarations (its `types` field points at `dist/commonjs/index.d.ts`), so the standalone `@types/tar` stub package is **deprecated and redundant**. Its only effect today is a warning on every install:\n\n```\npackages/create-objectstack | WARN deprecated @types/tar@7.0.87\n```\n\nThe npm registry stub even says so: *\"tar provides its own type definitions, so you do not need this installed.\"*\n\n## Verification\n\n- `import * as tar from 'tar'` in [`src/index.ts`](https://github.com/objectstack-ai/framework/blob/main/packages/create-objectstack/src/index.ts) resolves against tar's bundled types.\n- `pnpm -C packages/create-objectstack build` (tsup) ✅\n- `tsc --noEmit`: no new errors and **no tar-related error** — the 5 pre-existing errors are all in `src/templates/**` (scaffold files referencing workspace packages, unchanged from `main`).\n- Lockfile diff is 11 deletions, all `@types/tar`; the package no longer appears anywhere in `pnpm-lock.yaml`.\n\n## Release impact\n\nNone. devDependency-only — not shipped to consumers, `dist/` byte-identical. Empty changeset (no version bump); `create-objectstack` is in the lockstep `fixed` group, so a patch would needlessly bump the whole stack for a no-op.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

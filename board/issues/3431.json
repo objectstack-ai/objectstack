@@ -1,0 +1,32 @@
+{
+  "number": 3431,
+  "kind": "issue",
+  "title": "rest: PATCH /data 对被静默剥离的写入字段无任何回传 — onFieldsDropped 通道未接线(follow-up #3407/#3413)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-24T12:34:16Z",
+  "updated_at": "2026-07-24T15:10:36Z",
+  "closed_at": "2026-07-24T15:10:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3431",
+  "body": "## 背景\n\n#3413(closes #3407)建立了引擎级的剥离回传通道:`WriteObservabilityOptions.onFieldsDropped`(`packages/spec/src/contracts/data-engine.ts`),`engine.update()` 在全部 4 个剥离点(单 id / bulk × 静态 `readonly` #2948 / `readonlyWhen` #3042)回调,事件形态为 `DroppedFieldsEventSchema = { object, fields, reason }`。**service-automation 的 `update_record`/`create_record` 已接线**(步骤 warning + `droppedFields` 输出)。\n\n但 **REST 写路径尚未接线** —— 外部 API 调用方对同一类合法剥离依旧完全沉默。\n\n## 现象\n\n`PATCH /data/:object/:id`(`packages/rest/src/rest-server.ts:3488`)把 `p.updateData(...)` 的结果直接 `res.json(result)`:\n\n- 请求写 N 个字段、`readonly`/`readonlyWhen` 剥离后实际生效 < N 时,响应仍是 **200 + 更新后的记录**;\n- 客户端唯一的发现方式是对响应记录做逐字段 diff(且返回行未必回显全部字段)—— 实践中没人这么做,和 #3407 流程侧被掩盖是同一类问题;\n- FLS 写门不受影响(已 fail-closed 抛 403,#3413 调研确认)。\n\n## 期望\n\n响应携带 warning,列出被丢弃的字段名与原因。**状态码/成功语义不变**(剥离是合法语义,同 #3413 的原则:不升级为失败,只是不再沉默)。\n\n## 设计待拍板\n\n1. **回传形态**(核心分歧点):\n   - **HTTP 响应头**(如 `X-ObjectStack-Dropped-Fields: approval_status;reason=readonly`)—— 对响应体契约零侵入,不破坏现有客户端;缺点是浏览器端易被忽略、跨网关可能被剥;\n   - **响应体信封**(`{ data, warnings }`)—— 结构化最好,但当前直接返回记录本体,改信封是 breaking(要么版本化,要么仅在有 warning 时才加信封 —— 后者形态不稳定,不推荐);\n   - 记录对象上注入 `__warnings` —— 污染数据形状,不推荐。\n2. **波及面**:PUT / bulk update / `DataEngineBatchRequest` / GraphQL mutation 是否同批接线;`@objectstack/client` SDK 是否暴露 typed warnings。\n3. **透传路径**:REST handler 与引擎之间隔着 protocol 层(`p.updateData`),`onFieldsDropped` 需要经 protocol 契约透传(或 protocol 结果附带事件列表)。\n4. **insert 对称性**:同 #3413 —— insert 今天不剥离 readonly(INSERT 豁免),POST 接线只是对称/未来防御。\n\n## 参考\n\n- #3407(流程侧同一缺口,已修)/ #3413(通道落地 PR)\n- `DroppedFieldsEventSchema` — `packages/spec/src/data/data-engine.zod.ts`\n- REST PATCH handler — `packages/rest/src/rest-server.ts:3488`"
+}

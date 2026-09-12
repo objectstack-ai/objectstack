@@ -1,0 +1,35 @@
+{
+  "number": 3501,
+  "kind": "pull_request",
+  "title": "feat(approvals): enrich inbox rows with payload_labels (snapshot field labels)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-26T06:24:46Z",
+  "updated_at": "2026-07-27T06:03:13Z",
+  "closed_at": "2026-07-27T06:03:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T06:03:11Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3501",
+  "body": "Closes #3500\n\n## 背景\n审批收件箱摘要只拿得到快照的机器名字段 key,只能 `prettifyKey` 生造英文标签(`assessment_status` → \"Assessment Status\"),读不到目标对象真正的字段 label。中文项目里本该显示\"考核状态\"。后端富化已下发 `object_label` / `payload_display`,唯独没有字段 label。\n\n## 改动\n- `ApprovalRequestRow` contract 新增 `payload_labels?: Record<string,string>`。\n- `ApprovalService.enrichRows` 按对象解析字段 label,只附带快照里实际存在的 key;与既有 `payload_display` 对称。单语言项目里 `schema.label` 本身即本地化串。\n- 新增 service 测试。\n\n> 声明式操作 i18n(`plugin-approvals` 的 `_actions` 翻译包)**不在本 PR**——framework main 已完整提供,勿重复。\n\n## 验证\n- `pnpm --filter @objectstack/plugin-approvals test` → 165 passed(含新增 payload_labels 用例)。\n- 真机:`app-showcase`(seed-approval-demo)起后端,审批 API `/api/v1/approvals/requests/{id}` 返回 `payload_labels`,含 `name→\"Invoice Number\"`、`total→\"Subtotal\"`(≠ prettifyKey 的 \"Name\"/\"Total\"),经 objectui console dev 渲染在摘要卡片。\n\n客户端消费 PR:objectstack-ai/objectui#2818。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

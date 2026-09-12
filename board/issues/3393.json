@@ -1,0 +1,33 @@
+{
+  "number": 3393,
+  "kind": "pull_request",
+  "title": "feat(showcase): demonstrate action-param widgets + related-list pagination",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-21T15:34:21Z",
+  "updated_at": "2026-07-21T15:47:27Z",
+  "closed_at": "2026-07-21T15:47:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-21T15:47:24Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3393",
+  "body": "## Why\nThe #3358 v16 sweep (§4) couldn't exercise three shipped features because the showcase never demonstrated them out of the box:\n- **action-param real widgets** (ADR-0059) — no showcase action declared `params`, so the `ActionParamDialog` widget rendering was never shown;\n- **`autonumber` param → AutoNumber widget**;\n- **related-list pagination** (objectui#2711) — no parent had more children than a page.\n\n`coverage.ts` didn't flag these: it tracks metadata **KINDS** (action/view are \"demonstrated\" because *some* exist), not sub-features. So they were silent gaps in the dogfood safety net — exactly the kind of gap that lets shipped-but-broken features through.\n\n## What\n- **`ActionParamGalleryAction`** on Field Zoo — one inline param of every non-trivial type (`text/richtext/select/date/color/autonumber/image/file`), so the param dialog renders each real widget through the shared field-widget map; the `file`/`image` params carry `multiple`/`accept`/`maxSize` and exercise the upload guard.\n- **24 bulk prospects under Northwind** — its Account → Contacts related list now exceeds a page.\n- Note the sub-feature demonstration in the `action` coverage entry.\n\n## Verified in the running app\n- The **ParamDialog renders every widget** — rich-text editor (not a textarea), select, date picker, color swatch + hex, the AutoNumber \"Reference #\", \"Upload Image\", and a multi-file drop zone. (screenshot-confirmed)\n- The **Northwind Contacts related list holds 26 rows but fetches `?top=5`** (server-windowed, not load-all).\n- `os validate` ✓ (9 Actions) · `tsc --noEmit` ✓.\n\nFollow-up to #3364; from the #3358 sweep §4. `@objectstack/example-showcase` is private → no changeset.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

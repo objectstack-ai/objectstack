@@ -1,0 +1,34 @@
+{
+  "number": 3346,
+  "kind": "pull_request",
+  "title": "fix(create-objectstack): exclude CHANGELOG.md from the skills-catalog-boundary ratchet (unblocks main Test Core)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-20T05:09:33Z",
+  "updated_at": "2026-07-20T05:14:13Z",
+  "closed_at": "2026-07-20T05:14:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-20T05:14:11Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3346",
+  "body": "## Problem — `Test Core` is red on `main`\n\nThe required **Test Core** gate has been failing on `main` since before the current head (first seen at `e412fb676` / `631debac5`; last green `629fbae80`). One test fails:\n\n`create-objectstack › template-consistency.test.ts › skills catalog boundary › no customer-facing surface advertises a repo-root skills install`\n\n### Root cause\n\nThe guard greps `content/docs` / `skills` / `packages/create-objectstack` for `skills add objectstack-ai/framework` **not** followed by `/skills`, excluding only the test file — **not `CHANGELOG.md`**.\n\nWhen Changesets versioned `create-objectstack` in RC mode, it baked **#3101**'s changeset prose into `packages/create-objectstack/CHANGELOG.md:99`. That entry documents the fix by quoting the *removed* command in past tense:\n\n> \"…the scaffolder (and the docs) advertised `npx skills add objectstack-ai/framework --all` … All install commands are now scoped to the published catalog via the `/skills` subpath…\"\n\nThe ratchet flagged that historical quote as a live advertisement. Every real advertising surface (`content/docs/**`, `README.md`, `src/index.ts`, `templates/AGENTS.md`) already uses the correct `/skills` subpath — the CHANGELOG is the only \"offender\", and it's a false positive.\n\n### Fix\n\nExclude `**/CHANGELOG.md` from the guard's grep surfaces. A changelog documenting the **removal** of an anti-pattern is not advertising it. One line + rationale comment.\n\n## Verification\n\n`pnpm --filter create-objectstack test` → **18/18 pass** (was 1 failing). Reproduced the single offender locally and confirmed the `:(exclude)**/CHANGELOG.md` pathspec drops it (1 → 0 matches).\n\n## Notes\n\n- Pre-existing failure, unrelated to #3298/#3345 (discovery capability) — that PR's own Test Core was green pre-merge; its post-merge run was *cancelled* (superseded by #3344), not failed.\n- `skip-changeset`: test-infra only, nothing shipped in the published package.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

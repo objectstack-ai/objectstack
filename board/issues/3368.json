@@ -1,0 +1,30 @@
+{
+  "number": 3368,
+  "kind": "issue",
+  "title": "spec(view): canonicalize ViewFilterRule operator vocabulary (enum + legacy aliases) and deprecate legacy string sort",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-20T15:35:21Z",
+  "updated_at": "2026-07-21T00:56:37Z",
+  "closed_at": "2026-07-21T00:56:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3368",
+  "body": "## Background\n\n`ViewFilterRuleSchema.operator` is currently a free-form `z.string()`, so Studio (ObjectUI SchemaForm) cannot render an operator dropdown, and invalid operators pass validation silently. PR #3363 attempted to fix this by hard-switching to a 19-value `z.enum`, but that approach breaks existing data and consumers (see \"Why the previous attempt was rejected\" below). This issue tracks a redesign.\n\nPaired UI work lives in objectui (field-type-aware operator/value widgets); this spec change is its blocking dependency.\n\n## Problem\n\nThe operator vocabulary actually in use today is wider than any single canonical list:\n\n- ObjectUI's Studio `FilterBuilderWidget` **writes** shorthand operators to stored view metadata: `gt`, `gte`, `lt`, `lte` (see `FB_TO_SPEC` in `packages/app-shell/src/views/metadata-admin/widgets.tsx`).\n- ObjectUI's runtime accepts shorthands: `eq`, `ne`, `neq`, `gt`, `lt`, `gte`, `lte`, `nin` (see `specOperatorToAst` in `packages/plugin-list/src/UserFilters.tsx`).\n- Existing object definitions in this repo use `isNull` / `isNotNull` (plugin-sharing) and relative-date operators like `this_quarter` (documented in the schema's own JSDoc).\n\nA strict enum containing only long-form snake_case names invalidates all of the above, including data ObjectUI's own editor writes today.\n\n## Requirements\n\n1. **Define the canonical operator vocabulary** (proposed: long-form snake_case — `equals`, `not_equals`, `contains`, `not_contains`, `starts_with`, `ends_with`, `greater_than`, `less_than`, `greater_than_or_equal`, `less_than_or_equal`, `in`, `not_in`, `is_empty`, `is_not_empty`, `is_null`, `is_not_null`, `before`, `after`, `between`).\n2. **Accept legacy aliases on parse** — `eq`, `ne`, `neq`, `gt`, `lt`, `gte`, `lte`, `nin`, `isNull`, `isNotNull`, `isEmpty`, `isNotEmpty`, camelCase forms (`notEquals`, `greaterThan`, …) — normalized to the canonical form (e.g. via `z.preprocess`/`transform`), so existing stored metadata keeps validating. Alternatively ship a migration; either way, no silent breakage.\n3. **Decide the fate of relative-date operators** (`this_quarter`, etc.). They are documented in the current schema JSDoc; removing them is a product decision, not a cleanup. If removed, provide a replacement (e.g. relative-date value tokens) or an explicit deprecation.\n4. **Deprecate legacy string `sort` separately.** `ListViewSchema.sort` accepting `\"field desc\"` is a documented compatibility form, and the `task.view.ts` fixture using it is intentional live regression coverage for objectui#2601 (\"schema.sort.map is not a function\"). Removal must be its own deprecation-cycle change — keep the union (optionally with a deprecation note) for now, and do not delete the regression fixture until the string form is actually dropped.\n5. **Fixture updates must be semantics-preserving.** E.g. rewriting `isNull` → `is_empty` changes meaning unless the data layer treats them identically; use the alias mapping instead of rewording filters.\n\n## Acceptance criteria\n\n- [ ] `ViewFilterRuleSchema.operator` exposes an enum (so JSON-schema consumers like SchemaForm get `enum` choices) while still parsing all legacy aliases listed above.\n- [ ] `ObjectSchema` definitions in this repo (plugin-sharing, examples) validate unchanged, without semantic rewrites.\n- [ ] `ListViewSchema.sort` string form still parses; its removal is tracked in a separate deprecation issue.\n- [ ] Spec tests cover: canonical values, each legacy alias normalizing correctly, and rejection of genuinely unknown operators.\n- [ ] Changelog/migration note for downstream consumers (ObjectUI runtime + Studio).\n\n## Prior art\n\n- #3363 — rejected: strict enum with no aliases breaks stored data and ObjectUI's own `FilterBuilderWidget` writes; bundled the unrelated breaking `sort` change and deleted the objectui#2601 regression fixture; test-suite pass was achieved by rewriting the tests/fixtures themselves.\n- objectstack-ai/objectui#2760 — the paired Studio UI attempt, rejected for reasons tracked in the objectui counterpart issue."
+}

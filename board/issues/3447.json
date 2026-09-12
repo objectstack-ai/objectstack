@@ -1,0 +1,32 @@
+{
+  "number": 3447,
+  "kind": "issue",
+  "title": "审批流无法在「运行中」动态确定审批人——审批人在提交时即被 $trigger 快照锁定（动态路由 / 动态会签受阻）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-24T14:51:47Z",
+  "updated_at": "2026-07-27T03:49:55Z",
+  "closed_at": "2026-07-27T03:06:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3447",
+  "body": "### 一句话说明\n审批流一旦提交，后续各节点的审批人就**只能来自提交那一刻的记录快照（`$trigger`）**。流程跑起来之后，无论是「前一个审批人决定下一批审批人」，还是用节点重新算出来的审批人，**都喂不进后面的审批节点**。这类「运行中动态确定审批人」的能力目前缺失。\n\n### 核心问题\n审批人的解析被绑死在**提交时的不可变快照**上，缺一条「在节点进入时、按当前实时状态确定审批人」的路径。于是所有**动态审批路由**（上一步决定下一步审批人 / 动态会签 / 临时指定协办部门 / 依据流程中产生的数据分派）都无法用声明式方式表达。\n\n### 具体表现（目前已确认的两个口子）\n1. **`{type: 'field'}` 审批人只读 `$trigger` 快照**（主证据，已真机确认）：审批人来源为记录字段时，`value` 锚定 `$trigger`（schema `xRef.objectSource='$trigger'`），提交后再改该字段读不到。\n2. **审批人无法引用流变量**：`get_record` 能在流程中把实时记录读进流变量，但审批人的 `value` 只能绑 `$trigger`、不能指向该变量，所以「先重查再据此定审批人」这条路也走不通。\n\n> 补充：平台已有的 `Reassign`（转派）是**逐条请求的手动**动态改派，能救急；但缺的是**声明式、自动**的「节点进入时按实时状态定审批人」。\n\n### 场景（业务视角）\n不合格品审批：① 质检部部长审批 → ② **部长在这一步选择要并行会审的几个部门** → ③ 被选部门并行会签 → ④ 工厂长终审。第 ② 步部长选的部门展开成审批人写进记录字段，③ 用该字段当审批人——但 ③ 读的是 ① 提交时的旧快照，读不到部长中途填的人。\n\n### 对照实验（16.1.0 真机）\n| 审批人（记录字段）何时确定 | 后续并行节点解析到的审批人 |\n|---|---|\n| 提交**之前**就定好 | ✅ 正确（多选用户字段能 fan-out 成多个会审人） |\n| 提交**之后**、流程中途定 | ❌ 空（读的是 `$trigger` 提交快照） |\n\n顺带确认：**多选用户字段 → 多个并行审批人的 fan-out 本身是支持的**，问题只在「中途确定读不到」。\n\n### 期望\n支持**在节点进入时按实时状态确定审批人**。可选实现（由易到通用）：\n1. **节点进入时对 `field` 型审批人按记录 id 重查实时值**（最小改动，直接解决主场景）；\n2. **允许审批人 `value` 引用流变量**（`get_record` 刷新后喂给节点），覆盖「先重查再定人」；\n3. **提供计算型 / 动态审批人来源**（如 `type: 'expression'` 或节点级 resolver 钩子），一次性覆盖任意「按流程中数据分派」的动态路由。\n\n倾向 #1 保底、#2/#3 作为更通用的演进。\n\n### 最小复现\n1. 对象加多选用户字段 `approvers_dynamic`（初始空）；\n2. 流：节点A（固定审批人，如 `type: 'position'`）→ 节点B（`{type: 'field', value: 'approvers_dynamic'}`，`behavior: 'unanimous'`）；\n3. 提交进 A → 审批 A 期间往 `approvers_dynamic` 写 2 个用户 → 通过 A；\n4. 看 B 的 `sys_approval_request.pending_approvers`：空（期望那 2 人）；\n5. 对照：提交**前**写好 `approvers_dynamic` → B 正确解析出 2 人。\n\n### 环境\n- `@objectstack/spec` 16.1.0，运行时 16.x；ApprovalsServicePlugin；流类型 `record_change`；审批人 `{type: 'field'}`\n"
+}

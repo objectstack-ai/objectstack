@@ -1,0 +1,30 @@
+{
+  "number": 3246,
+  "kind": "issue",
+  "title": "feat(mcp): stdio transport requires an API-key principal — key→EC threading, fail-closed, no system bypass (ADR-0101)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T02:03:33Z",
+  "updated_at": "2026-07-19T10:40:02Z",
+  "closed_at": "2026-07-19T10:40:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3246",
+  "body": "#3167 明确 defer 的最后一块安全项(PR #3217 / #3228 的 PR-B 均已合入)。矩阵行 `mcp-stdio-authority` 目前 `experimental`,note 里写着 ADMISSION REQUIREMENT:长驻 stdio bridge 走裸 `metadataService` + `dataEngine`(`record_by_id` resource 直接 `dataEngine.findOne(...)`,无 ExecutionContext → 绕过 RLS/FLS/租户)。本 issue 落地该准入,决策记录见 **ADR-0101**(随实现 PR 提交,Proposed)。\n\n## 决策摘要(详见 ADR-0101)\n\n1. **D1 — stdio 必须携带一个后端 principal,形态为 API key**:`OS_MCP_STDIO_API_KEY=osk_...`,经 `@objectstack/core` 的共享验证链(`resolveApiKeyPrincipal` / `resolveAuthzContext`,与 HTTP 面同一条路)解析成 ExecutionContext;resource 读改走 `ql.find(..., { context })`,RLS/FLS/租户按该身份生效。**逐调用重解析**,吊销即时生效于存活的 stdio 会话。\n2. **D2 — fail-closed**:开了 stdio auto-start(`OS_MCP_STDIO_ENABLED=true` / `autoStart`)但 key 缺失/无效 → **拒绝启动 stdio**(响亮的配置错误,指明如何 mint key);HTTP 面不受影响。\n3. **D3 — 不提供 `system` 旁路模式**(rejected alternative):要\"满权\"就给平台管理员/专用 service 身份 mint 一个 key——供给凭据,而不是绕过身份。理由:可审计(归属真实身份)、可吊销、可轮换、走 posture 规则;`OS_MCP_STDIO_IDENTITY=system` 是刚在 #3217 修掉的 footgun 换名重现。\n\n行业对齐:MCP 规范(stdio 不做传输认证、后端凭据从 env 供给)、Postgres/GitHub MCP server(按供给凭据 scope)、Anthropic agent-identity 模型(admin 预置的 scoped service 身份)。\n\n## v1 范围(实现 PR)\n\n- [ ] `@objectstack/mcp` `plugin.start()`:读 `OS_MCP_STDIO_API_KEY` → 经 core 共享链解析 → 构造 EC(镜像 runtime `resolve-execution-context` 的映射);缺失/无效 → 拒启 stdio + 清晰报错\n- [ ] `bridgeResources` 系列改 principal-bound:`record_by_id` 等数据读携带 `{ context }`(逐调用重解析,吊销即时生效)\n- [ ] 矩阵 `mcp-stdio-authority`:`experimental` → `enforced`,enforcement 指向新 gate;`bridgeResources(unscoped-stdio)` 探针键随实现更新(会触发 STALE → 重分类,即本次)\n- [ ] 单测:有效 key→scoped 读生效 / 无 key→拒启 / 无效(revoked/expired)key→拒启 / 吊销后存活会话的下一次读被拒\n- [ ] docs:`environment-variables.mdx` 增 `OS_MCP_STDIO_API_KEY`;`connect-mcp.mdx` stdio 节更新\n- [ ] changeset(`@objectstack/mcp` minor,若 types 增解析器则一并)\n\n## v2(后续,不阻塞 v1)\n\n- `os dev` 便利:用已 seed 的 dev-admin 自动 mint 一个本地专用、可撤的 dev key 并在启动打印(scoped key,非旁路,方向一致)\n- 命名 service 身份 / 受限权限集 + key 轮换指引(对齐\"静态 token 是主要失败模式\"的行业共识)\n\n## Refs\n\n- ADR-0101(随实现 PR)· ADR-0096(执行面身份准入)· ADR-0024 §4(信任模型)\n- #3167(决策母题,PR-B 已落地)· #3217 / #3228(已合)· #3055(消费侧 stdio spawn 策略门——同一信任讨论的另一半)\n- `packages/qa/dogfood/test/authz-conformance.matrix.ts`(`mcp-stdio-authority` 行)"
+}

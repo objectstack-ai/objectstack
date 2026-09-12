@@ -1,0 +1,35 @@
+{
+  "number": 3487,
+  "kind": "pull_request",
+  "title": "feat(rest): 请求→环境解析统一到 kernel-resolver 缝 — ADR-0076 D11 步骤④ (#2462)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-25T03:03:57Z",
+  "updated_at": "2026-07-25T03:17:07Z",
+  "closed_at": "2026-07-25T03:17:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-25T03:17:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3487",
+  "body": "## 动机（#2462 D11 步骤④）\n\nREST 服务器一直维护着自己的 hostname/`X-Environment-Id` → environment 平行解析链，且同一条链在 `resolveRequestEnvironmentId`、`resolveI18nService`、`computeExecCtx` 里手抄了三份；而 HTTP dispatcher 早已把同一个问题交给 host 注入的 ADR-0006 `kernel-resolver` 缝（cloud 的 `CloudKernelResolver`，6 级解析链）。后果：**同一个 unscoped 请求打在 dispatcher 面和 REST 面上可能归属不同的 environment**（REST 链缺 session 级兜底，也不认 resolver 的 control-plane skip 语义）。\n\n## 改动\n\n- 新增 `RestRequestEnvResolver` 缝（rest 包本地结构类型，照 `RestKernelManager` 模式避免 runtime↔rest 包环）。\n- `RestApiPlugin` 把 host 的 `kernel-resolver` 服务适配进该缝：装配 `context{request}` 调 `resolveKernel`，回读 `context.environmentId`；`defaultKernel` 绑定 host kernel 服务面（resolver 的 session/default-project 级从它解析 auth/objectql/default-project）。**cloud 侧零改动**——`kernel-resolver` 与 `env-registry` 本就注册在同一 host kernel（objectos-stack.ts）。\n- `resolveRequestEnvironmentId` 成为唯一入口：explicit id → 注入 resolver（**正常返回即终局**，含 `undefined`=有意 unscoped；仅抛错才降级）→ 旧内建链（hostname → header）→ 单环境 default。三份手抄内联链收敛为一处调用。\n- 旧 `envRegistry` 链原样保留：OSS 单环境部署（无 resolver 服务）行为零变化，也是 resolver 异常时的降级路径。\n\n## 行为差异（仅 cloud/多租户部署，需 review 把关）\n\nresolver 在场时 unscoped REST 路由从 3 级链变为与 dispatcher 完全一致的 6 级链：\n\n1. **新增 session 兜底**：hostname 未绑定且无 header 时，登录用户经 `session.activeEnvironmentId` / org default 解析——dispatcher 面早已如此，REST 面补齐（消除双面归属分歧）。\n2. **skip 前缀语义**：resolver 对 control-plane 路径返回 `undefined` 为终局，REST 不再二猜。REST 消费点均为数据面路由（REST 自己的 `/discovery` 直用 boot 时控制面 protocol，不做 env 解析），实际不受影响。\n3. hostname 缓存：cloud `EnvironmentDriverRegistry` 自带 TTL 缓存，REST 侧 30s 缓存仅在降级链中仍生效——双缓存的正式退役留给 D11 步骤③。\n\n## 验证\n\n- 新增 `rest-env-resolution.test.ts`：9 条缝契约测试（explicit 短路 / resolver 优先 / undefined 终局 / 抛错降级 / 旧链原样 / header+default 兜底 / getOrCreate 路由 / plugin 装配含 facade 透传 / 无 resolver 正常服务）。\n- rest 包全量 348 测试绿；`@objectstack/http-conformance` 跨适配器 41 断言绿（两适配器 socket 级行为一致）；`--force` 重建 rest 及 11 个下游包含 DTS 全绿。\n\nCloses 部分 #2462（D11 步骤④）。步骤③（按域拆 dispatcher/rest-server）随后单独 PR。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

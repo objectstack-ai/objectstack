@@ -1,0 +1,32 @@
+{
+  "number": 3566,
+  "kind": "issue",
+  "title": "Identity import: raw SQL leaks into row errors; DB constraint failures need sanitized, friendly messages",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T06:07:39Z",
+  "updated_at": "2026-07-27T08:38:18Z",
+  "closed_at": "2026-07-27T08:38:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3566",
+  "body": "## Summary\n\nDuring identity bulk import (`POST /api/v1/auth/admin/import-users`, driven by the Console **ImportWizard**), failing rows surface **raw, unsanitized backend errors** to the user. Two concrete problems observed:\n\n1. **Raw SQL statement leaks into the row error.** A row that violates a DB `UNIQUE` constraint (e.g. `phone_number` — `sys-user.object.ts` has `{ fields: ['phone_number'], unique: true }`) surfaces the full driver error verbatim:\n\n   ```\n   insert into `sys_user` (`__search`, `ai_access`, `banned`, `created_at`, `email`,\n   `email_verified`, `failed_login_count`, `id`, `must_change_password`, `name`,\n   `phone_number`, `phone_number_verified`, `role`, `source`, `two_factor_enabled`,\n   `updated_at`) values ('zhoujunyi zjy', false, 0, '2026-07-2...\n   ```\n\n   This is (a) unreadable to an end user and (b) an **information-disclosure** of the DB schema. It must never reach the client.\n\n2. **Error messages need friendly, localizable wording.** better-auth pre-checks email uniqueness so email dupes get a clean `User already exists. Use another email.` — but phone-number uniqueness, strict email-format rejection, and other DB-layer failures fall through as opaque/raw text.\n\n## Root cause\n\n`packages/rest/src/import-runner.ts` → `toFailedResult()` (~L147-150) simply slices `err.message` (300 chars) and returns it verbatim as the row error. When `createData` (auth import → `authApi.createUser` → ObjectQL insert into `sys_user`) throws a driver-level constraint error, the raw SQL is that message.\n\n## Related: email format — frontend passes, server rejects\n\n- Server pre-filter `isLikelyEmail()` (`packages/plugins/plugin-auth/src/admin-user-endpoints.ts` ~L188) is intentionally permissive (structure only, no charset check), so a non-ASCII domain like `x@柴仟.com` passes it — and passes the dry-run pre-check.\n- The Console `validateValue()` (`ImportWizard.tsx` ~L417) does **no** email-format check at all (email → `default` → `true`).\n- better-auth's `createUser` applies a strict ASCII email regex and only rejects (`Invalid email`) at **real import time**, not during dry-run → jarring \"passed validation, then failed\" UX.\n\n## Proposed fixes\n\n**framework (`objectstack`)**\n- Sanitize the auth-import write path: never surface raw SQL. Map DB `UNIQUE` violations to friendly, field-aware messages (e.g. \"Email already in use\", \"Phone number already in use\"), preserve better-auth's clean messages, and fall back to a generic \"Could not create user\" for anything unrecognized.\n- Tighten `isLikelyEmail` (or the dry-run identity check) to reject clearly-invalid emails (non-ASCII / malformed) so they are caught in the **dry-run pre-check**, before any account is created.\n\n**objectui (`ImportWizard`)**\n- Add client-side email-format validation in `validateValue` so obviously-bad emails are flagged (red cell) in the preview step, before submit.\n- Ensure per-row server errors render readably (they already show `row.error`).\n\n## Repro\nImport a personnel CSV where one row's `phone_number` collides with an existing user, and another row has a non-ASCII email domain. Observe the raw SQL error and the \"frontend-passed-then-server-failed\" email case.\n"
+}

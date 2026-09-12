@@ -1,0 +1,35 @@
+{
+  "number": 3454,
+  "kind": "pull_request",
+  "title": "fix(objectql): exempt curated seed writes from state_machine validation (#3433)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-24T15:10:41Z",
+  "updated_at": "2026-07-24T16:16:40Z",
+  "closed_at": "2026-07-24T15:40:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-24T15:40:37Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3454",
+  "body": "Fixes #3433.\n\n## 问题\n\n`state_machine.initialStates`(#3165)在**每次 insert** 都强制 FSM 入口态,导致种子重放静默拒绝一切 mid-lifecycle 行,并级联丢掉其 master-detail 子记录 —— 空库启动 showcase 只入 1/5 项目、1/10 任务。所有带 `closed_won`/`closed` 种子行的 marketplace 模板,以及 rehydrate-heal、per-org replay 路径,都会撞上同样的\"装了却没数据\"。\n\n## 方案(平台级 / issue 方案 A)\n\n种子是策展的既成事实,不是走生命周期的记录,因此豁免 `state_machine` 规则:\n\n- **spec** — 新增服务端设置的 `ExecutionContext.seedReplay` 意图旗标(`isSystem` 的姊妹,客户端注入不了)。\n- **objectql** — 4 个 `evaluateValidationRules` 调用点(insert + 3 个 update)在上下文带 `seedReplay` 时传 `skipStateMachine`;规则求值器跳过 `state_machine`(insert 的 `initialStates` + update 的 transitions)。**只跳这一种** —— `format`/`cross_field`/`script`/`json_schema`/`conditional` 照常运行。\n- **metadata-protocol** — `SeedLoaderService.SEED_OPTIONS` 设 `seedReplay: true`,一处武装所有种子路径(boot inline、marketplace `runInlineSeed`、per-org replay、http-dispatcher、protocol),无需改任何 call site。\n\n同时回退 #3435 的三段式 FSM-walk 变通,showcase 项目种子恢复为单个 `upsert` 直写终态。\n\n## 验证\n\n- `pnpm --filter @objectstack/objectql --filter @objectstack/metadata-protocol test` → objectql **1056** 绿、metadata-protocol **54** 绿。\n- 三层回归:rule-validator(跳规则限定 FSM)、真引擎(`seedReplay` 上下文豁免)、seed loader(穿旗标 + 全量入库);均已验红(临时抽掉旗标即失败)。\n- 真实空库启动:`showcase_project=5`、`showcase_task=10`,看板 `active=2/completed=1/on_hold=1/planned=1`,banner `Seeds: 130 inserted` 无 `REJECTED`。\n\nchangeset:spec/objectql/metadata-protocol 三包 patch。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

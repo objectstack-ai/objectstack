@@ -1,0 +1,35 @@
+{
+  "number": 3581,
+  "kind": "pull_request",
+  "title": "feat(spec)!: shrink ApiMethod enum to the six primitives (#3543, P2 of #3391)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T08:08:25Z",
+  "updated_at": "2026-07-27T08:28:03Z",
+  "closed_at": "2026-07-27T08:28:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T08:28:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3581",
+  "body": "Closes #3543 (P2 of #3391).\n\n**BREAKING:** the authored `enable.apiMethods` enum shrinks to the six primitives (`get/list/create/update/delete/bulk`). The eight legacy values (`upsert/aggregate/history/search/restore/purge/import/export`) are derived effective operations only — no longer authorable. Ships as a `minor` bump per the lockstep launch-window policy (`check-changeset-no-major`): every package versions together, so the `!` marker + changeset are the breaking-change record, matching the pending breaking changesets already on main.\n\n## What changed\n\n### spec\n- `ApiMethod` z.enum → six primitives. New `stripLegacyApiMethods` `z.preprocess` compat layer: a stored legacy value is stripped at parse with a FROM→TO warning (canonicalize-and-warn, never a hard failure) — **permanent tolerance**, since real metadata does not upgrade in lockstep with the spec. Unknown values (typos) still hard-fail. The deny-all cliff (a pure-legacy whitelist strips to `[]` = deny-all) gets a dedicated loud warning. `LEGACY_API_METHOD_GUIDANCE` is the value-level tombstone map (AGENTS.md Post-Task #3).\n- **Type split — authored vs effective vocabulary:** new `ApiOperation` type / `ApiOperationSchema` / `API_OPERATION_ORDER` (14 values, byte-stable pre-shrink wire order) carry the gate/wire vocabulary. The wire contract is unchanged: the 405 `allowed` array and `/me/permissions` `apiOperations` still serialize derived verbs (`export`, `search`, …) — objectui's Export-button gating keeps working with **zero frontend changes** (verified: objectui imports no `ApiMethod`, consumes `apiOperations` as `string[]`). `EffectiveObjectPermissionSchema.apiOperations` now validates against `ApiOperationSchema`. `API_METHOD_ORDER` stays as a deprecated alias.\n- `EffectiveApiMethods.explicitLegacy` and the \"explicit wins\" honoring are removed; the derivation resolver ignores legacy/unknown strings on un-parsed inputs, so the zod path and the raw path converge on the same effective set.\n- **#3545 deferred tightening landed:** a present-but-non-array `apiMethods` now resolves to `deny-all` (fails closed) instead of unrestricted.\n- Regenerated: `api-surface.json` (additive), `json-schema/` (published `ApiMethod.json` is now the strict six-value enum — deliberate divergence from the tolerant zod parse, documented in the changeset), reference docs, skill refs, liveness note.\n\n### objectql\n- `warnDeprecatedExplicitApiMethods` → `warnStrippedLegacyApiMethods`: a permanent per-object registration diagnostic (the parse-time strip warning carries no object name; this covers raw schemas that never pass through Zod). Escalates on the deny-all case.\n- The `MANAGED_WRITE_VERB_AFFORDANCE` \"unification deferred to P2\" comment resolved: the three affordance tables stay deliberately separate (ADR-0103); `upsert`/`purge` keys survive for un-parsed whitelists.\n\n### platform-objects\n- `sys_business_unit` / `sys_business_unit_member`: P1's explicit `import`/`export` reclaimed; the remaining whitelist named all six primitives, so the `apiMethods` key is dropped entirely (equivalent to default-open, and it tracks future primitives). Same for `sys_user_preference`. Tests now pin `apiMethods` **absent** + the derivation granting import/export.\n- **Deviation from the issue checklist, deliberate:** the seven `[]` declarations (identity/oauth domain, all with `apiEnabled: false`) are **kept**, not deleted — `[]` is the second gate if `apiEnabled` ever flips to `true` (defense-in-depth; #3391 made `[]` fail closed precisely for this). Flagged in the changeset.\n- Stale `sys_secret` comment fixed (\"empty array would fail OPEN\" — it fails CLOSED since #3391).\n\n### Migration\n- Reporter codemod: `node scripts/codemod/apimethods-legacy-to-primitives.mjs` (scans, prints exact replacement per site, flags whitelists the mapping would widen — deliberately not an auto-rewriter: silently widening an API-exposure whitelist is a security hazard, and the runtime strip already keeps stored metadata working).\n- The P1 changeset's \"honored one release\" sentence is amended (both phases ship in the same release train, so that promise would be false); the new changeset carries the full FROM→TO table.\n\n## Release sequencing note\n\nP1 (#3498) and this P2 ship in the **same** release train — per discussion, the deprecation window is replaced structurally by the permanent parse-time strip layer + merged migration docs + codemod, which serve skip-version upgraders better than a one-week transitional release would.\n\n## Cross-repo\n\n- **objectui**: no changes needed (verified — consumes the effective set as strings; server wire vocabulary unchanged).\n- **cloud**: not accessible from this session — needs a grep for `ApiMethod` / legacy enum-value imports before the release train cuts.\n\n## Tests\n\n- spec: 6733 passed (includes new strip/deny-all/vocabulary-split suites)\n- objectql: registry 78 passed (diagnostic reworked)\n- platform-objects: 215 passed (assertions flipped to derivation-based)\n- rest: explicit-legacy gate test flipped to strip semantics\n- full monorepo turbo run: **131/131 tasks green** locally\n- `check:api-surface` / `check:docs` / `check:skill-refs` gates verified locally\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_018V7nzG1x7nuqkwZQTowtBo"
+}

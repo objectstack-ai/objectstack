@@ -1,0 +1,35 @@
+{
+  "number": 3307,
+  "kind": "pull_request",
+  "title": "feat(auth): bulk import defaults to `auto` — invite per row, temporary only for undeliverable rows (#3236)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T17:08:14Z",
+  "updated_at": "2026-07-19T17:21:04Z",
+  "closed_at": "2026-07-19T17:21:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-19T17:21:03Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3307",
+  "body": "Closes #3236.\n\n## 背景 / 前提更正\n\nIssue #3236 的前提是「默认策略是 `temporary`」,但实际默认早已是 **`none`**(#2820 改的:导入只供给身份、不发凭证、不分发任何秘密)。所以「危险默认」这一层其实已经不存在了。\n\nIssue 里**仍然成立**的价值:当管理员确实想在导入时发凭证时,`temporary` 是个「整批一刀切」的锤子——一批里既有可投递又有不可投递的行时,`invite` 会把不可投递的行整个 fail 掉,`temporary` 又会给**所有**行(包括本可安全 invite 的行)都发临时密码。#3236 的真正提案是**逐行决策**。\n\n## 改动\n\n新增第四种 `passwordPolicy` —— **`auto`**,并设为**新默认**(原为 `none`)。`auto` **逐行**决定:\n\n- 可投递的行(真邮箱 + 已接邮件服务,或手机号 + 已接 SMS 邀请)→ **走 invite**(set-your-password 邮件,或纯手机号行的邀请短信),**不分发任何长期共享秘密**;\n- 无可投递渠道的行(placeholder 邮箱 / 纯手机号无 SMS / 邮箱行但无邮件服务)→ **回退 `temporary`**,临时密码在响应里返回一次并盖 `must_change_password`。\n\n这把临时密码的爆炸半径从「整批」收缩到「真没渠道的少数行」;而且和 `invite` 不同,**`auto` 永不因缺基建而拒绝请求**(无渠道的行只是降级)。逐行结果挂在 `rows[].delivery`(`email` / `sms` / `temporary`),整批分布挂在 `summary.delivery`,并写入运行审计。\n\n三个原有策略行为**完全不变**,仍可显式选择:`invite`(逐行 fail 不可投递行,永不降级)/ `temporary`(整批临时密码)/ `none`(仅身份)。\n\n### 重构\n\n写入路径统一成:预校验时算好逐行 `RowPlan`(按身份 key,因为 `createData` 拿到的是 coerce 过的行**副本**,不能靠对象引用),写后用一个统一遍历(靠 invite / temporary 两个 map 驱动,不再按全局 policy 分支)。于是 `auto` 的混合批次和三个固定策略共用一条代码路径。\n\n## ⚠️ 行为变更\n\n省略 `passwordPolicy` 的调用方,现在拿到的是 `auto`(默认会主动外发邀请 / 返回临时密码),不再是 `none`。要恢复「只建身份」的老行为需显式传 `passwordPolicy: 'none'`。**已显式传策略的调用方不受影响**,响应是严格超集(新增 `delivery` 字段)。按 `@objectstack/plugin-auth` 的 `minor` 发。\n\n## 未纳入(单独跟进)\n\nIssue 标注为「先行止血项」的那个 bug(`temporary` 盖 `must_change_password` 失败时只 warn、仍以 created+临时密码 静默返回)本 PR 未修——Issue 明确说单独修。注意:`auto` 成为默认后,该静默失败现在落在了默认路径上,值得尽快单独补一个 PR。\n\n## 测试\n\n- 新增 5 个 `auto` 测试(逐行分流 / SMS 邀请 / 无渠道全降级 / 邀请失败不回滚 / dryRun 不投递),并更新默认策略测试。\n- `admin-import-users.test.ts` 26 项全绿;plugin-auth 全量 **465 项**全绿;DTS 类型检查过;eslint 干净。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

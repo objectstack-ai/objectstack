@@ -1,0 +1,34 @@
+{
+  "number": 1752,
+  "kind": "issue",
+  "title": "Report drill-down: date-granularity dimensions need a range filter, not equality",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-12T02:49:15Z",
+  "updated_at": "2026-07-22T21:08:41Z",
+  "closed_at": "2026-07-22T21:08:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1752",
+  "body": "## Context\n\nADR-0021 report drill-down ([objectui#1649](https://github.com/objectstack-ai/objectui/pull/1649)) scopes the destination object list with **equality** filters (`?filter[field]=value` → ObjectQL triple `[field, '=', value]`).\n\nA dimension with `dateGranularity` (e.g. `created_date` bucketed by month/quarter/day) groups rows into a **time bucket**, not a single value. Drilling into the \"2026-Q2\" bucket should open every record whose `close_date` falls in that quarter — a **range** (`>= start AND < end`), which the equality contract can't express.\n\nCurrent behavior: objectui's `ReportView.handleDatasetDrill` **skips** granularity-bucketed dimensions, so the drill lands on a superset (correct rows included, but not scoped to the bucket). This is now the common case for the matrix \"X by time\" reports (e.g. hotcrm `pipeline_coverage_by_quarter`, `cases_opened_by_day_priority` — see [hotcrm#382](https://github.com/objectstack-ai/hotcrm/pull/382)).\n\n## Proposal\n\nTwo pieces:\n1. A bucket→range mapping for each granularity (day/week/month/quarter/year → `[bucketStart, nextBucketStart)`). Natural home is shared spec/analytics util so server and client agree on bucket boundaries.\n2. A drill filter contract that carries a range, e.g. `?filter[close_date][gte]=...&filter[close_date][lt]=...`, consumed by the object list's URL-filter parser (`ObjectView` `urlFilters`, currently equality-only).\n\n## Affected\n- framework: granularity bucket-boundary util (analytics or spec)\n- objectui: `ObjectView` urlFilters parser (add range ops) + `ReportView.handleDatasetDrill` (emit a range for granularity dims instead of skipping)\n\nFound during the ADR-0021 report epic."
+}

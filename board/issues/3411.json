@@ -1,0 +1,33 @@
+{
+  "number": 3411,
+  "kind": "pull_request",
+  "title": "feat(showcase): stamp real submitters on the seeded approval requests",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-22T20:25:03Z",
+  "updated_at": "2026-07-22T20:31:10Z",
+  "closed_at": "2026-07-22T20:31:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-22T20:31:07Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3411",
+  "body": "## The gap\nEvery seeded approval request had a **null submitter**: the demo launches flows as SYS, and the approval node stamps the requester from the flow context (`submitterId: context?.userId ?? null`). Three consequences, all invisible until you look:\n\n- 申请人 rendered as `—` on every row and in the drawer;\n- the **我发起的** inbox tab was empty for every user — the whole surface was dead;\n- the submitter-only affordances never rendered **anywhere**. `Send reminder` and `Recall` are gated on `submitter_id == ctx.user.id`, so with no submitter only **5 of the 7** declared approval actions could ever appear.\n\n## The fix\nPass `userId` on the engine context, routed deliberately:\n\n| Request | Submitter | Why |\n|---|---|---|\n| Invoice Dual Sign-off | **admin** | the logged-in dev admin owns one request → 我发起的 is non-empty and the submitter-only actions have somewhere to render |\n| Committee Quorum · Expense Sign-off | **Mei Phone (demo)** | holds no approval position → a clean requester who is never one of her own approvers |\n\n## Verified in the running console\n申请人 now shows real names; 我发起的 holds the admin's request; and the **same viewer** sees\n\n- on Mei's requests → `Approve` `Reject` `Reassign` `Send back` `Request info`\n- on his own request → those **plus** `Send reminder` and `Recall`\n\nso all 7 declared actions render, gated by the viewer's role. `tsc --noEmit` ✓, boot log 0 ERROR.\n\nFollow-up to #3409, from the #3358 §1 evidence pass. Private example → no changeset.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

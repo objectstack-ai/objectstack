@@ -1,0 +1,33 @@
+{
+  "number": 3361,
+  "kind": "issue",
+  "title": "v16.0: per-request admin-gated Server-Timing never emits on the hono server (os serve/dev)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-20T13:01:53Z",
+  "updated_at": "2026-07-21T14:06:40Z",
+  "closed_at": "2026-07-21T14:06:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3361",
+  "body": "Found during the #3358 v16.0 browser/API verification sweep.\n\n## Summary\nThe **per-request, admin-gated `Server-Timing`** path (#2408) does **not** emit any header on the standard hono server (`os serve` / `os dev` / `os start`). An admin sending `X-OS-Debug-Timing: 1` (or `json`) gets no `Server-Timing` and no `X-OS-Debug-Timing-Detail` header on any route.\n\n## Repro\nBoot showcase with `objectstack dev --ui --seed-admin`, sign in as the seeded admin, then:\n\n```\ncurl -s -b <admin-cookies> -D - -o /dev/null \\\n  -H 'X-OS-Debug-Timing: json' \\\n  'http://localhost:<port>/api/v1/data/sys_user?$top=3'\n```\n\nResponse headers contain **no** `Server-Timing` and **no** `X-OS-Debug-Timing-Detail`. Same for `/api/v1/meta/object`, `/api/v1/meta/app?id=...`. The admin session is genuine (`/api/v1/auth/me/permissions` → `admin_full_access`, 200 on data reads).\n\nExpected (per the v16 release notes / checklist §9): *\"with `OS_SERVER_TIMING` / `X-OS-Debug-Timing`, an admin sees auth/db/hooks/serialize spans; a non-admin does not.\"*\n\n## Root cause\n- The only production caller of `allowPerfDisclosure()` is `packages/runtime/src/http-dispatcher.ts:263` (`timedResolveExecutionContext`, which calls it when `isPerfDisclosurePrincipal(ec)` is true).\n- `os serve`/`dev` mounts `HonoServerPlugin` (`packages/cli/src/commands/serve.ts:1029`).\n- The hono plugin resolves the principal via its **own** self-contained `resolveCtx` (`packages/plugins/plugin-hono-server/src/hono-plugin.ts:756`, *\"Mirrors the runtime's resolveExecutionContext but self-contained to avoid a cross-package dep\"*) and **never** calls `allowPerfDisclosure()`.\n- The perf middleware starts the disclosure gate closed for per-request mode (`gate.allowed = globalTiming` = false; `hono-plugin.ts:360`) and withholds the header unless the gate is opened during dispatch (`hono-plugin.ts:364`). Since nothing opens it, the header is always withheld.\n\nNet: only global mode (`OS_SERVER_TIMING=true`) emits — and that opens the gate for **every** caller up front, i.e. it is *not* admin-gated. The documented admin-gated per-request path is unavailable on the shipped OSS server.\n\n## Why CI didn't catch it\n`packages/plugins/plugin-hono-server/src/server-timing.test.ts` calls `allowPerfDisclosure()` manually *\"as the dispatcher would\"* (lines 41, 54). Header-emission and gate-opening are unit-tested in isolation; there is no end-to-end test that drives the real hono request pipeline as an admin, so the missing wiring is invisible.\n\n## Suggested fix\nHave the hono server open the disclosure gate when the resolved principal is privileged — e.g. after `resolveCtx`, call `allowPerfDisclosure()` when `isPerfDisclosurePrincipal(ec)` (export/reuse that predicate + `ExecutionContext.posture`/`principalKind` from `@objectstack/runtime`). Add an e2e test that boots the hono app and asserts an admin gets `Server-Timing` while a non-admin does not.\n\n## Severity\nP2 — an opt-in ops-diagnostics feature is non-functional as documented on the standard server. Not a data/security issue (the global path over-discloses but is off by default).\n\nResponsible: #2408. Refs release notes `content/docs/releases/v16.mdx` (Performance diagnostics: Server-Timing spans).\n"
+}

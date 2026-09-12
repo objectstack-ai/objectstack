@@ -1,0 +1,33 @@
+{
+  "number": 3266,
+  "kind": "issue",
+  "title": "[P1] approvals: quorum (M-of-N) + grouped per-group sign-off (会签) + decision attachments",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T09:40:26Z",
+  "updated_at": "2026-07-19T11:26:33Z",
+  "closed_at": "2026-07-19T11:26:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3266",
+  "body": "> 来源:`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` 第 5 条(审批流过于简单)的 **Phase 1**。三阶段拆分:本 issue(节点内语义,OSS)→ Phase 2 引擎 ADR(#3267)→ Phase 3 企业版治理(objectstack-ai/cloud#861)。\n\n## 背景与论证\n\n代码盘点结论:串行多级(节点串联)、或签(`first_response`)、意见/撤回/退回/转交/SLA/OOO 均已具备;真正缺口是 **S2 多部门会签**(法务 AND 财务各出一人)与 **S3 集体决策 quorum**(3 中 2)。\n\n平台对比:钉钉/飞书/Salesforce/ServiceNow 全部以**节点内多人规则**(或签/会签/unanimous-vs-first-response)交付这两个场景,无一要求业务管理员画并行网关;真·并行网关只在 BPMN 引擎(Camunda 类)存在。节点内语义同时规避“每记录一个 pending 请求”约束(`approval-service.ts:479`)、记录锁与状态镜像的多头问题。\n\n## 方案\n\n`ApprovalNodeConfig`(`packages/spec/src/automation/approval.zod.ts`)向后兼容扩展:\n\n```ts\n{\n  approvers: [\n    { type: 'department', value: 'legal',   group: 'legal' },    // 新增可选 group 标签\n    { type: 'department', value: 'finance', group: 'finance' },\n  ],\n  behavior: 'first_response' | 'unanimous'\n          | 'quorum'      // 新增:总名单 M 人通过即 finalize\n          | 'per_group',  // 新增:每组 ≥ minApprovals 人通过(默认 1)= 跨组会签\n  minApprovals: 2,        // 新增:quorum 的 M / per_group 的每组阈值\n}\n```\n\n语义:\n- 任一 reject → 整体 rejected(一票否决,与现有 `unanimous` 一致,同钉钉会签)\n- `quorum` 达到 M 即 finalize,清空其余 pending 槽(同 Camunda `completionCondition` 提前完成)\n- `per_group`:按组计数,全组达标才 finalize\n- 组归属存 `node_config_json` 快照,`pending_approvers` / `sys_approval_approver` 索引不变,**无 schema 迁移**\n\n落点:`expandApprovers` 保留 per-spec 分组结构(现为拍平,`approval-service.ts:300`);`decideNode` 推进判定按 behavior 分支(`:614` 附近)。\n\n**同 PR 捎带:决策附件** — `sys_approval_action` 增加附件引用(S2 合同场景刚需,现在决策只能带文字 comment)。\n\n另:更新 `approval.zod.ts:156` 的旧注释(“Enterprise adds quorum”)——按 #1322 分层原则,quorum/会签是业务底线归 OSS;**加权投票/审批矩阵治理**才归企业版(Phase 3,objectstack-ai/cloud#861)。\n\n## 不在范围\n\n- 真·并行分支(两个 approval 节点同时挂起 + join)→ Phase 2 引擎 ADR(#3267)\n- 加权投票、审批矩阵、组级 SLA 报表 → Phase 3(objectstack-ai/cloud#861)\n\n## 验收\n\n- [ ] `behavior: 'quorum'` + `minApprovals`:M=1、M=N 边界正确;达 M 即 finalize 并清空剩余槽\n- [ ] `behavior: 'per_group'`:每组独立计数,全组达标才推进;单 reject 即否决\n- [ ] 组内成员 OOO 改派(#1322)后计数归属正确\n- [ ] 决策可携带附件并落审计\n- [ ] Studio 属性表单经 `configSchema` 自动渲染新字段\n- [ ] `procurement`(quorum)/ `contracts`(法务+财务会签)场景验证\n- [ ] gap #5 标注部分修复"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 3262,
+  "kind": "issue",
+  "title": "新建带手机号的用户后，手机号在 UI 无处显示",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-19T07:42:29Z",
+  "updated_at": "2026-07-19T13:44:54Z",
+  "closed_at": "2026-07-19T13:44:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3262",
+  "body": "## 复现\n\n1. 启用 `OS_AUTH_PHONE_NUMBER_ENABLED=true`（auth.plugins.phoneNumber）。\n2. Setup → 用户 → 「创建用户」，填手机号（可不填邮箱）创建成功，`sys_user.phone_number` 正确落库（已用 API 实测确认）。\n3. 全程找不到任何显示手机号的地方。\n\n## 根因（两处展示层缺口）\n\n- **列表视图**：`sys_user` 的所有 listViews（`all_users` / `me` 等）的 `columns` 都没有 `phone_number`。纯手机号用户在列表里只显示随机占位邮箱（`u-…@placeholder.invalid`），看起来像手机号丢了。\n- **详情页**：`sys_user` 的默认详情页是 slotted 定制页（`packages/platform-objects/src/pages/sys-user.page.ts`），亮点条（email / email_verified / two_factor_enabled / role）与正文分区（Identity / Audit）均为显式白名单，`phone_number` 不在其中——详情页彻底不显示手机号。\n\n字段本身（`phone_number`，readonly、group Account）与创建链路（/api/v1/auth/admin/create-user → better-auth data.phoneNumber → 落库）均正常，纯属展示层遗漏。\n\n## 修复方向\n\n- `all_users` / `me` 列表视图补 `phone_number` 列（字段各语言翻译已存在，列标签自动生效）。\n- 详情页亮点条补 `phone_number`（与邮箱并列，同为登录标识），并同步加入亮点去重列表。\n\n## 不在本 issue 范围（已知关联缺口，另议）\n\n- 创建成功弹窗只回显（占位）邮箱不回显手机号——受 objectui `ActionResultDialog` 对缺失字段路径仍渲染脏行的限制，需先修 objectui。\n- 管理员没有修改已有用户手机号的动作（现状只能批量导入 upsert 或用户本人 OTP 流程）。"
+}

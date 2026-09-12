@@ -1,0 +1,35 @@
+{
+  "number": 3594,
+  "kind": "pull_request",
+  "title": "fix(spec,lint): gate unresolvable filter placeholders; freeze the {current_user_id} vocabulary (#3574)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T08:43:46Z",
+  "updated_at": "2026-07-27T09:13:33Z",
+  "closed_at": "2026-07-27T09:13:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T09:13:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3594",
+  "body": "Closes #3574 (framework half). Runtime resolution ships in objectstack-ai/objectui#2857.\n\n## The bug behind the bug\n\nThe reported symptom is a dashboard widget filtered on `{current_user_id}` rendering `0`. Investigating it turned up something worse than a missing substitution:\n\n- **`{current_user}` — the spelling in the first repro row — has never existed anywhere.** `current_user` is the RLS *expression root* (`owner_id = current_user.id`), a genuinely server-side mechanism. It was never a filter token. Only `{current_user_id}` is real.\n- **The token was never part of the contract.** Date macros are frozen in `date-macros.zod.ts` — a spec vocabulary, a lint-usable predicate, one client resolver. `{current_user_id}` had prose in an `app.zod.ts` JSDoc and three ad-hoc client implementations, each handling one surface's filter shape.\n- **Six widgets were broken, not one** — `DatasetWidget`, `ObjectMetricWidget`, `ObjectDataTable`, `ObjectPivotTable`, `ObjectChart` (both paths).\n- **Our own docs taught two of the wrong spellings.** `skills/objectstack-ui/SKILL.md` published a widget example using the token (which didn't work), and `view.zod.ts` documented `{user_id}`, which resolves nowhere.\n\n## What this PR does\n\nBrings `{current_user_id}` up to the maturity date macros already had, and adds the gate that would have caught this at authoring time.\n\n- **`@objectstack/spec`** — `data/context-tokens.zod.ts` freezes `CONTEXT_TOKENS` (`current_user_id`, `current_org_id`) with `isContextToken` / `isKnownFilterToken` / `classifyFilterToken` and a `CONTEXT_TOKEN_SUGGESTIONS` near-miss table. The module is explicit that these are **presentation scope, never an access boundary**.\n- **`@objectstack/lint`** — `validateFilterTokens` (rule `filter-token-unknown`, severity `error`) walks `filter` / `filters` / `runtimeFilter` subtrees across dashboards, objects, views, reports, datasets, pages and apps.\n- **`@objectstack/cli`** — the gate runs in `os validate` and `os compile`.\n\nTwo design choices worth reviewing:\n\n**It scans for filter *keys*, not known surfaces.** Enumerating surfaces is exactly how the dashboard got missed; a new surface following the convention is now covered the day it ships. Navigation `recordId` / `params` stay deliberately out of scope — they resolve `AppContextSelector` ids, which are meaningless in a filter.\n\n**It is an error, not a warning.** The runtime failure is silent and indistinguishable from a genuine zero, so it survives human review. It is worse for AI authors: an AI reads a query returning `0` as a correct answer and builds on it, and its correction loop is author → validate → fix — a diagnostic only reaches it if it can fail the build. Each spelling in the suggestion table (`{current_user}`, `{user_id}`, `{organization_id}`) is correct *somewhere else* in the platform, which is why authors reach for them.\n\n## Verification\n\n- Gate proven **red** on real metadata: injecting `{current_user}` into the app-todo dashboard fails `os validate`, naming dashboard + widget + path and suggesting `{current_user_id}`. `{today}` in the same filter correctly passes.\n- Gate proven **green**: all three in-repo examples pass (3 dashboards, 28 pages, 4 views, 4 reports) — no false positives.\n- `packages/spec` 6734 tests, `packages/lint` 359 tests, all passing. `tsc --noEmit` clean on all three packages.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

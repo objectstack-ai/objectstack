@@ -1,0 +1,35 @@
+{
+  "number": 3422,
+  "kind": "pull_request",
+  "title": "fix(seed-loader): resolve seed references for marketplace-installed objects (engine-registry fallback)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-23T16:50:01Z",
+  "updated_at": "2026-07-24T12:10:19Z",
+  "closed_at": "2026-07-24T12:10:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-24T12:10:16Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3422",
+  "body": "## Problem\n\nMarketplace-installed template packages (e.g. `app.objectstack.hotcrm`) seeded their lookup / master_detail reference fields with the raw externalId string instead of the target record's id: `crm_contact.crm_account` and `crm_opportunity.crm_account` held `\"Acme Corporation\"` rather than the `crm_account` row id.\n\nThe damage compounded under RLS: `crm_contact` declares `sharingModel: controlled_by_parent`, whose row filter compiles to a join on the parent reference. With every reference dangling, the join matched nothing and **the whole object went invisible to everyone — platform admins included** (REST list `total=0`, single GET 404) while 5 rows sat in the SQLite table.\n\n## Root cause\n\n`SeedLoaderService.buildDependencyGraph` built the reference graph from `metadata.getObject()` only. Marketplace packages register their objects through the `manifest` service straight into the ObjectQL registry (`ql.registerApp`) — and both the install endpoint and boot-time rehydrate run **after** `bridgeObjectsToMetadataService` did its one-shot copy at `kernel:ready`. The metadata service therefore never lists crm_* objects, the reference graph came back empty, and every reference value fell through the \"no known refs\" path and was written verbatim.\n\nShowcase's own config-declared apps were unaffected because AppPlugin registers before the bridge runs.\n\n## Fix\n\n`buildDependencyGraph` now resolves object definitions via the metadata service first, then falls back to the engine's own schema registry (feature-detected `engine.getSchema()`, which the ObjectQL engine exposes; the `IDataEngine` contract is unchanged). Engines without a schema registry keep the old behavior. One change in `@objectstack/metadata-protocol` covers every seed path (marketplace install/reseed, AppPlugin, dispatcher) since objectql/runtime re-export the same class.\n\n## Regression tests\n\n- `packages/metadata-protocol/src/seed-loader-engine-schema-fallback.test.ts` — engine-registry-only objects resolve (master_detail, lookup, self-reference, dependency ordering); metadata still wins when present; engines without `getSchema` degrade exactly as before. Red-checked: reverting the fix fails the marketplace-scenario case.\n- `packages/cloud-connection/src/marketplace-install-local-seed-lookup.test.ts` — drives the real `POST /api/v1/marketplace/install-local` endpoint with the real `SeedLoaderService` (not mocked, unlike the reseed spec), a faithful engine stub, and a metadata service that has never heard of the package's objects; pins that reference columns hold parent ids, never the authored natural-key strings. Also red-checked.\n\n## E2E verification\n\n`examples/app-showcase` + the shipped `app.objectstack.hotcrm@2.2.2` install artifact on a fresh DB, `objectstack dev --seed-admin` (workspace CLI), signed in as the dev admin, reseeded, then:\n\n- `GET /api/v1/data/crm_contact` → `total: 5` (was 0), every `crm_account` an internal id\n- single `GET /api/v1/data/crm_contact/:id` → 200 (was 404), id maps back to `Acme Corporation`\n- `GET /api/v1/data/crm_opportunity` → 61 rows, **0** dangling account references\n- reseed summary: `inserted=162, errors=0`\n\nRelated: #3421 heals the *missing rows* case on rehydrate — orthogonal files, complementary fixes (once it lands, its heal path benefits from this resolution fix too).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 3381,
+  "kind": "pull_request",
+  "title": "docs(readme): 拆分后在 README 首屏明确本仓库与 ObjectOS 的定位",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-21T13:27:57Z",
+  "updated_at": "2026-07-21T14:55:39Z",
+  "closed_at": "2026-07-21T14:53:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-21T14:53:22Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3381",
+  "body": "## 背景\n\nobjectos / objectstack 已完成拆分。本仓库 README 的正文虽已更新,但首屏没有说明\"本仓库=开源框架、ObjectOS=商业产品\"的分工,读者要滚动到很靠后的 \"This repo\" 一节才能看到。\n\n## 改动\n\n- 在 README 顶部(标语行之后)新增一段定位简介,采用 benefit-led 写法:整个仓库都是开放技术栈(协议、微内核、SDK、CLI、生产运行时),Apache-2.0、无 open-core 附加条件,单靠本仓库即可构建、发布、自托管真实应用;想要托管运营(含 AI Builder 与治理)则指向商业产品仓库 [objectstack-ai/objectos](https://github.com/objectstack-ai/objectos)。\n- \"This repo\" 一节中的 ObjectOS 链接补充其 GitHub 公开仓库(文档、issue、商标政策所在地)。\n- 补充空 changeset(README-only,不发版)以通过 Check Changeset。\n\n## 建议同步更新仓库 About 简介(需管理员在仓库设置中修改)\n\n当前 About 还是拆分前的旧文案。建议改为:\n\n> AI writes the app. ObjectStack is what it writes — a complete business app as ~2,000 lines of typed, validated metadata, run as database, REST API, UI, and MCP tools. Open source, Apache-2.0.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_0145qhfty9sRLm3HUvNBFxpk"
+}

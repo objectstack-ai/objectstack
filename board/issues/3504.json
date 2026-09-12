@@ -1,0 +1,32 @@
+{
+  "number": 3504,
+  "kind": "issue",
+  "title": "fix(approvals+storage): 审批决策附件在时间线里没名字、点击无反应、下载名是乱码 token (objectui #2820)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-26T07:55:37Z",
+  "updated_at": "2026-07-27T08:36:34Z",
+  "closed_at": "2026-07-27T08:36:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3504",
+  "body": "审批通过 / 拒绝时可上传附件。在记录 / 审批中心的「审批动态」时间线里,这个附件本应以 `📎 文件名` 胶囊呈现、点击打开。实测发现三处坏:\n\n1. **胶囊没有文件名**,只显示通用「附件」。\n2. **点击胶囊无反应**,也无任何报错。\n3. 即便文件下载下来,**文件名是一长串签名 token 乱码**(如 `eyJrIjoiYXR0YWNo…`),`content-type` 还是 `application/octet-stream`。\n\n## 根因一 —— 审批读取路径把描述符 `String()` 烂了\n\n`sys_approval_action.attachments` 是 `Field.file`,存的是**富描述符对象** `{ id, name, url, mimeType, size }`(fileId 在写入时被解析成完整描述符),不是 fileId 字符串。但 `plugin-approvals` 的 `rowFromAction` 用了 `row.attachments.map(String)`,把每个对象 `String()` 成字面量 **`\"[object Object]\"`**。`listActions` 的消费方(审批时间线)拿到的就是这坨垃圾 → chip 无名字、`openAttachment(\"[object Object]\")` 404 被前端吞掉。\n\n实测证据:修复前 `GET /approvals/requests/{id}/actions` 返回 `attachments: [\"[object Object]\"]`。\n\n## 根因二 —— 存储下载接口不带文件名 / 类型\n\n预签名下载把字节以 `application/octet-stream` + **无 `Content-Disposition`** 发出,浏览器只能拿 URL 末段(签名 token)当文件名保存。签名 token 里也没带原始文件名。\n\n## 方案\n\n**approvals(`@objectstack/spec` + `@objectstack/plugin-approvals`)**\n- 新增 `ApprovalActionAttachment`,`ApprovalActionRow.attachments` 从 `string[]` 改为 `ApprovalActionAttachment[]`;`rowFromAction` 透传描述符(`{id,name,url,...}`),兼容裸字符串 fileId。决策写入 input 仍是 `string[]`,不变。消费方从此不再需要对系统对象 `sys_file` 的读权限即可拿到名字 + URL。\n\n**storage(`@objectstack/spec` + `@objectstack/service-storage`)**\n- `IStorageService.getSignedUrl` / `getPresignedDownload` 增加可选 `PresignedDownloadOptions {filename, contentType, disposition}`。\n- REST 下载路由(`GET /storage/files/:id/url` 与 `/:id`)传入 `sys_file` 的 `name` + `mime_type`。\n- 本地适配器把它们编进签名 token,`_local/raw` 路由发 `Content-Type` + RFC 5987 `Content-Disposition`(ASCII 回退 + `filename*=UTF-8''…`);S3 适配器用 `ResponseContentType` / `ResponseContentDisposition` 烤进签名 URL。默认 `inline`,可预览类型仍在浏览器打开,保存时名字正确。\n\n已用 framework `app-showcase`(审批+存储链路)真机 UI 实测:chip 显示 `signed-contract.pdf`、点击打开真 PDF、下载响应头 `content-type: application/pdf` + `content-disposition: inline; filename=\"signed-contract.pdf\"`。\n\n前端配套:objectstack-ai/objectui#2820。"
+}

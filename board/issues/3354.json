@@ -1,0 +1,35 @@
+{
+  "number": 3354,
+  "kind": "pull_request",
+  "title": "fix(i18n/notifications): localize collab notification titles + storage objects; wire the notifications REST routes",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-20T07:46:41Z",
+  "updated_at": "2026-07-20T07:58:29Z",
+  "closed_at": "2026-07-20T07:58:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-20T07:58:27Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3354",
+  "body": "Fixes #3353.\n\nOne user report on a zh-CN workspace — a `sys_file \"repro.png\" assigned to you`\nnotification that was English, opened an English detail page, and never cleared\nits unread state — turned out to be **three** distinct gaps. This PR carries the\ntwo framework-side fixes plus the route wiring that makes the objectui mark-read\nfix reachable; the console change ships in objectstack-ai/objectui#2743.\n\n## Changes\n\n- **`@objectstack/plugin-audit`** — assignment (`collab.assignment`) and @mention\n  (`collab.mention`) bell titles were hardcoded English literals built from the\n  raw object API name. They now resolve through the i18n service with the same\n  key shapes as the activity summaries (framework#3039): new\n  `messages.assignedToYou` / `mentionedYou` / `mentionedYouAnonymous` templates\n  (en / zh-CN / ja-JP / es-ES), the object named by its translated label\n  (`objects.{name}.label` → authored def label → API name), and the locale\n  resolved for the **recipient**. Best-effort throughout: no locale / no i18n /\n  key miss degrades to the English literal (which now also prefers the authored\n  object label over the API name).\n\n- **`@objectstack/service-storage`** — `sys_file` / `sys_upload_session` shipped\n  with no translation bundle, so the file detail page (field labels + the\n  Pending Upload / Committed / Deleted status pipeline) rendered English on every\n  locale. The service now ships its own ADR-0029 D8 bundle (en / zh-CN / ja-JP /\n  es-ES, `src/translations` + `scripts/i18n-extract.config.ts`) loaded via\n  `i18n.loadTranslations` on `kernel:ready`, matching service-messaging.\n\n- **`@objectstack/runtime`** — the in-app notifications REST surface\n  (`GET /api/v1/notifications`, `POST /api/v1/notifications/read[/all]`;\n  ADR-0030) had its `handleNotification` dispatch branch and discovery entry but\n  no `server.<verb>()` mount in `dispatcher-plugin`, so only the cloud hosts'\n  hono catch-all reached it — the standalone / `os dev` server 404'd every\n  request. That was the real reason unread notifications never cleared: the\n  console's direct `sys_notification_receipt` write is rejected by ADR-0103's\n  engine-owned gate, and this REST fallback was unreachable. The three routes\n  are now mounted explicitly, guarded by the route-registration regression test.\n\n## Verification (showcase, real browser)\n\nBooted the showcase example, drove a real assignment through the messaging\npipeline, and drove the console (objectui HMR build) as a real user:\n\n- **Title i18n** — the materialized inbox row reads `系统文件 \"repro.png\" 已分配给你`\n  (translated label + template), confirmed in the DB and via `GET /api/v1/notifications`.\n- **Detail page i18n** — the `sys_file` detail page renders fully in Chinese:\n  breadcrumb 系统文件, status pipeline 待上传 / 已提交 / 已删除, fields 文件 ID / 作用域: 附件 /\n  访问控制: 私有 / 所有者 ID.\n- **Mark-read persists** — clicking \"全部标记为已读\" fired `POST /api/v1/notifications/read/all → 200`,\n  20 receipts flipped `delivered → read` server-side, and the bell badge stayed\n  cleared across the inbox poll (previously every row flipped back to unread).\n\nUnit tests: plugin-audit 45/45, runtime 193/193 (incl. new route-registration\nassertions), service-storage 99/99.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

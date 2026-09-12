@@ -1,0 +1,34 @@
+{
+  "number": 3391,
+  "kind": "issue",
+  "title": "跟踪:UI 操作按钮与 apiMethods 白名单一致性契约落地(#3026 设计定稿)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-21T15:15:47Z",
+  "updated_at": "2026-07-27T08:35:32Z",
+  "closed_at": "2026-07-27T08:35:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3391",
+  "body": "## 背景\n\n#3026 的设计评估已定稿(评估过程参考了 Salesforce / Dynamics 365 / NetSuite / ServiceNow / SAP / Odoo 的导入导出控制设计)。本 issue 跟踪契约的分阶段落地。首例触发案例见 #3025。\n\n## 定稿契约(一句话)\n\n> 服务端是唯一裁决者:每个对象的有效操作集由 spec 里**唯一一张派生映射表**从 6 个原语(`get/list/create/update/delete/bulk`)白名单解析(`undefined`=全开、`[]`=全禁、子集=收紧),REST gate、dispatcher gate、D3 调和、D4 clamp 全部消费同一张表;前端只渲染下发的 effective 结果,不读原始 `apiMethods`、不自行派生;派生动词不可独立声明。\n\n**派生映射**:import 按 writeMode 派生(insert→`create`;update→`update`;upsert→`create∧update`);export→`list`(预留 userPerm.export 槽,本期恒 true);aggregate→`list`(已有);search→`list∧searchable`;history→`get∧trackHistory`;restore/purge→`delete∧trash`(=ADR-0103 D2);upsert→`create∧update`;bulk 子操作→`bulk∧derived(子操作)`。\n\n**两轴正交**:API 收紧轴 = `apiEnabled:false`(404)> `apiMethods` 原语子集(405),managed 桶保留 D3 单向剥离;UI 收紧轴 = `managedBy`+`userActions`,platform 桶仅影响 UI。按钮谓词 = `effective.api(op) ∧ affordance(op) ∧ can(user, 基础权限)`。**不做 D3 双向化**(affordance 是 UX 意图,不升格为安全策略)。\n\n依据:全仓 60+ 对象白名单零声明派生动词的实证(显式声明模式 100% 遗漏);全球主流平台通例(import⊆create/update、export⊆read,批量数据移动由用户/角色级权限轴门控,UI 按服务端解析结果渲染);仓内既有先例(dispatcher `aggregate/find/query→list`,ADR-0103 D2 动词映射)。\n\n## P0 — 点状修复(可先行)\n\n- [x] objectstack:`sys-business-unit.object.ts:219`、`sys-business-unit-member.object.ts:104` 白名单补 `'import','export'` + 回归测试(#3025,详细开发计划见该 issue 评论)——已合并:#3392、#3394\n- [ ] objectui:`packages/plugin-grid/src/ImportWizard.tsx:564-565` `isUnsupportedImportJob` 正则含 404 不含 405,补 405 并给独立文案(\"该对象未开放导入\" vs 接口不存在)+ mock 405 测试\n\n## P1 — 契约落地(不动枚举)\n\n- [ ] spec:新增 `api-derivation`(派生映射表 + `resolveEffectiveApiMethods(enable)`),三态语义文档化\n- [ ] runtime:`checkApiExposure`(`packages/runtime/src/api-exposure.ts:51-75`)消费共享表;`[]`→deny-all(**需翻转 `api-exposure.test.ts:54`**,该 fail-open 是被测试背书的);legacy 显式派生值\"显式优先 + deprecation warning\"\n- [ ] rest:主 gate(`rest-server.ts:424-452`,`:440` 的 `length>0` 同步 deny-all)、import gate 按 writeMode 派生(`:3671/:3760`)、export gate 派生自 list(`:4122`)、bulk gate AND 子操作,全部换共享 resolve\n- [ ] **阻塞性测试**:export 输出与 list 使用同一字段级权限投影(派生方案唯一可能放大现有漏洞的点)\n- [ ] 测试:sys_business_unit 不带显式 import/export 也放行(反向验证派生);engine-owned 桶对象 import 仍拒;`[]`+`apiEnabled:true` 构造对象全 405;`['bulk']` 无 create 时批量 create 被拒\n- [ ] hono-server:D4 `clampManagedObjectWrites` 扩展,`/me/permissions` 下发 per-object effective 操作集(含 `userPerm.export` 预留槽)\n- [ ] objectui:`resolveCrudAffordances`(`packages/core/src/utils/managedBy.ts:116`)增加\"服务端 effective 存在则 AND\"路径;`ObjectView.tsx:1688`(Import)、`ListView.tsx:662` / `ObjectGrid.tsx:2273`(Export)接入;`packages/types` 只为 `/me/permissions` 响应补类型,**不给 ObjectSchemaMetadata 建 enable 模型**(前端不读原始值是契约点);effective 缺失(旧后端)回退现行为\n\n## P2 — 枚举清理(breaking,独立版本)\n\n- [ ] spec:`ApiMethod` 收缩至 6 原语,`z.preprocess` 剥除 legacy 8 值并告警(canonicalize-and-warn,不做解析硬失败);CHANGELOG major + codemod\n- [ ] platform-objects:60+ 样板白名单审计——等价全开的直接删 `apiMethods`;7 个 `[]` 声明(均配 `apiEnabled:false`,identity 域)删除;回收 P0 加的显式 `import/export`\n- [ ] 移除\"显式优先\"过渡逻辑\n\n## 独立 follow-up(另开 issue)\n\n- [ ] **用户级 export 权限轴**:权限集(`permission.zod.ts:24-85`)目前无用户级 import/export 位;全球平台均有此轴(Salesforce \"Export Reports\"、Dynamics \"Export to Excel\"、NetSuite \"Export Lists\"、SAP S_GUI 61)。补上前\"任何能 list 的用户可一键全表导出\"与主流实践不符。接入 P1 预留的 `userPerm.export` 槽即零契约变更\n- [ ] 元数据不可解析 fail-open(`api-exposure.ts:52-53`、`rest-server.ts:1080-1083`)的残余风险评估\n\n## 关联\n\n- #3026(设计讨论)/ #3025(首例,P0)\n- ADR-0049(enforce-or-remove gate:6 个\"可声明不可执行\"枚举值的处置依据)\n- ADR-0103(resolveCrudAffordances / D3 reconciliation / D4 clamp——本契约复用的三个机制)\n"
+}

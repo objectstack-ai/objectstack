@@ -1,0 +1,34 @@
+{
+  "number": 3365,
+  "kind": "issue",
+  "title": "Validate dashboard filter field-existence at build time (extend ADR-0021)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-20T15:16:07Z",
+  "updated_at": "2026-07-21T13:53:54Z",
+  "closed_at": "2026-07-21T13:53:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3365",
+  "body": "### Summary\n\nSince #2501 wired dashboard-level filters — including the built-in `dateRange` picker (reserved filter name `dateRange`) — into **every widget's analytics query**, a dashboard whose filter field does not exist on a given widget's underlying object emits invalid SQL and the widget crashes at render time. This is a build-time-decidable invariant that currently escapes the entire static gate (`os validate` + `os build`) and only fails when a user opens the dashboard.\n\nSurfaced upgrading a production app (HotCRM) from `14.7` to `16.0.0-rc.1`.\n\n### Repro\n\nA dashboard binds `dateRange: { field: 'close_date' }`. `close_date` exists only on the opportunity object; widgets on other objects (account / contact / lead / product) inherit the filter and produce:\n\n```\nSELECT COUNT(*) AS \"contact_count\" FROM \"crm_contact\"\nWHERE close_date >= '2026-07-01' AND close_date <= '2026-09-30'\n-- SqliteError: no such column: close_date  (service-analytics executeRawSql)\n```\n\n`os build` / `os validate` pass; the error only appears at query time (logged-in user opens the dashboard), rendering the widget as an error card.\n\n### Root cause\n\n`os validate` already runs **\"Checking dashboard widget bindings (ADR-0021)\"**, but it validates the `widget → dataset` binding only — it does not check that a dashboard-level filter's field exists on each widget's dataset object. After #2501 those filters are applied to the widget query, so their field refs became a new class of runtime-only failure.\n\n### Proposed check (extend ADR-0021)\n\nFor each dashboard filter (`dateRange` + every `globalFilters[]`), for each widget, error unless:\n\n- the filter's **effective field** (after `filterBindings` re-target) exists on the widget's dataset object, **or**\n- the widget opts out via `filterBindings: { <filterName>: false }`.\n\nThis is the same field-existence invariant ADR-0032 already enforces for formula / sharing-rule CEL references — dashboard filter fields are the same category, just not yet covered.\n\n### Acceptance criteria\n\n- `os build` / `os validate` fails a dashboard where a filter field is absent on a bound widget's object and the widget has no opt-out, with a message naming the dashboard, widget, filter, field, and object, e.g.:\n  > `executive_dashboard`: widget `total_accounts` inherits `dateRange(close_date)`, but object `crm_account` has no field `close_date` — set `filterBindings: { dateRange: false }` or re-target to an existing field.\n- A widget with `filterBindings: { <name>: false }` (or a re-target to an existing field) passes.\n- Fixture coverage for both the failing and opted-out shapes.\n\nHappy to send a PR — the check is well-scoped and mirrors the existing ADR-0032 field-ref validator.\n\n\n---\n_Related shift-left checks from the same 14.7 → 16 upgrade: #3365, #3366, #3367._"
+}

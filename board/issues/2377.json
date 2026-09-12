@@ -1,0 +1,32 @@
+{
+  "number": 2377,
+  "kind": "issue",
+  "title": "[11.0][A2] Remove dead author-facing metadata properties (ADR-0049 enforce-or-remove)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-27T14:36:13Z",
+  "updated_at": "2026-07-24T12:12:17Z",
+  "closed_at": "2026-07-24T12:12:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2377",
+  "body": "**Part of 11.0 breaking-change batch (#2364), ADR-0049 enforce-or-remove.**\n\nRemove author-facing metadata properties that pass schema validation but have **no runtime consumer** (verified against `packages/spec/liveness/*.json` + grep of plugins/services/objectql/runtime). Authoring them is a false affordance — especially dangerous for AI-authored metadata.\n\n### Verified-dead set (remove)\n- **field** (`spec/src/data/field.zod.ts`): `vectorConfig`, `fileAttachmentConfig`, `dependencies`, `caseSensitive`\n- **object** (`spec/src/data/object.zod.ts`): `versioning`, `partitioning`, `softDelete`, `recordName`, `keyPrefix`, `tags`, `abstract`, `isSystem`, `active`, dead `enable.*` flags (`trackHistory`, `searchable`, `files`, `feeds`, `activities`, `trash`, `mru`), `search`, `defaultDetailForm`\n- **action** (`spec/src/ui/action.zod.ts`): `type: 'form'` (enum value, no renderer)\n- **agent** (`spec/src/ai/agent.zod.ts`): `tenantId`, `planning.strategy`, `planning.allowReplan` (keep `planning.maxIterations` — live)\n- **dataset** (`spec/src/ui/dataset.zod.ts`): `measures.certified`\n\n### Explicitly KEEP (LIVE — do not remove)\n`field.currencyConfig`, `object.apiEnabled`, `action.disabled/shortcut/bulkEnabled`, `agent.access/permissions`, `skill.triggerPhrases/permissions`.\n\n### Why this cascades\nzod schemas are strict — if any example **sets** one of these, removing the field breaks the example build. **Each property: `grep examples` first** (e.g. showcase may set `dataset.measures.certified: true`).\n\n### Per-property checklist\n- [ ] Remove zod property (+ its dedicated sub-schema export + inferred type if only used here)\n- [ ] Flip the `packages/spec/liveness/<type>.json` entry to `removed`\n- [ ] Update/remove spec tests asserting the property\n- [ ] Migrate any example that set it\n- [ ] `pnpm --filter @objectstack/spec gen:api-surface` + commit snapshot\n- [ ] Add a 11.0 changelog/migration note (esp. aspirational `versioning`/`partitioning`/`softDelete`)\n\n**Risk**: low–medium; many entries → split into 1–2 PRs (field/dataset first, object aspirational blocks with migration note).\n"
+}

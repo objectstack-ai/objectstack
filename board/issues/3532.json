@@ -1,0 +1,35 @@
+{
+  "number": 3532,
+  "kind": "pull_request",
+  "title": "feat(approvals): expression approvers, empty-slate policy, decision outputs (#3447 P2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T02:52:07Z",
+  "updated_at": "2026-07-27T03:06:20Z",
+  "closed_at": "2026-07-27T03:06:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T03:06:17Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3532",
+  "body": "## What\n\nP2 of #3447 (design finalized in [this comment](https://github.com/objectstack-ai/objectstack/issues/3447#issuecomment-5086592127) after maintainer review): three declarative capabilities that complete dynamic approver routing on approval nodes. P1 (#3495, merged) made `field`/`manager` approvers read live data; this adds the general mechanism.\n\n### 1. `expression` approvers — resolve WHO at node entry, by CEL\n\n```ts\n{ type: 'expression', value: cel`current.co_review_departments`, resolveAs: 'department' }\n```\n\n- **Closed root set** — exactly `current.*` (live record at node entry), `trigger.*` (submit-time snapshot), `vars.*` (flow variables incl. node outputs). Backed by industry naming: ServiceNow `current`, ServiceNow FD `trigger.record` / Power Automate `triggerBody()`, BPMN process variables.\n- **`record` / bare fields rejected BEFORE evaluation.** Everywhere else `record` means \"the record at event time\" (conditions: trigger snapshot; hooks: write payload) — ambiguous at an approval node, so the expression must say which time. The CEL env resolves unknown roots as `dyn` → `null`, which would produce a silently-empty slate; the AST pre-check fails the node loudly instead, with errors that prescribe `current.<field>` / `trigger.<field>` — written for the AI author fixing the flow on the next validate pass.\n- **`resolveAs: 'user'(default)|'department'|'position'|'team'`** re-expands each resolved id through the existing graph lookups. With `behavior: 'per_group'`, each intermediate value (each returned department) forms its own sign-off group — dynamic co-sign (会签) in one node.\n- **Missing key = loud error** (`vars.never_written` throws); only a present-but-empty value is an empty slate. Guard optional inputs with `has(...)`.\n\n### 2. `onEmptyApprovers` — what an empty slate means (all approver types)\n\n`admin_rescue` (default — request opens for privileged takeover; exactly the #3424 behaviour, zero change for existing flows) | `fail` (node fails: config bug) | `auto_approve` (skip the request, continue down `approve` with `output.autoApproved = true`; opt-in because it waves the record through — the safe default is the only option that neither waves through nor kills the run).\n\nAuto-approve is powered by honouring `NodeExecutionResult.branchLabel` on the synchronous completion path — the field existed (\"Used by decision nodes\") but was only ever consumed via resume signals; unlabelled traversal would walk `approve` AND `reject`.\n\n### 3. Decision outputs — the previous approver picks the next step's approvers\n\n```ts\n// Node A declares keys; the approver fills values on decide:\n{ id: 'lead_review', config: { approvers: […], decisionOutputs: ['next_reviewers'] } }\n// POST …/approve { outputs: { next_reviewers: ['u2','u3'] } }\n// Node B resolves them at entry:\n{ id: 'co_sign', config: { approvers: [{ type: 'expression', value: cel`vars.lead_review.next_reviewers` }] } }\n```\n\nScreen-node trust model: **author declares keys, approvers only fill values**. Undeclared keys reject the decision atomically (before any write); `decision`/`requestId` reserved; outputs land as `<nodeId>.<key>` (never bare variables, so an approver can't shadow author variables). Engine unchanged — `ResumeSignal.output` already existed. Co-sign votes accumulate onto the snapshot; the finalizing decision hands the merged set to the flow.\n\n### Load-bearing fix surfaced by the integration test\n\nUnanimous tallies used to **re-resolve approvers at every decision** against the payload snapshot (back-compat path predating the group snapshot). That can't work for expressions (decide time has no flow variables) and could drift for live fields (open-time slate ≠ decide-time slate). Open now snapshots `__approverGroups` for every multi-approver behavior; decide always tallies against the open-time slate. Re-resolution survives only for pre-snapshot legacy rows.\n\n### Authoring safety net (AI-first)\n\n- 3 new `os lint` rules: `approval-expression-invalid` (error: parse failure / illegal root, same helper as the runtime so they can never drift), `approval-expression-no-empty-policy` (info nudge), `approval-decision-outputs-reserved` (error).\n- `collectCelRootIdentifiers` exported from `@objectstack/formula` — single implementation consumed by lint + runtime pre-check.\n- `__resolvedFrom` audits the resolution INPUT (live field value / expression intermediates) next to the already-persisted result, so \"why these people\" stays answerable.\n- SKILL.md (`objectstack-automation`) + `content/docs/automation/approvals.mdx`: new Dynamic approvers section, result contract, the missing-vs-empty distinction, end-to-end example, and a **time-word cheat sheet** across surfaces (flow `record`/`previous` vs hook `ctx.record`/`ctx.previous` vs approval `current`/`trigger`/`vars`).\n\n## Tests\n\n- **plugin-approvals 191** (25 new: expression matrix incl. current/trigger/vars, array & CSV fan-out, per-user OOO, resolveAs + per_group sub-keys, unstaffed-target literal, `__resolvedFrom`, missing-key loudness, 3 empty policies, 5 decision-output cases, and 4 end-to-end integration tests on a real AutomationEngine — including the issue's headline two-stage \"lead picks co-signers\" flow and the auto-approve branch wiring).\n- **formula 248** (6 new for `collectCelRootIdentifiers`), **lint 22** (8 new), **service-automation 360** (zero regressions on the branchLabel wiring), **rest 372**.\n- **Red-pass verified**: stashing the three runtime files (keeping spec/formula/lint + tests) turns exactly the 25 new behavior tests red, 142 existing stay green.\n- Generators re-run (`gen:schema` / `gen:docs` / `gen:openapi` / `gen:api-surface` / `gen:skill-refs` / `gen:skill-docs`); all six packages build with DTS.\n\n## Not in this PR\n\nP3 (programmatic resolver hook — Camunda TaskListener analog, routed to the hook surface per ADR-0077) and the objectui follow-ups (expression editor in Studio, decision-output form on the approval card — the card renders from `decisionOutputs` declarations) tracked on #3447.\n\nCloses #3447.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}
