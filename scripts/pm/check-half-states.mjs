@@ -4456,6 +4456,97 @@ export function claimedBranches(body) {
   }
   return out;
 }
+/**
+ * The claim state of one card's thread, in TWO parts: what GOVERNS, and what
+ * could not be CLASSIFIED.
+ *
+ * ## The silence this function exists to end
+ *
+ * `governingClaim` picks the newest claim comment from which at least one
+ * branch parses. A comment that matches `CLAIM_COMMENT_MARKER` and yields ZERO
+ * branches used to be DISCARDED at that point — and a discard is
+ * indistinguishable from an absence, so governance fell back to an OLDER claim
+ * and said nothing about it. The card then reads as claimed to a human and to
+ * a `grep`, as claimed-on-a-different-branch to every reader here, and as
+ * neither to nobody at all.
+ *
+ * ⭐ An unparsed claim is an UNCLASSIFIED result, ⛔ never a "no". Its three
+ * consequences are all silent and all wrong in different directions: H20/H27
+ * probe a branch the seat is no longer on, `check-clause2-carriers` reads a
+ * SUPERSEDED declaration as if it were the current one (measured on #16322 —
+ * two rounds, a director re-review and a re-issued claim to clear), and the
+ * near-miss on the same card is sharper still — a fallback whose older claim
+ * happens to AGREE is a green that is right for the wrong reason and nothing
+ * ever reports it.
+ *
+ * ⛔ The repair is NOT to widen `claimedBranches` for whichever spelling was
+ * measured last. That is the treadmill #16170 already bought once: it closes
+ * one spelling and leaves the next one exactly as silent. What is returned here
+ * is the STATE, so the next unrecognised spelling is a visible error on its
+ * first occurrence instead of a wrong reading.
+ *
+ * ## What `malformed` means, precisely
+ *
+ * The NEWEST claim-shaped comment on the thread parses to zero branches. Newest
+ * by the same recency rule `governing` uses, so the two readings can never
+ * disagree about which comment is the current one. It is reported whether or
+ * not an older claim parses, because the two shapes have the same remedy and
+ * only one of them is even detectable from the outside:
+ *
+ *   an older claim parses  → governance SILENTLY FELL BACK; every reader below
+ *                            is answering about a claim the seat has replaced.
+ *   none parses            → `governing` is null, which every reader has always
+ *                            read as "no claim was written". A claim WAS
+ *                            written; it is the `Branch:` line that is missing,
+ *                            and that is a different remedy from H2's.
+ *
+ * ⚠️ A claim whose newest comment DOES parse leaves `malformed` null even when
+ * an older one was branchless: that older claim is spent, governance is
+ * correct, and a row about it would be noise on a card with nothing wrong.
+ *
+ * @param {{ id?: number, body?: string, created_at?: string }[]} commentRows
+ * @returns {{ governing: { branches: string[], createdAt: string|null } | null,
+ *   malformed: { id: number|null, createdAt: string|null,
+ *     supersedes: string|null } | null }} — `supersedes` is the `created_at` of
+ *   the claim governance fell back to, or `null` when nothing governs at all.
+ */
+export function claimGovernance(commentRows) {
+  const rows = Array.isArray(commentRows) ? commentRows : [];
+  // The recency rule, written ONCE: `created_at` first and THREAD ORDER as the
+  // fallback for an unparseable stamp (#4690), with `>=` so a later row wins a
+  // tie. Both readings below call it, so the "newest claim" they each speak
+  // about is the same comment by construction rather than by care.
+  const newerThan = (candidate, incumbent) =>
+    incumbent === null ||
+    (candidate.stamp === null || incumbent.stamp === null
+      ? candidate.index > incumbent.index
+      : candidate.stamp >= incumbent.stamp);
+  let best = null;
+  let newest = null;
+  rows.forEach((row, index) => {
+    const body = String(row?.body ?? '');
+    if (!CLAIM_COMMENT_MARKER.test(body)) return;
+    const branches = claimedBranches(body);
+    const parsed = Date.parse(row?.created_at ?? '');
+    const stamp = Number.isFinite(parsed) ? parsed : null;
+    const candidate = { branches, createdAt: row?.created_at ?? null, stamp, index, id: row?.id ?? null };
+    if (newerThan(candidate, newest)) newest = candidate;
+    if (branches.length === 0) return;
+    if (newerThan(candidate, best)) best = candidate;
+  });
+  const governing = best === null ? null : { branches: best.branches, createdAt: best.createdAt };
+  return {
+    governing,
+    malformed:
+      newest !== null && newest.branches.length === 0
+        ? {
+            id: Number.isFinite(Number(newest.id)) ? Number(newest.id) : null,
+            createdAt: newest.createdAt,
+            supersedes: governing === null ? null : governing.createdAt,
+          }
+        : null,
+  };
+}
 
 /**
  * The claim this card is CURRENTLY waiting on — the MOST RECENT claim comment
@@ -4475,30 +4566,21 @@ export function claimedBranches(body) {
  * which the predicate treats as "must not read as fresh" — H10/H13/H18's
  * standing call on an unreadable timestamp (#4690).
  *
+ * ⚠️ This is `claimGovernance().governing` and nothing else — the branch half
+ * of a two-part reading, kept as its own export because most readers here
+ * legitimately need only the branches and must not be made to handle a state
+ * they have no row for. ⛔ A reader that DECIDES something about the card
+ * (dispatch liveness, the clause-② declaration limb) calls `claimGovernance`
+ * instead, or it will read a superseded claim as the current one and say
+ * nothing — the silence that function's header describes in full.
+ *
  * @param {{ body?: string, created_at?: string }[]} commentRows — the REST
  *   comment rows, NOT bodies: this item is the only reader here that needs a
  *   timestamp, which is why the sweep's cache holds rows.
  * @returns {{ branches: string[], createdAt: string|null } | null}
  */
 export function governingClaim(commentRows) {
-  const rows = Array.isArray(commentRows) ? commentRows : [];
-  let best = null;
-  rows.forEach((row, index) => {
-    const body = String(row?.body ?? '');
-    if (!CLAIM_COMMENT_MARKER.test(body)) return;
-    const branches = claimedBranches(body);
-    if (branches.length === 0) return;
-    const parsed = Date.parse(row?.created_at ?? '');
-    const stamp = Number.isFinite(parsed) ? parsed : null;
-    const candidate = { branches, createdAt: row?.created_at ?? null, stamp, index };
-    if (best === null) {
-      best = candidate;
-      return;
-    }
-    const newer = stamp === null || best.stamp === null ? index > best.index : stamp >= best.stamp;
-    if (newer) best = candidate;
-  });
-  return best === null ? null : { branches: best.branches, createdAt: best.createdAt };
+  return claimGovernance(commentRows).governing;
 }
 
 /**
@@ -12832,6 +12914,110 @@ export function h59LinkageClause(counts = {}) {
   );
 }
 // ---------------------------------------------------------------------------
+// H60 — a claim comment whose `Branch:` line parses to ZERO branches, so the
+// claim silently stopped governing.
+//
+// ## The class, stated as the rule rather than as a spelling
+//
+// `claimGovernance`'s header carries the mechanism in full. The row is what
+// makes it audible: a comment that IS a claim by `CLAIM_COMMENT_MARKER` and
+// names no parseable branch is MALFORMED, ⛔ never absent, and the two have
+// opposite remedies. Absent is H2's row — somebody must claim the card.
+// Malformed is this one — somebody claimed it, correctly by every other
+// measure, on a carrier the reader does not accept.
+//
+// ⛔ The row is deliberately NOT a widening of `claimedBranches`. Each of the
+// three measured spellings arrived AFTER the last widening shipped: the
+// bullet-prefixed directive (#16170), and then the branch named inline inside
+// the `Claim:` sentence with no directive line at all. Widening buys one
+// spelling and leaves the next one silent; a state buys every spelling that
+// will ever be written, because what is reported is the parse FAILING rather
+// than the shape that failed.
+//
+// ## Why this is its OWN row and not a widening of H20
+//
+// H20 is a statement about the remote: a claimed branch has no ref. It is
+// given the claim and a ref state per branch, and it has no way to speak about
+// a card it was never handed branches for — its own gate (`h20NeedsRefProbe`)
+// requires at least one. Folding this in would put an assertion about a REF on
+// a card where no ref was ever named, which is the "fabricated row" H17's
+// extractor refuses by name. This row asserts nothing about the remote at all.
+//
+// ## Its population, and why there is no age gate
+//
+// Every open `pm:dispatched` card whose thread this sweep read — the same set
+// the dispatch-liveness loop already walks (H50's completing walk), so the row
+// costs NO request. ⛔ No age gate, and the asymmetry with H20's 60 minutes is
+// the point: H20 waits because a young dispatch is not yet stuck and a later
+// sweep frees it. A branchless claim is wrong at the instant it is posted and
+// no later sweep can free it — the claim protocol forbids a second `Claim:`,
+// so nothing but a deliberate repair changes the reading.
+//
+// ## What it costs to be wrong here
+//
+// Nothing is written from this row (the family's standing posture) and the
+// remedy is one comment. The risk in the other direction was measured: two
+// rounds, a director re-review and a re-issued claim on one card, plus a
+// sibling that passed for the wrong reason on the same shift and was found
+// only by accident.
+// ---------------------------------------------------------------------------
+
+/**
+ * H60 — null when the card's newest claim parses (or the card is out of
+ * scope), else the finding sentence.
+ *
+ * Takes the whole `claimGovernance` reading rather than the malformed half
+ * alone, so the row can say WHAT governance did instead — the fallback is the
+ * damaging half and a sentence that named only the broken comment would leave
+ * the reader to guess whether anything is governing at all.
+ *
+ * @param {object} issue — an OPEN issue.
+ * @param {{ governing: object|null, malformed: object|null }|null} governance —
+ *   `claimGovernance(commentRows)`. A caller that read no thread passes `null`,
+ *   which yields no row: an unread thread is not a malformed claim (#4690).
+ */
+export function h60ClaimBranchUnparsed(issue, governance) {
+  if (!labelNames(issue ?? {}).includes('pm:dispatched')) return null;
+  const malformed = governance?.malformed ?? null;
+  if (!malformed) return null;
+  const governing = governance?.governing ?? null;
+  const which =
+    `comment ${malformed.id === null ? 'carrying no readable id' : `\`${malformed.id}\``} ` +
+    `(${malformed.createdAt ?? 'undated'})`;
+
+  const consequence =
+    governing === null
+      ? 'NOTHING governs this card as a result: `governingClaim` returns null, which every reader ' +
+        'here has always read as "no claim comment names a branch" — so H20 can never report a ' +
+        'missing remote ref for it and H27 can never report a dead claim, the two rows that exist ' +
+        'to catch an abandoned dispatch. The card is claimed and is outside dispatch liveness ' +
+        'entirely, which is invisible from the card itself.'
+      : `governance SILENTLY FELL BACK to an OLDER claim (${governing.createdAt ?? 'undated'}, ` +
+        `naming ${namedBranches(governing.branches.map((branch) => ({ branch, state: 'exists' })))}) — ` +
+        'so every reader here is answering about a claim this seat has already replaced. H20 and H27 ' +
+        'probe the superseded branch; `check-clause2-carriers` reads the superseded comment\'s ' +
+        '`Clause-②` declaration as if it were the current one. ⚠️ And when the older claim happens ' +
+        'to AGREE, the fallback produces a GREEN that is right for the wrong reason and no row ' +
+        'anywhere reports it — that near-miss is the sharper half of this class, not the mild one.';
+
+  return (
+    `\`pm:dispatched\` and the NEWEST claim comment on this thread parses to ZERO branches — ${which} ` +
+    'matches the claim marker (it IS a claim comment) and its `Branch:` directive yields no ' +
+    'protocol-shaped ref. That is a MALFORMED claim, ⛔ not an absent one: the two states have ' +
+    `opposite remedies and only this row can tell them apart. ${consequence} Remedy — WHO can act, ` +
+    'and HOW: the CLAIMING SEAT, with one comment. The branch must be named on a `Branch:` line of ' +
+    'its OWN — `` Branch: `claude/issue-<n>-<slug>` `` — and ⛔ not inside the `Claim:` sentence, ' +
+    'which no reader here parses. ⚠️ The claim protocol forbids a second `Claim:`, so the repair is ' +
+    'an EDIT of the claim comment where the seat has that tool, and otherwise a withdrawal and a ' +
+    're-claim by the seat that holds the card. ⛔ The reader is NOT widened to accept whichever ' +
+    'spelling this card used: each widening closes one spelling and leaves the next one silent, ' +
+    'which is the treadmill this row replaces. ⚠️ If a whole shift of claims reads this way, the ' +
+    'cause is the SEAT TEMPLATE rather than a typo, and the fix is upstream of any one card. ' +
+    'Report-only: ⛔ never a label written from this script.'
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -14053,6 +14239,16 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   H48: 'state',
   H49: 'state',
   H50: 'state',
+
+  // H60 is a `state` for H34's reason, one field over. H34 reads a claim whose
+  // SEPARATOR the marker does not accept; this one reads a claim whose BRANCH
+  // line the directive reader does not accept. Both are a live card that
+  // contradicts itself — claimed to a human, unclaimed (or claimed elsewhere)
+  // to the machine — and both are repaired on the board by the claiming seat
+  // re-writing one comment. ⛔ Not `stall`: this row does not claim the card is
+  // stopped, and it fires on a card whose dev may be working perfectly well;
+  // what is broken is the READING, not the dispatch.
+  H60: 'state',
 
   // H51 is a `state` and ⛔ NOT a `gate`, and the distinction is the gate band's
   // own criterion rather than the subject's vocabulary. That band exists for the
@@ -18114,7 +18310,18 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     // claim posted five minutes ago can already be behind a ruling posted four.
     const blindClaim = h33ClaimPredatesRuling(issue, commentRows);
     if (blindClaim) findings.push([issue, 'H33', blindClaim]);
-    const claim = governingClaim(commentRows);
+    // H60 (#17149) — the claim's OWN legibility, read before anything is asked
+    // ABOUT the claim. `claimGovernance` is the two-part reading: `governing`
+    // is what `governingClaim` has always returned, and `malformed` is the
+    // newest claim-shaped comment when it parses to zero branches — the state
+    // that used to be a silent discard. Judged for EVERY `pm:dispatched` card
+    // whose thread was walked above, ahead of H20's age gate and for H33's
+    // reason: whether a claim is READABLE has nothing to do with how old it is,
+    // and the rows below are the ones being misled by it.
+    const governance = claimGovernance(commentRows);
+    const claim = governance.governing;
+    const unparsedClaim = h60ClaimBranchUnparsed(issue, governance);
+    if (unparsedClaim) findings.push([issue, 'H60', unparsedClaim]);
     if (!h20NeedsRefProbe(issue, claim)) continue;
     const states = [];
     for (const branch of claim.branches) states.push({ branch, ...(await resolveBranchRef(branch)) });
