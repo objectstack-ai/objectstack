@@ -946,11 +946,28 @@ Output:
     ...
 ```
 
+The unit is one **key** per locale, and for a key authored as an
+[inline locale map](#form-2-is-several-locales-text-at-once) the locales that
+count are **the map's own**. `os i18n check` and `os lint` compute the same
+report, so this holds for both:
+
+| What the metadata carries at a key | The default locale | A locale the map carries | A locale the map omits |
+|:---|:---|:---|:---|
+| nothing — the prop is absent | not counted: the key leaves the denominator entirely | — | — |
+| a plain string | covered — the string **is** the default locale's text | n/a: only a bundle entry covers another locale | missing |
+| an inline locale map | covered | **covered, with no bundle entry** | **missing** — reported like any other gap |
+
+A `help` written `{ en, 'zh-CN' }` under
+`supportedLocales: ['en', 'zh-CN', 'ja-JP']` therefore reports exactly one gap,
+`ja-JP`, and adding `'ja-JP'` to the map closes it. There is no bundle row to
+write for it: no bundle key exists for a map.
+
 ### Orphan Keys and Option Keys
 
-`os i18n check` runs in one direction — which keys the metadata expects that no
-bundle carries. The reverse direction (keys a bundle carries that no metadata
-claims) is checked by `os validate`, `os lint`, and `os compile`, which walk
+`os i18n check` runs in one direction — which keys the metadata expects that
+nothing supplies text for, whether that text would come from a bundle or from
+an inline locale map. The reverse direction (keys a bundle carries that no
+metadata claims) is checked by `os validate`, `os lint`, and `os compile`, which walk
 every bundle against the stack it ships with:
 
 | Key | Must name |
