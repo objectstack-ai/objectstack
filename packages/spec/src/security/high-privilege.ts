@@ -14,6 +14,8 @@
  * `system_permissions` JSON-string columns) — callers pass whatever they have.
  */
 
+import { PLATFORM_CAPABILITY_NAMES } from './capabilities';
+
 /** Tolerant JSON access: value may be the parsed object or a JSON string column. */
 function coerceRecord(v: unknown): Record<string, unknown> | undefined {
   if (typeof v === 'string') {
@@ -23,13 +25,65 @@ function coerceRecord(v: unknown): Record<string, unknown> | undefined {
 }
 
 /**
+ * [#17189, ADR-0066 D1] What the anchor predicates need to know about the
+ * stack they are judging a set FOR.
+ *
+ * The predicates are pure and synchronous — they read one permission-set
+ * definition and nothing else — so the one fact they cannot discover for
+ * themselves is which capability names this stack DECLARED. The caller holds
+ * it: at boot from the `sys_capability` rows carrying `managed_by: 'package'`
+ * provenance, at authoring time from the stack's own `capabilities` array.
+ *
+ * ⛔ Never synthesize this from the set under test. The point of the input is
+ * that a set cannot vouch for its own tokens; a "declared" list derived from
+ * `systemPermissions` would excuse every token by construction and turn the
+ * gate off.
+ */
+export interface AnchorBindingContext {
+  /**
+   * Capability names declared by the packages installed in this stack — plain
+   * names, or declarations/registry rows carrying a `name`. Omit it (or pass an
+   * empty list) and the predicates refuse exactly as they did before the input
+   * existed.
+   */
+  declaredCapabilities?: Iterable<string | { name?: unknown }>;
+}
+
+/**
+ * The app-declared names that may be excused, with the platform floor applied.
+ *
+ * Returns `undefined` when nothing is excusable, so the caller keeps the
+ * pre-#17189 code path verbatim rather than filtering against an empty set.
+ */
+function appDeclaredCapabilityNames(
+  context: AnchorBindingContext | undefined,
+): ReadonlySet<string> | undefined {
+  const declared = context?.declaredCapabilities;
+  if (!declared) return undefined;
+  const names = new Set<string>();
+  for (const entry of declared) {
+    const name = typeof entry === 'string'
+      ? entry
+      : (entry && typeof entry === 'object' ? (entry as { name?: unknown }).name : undefined);
+    if (typeof name !== 'string' || name.length === 0) continue;
+    // THE PLATFORM FLOOR. A platform capability stays high-privilege no matter
+    // who declares a capability of that name — otherwise declaring
+    // `manage_users` would launder it past the anchor gate, and the widening
+    // would be a bypass rather than a distinction.
+    if (PLATFORM_CAPABILITY_NAMES.has(name)) continue;
+    names.add(name);
+  }
+  return names.size > 0 ? names : undefined;
+}
+
+/**
  * Does a permission-set definition carry bits too dangerous for an audience
  * anchor (`everyone` / `guest`)? Returns a human-readable description of the
  * first offending bit, or `null` when the set is anchor-safe.
  *
- * Offending bits — the ADR-0090 D5 list: any `systemPermissions`,
- * View/Modify All Data (VAMA), or delete/purge/transfer on any object, plus
- * bulk `export` (#3544).
+ * Offending bits — the ADR-0090 D5 list: a `systemPermissions` entry naming a
+ * PLATFORM system permission, View/Modify All Data (VAMA), or
+ * delete/purge/transfer on any object, plus bulk `export` (#3544).
  * A plain `'*'` wildcard grant is NOT high-privilege by itself (D5 permits a
  * read — or read/create/edit-own — baseline to cover all objects; the
  * platform's own `viewer_readonly` is exactly that shape, and `member_default`
@@ -49,14 +103,53 @@ function coerceRecord(v: unknown): Record<string, unknown> | undefined {
  * not a baseline right, and never something an anchor should confer wholesale.
  * (`member_default` deliberately carries no `allowExport`, so the platform's
  * own baseline stays anchor-bindable.)
+ *
+ * ## [#17189] `systemPermissions` carries TWO unlike kinds of token
+ *
+ * One list, two things: the platform's own powers (`manage_users` and friends
+ * — the curated `PLATFORM_CAPABILITIES`), and a capability an APP declared for
+ * itself (ADR-0066 D1 `defineCapability`, entering the `sys_capability`
+ * registry at boot with `managed_by: 'package'` + `package_id` provenance).
+ * Until `context` existed the predicate saw only a list of NAMES and judged
+ * both alike, so an app could not ship the "every employee holds this" set its
+ * own navigation gates on: the set's own token made it unbindable to
+ * `everyone`, and the app was pushed toward not declaring gates at all.
+ *
+ * {@link AnchorBindingContext.declaredCapabilities} supplies the missing half —
+ * the capability names THIS stack declared. A name on that list is the app's
+ * own gate and is not counted as a system permission. The discriminator is
+ * **provenance**, not spelling: ⛔ never infer "app token" from the shape of a
+ * name (a dotted segment, a prefix). A spelling rule misjudges in silence the
+ * first platform permission that is dotted or the first app token that is not,
+ * and it is the CALLER — which can read what this stack declared — that holds
+ * the fact, never the string.
+ *
+ * Two properties keep the widening honest, both fail-CLOSED:
+ *
+ *  - **The platform floor is absolute.** A name in
+ *    {@link PLATFORM_CAPABILITY_NAMES} is high-privilege however it is
+ *    declared, so an app cannot launder `manage_users` past the anchor gate by
+ *    declaring a capability of that name.
+ *  - **Omission refuses.** With no `context` — or with a token absent from it —
+ *    the verdict is exactly the pre-parameter one: a non-empty
+ *    `systemPermissions` offends. A caller that cannot enumerate the stack's
+ *    declarations errs toward REFUSING a binding, never toward granting one.
  */
-export function describeHighPrivilegeBits(def: any): string | null {
+export function describeHighPrivilegeBits(def: any, context?: AnchorBindingContext): string | null {
   if (!def || typeof def !== 'object') return null;
   const sysRaw = def.systemPermissions ?? def.system_permissions;
   const sys = typeof sysRaw === 'string'
     ? (() => { try { return JSON.parse(sysRaw); } catch { return undefined; } })()
     : sysRaw;
-  if (Array.isArray(sys) && sys.length > 0) return 'system permissions';
+  if (Array.isArray(sys) && sys.length > 0) {
+    const declared = appDeclaredCapabilityNames(context);
+    // A non-string entry is never excused: only a name can be matched against a
+    // declaration, so anything else stays on the offending side.
+    const unexcused = declared
+      ? sys.filter((token: unknown) => typeof token !== 'string' || !declared.has(token))
+      : sys;
+    if (unexcused.length > 0) return 'system permissions';
+  }
   const objects = coerceRecord(def.objects ?? def.object_permissions);
   if (objects) {
     for (const [objName, rawPerm] of Object.entries(objects)) {
@@ -90,8 +183,15 @@ export function describeHighPrivilegeBits(def: any): string | null {
 export function describeAnchorForbiddenBits(
   def: any,
   anchor: 'everyone' | 'guest',
+  context?: AnchorBindingContext,
 ): string | null {
-  const high = describeHighPrivilegeBits(def);
+  // [#17189] The D5 app-capability excusal is the `everyone` tier's alone. D9
+  // gives `guest` the STRICTEST tier, and an app token handed to `guest` is
+  // handed to anonymous visitors — a different act from handing it to the
+  // authenticated members D5 speaks for, and one this ruling did not decide.
+  // So the guest tier asks the question with NO context and keeps refusing any
+  // non-empty `systemPermissions`.
+  const high = describeHighPrivilegeBits(def, anchor === 'guest' ? undefined : context);
   if (high) return high;
   if (anchor !== 'guest') return null;
   const objects = coerceRecord(def?.objects ?? def?.object_permissions);
