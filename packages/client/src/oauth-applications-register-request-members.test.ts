@@ -161,6 +161,55 @@ export async function registerRequestMemberPins15447(): Promise<void> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// ①b [#17215] `redirect_uris` is OPTIONAL — parity with the vendor schema
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * [#17215] The eleventh member was the one required member on this type, and
+ * the route it posts to declares it **optional**. Re-introspected at runtime
+ * against `@better-auth/oauth-provider@1.7.3` — instantiate `oauthProvider()`,
+ * walk `endpoints`, read `options.body` — every one of that schema's 21
+ * members is optional, and `body.safeParse({ client_name })` succeeds with
+ * `redirect_uris` absent. So a request the route accepts had no spelling here.
+ *
+ * ⚠️ This pin is type-level for the same reason `registerRequestMemberPins15447`
+ * is: the route answers the same way either way, and only a compile-time
+ * assertion can observe a member's OPTIONALITY changing. A runtime assertion
+ * on the request bytes cannot — `JSON.stringify` omits an absent member
+ * whether the type required it or not, so the body is byte-identical in both
+ * states and any such test is green before the fix and green after it.
+ *
+ * ⛔ The key-set equality above is deliberately NOT the guard for this:
+ * `keyof` is blind to optionality, so it reads the same eleven names in both
+ * states. That is why it keeps holding across this change, and why this needs
+ * its own assertion rather than relying on the one already there.
+ */
+export async function registerRedirectUrisOptionalPin17215(): Promise<void> {
+  // ── the parity assertion — red if anyone re-tightens it ──────────────
+  expectTypeOf<RegisterRequest['redirect_uris']>().toEqualTypeOf<string[] | undefined>();
+
+  // ── the call that was previously INEXPRESSIBLE ───────────────────────
+  // Before this card `redirect_uris` was required, so this did not compile at
+  // all. It is the whole point of the change: the vendor accepts this body.
+  void (await client.oauth.applications.register({ client_name: 'PROBE-17215-OMITTED' }));
+
+  // The emptiest legal call: every member of the vendor schema is optional.
+  void (await client.oauth.applications.register({}));
+
+  // ── and the call that always worked still does ───────────────────────
+  void (await client.oauth.applications.register({
+    client_name: 'CTRL-17215-SUPPLIED',
+    redirect_uris: ['https://app.example.com/cb'],
+  }));
+
+  // ⚠️ Optional is not "any array will do": the vendor refuses `[]`
+  // (`safeParse([])` fails at runtime). The TYPE cannot express non-empty, so
+  // this still compiles — recorded here so the next reader does not mistake
+  // the compiling call for a legal one.
+  void (await client.oauth.applications.register({ redirect_uris: [] }));
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // ② The negative control — what the route DOES honour still arrives verbatim
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -209,6 +258,19 @@ describe('#15447 oauth.applications.register — the honoured members still reac
     // triage called "keep and honour" — a red test rather than a silent
     // divergence from the vendor's wire vocabulary.
     expect(init.body).toBe(JSON.stringify(req));
+  });
+
+  it('[#17215] a call omitting `redirect_uris` sends a body without the key at all', async () => {
+    // The type-level pin above cannot witness this half: it proves the call
+    // COMPILES, never what reaches the wire. This proves the SDK adds no
+    // default — no `redirect_uris: []` synthesised on the caller's behalf,
+    // which the vendor would refuse outright.
+    const { client: c, fetchMock } = clientCapturingRequest();
+    await c.oauth.applications.register({ client_name: 'PROBE-17215-OMITTED' });
+    const [url, init] = soleRequest(fetchMock);
+    expect(url).toBe(CREATE_CLIENT_URL);
+    expect(init.body).toBe(JSON.stringify({ client_name: 'PROBE-17215-OMITTED' }));
+    expect(JSON.parse(init.body as string)).not.toHaveProperty('redirect_uris');
   });
 
   it("surfaces the route's refusal of an array-form `scope` rather than swallowing it", async () => {
