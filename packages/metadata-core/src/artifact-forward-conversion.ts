@@ -62,11 +62,35 @@
  * Cross-major gaps are the protocol *handshake*'s jurisdiction
  * (`checkProtocolCompat`) and refuse before conversion could matter.
  *
+ * ## The one class the window does NOT admit — default flips
+ *
+ * The window above is a RESCUE: without it an artifact carrying a key the
+ * current schema has since tombstoned is refused outright, with no operator
+ * remedy. Every entry of that kind is safe to replay here, because the old
+ * shape has no live meaning left to destroy.
+ *
+ * A DEFAULT FLIP is not that. Its old shape still parses, still means
+ * something on today's authoring surface, and the rewrite changes what it
+ * means — so replaying it is a reinterpretation, sound only where "this input
+ * predates the flip" is a FACT. At this door it is a GUESS, and a weak one:
+ * the key is the artifact's **declared `engines.protocol` floor**, not its
+ * age, and `^17.0.0` is the range `create-objectstack` stamps — so an app
+ * authored today, against today's surface, lands inside the window (measured
+ * for `field-required-notnull-explicit`, #16693; measured again for
+ * `app-hidden-to-unpublished`, #17885). Retirement does not hold those back
+ * either: `retiredFromLoadPath`'s jurisdiction is the AUTHORING funnel and
+ * nothing else (#16864's determination, and the flag's own docblock now says
+ * so) — which is exactly why the window has to name them here.
+ *
+ * ⇒ {@link DEFAULT_FLIPS_NOT_REPLAYED_HERE} lists them, and the door refuses
+ * them by id. Each id owes its reason beside it.
+ *
  * ## What this deliberately is NOT
  *
  * - Not a second conversion table: the ADR-0087 registry in
  *   `@objectstack/spec` stays the single authority on *what* converts; this
- *   module only decides *whether the retired window opens* for one artifact.
+ *   module only decides *whether the retired window opens* for one artifact —
+ *   now per entry for the one named class above, rather than all-or-nothing.
  * - Not a validator: like `applyConversions` itself, this never throws and
  *   never gates. Gating stays at the caller's schema parse.
  * - Not the flow-specific seam: flows convert here too (context-less, exactly
@@ -244,6 +268,29 @@ export function resolveInstalledSpecVersion(): string | null {
 }
 
 /**
+ * ADR-0087 entries the versioned window deliberately does NOT replay here —
+ * the DEFAULT-FLIP class (see the module doc). Module-local on purpose: this
+ * is the door's own refusal, not a fact about the registry, and exporting it
+ * would invite a second caller to inherit a judgement it has not made.
+ *
+ * - `app-hidden-to-unpublished` (#17885, #4829, ADR-0045 amended 2026-08-09):
+ *   rewrites `app.hidden: true` into `app._unpublished: true`. `hidden` is a
+ *   LIVE authorable key — navigation presentation, *"never an access gate"*
+ *   (`ui/app.zod.ts`) — while `_unpublished` is the machine-managed publish
+ *   gate that `filterAppForUser` (`packages/rest/src/rest-server.ts`) drops
+ *   the app on for every user without `studio.access` / `setup.access`. So
+ *   replaying it here turns an authored `defineApp({ hidden: true })` into an
+ *   app nobody but a builder can see — reproducing #4829, the incident the
+ *   `_unpublished` split was introduced to end, through the conversion layer.
+ *   The entry is sound where it says it is (the stored-row rehydration seams,
+ *   where a `hidden: true` row can only have come from the pre-split
+ *   materialization path, and `os migrate meta --from <=16`, where the
+ *   operator asserts the source's age) — this door is neither, so it opts out
+ *   rather than the entry ceasing to fire.
+ */
+const DEFAULT_FLIPS_NOT_REPLAYED_HERE: readonly string[] = ['app-hidden-to-unpublished'];
+
+/**
  * Apply the versioned forward conversion to one compiled-artifact definition.
  *
  * Pure and copy-on-write; never throws, never validates. See the module doc
@@ -289,6 +336,7 @@ export function applyArtifactForwardConversions<T>(
   const notices: ArtifactConversionNotice[] = [];
   const converted = applyConversions(definition as Record<string, unknown>, {
     includeRetired: true,
+    excludeConversionIds: DEFAULT_FLIPS_NOT_REPLAYED_HERE,
     onNotice: (n) => {
       notices.push(n);
       options.onNotice?.(n);

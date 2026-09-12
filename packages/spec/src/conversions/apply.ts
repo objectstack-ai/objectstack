@@ -70,6 +70,34 @@ export interface ApplyConversionsOptions {
    * rather than silently clobber it.
    */
   reservedNodeTypes?: ReadonlySet<string>;
+  /**
+   * Conversion ids this seam refuses to replay, whatever `includeRetired`
+   * says. Empty/absent by default: every seam replays the whole window it
+   * opened.
+   *
+   * **Why a seam needs this at all.** `includeRetired` opens the window for a
+   * WHOLE CLASS of caller (data at rest), and the entries inside that window
+   * are not one kind. Most are lossless deletes or renames of a shape the
+   * current schema now REFUSES — replaying those is the rescue the window
+   * exists for, because without it the row or artifact is simply unbootable.
+   * A few are DEFAULT FLIPS: the old shape still parses, still means
+   * something, and the rewrite changes what it means. For those the replay is
+   * not a rescue, it is a reinterpretation — and whether it is sound depends
+   * on the CALLER, not on the entry: only a seam that can say "this input
+   * predates the flip" as a FACT rather than a guess may apply one.
+   *
+   * ⇒ The entry cannot answer that (nothing in the item distinguishes a
+   * machine-written row at rest from an author who wrote the same key
+   * yesterday), and `retiredFromLoadPath` does not answer it either — its
+   * jurisdiction is the authoring funnel and nothing else (see that flag's
+   * own docblock on `MetadataConversion`). This option is where a seam says
+   * which entries its own evidence cannot carry.
+   *
+   * ⛔ NOT a second conversion table and never a filter of convenience: the
+   * registry stays the single authority on WHAT converts. A caller passing
+   * this owes a written reason per id, at the call site.
+   */
+  excludeConversionIds?: readonly string[];
 }
 
 /**
@@ -84,10 +112,17 @@ export function applyConversions(
   stack: Record<string, unknown>,
   options: ApplyConversionsOptions = {},
 ): Record<string, unknown> {
-  const { onNotice, onConflict, reservedNodeTypes, includeRetired = false } = options;
+  const { onNotice, onConflict, reservedNodeTypes, includeRetired = false, excludeConversionIds } = options;
+  const excluded = excludeConversionIds && excludeConversionIds.length > 0
+    ? new Set(excludeConversionIds)
+    : null;
   let current = stack;
 
   for (const conversion of ALL_CONVERSIONS) {
+    // The seam's own refusal, read BEFORE the retirement window: a caller that
+    // cannot carry a given entry's precondition does not get it back by
+    // opening the window (see `excludeConversionIds`).
+    if (excluded?.has(conversion.id)) continue;
     // A retired entry is graduated chain history (ADR-0087 D2 window, second
     // half): the AUTHORING funnel (`normalizeStackInput`) no longer replays it,
     // so the tombstone teaches the author instead. The data-at-rest seams —
