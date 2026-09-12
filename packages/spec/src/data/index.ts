@@ -65,7 +65,9 @@ export * from './filter-comparand-type-conformance';
 // type can never store a string (the six existing numeric / boolean /
 // temporal / structured-JSON classes, by reference) is refused at the engine's
 // field-aware seam with INVALID_FILTER 400; string-valued classes pass;
-// `formula` is judged by its declared returnType or deferred. Named for the
+// `formula` is judged by its declared returnType or deferred — a contract
+// answer no consumer currently reaches, because the earlier #8296 door refuses
+// every formula filter with INVALID_FIELD 400 first (see the module). Named for the
 // door it declares, like `filter-comparand-type`, not as a driver case-set:
 // drivers sit beneath this door and keep answering FILTER_TEXT_CASES' row.
 export * from './filter-text-operator-declared-type';

@@ -109,6 +109,14 @@ Beyond the four CRUD flags, the schema also exposes lifecycle and super-user gra
 > a migration prescription. A dispatched `restore` / `purge` is denied
 > unconditionally (fail-closed destructive-operation backstop). The flags
 > return with the M2 lifecycle initiative (feature + RBAC in one batch, #1883).
+>
+> One exception, by ruling: the boolean literal `false` — the default the
+> published 17.x toolchain emitted into every built artifact — parses as inert
+> residue and is silently stripped (#12840), so it raises no error and reaches
+> no parsed output. Every other value, `"false"` and `0` included, is refused
+> exactly like `true`; this is not a truthy/falsy split. Since neither key can
+> reach validated data, guards belong in pre-parse tooling over raw sources,
+> never in code reading a parsed permission set.
 
 > Permission sets are **additive-only**: a user's effective capability is the union of every set they hold — directly, via positions, or via the built-in `everyone` baseline (ADR-0090 D5). A `true` anywhere wins; there are no subtraction sets — to withhold, don't grant.
 
