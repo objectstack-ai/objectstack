@@ -28,5 +28,6 @@
   "src/shared/retired-key-migrate-sentence.test.ts",
   "src/system/compliance-families-retirement.test.ts",
   "src/system/constants/platform-object-names.test.ts",
+  "src/system/email-template-floor-locale-parity.pin.test.ts",
   "src/ui/action-requires-confirmation-docblock.pin.test.ts"
 ]

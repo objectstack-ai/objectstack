@@ -44,7 +44,7 @@ const result = EmailTemplateDefinitionSchema.parse(data);
 | **name** | `string` | ✅ | Template identifier (dotted snake_case) |
 | **label** | `string` | ✅ | Display label |
 | **category** | `Enum<'auth' \| 'notification' \| 'workflow' \| 'marketing' \| 'custom'>` | optional (default: `"custom"`) |  |
-| **locale** | `string` | optional (default: `"en-US"`) | BCP-47 locale (e.g. en-US, zh-CN) |
+| **locale** | `string` | optional (default: `"en-US"`) | BCP-47 locale (e.g. en-US, zh-CN) — the bundle key the resolver matches EXACTLY, with one retry rung: the literal `en-US`. No language-subtag folding, so `en` and `en-US` are different bundles and neither reaches the other. A bundle with no `en-US` row therefore has no fallback floor: any recipient locale it does not carry a row for raises TEMPLATE_NOT_FOUND, which is permanent — the delivery dead-letters with no retry. Your stack's own `i18n.defaultLocale` is the wrong tag here unless it is spelled `en-US`. |
 | **subject** | `string` | ✅ | Subject template |
 | **bodyHtml** | `string` | ✅ | HTML body template |
 | **bodyText** | `string` | optional | Plain-text body template (auto-derived from HTML when omitted) |

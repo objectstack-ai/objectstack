@@ -194,6 +194,7 @@
     "Doc": "src/system/doc.zod.ts#Doc (type)",
     "DocSchema": "src/system/doc.zod.ts#DocSchema (const)",
     "DocTranslation": "src/system/doc.zod.ts#DocTranslation (type)",
+    "EMAIL_TEMPLATE_FLOOR_LOCALE": "src/system/email-template.zod.ts#EMAIL_TEMPLATE_FLOOR_LOCALE (const)",
     "ENVIRONMENT_ARTIFACT_SCHEMA_VERSION": "src/system/environment-artifact.zod.ts#ENVIRONMENT_ARTIFACT_SCHEMA_VERSION (const)",
     "EmailAddressConfig": "src/system/email-config.zod.ts#EmailAddressConfig (type)",
     "EmailAddressConfigSchema": "src/system/email-config.zod.ts#EmailAddressConfigSchema (const)",
