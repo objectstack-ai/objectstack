@@ -1724,8 +1724,12 @@ if (asJson) {
     // are classified" — was the instrument's own false claim: it counted a
     // blanket container verdict as one classified property and said nothing
     // about the keys underneath, which is exactly how #4956 stayed invisible.
+    // The qualifier names the LEDGER because that is what now sets the depth
+    // (#17424): it used to say "one-level granularity", which stopped being
+    // true the moment the walk started following a nested `children` map — and
+    // a success line that overstates its own reach is the defect it qualifies.
     console.log(
-      '\n✓ every governed-type property at the walk\'s one-level granularity is classified, every ' +
+      '\n✓ every governed-type property, at every depth the ledger drills, is classified, every ' +
       'registered type is governed or explicitly pending, no ledger row outlives its property, ' +
       `every container inheritance is declared, every ${EVIDENCE_SCANNED_LABEL} entry's repo-local evidence path ` +
       'resolves, every `path:NNN` citation names a line that file actually has, every ' +
