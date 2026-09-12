@@ -234,6 +234,67 @@ audit) lands there instead of the business DB (ADR-0057). Opt out with
 `OS_TELEMETRY_DB=0`, or point it elsewhere (any mode, including `serve`)
 with `OS_TELEMETRY_DB=<path>`.
 
+##### Waiting for the boot from a parent process
+
+`✓ Server is ready` is true about the **HTTP server**, and deliberately says
+nothing about the app's data. Seeding races a soft budget
+(`OS_INLINE_SEED_BUDGET_MS`, default `8000`); when it runs long the kernel
+starts anyway and the rest of the seed finishes **in the background** — so the
+banner, and anything that waits for it, can be a minute ahead of the seed's own
+result. On a machine where the seed fits its budget the same command settles
+before the banner. Both are normal, and which one you get depends on the box.
+
+So a script that spawns a dev server and wants to act **after the boot has come
+to rest** should not wait on the banner, and should not need to read the child's
+output at all. Spawn with an `ipc` channel and wait for a message:
+
+| Message | Sent by | Means |
+|---|---|---|
+| `objectstack:listening` | `os serve` | The HTTP server is bound. Carries `{ port, url }` — the port actually bound, which in dev may differ from the one requested. |
+| `objectstack:seed-settled` | `os serve` | Nothing is still seeding. Carries `{ ok, suppressed, sources }`. Sent once per boot, always **after** `objectstack:listening`. |
+
+```js
+import { spawn } from 'node:child_process';
+
+const child = spawn('os', ['dev'], { stdio: ['inherit', 'inherit', 'inherit', 'ipc'] });
+
+child.on('message', (msg) => {
+  if (msg?.type !== 'objectstack:seed-settled') return;
+  if (msg.suppressed.length > 0) {
+    console.log(`boot complete — seeds not run this boot (${msg.suppressed.join(', ')})`);
+  } else if (!msg.ok) {
+    console.log('boot complete — but some seed records did not land; see the log above');
+  } else {
+    console.log('boot complete — the app is ready to use');
+  }
+});
+```
+
+**`os dev` spawns `os serve`, and the two channels are not symmetric.** `os dev`
+consumes `objectstack:listening` itself — it is how the `↪ server bound to port`
+line and the MCP connect hint learn the real port — and does **not** relay it.
+It forwards `objectstack:seed-settled` to its own parent verbatim. Spawn
+`os serve` directly if you need both messages in one place.
+
+An `ipc` channel is optional: without one, both sends are no-ops and nothing
+about the command changes. There is no polling to do — if you did not open the
+channel, the messages simply are not sent.
+
+<Callout type="info" title="What `objectstack:seed-settled` promises, and what it does not">
+It is sent when **nothing is still writing** — on success *and* on failure, since
+a seed that failed has still come to rest. Read `ok` together with `sources`
+rather than alone: `ok` is a verdict on the per-source counts the boot recorded,
+and a source that finished by throwing may record no counts at all.
+
+`suppressed` is non-empty when this boot registered a seed source and
+deliberately never ran it — `multi-tenant-replay` (rows are written per
+organization on `sys_organization` insert) or `skip-seed-data` (a planning boot
+that writes nothing). Those sources never settle and no further signal is
+coming for them, which is exactly why the message is sent anyway with the reason
+attached: a consumer that waited for *every* source to finish would wait
+forever.
+</Callout>
+
 #### `os serve`
 
 Starts the ObjectStack server with automatic plugin discovery:

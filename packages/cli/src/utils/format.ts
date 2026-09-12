@@ -4,6 +4,11 @@ import chalk from 'chalk';
 import type { ZodError } from 'zod';
 import { formatZodIssue, type ConversionNotice } from '@objectstack/spec';
 import type { TenancyPosture } from '@objectstack/spec/security';
+// #17329 — the published settlement contract's own shape. Read, never restated:
+// a second local copy of `{ pending, inFlight, suppressed }` would be free to
+// drift the day a suppression reason is added, and the whole point of asking
+// through the contract is that the two sides cannot disagree.
+import type { SeedSettlementSnapshot } from '@objectstack/spec/contracts';
 import { writeStdoutDirect } from './json-stdout.js';
 import { authoringRuleUnionStack } from './stack-collections.js';
 
@@ -778,6 +783,33 @@ export interface ServerReadyOptions {
    */
   seeds?: SeedSourceSummary[];
   /**
+   * The kernel's live seed-settlement tally as of the instant the banner prints
+   * (#17329) — `undefined` when no seed pipeline registered on this kernel.
+   *
+   * ## The omission this closes
+   *
+   * {@link seeds} is fed by the `seed-summary` service, and a source only
+   * records its outcome when its load FINISHES. Past the inline seed budget the
+   * load has not finished when the banner prints, so `seeds` is `undefined` and
+   * the `Seeds:` row is ABSENT — making the transcript of a boot that is still
+   * writing byte-indistinguishable from one that declared no seeds at all:
+   *
+   * ```text
+   *   ✓ Server is ready
+   *   …
+   *   Press Ctrl+C to stop          ← and 82 seconds later, 120 ERROR lines
+   * ```
+   *
+   * A reader who sees `Press Ctrl+C to stop` reasonably believes nothing more
+   * is coming. They believe it because the banner in front of them says, by
+   * omission, that seeding is not part of this boot.
+   *
+   * ⛔ Human-facing only. It does NOT replace the `objectstack:seed-settled`
+   * IPC message a parent process waits on — a shell script still cannot wait on
+   * prose, which is why holding the banner was refused as the repair.
+   */
+  seedSettlement?: SeedSettlementSnapshot;
+  /**
    * Boot-phase kernel-logger diagnostics replayed from the boot-quiet stdout
    * window (#4012). `ObjectLogger` writes `warn` to stdout, so that window
    * used to discard every warning a plugin emitted while booting — the
@@ -1040,6 +1072,10 @@ export function printServerReady(opts: ServerReadyOptions) {
   }
   if (opts.automation) printAutomationSummary(opts.automation);
   if (opts.seeds) printSeedSummary(opts.seeds);
+  // #17329 — AFTER the settled summary, never instead of it: a bundle with two
+  // config apps can have one finished (a real `Seeds:` row) and one still
+  // writing, and reporting only the first is the omission this closes.
+  if (opts.seedSettlement) printSeedsStillWriting(opts.seedSettlement);
   if (opts.bootDiagnostics) printBootDiagnostics(opts.bootDiagnostics);
   console.error('');
   console.error(chalk.dim('  Press Ctrl+C to stop'));
@@ -1200,6 +1236,54 @@ function printSeedSummary(sources: SeedSourceSummary[]) {
     return;
   }
   console.error(chalk.dim(`  Seeds:   ${line}`));
+}
+
+/**
+ * Say that seeding is still running, when it is (#17329).
+ *
+ * ## The transcript this repairs
+ *
+ * `printSeedSummary` above can only render sources that FINISHED — the
+ * `seed-summary` service is written by `recordSeedOutcome`, which the seeder
+ * calls at the end of a load. Past the inline seed budget (`AppPlugin` races it
+ * against `OS_INLINE_SEED_BUDGET_MS`, default 8s, then detaches the rest) the
+ * load has not finished when the banner prints, so there is nothing to read and
+ * the row simply does not appear. Measured on one showcase boot at
+ * `OS_INLINE_SEED_BUDGET_MS=1`: a probe read `{"pending":1,"inFlight":1}` at
+ * banner time, and the transcript carried **zero** `Seeds:` rows — identical,
+ * byte for byte, to an app that declares no seeds. Eighty-two seconds later
+ * that same boot emitted 120 `ERROR` lines.
+ *
+ * So the row's absence was carrying a claim ("seeding is not part of this
+ * boot") that the boot went on to contradict. This says *pending* instead.
+ *
+ * ## Why suppressed sources are named rather than counted as pending
+ *
+ * A multi-tenant or `skipSeedData` boot keeps `pending > 0` for the life of the
+ * process ON PURPOSE — those rows are written per organization later, or not at
+ * all. Rendering that as "still writing" would promise a completion that is
+ * never coming, which is the same defect pointed the other way. `inFlight` is
+ * the only half that means work is outstanding; `suppressed` gets its own
+ * sentence saying nothing further is due.
+ */
+function printSeedsStillWriting(settlement: SeedSettlementSnapshot) {
+  const { inFlight, suppressed } = settlement;
+
+  if (inFlight > 0) {
+    const n = `${inFlight} source${inFlight === 1 ? '' : 's'}`;
+    console.error(chalk.yellow(`  ⚠ Seeds:   pending — ${n} still writing`));
+    // The line the ruling asks for in as many words: the banner is not the end
+    // of this boot's output, and a reader at `Press Ctrl+C to stop` needs to
+    // know that before the wall arrives rather than after.
+    console.error(chalk.dim('      seeding continues in the background; its result prints after this banner'));
+  }
+
+  if (suppressed.length > 0) {
+    // Deduplicated: two config apps suppressed for the same cause is one fact
+    // about this deployment, not two.
+    const reasons = [...new Set(suppressed)].join(', ');
+    console.error(chalk.dim(`  Seeds:   not run this boot (${reasons})`));
+  }
 }
 
 export function printMetadataStats(stats: MetadataStats) {

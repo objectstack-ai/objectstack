@@ -28,6 +28,19 @@ import { PLATFORM_CAPABILITY_TOKENS, PLATFORM_ALWAYS_ON_CAPABILITIES } from '@ob
 // boot gate's fix list enumerates the accepted values, and a second literal
 // list would be free to drift the day a posture is added.
 import { TENANCY_POSTURES, type TenancyPosture } from '@objectstack/spec/security';
+// #17329 — the PUBLISHED settlement contract, READ rather than re-derived, so
+// the `objectstack:seed-settled` announcement below asks the one component that
+// knows whether this boot's seeding has come to rest. The service is registered
+// by the runtime this command itself boots (`@objectstack/runtime`'s
+// `declareSeedSource`); `packages/cli` never registers or mutates it — the
+// contract is deliberately read-only, because a consumer that could edit the
+// tally could certify itself.
+import {
+  SEED_SETTLEMENT_SERVICE,
+  type ISeedSettlementService,
+  type SeedSettlementSnapshot,
+  type SeedSuppressionReason,
+} from '@objectstack/spec/contracts';
 import { missingProviderMessage } from '../utils/capability-preflight.js';
 // The mail provider vocabulary, read from the package that materialises the
 // transports rather than restated here (#5132) — `resolveEmailCapabilityArg`
@@ -498,6 +511,192 @@ export interface ListeningMessage {
 }
 
 /**
+ * The `objectstack:seed-settled` IPC message — "this boot's seeding has come to
+ * rest" (#17329).
+ *
+ * ## The defect this closes
+ *
+ * `✓ Server is ready` is true about the HTTP SERVER and says nothing about the
+ * APP. `AppPlugin` races its inline seed against a soft budget
+ * (`OS_INLINE_SEED_BUDGET_MS`, default 8s); over budget it hands the rest to a
+ * detached promise and the kernel starts anyway. So the banner can print, the
+ * parent can proceed, and eighty seconds later the continuation emits its error
+ * wall — and a parent that merely spawned the child has no readable signal that
+ * distinguishes that boot from one that seeded cleanly before the banner. Which
+ * side wins is decided by whether the seed fits its budget on a contended box,
+ * so the same command on the same corpus disagrees between two containers.
+ *
+ * Every signal that WOULD distinguish them — the over-budget warning, the error
+ * wall, the completion summary — arrives on the child's inherited stdio. Reading
+ * it costs the boot its TTY. This message is the same fact on the channel the
+ * parent already holds.
+ *
+ * ## When it is sent, and the one guarantee that makes it waitable
+ *
+ * Exactly once per boot, and never before {@link ListeningMessage}: seeding that
+ * settles DURING `runtime.start()` (the ordinary in-budget boot) is latched and
+ * released after {@link publishBoundPort} has driven its three channels, so a
+ * parent that waits for `objectstack:listening` first can never miss this one by
+ * being late. See {@link createSeedSettlementAnnouncer}.
+ *
+ * ## ⭐ `suppressed` is what keeps a waiting parent from hanging forever
+ *
+ * Two deployment shapes register a seed source and then deliberately never run
+ * it, so `app:seeded` never fires and the contract's `pending` stays above zero
+ * for the life of the process: **multi-tenant** (seeds replay per organization
+ * on `sys_organization` insert) and **`skipSeedData`** (an `os migrate` planning
+ * boot that must not write). A message keyed on `pending === 0` would never be
+ * sent in either, and its absence would be indistinguishable from a boot still
+ * writing — the exact ambiguity this card exists to end, one level up.
+ *
+ * So the predicate is {@link SeedSettlementSnapshot.inFlight}, not `pending`:
+ * *nothing is still writing*. Both modes reach `inFlight === 0` inside Phase 2
+ * `start()` (`suppress()` decrements the in-flight tally and records the reason),
+ * so the message is sent on those boots too — carrying the reasons, so a
+ * consumer can say **why** no rows landed instead of waiting for rows that were
+ * never coming. An empty `suppressed` with an empty `sources` is the third
+ * honest answer: this kernel has no seed pipeline at all.
+ */
+export interface SeedSettledMessage {
+  type: 'objectstack:seed-settled';
+  /**
+   * Whether every source that REPORTED an outcome reported a clean one — no
+   * rejected records, no dropped references, no install that came up empty.
+   *
+   * ⛔ Read it against {@link sources}, never alone: it is a verdict on what the
+   * seed summary contains, and a source that finished by throwing may record no
+   * outcome at all. `true` over an empty {@link sources} means "nothing reported
+   * a problem", which on a suppressed boot is simply "nothing ran".
+   */
+  ok: boolean;
+  /**
+   * One entry per source this boot deliberately did not run. Non-empty means
+   * rows these datasets describe were never written by this process, and no
+   * later signal is coming for them.
+   */
+  suppressed: readonly SeedSuppressionReason[];
+  /** Per-source counts — the same array the banner's `Seeds:` row renders. */
+  sources: SeedSourceSummary[];
+}
+
+/**
+ * Read the published settlement tally off the kernel this command booted.
+ *
+ * `undefined` means no seed pipeline registered on this kernel — a FACT by
+ * `kernel:ready`, since every source is declared in Phase 2 `start()`, and
+ * therefore an answer ("nothing to wait for") rather than a not-yet. ⚠️
+ * `getService` THROWS on an unregistered name rather than returning undefined,
+ * hence the `try`.
+ */
+export function readSeedSettlement(
+  kernel: { getService?: (name: string) => unknown } | undefined,
+): SeedSettlementSnapshot | undefined {
+  try {
+    const svc = kernel?.getService?.(SEED_SETTLEMENT_SERVICE) as ISeedSettlementService | undefined;
+    if (!svc || typeof svc.snapshot !== 'function') return undefined;
+    const snapshot = svc.snapshot();
+    // A tally that does not answer the one question is the same as no tally.
+    if (typeof snapshot?.inFlight !== 'number') return undefined;
+    return snapshot;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Has this boot's seeding come to rest?
+ *
+ * ⛔ NOT `pending === 0`. `pending` counts suppressed sources forever by design
+ * (see {@link SeedSettledMessage}), so keying on it would hang every
+ * multi-tenant and `skipSeedData` boot. The question a parent is actually asking
+ * is "is anything still writing", and that is `inFlight`.
+ *
+ * An absent snapshot is settled: no seed pipeline registered, so nothing is
+ * outstanding and nothing more is coming.
+ */
+export function seedingHasSettled(snapshot: SeedSettlementSnapshot | undefined): boolean {
+  return !snapshot || snapshot.inFlight === 0;
+}
+
+/** Build the message from the two things the kernel already knows. */
+export function composeSeedSettledMessage(
+  snapshot: SeedSettlementSnapshot | undefined,
+  sources: SeedSourceSummary[] | undefined,
+): SeedSettledMessage {
+  const list = sources ?? [];
+  return {
+    type: 'objectstack:seed-settled',
+    ok: list.every((s) => s.rejected === 0 && (s.droppedRefs ?? 0) === 0 && !s.emptyInstall),
+    suppressed: snapshot ? [...snapshot.suppressed] : [],
+    sources: list,
+  };
+}
+
+/** What {@link createSeedSettlementAnnouncer} needs from its host. */
+export interface SeedSettlementChannels {
+  /** The live tally — re-read per use, never cached (the contract says so). */
+  readSettlement: () => SeedSettlementSnapshot | undefined;
+  /** The per-source counts the banner renders, or `undefined` if none ran. */
+  readSummary: () => SeedSourceSummary[] | undefined;
+  /** Sends {@link SeedSettledMessage}, when an IPC channel is open. */
+  announceSettled: (message: SeedSettledMessage) => void;
+}
+
+/**
+ * The latch that turns "seeding settled" into ONE message, in the one order it
+ * is safe to send it in.
+ *
+ * ## Why a latch rather than a call at the settle point
+ *
+ * The two clocks this card is about run in EITHER order, and both have to work:
+ *
+ * ```text
+ * in-budget  seed settles ─▶ kernel:ready ─▶ publishBoundPort ─▶ (release) ─▶ send
+ * over-budget            kernel:ready ─▶ publishBoundPort ─▶ (release) … ─▶ app:seeded ─▶ send
+ * ```
+ *
+ * {@link check} is called from both the `app:seeded` and `kernel:ready` hooks;
+ * {@link release} is called once, after {@link publishBoundPort} has driven its
+ * three channels. Before the release nothing is sent, so a settle that happened
+ * during `runtime.start()` cannot overtake `objectstack:listening`; after it,
+ * the first `check` that finds nothing in flight sends and closes the latch.
+ *
+ * ⛔ The `kernel:ready` leg is not redundant with `app:seeded`. A suppressed
+ * boot (multi-tenant, `skipSeedData`) NEVER fires `app:seeded` — `emitSeedSettled`
+ * lives only on the branch that actually seeds — so `kernel:ready` is the only
+ * hook that runs on those boots, and dropping it is exactly how a waiting parent
+ * would hang forever there.
+ *
+ * ⛔ And it is not a poll. Every leg is an event the kernel already emits; the
+ * latch only decides which of them is allowed to be the one that speaks.
+ */
+export function createSeedSettlementAnnouncer(channels: SeedSettlementChannels): {
+  /** Re-evaluate: send iff released, not yet sent, and nothing in flight. */
+  check: () => void;
+  /** Open the gate — call AFTER the bound-port channels have been driven. */
+  release: () => void;
+} {
+  let released = false;
+  let sent = false;
+
+  const check = () => {
+    if (!released || sent) return;
+    const snapshot = channels.readSettlement();
+    if (!seedingHasSettled(snapshot)) return;
+    sent = true;
+    channels.announceSettled(composeSeedSettledMessage(snapshot, channels.readSummary()));
+  };
+
+  return {
+    check,
+    release: () => {
+      released = true;
+      check();
+    },
+  };
+}
+
+/**
  * The three channels {@link publishBoundPort} drives — declared in the ONE
  * order it is safe to drive them in, which is also the order the fields are
  * listed here.
@@ -706,6 +905,40 @@ export function runtimeBoundPortChannels(printBanner: () => void): BoundPortChan
       } catch { /* IPC channel closed — best-effort */ }
     },
     printBanner,
+  };
+}
+
+/**
+ * The real {@link SeedSettlementChannels} for a booted kernel (#17329).
+ *
+ * Kept OUT of {@link BoundPortChannels} deliberately. Those three are one
+ * ordered publication of ONE number and {@link publishBoundPort} exists to drive
+ * them in the one safe order; this is a different fact arriving on a different
+ * clock, often minutes later. Folding it in would have made the seam either
+ * asynchronous or a liar.
+ *
+ * Best-effort like its sibling: a closed or absent IPC channel is the ordinary
+ * `os serve` case, not an error, and a throw here would be a supervision
+ * nicety taking a healthy server down.
+ */
+export function runtimeSeedSettlementChannels(
+  kernel: { getService?: (name: string) => unknown } | undefined,
+): SeedSettlementChannels {
+  return {
+    readSettlement: () => readSeedSettlement(kernel),
+    readSummary: () => {
+      try {
+        const s: unknown = kernel?.getService?.('seed-summary');
+        return Array.isArray(s) && s.length > 0 ? (s as SeedSourceSummary[]) : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    announceSettled: (message) => {
+      try {
+        if (typeof process.send === 'function') process.send(message);
+      } catch { /* IPC channel closed — best-effort */ }
+    },
   };
 }
 
@@ -4705,6 +4938,50 @@ export default class Serve extends Command {
         trackPlugin('ArtifactBootMigrationGate');
       }
 
+      // ── Seed-settlement announcer (#17329) ─────────────────────────
+      // `✓ Server is ready` is true about the HTTP server and says nothing
+      // about the app: past the inline seed budget the rest of the seed runs
+      // detached, so the banner, and any parent that waits for it, can be
+      // eighty seconds ahead of a hundred-line error wall. This is the hop that
+      // makes the settle readable OFF the child's stdio — a second IPC message
+      // beside `objectstack:listening`, on the channel `os dev` already holds.
+      //
+      // ⛔ The producer is NOT new and NOT ours: `@objectstack/runtime` already
+      // declares every seed source and settles it at the exact moment its
+      // boot-time write is done, publishing the tally under the spec's
+      // `seed-settlement` contract. This registers no service and mutates
+      // nothing — it subscribes to two hooks the kernel already fires and reads
+      // a snapshot it already publishes.
+      //
+      // ⭐ Registered as a plugin because `hook` is reachable from a plugin
+      // context and nowhere else — `ObjectKernel.context` is private, and
+      // sniffing past that to reach it would be the coupling the published
+      // contract exists to avoid. Same shape as the artifact gate above.
+      const seedSettlement = createSeedSettlementAnnouncer(runtimeSeedSettlementChannels(kernel));
+      await kernel.use({
+        name: 'com.objectstack.cli.seed-settlement-announcer',
+        version: '1.0.0',
+        init: async (ctx: any) => {
+          // Both legs are load-bearing and neither is redundant:
+          //   `app:seeded`  — the ONLY signal on the over-budget path, where the
+          //                   settle lands after the banner (and after
+          //                   `kernel:ready`). Fires once per config app, so it
+          //                   asks the tally rather than counting itself.
+          //   `kernel:ready`— the only hook that runs at all on a multi-tenant
+          //                   or `skipSeedData` boot, where the source is
+          //                   SUPPRESSED and `app:seeded` never fires. Also the
+          //                   in-budget fast path, where seeding was already
+          //                   done before this line.
+          ctx.hook('app:seeded', () => { seedSettlement.check(); });
+          ctx.hook('kernel:ready', () => { seedSettlement.check(); });
+        },
+      } as any);
+      // ⛔ Deliberately NOT `trackPlugin`ed. That list feeds the banner's
+      // `Plugins:` count and name row, and this subscriber is an internal wiring
+      // detail of the CLI's own announcement — putting it there would grow a
+      // published banner surface on every boot to report a thing an operator
+      // cannot act on.
+
       // Boot the runtime
       await runtime.start();
 
@@ -4947,6 +5224,15 @@ export default class Serve extends Command {
         seededAdmin,
         automation: automationSummary,
         seeds: seedSummary,
+        // #17329 — read HERE, inside the banner thunk, so it is the tally as of
+        // the moment the banner prints rather than one sampled earlier in the
+        // boot. On the over-budget path `seedSummary` above is `undefined` —
+        // the summary is recorded only when the load FINISHES — so without this
+        // the transcript of a boot whose seed is still writing is
+        // byte-identical to one that declared no seeds at all, which is how
+        // this defect hid: the louder the seed went on to fail, the more
+        // complete the omission looked at the moment it was read.
+        seedSettlement: readSeedSettlement(kernel),
         // #16630 — what the kernel already knows about this boot, so the ready
         // line can say what state it is ready in. `undefined` on a healthy
         // boot, where the ready block prints exactly what it always has.
@@ -4985,6 +5271,20 @@ export default class Serve extends Command {
       // sends a consumer to it. {@link publishBoundPort} carries the race the
       // old order lost, and the reason the repair is not reader-side polling.
       publishBoundPort(boundPort, runtimeBoundPortChannels(printBanner), boundProtocol);
+
+      // ── …and one beat later, whether the APP is ready too (#17329) ──
+      // ⭐ AFTER the line above, and that is the whole of the ordering
+      // contract: a parent that waits for `objectstack:listening` and only then
+      // starts listening for the settle can never miss it, because nothing is
+      // sent before this call. On the ordinary in-budget boot seeding settled
+      // minutes of CPU ago and this releases the latched message immediately;
+      // past the budget it arms and the `app:seeded` hook speaks later.
+      //
+      // ⛔ NOT a fourth channel inside `publishBoundPort`. Those three are one
+      // publication of ONE number, ordered so the file exists before anything
+      // names it; this is a different fact on a different clock that frequently
+      // has not happened yet.
+      seedSettlement.release();
 
       // ── Watch the served database file's identity ──────────────────
       // Deleting the data directory under a running server (`rm -rf
