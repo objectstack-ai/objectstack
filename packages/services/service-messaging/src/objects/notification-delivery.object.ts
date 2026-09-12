@@ -24,10 +24,49 @@ export const NotificationDelivery = ObjectSchema.create({
     icon: 'send',
     isSystem: true,
     managedBy: 'engine-owned',
-    // ADR-0057: pipeline telemetry — same 90d window as sys_notification.
+    // ADR-0057: pipeline telemetry. TWO windows, because this table
+    // interleaves rows that still carry work with rows that never will.
+    //
+    // [#17611] A tenant with no transport configured for a fanned-out channel
+    // dead-letters that channel's row on its FIRST attempt (`attempts: 1`),
+    // and every `notify` writes one such row forever after. Measured on a
+    // production tenant: 2,876 `email`/`dead` rows at +316/day, zero pending.
+    // Those rows carry no work — nothing ever claims, retries or acks them
+    // again — yet they sat in the claim query's table for the full 90d.
+    //
+    // `retention.onlyWhen` scopes the SHORT window to the terminal-FAILURE
+    // statuses, the same shape `sys_job_queue`, `sys_automation_run` and
+    // `sys_upload_session` already declare. `success` is deliberately NOT in
+    // the scope: the ruling keeps delivery history at the table window.
+    //
+    // ⚠️ The 7d scope does not REPLACE the table's bound, it sits under it —
+    // `retention` is a single block, so scoping it would have left every
+    // non-terminal row (`pending`, `in_flight`, `success`) with no age bound
+    // at all, unbounding the larger half of this table's growth on the very
+    // card that exists to bound it. The `ttl` leg restates the 90d window the
+    // object has always declared, on the same `created_at` clock `retention`
+    // reaps by, so non-terminal rows keep exactly today's behaviour. Both legs
+    // run: `LifecycleService.reapObject` takes `ttl` and `retention` in
+    // independent `if`s, not an either/or.
+    //
+    // ⛔ The `$in` list is a third copy of a vocabulary the WRITERS own
+    // (`SqlNotificationOutbox.ack` / `MemoryNotificationOutbox.ack`), so it
+    // must be widened in the same change as a writer — the `sys_automation_run`
+    // lesson: a widened writer against a narrow sweep scope means the new
+    // status is simply never aged out, silently, forever. Today those two are
+    // the only terminal-failure statuses either ack path can produce.
+    // `failed` is a legal member of the `status` field below but NO writer of
+    // THIS object ever sets it (it is `sys_http_delivery`'s terminal status),
+    // so naming it here would scope the sweep on a value that cannot occur.
     lifecycle: {
         class: 'telemetry',
-        retention: { maxAge: '90d' },
+        // The table window — every row, same 90d as sys_notification.
+        ttl: { field: 'created_at', expireAfter: '90d' },
+        // The terminal-failure window — rows that will never carry work again.
+        retention: {
+            maxAge: '7d',
+            onlyWhen: { status: { $in: ['dead', 'suppressed'] } },
+        },
     },
     description: 'Durable per-recipient × channel delivery outbox (ADR-0030 Layer 4).',
     titleFormat: '{channel} → {recipient_id}',
