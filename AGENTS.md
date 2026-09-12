@@ -530,8 +530,8 @@ Even inside your own worktree, operate defensively:
    A running dev server you didn't start probably belongs to another agent or the user;
    killing it (or its port) breaks their in-flight work. Spin up your own instance on a
    random high port (`pnpm dev -- --fresh -p <random>`) and **shut it down yourself when
-   the task is done** (`kill $(lsof -ti tcp:<port>)`). Don't leave orphan servers behind.
-   ⛔ One process table per container: **kill only a PID you recorded, never a name** (`guard-process-kill.sh`).
+   the task is done** (`kill $(lsof -ti tcp:<port>)`). ⛔ One process table per container: **kill only a PID you
+   recorded, and wait only on one, never a name** — `pgrep -f` matches the asking shell (`guard-process-kill.sh`).
 9. **After pulling `main` into a long-lived worktree, refresh its build state before you
    trust a single test or gate.** A worktree open across several merges accumulates
    artefacts stale relative to the source, and every one of them fails **as if your change
