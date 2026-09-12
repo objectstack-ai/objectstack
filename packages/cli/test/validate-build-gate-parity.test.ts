@@ -117,10 +117,112 @@ const calls = (file: string, name: string) => new RegExp(String.raw`\b${name}\s*
  * through to its closing brace — the object literal whose `normalized` and
  * `parsed` members ARE the stack the rule table judges.
  */
-function ruleTableCallIn(file: string): string {
-  const src = sourceOf(file);
+function ruleTableCall(src: string): string {
   const at = src.indexOf('runAuthoringRules(');
   return at === -1 ? '' : src.slice(at, src.indexOf('})', at));
+}
+
+const ruleTableCallIn = (file: string): string => ruleTableCall(sourceOf(file));
+
+/** A literal call of the ONE fold. */
+const FOLD_CALL = /\bauthoringRuleUnionStack\s*\(/;
+
+/**
+ * The expression one tier is handed, as source text: from `tier:` to the
+ * object literal's own separating comma, tracking bracket depth so a call's own
+ * arguments cannot terminate it.
+ */
+function tierExpression(call: string, tier: string): string | null {
+  const at = new RegExp(String.raw`\b${tier}\s*:\s*`).exec(call);
+  if (!at) return null;
+  const from = at.index + at[0].length;
+  let depth = 0;
+  for (let i = from; i < call.length; i++) {
+    const c = call[i];
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') depth--;
+    else if (c === ',' && depth === 0) return call.slice(from, i).trim();
+  }
+  return call.slice(from).trim();
+}
+
+/** The right-hand side of `const NAME = …;` / `const { …, NAME, … } = …;`. */
+function constBindingOf(name: string, src: string): string | null {
+  const decl = new RegExp(
+    String.raw`^[ \t]*const\s+(?:${name}\b[^=\n]*|\{[^}\n]*\b${name}\b[^}\n]*\})\s*=\s*`,
+    'm',
+  ).exec(src);
+  if (!decl) return null;
+  const from = decl.index + decl[0].length;
+  let depth = 0;
+  for (let i = from; i < src.length; i++) {
+    const c = src[i];
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') depth--;
+    else if (c === ';' && depth === 0) return src.slice(from, i);
+  }
+  return null;
+}
+
+/** Every identifier token in an expression, in source order. */
+const identifiersIn = (expr: string): string[] => expr.match(/[A-Za-z_$][\w$]*/g) ?? [];
+
+/**
+ * Does the value handed to `tier` come from the ONE fold?
+ *
+ * ⭐ [#17528] Two spellings are legal, and they are the same act. `compile.ts`
+ * and `validate.ts` fold AT the call (`parsed: authoringRuleUnionStack(…)`);
+ * `lint.ts` folds ONCE at `lintConfig`'s entry, because its own hand-written
+ * checks read that stack too, and hands the tiers the hoisted binding. A guard
+ * that only matched the first spelling would force the second door to write a
+ * cosmetic re-fold whose sole purpose is to satisfy a regex — and, worse, would
+ * be satisfied BY that cosmetic call whatever the surrounding code did.
+ *
+ * So the identifier is RESOLVED instead of pattern-matched: follow `const`
+ * bindings in this same source, at most {@link MAX_BINDING_HOPS} deep, and
+ * answer true only when some hop is a literal `authoringRuleUnionStack(` call.
+ *
+ * ⛔ This is NOT a relaxation to "any identifier". An identifier that resolves
+ * to nothing, or whose chain never reaches the fold, still fails — including
+ * the two shapes this guard exists for, `normalized: config` and
+ * `normalized: normalizeStackInput(config)`, and including a source where the
+ * fold is called but not on the value handed over. Those three are asserted
+ * directly, against fabricated sources, in the negative-control test below: a
+ * guard that cannot fail is not a guard.
+ *
+ * ⚠️ Two BOUNDS, stated so the next reader knows which parts are proof and
+ * which are approximation — neither is a hole today, and both are places a
+ * future shape could outgrow this resolver rather than quietly defeat it:
+ *
+ *   - it follows EVERY identifier in the expression, so a composed expression
+ *     (`merge(a, b)`) passes as soon as any identifier it names reaches the
+ *     fold, even when the value handed over is the other one. Strictly narrower
+ *     than the `foldedElsewhere` case rejected below — there the fold-bearing
+ *     binding is not referenced at all — but it is source-level reachability,
+ *     not dataflow.
+ *   - {@link constBindingOf} takes the FIRST `const NAME =` in the file, so a
+ *     shadowed or re-declared binding resolves to the wrong one. Today each
+ *     command declares each of these names once.
+ */
+const MAX_BINDING_HOPS = 4;
+
+function handsFoldedStack(src: string, tier: string): boolean {
+  const expr = tierExpression(ruleTableCall(src), tier);
+  if (expr === null) return false;
+
+  const reaches = (text: string, seen: Set<string>, hops: number): boolean => {
+    if (FOLD_CALL.test(text)) return true;
+    if (hops >= MAX_BINDING_HOPS) return false;
+    for (const id of identifiersIn(text)) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const rhs = constBindingOf(id, src);
+      if (rhs !== null && reaches(rhs, seen, hops + 1)) return true;
+    }
+    return false;
+  };
+
+  return reaches(expr, new Set(), 0);
 }
 
 describe('os validate is the read-only superset of os build (#3782, #4409)', () => {
@@ -166,16 +268,82 @@ describe('os validate is the read-only superset of os build (#3782, #4409)', () 
       expect(call, `${file} must call runAuthoringRules`).not.toBe('');
       for (const tier of ['normalized', 'parsed']) {
         expect(
-          new RegExp(String.raw`\b${tier}\s*:\s*authoringRuleUnionStack\s*\(`).test(call),
+          handsFoldedStack(sourceOf(file), tier),
           `${file} hands the authoring-rule table a '${tier}' stack that has NOT been through ` +
             `authoringRuleUnionStack(). On an ADR-0130 D4 / option-B project — every definition in ` +
             `packages[], none at the top level — that input is an EMPTY stack, so every rule in the ` +
             `table reports nothing and this command certifies an unread project as clean at exit 0. ` +
-            `Wrap it, as compile.ts does. ⛔ Do not reimplement the fold here — import the one in ` +
-            `src/utils/stack-collections.ts.`,
+            `Fold it, at the call as compile.ts does or once at the reader's entry as lint.ts does — ` +
+            `either way the value handed over must resolve to authoringRuleUnionStack(). ⛔ Do not ` +
+            `reimplement the fold here — import the one in src/utils/stack-collections.ts.`,
         ).toBe(true);
       }
     }
+  });
+
+  /**
+   * The negative controls for the resolver above, on the same pass — because a
+   * guard that cannot fail is not a guard, and this one became a resolver
+   * rather than a literal match in #17528.
+   *
+   * Fabricated sources, not the real commands: the point is to exhibit inputs
+   * the predicate must REJECT, and the tree is (correctly) expected to contain
+   * none of them.
+   */
+  it('the union-fold guard still rejects a tier that does not reach the fold', () => {
+    const withCall = (decls: string, normalized: string, parsed: string) =>
+      `${decls}\n  for (const f of runAuthoringRules('x', {\n` +
+      `    normalized: ${normalized},\n    parsed: ${parsed},\n    sduiManifest: m,\n  })) {}\n`;
+
+    // ⛔ The pre-#17069 defect itself: the caller's own stack, handed straight on.
+    const rawConfig = withCall('  const config = load();', 'config', 'config');
+    expect(handsFoldedStack(rawConfig, 'normalized')).toBe(false);
+    expect(handsFoldedStack(rawConfig, 'parsed')).toBe(false);
+
+    // A bound identifier whose chain never reaches the fold.
+    const normalizedOnly = withCall(
+      '  const normalized = normalizeStackInput(config);',
+      'normalized',
+      'normalized',
+    );
+    expect(handsFoldedStack(normalizedOnly, 'normalized')).toBe(false);
+
+    // ⭐ The sharpest one: the fold IS called in this source, on something else.
+    // Resolution follows the value handed over, never the file's vocabulary.
+    const foldedElsewhere = withCall(
+      '  const unused = authoringRuleUnionStack(config);\n  const normalized = normalizeStackInput(config);',
+      'normalized',
+      'normalized',
+    );
+    expect(handsFoldedStack(foldedElsewhere, 'normalized')).toBe(false);
+
+    // A chain longer than the hop budget is rejected too — the budget is a
+    // bound on the resolver, not a hole in it.
+    const tooDeep = withCall(
+      '  const a = authoringRuleUnionStack(config);\n  const b = f(a);\n  const c = f(b);\n' +
+        '  const d = f(c);\n  const e = f(d);\n  const g = f(e);',
+      'g',
+      'g',
+    );
+    expect(handsFoldedStack(tooDeep, 'normalized')).toBe(false);
+
+    // ── And the three shapes it must ACCEPT, so the rejections above are not
+    //    a predicate that says no to everything.
+    expect(
+      handsFoldedStack(withCall('', 'authoringRuleUnionStack(normalized)', 'authoringRuleUnionStack(lowered)'), 'parsed'),
+      'the fold-at-the-call spelling (compile.ts / validate.ts) must pass',
+    ).toBe(true);
+    const hoisted = withCall(
+      '  const stack = authoringRuleUnionStack(config);\n' +
+        '  const { lowered, loweredHookRefs } = lowerCallables(stack);',
+      'stack',
+      'lowered',
+    );
+    expect(handsFoldedStack(hoisted, 'normalized'), 'a hoisted binding must pass').toBe(true);
+    expect(
+      handsFoldedStack(hoisted, 'parsed'),
+      'a hoisted binding read through one intermediate call must pass — the lint.ts shape',
+    ).toBe(true);
   });
 
   it.each(SHARED_NON_REGISTRY_GATES)('both commands run %s', (gate) => {
