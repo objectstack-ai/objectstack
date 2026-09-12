@@ -4,7 +4,6 @@
 
 ## 车道取卡全序与 `pm:blocking`
 
-- 级序理由:p0 是显式裁定,blocking 一张挡多张,bug 是已坏的不变量先于增强,卡龄防饿死。
 - 级别半边:p1–p3 是分诊已裁的显式排序;无级末位是分诊缺口,不是一个已裁的低优先级。
 - `pm:blocking` 的写入与摘除都在分诊轮 sweep,依赖者全关即摘。
 - 手工挂上的按误标处理,sweep 对着索引校正。
@@ -87,11 +86,14 @@
 - 读侧对称:决策复读命中无可取回 id 的出箱按未裁处理,同笔转回、⛔ 不派。
 - 结论只落可核性,⛔ 不断成因。
 - 裁决执行中新生的问题另立卡并回链已裁卡,⛔ 不给已裁卡重挂 `needs-user-decision`。
-- 理由两条:标签说不出是哪个问题;母卡一关就把这问题的可见性一起带走。
 - 机械两旗 report-only,归半状态巡查;接线是另一张卡的事,⛔ 不随协议文本改脚本。
 - 旗一:open 卡标题带决策标记或线程含裁决记录,却仍挂 `needs-user-decision`。
 - 旗二:`pm:blocked` 卡的 `Blocked-by:` 目标已关闭。
 - 交付了一半的阻塞是判断不是 grep,归四件之③,⛔ 不进机械旗。
+- 发布窗口判据:已上膛 = 开着的 head `changeset-release/main` PR,`is:pr is:open head:changeset-release`。
+- 点亮对照 `git ls-remote origin changeset-release/main` 必中;⛔ title 永不是判据。
+- 两仓 title 不同、由 action 配置:objectui `chore: release packages`、objectstack `chore: version packages`。
+- 上膛与否不足:真判据是本卡 changeset 已否折进该 head `CHANGELOG.md`,即「离永久还有多远」。
 - 卡上 re-check 命令两条硬线:① 每条 grep 自带阳性对照。
 - 对照取同文件里确定存在、且 ⛔ 绝不是被测词子串的一个词。
 - 对照未通过的零记没读到,⛔ 不记不存在。
@@ -183,9 +185,7 @@
 
 ## 派发词构造细则
 
-- 三分区各自的 dev 义务:裁决区 dev 执行不重开。
-- 机制假设区动手前验证,证伪照实报告并按裁决意图换实现路径,⛔ 不许为顺从假设硬做。
-- 建议路线区有更好的就换,⛔ 不得因派发令写了照做。
+- 三分区各自的 dev 义务单源见 SKILL.md 与 os-dev 定义,派发词 ⛔ 不复述。
 - 兄弟 dev 报告里的成本或形状估计一律落机制假设区并注明须复测。
 - ⛔ 不得穿裁决的衣服转述:被当事实搬运的估计会把错误方向写死,而天真测试照绿。
 - 前提含 spec 有这个槽位 ⇒ 派发前先读安装包内的活性账本对应行。
