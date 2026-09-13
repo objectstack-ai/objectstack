@@ -1505,14 +1505,18 @@ const SET_AUTH_TOKEN_HEADER = 'set-auth-token';
  *   session would not change which credential lands here — it would invent a
  *   `token` on a route that served none, which is a different lie.
  *
- * ⚠️ **Known residue — `data.session` on `/sign-in|sign-up/email` (#17234).**
- * Those two routes serve no session object and no session id or expiry
- * anywhere, body or header, so `login` and `register` return a `data` with no
- * `session` and still do not parse as the full declared `SessionResponse`. The
- * only place a session is obtainable is a SECOND call to `/get-session`
- * (`auth.me`), and manufacturing one here would put a fabricated id and expiry
- * under a declared type — the card stays open for that shape decision rather
- * than being closed by an invention.
+ * ⚠️ **`data.session` on `/sign-in|sign-up/email` is no longer residue —
+ * closed server-side (#17234).** Those two routes now serve a `session`
+ * member too: `plugin-auth`'s `after` hook (`session-envelope-completion.ts`)
+ * reads the row `internalAdapter.createSession` already committed, back by
+ * the response's OWN token — the same seam `/get-session` uses — and attaches
+ * it, rather than this lift inventing one. So `login` and `register` now
+ * parse as the full declared `SessionResponse`, with one gap that is NOT
+ * this: `data.user.image` served `null` against a declared
+ * `string | undefined` (#17235, tracked separately). This does not touch the
+ * `data.token` rule above: `session.token` is the SAME unsigned string the
+ * body's own `token` already carried, not a second credential, and
+ * `data.token` is still never synthesized FROM a session.
  *
  * The `!body` guard is what carries the anonymous answer: `null` is falsy and
  * is returned untouched rather than wrapped into a signed-in-looking envelope

@@ -105,6 +105,7 @@ import { validateSortableFields } from './validate-sortable-fields.js';
 import { validateListViewFieldRefs } from './validate-list-view-field-refs.js';
 import { validateObjectFieldRefs } from './validate-object-field-refs.js';
 import { validateActionNameRefs } from './validate-action-name-refs.js';
+import { validateActionDispatchContract } from './validate-action-dispatch-contract.js';
 import { validatePageFieldBindings } from './validate-page-field-bindings.js';
 import { validatePageVisualizationBindings } from './validate-page-visualization-bindings.js';
 import { validateChartBindings } from './validate-chart-bindings.js';
@@ -325,6 +326,21 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // an object's own field-name lists.
   { name: 'validateObjectFieldRefs', runtimeTypes: ['flow', 'object'], run: validateObjectFieldRefs },
   { name: 'validateActionNameRefs', run: validateActionNameRefs },
+  // [#17319] The same action name, one question on: `validateActionNameRefs`
+  // asks whether the name a list view's selection bar writes resolves to an
+  // action at all; this member asks whether the WIRING it resolves through
+  // matches the dispatch contract that action declares its body was written
+  // for. Placed directly after it so the two report together — a dead name
+  // first, then a live name delivered the wrong input shape.
+  //
+  // NO `runtimeTypes`, i.e. the frozen `flow` default, and for the same reason
+  // the member above it takes the default: it resolves against `stack.actions`,
+  // which no per-write snapshot carries. The failure it would take on a `view`
+  // crossing is the gentler one (this member returns early on an empty
+  // declaration map, so it would go silent rather than refuse), but a member
+  // that is structurally unable to judge the snapshot has no business being
+  // dispatched on it.
+  { name: 'validateActionDispatchContract', run: validateActionDispatchContract },
   { name: 'validatePageFieldBindings', run: validatePageFieldBindings },
   // [#14073] The same page, one question out. `validatePageFieldBindings`
   // above resolves the field NAMES an interface page writes; this member

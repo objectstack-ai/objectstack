@@ -25,6 +25,7 @@
     "ui/Action:disabled",
     "ui/Action:errorMessage",
     "ui/Action:execute [RETIRED]",
+    "ui/Action:execution",
     "ui/Action:icon",
     "ui/Action:label",
     "ui/Action:locations",

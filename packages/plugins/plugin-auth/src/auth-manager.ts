@@ -71,6 +71,7 @@ import {
 } from './impersonation-bearer-rotation.js';
 import { echoInstalledSessionToken } from './two-factor-rotated-token-echo.js';
 import { resetVerifiedOnTwoFactorReenrollment } from './two-factor-reenrollment-verified-reset.js';
+import { attachSessionToCredentialResponse } from './session-envelope-completion.js';
 import {
   applyPlatformAdminImpersonation,
 } from './admin-impersonate-endpoint.js';
@@ -2256,6 +2257,19 @@ export class AuthManager {
           // rotated cookie too. See `two-factor-rotated-token-echo.ts`. This
           // corrects the echoed VALUE only; resolver precedence is untouched.
           await echoInstalledSessionToken(ctx);
+
+          // ── #17234: complete the SessionResponse envelope with the session
+          // the route just committed ────────────────────────────────────────
+          // `/sign-in/email` and `/sign-up/email` answer `{ token, user }`
+          // (plus `redirect` on sign-in) with no `session` member anywhere in
+          // the body or the headers, so `SessionResponseSchema` never parsed
+          // either method's return value. The session is not absent — it is
+          // the row `internalAdapter.createSession` already committed before
+          // the endpoint returned — so this reads it back by the response's
+          // own token, the same seam `/get-session` uses, and attaches it.
+          // See `session-envelope-completion.ts` for the full measurement and
+          // why this can never fabricate an id or an expiry.
+          await attachSessionToCredentialResponse(ctx);
 
           // ── #10700: `verified` must describe the secret stored beside it ──
           // A second `/two-factor/enable` on an already-confirmed account

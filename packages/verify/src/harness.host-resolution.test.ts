@@ -6,8 +6,9 @@
  *
  * The defect: the organizations load used a bare `import()`, which Node ESM
  * resolves against the importer's own realpath — `packages/verify`'s, inside the
- * framework workspace. `@objectstack/organizations` is cloud-private and only
- * ever lives in the verified app's `node_modules`, so the import could never
+ * framework workspace. `@objectstack/organizations` is host-supplied — ADR-0132's
+ * entitlement boundary forbids any framework package declaring it — so it only
+ * ever lives in the verified app's `node_modules` and the import could never
  * succeed: `objectstack verify --multi-tenant` (and every programmatic
  * `bootStack(app, { multiTenant: true })`) fell into the catch and told the
  * operator to "Install/link it in this workspace" — about a package the app had
@@ -21,9 +22,10 @@
  * These cases use a real temp app directory with a real `node_modules` and a
  * real stand-in package on disk, and mock nothing.
  *
- * The fixture stands in for the enterprise package (it is not installable in
- * this workspace — that is the whole point), registering the same `org-scoping`
- * service and posture entitlement the real one does. What is under test here is
+ * The fixture stands in for the enterprise package (`packages/verify` may not
+ * declare it — ADR-0132's entitlement boundary — so it does not resolve here;
+ * that is the whole point), registering the same `org-scoping` service and
+ * posture entitlement the real one does. What is under test here is
  * RESOLUTION, not the enterprise semantics.
  */
 

@@ -244,6 +244,28 @@ Aggregate is the def form, which is where `execution` lives. A def that says
 time: the renderer has no action attached to such a def, so it used to render a
 button that reported success for every selected record and did nothing.
 
+**The action gets a say, and the two ends are checked against each other.** An
+action declares the contract its body was written for with the same key and the
+same two values the def uses — `execution: 'perRecord' | 'aggregate'` (see
+[Actions](/docs/ui/actions#declare-the-bulk-dispatch-contract)). Wiring a
+declared action the other way is refused by `os validate` / `os lint` /
+`os build` with `action-dispatch-contract-mismatch`, naming the action, the
+view and both contracts:
+
+```typescript
+// actions: { name: 'export_zip', type: 'api', execution: 'aggregate', … }
+
+bulkActions: ['export_zip'],   // ⛔ refused — the bare string is the per-record
+                               //    contract; this body reads `_selectedIds`
+bulkActionDefs: [
+  { name: 'export_zip', operation: 'custom', execution: 'aggregate' },  // ✅
+]
+```
+
+There is **no default**: an action that omits `execution` is checked against
+neither wiring, which is also the right declaration for a body deliberately
+written to serve both.
+
 **Gating a def by capability.** An inline def takes
 `requiredPermissions: string[]` with `action.requiredPermissions` semantics —
 absent/empty always passes, several entries AND, unknown caller capabilities

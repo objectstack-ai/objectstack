@@ -346,6 +346,21 @@ export default class Dev extends Command {
         // from the `/runtimeModule` hash, which differs run-to-run regardless
         // (the bundle embeds `builtAt`). Pinned by
         // child-env-source-loader.pin.test.ts.
+        //
+        // ⚠️ WHAT THIS RULE NO LONGER CARRIES, so the next reader does not
+        // re-derive it: the CONSEQUENCE above was never conditional on a child
+        // being handed the variable. Writing no `NODE_ENV` here leaves the
+        // child inheriting whatever the parent has, so an operator who merely
+        // EXPORTED `NODE_ENV=development` reproduced every word of it — and on
+        // a direct `os serve --dev` or `os start`, which has no parent to scrub
+        // at all. That class is closed one level down, where it is actually
+        // decided: `bin/run.js` declares `settings.enableAutoTranspile = false`,
+        // so the built entry resolves its commands from `dist/` whatever
+        // `NODE_ENV` says (#12271 — its docblock carries the measurement).
+        // ⛔ This rule stays anyway and is not redundant: it keeps the CLI's own
+        // sources from ASSERTING a loader-activating value, which is a
+        // different claim from the entry refusing to act on one, and it is the
+        // half `child-env-source-loader.pin.test.ts` can see.
         const compileResult = spawnSync(
           process.execPath,
           [binPath, 'compile', '--output', artifactPath],

@@ -38,7 +38,9 @@
  *
  * `multiTenant: 'posture-only'` activates the tenancy POSTURE and no row wall
  * (see `BootOptions.multiTenant`) — the enterprise `@objectstack/organizations`
- * runtime is cloud-private and genuinely absent from this workspace. An
+ * runtime is open core since ADR-0132, but ADR-0132's entitlement boundary
+ * forbids any framework package declaring it, so it is genuinely absent from
+ * this package's dependency graph and unresolvable from here. An
  * organization wall scopes ROWS, and the enabled bit is not a row:
  * `toggleFlow(name, enabled)` writes the automation engine's in-process
  * `flowEnabled` map, keyed by flow name and nothing else, `getFlowRuntimeStates()`

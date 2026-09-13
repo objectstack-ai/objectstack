@@ -19,11 +19,14 @@
 // nothing about the plugin's internals.
 //
 // ── Why this file mocks what its sibling refuses to mock ────────────────────
-// `dev-plugin-tenancy-failfast.test.ts` reads the ABSENT-package path off the
-// genuinely-absent cloud-private package, stubbing nothing. That is impossible
+// `dev-plugin-tenancy-failfast.test.ts` reads the ABSENT-package path off a
+// package that genuinely does not resolve from a framework package — ADR-0132's
+// entitlement boundary forbids any of them declaring `@objectstack/organizations`
+// (`no-framework-dependents.pin.test.ts`), and the package being open core since
+// ADR-0132 changes nothing about that — stubbing nothing. That is impossible
 // here by construction: "the package is present and refused" cannot be observed
-// without a present package. The mock therefore supplies only the thing the
-// open-source workspace cannot have — a resolvable `@objectstack/organizations`
+// without a present package. The mock therefore supplies only the thing no
+// framework package may declare — a resolvable `@objectstack/organizations`
 // — and the refusal semantics under test stay entirely in dev-plugin.ts.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';

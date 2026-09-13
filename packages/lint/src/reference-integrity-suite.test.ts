@@ -32,6 +32,12 @@ describe('reference-integrity suite — membership', () => {
       // members with nothing to inspect on the click path.
       'validateObjectFieldRefs',
       'validateActionNameRefs',
+      // [#17319] The same action name, one question on: the name-ref member
+      // above asks whether the selection bar's name resolves to an action; this
+      // one asks whether the wiring it resolves through matches the dispatch
+      // contract that action declares. Placed beside it so a dead name and a
+      // live-but-mis-wired one report together.
+      'validateActionDispatchContract',
       'validatePageFieldBindings',
       // [#14073] The same page, one question out: the BINDING behind each
       // visualization `appearance.allowedVisualizations` whitelists, resolved

@@ -42,8 +42,18 @@ interface InjectableApp {
 }
 
 /**
- * [#5261] Stand-in for the cloud-private `@objectstack/organizations` runtime,
- * mounted by `bootStack({ multiTenant: 'posture-only' })`.
+ * [#5261] Stand-in for the `@objectstack/organizations` runtime, mounted by
+ * `bootStack({ multiTenant: 'posture-only' })`.
+ *
+ * ⚠️ Why a stand-in and not the real package: since ADR-0132 that runtime is
+ * OPEN CORE — Apache-2.0, published on npm — so "it is closed-source" is no
+ * longer the reason and has not been since #16215. What keeps it out of here is
+ * ADR-0132's entitlement boundary: no framework package may DECLARE
+ * `@objectstack/organizations` (`no-framework-dependents.pin.test.ts`, its
+ * mechanical half — "Apps declare it; packages do not"), so `packages/verify`
+ * cannot depend on it and a bare import from here does not resolve it. The proof
+ * that the REAL plugin walls tenants lives in cloud's `security-enterprise`
+ * multi-org integration test.
  *
  * It registers the `org-scoping` service and nothing else. That single fact is
  * what the open core reads to decide whether a REQUESTED organization wall can
@@ -156,8 +166,9 @@ export interface BootOptions {
    * ## `'posture-only'` — a stand-in, for proving org LIFECYCLE without isolation
    *
    * `multiTenant: 'posture-only'` boots the same shape but registers a built-in
-   * stand-in for the `org-scoping` service instead of requiring the cloud-private
-   * enterprise package. The `tenancy` service then resolves a real, NON-DEGRADED
+   * stand-in for the `org-scoping` service instead of requiring the enterprise
+   * package that no framework package may declare (ADR-0132's entitlement
+   * boundary). The `tenancy` service then resolves a real, NON-DEGRADED
    * `isolated` posture, which is what posture-gated seams key on — above all
    * `POST /auth/organization/create`, which since #5261 refuses whenever the
    * EFFECTIVE posture has no organization wall.
@@ -510,8 +521,9 @@ export async function bootStack(
   } else if (opts.multiTenant) {
     // #4700: this used a bare `import()`, which Node ESM resolves against the
     // IMPORTER's realpath — `packages/verify`, inside the framework workspace.
-    // `@objectstack/organizations` is cloud-private and only ever lives in the
-    // host app's `node_modules`, so the import could never succeed and the
+    // `@objectstack/organizations` is host-supplied — ADR-0132's entitlement
+    // boundary forbids any framework package declaring it, so it only ever lives
+    // in the host app's `node_modules` — and the import could never succeed: the
     // message below fired at apps that had already installed the package,
     // telling them to install it again. Resolve from the host app (the project
     // `objectstack verify` runs in) and fall back to this package's own
@@ -531,8 +543,9 @@ export async function bootStack(
     // any caller until each one handed in its base. `(s) => import(s)` here is
     // literally this module's resolver, so the sentence now holds for
     // `bootStack`. Measured: it changes nothing for THIS specifier —
-    // `@objectstack/organizations` is cloud-private and resolves from nowhere
-    // in the framework workspace — and it is what stops the next app-supplied
+    // `@objectstack/organizations` resolves from nowhere in the framework
+    // workspace, because ADR-0132's entitlement boundary means no framework
+    // package declares it — and it is what stops the next app-supplied
     // package added to this path from silently missing `packages/verify`'s own
     // dependencies.
     const organizationsPkg = '@objectstack/organizations';

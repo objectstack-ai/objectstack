@@ -501,6 +501,8 @@ export type {
 } from './validate-object-field-refs.js';
 
 export { validateActionNameRefs, ACTION_NAME_UNDEFINED } from './validate-action-name-refs.js';
+export { validateActionDispatchContract, ACTION_DISPATCH_CONTRACT_MISMATCH } from './validate-action-dispatch-contract.js';
+export type { ActionDispatchContract, ActionDispatchContractFinding } from './validate-action-dispatch-contract.js';
 export type { ActionNameRefFinding, ActionNameRefSeverity } from './validate-action-name-refs.js';
 
 export { validateActionLocations, ACTION_NO_PLACEMENT } from './validate-action-locations.js';
