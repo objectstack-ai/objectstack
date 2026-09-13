@@ -1135,13 +1135,17 @@ describe('translation unknown-key strictness (#4001)', () => {
         .toContain('`title` → `label`');
     });
 
-    it('refuses `help` on a screen field rather than declaring a key the field has not got', () => {
-      // The report proposed label/placeholder/help. `ScreenFieldConfigSchema`
-      // declares nothing help-shaped, so `help` would parse clean and translate
-      // nothing (ADR-0078) — and unlike #6080's page-component `help` there is
-      // no honest key to alias it to, since `placeholder` is the in-input hint
-      // and not help text. It is `guidance` instead.
+    it('refuses `help` on a screen field, and says the string exists but the key does not', () => {
+      // The report proposed label/placeholder/help. `help` is still refused —
+      // but ⚠️ its reason changed with #17306 and this pin changed with it.
+      // The old reason was that the field declared nothing help-shaped; it now
+      // declares `inlineHelpText` (the object field's spelling), so the copy is
+      // real and only THIS face's key for it is missing. The refusal must not
+      // keep telling an author the field has no help copy when it has.
       const declared = Object.keys((ScreenFieldConfigSchema as unknown as z.ZodObject<z.ZodRawShape>).shape);
+      expect(declared).toContain('inlineHelpText');
+      // The bare spellings stay undeclared on the schema — `inlineHelpText` is
+      // the one landing key, so the translation face has exactly one candidate.
       expect(declared).not.toContain('help');
       expect(declared).not.toContain('helpText');
       expect(declared).toContain('label');
@@ -1149,7 +1153,8 @@ describe('translation unknown-key strictness (#4001)', () => {
 
       const message = parse({ lead_conversion: { screens: { s1: { fields: { f: { help: 'x' } } } } } })
         .error?.issues.find((i) => i.code === 'unrecognized_keys')?.message ?? '';
-      expect(message).toContain('a screen field declares no help/hint copy');
+      expect(message).toContain('would translate nothing');
+      expect(message).toContain('inlineHelpText');
       // …and it must not be re-pointed at `placeholder`, which means something else.
       expect(message).not.toContain('`help` → `placeholder`');
     });

@@ -396,6 +396,75 @@ Two things worth knowing:
   `config.fields[N].visibleWhen` — but a predicate that *parses* and simply
   names the wrong field still shows up as a field that never hides.
 
+#### A field's bound, help text and lookup target
+
+A screen field spells these three with **the object field's own key names** —
+one platform, one field vocabulary, so a name you learned declaring an object
+field means the same thing here:
+
+| Key | Type | What it does |
+|:---|:---|:---|
+| `min` / `max` | `number` | Numeric bound. Applied by the client at the input **and re-checked server-side when the run resumes**. |
+| `inlineHelpText` | `string` | Help text under the input. Unlike `placeholder`, it stays readable after the user types. |
+| `reference` | `string` | Object whose records a `type: 'lookup'` field picks from, so the field renders a record picker. |
+
+```typescript
+{
+  id: 'quote_terms',
+  type: 'screen',
+  config: {
+    fields: [
+      { name: 'discount', label: 'Discount %', type: 'number',
+        min: 0, max: 20,
+        inlineHelpText: 'Above 20% the quote is refused — this is a hard ceiling.' },
+      { name: 'resolved_by_article', label: 'Resolved by Article', type: 'lookup',
+        reference: 'crm_knowledge_article' },
+    ],
+  },
+}
+```
+
+**The bound is not advice.** `min` / `max` ride to the client so the user is
+stopped at the input, and `validateScreenInputs` re-checks them on resume, so a
+caller that skips the dialog and posts to `resume` directly is refused too
+(`min_value` / `max_value`, inside the run's `INVALID_SCREEN_INPUT`). A screen
+field's declared contract is the only contract behind it — there is no object
+schema to catch a bad bag downstream.
+
+**What these keys refuse:**
+
+- **A bound that is not a number.** `max: '20'` is refused at parse time
+  (`invalid_type`). The bound is a closed constraint even though the `type`
+  beside it is an open widget hint.
+- **The neighbouring spellings, by name and with their target.** `helpText`,
+  `help`, `hint` and `tooltip` are refused and named onto `inlineHelpText`;
+  `object`, `referenceTo`, `targetObject`, `lookupObject`, `relatedTo` and
+  `target` are refused and named onto `reference`. ⚠️ `object` means different
+  things one level apart: on the screen **node** it renames to `objectName`
+  (render that object's whole form), on a screen **field** it can only mean the
+  lookup target.
+- **A non-string `inlineHelpText` or `reference`.**
+
+**What they deliberately do NOT refuse:**
+
+- **A `lookup` field with no `reference`.** Unlike an object field — where the
+  reference is required — this stays optional, because screen fields declaring a
+  bare `lookup` type already exist in shipped flows and refusing them would break
+  metadata that parses today. Such a field keeps its current behaviour: no
+  picker target to resolve.
+- **A bound on a non-numeric field, or a non-numeric value under a bound.** A
+  screen field's `type` has no closed vocabulary, so neither this schema nor the
+  resume check judges value shape; the bound simply never fires.
+- **An absent value.** A bound constrains a value that is present — an optional
+  bounded field left empty is conformant. Presence is `required`'s question.
+- **A bound on a field the user was never shown.** Like `required`, a bound on a
+  hidden `visibleWhen` field does not fire — the client is the authority on what
+  was on screen.
+
+Not translatable yet: the flows translation bundle carries `label` and
+`placeholder` per field, so `inlineHelpText` renders in the authored language
+until that face grows a key for it.
+
 **Screen (object form):**
 
 Set `config.objectName`
