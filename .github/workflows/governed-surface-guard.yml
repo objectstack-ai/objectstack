@@ -19,8 +19,17 @@ on:
   # regime's healthy end state, and a check that reddens on the healthy case is
   # the permanently-red gate the 2026-08-18 ruling retired.
   pull_request:
-    branches:
-      - main
+    # ⛔ NO `branches:` filter either — the same permanent-pending wedge as the
+    # `paths:` note below, reached through the other axis of this same trigger:
+    # `paths:` decides which CHANGES start the workflow, `branches:` decides
+    # which BASE branches do. A `branches: [main]` filter means a PR based on a
+    # feature branch does not start this workflow at all, so `Governed Surface
+    # Queue Guard` publishes NO check run there — an ABSENCE, which branch
+    # protection holds as permanently pending rather than as a skip. A required
+    # context must report for ANY base, and this one is required: enrolling it
+    # in `scripts/check-required-contexts.mjs` brought this file under that
+    # registry's assertion 7c, which is the same defect #16482 cleared from
+    # `ci.yml` and `lint.yml` before this workflow was registered.
     # Naming `types:` REPLACES GitHub's default set rather than extending it,
     # so all three defaults are restated here (#8304). `ready_for_review` is
     # the addition and it is the point: flipping a governed draft to ready is
