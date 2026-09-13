@@ -30,7 +30,7 @@ describe('Plugin Security Advanced Schemas', () => {
         resourceLimits: {
           maxMemory: 16777216, // 16MB
           maxCpu: 50,
-          timeout: 30000,
+          timeoutMs: 30000,
         },
       };
       const result = RuntimeConfigSchema.parse(config);
@@ -67,7 +67,7 @@ describe('Plugin Security Advanced Schemas', () => {
         resourceLimits: {
           maxMemory: 1073741824, // 1GB
           maxCpu: 100,
-          timeout: 60000,
+          timeoutMs: 60000,
         },
       };
       const result = RuntimeConfigSchema.parse(config);
@@ -392,17 +392,76 @@ describe('Plugin security durations carry their unit (#15678)', () => {
     expect(parsed.vulnerabilityDisclosure?.responseTimeHours).toBe(24);
     expect(parsed.vulnerabilityDisclosure?.bugBounty).toBe(true);
   });
+});
 
-  // A NEGATIVE control on the same file: this key names its unit only in the
-  // JSDoc above it, a channel the gate does not read (it reads `.describe()` and
-  // `.meta({ description })`) — so the gate lists it without judging it, and it
-  // is outside this rename. The JSDoc-channel gap is #15939. Without this test, a
-  // later sweep reads the four renames above as "every timeout on this file".
-  it('leaves `RuntimeConfig.resourceLimits.timeout` bare — its describe names no unit', () => {
-    const parsed = RuntimeConfigSchema.parse({
+// THE FIFTH DURATION, closed by #15939 ruling A — what this slot used to pin.
+//
+// Until this card, this slot held a NEGATIVE control: `resourceLimits.timeout`
+// named its unit only in the JSDoc above it, a channel `check:duration-unit-keys`
+// does not read (it reads `.describe()` and `.meta({ description })`), so the
+// gate listed the key in its census without judging it and #15678 deliberately
+// left it alone. The control existed so a later sweep could not read the four
+// renames above as "every timeout on this file".
+//
+// #15939 IS that sweep, and it is the reason the control was written. Director
+// seat ruling A (2026-09-11, maintainer 「同意」, decision batch #115) remediates
+// the JSDoc-channel population per file, so the key is renamed here and this
+// slot now pins the OPPOSITE fact: the bare spelling is refused with the rename
+// prescription, and the suffixed spelling parses at the same magnitude. The
+// guard succeeded by failing — ⛔ it was not deleted, weakened or skipped.
+describe('RuntimeConfig.resourceLimits.timeout → timeoutMs (#15939 ruling A, #14478)', () => {
+  it('REFUSES the retired `resourceLimits.timeout` with the rename to `timeoutMs`', () => {
+    const result = RuntimeConfigSchema.safeParse({
       engine: 'process' as const,
       resourceLimits: { maxMemory: 1073741824, timeout: 60000 },
     });
-    expect(parsed.resourceLimits?.timeout).toBe(60000);
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find(
+      (i) => i.path.join('.') === 'resourceLimits.timeout',
+    );
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toMatch(
+      /`RuntimeConfig\.resourceLimits\.timeout` was renamed.*Rename the key to `timeoutMs`/s,
+    );
+    expect(issue!.message).toContain('the value (milliseconds) is unchanged');
+  });
+
+  it('accepts `timeoutMs` at the magnitude the retired key carried, beside its siblings', () => {
+    const parsed = RuntimeConfigSchema.parse({
+      engine: 'process' as const,
+      resourceLimits: { maxMemory: 1073741824, maxCpu: 100, timeoutMs: 60000 },
+    });
+    expect(parsed.resourceLimits?.timeoutMs).toBe(60000);
+    expect(parsed.resourceLimits).not.toHaveProperty('timeout');
+    expect(parsed.resourceLimits?.maxMemory).toBe(1073741824);
+    expect(parsed.resourceLimits?.maxCpu).toBe(100);
+  });
+
+  // The channel the whole of #15939 is about: the describe is what
+  // `content/docs/references/**` renders, and it now names the unit.
+  it('publishes the unit in the describe — the text the reference pages render', () => {
+    const limits = RuntimeConfigSchema.shape.resourceLimits.unwrap();
+    expect(limits.shape.timeoutMs.description).toBe('Maximum execution time in milliseconds');
+  });
+
+  // The two `timeout` keys on this file are DIFFERENT keys on different
+  // shapes, and both are now retired to the same `timeoutMs` token. Each
+  // refusal must name its own shape, or an upgrading author edits the wrong
+  // block — the confusion `SandboxConfig.process.timeout`'s own tombstone
+  // comment warned about while this key was still bare.
+  it('names its own shape, not the sandbox one, in the prescription', () => {
+    const runtime = RuntimeConfigSchema.safeParse({
+      resourceLimits: { timeout: 60000 },
+    });
+    const sandbox = SandboxConfigSchema.safeParse({ process: { timeout: 30000 } });
+    const runtimeMsg = runtime.error!.issues
+      .find((i) => i.path.join('.') === 'resourceLimits.timeout')!.message;
+    const sandboxMsg = sandbox.error!.issues
+      .find((i) => i.path.join('.') === 'process.timeout')!.message;
+    expect(runtimeMsg).toContain('`RuntimeConfig.resourceLimits.timeout`');
+    expect(runtimeMsg).not.toContain('`SandboxConfig.process.timeout`');
+    expect(sandboxMsg).toContain('`SandboxConfig.process.timeout`');
+    expect(sandboxMsg).not.toContain('`RuntimeConfig.resourceLimits.timeout`');
   });
 });

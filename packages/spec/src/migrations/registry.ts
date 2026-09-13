@@ -8632,6 +8632,68 @@ const step18: MigrationStep = {
         + 'dropped.',
     },
     {
+      id: 'kernel-health-check-and-hot-reload-durations-unit-in-key',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface: 'the three plugin-lifecycle durations whose unit lived in a source JSDoc only: '
+        + 'PluginHealthCheck.interval, PluginHealthCheck.timeout and HotReloadConfig.debounceDelay '
+        + '(kernel/plugin-lifecycle-advanced.zod.ts)',
+      replacement: 'intervalMs, timeoutMs and debounceDelayMs — rename each key; all three values '
+        + '(milliseconds) and their 30000 / 5000 / 1000 defaults are unchanged',
+      reason:
+        'Director-seat ruling A on #15939, 2026-09-11, carrying the maintainer\'s 「同意」 (decision '
+        + 'batch #115), executing the #14478 rule per file. Each key named milliseconds in its JSDoc '
+        + '— "Health check interval in milliseconds", "Timeout for health check in milliseconds", '
+        + '"Debounce delay before reloading (milliseconds)" — and the JSDoc above a key is NOT what '
+        + '`content/docs/references/**` renders; `.describe()` is. Measured on this tree by the '
+        + 'gate\'s own census (check-duration-unit-keys --list): all three read [name: -] [prose: -] '
+        + '— no unit in the name and none in the published prose either. `interval` is the sharpest '
+        + 'of the three: its describe carried one unit-shaped token, the parenthetical '
+        + '"(default: 30s)", which names SECONDS for a value the schema bounds and defaults in '
+        + 'MILLISECONDS (min 1000, default 30000). That is the 1000x confusion the rule exists for, '
+        + 'published to the one reader who cannot see the source. The suffix is the family\'s own '
+        + 'spelling, counted on this tree: 100 key-position *Ms declarations across packages/spec, '
+        + 'timeoutMs 29 of them and intervalMs 3, so both renames land on names the surface already '
+        + 'uses. debounceDelay takes the plain suffix rather than a shortened form: it is the only '
+        + 'debounce-shaped key spelling in the whole repo (5 key-position occurrences, all of this '
+        + 'one key and its fixtures, no debounceMs variant anywhere), while the Delay-plus-Ms pairing '
+        + 'is already attested (maxDelayMs, initialDelayMs, retryDelayMs, delayMs) — so unlike the '
+        + 'Ttl-versus-TTL question the sibling round had to settle, there is no competing family '
+        + 'spelling to choose between. All three old spellings are retiredKey() tombstones: neither '
+        + 'PluginHealthCheckSchema nor HotReloadConfigSchema is .strict(), so a bare deletion would '
+        + 'be a SILENT STRIP (#3733, ADR-0104) — and here the stripped value lands on a setInterval '
+        + 'period, a race deadline and a setTimeout delay. Why a semantic entry and not a D2 '
+        + 'conversion: the conversion chain walks a normalized STACK, and neither def is an '
+        + 'authorable surface — no metadata-type binding, stack collection or manifest embed carries '
+        + 'either, and both are library parameters a host passes to PluginHealthMonitor / '
+        + 'HotReloadManager in TypeScript (the #4914 / #11825 keep) — so a conversion would be a '
+        + 'transform with no seam that ever runs. That is the same disposition '
+        + 'plugin-auto-restart-never-reinitialised and hot-reload-watch-placeholder-retired recorded '
+        + 'for keys on these two defs. The registration-time refusals in '
+        + 'PluginHealthMonitor.registerPlugin and HotReloadManager.registerPlugin are the door for '
+        + 'the audience that does not parse. Measured on 884e8347d: the only in-repo readers are '
+        + 'packages/core/src/health-monitor.ts and packages/core/src/hot-reload.ts, both moved in '
+        + 'this same change; and the pinned objectui checkout — the pin this repo builds '
+        + 'against, `.objectui-sha` = `53ded82bf7a494f54e344e19099dbf00854b8694` — names '
+        + 'neither def and neither key: all thirteen exports of plugin-lifecycle-advanced.zod.ts and '
+        + 'the string debounceDelay each occur 0 times across its 6409 tracked files, against lit '
+        + 'controls objectstack 10171 and @objectstack/spec 3479 on the same corpus.',
+      acceptanceCriteria:
+        'Every producer and reader of a PluginHealthCheck spells intervalMs and timeoutMs, and every '
+        + 'one of a HotReloadConfig spells debounceDelayMs — concretely '
+        + 'packages/core/src/health-monitor.ts, whose loop now reads setInterval(..., '
+        + 'config.intervalMs) and whose race reads config.timeoutMs, and '
+        + 'packages/core/src/hot-reload.ts, whose debounce now reads config.debounceDelayMs. '
+        + 'Authoring any old spelling fails to compile (input type `never`) and fails to parse with '
+        + 'the rename prescription naming the suffixed key; handing one to registerPlugin on either '
+        + 'class is refused with an ADR-0112 VALIDATION_ERROR / 400 before the plugin is stored. '
+        + 'Behaviour is unchanged: the same milliseconds, the same 30000 / 5000 / 1000 defaults and '
+        + 'the same min bounds (1000 / 100 / 0), and the published describes now name milliseconds. '
+        + 'The sibling shutdownTimeout on HotReloadConfig is deliberately NOT renamed with them: its '
+        + 'JSDoc reads "Graceful shutdown timeout" and names no unit anywhere, so it is the #14519 '
+        + 'unit-nowhere shape the #14478 gate leaves outside its verdict, not part of this row set.',
+    },
+    {
       id: 'kernel-package-lifecycle-durations-unit-in-key',
       // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
       // code span AND a table cell.
@@ -8760,6 +8822,65 @@ const step18: MigrationStep = {
         + 'key. Verify the sharp pair explicitly: a manifest and a health report in the same '
         + 'codebase must now read responseTimeHours and responseTimeMs respectively, and neither '
         + 'accepts the bare name.',
+    },
+    {
+      id: 'kernel-runtime-config-timeout-unit-in-key',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface: 'RuntimeConfig resourceLimits.timeout (kernel/plugin-security-advanced.zod.ts)',
+      replacement: 'resourceLimits.timeoutMs — rename the key; the value (milliseconds) is unchanged',
+      reason:
+        'This entry COMPLETES what #15678 deliberately left alone, and the two are meant to be read '
+        + 'as a sequence. #15678 renamed the four plugin-security durations on this same file '
+        + '(`kernel-plugin-security-durations-unit-in-key`) and recorded, accurately, that one key was '
+        + 'out of its scope: RuntimeConfig.resourceLimits.timeout named its unit only in the JSDoc '
+        + 'above it ("Execution timeout in milliseconds"), a channel check:duration-unit-keys does not '
+        + 'read — it reads `.describe()` and `.meta({ description })` — and that key\'s describe '
+        + '("Maximum execution time") named none, so the gate listed it among the duration-shaped keys '
+        + 'without judging it, neither an offender nor an exemption. That JSDoc-channel gap was filed '
+        + 'as #15939, and #15678\'s statement about its own scope stays true. #15939 is now ruled and '
+        + 'this is its remediation: director-seat ruling A, 2026-09-11, carrying the maintainer\'s '
+        + '「同意」 (decision batch #115), which remediates the 21-row JSDoc-channel population per file '
+        + 'and lands the widened gate (#17635) last, into a tree already clean. So the reader who most '
+        + 'needs the unit — the reader of the published reference page, who never sees the source '
+        + 'JSDoc — got a bare integer on '
+        + 'content/docs/references/kernel/plugin-security-advanced.mdx and could not tell 60000 '
+        + 'milliseconds from 60000 seconds. The key is renamed and the describe is corrected in the '
+        + 'same stroke, because under the #14478 rule moving the unit into the describe alone is '
+        + 'itself a violation (unit in prose, none in the name). Spelled Ms, the same token '
+        + 'SandboxConfig.process.timeoutMs on this very file already carries: counted on this tree, '
+        + 'the suffixed family spells it that way in every member (29 key-position `timeoutMs` '
+        + 'declarations across packages/spec/src/**/*.zod.ts, 40 distinct *Ms keys) and there is no '
+        + 'timeoutMillis, timeout_ms or timeoutMS variant anywhere in packages/spec/src. Tombstoned '
+        + 'with retiredKey() because the nested resourceLimits object is not strict, so a bare '
+        + 'deletion would silently strip the key. Why a semantic entry and not a D2 conversion: a '
+        + 'RuntimeConfig is the engine block of the SandboxConfig a host or a plugin security manifest '
+        + 'constructs — stack.zod.ts declares no sandbox, security-policy or runtime-config collection '
+        + 'and it is not a stored sys_metadata row — so the conversion chain has no seam that runs on '
+        + 'it; the same reading #15678 recorded for the four keys it renamed. Measured on 146c291943: '
+        + 'no in-repo runtime reads the key — packages/core/src/security/sandbox-runtime.ts, the one '
+        + 'consumer of this shape, reads resourceLimits.maxCpu (3 occurrences of resourceLimits) and '
+        + 'spells timeout 0 times; outside the zod file and its test the only live occurrences are the '
+        + 'generated rows in content/docs/references/kernel/plugin-security-advanced.mdx, which this '
+        + 'rename regenerates. The pinned objectui checkout — this is the pin we build against, '
+        + '`.objectui-sha` = `53ded82bf7a494f54e344e19099dbf00854b8694`, re-read from this tree — '
+        + 'spells resourceLimits.timeout 0 times across '
+        + '6409 tracked files, against lit controls timeout 832, RuntimeConfig 236 and resourceLimits '
+        + '2 on the same corpus; both resourceLimits hits are prose in packages/app-shell recording '
+        + 'that objectui\'s own AppShellRuntimeConfig shares not one key with the spec\'s '
+        + 'RuntimeConfig, so nothing there authors this key and no pin bump is owed. #15939, #15678, '
+        + '#14478, ADR-0087.',
+      acceptanceCriteria:
+        'Every RuntimeConfigSchema.parse(…) site, and every literal handed to a plugin sandbox as its '
+        + 'runtime block, spells resourceLimits.timeoutMs; authoring resourceLimits.timeout fails to '
+        + 'compile (input type `never`) and fails to parse with the rename prescription naming '
+        + 'timeoutMs and the shape it belongs to. Behaviour is unchanged: a runtime given '
+        + 'timeoutMs: 60000 aborts execution after sixty seconds exactly as timeout: 60000 did, and '
+        + 'the min(0) integer bound rides along with the renamed key. The published describe reads '
+        + '"Maximum execution time in milliseconds". Verify the two same-named keys on this one file '
+        + 'apart: RuntimeConfig.resourceLimits.timeout and SandboxConfig.process.timeout both retire '
+        + 'to a key spelled timeoutMs, and each refusal names its own shape so an upgrading author '
+        + 'edits the right block.',
     },
     {
       id: 'kernel-startup-orchestrator-durations-unit-in-key',
@@ -12128,6 +12249,24 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // records: a health report is emitted by the startup orchestrator at runtime,
     // never authored into a metadata document.
     'kernel/HealthStatus:timestamp',
+    // #15939 ruling A (per-file remediation of #14478).
+    // `HotReloadConfig.debounceDelay` said "Debounce delay before reloading
+    // (milliseconds)" in a source JSDoc and "Wait time after change detection before
+    // reload" in the `.describe()` the reference pages publish, so the published
+    // channel named no unit at all and the reference-page reader got a bare 1000.
+    // Renamed to `debounceDelayMs`, the plain suffix rather than a shortened form:
+    // this is the only debounce-shaped key spelling in the repo (5 key-position
+    // occurrences, all this key and its fixtures; no `debounceMs` variant anywhere),
+    // while the Delay-plus-Ms pairing is already attested (`maxDelayMs`,
+    // `initialDelayMs`, `retryDelayMs`, `delayMs`) — so there was no competing family
+    // spelling to choose between. The value and the 1000 default are unchanged.
+    // Tombstoned with `retiredKey()`: `HotReloadConfigSchema` is not `.strict()`, so
+    // a bare deletion would silently strip the key and hand `setTimeout` no delay.
+    // No D2 conversion: not a stack collection member, not a stored row —
+    // `HotReloadConfig` is a library parameter a host passes to `HotReloadManager` in
+    // TypeScript, the same reading `hot-reload-watch-placeholder-retired` recorded
+    // for this def. See `kernel-health-check-and-hot-reload-durations-unit-in-key`.
+    'kernel/HotReloadConfig:debounceDelay',
     // #12428 — ADR-0049 enforce-or-remove, one symbol over from #12340 (PR #12425)
     // in the same file and on the same per-key test. `HotReloadManager.startWatching`
     // contained NO watcher: a guard plus `logger.info('File watching started',
@@ -12679,6 +12818,23 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // registration-time refusal in `PluginHealthMonitor.registerPlugin` is the door
     // for the audience that exists.
     'kernel/PluginHealthCheck:autoRestart',
+    // #15939 ruling A (per-file remediation of #14478). `PluginHealthCheck.interval`
+    // said "Health check interval in milliseconds" in a source JSDoc, and the
+    // `.describe()` the reference pages publish said "How often to perform health
+    // checks (default: 30s)" — its one unit-shaped token naming SECONDS for a value
+    // the schema bounds at min 1000 and defaults to 30000 MILLISECONDS. Measured by
+    // the gate's own census, the key read [name: -] [prose: -]: no unit in the name,
+    // and none the gate recognises in the prose either. Renamed to `intervalMs` —
+    // the family's own spelling on this tree (100 key-position `*Ms` declarations in
+    // packages/spec, `intervalMs` 3 of them). The value and the 30000 default are
+    // unchanged. Tombstoned with `retiredKey()`: `PluginHealthCheckSchema` is not
+    // `.strict()`, so a bare deletion would silently strip the key and hand
+    // `setInterval` no period at all. No D2 conversion: not a stack collection
+    // member, not a stored row — `PluginHealthCheck` is a library parameter a host
+    // passes to `PluginHealthMonitor` in TypeScript, the same reading
+    // `plugin-auto-restart-never-reinitialised` recorded for this def. See
+    // `kernel-health-check-and-hot-reload-durations-unit-in-key`.
+    'kernel/PluginHealthCheck:interval',
     // #12032 — ADR-0049 enforce-or-remove, one class over from #12428 (PR #12571)
     // and #12340 (PR #12425) in the same host-driven lifecycle library, and for a
     // sharper reason than either: this key HAD a reader that acted, and what it did
@@ -12785,6 +12941,21 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // registration-time refusal in `PluginHealthMonitor.registerPlugin` is the door
     // for the audience that exists.
     'kernel/PluginHealthCheck:restartBackoff',
+    // #15939 ruling A (per-file remediation of #14478). `PluginHealthCheck.timeout`
+    // said "Timeout for health check in milliseconds" in a source JSDoc and
+    // "Maximum time to wait for health check response" in the `.describe()` the
+    // reference pages publish, so the published channel named no unit at all and the
+    // reference-page reader got a bare 5000. Renamed to `timeoutMs` — the family's
+    // most attested spelling on this tree (29 key-position `timeoutMs` declarations
+    // in packages/spec). The value and the 5000 default are unchanged. Tombstoned
+    // with `retiredKey()`: `PluginHealthCheckSchema` is not `.strict()`, so a bare
+    // deletion would silently strip the key and race the health check against no
+    // deadline. No D2 conversion: not a stack collection member, not a stored row —
+    // `PluginHealthCheck` is a library parameter a host passes to
+    // `PluginHealthMonitor` in TypeScript, the same reading
+    // `plugin-auto-restart-never-reinitialised` recorded for this def. See
+    // `kernel-health-check-and-hot-reload-durations-unit-in-key`.
+    'kernel/PluginHealthCheck:timeout',
     // #15678 (stack card 3/6 of #14478) — ruling B. `PluginHealthReport.metrics.responseTime`
     // said "Average response time in ms" in prose and nothing else. Renamed to
     // `responseTimeMs`; the value is unchanged. Tombstoned with `retiredKey()`.
@@ -12827,6 +12998,21 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // this rename, and the divergence between the two shapes is filed separately.
     // See `kernel-startup-orchestrator-durations-unit-in-key`.
     'kernel/PluginStartupResult:duration',
+    // #15939 ruling A (per-file remediation of #14478 ruling B). This is the fifth
+    // duration on `kernel/plugin-security-advanced.zod.ts` and the one #15678
+    // deliberately left alone: `resourceLimits.timeout` said "Execution timeout in
+    // milliseconds" in a source JSDoc and "Maximum execution time" in the
+    // `.describe()` the reference pages publish, so the published channel named no
+    // unit at all and the gate listed the key in its census without judging it.
+    // Renamed to `timeoutMs`, the same token `SandboxConfig.process.timeoutMs` on
+    // this file already carries. The value is unchanged. Tombstoned with
+    // `retiredKey()`: the nested `resourceLimits` object is not strict, so a bare
+    // deletion would silently strip the key. No D2 conversion: a `RuntimeConfig` is
+    // the engine block of the `SandboxConfig` a host or a plugin security manifest
+    // constructs, never a stack collection member or a stored row — the same
+    // reading `kernel-plugin-security-durations-unit-in-key` recorded for the four
+    // keys it renamed. See `kernel-runtime-config-timeout-unit-in-key`.
+    'kernel/RuntimeConfig:resourceLimits.timeout',
     // #15678 (stack card 3/6 of #14478) — ruling B. `SandboxConfig.process.timeout`
     // said "Process timeout in ms" in prose and nothing else. Renamed to
     // `timeoutMs`; the value is unchanged. Tombstoned with `retiredKey()` inside

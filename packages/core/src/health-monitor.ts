@@ -57,8 +57,9 @@ function healthMonitorRefusal(message: string): Error & { code: string; status: 
 }
 
 /**
- * Keys removed from `PluginHealthCheck` in 18 (#12032) that a host may still
- * be passing.
+ * Keys a host may still be passing that `PluginHealthCheck` no longer accepts:
+ * the three restart keys removed in 18 (#12032), and the two durations renamed
+ * in 17 (#17780) so the unit rides in the key name.
  *
  * `PluginHealthCheckSchema` is not `.strict()`, so before the tombstones zod
  * would have silently STRIPPED each of these — a clean parse and a setting
@@ -103,6 +104,25 @@ const RETIRED_HEALTH_CHECK_KEYS: ReadonlyArray<readonly [string, string]> = [
     + '18 (#12032, ADR-0049 enforce-or-remove) — it delayed a restart that '
     + 'never happened, so it only moved when the `destroy()` landed. Delete '
     + 'the key.',
+  ],
+  // The two rename rows carry no tracker id: a runtime string reaches authors
+  // and operators who cannot resolve one. Their anchor is #17780, ruling A on
+  // #15939 — here in the source, where the reader who CAN resolve it looks.
+  [
+    'interval',
+    "'interval' was renamed to 'intervalMs' on PluginHealthCheck in "
+    + '@objectstack/spec 17 — the unit of a duration-shaped number lives in '
+    + 'the key name, not only in the describe prose. Rename the key to '
+    + "'intervalMs'; the value (milliseconds) and the 30000 default are "
+    + 'unchanged.',
+  ],
+  [
+    'timeout',
+    "'timeout' was renamed to 'timeoutMs' on PluginHealthCheck in "
+    + '@objectstack/spec 17 — the unit of a duration-shaped number lives in '
+    + 'the key name, not only in the describe prose. Rename the key to '
+    + "'timeoutMs'; the value (milliseconds) and the 5000 default are "
+    + 'unchanged.',
   ],
 ];
 
@@ -199,7 +219,7 @@ export class PluginHealthMonitor {
 
     this.logger.info('Plugin registered for health monitoring', { 
       plugin: pluginName,
-      interval: config.interval 
+      intervalMs: config.intervalMs 
     });
   }
 
@@ -224,7 +244,7 @@ export class PluginHealthMonitor {
           error 
         });
       });
-    }, config.interval);
+    }, config.intervalMs);
 
     this.checkIntervals.set(pluginName, interval);
     this.logger.info('Health monitoring started', { plugin: pluginName });
@@ -272,8 +292,8 @@ export class PluginHealthMonitor {
       if (config.checkMethod && typeof (plugin as any)[config.checkMethod] === 'function') {
         const checkResult = await this.raceCheckTimeout(
           (plugin as any)[config.checkMethod](),
-          config.timeout,
-          `Health check timeout after ${config.timeout}ms`
+          config.timeoutMs,
+          `Health check timeout after ${config.timeoutMs}ms`
         );
 
         if (checkResult === false || (checkResult && checkResult.status === 'unhealthy')) {
@@ -445,9 +465,9 @@ export class PluginHealthMonitor {
    * Same shape, same reasoning as `ObjectKernel.raceStartupTimeout()` (#4813,
    * PR #4874): the guard used to be armed and then abandoned — when the check
    * won the race, its `setTimeout` stayed ref'd in the event loop for the full
-   * `config.timeout`. Health checks are *periodic*, so unlike the kernel's
+   * `config.timeoutMs`. Health checks are *periodic*, so unlike the kernel's
    * one-shot startup guards the orphans here accumulate: one per plugin per
-   * round, each pinning the loop for `config.timeout`.
+   * round, each pinning the loop for `config.timeoutMs`.
    *
    * Clearing on settle rather than `unref()`-ing at arm time is deliberate.
    * An unref'd guard also stops pinning the loop, but it stops being a guard
