@@ -690,25 +690,20 @@ export interface AnalyticsServiceConfig {
    *   that field's storage scale via `percentScaleOf`, so a renderer scales by
    *   declared metadata instead of guessing from the value.
    * - Date bucketing: a date vs datetime dimension drills by the right bound.
-   * - [#16236] Formula result type: `returnType` is what a `formula` field was
-   *   DECLARED to compute, and the only channel it has to the measure
-   *   result-column rule. See the key's own note below.
-   *
-   * ⚠️ [#16236] `returnType` is `FieldSchema.returnType` — the AUTHORING
-   * vocabulary `'number' | 'text' | 'boolean' | 'date'`, whose owner is
-   * `packages/spec/src/data/field.zod.ts`. It is declared `string` here for the
-   * reason its sibling `type` is: this shape is what a HOST answers at runtime,
-   * and a host can answer a word this contract does not accept. ⛔ The accepted
-   * set is NEVER restated at this seam — `measureResultType` reads it off
-   * {@link FORMULA_RETURN_TYPE_RESULT}, which is the one copy, and tiers an
-   * unrecognised word as "cannot answer, do not block".
-   *
-   * ⛔ It is NOT a wire word. `AnalyticsResult.fields[].type` speaks
-   * `DimensionType`, in which `text` is `'string'` and `date` is `'time'`;
-   * relaying this key into that position is the mistake the translation table
-   * exists to prevent.
+   * ⚠️ [#17560] `returnType` was a FOURTH member here (#16236), carried for one
+   * reader: `measureResultType` translated a `formula` field's declared result
+   * type into the measure column's wire word. The director ruling of decision
+   * batch #127 (2026-09-13) refused `min` / `max` over `formula` on the
+   * compatibility table's own storage ground — a formula is VIRTUAL in SQL
+   * storage, no column is emitted, so no aggregate can be lowered to it
+   * whatever `returnType` says — and the compile leg now refuses the pair
+   * before a query is built. With its one reader retired the key had no
+   * consumer left, so it is REMOVED rather than relayed into a seam nothing
+   * reads: a declared input nobody consumes is the declared-not-enforced shape
+   * Prime Directive #10 refuses. A host that still answers it is simply
+   * ignored; ⛔ nothing here reads it.
    */
-  sourceFieldMeta?: (object: string, field: string) => { type?: string; defaultCurrency?: string; max?: number; returnType?: string } | undefined;
+  sourceFieldMeta?: (object: string, field: string) => { type?: string; defaultCurrency?: string; max?: number } | undefined;
   /**
    * [#15684] The SQL dialect of the datasource backing `object` — `'sqlite'`,
    * `'postgres'`, `'mysql'`, or `undefined` when the host cannot answer.
@@ -1836,12 +1831,12 @@ export class AnalyticsService implements IAnalyticsService {
         // + `field`) and the source field's declared type. A per-producer copy
         // would be four implementations of one rule, free to drift.
         //
-        // [#16236] The third input is the aggregated field's declared
-        // `returnType` — read off the SAME hook, in the same call, so a formula
-        // measure is typed from metadata the host already had rather than from
-        // a second probe. Absent (an unproven `dyn` expression) or unrecognised
-        // ⇒ the rule declines and the producer's `number` stands.
-        const resultType = measureResultType(m.aggregate, meta?.type, meta?.returnType);
+        // [#17560] The rule asks `AGGREGATE_FIELD_TYPE_COMPATIBILITY` whether
+        // the pair is accepted at all before it answers, so this seam cannot
+        // describe a pair the compile door refuses. Its former third input (a
+        // formula field's declared `returnType`, #16236) went with the `formula`
+        // branch the same ruling retired.
+        const resultType = measureResultType(m.aggregate, meta?.type);
         if (resultType) f.type = resultType;
       }
     }
