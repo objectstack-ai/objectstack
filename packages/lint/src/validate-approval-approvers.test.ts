@@ -259,30 +259,50 @@ describe('unset-manager dead-end (#16748)', () => {
     expect(findings[0].message).toContain('locked'); // lockRecord defaults true
   });
 
-  it('names the REAL remedy — provisioning, not the Console', () => {
+  it('names the REAL remedy — the admin operation, not the Console form', () => {
     const [finding] = validateApprovalApprovers(managerOnly());
-    // The prescription an operator can actually carry out (#16678: the column
-    // has no product write surface).
+    // The prescription an operator can actually carry out. #16678 landed the
+    // write surface, so the first thing the hint owes the reader is the
+    // endpoint, its body and how to CLEAR the link.
+    expect(finding.hint).toContain('/api/v1/auth/admin/set-user-manager');
+    expect(finding.hint).toContain('{ userId, managerId }');
+    expect(finding.hint).toContain('managerId set to null');
     expect(finding.hint).toContain('SCIM');
     expect(finding.hint).toContain('import');
     expect(finding.hint).toContain('directory sync');
-    expect(finding.hint).toContain('no product write surface');
-    // ⛔ And it must not send them to a surface that cannot write it. The word
-    // "Console" appears only inside that denial, never as an instruction.
+
+    // ⛔ The assertion that went stale the day the endpoint landed. It must be
+    // gone from the string, not merely contradicted further down it: an author
+    // who reads "no product write surface" stops looking for the endpoint.
+    expect(finding.hint).not.toContain('no product write surface');
+
+    // ⛔ And it still must not send them to a surface that cannot write it —
+    // the column stays OUT of ADR-0092 Tier 1 and readonly on the form, so a
+    // dedicated operation is not the same thing as an editable profile column.
+    // The word "Console" appears only inside that denial, never as an
+    // instruction.
     expect(finding.hint).toContain('never populated by editing the user in the Console');
     expect(finding.hint).not.toMatch(/[Ee]dit .{0,40}in the Console\b(?!.*NOT)/);
-    // It still offers the escape that does not depend on #16678 at all.
+    // It still offers the escape that needs no operator action at all.
     expect(finding.hint).toContain("org_membership_level', value: 'owner'");
   });
 
   it('GRADES the routes — an exact diagnosis whose remedy cannot be carried out is worse than none', () => {
-    // A remedy that names a route with no writer is the #17037 shape. The three
-    // routes are measured against this tree, so the hint must SEPARATE the one
-    // that works here from the ones that need the deployment's own provisioning.
+    // A remedy that names a route with no writer is the #17037 shape. The four
+    // routes are measured against this tree, so the hint must SEPARATE the ones
+    // that work here from the ones that need the deployment's own provisioning.
     const [finding] = validateApprovalApprovers(managerOnly());
 
-    // The route with a demonstrated writer: a system-context write bypasses the
-    // managed-update whitelist (`isUserContextWrite` is `userId && !isSystem`).
+    // The route added by #16678, and the refusals that make it safe to point an
+    // operator at: naming an endpoint without naming what it declines is the
+    // same "prescription that cannot be carried out" defect one layer in.
+    expect(finding.hint).toContain('their own manager');
+    expect(finding.hint).toContain('close a cycle');
+    expect(finding.hint).toContain('organization boundary');
+
+    // The pre-existing route with a demonstrated writer: a system-context write
+    // bypasses the managed-update whitelist (`isUserContextWrite` is
+    // `userId && !isSystem`). Kept — the endpoint did not replace it.
     expect(finding.hint).toContain('written by a seed, or by any other system-context write');
     expect(finding.hint).toContain('bypasses the managed-update whitelist');
 
@@ -294,8 +314,11 @@ describe('unset-manager dead-end (#16748)', () => {
 
     // ⛔ And they must not be deleted: a deployment running a real directory
     // sync may well populate the column, and the defect was presenting all
-    // three as equally available, never naming them at all.
+    // three as equally available, never naming them at all. They now also take
+    // PRECEDENCE — the endpoint refuses an `idp_provisioned` identity — so the
+    // hint must not read as "use the endpoint instead of your directory".
     expect(finding.hint).toContain('SCIM provisioning and directory sync can populate it');
+    expect(finding.hint).toContain("source 'idp_provisioned' the admin operation refuses");
   });
 
   it('does not claim a runtime fact it did not read', () => {

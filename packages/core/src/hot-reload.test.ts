@@ -48,7 +48,7 @@ describe('HotReloadManager', () => {
     const guardedConfig = (overrides: Partial<HotReloadConfigParsed> = {}): HotReloadConfigParsed =>
       ({
         enabled: true,
-        debounceDelay: 1000,
+        debounceDelayMs: 1000,
         preserveState: false,
         stateStrategy: 'none',
         shutdownTimeout: 120_000,
@@ -225,7 +225,7 @@ describe('[#12340] stateStrategy refusal', () => {
   const configWith = (strategy: string): HotReloadConfigParsed =>
     ({
       enabled: true,
-      debounceDelay: 0,
+      debounceDelayMs: 0,
       preserveState: true,
       stateStrategy: strategy,
       shutdownTimeout: 1000,
@@ -350,7 +350,7 @@ describe('[#12428] startWatching refusal and the watch-handle removal', () => {
   const liveConfig = (overrides: Record<string, unknown> = {}): HotReloadConfigParsed =>
     ({
       enabled: true,
-      debounceDelay: 1000,
+      debounceDelayMs: 1000,
       preserveState: false,
       stateStrategy: 'memory',
       shutdownTimeout: 1000,
@@ -466,5 +466,54 @@ describe('[#12428] startWatching refusal and the watch-handle removal', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// ── [#17780] The debounce rename refuses at the door, not silently ──────────
+//
+// `HotReloadConfigSchema` is not `.strict()` and `registerPlugin` takes the
+// config straight from the caller's hand, so a host still spelling
+// `debounceDelay` would otherwise get `undefined` where a delay belongs — the
+// silent strip these tables exist to prevent, here landing on a `setTimeout`
+// argument.
+describe('[#17780] debounceDelay -> debounceDelayMs refusal', () => {
+  let mgr: HotReloadManager;
+  beforeEach(() => {
+    mgr = new HotReloadManager(createRecordingLogger([]));
+  });
+
+  it('refuses a leftover `debounceDelay` with an ADR-0112 envelope and the rename', () => {
+    const cfg = {
+      enabled: true,
+      debounceDelay: 2000,
+      preserveState: true,
+      stateStrategy: 'memory',
+      shutdownTimeout: 1000,
+    } as unknown as HotReloadConfigParsed;
+
+    let caught: (Error & { code?: string; status?: number }) | undefined;
+    try {
+      mgr.registerPlugin('p', cfg);
+    } catch (e) {
+      caught = e as Error & { code?: string; status?: number };
+    }
+    expect(caught).toBeDefined();
+    expect(caught?.code).toBe('VALIDATION_ERROR');
+    expect(caught?.status).toBe(400);
+    expect(caught?.message).toContain("'debounceDelay' was renamed to 'debounceDelayMs'");
+    expect(caught?.message).toContain('milliseconds');
+    // This file's prescriptions name the hazard, never a tracker id.
+    expect(caught?.message).not.toMatch(/(?<![#&])#\d{3,5}(?![0-9A-Za-z])/);
+  });
+
+  it('accepts the suffixed spelling (anti-vacuity)', () => {
+    const cfg = {
+      enabled: true,
+      debounceDelayMs: 2000,
+      preserveState: true,
+      stateStrategy: 'memory',
+      shutdownTimeout: 1000,
+    } as unknown as HotReloadConfigParsed;
+    expect(() => mgr.registerPlugin('p', cfg)).not.toThrow();
   });
 });
