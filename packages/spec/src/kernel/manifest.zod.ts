@@ -386,11 +386,33 @@ export const ManifestSchema = strictObject({
    * structured plugin permission block ({@link PluginPermissionsSchema},
    * ADR-0025 §3.2) that maps to service / hook / network / fs capabilities.
    *
+   * ⚠️ **This key carries a DIFFERENT declaration one stage along, and the two
+   * are not compatible.** At this AUTHORING stage `permissions` is the
+   * capability grant above. At the ASSEMBLED stage the collection wins and the
+   * same key is `PermissionSet[]` — the ADR-0090 app-category sets, with
+   * `name` / `isDefault` — declared by `AssembledPackageBodySchema` in
+   * `../stack.zod.ts`, whose own stage table names this key beside `objects`
+   * and `datasources` as one of the three that change meaning. A package
+   * writes the set collection in its own stack (`defineStack({ permissions:
+   * [ … ] })`); a manifest-stage `permissions` has no expression in an
+   * assembled body, because the flatten order overrides it.
+   *
+   * ⇒ A consumer reading `permissions` off an installed-package RECORD is
+   * reading whichever stage that row was installed at, so it must say which
+   * one it wants and report the other rather than dropping it. The one such
+   * reader today is `collectDeclaredSuggestions` in
+   * `@objectstack/plugin-security` (`suggested-audience-bindings.ts`), which
+   * wants the assembled reading and now names the authoring one when it meets
+   * it. ⛔ The fix for that collision is never to widen this union with the
+   * set shape: a union at the key would make neither stage checkable, which is
+   * the road `AssembledPackageBodySchema` records as REJECTED by name
+   * (Prime Directive #12).
+   *
    * @example ["system.user.read", "system.data.write"]
    * @example { "services": ["object", "http"], "hooks": ["record.beforeInsert"] }
    */
   permissions: ManifestPermissionsSchema.optional()
-    .describe('Required permissions: legacy string[] or structured plugin block (ADR-0025 §3.2)'),
+    .describe('Required permissions at the AUTHORING stage: legacy string[] or structured plugin block (ADR-0025 §3.2) — at the assembled stage the same key is the ADR-0090 `PermissionSet[]` collection instead (`AssembledPackageBodySchema`)'),
   
   /** 
    * Glob patterns specifying ObjectQL schemas files.

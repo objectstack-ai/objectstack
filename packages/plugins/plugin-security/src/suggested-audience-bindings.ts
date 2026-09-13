@@ -230,6 +230,132 @@ function suggestionKey(packageId: string, setName: string, anchor: string): stri
 }
 
 /**
+ * One installed package whose `manifest.permissions` this reader could not read
+ * as permission sets, and which arm of `ManifestPermissionsSchema` it turned
+ * out to be carrying.
+ *
+ * `entries` counts the ARRAY members that were dropped, and is `0` for the
+ * structured arm, which is one object dropped whole.
+ */
+interface DroppedManifestPermissions {
+  packageId: string;
+  arm: 'adr-0025-structured' | 'adr-0025-legacy-strings';
+  entries: number;
+}
+
+/**
+ * Which packages one engine has already been told about, so the report below
+ * is made ONCE per engine per package+arm rather than once per pass.
+ *
+ * The frequency is the whole reason this is not a bare `warn` at the drop
+ * site: `syncAudienceBindingSuggestions` runs at boot, after every
+ * package-door `permission` publish AND on every `listAudienceBindingSuggestions`
+ * call, while a manifest's shape is fixed for as long as that package is
+ * installed — so an undeduplicated line would repeat on every console page
+ * load and be skimmed past, which is the same silence with extra steps.
+ *
+ * Keyed on the ENGINE rather than held in a module-level `Set`, so a process
+ * hosting several tenant kernels reports once per kernel, and so a test gets a
+ * fresh ledger from its own stub with nothing to reset.
+ */
+const reportedManifestPermissionDrops = new WeakMap<object, Set<string>>();
+
+/**
+ * Classify a manifest's `permissions` value against what THIS reader needs.
+ *
+ * `null` = readable as permission sets, or simply absent. A partially readable
+ * array is reported with only its unreadable members counted.
+ */
+function classifyManifestPermissions(
+  permissions: unknown,
+): Omit<DroppedManifestPermissions, 'packageId'> | null {
+  if (permissions === undefined || permissions === null) return null;
+  if (!Array.isArray(permissions)) {
+    // The ADR-0025 §3.2 structured block — `{ services, hooks, network, fs }`.
+    // An object, so `Array.isArray` is false and the whole value is dropped.
+    return typeof permissions === 'object' ? { arm: 'adr-0025-structured', entries: 0 } : null;
+  }
+  // The legacy flat arm is `string[]`; a permission set is an object with a
+  // `name`. Count what `consider` refuses on SHAPE — never what it refuses on
+  // `isDefault` or on missing provenance, which are decisions, not drops.
+  const entries = permissions.filter((e) => !e || typeof e !== 'object' || !(e as { name?: unknown }).name).length;
+  return entries > 0 ? { arm: 'adr-0025-legacy-strings', entries } : null;
+}
+
+/**
+ * Report — once per engine per package+arm — that a package's
+ * `manifest.permissions` carried the ADR-0025 reading and therefore
+ * contributed no audience-binding suggestion.
+ *
+ * ## Why this exists: one key, two incompatible readings, one registry slot
+ *
+ * `permissions` means different things at the two manifest stages, and the
+ * registry stores both under the same key:
+ *
+ *  - AUTHORING stage — `ManifestSchema.permissions` is `ManifestPermissionsSchema`
+ *    (`kernel/manifest.zod.ts`): the capability grant a plugin REQUESTS, either
+ *    the legacy flat `string[]` or the structured `{ services, hooks, network,
+ *    fs }` block (ADR-0025 §3.2);
+ *  - ASSEMBLED stage — the collection wins and the key is `PermissionSet[]`
+ *    (`AssembledPackageBodySchema` in `stack.zod.ts`, ADR-0130 D4), whose own
+ *    table states that precedence key by key.
+ *
+ * This reader wants the assembled reading. Handed the authoring one it used to
+ * return an empty list and say nothing: the structured arm fell out of
+ * `Array.isArray`, and every member of the legacy arm fell out of `consider`'s
+ * first line. A package declaring the other reading produced no suggestion, no
+ * row and no log — AGENTS.md "Route & surface ownership" §3: absence must be
+ * loud.
+ *
+ * ## Why `warn` and not `error`
+ *
+ * Same reasoning as {@link reportSuggestionWriteRefusals}, one step weaker:
+ * nothing here claims to have persisted anything, so this is a FUNCTIONAL
+ * degradation — a prompt that is not offered — which AGENTS.md "Degradation
+ * log levels" puts at `warn`. The sink is the same `SuggestionDeps['logger']`,
+ * which declares no `error`.
+ */
+function reportDroppedManifestPermissions(
+  ql: unknown,
+  logger: SuggestionDeps['logger'] | undefined,
+  dropped: DroppedManifestPermissions[],
+): void {
+  if (dropped.length === 0 || !logger?.warn) return;
+  let ledger: Set<string> | undefined;
+  if (typeof ql === 'object' && ql !== null) {
+    ledger = reportedManifestPermissionDrops.get(ql);
+    if (ledger === undefined) {
+      ledger = new Set<string>();
+      reportedManifestPermissionDrops.set(ql, ledger);
+    }
+  }
+  const fresh = ledger ? dropped.filter((d) => !ledger.has(`${d.packageId}|${d.arm}`)) : dropped;
+  if (fresh.length === 0) return;
+  for (const d of fresh) ledger?.add(`${d.packageId}|${d.arm}`);
+  logger.warn(
+    `[security] ${fresh.length} installed package(s) declare \`manifest.permissions\` in the ADR-0025 ` +
+      `plugin-GRANT reading, not the ADR-0090 permission-SET collection this reconciler reads — those ` +
+      `declarations contribute NO audience-binding suggestion, and until now they said nothing at all. ` +
+      `One key carries two incompatible readings and the registry stores both in the same slot: at the ` +
+      `AUTHORING stage \`ManifestSchema.permissions\` is the capability grant a plugin requests (the legacy ` +
+      `flat \`string[]\`, or the structured \`{ services, hooks, network, fs }\` block, ADR-0025 §3.2); at ` +
+      `the ASSEMBLED stage the collection wins and the key is \`PermissionSet[]\` ` +
+      `(\`AssembledPackageBodySchema\`, ADR-0130 D4). This pass reads the ASSEMBLED one, so the authoring ` +
+      `one is skipped whole — the structured arm is an object and never enters the loop, and every member ` +
+      `of the legacy arm is a bare string with no \`name\`. CONSEQUENCE: if any of these packages meant to ` +
+      `ship a permission set with \`isDefault: true\`, no \`sys_audience_binding_suggestion\` row exists ` +
+      `for it and no admin is ever prompted to bind it — the console shows one fewer suggestion and the ` +
+      `deployment goes on looking healthy. If they meant the ADR-0025 grant, nothing is lost and this line ` +
+      `is informational; it prints either way because this reader cannot tell the two intents apart. ` +
+      `REMEDY: declare permission sets in the package's OWN stack collection — ` +
+      `\`defineStack({ permissions: [ … ] })\` — which is what the assembled body carries and what this ` +
+      `pass reads, and leave the manifest-stage \`permissions\` to ADR-0025. Reported once per engine per ` +
+      `package and arm, so a shape that does not change does not repeat on every list call.`,
+    { packages: fresh },
+  );
+}
+
+/**
  * Collect every currently-declared audience-binding suggestion from BOTH
  * declaration sources:
  *
@@ -243,8 +369,18 @@ function suggestionKey(packageId: string, setName: string, anchor: string): stri
  * Today the only declarable suggestion is `isDefault: true` → `everyone`
  * (ADR-0090 D5); the shape is anchor-keyed so the D9 `guest` generalization
  * slots in without a schema change.
+ *
+ * `logger` is optional and carries ONE report: source 2 reads its key at the
+ * assembled stage while the same key has an authoring-stage meaning, and a
+ * manifest carrying the authoring one is skipped — see
+ * {@link reportDroppedManifestPermissions}. Passing no logger is silent, which
+ * is why every in-repo caller passes one.
  */
-export function collectDeclaredSuggestions(ql: any, metadata?: any): DeclaredSuggestion[] {
+export function collectDeclaredSuggestions(
+  ql: any,
+  metadata?: any,
+  logger?: SuggestionDeps['logger'],
+): DeclaredSuggestion[] {
   const out = new Map<string, DeclaredSuggestion>();
 
   const consider = (ps: any, packageId: string | undefined) => {
@@ -268,6 +404,7 @@ export function collectDeclaredSuggestions(ql: any, metadata?: any): DeclaredSug
   } catch { /* metadata facade optional */ }
 
   // Source 2 — installed package manifests (live at install time).
+  const dropped: DroppedManifestPermissions[] = [];
   try {
     const packages: any[] = ql?.registry?.getAllPackages?.() ?? [];
     for (const pkg of packages) {
@@ -275,8 +412,14 @@ export function collectDeclaredSuggestions(ql: any, metadata?: any): DeclaredSug
       const manifest = pkg?.manifest;
       const declared = Array.isArray(manifest?.permissions) ? manifest.permissions : [];
       for (const ps of declared) consider(ps, manifest?.id);
+      // The same value, asked the OTHER question: was any of it unreadable
+      // here? An unowned package still counts — its declaration is dropped by
+      // this reader either way, and naming it is how an operator finds it.
+      const drop = classifyManifestPermissions(manifest?.permissions);
+      if (drop) dropped.push({ packageId: manifest?.id ?? manifest?.name ?? '(unidentified package)', ...drop });
     }
   } catch { /* registry shape optional (test stubs) */ }
+  reportDroppedManifestPermissions(ql, logger, dropped);
 
   return [...out.values()];
 }
@@ -424,7 +567,7 @@ export async function syncAudienceBindingSuggestions(
   // steady-state boot — and the summary line is gated on that same zero.
   const refusals = createSeedWriteRefusals();
 
-  const declared = collectDeclaredSuggestions(ql, metadata);
+  const declared = collectDeclaredSuggestions(ql, metadata, logger);
   const declaredKeys = new Set(declared.map((d) => suggestionKey(d.packageId, d.set.name, d.anchor)));
 
   const anchors = await findAnchorPositions(ql, organizationId);
@@ -787,7 +930,7 @@ export async function confirmAudienceBindingSuggestion(
   // or env-owned name is refused, never clobbered.
   let setRow = (await tryFind(ql, 'sys_permission_set', { name: row.permission_set_name }, 1, organizationId))[0] ?? null;
   if (!setRow) {
-    const declared = collectDeclaredSuggestions(ql, deps.metadata).find(
+    const declared = collectDeclaredSuggestions(ql, deps.metadata, deps.logger).find(
       (d) => d.packageId === row.package_id && d.set.name === row.permission_set_name && d.anchor === row.anchor,
     );
     if (declared) {
