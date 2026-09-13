@@ -79,14 +79,19 @@ const parse: CliParse = parseCLI;
 /** A real `vitest run …` command line, as `process.argv` would carry it. */
 const argv = (...args: string[]): string[] => ['/usr/bin/node', '/x/vitest.mjs', 'run', ...args];
 
-/** Run the preflight with a capturing writer instead of stderr. */
+/**
+ * Run the preflight with a capturing writer and a FRESH once-guard scope, so
+ * each case behaves like its own process.
+ */
 function preflight(...args: string[]): { notice: string; writes: string[] } {
   const writes: string[] = [];
+  const scope: Record<string, unknown> = {};
   const notice = runFilterPreflight({
     argv: argv(...args),
     root: PKG,
     populations: POPULATIONS,
     parse,
+    scope,
     write: (text) => void writes.push(text),
   });
   return { notice, writes };
@@ -121,6 +126,31 @@ describe('① a path that will run no tests is reported by name', () => {
     const only = preflight('--project', 'unit', I1);
     expect(only.notice).toContain(I1);
     expect(only.notice).toContain('this run selected project `unit`');
+  });
+
+  it('announces ONCE per process, however many times the config is loaded', () => {
+    // ⛔ vitest loads this config once per project and each load is its own
+    // module instance, so a module-level flag guards nothing: before the scope
+    // guard existed, three loads printed three notices at the top and three
+    // more at exit. The guard is pinned here by calling twice on one scope.
+    const writes: string[] = [];
+    const scope: Record<string, unknown> = {};
+    const once = (): string =>
+      runFilterPreflight({
+        argv: argv('--project', 'unit', U1, I1),
+        root: PKG,
+        populations: POPULATIONS,
+        parse,
+        scope,
+        write: (text) => void writes.push(text),
+      });
+    const first = once();
+    const second = once();
+    expect(first).not.toBe('');
+    // ⛔ The second call still REPORTS the notice to its caller — it just does
+    // not write it again. Returning '' would read as "nothing was lost".
+    expect(second).toBe(first);
+    expect(writes).toHaveLength(1);
   });
 
   it('separates a path in the other tier from one in no tier at all', () => {

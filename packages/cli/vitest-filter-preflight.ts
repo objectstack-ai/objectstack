@@ -301,17 +301,30 @@ export function renderLostFilterNotice(
   return lines.join('\n');
 }
 
-let armed = false;
+/**
+ * The once-guard key. ⛔ It lives on a SCOPE OBJECT (`globalThis` in a real
+ * run), never in a module-level binding: vitest loads this config once per
+ * project, each load gets its own module instance, and a module-level flag
+ * therefore guards nothing. Measured before this existed — three projects'
+ * worth of loads printed the notice three times at the top and three more at
+ * exit, six copies of one diagnostic.
+ */
+const ANNOUNCED = '__objectstackCliFilterPreflightAnnounced';
 
 /**
- * Run the preflight for this process and, if anything was lost, say so twice:
- * once now — config load, so it precedes vitest's banner — and once from an
- * `exit` listener, so it also lands BELOW the summary, which is where a reader
- * looks for `Test Files N passed`. Writes nothing at all, and registers no
- * listener, when nothing was lost.
+ * Run the preflight for this process and, if anything will be lost, say so
+ * twice: once now — config load, so it precedes vitest's banner — and once from
+ * an `exit` listener, so it also lands BELOW the summary, which is where a
+ * reader looks for `Test Files N passed`. Writes nothing at all, and registers
+ * no listener, when nothing is lost.
  *
  * ⛔ `process.on('exit')` rather than a reporter hook: see this file's header
  * on what naming `test.reporters` costs.
+ *
+ * `scope` is the once-guard's home and defaults to `globalThis`, so repeated
+ * config loads in ONE process announce once. A caller passing a fresh object
+ * gets a fresh process's behaviour, which is how the pin exercises both a first
+ * announcement and a repeat.
  */
 export function runFilterPreflight(options: {
   argv: readonly string[];
@@ -319,9 +332,11 @@ export function runFilterPreflight(options: {
   populations: Populations;
   parse: CliParse;
   write?: (text: string) => void;
+  scope?: Record<string, unknown>;
 }): string {
   const { argv, root, populations, parse } = options;
   const write = options.write ?? ((text: string) => void process.stderr.write(text));
+  const scope = options.scope ?? (globalThis as unknown as Record<string, unknown>);
   const invocation = parseInvocation(argv, parse);
   const notice = renderLostFilterNotice(
     lostFilters(invocation, populations, root),
@@ -329,10 +344,9 @@ export function runFilterPreflight(options: {
     invocation.projects,
   );
   if (!notice) return '';
+  if (scope[ANNOUNCED]) return notice;
+  scope[ANNOUNCED] = true;
   write(notice);
-  if (!armed) {
-    armed = true;
-    process.on('exit', () => write(notice));
-  }
+  process.on('exit', () => write(notice));
   return notice;
 }
