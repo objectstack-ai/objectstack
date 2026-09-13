@@ -141,13 +141,48 @@ describe('[#5341] formatZodErrors expands invalid_union branches', () => {
 /**
  * The live specimen, on the surface `os validate` actually parses.
  *
- * `views[].list.sort` is `z.union([z.string(), z.array(<strict sort entry>)])`
- * and the entry declares the #4721 alias `direction → order` — the same tuple
- * under a different word, which is worth a prescription precisely because
- * getting it wrong REVERSES the sort silently. Behind a union, that
- * prescription was produced on every run and delivered on none.
+ * The specimen's whole job is to reach a REAL `z.union` whose strict branch
+ * carries a curated prescription. It is therefore pinned to a property of the
+ * SCHEMA, not to any one key, and it moves when the schema does.
+ *
+ * ## Why it moved once already — read this before touching the assertions
+ *
+ * It used to be `views[].list.sort`,
+ * `z.union([z.string(), z.array(<strict sort entry>)])`, with the #4721 alias
+ * `direction → order`. #17053 retired the bare-string arm under ADR-0049
+ * enforce-or-remove; the union collapsed to its one surviving member, and the
+ * same stack now falls straight out of a plain `z.array(...)` as TWO ordinary
+ * issues — an `invalid_value` on `order` and an `unrecognized_keys` on the
+ * entry — neither of them `invalid_union`. The block's subject, *a rejection
+ * reaching the terminal from behind a union*, was no longer exercised at this
+ * door at all, and the terminal test below went on passing on the ordinary
+ * path while what it exists to guard went unguarded. Re-pointing the specimen
+ * is the repair; adapting the counts to the collapsed shape would have been
+ * the regression, which is why the terminal test now also asserts the union's
+ * own verdict line.
+ *
+ * ## The successor door, and the three things that qualify one
+ *
+ * `views[].list.gantt.tooltipFields`, verified on the tree this test runs
+ * against:
+ *
+ *   1. it is still `z.union([z.string(), <strict entry>])` — the string arm is
+ *      the bare field name, the object arm the `{ field, label }` pair
+ *      objectui's GanttView tooltip resolver reads, and no ruling retires
+ *      either (contrast `view.sort`, whose string arm had one);
+ *   2. the strict arm is a closed `strictObject` declaring the curated aliases
+ *      `name → field`, `fieldName → field`, `text → label`, `title → label`,
+ *      so a near-miss gets the #4001 campaign's prose instead of zod's default
+ *      report — the same reason `direction → order` was worth delivering;
+ *   3. it is reachable from `ObjectStackDefinitionSchema`, the schema
+ *      `os validate` parses, so the terminal really renders it.
+ *
+ * ⚠️ If this block reds on the issue COUNT again, the DOOR has moved and the
+ * formatter is fine: find another union that satisfies (1)–(3) and re-point
+ * the specimen at it. ⛔ Never adapt the assertions to whatever shape the
+ * schema now produces — that greens the file with its own subject untested.
  */
-const SORT_ALIAS_STACK = {
+const GANTT_TOOLTIP_ALIAS_STACK = {
   manifest: { id: 'union_probe', name: 'Union Probe', namespace: 'union_probe', version: '1.0.0', type: 'app' },
   views: [
     {
@@ -156,9 +191,18 @@ const SORT_ALIAS_STACK = {
       list: {
         name: 'union_probe_list',
         label: 'Union Probe',
-        type: 'grid',
+        type: 'gantt',
         columns: ['name'],
-        sort: [{ field: 'name', direction: 'desc' }],
+        gantt: {
+          startDateField: 'start_at',
+          endDateField: 'end_at',
+          titleField: 'name',
+          // The near-miss: `name` is how `record:highlights` spells the same
+          // idea, so an author carrying an entry across surfaces brings it
+          // along. Declared as an alias precisely so the answer names the
+          // replacement instead of reporting a stray key.
+          tooltipFields: [{ name: 'owner' }],
+        },
       },
     },
   ],
@@ -199,35 +243,43 @@ describe('[#5341] `os validate` delivers a union branch prescription', () => {
   // runs first. If the stack failed for some unrelated reason the terminal
   // assertion below could pass on the wrong error entirely.
   it('the specimen fails on exactly one issue, and that issue is the union', () => {
-    const result = ObjectStackDefinitionSchema.safeParse(SORT_ALIAS_STACK);
+    const result = ObjectStackDefinitionSchema.safeParse(GANTT_TOOLTIP_ALIAS_STACK);
     expect(result.success).toBe(false);
     const issues = result.success ? [] : result.error.issues;
     expect(issues).toHaveLength(1);
     expect(issues[0]!.code).toBe('invalid_union');
     // The prescription exists in the payload — it always has. Delivery is the
     // only thing #5341 is about.
-    expect(JSON.stringify(issues[0])).toContain('`direction` → `order`');
+    expect(JSON.stringify(issues[0])).toContain('`name` → `field`');
   });
 
   it('prints the prescription, not a bare `invalid_union: Invalid input`', () => {
-    const { exitCode, output } = runCli('validate', SORT_ALIAS_STACK);
-    expect(exitCode, `os validate accepted a stack with an aliased sort key:\n${output}`).not.toBe(0);
-    expect(output).toContain('views.0.list.sort');
-    expect(output).toContain('`direction` → `order`');
+    const { exitCode, output } = runCli('validate', GANTT_TOOLTIP_ALIAS_STACK);
+    expect(exitCode, `os validate accepted a stack with an aliased tooltip key:\n${output}`).not.toBe(0);
+    // Paired deliberately, and the pair is what keeps this test from passing
+    // for the wrong reason: the union's own verdict line is the evidence that
+    // the prescription under it arrived from BEHIND a union. The prescription
+    // assertion alone passes for any door that reports an unrecognized key
+    // directly — which is exactly how this test kept passing after #17053
+    // collapsed the previous specimen's union and left the block's subject
+    // unexercised.
+    expect(output).toContain('invalid_union: Invalid input');
+    expect(output).toContain('views.0.list.gantt.tooltipFields');
+    expect(output).toContain('`name` → `field`');
   }, 120_000);
 
   it('leaves the `--json` payload exactly as it was — full, and nested', () => {
     // The machine path never had this defect: it passes `error.issues` through,
     // so the branch tree was always on it. Pinned here because the fix is one
     // `console.log` loop away from being "helpfully" moved into the payload.
-    const { exitCode, output } = runCli('validate', SORT_ALIAS_STACK, ['--json']);
+    const { exitCode, output } = runCli('validate', GANTT_TOOLTIP_ALIAS_STACK, ['--json']);
     expect(exitCode).not.toBe(0);
     const payload = JSON.parse(output.slice(output.indexOf('{')));
     expect(payload.valid).toBe(false);
     expect(payload.errors).toHaveLength(1);
     expect(payload.errors[0].code).toBe('invalid_union');
     // The branch tree, untouched — and NOT flattened into extra `errors[]` rows.
-    expect(JSON.stringify(payload.errors[0].errors)).toContain('`direction` → `order`');
+    expect(JSON.stringify(payload.errors[0].errors)).toContain('`name` → `field`');
   }, 120_000);
 });
 
