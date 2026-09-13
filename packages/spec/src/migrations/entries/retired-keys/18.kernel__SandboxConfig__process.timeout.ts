@@ -4,13 +4,16 @@
 // said "Process timeout in ms" in prose and nothing else. Renamed to
 // `timeoutMs`; the value is unchanged. Tombstoned with `retiredKey()` inside
 // the live `process` block. ⚠️ Note for anyone grepping this file: the
-// neighbouring `RuntimeConfig.resourceLimits.timeout` is a DIFFERENT key whose
-// describe names no unit at all, so it is inside the gate's census and outside
-// its verdict, and is untouched here. ⚠️ Its unit is not missing, only
-// unpublished: the JSDoc two lines above it says milliseconds. That divergence
-// is what #15939 filed and what `check:duration-unit-keys` was ruled to refuse
-// (2026-09-07, decision batch #65) — so this key is a rename waiting on that
-// gate change, not a key that has nothing to fix.
+// neighbouring `RuntimeConfig.resourceLimits.timeout` is a DIFFERENT key and is
+// not covered by this entry. It was never "outside the gate's population", the
+// reason this note gave until #15939: its unit lived in a source JSDoc only
+// ("Execution timeout in milliseconds") while the `.describe()` the reference
+// pages publish read "Maximum execution time" and named none, so
+// `check:duration-unit-keys` listed the key in its census and never judged it.
+// Ruling A on #15939 remediated that JSDoc-channel population per file, so that
+// key is renamed to `timeoutMs` as well — landed, not pending — under its own
+// entry `kernel/RuntimeConfig:resourceLimits.timeout`; see
+// `kernel-runtime-config-timeout-unit-in-key` for its record.
 // No D2 conversion: a `SandboxConfig` is the isolation argument a host or a
 // plugin security manifest constructs, never a stack collection member or a
 // stored row. See
