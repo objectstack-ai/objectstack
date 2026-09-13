@@ -379,7 +379,6 @@
 - required checks 的名单是每仓事实,objectstack 七个:
   `TypeScript Type Check` · `Lint & Repo Gates` · `Test Core` · `Dogfood Regression Gate` ·
   `Build Core` · `Temporal Conformance (live PG + MySQL)` · `Governed Surface Queue Guard`。
-- 第七个 2026-08-27 入集(#12427),而注册表到 #15233 才钉住它。
 - ⭐ 本表的 `mustName` 不要求排他 ⇒ 第七个加注册行不会让本表变红。
 - ⇒ ⛔ 门绿不是本行已对的读数:计数行只能手跟改。
 - `in_progress` 不是过;advisory 门禁红进 main 是共享损伤,照样止血立单。
