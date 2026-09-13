@@ -5457,19 +5457,20 @@ const step18: MigrationStep = {
     'is a pure lossless DELETE (the key never had an effect to preserve) scoped by component ' +
     '`type`: `quickAdd` stays LIVE on the `kanban-ui` block, where a React host supplies the ' +
     'runtime slot, and the ruling keeps it there deliberately. ' +
-    'It also removes `page.assignedProfiles` (ADR-0090 D2 / ADR-0049 enforce-or-remove; ' +
-    'maintainer ruling 2026-09-12 \u300c\u540c\u610f\u300d). The key was authorable on the published ' +
-    '`PageSchema` and named for the Profile concept ADR-0090 D2 deleted, while the schema\'s own ' +
-    'alias table CORRECTED an authored `profiles:` into it — two files from ' +
-    '`security/permission.zod.ts` answering the same word with \"no Profile concept\". Measured ' +
-    'across this repository and objectui it had zero readers, so a page that \"assigned ' +
-    'profiles\" was open to every caller who could reach it. It is a retiredKey tombstone on ' +
-    '`PageSchema` — the def is still parsed from the `page` root, so there is an author to ' +
-    'teach — and the two alias entries became refusals naming the permission-set route. The ' +
-    'D2 conversion ' +
-    'STRIPS the key — there is no lossless target, because which permission set a given ' +
-    'profile name corresponds to is a judgement no walker can make, which is what the paired ' +
-    'D3 semantic entry is for.',
+    'It also retires the bare STRING `sort` clause on the list-view doors (#17053; objectui#8221 '
+    + 'decision batch #77, 2026-09-07 — option B, one spelling, the array). This is the PRODUCER '
+    + 'half of the seam whose consumer half is objectui PR #8758: `convertSortToQueryParams` now '
+    + 'refuses a runtime string, so `ListViewSchema.sort` was minting documents its own consumer '
+    + 'rejects — a document that validated upstream failed downstream, and the author was told off '
+    + 'by the wrong layer. Like the `type` value above it is a VALUE narrowing with no tombstone to '
+    + 'hang a prescription on, so the surviving array member\'s own error map carries it, keyed on '
+    + '`issue.input` being a string. The D2 conversion REWRITES rather than strips, because the '
+    + 'clause is losslessly mechanical: `\'created_at desc\'` is the tuple `{ field, order }`, a bare '
+    + 'field name meant ascending and is written out as `order: \'asc\'`, and the comma-separated '
+    + 'multi-key form becomes one entry per key in the same order. A string that does not parse as '
+    + 'that grammar — the `\'-field\'` dialect above all — is left alone and meets the door instead: '
+    + 'that dialect belongs to `RecordRelatedListProps.sort`, never reaches '
+    + '`convertSortToQueryParams`, and retiring it was NOT ruled.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5497,7 +5498,7 @@ const step18: MigrationStep = {
     'memory-persistence-auto-save-interval-to-ms',
     'turso-config-timeout-to-timeout-ms',
     'view-page-mount-removed',
-    'page-assigned-profiles-removed',
+    'list-view-sort-string-clause-to-array',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -8858,6 +8859,60 @@ const step18: MigrationStep = {
         + 'duration key — which is not a reader of this schema and is unchanged.',
     },
     {
+      id: 'logging-durations-unit-in-key',
+      surface: 'HttpDestinationConfig `batch.flushInterval` / `retry.initialDelay` / `timeout` and '
+        + 'LoggingConfig `buffer.flushInterval` (system/logging.zod.ts)',
+      replacement: '`batch.flushIntervalMs` (default 5000) / `retry.initialDelayMs` (default 1000) / '
+        + '`timeoutMs` (default 30000) on HttpDestinationConfig, and `buffer.flushIntervalMs` '
+        + '(default 1000) on LoggingConfig — rename the keys; every value (milliseconds) is unchanged',
+      reason:
+        'Director-seat ruling A on #15939, 2026-09-11, carrying the maintainer\'s 「同意」 (decision '
+        + 'batch #115), executing the #14478 rule per file. All four keys named milliseconds in a '
+        + 'source JSDoc — "Flush interval in milliseconds", "Initial retry delay in milliseconds", '
+        + '"Timeout in milliseconds" — and the JSDoc above a key is not what '
+        + '`content/docs/references/**` renders; `.describe()` is, and none of the four carried one at '
+        + 'all. Measured by the `check:duration-unit-keys` census on this tree before the change, all '
+        + 'four read `[name: -] [prose: -]`: no unit in the key and no published prose to supply it, '
+        + 'so `content/docs/references/system/logging.mdx` printed a bare 5000 / 1000 / 30000 / 1000 '
+        + 'and nothing on the page decided milliseconds from seconds. Under the #14478 gate, moving '
+        + 'the unit into the describe alone is itself a violation (unit in prose, none in the name), '
+        + 'so each key is renamed and given the describe it never had in the same stroke. '
+        + '⚠️ `flushInterval` was declared TWICE on this file, in two different defs and with two '
+        + 'different defaults — 5000 on the HTTP destination\'s batch and 1000 on the logging buffer '
+        + '— so they are two keys, each with its own tombstone and its own registered row; the '
+        + 'prescriptions name their def so a reader who lands on one is not sent to the other. The '
+        + '`Ms` suffix is the family\'s own spelling, counted in key position on this tree: 272 '
+        + '`*Ms:` declarations in `packages/spec/src` against 75 `*Seconds:`, and the only competing '
+        + 'unit spellings are 3 `*MS:` and 9 `*Millis:` — every one of them a name fixed outside this '
+        + 'repo (MongoDB\'s `maxCommitTimeMS` and `connectTimeoutMS`, node-postgres\'s '
+        + '`idleTimeoutMillis` and `connectionTimeoutMillis` on `PoolConfigSchema`), so unlike the '
+        + '`Ttl`-versus-`TTL` question a sibling round settled there is no in-repo alternative to '
+        + 'choose between. All three target spellings were already attested as key-position `*.zod.ts` '
+        + 'declarations before this change: `flushIntervalMs` 1 (`kernel/events/integrations.zod.ts`, '
+        + 'same 1000 default), `initialDelayMs` 5, `timeoutMs` 30. Tombstoned with `retiredKey()` '
+        + 'rather than deleted because none of the four enclosing objects — `HttpDestinationConfig` '
+        + 'itself and its nested `batch` and `retry`, and `LoggingConfig`\'s nested `buffer` — is '
+        + '`.strict()`, so a bare deletion would have stripped the value in silence. Why a semantic '
+        + 'entry and not a D2 conversion: `stack.zod.ts` declares no logging collection and neither '
+        + '`LoggingConfigSchema` nor `HttpDestinationConfigSchema` is referenced anywhere in '
+        + '`packages/spec/src` outside `system/logging.zod.ts`, so the chain has no rehydration seam '
+        + 'that runs on an authored logging document — the same reading '
+        + '`tenant-schema-cache-ttl-unit-in-key` recorded for its sibling key. Measured on 4dab2bc5c: '
+        + 'no in-repo runtime reads any of the four — outside `packages/spec/src/system/logging.zod.ts` '
+        + 'and its test the only occurrences are the generated rows in '
+        + '`content/docs/references/system/logging.mdx`, which this rename regenerates; and the pinned '
+        + 'objectui checkout — `.objectui-sha` = `53ded82bf7a494f54e344e19099dbf00854b8694` — spells '
+        + '`flushInterval` 0 times, `initialDelay` 0, `HttpDestinationConfig` 0 and `LoggingConfig` 0 '
+        + 'across its 6409 tracked files, against lit controls `useState` 2304 and `timeout` 702 on '
+        + 'the same corpus.',
+      acceptanceCriteria:
+        'Every HTTP log destination spells `batch.flushIntervalMs`, `retry.initialDelayMs` and '
+        + '`timeoutMs`, and every logging buffer spells `buffer.flushIntervalMs`; authoring any of the '
+        + 'four retired spellings fails to compile and fails to parse with a rename prescription '
+        + 'naming the suffixed key and its def; the parsed defaults are 5000 / 1000 / 30000 / 1000 as '
+        + 'before; and each published describe names milliseconds.',
+    },
+    {
       id: 'memory-persistence-placeholder-refused',
       surface: 'memory driver config `persistence.path` (file persistence and the `auto` ' +
         'override) and `persistence.key` (localStorage and the `auto` override) — values ' +
@@ -9364,36 +9419,6 @@ const step18: MigrationStep = {
         + 'SDKs from the contract entry, and the route\'s handler emits the same '
         + 'bytes before and after — the retirement removes a false claim, not '
         + 'behaviour.',
-    },
-    {
-      id: 'page-assigned-profiles-audience-to-permission-set',
-      surface: '`page.assignedProfiles` — the per-page audience list (REMOVED)',
-      replacement:
-        "the object's permission sets, bound to people through positions. The page shows DATA; gate "
-        + 'that data with the permission sets on the objects it reads (`objects.<name>.allowRead` and '
-        + 'the field-level bits), and bind each set to the people who should hold it through a position '
-        + '(`sys_position_permission_set`). There is no per-page audience key to move the list into, '
-        + 'and ADR-0090 D2 deleted the Profile concept the old list was written in, so each name in a '
-        + 'retired `assignedProfiles` list has to be re-expressed as a permission set + position pair.',
-      reason:
-        'The D2 conversion `page-assigned-profiles-removed` STRIPS the key mechanically, but the strip '
-        + 'is not the whole migration and must not read as one: the author who wrote the list was '
-        + 'declaring an intent ("only these people see this page") that the platform never honoured. '
-        + 'Measured at the ruling: zero readers in this repository and zero in objectui — no renderer, '
-        + 'route or metadata read door consulted the key — so the page has been open to every caller '
-        + 'who could reach it for as long as the key existed. Deleting it therefore changes no '
-        + 'behaviour and closes no hole; it makes an unkept promise stop being made. Which permission '
-        + 'set corresponds to a given profile name is a judgement no walker can derive, which is why '
-        + 'this is a TODO rather than a rewrite.',
-      acceptanceCriteria:
-        'No page metadata carries `assignedProfiles` (the D2 conversion '
-        + '`page-assigned-profiles-removed` strips it from authored sources on a chain replay; '
-        + '`os migrate meta --stored` covers rows already at rest). For every page that carried one, '
-        + 'each name in the old list resolves to a permission set held by the intended people through '
-        + 'a position, and a caller OUTSIDE that audience, signed in, is refused the data the page '
-        + 'reads — verified against the running deployment, not against the metadata alone. A caller '
-        + 'who was previously outside an `assignedProfiles` list and could nonetheless open the page '
-        + 'is the pre-existing state, not a regression introduced by the removal.',
     },
     {
       id: 'plugin-auto-restart-never-reinitialised',
@@ -13299,6 +13324,39 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // not a stack collection member, not a stored row.
     // See `system-failover-health-check-interval-unit-in-key`.
     'system/FailoverConfig:healthCheckInterval',
+    // #15939 ruling A (per-file remediation of #14478). `batch.flushInterval` said
+    // "Flush interval in milliseconds" in a source JSDoc and carried no
+    // `.describe()` at all, so the reference page published a bare 5000. Renamed to
+    // `flushIntervalMs` — the family's own spelling, 272 key-position `*Ms:`
+    // declarations in `packages/spec/src` and `flushIntervalMs` already declared on
+    // `kernel/events/integrations.zod.ts`. The value and the 5000 default are
+    // unchanged. Tombstoned with `retiredKey()`: the nested `batch` object is not
+    // strict, so a bare deletion would silently strip the key. ⚠️ Not the same key
+    // as `system/LoggingConfig:buffer.flushInterval`, which defaults to 1000 and
+    // has its own row. No D2 conversion: no logging collection on `stack.zod.ts`,
+    // not a stored row. See `logging-durations-unit-in-key`.
+    'system/HttpDestinationConfig:batch.flushInterval',
+    // #15939 ruling A (per-file remediation of #14478). `retry.initialDelay` said
+    // "Initial retry delay in milliseconds" in a source JSDoc and carried no
+    // `.describe()` at all, so the reference page published a bare 1000. Renamed to
+    // `initialDelayMs` — already attested as a key-position declaration 5 times on
+    // this tree. The value and the 1000 default are unchanged. Tombstoned with
+    // `retiredKey()`: the nested `retry` object is not strict, so a bare deletion
+    // would silently strip the key. No D2 conversion: no logging collection on
+    // `stack.zod.ts`, not a stored row. See `logging-durations-unit-in-key`.
+    'system/HttpDestinationConfig:retry.initialDelay',
+    // #15939 ruling A (per-file remediation of #14478). `timeout` said "Timeout in
+    // milliseconds" in a source JSDoc and carried no `.describe()` at all, so the
+    // reference page published a bare 30000. Renamed to `timeoutMs` — already
+    // attested as a key-position declaration 30 times on this tree. The value and
+    // the 30000 default are unchanged. Tombstoned with `retiredKey()`:
+    // `HttpDestinationConfig` is not strict, so a bare deletion would silently
+    // strip the key. ⚠️ The one TOP-LEVEL key of this card's four, so this is the
+    // one whose `authorable-surface/` and `authorable-defaults/` rows move — that
+    // ratchet records `schema.properties` one level deep. No D2 conversion: no
+    // logging collection on `stack.zod.ts`, not a stored row. See
+    // `logging-durations-unit-in-key`.
+    'system/HttpDestinationConfig:timeout',
     // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
     // retire per family). One of the hour/minute/day-shaped deadline keys of the
     // incident-response / training / change-management families: declared on the
@@ -13441,6 +13499,17 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // (launch-window convention) and the prescription lives at the major boundary
     // where `migrate meta` users look.
     'system/Job:timeout',
+    // #15939 ruling A (per-file remediation of #14478). `buffer.flushInterval` said
+    // "Flush interval in milliseconds" in a source JSDoc and carried no
+    // `.describe()` at all, so the reference page published a bare 1000. Renamed to
+    // `flushIntervalMs`. The value and the 1000 default are unchanged. Tombstoned
+    // with `retiredKey()`: the nested `buffer` object is not strict, so a bare
+    // deletion would silently strip the key. ⚠️ Not the same key as
+    // `system/HttpDestinationConfig:batch.flushInterval`, which defaults to 5000
+    // and has its own row — the two spellings were identical and the defaults never
+    // were. No D2 conversion: no logging collection on `stack.zod.ts`, not a stored
+    // row. See `logging-durations-unit-in-key`.
+    'system/LoggingConfig:buffer.flushInterval',
     // #15679 (stack card 4/6 of #14478) — ruling B. `MetricAggregationConfig.window.size`
     // said "Window size in seconds" in prose and nothing else. Renamed to
     // `durationSeconds`, NOT to the gate's mechanical `sizeSeconds`: `size` is
@@ -14079,26 +14148,6 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // which is a different key on a different surface and has always rendered. D2:
     // `view-page-mount-removed`.
     'ui/ObjectListView:pageName',
-    // ADR-0090 D2 (no Profile concept) + ADR-0049 enforce-or-remove; maintainer
-    // ruling 2026-09-12, decision batch #121 item 2, verbatim 「同意」.
-    // `Page.assignedProfiles` was an authorable key named for the concept ADR-0090 D2
-    // deleted, and it gated nothing: measured across this repository and objectui,
-    // every hit was a declaration, a generated artifact, prose or a round-trip test —
-    // no renderer, route or metadata read door ever read it, so a page that "assigned
-    // profiles" stayed open to every caller who could reach it. `PageSchema` is reachable
-    // from the `page` metadata-type root, so the key is NOT deleted from the shape: it
-    // stays as a `retiredKey()` tombstone that carries the prescription, which is why the
-    // key keeps its authorable-surface line (marked `[RETIRED]`) and its liveness row (as
-    // `dead`). Authoring it is a `tsc` error and a parse error; there is no `guidance`
-    // entry for it, because a guidance entry only ever runs from the
-    // `unrecognized_keys` path and the shape still declares this key. The two alias
-    // entries that steered an
-    // authored `profiles:` / `assignedTo:` INTO this retired vocabulary became
-    // refusals naming the permission-set route in the same change. Page audience is
-    // the permission set's: the object's permission sets gate the DATA, and positions
-    // bind those sets to people. D2: `page-assigned-profiles-removed`; D3 semantic:
-    // `page-assigned-profiles-audience-to-permission-set`.
-    'ui/Page:assignedProfiles',
     // #11027 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-22, ruled B:
     // retire + repair the redirect texts in the same change). The LAST carrier of
     // the `ResponsiveConfig` layout block, and the destination the

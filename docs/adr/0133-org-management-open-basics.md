@@ -185,9 +185,14 @@ Those are objectui's behaviours, cited here so a reader can find them — ⛔ th
 record does not make them contracts of this repository, and a change to them is
 not a violation of this record.
 
-⚠️ **The tab set and its ordering are NOT declared by this repository, and this
-record does not decide them.** See
-[What this record does not decide](#what-this-record-does-not-decide).
+⚠️ **The tab set and its ordering ARE declared by this repository — by a
+page metadata record, not by this ADR — and this record does not decide them.**
+`packages/platform-objects/src/pages/sys-organization.page.ts#SysOrganizationDetailPage`
+declares the Members / Invitations / Teams strip and plugin-auth hands it to
+the runtime (`packages/plugins/plugin-auth/src/auth-plugin.ts#pages`). ⛔ An
+earlier revision of this record asserted they were **not** declared anywhere;
+that was corrected on 2026-09-12 — see
+[What this record does not decide](#what-this-record-does-not-decide), item 1.
 
 ### D4 — Control-plane roster reads are organization-scoped
 
@@ -225,19 +230,57 @@ This section is the honest residue: places where the cloud record is silent, or
 where this repository's code and its own comments do not agree. ⛔ None of it is
 resolved here.
 
-1. ⭐ **"Opens on tab-0 Members" is asserted in this repository's comments but
-   declared by none of its metadata.** Two source comments and a QA checklist
-   item describe the organization record page as opening on a Members tab with
-   Invitations and Teams beside it. Measured on `origin/main` at `77781151d`,
-   **no object in `packages/platform-objects/src/identity/` declares the
-   `relatedList` prominence key** (`packages/spec/src/data/field.zod.ts#relatedList`)
-   — the key objectui reads to promote a child list to its own tab — and no
-   `relatedLayout` override exists anywhere in this repository. Under the
-   documented default, with no primary list declared, related lists collapse
-   into a single stacked tab. So the tab ordering is either an emergent property
-   of the renderer or a claim that has gone stale; **this record states the
-   deep-link contract, which is declared, and does not assert a tab order, which
-   is not.** Filed separately rather than repaired here.
+1. ⭐ **"Opens on tab-0 Members" — the reading recorded here was WRONG. It is
+   kept, because what corrected it is the transferable part.**
+   ⚠️ **CORRECTED 2026-09-12** ([#16270](https://github.com/objectstack-ai/objectstack/issues/16270);
+   the provenance half landed in PR #17750). The disposition is unchanged; the
+   ground stated for it was not.
+
+   **The reading as originally recorded.** Two source comments and a QA
+   checklist item describe the organization record page as opening on a Members
+   tab with Invitations and Teams beside it. Measured on `origin/main` at
+   `77781151d`, **no object in `packages/platform-objects/src/identity/`
+   declares the `relatedList` prominence key**
+   (`packages/spec/src/data/field.zod.ts#relatedList`) — the key objectui reads
+   to promote a child list to its own tab — and no `relatedLayout` override
+   exists anywhere in this repository. Under the documented default, with no
+   primary list declared, related lists collapse into a single stacked tab.
+   ⛔ From that, this record concluded the tab ordering was *"either an emergent
+   property of the renderer or a claim that has gone stale."*
+
+   **⛔ That conclusion is false, and it was already false on the day it was
+   written.** Both measurements above reproduce exactly, each with a lit
+   control — they were never the error. The tab strip is declared, as an
+   **assigned Page** rather than as a field prominence key:
+   `packages/platform-objects/src/pages/sys-organization.page.ts#SysOrganizationDetailPage`
+   is a `kind: 'slotted'`, `isDefault: true` record page for `sys_organization`
+   whose `slots.tabs` override carries exactly three `record:related_list`
+   tabs — **Members, Invitations, Teams, in that order** — and plugin-auth
+   hands it to the runtime
+   (`packages/plugins/plugin-auth/src/auth-plugin.ts#pages`). That file was
+   already in the tree at `77781151d`, the very commit cited above.
+
+   ⭐ **What the measurement missed, stated so it transfers.** The search was
+   exhaustive over the wrong space: scoped to `src/identity/` and to the
+   `relatedList` key, while the declaration lives one directory over, in
+   `src/pages/`, written in a different vocabulary. A control proves a probe
+   reaches; it cannot prove the probe is aimed at the right place.
+
+   ⚠️ **Neither branch of the disjunction was available, either.** "An
+   emergent property of the renderer" is not merely unproven:
+   `objectui:packages/plugin-detail/src/synth/buildDefaultPageSchema.ts#buildDefaultTabs`
+   seeds `items[0]` with `Details` unconditionally, so a promoted related list
+   could never be tab-0 — and the synthesizer
+   (`objectui:packages/plugin-detail/src/synth/buildDefaultPageSchema.ts#buildDefaultPageSchema`)
+   never calls it at all when an assigned page supplies a `tabs` slot. So
+   adding `relatedList: 'primary'` would have been inert on this page, not
+   corrective.
+
+   **The disposition is unchanged.** This record states the deep-link contract
+   (D3) and does not assert a tab order. ⛔ What changed is the ground: not
+   that no tab order is declared, but that the metadata record which declares
+   it is not this ADR's to govern. The item stays in this section because a
+   correction belongs beside the reading it corrects.
 
 2. **Whether `sys_member` keeps `organization_id`** — ADR-0131 D7's writer-facts
    question, answered by the C6 census (#15207). See D4.
