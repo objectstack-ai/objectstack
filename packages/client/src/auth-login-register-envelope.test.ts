@@ -56,6 +56,7 @@ import { AuthManager } from '@objectstack/plugin-auth';
 import * as identityObjects from '@objectstack/platform-objects/identity';
 import { BaseResponseSchema, SessionResponseSchema, SessionSchema } from '@objectstack/spec/api';
 import { ObjectStackClient } from './index';
+import type { ServiceObject } from '@objectstack/spec/data';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const ORIGIN = 'http://localhost:3000';
@@ -79,6 +80,83 @@ const IDENTITY_OBJECTS = Object.values(
     typeof (o as { fields?: unknown }).fields === 'object',
 );
 
+/**
+ * ⚠️ [#18070] The authz objects every authenticated request in this file
+ * makes core's `resolveUserAuthzGrants`
+ * (`core/src/security/resolve-authz-context.ts`) read. They belong to
+ * `@objectstack/plugin-security` and are spelled LOCALLY here, carrying only
+ * the columns that reading path touches, so this suite adds no dependency edge
+ * onto that package — the shape PR #17982 and PR #18067 landed for the same
+ * defect.
+ *
+ * Without them the driver REFUSED every one of those reads. Measured on
+ * `fb29f62ce`, classified by the `(table, filter, limit)` triple of the eight
+ * reads the resolver issues: **6** resolver-class `refused a read on` driver
+ * lines in this file, 2 per table across 3. `tryFind` classifies a missing
+ * table as "not provisioned" and answers `[]`, so nothing went red: every
+ * assertion below passed over grant reads that never happened — a green this
+ * suite had not earned, and one it could not lose if grant resolution broke.
+ *
+ * ⛔ Registering the tables is what makes those reads SUCCEED. The count must
+ * ⛔ not fall by silencing, filtering or re-levelling the driver line.
+ *
+ * ⭐ Only THREE tables, and that is the measurement talking: this fixture
+ * already provisions `sys_user` and `sys_member` through `IDENTITY_OBJECTS`
+ * above, so those two reads always succeeded here. The three below are the
+ * `@objectstack/plugin-security` side, which nothing in this file provisioned.
+ *
+ * Columns, and why each is here — every other column of the real objects is
+ * deliberately absent, because no read on this path touches it. `id` is not
+ * declared anywhere below: the registry supplies the primary key itself.
+ *   `sys_user_position`        user_id (filter), position, organization_id
+ *   `sys_user_permission_set`  user_id (filter), permission_set_id, organization_id
+ *   `sys_position`             name (filter), active (`isRowActive`),
+ *                              organization_id (the driver's tenant scope)
+ *
+ * ⛔ `sys_position_permission_set` and `sys_permission_set` are NOT here: the
+ * resolver reaches them only once a `sys_position` row resolves and a
+ * permission-set id is collected, and nothing here seeds either — measured,
+ * neither table appears in this file's refusals, before or after.
+ */
+const AUTHZ_RESOLVER_OBJECTS: { owner: string; def: ServiceObject }[] = [
+  {
+    owner: '@objectstack/plugin-security',
+    def: {
+      name: 'sys_user_position',
+      label: 'User Position',
+      fields: {
+        user_id: { type: 'text', label: 'User' },
+        position: { type: 'text', label: 'Position' },
+        organization_id: { type: 'text', label: 'Organization' },
+      },
+    },
+  },
+  {
+    owner: '@objectstack/plugin-security',
+    def: {
+      name: 'sys_user_permission_set',
+      label: 'User Permission Set',
+      fields: {
+        user_id: { type: 'text', label: 'User' },
+        permission_set_id: { type: 'text', label: 'Permission Set' },
+        organization_id: { type: 'text', label: 'Organization' },
+      },
+    },
+  },
+  {
+    owner: '@objectstack/plugin-security',
+    def: {
+      name: 'sys_position',
+      label: 'Position',
+      fields: {
+        name: { type: 'text', label: 'Name' },
+        active: { type: 'boolean', label: 'Active' },
+        organization_id: { type: 'text', label: 'Organization' },
+      },
+    },
+  },
+];
+
 const engines: ObjectQL[] = [];
 
 const makeEngine = async (): Promise<ObjectQL> => {
@@ -88,6 +166,11 @@ const makeEngine = async (): Promise<ObjectQL> => {
   await engine.init();
   for (const object of IDENTITY_OBJECTS) {
     engine.registry.registerObject(object as never, '@objectstack/plugin-auth');
+  }
+  // [#18070] The authz resolver's plugin-security-side reads, registered
+  // before the sync so the driver PROVISIONS them rather than refusing them.
+  for (const o of AUTHZ_RESOLVER_OBJECTS) {
+    engine.registry.registerObject(o.def, o.owner);
   }
   await engine.syncSchemas();
   return engine;

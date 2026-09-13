@@ -47,6 +47,7 @@ import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { createRestApiPlugin } from '@objectstack/runtime';
 import { ObjectStackClient } from './index';
 import type { IHttpServer } from '@objectstack/spec/contracts';
+import type { ServiceObject } from '@objectstack/spec/data';
 
 const ENV_ID = 'proj-alpha';
 const CUSTOM_PREFIX = '/objects';
@@ -55,6 +56,103 @@ interface Fixture {
     baseUrl: string;
     kernel: LiteKernel;
 }
+
+/**
+ * ⚠️ [#18070] The authz objects every authenticated request in this file
+ * makes core's `resolveUserAuthzGrants`
+ * (`core/src/security/resolve-authz-context.ts`) read. They belong to
+ * `@objectstack/plugin-auth` / `@objectstack/plugin-security` and are spelled
+ * LOCALLY here, carrying only the columns that reading path touches, so this
+ * suite adds no dependency edge onto either package — the shape PR #17982 and
+ * PR #18067 landed for the same defect.
+ *
+ * Without them the driver REFUSED every one of those reads. Measured on
+ * `fb29f62ce`, classified by the `(table, filter, limit)` triple of the eight
+ * reads the resolver issues: **25** resolver-class `refused a read on` driver
+ * lines in this file, 5 per table across 5. `tryFind` classifies a missing
+ * table as "not provisioned" and answers `[]`, so nothing went red: every
+ * assertion below passed over grant reads that never happened — a green this
+ * suite had not earned, and one it could not lose if grant resolution broke.
+ *
+ * ⛔ Registering the tables is what makes those reads SUCCEED. The count must
+ * ⛔ not fall by silencing, filtering or re-levelling the driver line.
+ *
+ * Columns, and why each is here — every other column of the real objects is
+ * deliberately absent, because no read on this path touches it. `id` is not
+ * declared anywhere below: the registry supplies the primary key itself, and
+ * it is what `sys_user`'s `id` filter reads.
+ *   `sys_user`                 email (the `current_user.email` owner-RLS fallback)
+ *   `sys_member`               user_id / organization_id (both filters), role
+ *   `sys_user_position`        user_id (filter), position, organization_id
+ *   `sys_user_permission_set`  user_id (filter), permission_set_id, organization_id
+ *   `sys_position`             name (filter), active (`isRowActive`),
+ *                              organization_id (the driver's tenant scope)
+ *
+ * ⛔ `sys_position_permission_set` and `sys_permission_set` are NOT here: the
+ * resolver reaches them only once a `sys_position` row resolves and a
+ * permission-set id is collected, and nothing here seeds either — measured,
+ * neither table appears in this file's refusals, before or after.
+ */
+const AUTHZ_RESOLVER_OBJECTS: { owner: string; def: ServiceObject }[] = [
+    {
+        owner: '@objectstack/plugin-auth',
+        def: {
+            name: 'sys_user',
+            label: 'User',
+            fields: {
+                email: { type: 'text', label: 'Email' },
+            },
+        },
+    },
+    {
+        owner: '@objectstack/plugin-auth',
+        def: {
+            name: 'sys_member',
+            label: 'Member',
+            fields: {
+                user_id: { type: 'text', label: 'User' },
+                organization_id: { type: 'text', label: 'Organization' },
+                role: { type: 'text', label: 'Role' },
+            },
+        },
+    },
+    {
+        owner: '@objectstack/plugin-security',
+        def: {
+            name: 'sys_user_position',
+            label: 'User Position',
+            fields: {
+                user_id: { type: 'text', label: 'User' },
+                position: { type: 'text', label: 'Position' },
+                organization_id: { type: 'text', label: 'Organization' },
+            },
+        },
+    },
+    {
+        owner: '@objectstack/plugin-security',
+        def: {
+            name: 'sys_user_permission_set',
+            label: 'User Permission Set',
+            fields: {
+                user_id: { type: 'text', label: 'User' },
+                permission_set_id: { type: 'text', label: 'Permission Set' },
+                organization_id: { type: 'text', label: 'Organization' },
+            },
+        },
+    },
+    {
+        owner: '@objectstack/plugin-security',
+        def: {
+            name: 'sys_position',
+            label: 'Position',
+            fields: {
+                name: { type: 'text', label: 'Name' },
+                active: { type: 'boolean', label: 'Active' },
+                organization_id: { type: 'text', label: 'Organization' },
+            },
+        },
+    },
+];
 
 /**
  * One boot recipe, two prefixes — so the non-default case and the control
@@ -105,6 +203,12 @@ async function bootServer(dataPrefix?: string): Promise<Fixture> {
     });
     // Registered after bootstrap, so nothing has issued the DDL yet (#4065).
     await ql.syncObjectSchema('task');
+    // [#18070] The authz resolver's own reads, registered and synced so the
+    // driver PROVISIONS them rather than refusing them.
+    for (const o of AUTHZ_RESOLVER_OBJECTS) {
+        ql.registerObject(o.def, o.owner);
+        await ql.syncObjectSchema(o.def.name);
+    }
 
     const httpServer = kernel.getService<IHttpServer>('http.server');
     const port = httpServer.getPort!();
