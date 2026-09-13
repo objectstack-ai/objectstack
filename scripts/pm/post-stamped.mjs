@@ -114,6 +114,44 @@
  * the corpus, taken at write time, against the same imported tolerance. The
  * stored bytes are compared with the bytes sent, so a body the platform's
  * sanitizer mutated is reported instead of assumed.
+ *
+ * ## The unread-knock check on a body refresh (#17905)
+ *
+ * The read side of the seat-post protocol reads the body plus the comments
+ * NEWER THAN THE BODY'S LAST EDIT — approved on purpose, and kept. Its cost is
+ * that a body refresh closes that window on every comment inside it: a knock
+ * nobody has read yet is not "old" afterwards, it is gone, and the knocker gets
+ * no signal. Measured: a director-ruled cross-lane request knocked on a seat
+ * post at 13:20Z, the body was refreshed at 15:58Z, and the request reached the
+ * seat nine hours later, by escalation to a card. So `--body` REFUSES to write
+ * while comments newer than the body's last write exist and the refresh names
+ * none of them:
+ *
+ *   --ack-through=ID   the id of the NEWEST comment on the card — which a seat
+ *                      cannot know without reading the tail to its end, so the
+ *                      flag is a proof of reading, not a switch. Naming an older
+ *                      comment is refused with the ones that landed after it,
+ *                      and a comment that lands between the read and the write
+ *                      is refused the same way.
+ *
+ * "The body's last write" has no platform field: the REST issue object carries
+ * `updated_at`, which moves on comments and labels too, and the body's edit
+ * history is GraphQL-only, which agent containers cannot reach. So the instant
+ * is read from the body ITSELF — the newest protocol stamp in the stored body,
+ * which is this tool's own `{{NOW}}` whenever the last refresh came through it
+ * (the protocol says every seat-post stamp does). ⚠️ That derivation is a LOWER
+ * bound: a refresh that carried no `{{NOW}}`, or one made by hand, leaves an
+ * older stamp behind, so MORE comments count as newer, never fewer — the check
+ * may ask for an acknowledgement it did not strictly need, and cannot skip one
+ * it did. A body with no stamp at all counts every comment, and says so.
+ *
+ * ⛔ It cannot tell a knock from any other comment: under one shared identity
+ * the author field names no seat, and content is not classified. So the control
+ * the acceptance demands — "no unread knock ⇒ the refresh is not affected" —
+ * holds exactly as stated: no comment newer than the last write ⇒ no flag, no
+ * refusal, and the write is what it was before this check existed; one newer
+ * comment of any kind ⇒ one flag naming it. `--comment` is untouched (a comment
+ * voids nothing), and `--dry-run` stays offline and does not run it.
  */
 
 import process from 'node:process';
@@ -379,9 +417,107 @@ export function readBackVerdict({ stamp, writtenAt, sent, stored, substituted = 
   return { lines, drift, mutated: typeof stored === 'string' && stored !== sent };
 }
 
+/**
+ * The instant the stored body was last written, as far as the body itself can
+ * say: its NEWEST protocol stamp, judged as an instant (a seconds-grained stamp
+ * and a minute-grained one compare by `stampSpan`, never as strings). `null`
+ * when the body carries no stamp. A lower bound on the true last write — see
+ * the header — so a caller using it as "since" over-includes, never under.
+ */
+export function lastWriteStamp(storedBody) {
+  let best = null;
+  for (const stamp of protocolStamps(storedBody)) {
+    const span = stampSpan(stamp);
+    if (span && (!best || span.from > best.from)) best = { stamp, from: span.from };
+  }
+  return best;
+}
+
+const commentCreatedMs = (c) => {
+  const at = Date.parse(String(c?.created_at ?? ''));
+  return Number.isFinite(at) ? at : Number.POSITIVE_INFINITY; // unreadable ⇒ newest, never silently old
+};
+
+/**
+ * Whether this refresh may write over the card's comment tail. Pure: the
+ * caller hands in the stored body and the comments it fetched; the population
+ * judged is every comment CREATED at or after the minute of the body's newest
+ * stamp (an edit to an older comment is not a knock the read window knows).
+ *
+ *   ok, kind 'none-newer'      nothing newer than the last write — the control
+ *   ok, kind 'acknowledged'    `ackThrough` names the newest of the newer ones
+ *   refused 'unacknowledged'   newer comments exist and no id was named
+ *   refused 'ack-not-newest'   the named id is on the card but newer ones followed
+ *   refused 'ack-unknown'      the named id is not a comment on this card
+ */
+export function unreadComments({ storedBody, comments, ackThrough = null }) {
+  const since = lastWriteStamp(storedBody);
+  const all = Array.isArray(comments) ? comments : [];
+  const newer = all
+    .filter((c) => since === null || commentCreatedMs(c) >= since.from)
+    .sort((a, b) => commentCreatedMs(a) - commentCreatedMs(b) || Number(a?.id) - Number(b?.id));
+  const newest = newer.length > 0 ? newer[newer.length - 1] : null;
+  const base = { since, newer, newest, ackThrough };
+  if (newer.length === 0) return { ...base, ok: true, kind: 'none-newer', after: [] };
+  if (ackThrough === null) return { ...base, ok: false, kind: 'unacknowledged', after: newer };
+  if (Number(newest.id) === Number(ackThrough)) return { ...base, ok: true, kind: 'acknowledged', after: [] };
+  const named = all.find((c) => Number(c?.id) === Number(ackThrough));
+  if (!named) return { ...base, ok: false, kind: 'ack-unknown', after: newer };
+  const namedAt = commentCreatedMs(named);
+  return { ...base, ok: false, kind: 'ack-not-newest', after: newer.filter((c) => commentCreatedMs(c) > namedAt) };
+}
+
+const commentRow = (c, i) => {
+  const first = String(c?.body ?? '').split('\n').find((l) => l.trim().length > 0) ?? '';
+  const shown = first.length > 96 ? `${first.slice(0, 96)}…` : first;
+  return `  ${i + 1}. ${c?.id ?? '?'} · ${c?.created_at ?? '(no created_at)'} · ${c?.user?.login ?? '?'} · ${shown}`;
+};
+
+/** The refusal a caller reads when `unreadComments` says no. */
+export function unreadRefusalText(check, number) {
+  const sinceText = check.since ? `the body's last write stamp (\`${check.since.stamp}\`)` : 'the body\'s last write';
+  const newestId = check.newest?.id ?? '?';
+  const head =
+    check.kind === 'ack-unknown'
+      ? `post-stamped: REFUSED — --ack-through=${check.ackThrough} names no comment on #${number}. Nothing was written.`
+      : check.kind === 'ack-not-newest'
+        ? `post-stamped: REFUSED — --ack-through=${check.ackThrough} is not the newest comment on #${number}: ` +
+          `${check.after.length} comment(s) landed after it. Nothing was written.`
+        : `post-stamped: REFUSED — ${check.newer.length} comment(s) on #${number} are newer than ${sinceText} ` +
+          'and this refresh acknowledges none of them. Nothing was written.';
+  const lines = [head];
+  lines.push(
+    '  A body refresh closes the read window (the comments newer than the body\'s last edit) on every',
+    '  comment inside it — a knock nobody has read yet would simply vanish, and the knocker would see',
+    '  silence. Read the tail to its end, receipt every request it carries (a reply comment, or a',
+    `  carry-over into the body), then re-run with --ack-through=${newestId} — the newest comment.`,
+  );
+  if (check.since === null) {
+    lines.push(
+      '  ⚠️ The stored body carries NO protocol stamp, so EVERY comment on the card counts as newer than',
+      `  its last write. Put \`${STAMP_TOKEN}\` in the body so the next refresh measures from this write.`,
+    );
+  } else {
+    lines.push(
+      '  (The stamp is a lower bound on the last write — a refresh that carried no token leaves an older',
+      '  stamp behind — so this list can be longer than the true unread set, never shorter.)',
+    );
+  }
+  lines.push(...check.after.map(commentRow));
+  return lines.join('\n');
+}
+
+/** The one line a transcript carries when the check passed. */
+export function unreadPassText(check) {
+  const sinceText = check.since ? `the body's last write stamp \`${check.since.stamp}\`` : 'the body (which carries no stamp)';
+  return check.kind === 'none-newer'
+    ? `  unread check: no comment newer than ${sinceText} — nothing to acknowledge`
+    : `  unread check: ${check.newer.length} comment(s) newer than ${sinceText}, acknowledged through ${check.newest?.id} (the newest)`;
+}
+
 /** The flags this tool takes. An argument outside this set is a typo, and a typo is refused. */
 export const KNOWN_FLAGS = Object.freeze(['--dry-run', '--json', '--self-test', '--help', '-h']);
-export const KNOWN_OPTIONS = Object.freeze(['comment', 'body', 'file', 'repo']);
+export const KNOWN_OPTIONS = Object.freeze(['comment', 'body', 'file', 'repo', 'ack-through']);
 
 export function readOption(argv, name) {
   const prefix = `--${name}=`;
@@ -418,6 +554,17 @@ export function parseOptions(argv) {
   if (!Number.isInteger(number) || number <= 0) {
     return { ok: false, error: `\`${raw}\` is not a card number. --${comment === null ? 'body' : 'comment'}=N takes the issue number.` };
   }
+  const ack = readOption(args, 'ack-through');
+  let ackThrough = null;
+  if (ack !== null) {
+    if (comment !== null) {
+      return { ok: false, error: '--ack-through belongs to a body refresh (--body=N). A comment voids nothing, so it has nothing to acknowledge.' };
+    }
+    ackThrough = Number(ack);
+    if (!Number.isInteger(ackThrough) || ackThrough <= 0) {
+      return { ok: false, error: `\`${ack}\` is not a comment id. --ack-through=ID takes the numeric id of the newest comment on the card.` };
+    }
+  }
   return {
     ok: true,
     options: {
@@ -425,6 +572,7 @@ export function parseOptions(argv) {
       number,
       file: readOption(args, 'file'),
       repo: readOption(args, 'repo'),
+      ackThrough,
       dryRun: args.includes('--dry-run'),
       json: args.includes('--json'),
     },
@@ -452,6 +600,24 @@ async function rest(path, { method = 'GET', body = null } = {}) {
   }
   if (res.status === 204) return null;
   return res.json();
+}
+
+/**
+ * The card body and every comment created at or after `sinceMs` (all of them
+ * when `sinceMs` is not a number). REST's `since` filters on `updated_at`, a
+ * superset of what `unreadComments` judges, so the pages fetched are the tail
+ * and nothing the pure filter needs is left behind.
+ */
+async function readCardTail(repo, number, sinceMs) {
+  const card = await rest(`/repos/${repo}/issues/${number}`);
+  const since = Number.isFinite(sinceMs) ? `&since=${encodeURIComponent(new Date(sinceMs).toISOString())}` : '';
+  const comments = [];
+  for (let page = 1; ; page++) {
+    const rows = await rest(`/repos/${repo}/issues/${number}/comments?per_page=100&page=${page}${since}`);
+    comments.push(...(Array.isArray(rows) ? rows : []));
+    if (!Array.isArray(rows) || rows.length < 100) break;
+  }
+  return { card, comments };
 }
 
 async function writeArtefact(repo, options, body) {
@@ -511,7 +677,7 @@ const USAGE = [
   'post-stamped — write a seat artefact to GitHub with a stamp this act read, never one typed from memory.',
   '',
   '  node scripts/pm/post-stamped.mjs --comment=N [--file=PATH] [--repo=OWNER/NAME] [--dry-run] [--json]',
-  '  node scripts/pm/post-stamped.mjs --body=N    [--file=PATH] [--repo=OWNER/NAME] [--dry-run] [--json]',
+  '  node scripts/pm/post-stamped.mjs --body=N    [--file=PATH] [--repo=OWNER/NAME] [--ack-through=ID] [--dry-run] [--json]',
   '  node scripts/pm/post-stamped.mjs --self-test',
   '',
   '  With no --file the body is read from stdin.',
@@ -519,6 +685,8 @@ const USAGE = [
   '  stamp that is a reading of something else. A bare stamp on the opening line, or on a subscript',
   '  reading-time line, is REFUSED — that position belongs to the writing act. A quoted stamp LATER',
   '  than the clock this run reads is REFUSED too — the future is not a thing anyone read.',
+  '  A body refresh is REFUSED while comments newer than the body\'s last write stamp exist and',
+  '  --ack-through=ID does not name the newest of them — a refresh must not void an unread knock.',
   '  The attribution footer is the caller\'s: its form differs by channel and act, so this tool adds none.',
 ].join('\n');
 
@@ -562,10 +730,28 @@ async function main(argv) {
     console.error(
       `post-stamped: DRY RUN — nothing was written. ${rendered.substituted} token(s) substituted with ` +
         `\`${rendered.stamp}\`, ${rendered.quoted} quoted stamp(s) rendered verbatim. Target would be ` +
-        `${repoRes.repo}#${options.number} (${options.mode}).`,
+        `${repoRes.repo}#${options.number} (${options.mode}).` +
+        (options.mode === 'body' ? ' The unread-comment check reads the card and runs only on a live write.' : ''),
     );
     console.log(rendered.body);
     return EXIT_OK;
+  }
+
+  // A body refresh first reads the tail it is about to close the window on.
+  let unread = null;
+  if (options.mode === 'body') {
+    let tail;
+    try {
+      const probe = await rest(`/repos/${repoRes.repo}/issues/${options.number}`);
+      tail = await readCardTail(repoRes.repo, options.number, lastWriteStamp(probe?.body)?.from);
+    } catch (err) {
+      return reportPrerequisiteNotMet(err);
+    }
+    unread = unreadComments({ storedBody: tail.card?.body, comments: tail.comments, ackThrough: options.ackThrough });
+    if (!unread.ok) {
+      console.error(unreadRefusalText(unread, options.number));
+      return EXIT_REFUSED;
+    }
   }
 
   let written;
@@ -598,6 +784,9 @@ async function main(argv) {
           written_at: written.writtenAt,
           drift_minutes: verdict.drift,
           body_mutated: verdict.mutated,
+          ...(unread
+            ? { unread_check: { since: unread.since?.stamp ?? null, newer: unread.newer.length, ack_through: unread.ackThrough } }
+            : {}),
         },
         null,
         2,
@@ -611,6 +800,7 @@ async function main(argv) {
       `post-stamped: ${options.mode === 'comment' ? 'comment posted on' : 'body rewritten on'} ${repoRes.repo}#${options.number}`,
       `  ${options.mode === 'comment' ? 'comment' : 'card'}: ${written.id} ${written.url ?? '(no url returned)'}`,
       ...verdict.lines,
+      ...(unread ? [unreadPassText(unread)] : []),
       `  substitutions: ${rendered.substituted} ${STAMP_TOKEN}, ${rendered.quoted} quoted`,
     ].join('\n'),
   );
@@ -633,10 +823,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the direction check: a stamp no act can have read': 22,
   'the substitution: one clock, read once, written everywhere': 9,
   'the read-back: what the transcript can actually prove': 11,
-  'the CLI: the one decision a typo must never make': 12,
+  'the CLI: the one decision a typo must never make': 16,
+  'the unread-knock check: a refresh cannot void what nobody read': 23,
   'the shared rule: this tool and H56 cannot come to disagree': 6,
 });
-const SELF_TEST_BATTERY_FLOOR = 7;
+const SELF_TEST_BATTERY_FLOOR = 8;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 let selfTestReachedVerdict = false;
@@ -764,6 +955,44 @@ export function selfTest() {
   t('--dry-run is carried through', parseOptions(['--comment=1', '--dry-run']).options.dryRun === true);
   t('--json is carried through', parseOptions(['--comment=1', '--json']).options.json === true);
   t('--repo and --file are read as values, not flags', parseOptions(['--comment=1', '--repo=o/n', '--file=b.md']).options.repo === 'o/n');
+  t('--ack-through=ID is read as the newest comment id, with --body', parseOptions(['--body=6017', '--ack-through=5646143629']).options.ackThrough === 5646143629);
+  t('…and absent, it is null rather than zero', parseOptions(['--body=1']).options.ackThrough === null);
+  t('⛔ --ack-through with --comment is refused — a comment voids nothing', parseOptions(['--comment=1', '--ack-through=5']).ok === false);
+  t('⛔ a non-numeric --ack-through is refused rather than coerced', parseOptions(['--body=1', '--ack-through=newest']).ok === false);
+
+  // The filed shape: the body last written (and stamped) at 10:00Z, a knock at
+  // 13:20:47Z, a refresh attempted at 15:58Z — which is where the knock died.
+  battery('the unread-knock check: a refresh cannot void what nobody read');
+  const SEAT_BODY = '**Seat post.**\n\n## 当前 PM\n\n🟢 seat · 自 2026-09-12T10:00Z 就座;前任 2026-09-11T22:00Z 离任。\n';
+  const KNOCK = { id: 5646143629, created_at: '2026-09-12T13:20:47Z', user: { login: 'engine-seat' }, body: '敲门:a director ruling assigns this seat an incremental contract review.' };
+  const OLDER = { id: 5640000000, created_at: '2026-09-11T23:30:00Z', user: { login: 'someone' }, body: 'audit: handover' };
+  const LATER = { id: 5648793698, created_at: '2026-09-12T20:05:00Z', user: { login: 'engine-seat' }, body: 'escalation' };
+  const filed = unreadComments({ storedBody: SEAT_BODY, comments: [OLDER, KNOCK] });
+  t('⭐ the filed shape: a knock newer than the body\'s last stamp, no acknowledgement ⇒ REFUSED', filed.ok === false && filed.kind === 'unacknowledged');
+  t('…the last write is read from the body\'s own newest stamp, never from updated_at', filed.since?.stamp === '2026-09-12T10:00Z');
+  t('…the knock is the one comment listed; the older one is outside the window', filed.after.length === 1 && filed.after[0].id === 5646143629);
+  t('…and the refusal names the newest id as the flag to pass', unreadRefusalText(filed, 6017).includes('--ack-through=5646143629'));
+  t('…says nothing was written', unreadRefusalText(filed, 6017).includes('Nothing was written'));
+  t('…and lists the comment so the seat reads it, not a count', unreadRefusalText(filed, 6017).includes('5646143629 · 2026-09-12T13:20:47Z · engine-seat'));
+  const control = unreadComments({ storedBody: SEAT_BODY, comments: [OLDER] });
+  t('⭐ THE CONTROL: no comment newer than the last write ⇒ accepted with no flag at all', control.ok === true && control.kind === 'none-newer');
+  t('…and an empty card is accepted the same way', unreadComments({ storedBody: 'no stamp here', comments: [] }).ok === true);
+  t('⭐ acknowledging the newest comment ⇒ accepted', unreadComments({ storedBody: SEAT_BODY, comments: [OLDER, KNOCK], ackThrough: 5646143629 }).kind === 'acknowledged');
+  const stale = unreadComments({ storedBody: SEAT_BODY, comments: [OLDER, KNOCK, LATER], ackThrough: 5646143629 });
+  t('⛔ acknowledging an OLDER comment is refused — the flag proves reading, it is not a switch', stale.ok === false && stale.kind === 'ack-not-newest');
+  t('…with exactly the comments that landed after the acknowledged one', stale.after.length === 1 && stale.after[0].id === 5648793698);
+  t('…and the refusal points at the newest', unreadRefusalText(stale, 6017).includes('--ack-through=5648793698'));
+  t('⛔ an id that is not on the card is refused, never trusted', unreadComments({ storedBody: SEAT_BODY, comments: [KNOCK], ackThrough: 42 }).kind === 'ack-unknown');
+  t('an acknowledgement with nothing newer is moot, not an error', unreadComments({ storedBody: SEAT_BODY, comments: [OLDER], ackThrough: 5640000000 }).ok === true);
+  t('⭐ a body with NO stamp counts every comment as newer — the conservative direction', unreadComments({ storedBody: 'nothing stamped', comments: [OLDER] }).kind === 'unacknowledged');
+  t('…and the refusal says to put the token in the body', unreadRefusalText(unreadComments({ storedBody: 'x', comments: [OLDER] }), 1).includes('{{NOW}}'));
+  t('the newest stamp is judged as an instant: seconds-grained 10:00:30Z outranks minute-grained 10:00Z', lastWriteStamp('a 2026-09-12T10:00Z b 2026-09-12T10:00:30Z').stamp === '2026-09-12T10:00:30Z');
+  t('…and a later minute outranks an earlier seconds-grained one', lastWriteStamp('2026-09-12T10:00:30Z then 2026-09-12T10:01Z').stamp === '2026-09-12T10:01Z');
+  t('BOUNDARY: a comment inside the stamp\'s own minute counts as newer — the seat may not have seen it', unreadComments({ storedBody: SEAT_BODY, comments: [{ id: 1, created_at: '2026-09-12T10:00:05Z' }] }).ok === false);
+  t('…and one at the last second of the minute before does not', unreadComments({ storedBody: SEAT_BODY, comments: [{ id: 1, created_at: '2026-09-12T09:59:59Z' }] }).ok === true);
+  t('the newest is by created_at, not by input order', unreadComments({ storedBody: SEAT_BODY, comments: [LATER, KNOCK] }).newest.id === 5648793698);
+  t('a comment with an unreadable created_at is newer, never silently old', unreadComments({ storedBody: SEAT_BODY, comments: [{ id: 7, created_at: 'n/a' }] }).ok === false);
+  t('the pass line names what was measured against', unreadPassText(control).includes('2026-09-12T10:00Z'));
 
   battery('the shared rule: this tool and H56 cannot come to disagree');
   t('⭐ the positions this tool refuses are the ones H56 reads — one imported reader, never two', h56StampedReadings(maskQuotedStamps(OPENING)).length === 1);

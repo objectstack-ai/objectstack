@@ -2272,6 +2272,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-approvals/src/recall-strand-discriminator.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/recall-strand-discriminator.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-approvals/src/record-reader-visibility.test.ts",
       "verb": "delete",
       "pinned": 1

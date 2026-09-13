@@ -64,26 +64,40 @@ Authored `type: 'role'` on 15.x? That is the deprecated spelling of `org_members
 </Callout>
 
 <Callout type="warn">
-**`manager` is a directory-sync dependency, not something you configure here.**
-`{ type: 'manager' }` resolves at runtime from `sys_user.manager_id` on the record's owner, and
-that column is not one an operator can fill in from inside the product.
+**`manager` is set on the user by an admin, not configured here.**
+`{ type: 'manager' }` resolves at runtime from `sys_user.manager_id` on the record's owner. That
+column is not a profile field: it is `readonly` on the user form and the data API's
+managed-update whitelist is `{name, image, locale}`, so it is never populated by editing the user
+in the Console.
 
-`sys_user.manager_id` has no product write surface — the data API's managed-update whitelist is
-`{name, image, locale}`, the auth admin endpoints do not accept the column and the Console
-renders no field for it, so it is never populated by editing the user in the Console. On this
-platform the column is written by a seed, or by any other system-context write, which bypasses
-the managed-update whitelist. SCIM provisioning and directory sync can populate it too, but only
+It has a dedicated admin operation instead. A platform admin posts the link:
+
+```http
+POST /api/v1/auth/admin/set-user-manager
+Content-Type: application/json
+
+{ "userId": "usr_report", "managerId": "usr_boss" }
+```
+
+`"managerId": null` clears the link. The endpoint refuses a link that would make a user their own
+manager, close a cycle in the reporting chain, run past the chain depth cap, or point at a manager
+who is provably outside every organization the user belongs to — each with the reason in the
+response. It is platform-admin gated, like every other `/api/v1/auth/admin/*` route.
+
+The column is also written by a seed, or by any other system-context write, which bypasses the
+managed-update whitelist. SCIM provisioning and directory sync can populate it too, but only
 through a provisioning path your own deployment supplies: this platform declares the SCIM
 `manager` attribute without projecting it onto the column, and its admin bulk import does not
-write it either.
+write it either. Where an identity carries `source: 'idp_provisioned'` the admin operation
+**refuses**, so that directory stays the one surface that authors its manager.
 
-So where `manager_id` is unset the slate resolves to nobody: the request opens with an empty
-`pending_approvers` and waits forever, and under the default `lockRecord: true` the record stays
-locked with no in-product recovery. Populate the column for everyone who submits this request,
-or add a fallback approver that cannot resolve empty — e.g.
-`{ type: 'org_membership_level', value: 'owner' }`. `os lint` reports this at authoring time
-(`approval-approvers-may-resolve-empty`, `info`) and carries the same remedy text, so the two
-cannot drift apart.
+Setting the column is still something you have to *do*. Where `manager_id` is unset the rung
+expands to nobody, the request opens on a slate no one can act on, and under the default
+`lockRecord: true` the record stays locked — recoverable only by a platform or tenant admin
+override. So set it for everyone who submits this request, or add a fallback approver that cannot
+resolve empty — e.g. `{ type: 'org_membership_level', value: 'owner' }`. `os lint` reports the
+shape at authoring time (`approval-approvers-may-resolve-empty`, `info`) and carries the same
+remedy text, so the two cannot drift apart.
 </Callout>
 
 Approving is itself a gated action — model "may approve" as a capability (`approve_invoice`) the approver's permission set grants, and gate the approve action's `requiredPermissions` on it so the gate is enforced on **both** the UI and the server (ADR-0066 D4).

@@ -82,8 +82,10 @@ import {
   type WalledOwnerAccountState,
 } from './walled-owner-verification-path.js';
 import {
+  probeSignInPathWiring,
   probeSignInReachability,
   reportIfNoSignInAccountExists,
+  type SignInPathConfigView,
 } from './boot-sign-in-reachability.js';
 import { judgePlatformAdmin, isPlatformAdminUser, type PlatformAdminActor } from './platform-admin-gate.js';
 import {
@@ -1002,7 +1004,7 @@ export class AuthPlugin implements Plugin {
       // `AuthManager` without ever registering the kernel `email` service, and
       // the sibling hook below injects the service into it. Reading BOTH makes
       // this hook's answer independent of hook registration order.
-      let pub: { socialProviders?: unknown[]; features?: { sso?: boolean } } | undefined;
+      let pub: SignInPathConfigView | undefined;
       try { pub = this.authManager?.getPublicConfig(); } catch { pub = undefined; }
       const hasEmailTransport = !!emailSvc || !!this.authManager?.hasEmailTransport();
       const hasFederatedSignIn =
@@ -1025,7 +1027,16 @@ export class AuthPlugin implements Plugin {
       // and the answer handed to the walled-owner probe, so no boot pages
       // `sys_user` twice. Cost on a fresh store is a single bounded page.
       const reachability = await probeSignInReachability(ql);
-      const deadEnd = reportIfNoSignInAccountExists(reachability, ctx.logger);
+      // [#15074] …and the fact that decides whether "humans, zero accounts" is
+      // a dead end AT ALL on this deployment: does it sign people in through an
+      // identity provider, which needs no `sys_account` row of its own? On a
+      // platform-SSO tenant kernel that population is the HEALTHY one, and the
+      // report's "NOBODY CAN SIGN IN" was false on every boot. The resolver
+      // pays for its bounded provider read only when the answer can change what
+      // is reported; a deployment with no delegated path is untouched and still
+      // reports at `error`.
+      const signInPath = await probeSignInPathWiring(reachability, pub, ql);
+      const deadEnd = reportIfNoSignInAccountExists(reachability, ctx.logger, signInPath);
 
       let ownerAccountState: WalledOwnerAccountState = 'unknown';
       if (
@@ -2318,6 +2329,51 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] unlock-user failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
+    // #16678 — admin: set (or clear) a user's manager.
+    //
+    // `sys_user.manager_id` drives the approvals `{ type: 'manager' }` rung
+    // and the `own_and_reports` read scope, and had no product write surface
+    // at all: the generic data path refuses it (ADR-0092 D2's managed-update
+    // whitelist is `{name, image, locale}`), the bulk import does not carry
+    // it, and the Console renders it read-only. So the rung expanded to
+    // nobody on every record in any install without a directory sync.
+    //
+    // Same family as `unlock-user` above: an ObjectStack mount on the raw app
+    // ahead of the catch-all, platform-admin gated (ADR-0068), ledgered in
+    // `auth-route-ledger.ts`. The handler runs under a SYSTEM context, so it
+    // reaches the column by context rather than by whitelist — exactly how
+    // `admin-import-users` already reaches `phone_number` and `role` — which
+    // is why no Tier-1 list moves and the column keeps `readonly: true`.
+    // Every refusal (self-assignment, cycle, depth, cross-organization,
+    // directory-owned identity) is enforced in the handler; see
+    // `admin-set-user-manager.ts` for why each one has to live at the write.
+    rawApp.post(`${basePath}/admin/set-user-manager`, async (c: any) => {
+      try {
+        const actor = await gateAdmin(c);
+        if (actor instanceof Response) return actor;
+        const { runSetUserManager } = await import('./admin-set-user-manager.js');
+        // Attribution only — the route's own authorization already happened
+        // in `gateAdmin`. Opening the actor seam here credits the `sys_user`
+        // row to the admin instead of recording it as the system.
+        const { status, body } = await runAttributedToUser(actor.id, () =>
+          runSetUserManager(
+            {
+              getDataEngine: () => this.authManager!.getDataEngine() as any,
+              logger: ctx.logger,
+            },
+            actor,
+            c.req.raw,
+          ),
+        );
+        return c.json(body, status as any);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] set-user-manager failed', err);
         return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
       }
     });

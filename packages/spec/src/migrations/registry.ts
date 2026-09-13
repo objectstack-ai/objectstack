@@ -6022,6 +6022,65 @@ const step18: MigrationStep = {
         + 'nothing to visit.',
     },
     {
+      id: 'cache-warmup-scheduled-strategy-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+      // span AND a table cell.
+      surface:
+        "CacheWarmup.strategy — the value 'scheduled' left the warmup-strategy enum "
+        + '(packages/spec/src/system/cache.zod.ts), and the enum describe stopped promising '
+        + '"scheduled (cron)". The key itself, DistributedCacheConfig.warmup.strategy, is '
+        + 'unchanged and still authorable',
+      replacement:
+        "'eager' to warm at startup or 'lazy' to warm on first access — the two strategies "
+        + 'the vocabulary ever described without pointing outside itself. There is no '
+        + 'replacement for the cadence: a warmup on a schedule is a job. Declare a `job` with '
+        + 'schedule.expression (system/job.zod.ts) whose handler does the warming — that is '
+        + 'the one cron slot this platform evaluates, and it is the slot #16320 deliberately '
+        + 'kept when it deleted the other seven',
+      reason:
+        'ADR-0049 enforce-or-remove, closing the residue #16320 left inside the schema it had '
+        + 'just edited. That card deleted CacheWarmup.schedule — the cron key this enum member '
+        + 'selected — and declined the member itself on the reading that it is "a value, not a '
+        + "position this ruling names\". That is a statement about the ruling's SCOPE, not a "
+        + 'finding that the value was sound: after the deletion the member declared a warmup '
+        + 'cadence with no key left to configure it, no engine that has ever run one, and a '
+        + '.describe() still promising "(cron)" — ADR-0049 declared-not-enforced in the form '
+        + 'Prime Directive 10 names outright, a capability advertised that the runtime does '
+        + 'not deliver. Re-measured on main at 690f083f83 with a lit control rather than '
+        + 'inherited from the card: CacheWarmupSchema has zero runtime consumers outside its '
+        + 'declaring file (six files reference it — the generated reference page import, the '
+        + 'declaration-map and export-origins catalogues, the ADR-0058 D7 ledger comment and '
+        + 'two spec test files — while the control, ConnectorSchema, resolves to 46 files), '
+        + 'and no cache-warmup engine exists anywhere on the platform. Bookkeeping follows the '
+        + "hot-reload-inert-state-strategies-retired and crypto.hash precedents: an enum-VALUE "
+        + 'narrowing puts nothing in RETIRED_KEYS_BY_MAJOR (no authorable KEY changed) and '
+        + 'leaves the four surface ratchets byte-identical (no def changed, and they key on '
+        + "positions and names, never on a def's value set), so the prescription hangs on the "
+        + "enum's own error map dispatched by issue.input — telling the author of a TYPO that "
+        + 'their value "was removed" would misinform. It is a SEMANTIC entry rather than a D2 '
+        + 'conversion because there is no source to rewrite: CacheWarmup is bound to no '
+        + 'metadata type and embedded in no stack collection, so no authored document and no '
+        + 'stored row has ever carried this value, and os migrate meta has nothing to list. '
+        + 'Route 3 of the retirement playbook, the #4834 / #11825 shape: this entry IS the '
+        + 'declaration. ADR-0049, ADR-0087, #17157, #16320.',
+      acceptanceCriteria:
+        "No configuration passes strategy: 'scheduled' to CacheWarmupSchema or to "
+        + 'DistributedCacheConfigSchema.warmup. TypeScript callers cannot: '
+        + "CacheWarmup['strategy'] is now 'eager' | 'lazy', so the literal is a compile error "
+        + 'at the authoring site. Callers that arrive as JSON get a parse REFUSAL — not the '
+        + 'silent strip #16320 left for the schedule key beside it, because a narrowed enum '
+        + 'rejects rather than drops — carrying the prescription, which names the job route. '
+        + 'Concretely, check two places. (1) Any host or deployment config embedding a '
+        + 'DistributedCacheConfig: a warmup block selecting the retired strategy now fails to '
+        + 'parse where it previously parsed green; change it to eager or lazy. (2) Anything '
+        + 'that was waiting on the cadence to take effect: it never did. No warmup has ever '
+        + 'run on a schedule on this platform, so migrating the value changes no runtime '
+        + 'behaviour whatsoever — what changes is that the contract stops promising it. If a '
+        + 'scheduled warmup is genuinely wanted, it comes back through the ENFORCE leg of '
+        + 'ADR-0049: the engine first, the declaration with it, never as a bare enum row '
+        + 'again.',
+    },
+    {
       id: 'cbp-master-detail-required-forced',
       surface: 'object.fields.<master>.required on a `master_detail` reference under '
         + '`sharingModel: \'controlled_by_parent\'` — authored via `ObjectSchema.create()`',
@@ -8495,6 +8554,68 @@ const step18: MigrationStep = {
         + 'dropped.',
     },
     {
+      id: 'kernel-health-check-and-hot-reload-durations-unit-in-key',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface: 'the three plugin-lifecycle durations whose unit lived in a source JSDoc only: '
+        + 'PluginHealthCheck.interval, PluginHealthCheck.timeout and HotReloadConfig.debounceDelay '
+        + '(kernel/plugin-lifecycle-advanced.zod.ts)',
+      replacement: 'intervalMs, timeoutMs and debounceDelayMs — rename each key; all three values '
+        + '(milliseconds) and their 30000 / 5000 / 1000 defaults are unchanged',
+      reason:
+        'Director-seat ruling A on #15939, 2026-09-11, carrying the maintainer\'s 「同意」 (decision '
+        + 'batch #115), executing the #14478 rule per file. Each key named milliseconds in its JSDoc '
+        + '— "Health check interval in milliseconds", "Timeout for health check in milliseconds", '
+        + '"Debounce delay before reloading (milliseconds)" — and the JSDoc above a key is NOT what '
+        + '`content/docs/references/**` renders; `.describe()` is. Measured on this tree by the '
+        + 'gate\'s own census (check-duration-unit-keys --list): all three read [name: -] [prose: -] '
+        + '— no unit in the name and none in the published prose either. `interval` is the sharpest '
+        + 'of the three: its describe carried one unit-shaped token, the parenthetical '
+        + '"(default: 30s)", which names SECONDS for a value the schema bounds and defaults in '
+        + 'MILLISECONDS (min 1000, default 30000). That is the 1000x confusion the rule exists for, '
+        + 'published to the one reader who cannot see the source. The suffix is the family\'s own '
+        + 'spelling, counted on this tree: 100 key-position *Ms declarations across packages/spec, '
+        + 'timeoutMs 29 of them and intervalMs 3, so both renames land on names the surface already '
+        + 'uses. debounceDelay takes the plain suffix rather than a shortened form: it is the only '
+        + 'debounce-shaped key spelling in the whole repo (5 key-position occurrences, all of this '
+        + 'one key and its fixtures, no debounceMs variant anywhere), while the Delay-plus-Ms pairing '
+        + 'is already attested (maxDelayMs, initialDelayMs, retryDelayMs, delayMs) — so unlike the '
+        + 'Ttl-versus-TTL question the sibling round had to settle, there is no competing family '
+        + 'spelling to choose between. All three old spellings are retiredKey() tombstones: neither '
+        + 'PluginHealthCheckSchema nor HotReloadConfigSchema is .strict(), so a bare deletion would '
+        + 'be a SILENT STRIP (#3733, ADR-0104) — and here the stripped value lands on a setInterval '
+        + 'period, a race deadline and a setTimeout delay. Why a semantic entry and not a D2 '
+        + 'conversion: the conversion chain walks a normalized STACK, and neither def is an '
+        + 'authorable surface — no metadata-type binding, stack collection or manifest embed carries '
+        + 'either, and both are library parameters a host passes to PluginHealthMonitor / '
+        + 'HotReloadManager in TypeScript (the #4914 / #11825 keep) — so a conversion would be a '
+        + 'transform with no seam that ever runs. That is the same disposition '
+        + 'plugin-auto-restart-never-reinitialised and hot-reload-watch-placeholder-retired recorded '
+        + 'for keys on these two defs. The registration-time refusals in '
+        + 'PluginHealthMonitor.registerPlugin and HotReloadManager.registerPlugin are the door for '
+        + 'the audience that does not parse. Measured on 884e8347d: the only in-repo readers are '
+        + 'packages/core/src/health-monitor.ts and packages/core/src/hot-reload.ts, both moved in '
+        + 'this same change; and the pinned objectui checkout — the pin this repo builds '
+        + 'against, `.objectui-sha` = `53ded82bf7a494f54e344e19099dbf00854b8694` — names '
+        + 'neither def and neither key: all thirteen exports of plugin-lifecycle-advanced.zod.ts and '
+        + 'the string debounceDelay each occur 0 times across its 6409 tracked files, against lit '
+        + 'controls objectstack 10171 and @objectstack/spec 3479 on the same corpus.',
+      acceptanceCriteria:
+        'Every producer and reader of a PluginHealthCheck spells intervalMs and timeoutMs, and every '
+        + 'one of a HotReloadConfig spells debounceDelayMs — concretely '
+        + 'packages/core/src/health-monitor.ts, whose loop now reads setInterval(..., '
+        + 'config.intervalMs) and whose race reads config.timeoutMs, and '
+        + 'packages/core/src/hot-reload.ts, whose debounce now reads config.debounceDelayMs. '
+        + 'Authoring any old spelling fails to compile (input type `never`) and fails to parse with '
+        + 'the rename prescription naming the suffixed key; handing one to registerPlugin on either '
+        + 'class is refused with an ADR-0112 VALIDATION_ERROR / 400 before the plugin is stored. '
+        + 'Behaviour is unchanged: the same milliseconds, the same 30000 / 5000 / 1000 defaults and '
+        + 'the same min bounds (1000 / 100 / 0), and the published describes now name milliseconds. '
+        + 'The sibling shutdownTimeout on HotReloadConfig is deliberately NOT renamed with them: its '
+        + 'JSDoc reads "Graceful shutdown timeout" and names no unit anywhere, so it is the #14519 '
+        + 'unit-nowhere shape the #14478 gate leaves outside its verdict, not part of this row set.',
+    },
+    {
       id: 'kernel-package-lifecycle-durations-unit-in-key',
       // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
       // code span AND a table cell.
@@ -8623,6 +8744,65 @@ const step18: MigrationStep = {
         + 'key. Verify the sharp pair explicitly: a manifest and a health report in the same '
         + 'codebase must now read responseTimeHours and responseTimeMs respectively, and neither '
         + 'accepts the bare name.',
+    },
+    {
+      id: 'kernel-runtime-config-timeout-unit-in-key',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface: 'RuntimeConfig resourceLimits.timeout (kernel/plugin-security-advanced.zod.ts)',
+      replacement: 'resourceLimits.timeoutMs — rename the key; the value (milliseconds) is unchanged',
+      reason:
+        'This entry COMPLETES what #15678 deliberately left alone, and the two are meant to be read '
+        + 'as a sequence. #15678 renamed the four plugin-security durations on this same file '
+        + '(`kernel-plugin-security-durations-unit-in-key`) and recorded, accurately, that one key was '
+        + 'out of its scope: RuntimeConfig.resourceLimits.timeout named its unit only in the JSDoc '
+        + 'above it ("Execution timeout in milliseconds"), a channel check:duration-unit-keys does not '
+        + 'read — it reads `.describe()` and `.meta({ description })` — and that key\'s describe '
+        + '("Maximum execution time") named none, so the gate listed it among the duration-shaped keys '
+        + 'without judging it, neither an offender nor an exemption. That JSDoc-channel gap was filed '
+        + 'as #15939, and #15678\'s statement about its own scope stays true. #15939 is now ruled and '
+        + 'this is its remediation: director-seat ruling A, 2026-09-11, carrying the maintainer\'s '
+        + '「同意」 (decision batch #115), which remediates the 21-row JSDoc-channel population per file '
+        + 'and lands the widened gate (#17635) last, into a tree already clean. So the reader who most '
+        + 'needs the unit — the reader of the published reference page, who never sees the source '
+        + 'JSDoc — got a bare integer on '
+        + 'content/docs/references/kernel/plugin-security-advanced.mdx and could not tell 60000 '
+        + 'milliseconds from 60000 seconds. The key is renamed and the describe is corrected in the '
+        + 'same stroke, because under the #14478 rule moving the unit into the describe alone is '
+        + 'itself a violation (unit in prose, none in the name). Spelled Ms, the same token '
+        + 'SandboxConfig.process.timeoutMs on this very file already carries: counted on this tree, '
+        + 'the suffixed family spells it that way in every member (29 key-position `timeoutMs` '
+        + 'declarations across packages/spec/src/**/*.zod.ts, 40 distinct *Ms keys) and there is no '
+        + 'timeoutMillis, timeout_ms or timeoutMS variant anywhere in packages/spec/src. Tombstoned '
+        + 'with retiredKey() because the nested resourceLimits object is not strict, so a bare '
+        + 'deletion would silently strip the key. Why a semantic entry and not a D2 conversion: a '
+        + 'RuntimeConfig is the engine block of the SandboxConfig a host or a plugin security manifest '
+        + 'constructs — stack.zod.ts declares no sandbox, security-policy or runtime-config collection '
+        + 'and it is not a stored sys_metadata row — so the conversion chain has no seam that runs on '
+        + 'it; the same reading #15678 recorded for the four keys it renamed. Measured on 146c291943: '
+        + 'no in-repo runtime reads the key — packages/core/src/security/sandbox-runtime.ts, the one '
+        + 'consumer of this shape, reads resourceLimits.maxCpu (3 occurrences of resourceLimits) and '
+        + 'spells timeout 0 times; outside the zod file and its test the only live occurrences are the '
+        + 'generated rows in content/docs/references/kernel/plugin-security-advanced.mdx, which this '
+        + 'rename regenerates. The pinned objectui checkout — this is the pin we build against, '
+        + '`.objectui-sha` = `53ded82bf7a494f54e344e19099dbf00854b8694`, re-read from this tree — '
+        + 'spells resourceLimits.timeout 0 times across '
+        + '6409 tracked files, against lit controls timeout 832, RuntimeConfig 236 and resourceLimits '
+        + '2 on the same corpus; both resourceLimits hits are prose in packages/app-shell recording '
+        + 'that objectui\'s own AppShellRuntimeConfig shares not one key with the spec\'s '
+        + 'RuntimeConfig, so nothing there authors this key and no pin bump is owed. #15939, #15678, '
+        + '#14478, ADR-0087.',
+      acceptanceCriteria:
+        'Every RuntimeConfigSchema.parse(…) site, and every literal handed to a plugin sandbox as its '
+        + 'runtime block, spells resourceLimits.timeoutMs; authoring resourceLimits.timeout fails to '
+        + 'compile (input type `never`) and fails to parse with the rename prescription naming '
+        + 'timeoutMs and the shape it belongs to. Behaviour is unchanged: a runtime given '
+        + 'timeoutMs: 60000 aborts execution after sixty seconds exactly as timeout: 60000 did, and '
+        + 'the min(0) integer bound rides along with the renamed key. The published describe reads '
+        + '"Maximum execution time in milliseconds". Verify the two same-named keys on this one file '
+        + 'apart: RuntimeConfig.resourceLimits.timeout and SandboxConfig.process.timeout both retire '
+        + 'to a key spelled timeoutMs, and each refusal names its own shape so an upgrading author '
+        + 'edits the right block.',
     },
     {
       id: 'kernel-startup-orchestrator-durations-unit-in-key',
@@ -9836,6 +10016,60 @@ const step18: MigrationStep = {
         + 'no backfill, no reaper, no migrate command.',
     },
     {
+      id: 'screen-field-lookup-reference-required',
+      surface:
+        "The `reference` key of a `type: 'lookup'` field on a `screen` node — "
+        + '`flows[].nodes[].config.fields[]` where the node `type` is `screen` and the field '
+        + "`type` is `lookup` (`ScreenFieldConfigSchema`). Nothing is renamed, retired or "
+        + 're-typed and the key set does not move: `reference` was already declared and '
+        + 'already optional in the shape. What narrows is the ACCEPT SET for one value of the '
+        + "sibling `type` — a `lookup` field with no `reference`, or with a blank one, parsed "
+        + 'before this major and is refused now. Every other widget hint is untouched, and a '
+        + '`lookup` field that already names its target parses byte-identically.',
+      replacement:
+        "Name the object whose records the picker offers, beside the type: "
+        + "`{ name: 'resolved_by_article', type: 'lookup', reference: 'crm_knowledge_article' }`. "
+        + 'The value is an object NAME (the canonical id — same string `FieldSchema.reference` '
+        + 'carries), not a label and not a record id. ⚠️ There is deliberately no default and no '
+        + 'inference: a picker pointed at the wrong object is worse than one that refuses to '
+        + 'load, because it offers a human a plausible list of the wrong records and the flow '
+        + 'stores the id it is given. Where the field genuinely has no target object — the '
+        + 'author was using `lookup` to mean "type an id here" — the fix is the other '
+        + "direction: change `type` to `'text'`, which is what that field actually was, and "
+        + 'keep the prose that asked for an id in `inlineHelpText`.',
+      reason:
+        'Maintainer ruling A′, 2026-09-13 (decision batch #130 item 1), verbatim, '
+        + 'untranslated: 「同意」. ADR-0078 forbids metadata that parses, carries no marking and '
+        + 'does nothing — and its own worked example of that state is a `lookup` with no '
+        + '`reference`: the field renders a picker, the picker has no object to query, and '
+        + 'nothing anywhere says so. The key shipped OPTIONAL on this surface one release '
+        + 'earlier, on the argument that flows declaring a bare `lookup` already exist; the '
+        + 'ruling reversed that, holding that a degraded shape which ships is not a reason to '
+        + 'bend the contract to it. ⛔ NOT losslessly convertible, and the reason is the same '
+        + 'one `schedule-flow-acting-organization-required` gives: the remedy is a value the '
+        + 'artifact does not contain. A bare lookup records the field name and nothing about '
+        + 'its intended object, so `objectstack migrate meta` can identify every site but can '
+        + 'answer none of them — and a conversion that guessed (the first object with a '
+        + 'matching-looking name, the flow\'s trigger object) would write an authoritative '
+        + 'wrong answer into metadata a human then trusts. Registered under ADR-0087 D3 rather '
+        + 'than left silent because the change DOES carry a prescription a human can execute, '
+        + 'which is what D3 says a structured TODO is for.',
+      acceptanceCriteria:
+        "Every `type: 'lookup'` field on every `screen` node in the stack declares a non-empty "
+        + '`reference`, and the stack parses: `ScreenFieldConfigSchema` refuses the bare form '
+        + 'with a message addressed to `reference` '
+        + '(`SCREEN_FIELD_LOOKUP_REFERENCE_REQUIRED`), so a full metadata parse — `os lint`, or '
+        + 'any publish — reports one issue per unfixed site and names the FLOW and the FIELD in '
+        + 'its path. Work the list to empty rather than sampling it: a flow whose screen never '
+        + 'reaches that node in testing is refused at publish just the same. For each site, '
+        + 'answer which object the picker was meant to offer — the declaration is the answer, '
+        + "and where there is no such object the field was never a lookup (retype it `'text'`). "
+        + '⚠️ Runs SUSPENDED at a screen before the upgrade rehydrate their `ScreenSpec` from '
+        + 'stored context, so an in-flight run parked on an unfixed screen carries the old '
+        + 'shape: drain or re-drive those rather than assuming the fix reaches them '
+        + 'retroactively.',
+    },
+    {
       id: 'send-template-input-org-retired',
       surface: 'contracts.emailService.sendTemplate input.org',
       replacement:
@@ -10419,6 +10653,41 @@ const step18: MigrationStep = {
         + 'unchanged: { max: 100, durationMs: 60000 } is a hundred tasks a minute exactly as '
         + '{ max: 100, duration: 60000 } was, and the positive-integer bound rides along with the '
         + 'renamed key. The sibling max is a COUNT and keeps its name — it has no unit to carry.',
+    },
+    {
+      id: 'tenant-schema-cache-ttl-unit-in-key',
+      surface: 'SchemaLevelIsolationStrategy `performance.schemaCacheTTL` (system/tenant.zod.ts)',
+      replacement: '`performance.schemaCacheTtlSeconds` (default 3600) — rename the key; the value '
+        + '(seconds) is unchanged',
+      reason:
+        'Director-seat ruling A on #15939, 2026-09-11, carrying the maintainer\'s 「同意」 (decision '
+        + 'batch #115), executing the #14478 rule per file. The key carried its unit (seconds) in a '
+        + 'source JSDoc only — "Schema cache TTL in seconds" — while `.describe()`, the text '
+        + '`content/docs/references/**` publishes, said "Schema cache TTL" and named no unit at all. '
+        + 'So the reader who most needs the unit, the reader of the published reference page, was the '
+        + 'only reader who never saw it: 3600 is a plausible number of seconds and a plausible number '
+        + 'of milliseconds, and nothing on the page decided it. Under the #14478 gate, moving the unit '
+        + 'into the describe alone is itself a violation (unit in prose, none in the name), so the key '
+        + 'is renamed and the describe is corrected in the same stroke. Spelled `Ttl` and not `TTL`: '
+        + 'counted on this tree, the suffixed family already spells it that way in every member '
+        + '(`cacheTtlSeconds` 11, `ttlSeconds` 3, `defaultCacheTtlSeconds` 1) and no key-position '
+        + '`TtlSeconds` variant spells it otherwise. Tombstoned with `retiredKey()` because the nested '
+        + '`performance` object is not strict, so a bare deletion would silently strip the key. Why a '
+        + 'semantic entry and not a D2 conversion: `stack.zod.ts` declares no tenancy collection and a '
+        + 'tenant isolation strategy is not a stored metadata row (it describes cloud tenancy '
+        + 'configuration), so the chain has no seam that runs on it — the same reading '
+        + '`tenant-timeouts-unit-in-key` recorded for the two sibling keys on this file. Measured on '
+        + 'bd25e897dc: no in-repo runtime reads the key — outside `packages/spec/src/system/tenant.zod.ts` '
+        + 'and its test the only occurrences are the four generated rows in '
+        + '`content/docs/references/system/tenant.mdx`, which this rename regenerates; and the pinned '
+        + 'objectui checkout — `.objectui-sha` = `53ded82bf7a494f54e344e19099dbf00854b8694` — spells it 0 '
+        + 'times across 6409 tracked files, against lit controls `TTL` 112 and `tenant` 819 on the '
+        + 'same corpus.',
+      acceptanceCriteria:
+        'Every schema-level tenant isolation source spells `performance.schemaCacheTtlSeconds`; '
+        + 'authoring `performance.schemaCacheTTL` fails to compile and fails to parse with the rename '
+        + 'prescription naming the suffixed key; the parsed default is 3600 as before, and the '
+        + 'published describe reads "Schema cache TTL in seconds".',
     },
     {
       id: 'tenant-timeouts-unit-in-key',
@@ -11956,6 +12225,24 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // records: a health report is emitted by the startup orchestrator at runtime,
     // never authored into a metadata document.
     'kernel/HealthStatus:timestamp',
+    // #15939 ruling A (per-file remediation of #14478).
+    // `HotReloadConfig.debounceDelay` said "Debounce delay before reloading
+    // (milliseconds)" in a source JSDoc and "Wait time after change detection before
+    // reload" in the `.describe()` the reference pages publish, so the published
+    // channel named no unit at all and the reference-page reader got a bare 1000.
+    // Renamed to `debounceDelayMs`, the plain suffix rather than a shortened form:
+    // this is the only debounce-shaped key spelling in the repo (5 key-position
+    // occurrences, all this key and its fixtures; no `debounceMs` variant anywhere),
+    // while the Delay-plus-Ms pairing is already attested (`maxDelayMs`,
+    // `initialDelayMs`, `retryDelayMs`, `delayMs`) — so there was no competing family
+    // spelling to choose between. The value and the 1000 default are unchanged.
+    // Tombstoned with `retiredKey()`: `HotReloadConfigSchema` is not `.strict()`, so
+    // a bare deletion would silently strip the key and hand `setTimeout` no delay.
+    // No D2 conversion: not a stack collection member, not a stored row —
+    // `HotReloadConfig` is a library parameter a host passes to `HotReloadManager` in
+    // TypeScript, the same reading `hot-reload-watch-placeholder-retired` recorded
+    // for this def. See `kernel-health-check-and-hot-reload-durations-unit-in-key`.
+    'kernel/HotReloadConfig:debounceDelay',
     // #12428 — ADR-0049 enforce-or-remove, one symbol over from #12340 (PR #12425)
     // in the same file and on the same per-key test. `HotReloadManager.startWatching`
     // contained NO watcher: a guard plus `logger.info('File watching started',
@@ -12507,6 +12794,23 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // registration-time refusal in `PluginHealthMonitor.registerPlugin` is the door
     // for the audience that exists.
     'kernel/PluginHealthCheck:autoRestart',
+    // #15939 ruling A (per-file remediation of #14478). `PluginHealthCheck.interval`
+    // said "Health check interval in milliseconds" in a source JSDoc, and the
+    // `.describe()` the reference pages publish said "How often to perform health
+    // checks (default: 30s)" — its one unit-shaped token naming SECONDS for a value
+    // the schema bounds at min 1000 and defaults to 30000 MILLISECONDS. Measured by
+    // the gate's own census, the key read [name: -] [prose: -]: no unit in the name,
+    // and none the gate recognises in the prose either. Renamed to `intervalMs` —
+    // the family's own spelling on this tree (100 key-position `*Ms` declarations in
+    // packages/spec, `intervalMs` 3 of them). The value and the 30000 default are
+    // unchanged. Tombstoned with `retiredKey()`: `PluginHealthCheckSchema` is not
+    // `.strict()`, so a bare deletion would silently strip the key and hand
+    // `setInterval` no period at all. No D2 conversion: not a stack collection
+    // member, not a stored row — `PluginHealthCheck` is a library parameter a host
+    // passes to `PluginHealthMonitor` in TypeScript, the same reading
+    // `plugin-auto-restart-never-reinitialised` recorded for this def. See
+    // `kernel-health-check-and-hot-reload-durations-unit-in-key`.
+    'kernel/PluginHealthCheck:interval',
     // #12032 — ADR-0049 enforce-or-remove, one class over from #12428 (PR #12571)
     // and #12340 (PR #12425) in the same host-driven lifecycle library, and for a
     // sharper reason than either: this key HAD a reader that acted, and what it did
@@ -12613,6 +12917,21 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // registration-time refusal in `PluginHealthMonitor.registerPlugin` is the door
     // for the audience that exists.
     'kernel/PluginHealthCheck:restartBackoff',
+    // #15939 ruling A (per-file remediation of #14478). `PluginHealthCheck.timeout`
+    // said "Timeout for health check in milliseconds" in a source JSDoc and
+    // "Maximum time to wait for health check response" in the `.describe()` the
+    // reference pages publish, so the published channel named no unit at all and the
+    // reference-page reader got a bare 5000. Renamed to `timeoutMs` — the family's
+    // most attested spelling on this tree (29 key-position `timeoutMs` declarations
+    // in packages/spec). The value and the 5000 default are unchanged. Tombstoned
+    // with `retiredKey()`: `PluginHealthCheckSchema` is not `.strict()`, so a bare
+    // deletion would silently strip the key and race the health check against no
+    // deadline. No D2 conversion: not a stack collection member, not a stored row —
+    // `PluginHealthCheck` is a library parameter a host passes to
+    // `PluginHealthMonitor` in TypeScript, the same reading
+    // `plugin-auto-restart-never-reinitialised` recorded for this def. See
+    // `kernel-health-check-and-hot-reload-durations-unit-in-key`.
+    'kernel/PluginHealthCheck:timeout',
     // #15678 (stack card 3/6 of #14478) — ruling B. `PluginHealthReport.metrics.responseTime`
     // said "Average response time in ms" in prose and nothing else. Renamed to
     // `responseTimeMs`; the value is unchanged. Tombstoned with `retiredKey()`.
@@ -12655,6 +12974,21 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // this rename, and the divergence between the two shapes is filed separately.
     // See `kernel-startup-orchestrator-durations-unit-in-key`.
     'kernel/PluginStartupResult:duration',
+    // #15939 ruling A (per-file remediation of #14478 ruling B). This is the fifth
+    // duration on `kernel/plugin-security-advanced.zod.ts` and the one #15678
+    // deliberately left alone: `resourceLimits.timeout` said "Execution timeout in
+    // milliseconds" in a source JSDoc and "Maximum execution time" in the
+    // `.describe()` the reference pages publish, so the published channel named no
+    // unit at all and the gate listed the key in its census without judging it.
+    // Renamed to `timeoutMs`, the same token `SandboxConfig.process.timeoutMs` on
+    // this file already carries. The value is unchanged. Tombstoned with
+    // `retiredKey()`: the nested `resourceLimits` object is not strict, so a bare
+    // deletion would silently strip the key. No D2 conversion: a `RuntimeConfig` is
+    // the engine block of the `SandboxConfig` a host or a plugin security manifest
+    // constructs, never a stack collection member or a stored row — the same
+    // reading `kernel-plugin-security-durations-unit-in-key` recorded for the four
+    // keys it renamed. See `kernel-runtime-config-timeout-unit-in-key`.
+    'kernel/RuntimeConfig:resourceLimits.timeout',
     // #15678 (stack card 3/6 of #14478) — ruling B. `SandboxConfig.process.timeout`
     // said "Process timeout in ms" in prose and nothing else. Renamed to
     // `timeoutMs`; the value is unchanged. Tombstoned with `retiredKey()` inside
@@ -13139,6 +13473,17 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `api/BatchEndpointsConfig:operations.upsertMany` are.
     // D3 semantic entry: `change-management-duration-keys-retired`.
     'system/RollbackPlan:steps.estimatedMinutes',
+    // #15939 ruling A (per-file remediation of #14478). `performance.schemaCacheTTL`
+    // said "Schema cache TTL in seconds" in a source JSDoc and "Schema cache TTL" in
+    // the `.describe()` the reference pages publish, so the published channel named
+    // no unit at all. Renamed to `schemaCacheTtlSeconds` — `Ttl`, not `TTL`, because
+    // that is how every member of the suffixed family on this tree already spells it
+    // (`cacheTtlSeconds`, `ttlSeconds`, `defaultCacheTtlSeconds`). The value and the
+    // 3600 default are unchanged. Tombstoned with `retiredKey()`: the nested
+    // `performance` object is not strict, so a bare deletion would silently strip the
+    // key. No D2 conversion: not a stack collection member, not a stored row. See
+    // `tenant-schema-cache-ttl-unit-in-key`.
+    'system/SchemaLevelIsolationStrategy:performance.schemaCacheTTL',
     // #15679 (stack card 4/6 of #14478) — ruling B. The second of the two
     // byte-identical `window.size` declarations in `metrics.zod.ts`; it carries the
     // same prose and takes the same new name, `durationSeconds`, for the reason

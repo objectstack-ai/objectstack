@@ -36,6 +36,25 @@ import { SqliteWasmDriver } from './index.js';
 /** `any` defeats ordinary assignability checks; this is the standard detector. */
 type IsAny<T> = 0 extends 1 & T ? true : false;
 
+/**
+ * [#17879] MEASURED — the strongest reading in the sweep: this door does not
+ * merely regress to a nested `any`, it ALREADY IS one, today, and the two
+ * `IsAny` legs below are green about it.
+ *
+ *   door resolves to  `{ name: string; fields?: Record<string, any>;
+ *                        tenancy?: any; indexes?: any[]; lifecycle?: any }[]`
+ *   `IsAny` on the array and on the element   both `false` => both legs green
+ *   `ContainsAny` on either                   `true`      => RED AT BASELINE
+ *   CONTROL  `objects: any`                   7 errors here => it fires
+ *
+ * So the #17876 swap cannot be made here: it does not go red on a REGRESSION,
+ * it goes red on `main`. Four sub-doors (`fields`, `tenancy`, `indexes`,
+ * `lifecycle`) are masked in `SqlDriver.initObjects`'s own parameter literal,
+ * and un-masking them is a NON-TEST change in `@objectstack/driver-sql` —
+ * outside #17879's scope, reported instead. Note the pair below already
+ * covers the `objects: any[]` shape: the ELEMENT leg catches it.
+ */
+
 type InitObjectsArg = Parameters<SqliteWasmDriver['initObjects']>[0];
 type InitObjectsElement = InitObjectsArg extends Array<infer E> ? E : never;
 

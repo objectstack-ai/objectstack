@@ -2772,9 +2772,16 @@ export class ObjectStackClient {
    * - GET    /api/v1/cloud/environments            → list environments
    * - GET    /api/v1/cloud/environments/:id        → get one (with database info)
    * - POST   /api/v1/cloud/environments            → provision a new environment
-   * - PATCH  /api/v1/cloud/environments/:id        → update (displayName, plan, status, …)
+   * - PATCH  /api/v1/cloud/environments/:id        → update (display_name, is_default, metadata)
    * - POST   /api/v1/cloud/environments/:id/activate → set as session's active environment
    * - POST   /api/v1/cloud/environments/:id/credentials/rotate → rotate credential
+   *
+   * That PATCH accept-set is the WHOLE set. `plan`, `status` and `visibility`
+   * are read-only on the control plane, and an unknown or read-only key is
+   * answered with a **400** — ⛔ it is NOT dropped silently. A plan change goes
+   * through the billing routes, a status change through the lifecycle actions
+   * (archive / restore / suspend / resume), and `visibility` is server-owned.
+   * Per-field detail, and the provenance of that 400, live on `update` below.
    *
    * @see docs/adr/0002-environment-database-isolation.md
    */
@@ -2933,7 +2940,32 @@ export class ObjectStackClient {
     },
 
     /**
-     * Update an environment (display_name, plan, status, is_default, metadata).
+     * Update an environment. The control plane accepts exactly three keys on
+     * this route: `display_name`, `is_default` and `metadata`.
+     *
+     * ⛔ Every other key is REFUSED, ⛔ not silently dropped — an unknown or
+     * read-only key is answered with a **400**. Silent-drop is the assumption
+     * a caller reasonably makes today, and it is the wrong one: the write does
+     * not half-succeed, the whole call fails loudly.
+     *
+     * - `plan` — read-only column. Plan changes go through the billing routes,
+     *   never through this call.
+     * - `status` — read-only column. Use the lifecycle actions instead:
+     *   archive / restore / suspend / resume.
+     * - `visibility` — server-owned, `private` today. The control plane forces
+     *   it at create time and refuses the column here; a write entry arrives
+     *   with the public-listing feature, on its OWN endpoint rather than this
+     *   generic update (2026-09-12 maintainer ruling). See `updateVisibility`
+     *   below, which is subject to exactly this refusal.
+     *
+     * ⚠️ That 400 is an INHERITED reading, not one measured from this repo:
+     * `/api/v1/cloud/*` is served by `objectstack-ai/cloud`, which is not
+     * readable from here, so no gate in this repo can check it — the same
+     * constraint the namespace docblock above records for the wire's casing.
+     *
+     * `patch` stays `Record<string, unknown>` deliberately. Narrowing it to a
+     * named type would narrow a published accept-set, which is a breaking
+     * change to this SDK and the maintainer's ruling to make, not a doc fix's.
      */
     update: async (id: string, patch: Record<string, unknown>) => {
       const res = await this.fetch(`${this.baseUrl}/api/v1/cloud/environments/${encodeURIComponent(id)}`, {
@@ -3054,6 +3086,21 @@ export class ObjectStackClient {
      * still allows anonymous artifact downloads when the URL includes an
      * exact `?commit=<id>` (share-by-link). `public` lists the environment and
      * freely exposes all revisions.
+     *
+     * ⛔ CURRENT STATE — this call is refused today, so the paragraph above
+     * describes a capability that does not exist yet. It PATCHes the generic
+     * `/api/v1/cloud/environments/:id` route with `{ visibility }`, and
+     * `visibility` is one of the server-owned columns that route rejects with
+     * a 400 (see `update` above). The 2026-09-12 maintainer ruling keeps
+     * `visibility` server-owned and forced to `private` until the
+     * public-listing feature ships, at which point it gets its OWN endpoint
+     * rather than this generic update.
+     *
+     * ⚠️ Note only. The signature and body below are deliberately untouched:
+     * retiring this method, re-signing it, or making it throw is a breaking
+     * change to a published SDK method and is the maintainer's ruling to make.
+     * ⚠️ The refusal is an INHERITED reading — see the provenance note on
+     * `update` above. It was NOT measured from this repo.
      */
     updateVisibility: async (id: string, visibility: 'private' | 'public') => {
       const res = await this.fetch(`${this.baseUrl}/api/v1/cloud/environments/${encodeURIComponent(id)}`, {
