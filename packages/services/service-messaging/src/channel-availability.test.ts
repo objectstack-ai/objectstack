@@ -185,7 +185,7 @@ describe('channel availability at fan-out (#17732)', () => {
         // notification is lost, to record that nothing was suppressed. That is
         // not hypothetical — it is what this change did to
         // `service-automation`'s zero-delivery harness before it was fixed.
-        expect(Object.hasOwn(data.inserts[0].row, 'suppressed_channels')).toBe(false);
+        expect(Object.prototype.hasOwnProperty.call(data.inserts[0].row, 'suppressed_channels')).toBe(false);
     });
 
     it('the common path writes EXACTLY the column set it wrote before this change', async () => {
@@ -353,7 +353,7 @@ describe('channel availability at fan-out (#17732)', () => {
         });
 
         expect(result.suppressed).toEqual([]);
-        expect(Object.hasOwn(data.inserts[0].row, 'suppressed_channels')).toBe(false);
+        expect(Object.prototype.hasOwnProperty.call(data.inserts[0].row, 'suppressed_channels')).toBe(false);
         expect(result.deliveries.find((d) => d.channel === 'nowhere'))
             .toMatchObject({ ok: false, error: "channel 'nowhere' not registered" });
     });
