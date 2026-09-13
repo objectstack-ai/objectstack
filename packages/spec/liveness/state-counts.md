@@ -30,7 +30,7 @@ for both corollaries.
 | `object` | 51 | 0 | 0 | 0 | 1 | 52 |
 | `field` | 90 | 0 | 0 | 1 | 2 | 93 |
 | `flow` | 34 | 0 | 0 | 6 | 0 | 40 |
-| `action` | 43 | 0 | 0 | 3 | 2 | 48 |
+| `action` | 44 | 0 | 0 | 3 | 2 | 49 |
 | `hook` | 19 | 0 | 0 | 3 | 0 | 22 |
 | `permission` | 36 | 0 | 0 | 6 | 0 | 42 |
 | `position` | 12 | 0 | 0 | 0 | 0 | 12 |
@@ -41,7 +41,7 @@ for both corollaries.
 | `page` | 22 | 0 | 0 | 1 | 1 | 24 |
 | `view` | 77 | 0 | 0 | 11 | 0 | 88 |
 | `report` | 21 | 0 | 0 | 0 | 0 | 21 |
-| `dashboard` | 34 | 0 | 0 | 8 | 0 | 42 |
+| `dashboard` | 45 | 0 | 0 | 10 | 0 | 55 |
 | `webhook` | 19 | 0 | 0 | 0 | 0 | 19 |
 | `query` | 16 | 0 | 0 | 5 | 0 | 21 |
 | `datasource` | 30 | 0 | 0 | 0 | 0 | 30 |
@@ -63,4 +63,4 @@ for both corollaries.
 | `batch_endpoints` | 5 | 0 | 0 | 2 | 0 | 7 |
 | `route_generation` | 0 | 0 | 0 | 4 | 0 | 4 |
 | `realtime_subscription` | 0 | 0 | 0 | 6 | 0 | 6 |
-| **total** | **849** | **5** | **1** | **94** | **10** | **959** |
+| **total** | **861** | **5** | **1** | **96** | **10** | **973** |
