@@ -107,6 +107,7 @@ Appearance and visualization configuration
 | **endDateField** | `string` | optional | Field providing the event end date/time (defaults to a single-day event) |
 | **titleField** | `string` | optional | Field displayed as the event title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
 | **colorField** | `string` | optional | Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the calendar theme-aware palette color hashed from the value |
+| **allDayField** | `string` | optional | Field carrying the all-day flag for each event (names a boolean field, not a value): a record whose flag is true is drawn as an all-day band rather than at a clock time, and one whose flag is absent or false is not all-day. Omit to leave the renderer inference in place — an event with no end date draws as all-day |
 
 
 ---
@@ -799,7 +800,7 @@ Map view configuration
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
-| **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
+| **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
 | **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline view configuration |
@@ -943,6 +944,7 @@ View filter rule
 | **endDateField** | `string` | optional | Field providing the event end date/time (defaults to a single-day event) |
 | **titleField** | `string` | optional | Field displayed as the event title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
 | **colorField** | `string` | optional | Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the calendar theme-aware palette color hashed from the value |
+| **allDayField** | `string` | optional | Field carrying the all-day flag for each event (names a boolean field, not a value): a record whose flag is true is drawn as an all-day band rather than at a clock time, and one whose flag is absent or false is not all-day. Omit to leave the renderer inference in place — an event with no end date draws as all-day |
 
 ### Nested Shape: `ListView.gantt`
 
@@ -1204,7 +1206,7 @@ Tab configuration for multi-tab view interface
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
-| **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
+| **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
 | **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline view configuration |
@@ -1339,6 +1341,7 @@ View filter rule
 | **endDateField** | `string` | optional | Field providing the event end date/time (defaults to a single-day event) |
 | **titleField** | `string` | optional | Field displayed as the event title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
 | **colorField** | `string` | optional | Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the calendar theme-aware palette color hashed from the value |
+| **allDayField** | `string` | optional | Field carrying the all-day flag for each event (names a boolean field, not a value): a record whose flag is true is drawn as an all-day band rather than at a clock time, and one whose flag is absent or false is not all-day. Omit to leave the renderer inference in place — an event with no end date draws as all-day |
 
 ### Nested Shape: `ObjectListView.gantt`
 
@@ -1800,7 +1803,7 @@ Tab configuration for multi-tab view interface
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
-| **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
+| **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
 | **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline view configuration |
@@ -1885,7 +1888,7 @@ Tab configuration for multi-tab view interface
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
-| **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
+| **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
 | **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline view configuration |
@@ -2126,7 +2129,7 @@ This schema accepts one of the following structures:
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
-| **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
+| **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
 | **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline view configuration |
@@ -2302,7 +2305,7 @@ This schema accepts one of the following structures:
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
-| **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
+| **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
 | **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline view configuration |
