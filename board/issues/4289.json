@@ -1,0 +1,32 @@
+{
+  "number": 4289,
+  "kind": "issue",
+  "title": "补一份手写的连接器指南:`connectors:` 是租户手写的(ADR-0097),但全仓没有任何一页教怎么写",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-07-31T03:19:24Z",
+  "updated_at": "2026-07-31T03:53:25Z",
+  "closed_at": "2026-07-31T03:53:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4289",
+  "body": "从 #4287 的豁免审计出来的结论项。那次复核把 `variant-docs.json` 里 7 条 `generated-reference-only` 豁免逐条查了一遍,**连接器授权是其中最该动手的一条** —— 别的要么是错归档(实为不可授权),要么是低优先级的封闭集合,只有它是「租户真的要手写、但没有任何指南」。\n\n## 缺口\n\nADR-0097 让连接器成为**声明式、租户手写**的元数据:一条 `connectors:` 条目写上 `provider`(`rest` / `openapi` / `mcp`),启动时被通用执行器工厂物化成可派发的连接器,**不需要写任何插件代码**。也就是说 auth type、`credentialRef`、`config` 全是作者要在 stack 元数据里敲的东西。\n\n但手写文档树里没有任何一页教这件事。逐页核查过(不是估计):\n\n| 页 | 实际覆盖 |\n|---|---|\n| `automation/flows.mdx` | **一段**,讲 `connector_action` 节点如何派发,顺带点了 ADR-0097 和 stdio 安全默认。是目前最接近的,但主题是 flow 节点,不是连接器授权 |\n| `capabilities/integrations.mdx` | 30 行的能力概览页,连接器占**一个 bullet**(「ready-made Slack and generic REST connectors drop into flows」)。营销面,非授权面 |\n| `ai/connect-mcp.mdx` | 206 行,但讲的是**反方向** —— 把外部 MCP 客户端接到本平台,不是用 `mcp` provider 声明一个出站连接器 |\n| `references/integration/connector.mdx` / `connector-auth.mdx` | 生成页,由 schema 产出,不含任何授权指引 |\n\n> 更正一处我自己写下的说法:#4287 的 ledger reason 里我写「唯一的散文是 flows.mdx 里关于 `connector_action` 节点的一段」。上面两页(`capabilities/integrations.mdx`、`ai/connect-mcp.mdx`)也提到了连接器,只是都不是授权指南。结论不变,措辞当时说窄了。\n\n## 为什么值得写(而不只是「文档待补」)\n\n1. **auth 是密钥面。** `ConnectorSchema.auth` 有两种形态:运行时形状**内联密钥**(插件传 `{ type: 'bearer', token }`),声明式实例形状只能带 `credentialRef` **引用**。ADR-0097 §3 明确「stack 元数据是被授权、被版本化、被分发的,原始 token 绝不能进去」—— 这条约束目前只活在 schema 注释里,作者读不到。AI 作者尤其可能顺手内联一个 token,因为那是它见过最多的写法。\n2. **`config` 是开放面。** 它**故意不由 stack schema 校验**,而是由 provider 工厂各自校验(OpenAPI 要 `{ spec }`、MCP 要 `{ transport }`、REST 要 `{ baseUrl }`)。开放面 + 无文档 = #4001 反复处理的那种静默失效,只是这次连 strict 都救不了(schema 有意不管)。\n3. **失败模式是硬启动错误。** `provider` 写了但对应工厂没装 ⇒ **hard boot error**;`mcp` + stdio 传输默认被拒(要 host 显式 opt-in)。这些都是作者第一次就会撞上的,现在只能靠读 ADR 或读源码。\n4. **写完就自动进棘轮。** `variant-docs.json` 里 connector auth 的两条豁免写明了「when one is written, bind it and delete this exemption」—— 指南一落地,#4177 的变体/文档闸门立刻接管这 5 个 auth 变体,以后加一种就必须更文档。\n\n## 建议内容\n\n新页 `content/docs/integration/connectors.mdx`(路径可议),覆盖:\n\n- **两种连接器**:插件注册的品牌连接器(Slack…) vs 声明式 provider-bound 实例(ADR-0097),以及何时用哪种;\n- **五种 auth 变体**逐个示例 —— `none` / `bearer` / `api-key`(含 `headerName` vs `paramName`)/ `basic`(`username` 在元数据里是安全的、密码走 `credentialRef`)/ `oauth2`(**企业层,ADR-0015**;声明式实例形状里有意没有它,这点要写明,否则作者会以为是漏了);\n- **`credentialRef` 的密钥解析路径**,以及「元数据里绝不内联密钥」这条硬规矩;\n- **三个通用执行器各自的 `config` 契约**,并说清它由工厂校验而非 stack schema —— 写错不会在 `os validate` 报;\n- **踩坑清单**:未安装 provider ⇒ 硬启动失败;stdio MCP 默认拒绝及 opt-in 写法;\n- **可运行示例**:`examples/app-showcase/src/system/connectors/index.ts` 已经同时含两种形态(`objectstack.config.ts` 里 `connectors: allConnectors`),直接指过去,不要新编一份。\n\n## 落地时同步做\n\n- 把 `packages/spec/variant-docs.json` 里 **connector authentication** 与 **connector auth (environment-artifact projection)** 两条 `exempt` 换成 `docs: [新页]`,删掉豁免理由;\n- 跑 `pnpm --filter @objectstack/spec check:variant-docs` 确认 5 个变体全部被认出(注意闸门认三种写法:带引号、反引号、整行 YAML —— YAML 那条是 #4287 刚补的);\n- 每个示例都要**对着真 schema parse 过**再落地(#4218 的教训:凭记忆写文档示例会写出不存在的键)。\n\n## 参考\n\n- #4287(本 issue 的来源:豁免审计)、#4177(变体/文档闸门)、#4001(母 issue)\n- ADR-0097(声明式连接器实例)、ADR-0015(外部数据源联邦 / OAuth2 企业层)\n- `packages/spec/src/integration/connector.zod.ts`、`packages/spec/src/shared/connector-auth.zod.ts`\n- `examples/app-showcase/src/system/connectors/index.ts`"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 4101,
+  "kind": "pull_request",
+  "title": "test(showcase): a specimen for legacy string rowActions (objectui#2960)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T09:50:57Z",
+  "updated_at": "2026-07-30T10:06:31Z",
+  "closed_at": "2026-07-30T10:06:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T10:06:28Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4101",
+  "body": "Specimen for the bug class objectui#2960 fixed in objectui#2996. Showcase had no view authored the legacy way, so this whole class was invisible here.\n\n## 背景\n\n列表视图声明 `rowActions: ['<action 名>']`（`rowActionDefs` 之前的老写法）时，行菜单里那一项点下去**零网络请求却报成功**；如果对象还在 `list_item` 声明了同名 action，菜单里会并排出现**一个能用、一个是死的**。\n\n## 加了什么\n\n`showcase_task.legacy_row_actions` —— 用对象已有的 action，一次覆盖客户端必须处理的两种情况：\n\n| action | locations | 为什么在这里 |\n|---|---|---|\n| `showcase_recalc_estimate` | `record_more`, `record_section` | **不是** `list_item` action，不会派生出 def。客户端必须拿名字去对象的 actions 里解析，否则这一项就是死的。 |\n| `showcase_quick_view` | `list_item` | 已经会独立派生出 def。这里再写一次名字，**不能**产生第二个死副本。 |\n\n另外给 `showcase_recalc_estimate` 补了 `recordIdParam: 'recordId'`。它的端点是 record-scoped 的、body 里没 id 就拒绝；在 record 界面上由页面提供，但**从列表行调用时没有任何东西能提供** —— 行 id 只会注入给声明了 body key 的 action。不补的话这个 specimen 自己的 action 从行上点会返回 400 `recordId required`。对 record 界面是纯增量（那里 id 本来就有）。\n\n## 浏览器实测\n\n拿这个 specimen 配 objectui #2996 的控制台跑过：\n\n行菜单实际 DOM ——\n\n```\nrow-action-builtin-edit              编辑\nrow-action-builtin-delete            删除\nrow-action-showcase_bulk_reassign    Reassign…\nrow-action-showcase_quick_view       Quick View            ← 只有一个，无死副本\nrow-action-showcase_recalc_estimate  Recalculate Estimate  ← 名字解析成功\n```\n\n点击 `Recalculate Estimate` → `POST /api/v1/showcase/recalc` → **200 OK**，toast 是 action 自己声明的 `successMessage`「Estimate recalculated.」，而不是 runner 的通用「Action completed successfully」—— 后者正是这个 bug 过去弹的东西，所以文案本身就能区分真假。\n\n补 `recordIdParam` 之前，同一次点击返回 400，红色 toast 如实显示服务端的「recordId required」。两种结局都验证过了。\n\n## 检查\n\n- `check:i18n-coverage`：665，none new（`listViews` 的 label 不在 i18n lint 作用域，实测 0 条 issue 提及 `legacy_row_actions`，不引入新债）\n- `os lint`：0 errors\n- `@objectstack/example-showcase`：10 文件 / 60 测试全过\n\n纯 fixture + 一处示例修正，无 changeset（非 feature）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

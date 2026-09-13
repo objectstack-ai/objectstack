@@ -1,0 +1,32 @@
+{
+  "number": 4117,
+  "kind": "issue",
+  "title": "adapters/hono 的 ${prefix}/auth/* 与 ${prefix}/storage/* 是终结式通配 —— 与 #4088 同一缺陷，只是这个包在仓内没有消费者",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T10:24:01Z",
+  "updated_at": "2026-07-30T11:03:27Z",
+  "closed_at": "2026-07-30T11:03:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4117",
+  "body": "由 #4116 的通配落穿扫描发现（这两处是扫描找出的、此前**未被任何人跟踪**的实例；手工 grep 当初没找到它们）。\n\n## 现象\n\n`packages/adapters/hono/src/index.ts` 有两处终结式命名空间挂载：\n\n- **line 279** —— `app.all(\\`${prefix}/auth/*\\`, async (c) => { … })`\n- **line 351** —— `app.all(\\`${prefix}/storage/*\\`, async (c) => { … })`\n\n两个 handler 都只收 `c`、不收 `next`，无条件返回自己的响应。这与 #4088 在 `AuthPlugin` 上修掉的、以及 [cloud#923](https://github.com/objectstack-ai/cloud/pull/923) 在 `AuthProxyPlugin` 上修掉的是**同一个形状**：任何别的代码想在 `${prefix}/auth/*` 或 `${prefix}/storage/*` 下挂路由，都只有恰好注册得更早才能被访问到。\n\n## 今天没坏，但它是发布出去的\n\n全仓**没有任何 package 依赖 `@objectstack/adapter-hono`** —— 所以 `os serve` 与 cloud 都不走这条路径，眼下没有任何东西因此损坏。这也是为什么它被登记为 `ratchet` 而不是当场修：真实、被跟踪、**未被祝福**。\n\n但它是发布的包，而 ADR-0076 的触发场景本身就提到外部嵌入方（`../objectbase` 的 gateway）。任何这样的嵌入方在这两个前缀下挂路由，就会撞上 #4088 一模一样的静默 404。\n\n## 与同文件 line 382 的区别\n\n同一文件 line 382 的 `app.all(\\`${prefix}/*\\`)` **也是**终结式，但那是**刻意的**，并已有既定结论（ADR-0076 OQ#9 / #3576 / #3608）：`dispatch()` 是一条 gates+registry 流水线，拆成 per-prefix 挂载会绕过那些横切闸门阶段（#2852 的 RLS 泄漏那一类）。所以它在 ledger 里是 `exempt` + 理由，而这两处是 `ratchet`。\n\n换句话说：#4116 的扫描把这个文件里\"刻意独占\"与\"忘了让路\"两件事**区分开**了 —— 在此之前它们在源码里长得一模一样。\n\n## 修法\n\n照 #4092 的形状：handler 收 `next`；上游/服务不认识该路径时（这两处的具体判据需要看各自的 404 来源）落穿；无人接手时逐字保留原本的 404。注意 #4092 踩出来的两个坑同样适用 —— `c.finalized` 不能用作判据（链末尾的 notFound 会把它翻真），且链里有 `use()` 中间件时必须 `c.res = resp` 而不能 `return resp`（compose 会丢弃）。\n\n修好后把 ledger 里这两条从 `ratchet` 换成 `{ yields: true }` —— 扫描会验证这个声明，所以换错了会失败。\n\n关联：#4116（扫描与 ledger）、#4088 / #4092、cloud#923、#2567、#4018、ADR-0076 OQ#9。"
+}

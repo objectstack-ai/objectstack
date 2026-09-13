@@ -1,0 +1,30 @@
+{
+  "number": 3991,
+  "kind": "issue",
+  "title": "字段级 `unique: true` 与同列的声明式全局 unique 索引意图矛盾,authoring 层零提示",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T01:51:27Z",
+  "updated_at": "2026-07-30T06:35:36Z",
+  "closed_at": "2026-07-30T06:35:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3991",
+  "body": "在 #3955 的第二条缺陷(PR #3981)复核过程中发现。运行时侧的 churn 已在该 PR 修掉;**这里剩下的是 authoring 层的缺口**,单独立项。\n\n## 现象\n\n一个对象可以同时声明两种唯一性,而且**两者语义互相矛盾**:\n\n```ts\n// HotCRM crm_contact —— 真实代码\nemail: Field.email({ unique: true }),              // 字段级:租户内唯一(#3696 语义)\nindexes: [{ fields: ['email'], unique: true }],    // 对象级:verbatim,跨租户全局唯一\n```\n\n这不是笔误,`IndexSchema` 的注释明确说明了两者的区别是**刻意设计**的:\n\n> A DECLARED index is materialized over exactly the columns listed in `fields` — no tenant column is injected, unlike field-level `unique` (#3696). … many declared indexes are legitimately platform-wide.\n\n所以两种写法各自都合法、都有正当用途。问题在于**同一列上同时出现**时:\n\n- 字段级说\"租户内唯一\"(允许 org_b 复用 org_a 的 email);\n- 声明索引说\"全局唯一\"(禁止复用)。\n\n物理上以更严格的那个为准 —— 全局唯一生效,字段级的租户复合索引成了永远不会被触发的死约束。作者写下的两个意图,有一个被静默丢弃。\n\nHotCRM 的注释显示作者确实是这么理解的(而且认为是好事):\n\n> Email uniqueness is already enforced (globally, which is stricter than per-account) by the `{ fields: ['email'], unique: true }` index above.\n\n—— 也就是说作者以为 `unique: true` 是\"per-account\",实际上 #3696 之后它是 per-organization,而真正生效的是那条全局索引。三种理解在同一处代码上打架,平台一声不吭。\n\n## 为什么值得管\n\n按 Prime Directive #12(contract-first:在 producer 修 metadata,在 authoring/publish 拒绝),这正是\"声明了但不生效\"的形态 —— 和 #1475(spec 声明 9 种校验规则、写路径只执行 3 种)同构,只是方向相反:这里是两条声明都被接受,其中一条注定无效。\n\n而且它的后果不只是\"多一个没用的索引\":\n\n- **升级期语义漂移无人告知**。#3696 把字段级 `unique: true` 从全局改成租户作用域。对一个同时写了声明索引的对象来说,这次语义变更**完全没有可观察效果**(全局约束仍由声明索引兜着),于是作者永远不会发现自己的租户模型和实际约束对不上 —— 直到某天删掉那条声明索引。\n- **多租户上线时才炸**。单租户开发期两者行为一致;真正开启多租户、第二个 org 复用同一 email 时才会被那条\"以为已经放宽了\"的全局索引拒绝。这正是 #3696 想消除的故障模式,却被声明索引原样保留了。\n- 它还是 #3955 第二条缺陷的**触发条件** —— 运行时已经不再 churn,但产生这个组合的 metadata 本身没被质疑过。\n\n## 建议方向\n\n加一条 authoring 期的 lint(建议 advisory,不阻断构建 —— 这个组合的产物是良定义的,代价是一个失效意图而非坏产物,与 `action-target-execute-conflict` 同级):\n\n**规则:** 对象在租户作用域的表上,对**同一列**同时声明了字段级 `unique: true`(非 `'global'`)与单列 `unique` 的对象级索引时告警,指出:\n\n- 实际生效的是声明索引的**全局**唯一,字段级的租户复合约束不会被触发;\n- 二选一的修法 —— 想要全局唯一就把字段级改成 `unique: 'global'` 并删掉重复的声明索引;想要租户内唯一就删掉声明索引(或把它显式写成 `fields: ['organization_id', 'email']`)。\n\n落点参考现有实现:`packages/cli/src/utils/lint-autonumber-formats.ts` 的形状,由 `compile.ts` 与 `os lint` 共同调用(与 `lintAutonumberFormats` 在 `compile.ts:476` 的接法一致),这样 `os build` / `os validate` 两条路径的结论一致。判定\"声明索引叫什么名字\"应复用 `normalizeDeclaredIndex`(`packages/plugins/driver-sql/src/schema-drift.ts`),避免第三份拼名逻辑 —— 不过该 helper 目前在 driver 包里,是否需要下沉到 spec 供 lint 复用,值得在实现时一并决定。\n\n顺带:HotCRM 那三处(`crm_contact.email`、`crm_lead.email`、`crm_product.sku`,以及 `crm_account.name` / `crm_competitor.name` / `crm_case.case_number` 等只有声明索引的要另判)应当照规则复核一遍,确认每处到底想要哪种唯一性。\n\n## 关联\n\n- PR #3981 —— 修掉了这个组合在漂移检测里引发的无限 ping-pong(运行时侧)\n- #3696 —— 字段级 `unique` 的租户作用域化,即语义分叉的来源\n- #1475 —— 「declared ≠ enforced」的先例处理方式"
+}

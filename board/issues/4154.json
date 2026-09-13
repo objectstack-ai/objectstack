@@ -1,0 +1,34 @@
+{
+  "number": 4154,
+  "kind": "issue",
+  "title": "MessagingServicePlugin 写 `sys_notification` 但不声明它——靠 platform-objects 恰好也加载才能工作",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T12:49:05Z",
+  "updated_at": "2026-07-30T14:38:19Z",
+  "closed_at": "2026-07-30T14:38:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4154",
+  "body": "在 #4065 的工作里，把 `packages/runtime/src/notifications.hono.integration.test.ts` 从 mingo 迁到 in-memory SQLite 时暴露出来的。与 #4065 本身无因果关系，是一处独立的层次错位。\n\n## 事实\n\n`MessagingServicePlugin` 向 `sys_notification` 写行 —— `messaging-service.ts:16` 就把它定义成常量：\n\n```ts\nexport const NOTIFICATION_EVENT_OBJECT = 'sys_notification';\n```\n\n但它**既不在 manifest 的 `objects` 里声明它，也不在 `provisionSystemTables` 里给它建表**。两处清单都是同样的 7 个，`sys_notification` 都不在内：\n\n```\nInboxMessage, NotificationReceipt, NotificationDelivery,\nNotificationPreference, NotificationSubscription, NotificationTemplate, HttpDelivery\n```\n\n而 `provisionSystemTables` 的 docstring 自己把它算作本服务的 pipeline 对象：\n\n> pipeline objects (`sys_notification` / delivery / receipt / inbox)\n\n对象的真正声明在别处 —— `packages/platform-objects/src/audit/sys-notification.object.ts:29`。\n\n## 后果\n\n真实 boot 之所以能工作，只是因为 platform-objects 恰好也被加载了，engine 因此有 schema 可以下 DDL。也就是说这个插件对一张**不属于自己声明**的表有写依赖，而这条依赖没有在任何地方被表达或校验。\n\n一个不加载 platform-objects 的精简 kernel 会在第一次 `notify()` 时炸：\n\n```\ninsert into `sys_notification` (...) - no such table: sys_notification\n```\n\n这在 mingo 上完全看不出来 —— 它的 `getTable()` 首次触碰即自动建数组，所以「对象从未声明」和「对象已声明」表现一致。换成任何 SQL driver 才会显形。\n\n## 复现\n\n在 #4065 之前，上述集成测试用 `new DriverPlugin(new InMemoryDriver())` 引导一个不含 platform-objects 的精简 kernel，一路绿。换成 `SqliteWasmDriver({ filename: ':memory:' })` 后立刻红在上面那条 insert 上。\n\n该测试目前的处置是显式注册**真正的** `SysNotification`（不是手抄一份 schema），保持单一契约（Prime Directive #12）—— 但那是 fixture 侧的绕行，没有解决插件本身的依赖未声明。\n\n## 建议处置\n\n按代价从小到大：\n\n1. **把 `sys_notification` 加进 `provisionSystemTables` 的清单**。最小改动，且与该函数 docstring 已有的说法一致。但仍不解决「声明归属」。\n2. **明确归属**。要么让 MessagingServicePlugin 自己声明该对象（与它声明另外 7 个的方式一致），要么让它对 platform-objects 的依赖变成显式的、启动时可校验的前置条件 —— 现在两者都不是。\n3. 顺带一提，`provisionSystemTables` 只在 `engine.syncObjectSchema` 存在时才动作，对没有该方法的 engine 静默跳过；如果第 2 条选了「显式前置条件」，这条静默跳过也该一并出声。\n\n## 关联\n\n- #4065（发现路径，无因果关系）\n- Prime Directive #10（declared ≠ enforced）、#12（单一契约）"
+}

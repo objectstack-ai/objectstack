@@ -1,0 +1,32 @@
+{
+  "number": 4319,
+  "kind": "issue",
+  "title": "诚实层的 `_dev` 遗留标记生产者已清零 —— 按 enforce-or-remove 收敛到唯一的 `__serviceInfo`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T05:53:27Z",
+  "updated_at": "2026-07-31T06:55:11Z",
+  "closed_at": "2026-07-31T06:55:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4319",
+  "body": "按 Prime Directive #10 记录,#3898 / PR #4306 核对时确认的一处可收口的历史包袱。**纯清理,无行为变化**。\n\n## 现状\n\n`readServiceSelfInfo`(`packages/spec/src/api/discovery.zod.ts:129`)识别两种标记:\n\n1. `svc.__serviceInfo` —— D12 的标准描述符;\n2. `svc._dev === true` —— plugin-dev 的遗留标记,归一为 `{ status: 'stub', handlerReady: false }`。\n\n`_dev` 的**生产者已经一个不剩**:\n\n- framework:`packages/` + `examples/` 全量搜 `_dev: true`,命中的两处都是**注释**(`http-dispatcher.ts:1009`、`discovery.zod.ts:126`),没有代码写它。plugin-dev 的 stub 表在 #4093 / ADR-0115 里退役了;\n- objectui:无;\n- cloud:无。\n\n剩下的只有:`SERVICE_DEV_MARKER_KEY` 常量导出、`readServiceSelfInfo` 的识别分支,以及四个测试文件里手写 `{ _dev: true }` 的 pin(`http-dispatcher.test.ts`、`dispatcher-plugin.routes.test.ts`、`protocol-discovery.test.ts`、`discovery.test.ts`)—— 也就是说,这个分支现在**只被测试触发**。\n\n#3898 的洞 1 当初可以选\"教 reader 认第三种标记 `_fallback`\",实际走的是相反路线(#4082):把五个内存兜底改带标准 `__serviceInfo`,让 `_fallback` 从生产代码中消失。同一条路线上,`_dev` 是最后一个没走完的。\n\n## 建议\n\n按 ADR-0049 enforce-or-remove 收敛到唯一标记:\n\n1. 删 `readServiceSelfInfo` 的 `_dev` 分支 + `SERVICE_DEV_MARKER_KEY` 导出;\n2. 四处测试 pin 改写成 `__serviceInfo: { status: 'stub' }`(它们本来就是在验证\"stub 不报 available\",标记形态不是被测对象);\n3. `pnpm --filter @objectstack/spec gen:api-surface`(删了公开导出);\n4. 破坏性 changeset,body 写 FROM → TO:`{ _dev: true }` → `{ __serviceInfo: { status: 'stub', message: '…' } }` —— 这段文字会随 npm 包发到消费者手里,是外部实现者升级时会 grep 的东西。\n\n收益:`readServiceSelfInfo` 的文档不必再解释 legacy 分支,\"三种标记\"的历史彻底归一为一种。\n\n## 关联\n\n#3898、#4058(#4082)、#4093(ADR-0115)、ADR-0076 D12、ADR-0049。\n\n<sub>核对于 `origin/main` @ 366105c3f。</sub>"
+}

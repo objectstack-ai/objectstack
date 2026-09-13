@@ -1,0 +1,32 @@
+{
+  "number": 4276,
+  "kind": "issue",
+  "title": "packages/verify 的 lint 脚本无法独立运行:eslint src 解析不到根 flat-config 的插件",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T02:04:13Z",
+  "updated_at": "2026-07-31T05:35:59Z",
+  "closed_at": "2026-07-31T05:35:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4276",
+  "body": "在干净 HEAD 上运行 `pnpm --filter @objectstack/verify lint`(即包内 `eslint src`)会报 7 个错,全部是:\n\n```\nerror  Definition for rule '@typescript-eslint/no-explicit-any' was not found  @typescript-eslint/no-explicit-any\n```\n\n落点是 src/derive.ts、src/rls.ts、src/verify.ts、src/harness.ts、src/harness.posture.test.ts 里的 `// eslint-disable-next-line @typescript-eslint/no-explicit-any` 注释——从包目录起跑时 eslint 解析不到根 flat config 注册的 @typescript-eslint 插件,于是这些 disable 注释引用了一个'不存在'的规则。\n\nCI 不受影响(lint.yml 跑的是仓库根的 `pnpm lint` = `eslint . --no-inline-config`,根配置解析正常且 --no-inline-config 本就无视这些注释),所以这是本地 DX papercut:包内脚本存在但一跑就红,误导排查(#4275 的收尾验证撞上过一次,git stash 验证为既有问题)。\n\n两个修法二选一:让包内脚本显式指向根配置(`eslint --config ../../eslint.config.* src` 或等价方式),或删掉这些 per-package lint 脚本、统一只从根跑(多数包本就没有 lint 脚本,verify 是少数带着的)。顺带值得 `grep -l '\"lint\"' packages/*/package.json packages/*/*/package.json` 盘一遍还有哪些包带同样会独立失败的脚本。"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 4128,
+  "kind": "issue",
+  "title": "analytics filter-normalizer：未映射的算子被静默丢弃 → 查询放宽到全表（$between 已修，还剩四个）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T10:42:07Z",
+  "updated_at": "2026-07-30T11:26:37Z",
+  "closed_at": "2026-07-30T11:26:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4128",
+  "body": "从 #4081 的温度一致性矩阵补第六个消费者（`NativeSQLStrategy`）时发现的一类缺陷，`$between` 那一格已在该 PR 内修掉，但**成因还在**，这里单独立项。\n\n## 成因\n\n`packages/services/service-analytics/src/strategies/filter-normalizer.ts` 把 Mongo 风格的 `where` 拍平成内部管线形式，靠一张 `MONGO_TO_CUBE_OP` 映射表：\n\n```ts\nconst cubeOp = MONGO_TO_CUBE_OP[opKey];\nif (!cubeOp) continue;          // ← 未映射 = 谓词凭空消失\n```\n\n`continue` 掉一个谓词不是「不支持」，是**把查询放宽**。少一个 WHERE 条件的 SQL 依然合法，只是多返回行——所以它对断言 SQL 字符串的测试完全隐形，对用户表现为图表画出全部历史（#3650 的症状）。\n\n`normalizeAnalyticsFilters` 同时被 `NativeSQLStrategy` 和 `ObjectQLStrategy` 使用，两条路径都受影响。\n\n## 现状盘点\n\nspec 的 `FilterCondition` 词汇（`filter.zod.ts`）对照映射表：\n\n| 算子 | 状态 |\n|---|---|\n| `$eq` `$ne` `$gt` `$gte` `$lt` `$lte` `$in` `$nin` `$contains` `$notContains` `$exists` | ✅ 已映射 |\n| `$between` | ✅ 已修（#4081 follow-up：下降为 `gte`+`lte`，畸形输入抛错） |\n| **`$startsWith`** | ❌ 静默丢弃 |\n| **`$endsWith`** | ❌ 静默丢弃 |\n| **`$null`** | ❌ 静默丢弃 |\n| **`$regex`** | ❌ 静默丢弃 |\n| `$and` | ✅ 递归拍平 |\n| `$or` / `$not` | ⚠️ 有注释的刻意跳过——但同样是放宽，见下 |\n\n四个 ❌ 都是作者可以合法写进 dashboard widget / dataset 过滤器的 spec 词汇（`$null` 尤其常见：「未指派」「无关闭日期」这类看板）。今天它们不会报错、不会告警，只会多给行。\n\n## 建议的方向\n\n两步，第二步需要决策：\n\n1. **实现能实现的。** `$startsWith` / `$endsWith` / `$regex` 都能落到已有的 `contains`（LIKE）家族上；`$null` 落到已有的 `set` / `notSet`（`IS [NOT] NULL`，两条策略都已支持）。这四个都不需要新概念，只是映射表缺项。\n\n2. **把兜底从 `continue` 改成 `throw`。** 这是 #3948 在 driver-memory 上已经做过的同一个决定（`convertConditionToMongo` 从 `return null` 改为抛错，注释原文：「Returning no predicate would silently match every record」），也是 Prime Directive #10「declared ≠ enforced 要么实现要么报错，别假装覆盖」的直接应用。爆炸半径需要评估：改完之后，任何今天在用未映射算子的看板会从「悄悄画错」变成「明确报错」——方向正确，但属于行为变更，值得单独确认。\n\n`$or` / `$not` 是第三档：注释写明「策略尚不支持递归 WHERE 构建，忽略以便部分查询仍能运行」。这条理由在 `compileScopedFilterToSql`（read-scope 已能编译完整的 `$or` 树，见 #3774 的一致性表）存在之后是否还成立，值得复查——如果能复用它，`$or` 就不必再被丢。注意 RLS read scope 走的是另一条路径，不受影响；受影响的是作者自己写的 `where`。\n\n## 复现\n\n矩阵消费者本身就是复现器（`packages/services/service-analytics/src/__tests__/native-sql-temporal-conformance.test.ts`，真实 sql.js 引擎 + 断言行 id）。把 `$between` 换成上表任一 ❌ 算子，返回的就是全表。\n\n## 关联\n\n#4081（矩阵）、#4098（矩阵落地 + preview 侧同species 的 `$between` 缺陷）、#3650（窗口被丢弃画出全部历史）、#3948（driver-memory 同一决定的先例）；ADR-0053 D-A3.1。"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 4162,
+  "kind": "issue",
+  "title": "docs-drift mapper 把 30 个嵌套包全部塌成父目录：只特判了 `plugins`，导致真实漏报（`automation/flows.mdx` 就是其中一个）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T13:09:27Z",
+  "updated_at": "2026-07-30T15:22:13Z",
+  "closed_at": "2026-07-30T15:22:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4162",
+  "body": "`scripts/docs-audit/affected-docs.mjs` 从变更文件推导包根时只特判了 `packages/plugins/*`：\n\n```js\nlet m = f.match(/^(packages\\/plugins\\/[^/]+)\\//) || f.match(/^(packages\\/[^/]+)\\//);\n```\n\n但这个仓库有 **7 个**「容器目录」—— 自身没有 `package.json`、下面才是真包：\n\n| 容器目录 | 嵌套包数 |\n|:---|---:|\n| `packages/plugins/` | 18 ← 唯一被特判的 |\n| `packages/services/` | 16 |\n| `packages/connectors/` | 4 |\n| `packages/apps/` | 3 |\n| `packages/qa/` | 3 |\n| `packages/triggers/` | 3 |\n| `packages/adapters/` | 1 |\n\n于是除 `plugins` 外的 **30 个包**，改动都会被归到父目录。\n\n## 症状就在 #4161 的 drift 评论里\n\n那条评论说 *\"This PR changes 2 package(s): `packages/services`, `@objectstack/spec`\"* —— 该 PR 改的是 `packages/services/service-automation`，本该报成 **`@objectstack/service-automation`**。报出目录名，就是这个 bug 的直接证据。\n\n## 两个后果，漏报是严重的那个\n\n`packages/services/` 没有 `package.json`，所以：\n\n```js\nconst pj = join(repoRoot, dir, 'package.json');   // packages/services/package.json — 不存在\nif (existsSync(pj)) { name = ... }                 // → name 保持 null\n```\n\n**1. npm 名那条匹配臂整个失效。** 匹配逻辑是：\n\n```js\nif (name && text.includes(name)) hits.push(name);\nelse if (text.includes(dir)) hits.push(dir);\n```\n\n`name` 为 null，就只剩路径 token `packages/services` 可匹配。**任何只提 `@objectstack/service-automation`、不提该路径的文档都会被漏掉。**\n\n实测这个漏报确实存在 —— 3 篇：\n\n```\ncontent/docs/automation/flows.mdx\ncontent/docs/releases/implementation-status.mdx\ncontent/docs/releases/v9.mdx\n```\n\n第一篇是**和 wait 节点改动最相关的那一篇**。#4161 里它们之所以出现在清单上，纯粹是因为该 PR 同时改了 `packages/spec`、被 `@objectstack/spec` 捞到了。一个只改 `service-automation` 的 PR 会一篇都不报。\n\n这个方向正是工具自己声明要避免的：README 和 #4091 的 changeset 都写着 *\"over-inclusion is preferred over misses\"*。\n\n**2. 顺带的噪声。** 路径 token `packages/services` 会匹配**任何**提到该目录下任意路径的文档，所以一个 `service-automation` 的改动会连带捞出 audit / settings / storage 等服务的文档。这个方向无害（过度包含是设计选择），但归因是错的 —— `_(via packages/services)_` 没告诉读者是哪个包。\n\n## 修法\n\n**不要硬编码那 7 个目录名。** 那本身就是 #3786 排查的「手抄清单 + 保持同步」形状 —— 新增一个容器目录时它会再次静默失效。应当**从文件系统推导**：取变更文件路径上**最深的、含 `package.json` 的祖先目录**。这样 `plugins` 的特判也一并消失，而不是再加 6 条。\n\n顺带一提，#4091 给这个脚本加的 `--self-test` **覆盖不到这条路径** —— 它只钉了 `isTestFile` 匹配器。守卫自身的守卫有个自己的洞。修的时候应把包根推导也纳入自检，至少含：直接子包（`packages/spec`）、每类嵌套包（`packages/services/x`、`packages/plugins/y`）、以及一个「容器目录本身绝不该成为包根」的断言。\n\n## 未包含\n\n`@objectstack/spec` 在 #4161 上匹配 108 篇文档 —— 那是**设计如此**的过度包含（spec 几乎在每篇文档里都被提到），不是 bug，本 issue 不涉及。\n\n## 相关\n\n- #4091 —— 给这个 mapper 排除测试文件 + 加 `--self-test`；本 bug 与那次改动无关，是更早就存在的\n- #3786 —— 「手抄清单没有闸门」模式；本 issue 的修法要求不引入第 8 条手抄\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 4054,
+  "kind": "pull_request",
+  "title": "refactor(spec)!: the #3896 close-out sweep — fourteen inert authoring keys leave the surface",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T07:10:20Z",
+  "updated_at": "2026-07-30T07:40:00Z",
+  "closed_at": "2026-07-30T07:39:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T07:39:58Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4054",
+  "body": "The enforce-or-remove worklist across the remaining governed types, inside the v17 window. Every removal got the full retirement kit (retiredKey prescription + protocol-17 conversion + retirement pin tests); the sweep also produced **one correction in the opposite direction**, which is the most instructive part.\n\n## Removed (14 keys, 6 conversions)\n\n| Type | Keys | Why the claim was false |\n|---|---|---|\n| action | `shortcut`, `bulkEnabled` | no keydown path ever dispatched a shortcut (objectui's keyboard stack never consults action metadata); the multi-select toolbar reads the **view's** `bulkActions`, never this flag |\n| flow | `active`, `template`, node `outputSchema`, `errorHandling.fallbackNodeId` | **`active: false` never stopped a flow** — `status` is the enforced lifecycle, and the default even *read* as disabled while the engine treated unset as enabled (the `rls.enabled` shape, over-permissive direction); `template` had no reader; node outputs were never validated; faults route via per-node fault edges |\n| view | list `responsive`/`performance`, form `defaultSort`/`aria` | no renderer read any of them (re-verified; list `aria`/`data` stay live) — an ARIA claim merely accepted is false *accessibility* compliance |\n| dashboard | `aria`, `performance`, widget `performance` | no renderer applied them; `widget.performance` had no ledger entry and was **call-graph-closed fresh across both repos** (objectui's virtual scrolling reads the live top-level `virtualScroll`) |\n| agent | `knowledge` | declaring sources/indexes **never scoped retrieval** — `search_knowledge` takes `sourceIds` from the LLM's own tool-call arguments, never the agent record. A grounding claim in the dangerous direction |\n| skill | `triggerPhrases` | phrases were never matched against the user's message; activation is `triggerConditions` ∩ the agent's `skills[]`. The cloud API even served the field back — a dead-end projection that made the false capability look real |\n\nOrphaned value schemas removed with their keys (`PerformanceConfigSchema`, `AIKnowledgeSchema`, #3950 precedent); the same-major `topics`→`sources` rename is **absorbed** into the knowledge removal pre-release — composed, its effect was unobservable, and the conversion table's fixture-disjointness contract enforces exactly that judgment.\n\n## The correction: `form.data` survived, and the build is the referee\n\nThe ledger said form `data` was dead (\"no form-path reader in either repo\"). The removal attempt **broke the build**: `defineForm` writes `data: { provider: 'schema', schemaId }` onto every `*.form.ts` metadata form, and `metadata-protocol` serves it to the metadata-admin pipeline. So the entry's verdict is **corrected to live** (with the real evidence and a `verifiedAt`), the conversion narrowed, and the lint tests pin the non-warn. Method note now recorded in the entry: a ledger verdict is an *input* to removal, not a substitute for the build's own proof.\n\n## Deliberate keeps (recorded, not skipped)\n\n`hook.label`/`description` and `flow.description` are **docs-shaped annotation fields** — they document intent for the next reader (per ADR-0033, often a model) even without a runtime consumer. Kept, with ledger notes marking them exempt from enforce-or-remove so future audits don't re-litigate. Stale report `aria`/`performance` ledger entries (schema already clean since the report-liveness close-out) deleted as hygiene.\n\n## Kit details\n\n- 6 conversions + chain step; chain-replay composability green; `spec-changes.json`/upgrade guide carry every entry.\n- The surface guard's tombstone-coverage matcher generalized to split `' / '`-separated multi-key conversion surfaces before matching — exactly as strict per key as before; multi-key conversions have been the house style since the tool sweep, and this is the first `retiredKey` batch to exercise that path.\n- Retirement pins across 7 test files; forms pruned (action/flow/dashboard/agent/skill — a form input for an unenforced capability is the UI half of false compliance); i18n bundles regenerated (merge mode, pure deletions); example flows drop `template: true` (3 sites — two of them caught by the tombstone's tsc leg after the initial grep missed them); SKILL.md and `ai/agents.mdx` stop teaching the removed keys; v17 notes, upgrade checklist, and ledger README rows updated; major changeset.\n\n## Verification\n\n- spec **6932** / objectql **1179** / cli **830** tests green; all spec gates green (`liveness`, `empty-state`, `authorable-surface`, `api-surface`, `spec-changes`, `upgrade-guide`, `docs` 251, `skill-refs`, `skill-examples` 198, `i18n`).\n- Examples + downstream-contract typecheck clean; spec `tsc` clean.\n- Ledger state after the sweep: **action/view/dashboard/report/agent/skill dead-count = 0**; flow = 1 (kept docs field), hook = 2 (kept docs fields).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QuViRSR1j6GJjf9qGbnqFX)_"
+}

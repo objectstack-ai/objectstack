@@ -1,0 +1,35 @@
+{
+  "number": 4394,
+  "kind": "pull_request",
+  "title": "fix(lint,cli): os lint 不再放行另外两个命令拒绝的 flow",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T10:45:35Z",
+  "updated_at": "2026-07-31T11:41:31Z",
+  "closed_at": "2026-07-31T10:58:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T10:58:41Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4394",
+  "body": "`validateReadonlyFlowWrites` 手工接进了 `os validate` 和 `os compile`,唯独漏了 `os lint`。\n\n## 实测(showcase 植入一处违规:`runAs:'user'` 的 update_record 写静态 readonly 字段)\n\n| | `os lint` | `os validate` |\n|---|---|---|\n| **修复前** | **exit 0 —— 放行** | exit 1 —— 拒绝 |\n| **修复后** | exit 1 —— 拒绝 | exit 1 —— 拒绝 |\n\n这条规则是 **gate 级**(静态 `readonly` + 字面字段是确定的 no-op:引擎把它从 UPDATE payload 剥掉,步骤照样报成功,#2948/#3425),所以漏接不是\"少一条警告\",而是 **`os lint` 放行了一个 `os validate` 会拦下的构建**。\n\n## 改动\n\n接入 `REFERENCE_INTEGRITY_RULES`,两处手工接线随之删除 —— 三个命令的答案由构造保证一致,而不是靠三个人记得。这正是 suite 设立要终结的漂移(#3583 §5 D5),而 suite 自己的头注释一直把这条规则当作该漂移的**现行证据**;那句话现在也改了。\n\n**规则行为零变化**:id、严重级、文案都不动。\n\n## 两件让这个接线从\"不整洁\"变成\"站不住\"的事\n\n1. **`validateFlowNodeWrites`(#4369)走的是同一张 `config.fields` map**,问的是同一问题的另一半 —— \"字段存在吗\" vs \"字段可写吗\" —— 而它**已经在 suite 里**。一张 map、两个检查、两套命令集合。\n\n2. **两处手工接线连输入都不一致**:`validate` 喂 pre-parse 的 `normalized`,`compile` 喂 post-parse 的 `result.data`。这是第二重漂移,之前没人注意。合并到 suite 的 post-parse 输入前,我实测了两者对本规则**等价**(同一 stack 两边都产出 `error:flow-update-readonly-field`),确认不丢 finding。\n\n## 测试\n\nsuite 的活体 fixture 加了一个**独立**的 `lock` 节点,而不是复用 #4369 的 `stamp` 节点 —— 一个节点同时带两种缺陷,会让其中一条规则的沉默藏在另一条的 finding 后面。\n\n## 验证\n\n| 门 | 结果 |\n|---|---|\n| `@objectstack/lint` | **693 passed** |\n| `@objectstack/cli` | **629 passed** |\n| typecheck / eslint | clean |\n| showcase 端到端 | 见上表(合并 #4388 后复跑一致) |\n\n已合并 #4388(让 flow 规则看进 try_catch / loop / parallel 区域,改的正是本规则的实现),与本 PR 的 4 个文件零重叠,合并后全部复跑。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

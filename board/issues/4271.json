@@ -1,0 +1,32 @@
+{
+  "number": 4271,
+  "kind": "issue",
+  "title": "L2 hook body 写集不透明:把「写了目标对象上不存在的字段」从 accepted gap 变成作者时 lint 告警",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-07-31T01:43:52Z",
+  "updated_at": "2026-07-31T06:25:28Z",
+  "closed_at": "2026-07-31T06:25:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4271",
+  "body": "从 #4001 / #4207 的 hook 步骤延伸。`packages/spec/src/data/hook-body.zod.ts:134-140` 的 schema 头注释**自己承认**了这个缺口:\n\n> **Write-set opacity — accepted static-analysis gap.** `source` is opaque to static analysis: no lint verifies that the fields the body writes (`ctx.input.x = …`, `ctx.api.object('y').update(id, { x })`) exist on the target object(s). Only the read side (`hook.condition`) and the capability surface are statically checked.\n\n## 问题\n\nL2 body(`language: 'javascript'`,QuickJS 沙箱)里把字段名写错——或写了一个语义正确但 schema 未声明的字段——的后果是:**运行成功、无任何诊断、数据没落**。这是 #4001「静默失效制造虚假完成」在运行时表达式层的精确镜像,也是 AI 写业务逻辑最典型的失误形态(#3405 的 `reference`、#1535 的 `workflows` 是元数据形状层的同款)。\n\n校验版图目前的不对称:\n\n| 面 | 现状 |\n|---|---|\n| 读侧:`hook.condition`(bare CEL) | ✅ 注册期 + `os validate` 双点校验(ADR-0032) |\n| 读侧:flow 表达式槽 | ✅ #4027 路径 ledger + reconciliation 测试 |\n| 能力面:`capabilities` 声明 | ✅ 静态检查 |\n| 写侧:flow `update_record` 的 `fields` | ✅ 结构化 config,`validate-readonly-flow-writes` 连 readonly 都查 |\n| **写侧:L2 body 的 `source`** | ❌ **全盲** |\n\n## 现有零件(全在仓库里,不要另造)\n\n- **`@objectstack/lint`** 是 ADR-0019 纯 `(stack) => Finding[]` 规则包,已挂 `os validate` / `os build`,35 个 `validate-*` pass 先例。\n- **解析器不需要新依赖**:`typescript` 和 `sucrase` 已是 `@objectstack/lint` 的 **runtime** 依赖(`validate-react-pages` 在用);CLI 侧另有 ts-morph / esbuild。\n- **`validate-jsx-pages.ts`** 先例:作者产物 `source` 「parsed, never executed」,作者时 fail loudly(ADR-0078)。\n- **`validate-readonly-flow-writes.ts`** 先例:写集对照目标对象、目标「when statically knowable」否则静默放行——bail-out 姿态和目标对象解析辅助都可复用。\n- **`shared/suggestions.zod.ts`** 的 `findClosestMatches`:#4001 的「strict 必须配可修错误」同样适用于 warning——未知字段要给 did-you-mean。\n\n## 方案草案\n\n新 pass `validate-hook-body-writes.ts`(命名可议):\n\n1. **范围**:hook `body.language: 'javascript'` 的 `source`。L1 expression 无写能力;flow 的 `script` 节点是内建 side-effect(`config.actionType: 'email'|'slack'`),不是 L2 JS body——都不在范围。\n2. **提取**(typescript parser,只 parse 不执行不 type-check),v1 白名单三种写模式:\n   - `ctx.input.<ident> = …` / `ctx.input['<字面量>'] = …` → 目标 = hook 的 `object`\n   - `Object.assign(ctx.input, { <字面量键>: … })` → 同上\n   - `ctx.api.object('<字面量>').update(…, { <字面量键>: … })` / `.create({ … })` → 目标 = 该字面量对象名\n3. **对照**:stack 内 ObjectSchema 声明字段 + 系统字段;未知字段 → **warning** 带 `findClosestMatches` 建议。\n4. **bail-out(静态不可知即沉默,零误报优先)**:计算键、非字面量 spread、动态对象名、`object: '*'` 通配 hook 的 `ctx.input` 写(无单一目标对象;通配 hook 本就该有更高 review bar,另行讨论)。误报是这类 lint 的死因,漏报只是缺口暂时留着——不对称,宁漏勿误。\n5. **severity**:v1 全 advisory warning,不阻断;和 `lintUnknownAuthoringKeys`(#3786/#4167)姿态一致,有现场数据后再谈 ratchet。\n6. **挂载**:`@objectstack/lint` → `os validate` / `os build`。**不进** `defineStack` 运行时——TS parser 不在那条路径的依赖里,且那层的 warning 是元数据形状层,别混。\n\n## 设计上待决\n\n- **写模式清单要不要 ledger 化 + reconciliation 测试**(像 #4027)?建议要:「声明了模式但没人验证」正是 #3528 的死法。\n- **一层 const 别名**(`const doc = ctx.input; doc.x = 1`)v1 收不收?常见写法,提取成本低,但开了口子就有数据流分析的滑坡——建议 v1 明确记为 known miss,advisory 姿态下漏报可接受。\n- **落地后改注释**:`hook-body.zod.ts:134` 的「accepted gap」段改写为指向本 lint,避免注释与现实反向漂移。\n\n## 明确不做(v1)\n\n- 不执行 body、不 type-check、不做数据流/别名分析——纯语法层白名单。\n- 不做 completeness(`create` 缺必填字段)——那是 ADR-0078 的另一战场。\n- 不动 QuickJS 沙箱运行时行为。\n\n## 参考\n\n- #4001(母 issue)、#4207(hook strict + gap 注释落盘)、#4027(表达式路径 ledger)、#3528(声明未验证的死法)、#3405 / #1535(静默失效先例)\n- `packages/lint/src/validate-readonly-flow-writes.ts`、`validate-jsx-pages.ts`、`validate-expressions.ts`\n- `packages/spec/src/automation/flow-node-expression-paths.ts`\n- ADR-0019 / ADR-0032 / ADR-0078"
+}

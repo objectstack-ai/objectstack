@@ -1,0 +1,35 @@
+{
+  "number": 4209,
+  "kind": "pull_request",
+  "title": "fix(data): a filter the server cannot apply is rejected, not silently ignored (#4181)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T15:21:29Z",
+  "updated_at": "2026-07-30T16:16:57Z",
+  "closed_at": "2026-07-30T16:16:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T16:16:55Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4209",
+  "body": "Closes #4181。#4134 / #4164 家族第三员,也是**方向最恶性**的一个:前两案分别是清零和丢一个谓词,这个是**返回全部**。\n\n> **更新:与 #4121 (#4200) 的会合。** 本 PR 在途中,#4121 落到了**同一段 filter 别名链**上(拒绝不是合法 AST 的 `$filter` 数组)。两者是同一个条件的互补两半,已合并 `origin/main` 并做了语义上的对账——细节见下方「与 #4121 的对账」。CI 之前一直不跑正是因为这个冲突:`mergeable_state: dirty` 时 GitHub 造不出 merge commit,`pull_request` 工作流不触发。\n\n## 问题\n\n`?filter={status:done`(少一个引号)返回 `200` + **未过滤整页**。归一化层的 `catch { /* keep as-is */ }` 把原始字符串留在 `where` 上,没有驱动消费这个形状,于是过滤器**整个蒸发**,响应与一次成功的无过滤查询逐字节相同——调用方无从察觉自己写的过滤器从未生效。\n\n## 这不是设计题:处方早就在同一个文件里\n\n`GET /data/:object/export` 对同一份输入从写下来那天起就拒绝(`rest-server.ts`)。**list 路由才是异类**——同一端点家族的两条路由,对同一份畸形输入给出相反答案,而且被硬化的恰好是危害较小的那条(export 一次性、结果可见),没硬化的是常被程序化消费的 list。守卫因此搬进**共享归一化层**,`GET /data/:object`、`POST /data/:object/query`、runtime dispatcher 三条路径继承同一个答案。\n\n## 改动\n\n- **解析失败 → `400 INVALID_FILTER`**,点名参数并**明说过滤器没有生效**(`It was not applied, and an unapplied filter would have returned the unfiltered result set`)——失败模式本身才是这个 bug 的要害,错误信息必须说出来。\n- **解析成功但不是过滤器**(`?filter=5` / `\"done\"` / `null`)同样拒绝。能被 JSON 解析 ≠ 能当过滤器用;这一步也是让 #4164 的合并可以信任 `where` 是 object 的前提。\n- **空 `?filter=` 仍是「不存在」而非「畸形」**——沿用 export 的 `length > 0` 判断,并删掉 `where` 而不是留一个 `''`。\n- **四别名不再静默分胜负**。`filter` / `filters` / `$filter` / `where` 是同一槽位的四种拼法,`??` 取第一个非空 = 静默丢弃其余(body 同时带 `where` 和不同的 `filter` 时,跑的是 `filter`)。值不同 → `400 INVALID_REQUEST`;刻意**不选** AND 合并——合并会发明调用方没表达过的意图,而选一个就是静默丢弃本身。冗余的相同拼法放行。这里用 `INVALID_REQUEST` 而非 `INVALID_FILTER`:每个值单独看都是合法过滤器,**含混的是请求**,不是过滤器。\n- **export 的 `orderby` 同规则**(原本 `catch { /* leave undefined */ }`)。危害低于 filter(结果集不变),但靠 `orderby` + `top` 取「最新 N 条」的调用方拿到的是任意 N 条。这条守卫此前**没有任何测试**,一并补上。\n\n### 顺带清掉一处刚变成死代码的守卫\n\n#4164 当时加了 `typeof explicitWhere === 'object'` 才允许合并,理由写在注释里:**正是因为这个解析容忍可能在 `where` 上留下裸字符串**。源头修掉后该分支不可达,连同注释删除;那条 `pinned until #4181` 的测试也从「保留垃圾」翻转为「拒绝垃圾」。这是当初刻意留的交接点。\n\n## 与 #4121 的对账\n\ngit 解不了的是一个**函数重名**:两边都叫 `malformedFilterError`,签名和错误码都不同。对账结果:\n\n| | 覆盖 | helper |\n|:---|:---|:---|\n| #4121 | 畸形 filter **数组**(坏操作符、孤立 `[\"and\"]`) | `malformedFilterArrayError` |\n| #4181 | 非数组的失败路径(JSON 解析失败;解析出 number / string / null) | `unusableFilterError` |\n\n**两者共用 `INVALID_FILTER`**(标准目录码,#4121 引入)。调用方问的是「我的过滤器跑了吗」,不该需要知道是哪条分支拦下的——新增一条测试专门钉这点:四种不同坏法的 filter,只允许出现一个 `400/INVALID_FILTER`。\n\n链条顺序是两者能共存的关键:空 → 视为不存在;字符串 → 解析或拒绝;数组 → AST 转换或拒绝(#4121);标量 → 拒绝(#4181);活下来的一定是 object,这正是 #4164 的合并可以信任 `where` 的依据。空 `[]` 仍表示「无过滤器」,原样通过。\n\nexport 路由的 filter 守卫也从 `INVALID_REQUEST` 改为 `INVALID_FILTER` 与之统一。**这条错误码此前是有测试钉住的**——我先前用消息字符串 grep 没抓到断言 code 的那一行,是全量测试把它抓了出来;改动因此是有意的,测试里记下了理由。\n\n## 验证\n\n**单测**:#4121 的 12 项 + 本分支 103 项全过。本分支覆盖三个别名各自的解析失败、\"没有生效\"的措辞、四种「能解析但不是过滤器」的值、三种合法形状(JSON 字符串 / 活对象 / FilterAST 数组)、空 filter、别名冲突/相同/单发、以及跨两案的单一错误码。真实引擎测试先跑 baseline `total=10` 再证明垃圾 filter 不再返回同样的 10 行——**否则「拒绝了」和「过滤器生效了」在断言上无法区分**。\n\n**跑起来的服务器**(showcase,已自行关闭;下表跑在合并 #4121 之前的提交上,错误码当时还是 `INVALID_REQUEST`,行为与现在一致):\n\n```\nbaseline                          -> 200 total=10\n?filter={\"status\":\"done\"}         -> 200 total=2         ✅ 合法照常\n?filter={status:done              -> 400                  (修复前 200 total=10)\n?filter={status:done&top=2        -> 400                  (修复前 200 total=10 records=2,装模作样地分页)\n?filter=5 / \"done\" / null         -> 400 ×3\n?filter=  (空)                    -> 200 total=10         ✅ 空仍视为不存在\n?filters=… / ?$filter=…           -> 200 total=2 ×2       ✅ 别名照常\nPOST body {where:done,filter:todo}-> 400 冲突;{…,filter:done} 相同 -> 200\nexport?filter=垃圾 / orderby=垃圾 -> 400 ×2;正常 export -> 200 6080B\n?pageSize=5        (#4134)        -> 400 INVALID_FIELD    ✅ 不回归\n?filter=…&status=todo (#4164)     -> 200 total=1          ✅ 不回归\n```\n\n`turbo run test` 132/132 全绿(合并后重跑);eslint 干净;`check:route-envelope` / `check:error-code-casing` / `check:doc-authoring` 全 PASS。\n\n文档:`data-api.mdx` 增加「过滤器要么生效要么失败」小节与对照表;`error-catalog.mdx` 的 `INVALID_FILTER` 条目此前只写「where 子句里的操作符或字段非法」,不再覆盖它现在回答的条件,已重写并补上这一族存在的理由。\n\n## 对调用方的影响\n\n带畸形过滤器的请求现在大声失败,而不是收到**全部记录**。所有合法形状——JSON 字符串、活对象、`FilterCondition` AST 数组、四种别名单独使用——不受影响。`export?filter=` 的错误码从 `INVALID_REQUEST` 变为 `INVALID_FILTER`(状态码与消息不变)。\n\n## 家族收口\n\n三案修完后,`findData` 的过滤器表达路径上不再有静默分支:未知参数(#4134)、被挤掉的谓词(#4164)、无法应用的过滤器(#4181/#4121)全部要么生效要么抛错。建议后续补一条家族级 conformance 把这条不变量固化。\n"
+}

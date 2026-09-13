@@ -1,0 +1,35 @@
+{
+  "number": 4295,
+  "kind": "pull_request",
+  "title": "fix(spec,plugin-approvals): the two approval vocabularies are derived, not hand-matched (#3786)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T04:06:27Z",
+  "updated_at": "2026-07-31T04:24:43Z",
+  "closed_at": "2026-07-31T04:24:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T04:24:41Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4295",
+  "body": "The last known **derivable** copy from the #3786 sweep. (A fourth, non-derivable copy turned up while verifying — see the end.)\n\n## What it was\n\n`sys_approval_request.status` and `sys_approval_action.action` spelled their option lists out — **five values and twelve** — each under a \"Keep in sync with `ApprovalStatus` / `ApprovalActionKind` (spec/contracts)\" comment, while the contract held the same sets as bare type unions. Seventeen strings matched by hand across a package boundary, with nothing checking them.\n\nThey did all still agree — that was verified verbatim before anything changed. But agreeing is not being held, and both directions of drift are quiet:\n\n- a value the **column** accepts and the contract omits is invisible to every consumer typed against the contract — the row exists and nothing can narrow it;\n- a value the **contract** declares and the column rejects surfaces only at write time, on whichever tenant first reaches that transition.\n\nAn audit vocabulary is a bad place for either: it is precisely what gets read back when someone asks what happened.\n\n## The fix\n\nThe contract publishes the lists as **values** — `APPROVAL_STATUSES` and `APPROVAL_ACTION_KINDS` — with `ApprovalStatus` / `ApprovalActionKind` derived from them via `(typeof X)[number]`. Both columns spread the constants. The per-entry rationale (which action kinds move the flow, which are thread-only, why `returned` differs from `recalled`) moved onto the constants, where the values live.\n\n**No behaviour change.** The emitted option lists are byte-identical — checked against the built artifact before and after:\n\n```\nstatus  : [\"pending\",\"approved\",\"rejected\",\"recalled\",\"returned\"]\naction  : [\"submit\",\"approve\",\"reject\",\"recall\",\"escalate\",\"reassign\",\n           \"remind\",\"request_info\",\"comment\",\"revise\",\"resubmit\",\"ooo_substitute\"]\n```\n\nExisting imports of the two types are unaffected — they resolve to the same unions. Two new exports, `0 breaking` on `check:api-surface`.\n\n## The test pins what derivation cannot\n\nDerivation makes disagreement unrepresentable **while the spread is there**. `approval-vocabularies.test.ts` pins that qualifier: it fails if either column is re-inlined as a literal that has drifted. It cannot catch an *identical* re-inline — correct today, fragile tomorrow — which is why the derivation, not the test, is the mechanism.\n\nIt also guards the guard (an unresolvable import would compare two empty lists and pass), and asserts the two vocabularies stay distinct — a copy-paste pointing one column at the other constant would satisfy \"derived from the contract\" while being the wrong vocabulary entirely.\n\n## Verification\n\nMutation-tested in **both** directions, which matters here because the two failure modes are different:\n\n| mutation | result |\n| --- | --- |\n| add a value to `APPROVAL_STATUSES`, rebuild both packages | it appears in the **built** `sys_approval_request.status` options, and `action` is untouched — the derivation is live, not a stale build |\n| re-inline `status` as a drifted literal | `sys_approval_request.status offers exactly the contract statuses, in order` fails |\n\n- plugin-approvals — 330 tests green (13 files)\n- spec — 7169 tests green (276 files)\n- `check:api-surface` (regenerated: 0 breaking, 2 added) / `check:generated` / `check:exported-any` / `check:liveness` / `check:docs` — all PASS\n\n## A fourth copy, found by the docs-drift check\n\n`content/docs/automation/approvals.mdx` carries a \"Statuses in full: …\" line — the same five values, in the highest-visibility place. **Unlike the CORS case in #4282, this one is correct today**, so there is nothing to fix; it is simply unguarded.\n\nThe last commit points it at `APPROVAL_STATUSES` and says plainly that it is a copy nothing updates automatically. That is weaker than derivation and this PR does not pretend otherwise: prose docs legitimately restate values, and a test asserting that exact sentence would be brittle against any doc restructure. `check:variant-docs` already solves this shape for schema variants and is the right place to extend if the set starts moving — recorded as a follow-up rather than bolted on here.\n\n## Note\n\n`pnpm --filter @objectstack/plugin-approvals exec tsc --noEmit` reports a pre-existing `replaceAll` lib-target error in `action-link-pages.ts` — present on a clean tree, and that package has no `typecheck` script (bare `tsc` isn't its build path). Its real build (`tsup`) is clean."
+}

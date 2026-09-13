@@ -1,0 +1,35 @@
+{
+  "number": 4110,
+  "kind": "pull_request",
+  "title": "fix(cli,core,metadata,runtime): the platform boots with no application — `os serve` no longer needs a compiled artifact (#4085)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T10:13:45Z",
+  "updated_at": "2026-07-30T10:54:31Z",
+  "closed_at": "2026-07-30T10:54:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T10:54:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4110",
+  "body": "Closes #4085.\n\n## 结论先说\n\nartifact（`dist/objectstack.json`）定义的是**一个应用**。我们是开发平台，平台在没有任何应用时本来就应该能启动 —— 所以 #4085 不是「缺少前置步骤」，而是三个各自都足以拒绝启动的 bug。本 PR 全部修掉，并选择 issue 里的第一条路线（让依赖被正确满足），而不是第二条（提前报错叫用户先 `os compile`）。\n\n## 症状\n\n```\n  Loading objectstack.config.ts...\n[StandaloneStack] artifact read FAILED: path='…/dist/objectstack.json' error=ENOENT…\n\n  ✗ Service 'manifest' is async - use await\n```\n\nexit 1。发生在**一个已知能跑的应用**上（`examples/app-todo` 只把 `dist/objectstack.json` 移走就同样失败），也发生在每个 `os init` 之后、第一次 `os compile` 之前的新项目上。报错既没点出缺失的 artifact，也没给出修复方式，读起来像内核内部故障。\n\n## 三个根因\n\n**1. `serve` 把 config 派生的 `AppPlugin` 注册在 stack 自己的 `plugins[]` 之前**（`packages/cli/src/commands/serve.ts`）\n\n注册顺序**就是**内核的 init/start 顺序（`resolveDependencies` 对未声明 `dependencies` 的插件保持插入序，`AppPlugin` 正好没声明）。而那个位置排在 `ObjectQLPlugin`（注册 `manifest`/`objectql`）和 `DefaultDatasourcePlugin`（连接 app 写种子数据要用的库）之前。\n\n现在改成**追加**到 `plugins[]` —— 也就是 `createStandaloneStack` 给「artifact 派生的 AppPlugin」的同一个位置，于是 config 启动和 artifact 启动共用一套插件顺序。artifact 路径从来没踩到这个坑，这正是一个**顺序** bug 长期伪装成 artifact 问题的原因。\n\n**2. `ctx.getService()` 把「从未注册」的服务报成「is async」**（`packages/core/src/kernel.ts`）\n\n`PluginLoader.getService` 是 `async` 方法，返回值**永远**是 Promise，它内部的 \"not found\" 拒绝在同步路径上根本不可能浮现 —— 内核却从这个 Promise 上读结论，于是让调用方去 `await` 一个不存在的服务，而下面那段 `not found` 分支是**死代码**。现在改为从注册表判定：没注册 ⇒ `[Kernel] Service 'x' not found`；已注册但未实例化 ⇒ 保持原文 `Service 'x' is async - use await`（`console.ts`、`http-dispatcher.ts` 靠匹配 `is async` 容错，字符串不动）。\n\n同一个崩溃现在读作 `[Kernel] Service 'manifest' not found` —— 指向真正出错的那一层。\n\n**3. `MetadataPlugin` 把「本地 artifact 文件不存在」当致命错误**（`packages/metadata/src/plugin.ts`）\n\n`createStandaloneStack` 总是把它指向 `dist/objectstack.json`，所以连「完全没有应用」的 stack 都启动不了。现在「文件不存在」＝「还没编译」：记一行日志、以空状态启动、watcher 继续挂着，后续 `os compile` 会热加载进正在运行的服务。仅容忍 ENOENT —— 格式损坏/读不动的 artifact 仍然致命 —— 且 `bootstrap: 'artifact-only'`（封闭运行时，artifact 就是这次部署本身）保持大声失败，不会静默端出一个空运行时。\n\n`[StandaloneStack] artifact read FAILED … ENOENT` 同理不再对着「无 artifact 属于健康状态」的调用方喊叫；真正不可用的 artifact 保留原来的 warn。\n\n## 附带修掉同类的一处静默（第二个 commit）\n\n包住「config 派生 AppPlugin」的那个 `catch`（正是顺序修复重写的同一个块）原本是**完全静默**的。它吞掉的两种情况都以「服务器在端口上应答、但零对象、且不说原因」收场：`AppPlugin` 按构造就拒绝的畸形 envelope（有 app 载荷但没有 `manifest.id`/`name`），以及 `@objectstack/runtime` 解析失败。这跟 #4085 本身是同一类隐形启动失败 —— 在修 #4085 的块里留着它，等于把教训原样发布。现在仍然**不致命**（应用坏不等于平台坏），但会指名原因并说明该 app 的 objects/flows **没有**被服务。\n\n## 验证\n\n`packages/cli/test/serve-no-artifact.e2e.test.ts` —— 驱动**真实的 `os serve` 进程**，全文件没有任何 `os compile`：\n\n1. 只由 `objectstack.config.ts` 定义的应用能启动，并断言该应用**出现在已启动插件集合里**（不只是「没崩」—— init 注册 manifest 或 start 写种子任一失败都会在 banner 之前中止启动）；\n2. `export default {}` 的裸平台能启动；\n3. 带「无法注册的 app」的 config：平台照常 ready，**并且**打印跳过原因。\n\n反向验证（防止断言空转）：单独还原 `serve.ts` 的顺序修复后，第一条用例失败在目标断言上并打印 `[Kernel] Service 'manifest' not found`，第二条仍通过；还原 metadata 修复则启动死在 `Cannot read artifact file`，正是第二条用例断言的字符串。\n\n手工核对（源码 CLI + 真实 HTTP）：\n- 无 artifact 启动后 `POST /api/v1/data/noart_task` 写入、`GET` 读回成功 —— 表明 config 里的对象真的进了 registry 且建了表；\n- issue 里的对照实验：`examples/app-todo` 移走 `dist/objectstack.json` 后启动成功，`todo` 应用在插件列表里（用后已还原该文件）；\n- artifact 存在时插件列表与顺序**逐项不变**（29 个，`… default-datasource, metadata, ObjectQL, <app>, RestAPI …`）；\n- `os start` 那条空内核路径（`OS_BOOT_EMPTY=1`）依旧正常。\n\n单元测试：`kernel.test.ts` 钉住 not-found / async / 工厂抛错三种诊断；`metadata.test.ts` 钉住「缺 artifact 能启动」「artifact 损坏仍致命」「artifact-only 仍致命」。\n\n自动化：`pnpm build` 全量通过（含 tsc 类型检查）；全仓 `pnpm test` 124 个 task 全部通过（`cloud-connection` / `plugin-auth` 曾在我本地与一个并发 serve 抢 CPU 时超时，隔离重跑 64/64、573/573 全绿，且那两个用例的注释本身就记录了这类核数争抢 flake）；改动文件 ESLint 无告警。\n\n## 未纳入范围\n\n`os serve` 在**既无 config 又无 artifact** 时仍然报错并给出提示（指向 `os init` / `os start` / `os build`）—— 那是一条有意的、文档化的行为，不是本 issue 的崩溃，而「零应用启动平台」已由 `os start`（`OS_BOOT_EMPTY=1`）和本 PR 的 `export default {}` 用例覆盖。要不要让裸 `os serve` 也直接空启动，是 `serve` 与 `start` 的职责划分问题，按 Prime Directive #10 不在本 PR 里顺手改。\n\n文档无需改动：`content/docs/deployment/cli.mdx` 本来就写着 `os serve` 从 `objectstack.config.ts`（TypeScript 源码）启动、没有 artifact 前置条件 —— 是实现与文档不符，本 PR 让实现追上文档。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Ve9HidCGRGtS2UjNPUGHSV"
+}

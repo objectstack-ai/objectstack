@@ -1,0 +1,35 @@
+{
+  "number": 4064,
+  "kind": "pull_request",
+  "title": "test(automation): pin the control-flow trio's designer forms (#4045)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T07:45:18Z",
+  "updated_at": "2026-07-30T08:02:32Z",
+  "closed_at": "2026-07-30T08:02:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T08:02:30Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4064",
+  "body": "Step A of #4045, after #4050 (step 1) and #4059 (step 3a). Tests only, no production code.\n\n## The gap\n\n`config-schemas.test.ts` covered the CRUD quartet, `assignment` and `screen`. `loop` / `parallel` / `try_catch` had **no descriptor assertions at all** — the designer's input for the entire control-flow trio was unguarded, so a change to those `configSchema` literals could not be noticed by anything.\n\n## …and a premise this plan had wrong\n\n#4045 — and [my own analysis on it](https://github.com/objectstack-ai/objectstack/issues/4045#issuecomment-5127636357) — treated these three as the *easy* part: redundant copies of Zod that already exists in `control-flow.zod.ts`, so step 4 would be \"pure deletion, put it last\". Reading them side by side to write these assertions shows that is **wrong**, and it would have been an expensive thing to discover mid-refactor.\n\nThe literals are deliberately **shallower and looser** than the Zod:\n\n| | form literal publishes | Zod says | naive generation would |\n|---|---|---|---|\n| `loop.body`, `parallel.branches[].nodes/edges`, `try_catch.try/catch` | `{ type: 'array' }`, **no `items`** | `FlowRegionSchema` = `z.array(FlowNodeSchema)` | nest the whole FlowNode/FlowEdge definition |\n| `collection` | `type: 'string'` | `z.string().min(1)` | add `minLength: 1` |\n| `iteratorVariable` | `type: 'string'` | `.default('item')` | add `default: 'item'` |\n\nThe region case is the load-bearing one. A loop body is edited **on the canvas**; publishing its element schema would invite the designer to render a property form for every node inside the sub-graph. The absence of `items` is the contract, not an oversight.\n\nSo these are not duplicate sources pending merge — they are a **second artifact with a different job** (drive a form vs. validate a value), and the gaps are intentional. That reopens the option-1-vs-option-3 question for these nodes specifically: where two artifacts legitimately differ, what you want is *the difference declared and enforced*, not the difference erased.\n\n## What this PR does\n\nPins the intent, so the next person (or the next refactor) has an oracle:\n\n- `expectOpaqueRegion()` asserts each region key is an object whose `nodes`/`edges` are arrays **with `items` undefined** — a named, explained assertion rather than a bare deep-equal.\n- Pins `loop.collection.xExpression === 'template'`, the `maxIterations` bounds against `LOOP_MAX_ITERATIONS_CEILING`, `parallel.branches.minItems === 2`, `try_catch`'s `errorVariable` and the `retry` policy bounds.\n- Asserts the **absence** of `minLength` / `default` on loop's string keys, so publishing the Zod-only constraints becomes a decision rather than a side effect.\n\n## Verified to bite, not merely to pass\n\nAn assertion that never fails is decoration. I simulated what a naive `z.toJSONSchema` swap would emit — deep `items` under `body.nodes`, plus `minLength`/`default` on the string keys — and both new `loop` tests went red with the intended message:\n\n```\n× loop: template collection, bounded iterations, opaque body\n× loop: the form does NOT carry the Zod-only string constraints\nAssertionError: loop.body.nodes must stay opaque (no items):\n  expected { type: 'object', …(1) } to be undefined\n```\n\n## Test plan\n\n| Check | Result |\n|---|---|\n| `@objectstack/service-automation` | ✅ 452 passed (4 new) |\n| ESLint on the changed file | ✅ clean |\n\nEmpty changeset — tests only, nothing releases.\n\n## What this changes about the next step\n\nStep B is now worth doing before any swap: run `z.toJSONSchema(LoopConfigSchema)` for real and diff it against these pinned shapes, so the size of the gap is measured rather than inferred from reading. My table above is read from source, not from generated output. Depending on that result, the honest answer for region-bearing nodes may be a reconciliation ratchet (option 1) while the flat nodes — `screen`, CRUD, `http`, `notify` — go the single-Zod-source route (option 3), rather than one approach forced on all thirteen.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QoA8AV99Ss1RRkLLAYmDzq\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QoA8AV99Ss1RRkLLAYmDzq)_"
+}

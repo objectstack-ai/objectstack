@@ -1,0 +1,32 @@
+{
+  "number": 4095,
+  "kind": "issue",
+  "title": "Config-booted apps lose their `onEnable` hook — every script action handler goes unregistered and 404s at dispatch (`examples/app-todo`: all 8)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T09:28:11Z",
+  "updated_at": "2026-07-30T12:40:51Z",
+  "closed_at": "2026-07-30T12:40:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4095",
+  "body": "Found immediately after #4084 made boot-phase warnings visible. The ADR-0110 D5 `[action-governance]` inventory fired on the platform's own example app, and it was **right**: the handlers really are missing.\n\nThis is the D5 checklist doing exactly the job it was built for, on its first boot where anyone could see it.\n\n## The finding\n\nBooting `examples/app-todo` through `os serve` (or `os dev`) reports all eight of its `todo_task` script actions as unbound:\n\n```\nWARN [action-governance] declared script actions with NO handler — a button wired to\nnothing (ADR-0078); add a `body`, or register a handler under the declared `target`\n{\"count\":8,\"actions\":[\"todo_task:clone_task\",\"todo_task:complete_task\",\n \"todo_task:defer_task\",\"todo_task:delete_completed\",\"todo_task:export_csv\",\n \"todo_task:mass_complete\",\"todo_task:set_reminder\",\"todo_task:start_task\"]}\n```\n\nThe example is **correctly authored**. `task.actions.ts` declares `complete_task` with `target: 'completeTask'`, `register-handlers.ts` registers `engine.registerAction('todo_task', 'completeTask', completeTask)`, and `objectstack.config.ts` exports `export const onEnable = async (ctx) => registerTaskActionHandlers(ctx.ql)`. That pairing is exactly what `resolveActionHandlerKeys` resolves, so a registered handler would reconcile.\n\n## It is not a false positive — the action 404s\n\n```\n$ curl -sX POST http://localhost:44340/api/v1/actions/todo_task/complete_task \\\n       -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{}'\n{\"success\":false,\"error\":{\"code\":\"RESOURCE_NOT_FOUND\",\n \"message\":\"Action 'complete_task' on object 'todo_task' not found\",\"httpStatus\":404}}\n```\n\nEvery \"Mark Complete\" / \"Start\" / \"Clone\" / \"Export CSV\" button in the example app is dead over HTTP.\n\n## Root cause\n\n`AppPlugin` runs, reaches the runtime-hook resolution at `packages/runtime/src/app-plugin.ts:563`, and finds nothing:\n\n```\n$ os serve objectstack.config.ts --dev --log-level debug | grep onEnable\nDEBUG No runtime.onEnable function found {\"appId\":\"com.example.todo\"}\n```\n\nSo the bundle `AppPlugin` receives has no `onEnable`, even though the config module exports one. Note that `serve.ts` carries explicit code for exactly this hazard:\n\n```ts\n// Preserve module-level named exports (e.g. `onEnable`, `onDisable`\n// lifecycle hooks) that would otherwise be dropped when we unwrap\n// `mod.default`. Without this AppPlugin can never invoke runtime hooks\n// declared as `export const onEnable = ...` alongside the default\n// `defineStack(...)` export.\n```\n\n…and `app-plugin.ts:559-565` carries a matching fallback for the same reason. Both guards exist, and the hook still does not arrive — so the loss is somewhere between them. The `[StandaloneStack] artifact read` path is the obvious suspect: `dist/objectstack.json` is pure JSON metadata and cannot carry a function, so if the bundle handed to `AppPlugin` is derived from the artifact rather than the loaded module, metadata (the 8 declarations) survives and code (the handlers) does not — which is precisely the observed split.\n\n## Repro\n\n```bash\ncd examples/app-todo\nos serve objectstack.config.ts --port 44340 --dev\n# banner now shows the [action-governance] WARN naming all 8 (needs #4084)\n# then, with a session token:\ncurl -sX POST localhost:44340/api/v1/actions/todo_task/complete_task \\\n     -H \"Authorization: Bearer $TOKEN\" -d '{}'   # → 404\n```\n\n## Why this matters\n\n- **`declared ≠ enforced` at the call site** (Prime Directive #10): the app declares eight executable actions and the runtime serves none of them. The showcase demonstrates a capability that does not work.\n- It is silent without #4084. The 404 only appears if someone clicks the button; nothing at boot said the handlers were missing, which is how this survived.\n- ADR-0110 D3 refuses undeclared handlers at dispatch with no opt-out. The mirror case — declared, handler dropped by the host — currently fails the same way at the same place, with the operator having done nothing wrong.\n\n## Scope check worth doing\n\nI only verified the `os serve <config>` path on `examples/app-todo`. Worth confirming whether the compiled-artifact path (`os build` → `os start`), the `os dev` fast path, and `app-showcase` / `app-crm` behave the same, since they share `AppPlugin`."
+}

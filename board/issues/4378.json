@@ -1,0 +1,35 @@
+{
+  "number": 4378,
+  "kind": "pull_request",
+  "title": "fix(spec,plugins): a paged read with no `orderBy` is a partition too — the shape every list view actually sends (#4363)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T10:00:59Z",
+  "updated_at": "2026-07-31T11:04:58Z",
+  "closed_at": "2026-07-31T11:04:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T11:04:55Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4378",
+  "body": "Closes #4363。#4367 收口了「有 `orderBy` 的分页」，本 PR 收口它按 Prime Directive #10 拆出去的另一半。\n\n> #4367 已在本 PR 开出后合入 `main`，已 merge 进来（十处冲突全是同一段内容从两条路径到达 —— 逐文件比对确认 `origin/main` 与我 fork 出来的那个 branch head **逐字节相同**，所以取本侧不丢任何东西）。合并后重装、全量重建、重跑，diff 现在只有本 PR 自己的改动。\n\n## 决策：走方向 1，并且量过了\n\nissue 列了三个方向、倾向 1（「`orderBy` 为空且 `limit`/`offset` 存在时按主键排序」），但要求「在真实数据量上先量一次计划变化再定」。量了 —— Postgres 16、2,000,000 行、390 MB、`VACUUM FULL ANALYZE` 之后、热缓存、best of 3：\n\n| 形态 | before | after | 计划 |\n|:---|---:|---:|:---|\n| 列表第 1 页 `limit 50` | 0.038 ms | 0.089 ms | seq scan → `ticket_pkey` |\n| 列表第 201 页 `limit 50 offset 10000` | 0.764 ms | 10.3 ms | seq scan → `ticket_pkey` |\n| 深翻页 `limit 50 offset 1000000` | 70.6 ms | 1089 ms | seq scan → `ticket_pkey` |\n| 过滤（命中 25%）`limit 50` | 0.056 ms | 0.249 ms | seq scan → `ticket_pkey` |\n| 过滤（命中 400/2M）`limit 50` | 0.440 ms | 1.885 ms | `ticket_owner_idx` 不变，加 top-N sort |\n| 过滤（命中 400/2M）`limit 5` | 0.088 ms | 2.024 ms | `ticket_owner_idx` 不变，加 top-N sort |\n| **`findOne` 形态 `limit 1`** | **0.077 ms** | **7.84 ms** | **`ticket_owner_idx` → `ticket_pkey`（放弃谓词自己的索引）** |\n\n结论分两条：\n\n**分页读取本身可以接受。** 谓词有索引时计划不变，只多一个 top-N sort（毫秒级）；无谓词时从顺序扫描换成主键索引扫描，代价随 offset 线性上升。深翻页那一格（1.09 s）确实难看，但它 before 就已经是 70 ms 的病态形态，文档本来就建议改用 keyset —— 而且它 before 之所以快，正是因为它返回的是**错的**结果。这是把「快而不确定」换成「慢而确定」，方向没得选。\n\n**`limit 1` 是另一回事，所以我把 `findOne` 排除在外了。** 这一条 issue 没预见到：`engine.findOne()` 按契约写死 `limit: 1`，而 `SqlDriver.findOne()` 是转调 `find()` 实现的 —— 于是「分页读取」这条规则会顺手盖住全系统最热的那条读路径。`ORDER BY id LIMIT 1` 恰好是让 planner 判断「反正很快就能停」从而放弃谓词索引、改走主键加过滤的经典形态：上表最后一行，约 100×。\n\n而且这里**什么都换不到**：`findOne` 承诺的是「一条匹配的记录」，不是「序列中的某个位置」，没有第二页可以跟它不一致。所以 `find` 与 `findOne` 从共享的 `findRows()` 分叉，`singleRowLookup` 只影响这一件事。顺带的好处是这让两个 driver 重新对齐 —— `MongoDBDriver.findOne` 走 `collection.findOne`，从来就没排过序。\n\n契约里也写下了这条边界（`IDataDriver.findOne` 的 JSDoc），免得下一个人把它当成漏掉的。\n\n**没走 2 和 3 的理由。** 方向 2（全量补默认排序）上表已经回答了：谓词有索引的读取要多付一个 top-N sort，无谓词的要从顺序扫描换成主键索引扫描 —— 而**不分页**的读取把整个匹配集交给调用方，没有任何一页可以是错的，这笔钱买不到东西。方向 3（在 protocol 边界对「`top`/`skip` 存在而 `sort` 缺失」告警或拒绝）把决定权交回调用方，姿态上和 #4226 同源，但它要求每一个现存调用方都改：而这些调用方今天并没有做错事 —— 「不关心顺序」是一个合法的意图，只是它不该顺带意味着「可以少给我一行」。真正错的是我们把「不关心顺序」实现成了「不保证是个划分」。所以修在 driver，理由和 tie-breaker 一样：哪一列唯一、表上到底有没有，只有 driver 知道。\n\n## 改了什么\n\n**契约（`IDataDriver.find`）** —— 义务从「`orderBy` 非空 + 分页」放宽到「**只要分页**」，两种破坏形态并列写出：不能标识行的排序键，和根本没有排序键（后者是前者的退化情形 —— 空排序键上每一行都跟每一行并列）。原来那段「Deliberately NOT covered」换成真正剩下的那个 carve-out：**不分页**的无序读取。\n\n**`SqlDriver`** —— ORDER BY 的构造收进 `orderKeysFor()`，三种形态一张表：非空 `orderBy` → 调用方的键 + `id`；空 `orderBy` + 分页 → 只有 `id`；空 `orderBy` + 不分页 → **什么都不加**。`limit` 单独出现也算分页：列表第一页常常就是 `limit=50` 不带 offset，只给带 offset 的页排序等于让第 1 页跟后面的页切自不同的排列 —— bug 原封不动，外面套一层像修好了的样子。#3821 的恢复梯子也跟着改问「这条语句到底有没有 ORDER BY」，而不再问「调用方给没给」—— 自本 PR 起这是两个问题。\n\n**`MongoDBDriver`** —— `buildSortSpec()` 改读整个 query 而非只读 `orderBy`。无 `sort` 时文档按 natural order 返回，而 natural order 描述的是文档当前在 extent 里的位置，文档一动它就变。`syncCollectionSchema` 给每个它建的集合都建了唯一索引 `idx_id_unique`，所以以 `id` 收尾的 sort 走索引，不会撞 100 MB 的内存排序上限。\n\n**`driver-memory` 又一次不用改** —— 它切的是自己的存储数组，两次读之间没有写就是同一个序列。契约要的是「划分」，不是「按 id 排」，这个 driver 从另一个方向满足它。给它补了用例，理由跟 #4367 给它补用例一样：这个保证是隐式的，一次看起来像提速的重构就会丢掉，而且不会让这个包里任何别的测试变红。\n\n**联邦表现在会出声。** `SqlDriver` 保留 #4367 的限制（只对自己建的表加序），但这里的代价比 sorted 那半大：sorted 的读取至少还留着调用方自己的 ORDER BY，只是其中的并列会重排；unsorted 的读取则一无所有。行为不变，但每个对象报一次 warn —— 契约现在把确定性写成 MUST，一个静悄悄不成立的 MUST 就是这条规则本来要消灭的那种失败。\n\n## 测试\n\n合并 `main`（含刚落地的 #4367 与 #4373）之后 `pnpm install --frozen-lockfile` + 全量 `pnpm build` + 清 `.objectstack/`，再全部重跑：\n\n| suite | 结果 |\n|:---|:---|\n| **全仓 `pnpm test`** | **132 / 132 tasks successful**（含 `dogfood` 74 files、`cli`、`example-showcase`）—— 合并前跑过一次，合并后再跑一次 |\n| `driver-sql` 全量 | 615 passed / 38 skipped |\n| `driver-memory` 全量 | 281 passed |\n| `driver-sqlite-wasm` 全量 | 191 passed（继承 `SqlDriver`，同一条代码路径） |\n| `driver-mongodb` 全量 | 84 passed / 93 skipped（见下：环境限制） |\n| `@objectstack/spec` 全量 | 7161 passed |\n| `objectql` / `rest` / `runtime` | 1450 / 539 / 974 passed |\n| `@objectstack/spec check:generated` | 8/8 up to date（`api-surface.json` 重新生成，恰好 +2 行 = 两个新导出） |\n| `check:liveness` / `check:exported-any` / `check:type-check-coverage` / `check:doc-authoring` / `check:role-word` / `check:nul-bytes` | 全绿 |\n| `typecheck`（spec、driver-mongodb）+ 改动文件 eslint | clean（`driver-sql`/`driver-memory` 在覆盖率台账里无 `typecheck` script） |\n\n两处 **mutation check**（不是「跑绿了」而是「拆了会红」）：把 `SqlDriver` 里的 `paged` 钉成 `false` → 5 个用例红；把 `MongoDBDriver` 的同一处钉成 `false` → 1 个红。\n\n顺手修了 #4367 两个测试上的洞，因为我正好要往它们上面加断言：\n\n1. **SQL 那半的 clause 断言原本证明不了它想证明的事。** `InspectableSqlDriver.orderByClauseFor()` 是在测试里**重新实现**了一遍 tie-breaker 逻辑再编译 SQL —— 也就是说 `find()` 哪天不再调用它，这个断言照样绿，而那个文件的头注释写的恰恰是「clause 断言是删掉功能时会红的那一半」。改成从 knex 的 `query` 事件上读**真实 `find()` 发出去的那条语句**。\n2. **Mongo 那半的 sort-spec 断言挂在一个它不需要的依赖上。** 那几条是纯函数断言，却和属性用例一起被 `skipIf(!sharedMongod)` 罩着。于是在拉不到 mongod 二进制的环境里，整个文件 —— 包括唯一能抓住功能被删的那半 —— 全体静默，而且报绿。挪到 `skipIf` 外面，用一个只构造、不 connect 的 driver 跑（构造函数不开 socket）。\n\n## 环境限制（需要 CI 覆盖的部分）\n\n**MongoDB 的属性用例在本环境跑不了。** `mongodb-memory-server` 要下载的 `fastdl.mongodb.org` 被网络策略挡掉（agent proxy 403，`__agentproxy/status` 的 `recentRelayFailures` 里有记录），所以需要真实 mongod 的用例是 skipped。上面第 2 条改动的直接结果是：即便如此，4 条 sort-spec 断言仍然真实执行并通过 —— 换成改之前，这个文件在这里会是 17 skipped、0 assertion，看起来跟「全过」一模一样。真实 mongod 上的那一半以 CI 为准。\n\nPostgres 的数字是本机真跑的（本地 `initdb` 起的 16.13 实例，2M 行、390 MB，用完已拆）；SQLite 由 `driver-sql` 套件覆盖。MySQL 没量。\n\n## 关联\n\n- #4367 —— sorted 那半，本 PR 的前置（已合入 `main`）。\n- objectui#3106 —— 列头排序在服务端分页下只排了当前页。\n- #3948 / #4226 / #4256 —— 「未生效的东西不该看起来生效了」，本 PR 里对应联邦表那条 warn。\n- #4379 —— 顺路发现、按 Prime Directive #10 单开：`MongoDBDriver.findOne` 完全忽略 `query.orderBy`（也忽略 `query.fields`），所以 `engine.findOne({ orderBy: [...] })` 在 Mongo 上返回的是任意一条而不是排序后的第一条，与 SQL 分歧。同一族缺陷但不是本 issue，而且本环境跑不了 mongod，盲改比不改更糟。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

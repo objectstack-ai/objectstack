@@ -1,0 +1,34 @@
+{
+  "number": 4227,
+  "kind": "pull_request",
+  "title": "fix(spec): the remaining six recursive schemas name both type parameters, and the authoring artifacts stop spelling out defaults (#4195)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T16:31:08Z",
+  "updated_at": "2026-07-30T17:42:39Z",
+  "closed_at": "2026-07-30T17:42:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T17:42:37Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4227",
+  "body": "Closes #4195. Follow-up to #4171 / #4194. **Overlaps #4221 — see below.**\n\n## Relationship to #4221\n\n#4221 landed while this was in review and fixed `NavigationItemSchema` — the worst instance, and the one with a reproducible demo (`defineApp` compiling `navigation: [{ totally: 'made up' }, 42, 'nonsense']`). Both branches derived `NavigationItemInput` independently and the two declarations came out **byte-identical**, so the merge conflict was only the doc comment above it. I kept #4221's: it is the landed version, it carries the repro, and it references `app.nav-type-assertions.ts`, the compile-level pin it added.\n\nThis PR is the rest of the sweep. Nothing here re-does #4221's work.\n\n## What this covers that #4221 did not\n\n`z.ZodType` takes `<Output, Input>` and `Input` **defaults to `unknown`**, so naming only the first parameter leaves `z.input` of anything embedding that schema at `unknown`. `NavigationItemSchema` was one of **seven**. Measured with a type probe:\n\n| | was | now |\n|---|---|---|\n| `QueryInput['joins']` | `unknown[]` | `JoinNodeInput[]` |\n| `QueryInput['fields']` | `unknown[]` | `FieldNode[]` |\n| `z.input<typeof FormFieldSchema>` | `unknown` | `FormFieldInput` |\n| `z.input<typeof QuerySchema>` | `unknown` | `QueryInput` |\n| `z.input<typeof StateNodeSchema>` | `unknown` | `StateNodeConfig` |\n| `z.input<typeof ValidationRuleSchema>` | `unknown` | `BaseValidationRuleShape` |\n\nNew exported types: `FormFieldInput`, `JoinNodeInput`, `NavigationContributionInput`. `FilterCondition`, `NormalizedFilter` and `FieldNode` carry no `.default()` or `.transform()`, so their input *is* their output and the second parameter is simply the first.\n\n**The `z.ZodType<T>` single-parameter form is now absent from the codebase.**\n\n## The downstream close-out\n\nThis is the half #4221 left on the table, and the reason `NavigationContributionInput` is needed.\n\n#4171 had to spell out `expanded: false` (×16) and `target: '_self'` (×10) across `setup.app.ts`, `studio.app.ts` and `setup-nav.contributions.ts`, because those artifacts are annotated with the **parsed** type where a `.default()`ed key is required — and retyping them to the input surface would have traded eight loud errors for *no checking at all*.\n\nWith `NavigationItemInput` landed and `NavigationContributionInput` added here, they are annotated `AppInput` / `NavigationContributionInput`, the defaults are defaults again, and the literals are checked for the first time. Net across those four files: **21 lines added, 54 removed.**\n\nVerified live, not nominal: a literal omitting `expanded`/`target` compiles, and one writing `defaultOpen` — the non-spec key #4171 found in `account.app.ts` — is a compile error whose suggestion list names `expanded`.\n\n## Two typed with a documented caveat\n\n`StateNodeSchema` and `ValidationRuleSchema` reuse their hand-written type for both parameters: exact on the input side, loose on the output side. `StateNodeConfig` marks `type` optional though `.default('atomic')` makes it always present; `BaseValidationRuleShape` carries a `[key: string]: unknown` index signature. **Both were already that loose** — input went from `unknown` (types nothing) to a real type, output is untouched. Making them exact means deriving those types from their schemas instead of maintaining them beside one; that is separate work, and the caveat is written at each declaration rather than left for a reader to discover.\n\n## Why there is still no CI gate\n\n#4195 proposed one — extend `check:exported-any` to fail on \"output precise but input `unknown`\". I measured before building it: after this change exactly two schemas match, `TranslationItemSchema` and `InlineActionSchema`, and **both are correct**. They are `z.preprocess(...)`, where an `unknown` input is zod's semantics, not a missing annotation.\n\nSeparating those from a genuinely missing parameter needs heuristics on emitted type names, and per the rule written into that script's own header — zero false positives, so red keeps meaning broken — a gate I can't make reliable is worse than none. #4221's `app.nav-type-assertions.ts` is the better pattern where it applies: pin the contract at compile level rather than infer intent from shape.\n\n## Verification\n\nRe-run in full after merging `main` (which brought #4221 and 5 other PRs):\n\n| | |\n|---|---|\n| `tsc --noEmit` (spec) | clean |\n| `turbo run build --filter='./packages/*' --filter='./examples/*^...'` | 66/66, **zero errors** |\n| `turbo run test --filter='./packages/*'` | **74/74** |\n| examples typecheck (4 apps, every `defineApp`/`defineView` call site) | clean |\n| downstream-contract typecheck | clean |\n| `check:generated` | all 8 artifacts up to date, `api-surface.json` no drift after regen |\n| spec pure gates | `check:exported-any` `check:liveness` `check:empty-state` `check:react-conformance` `check:skill-examples` `check:variant-docs` PASS |\n| root gates | `lint` + 11 `check:*` PASS |\n\nThe workspace built with **zero errors** on the first attempt after the type change — the existing metadata was already conformant, it had simply never been checked.\n\nNote for anyone who saw the earlier runs: `cloud-connection`'s marketplace seed test timed out under parallel load 4× across #4194 and this PR. #4217 landed a timeout-budget fix for it in the meantime, and the suite is 74/74 clean here.\n\n## Follow-ups still open\n\n- **#4196** — `FieldNode`'s nested-select object form is declared but nothing produces or consumes it (enforce-or-remove). Unaffected by this PR.\n- The `StateNodeConfig` / `BaseValidationRuleShape` output-side looseness above, if someone wants those derived from their schemas.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01XY3swmCsdYx6AMGiRmFt1H"
+}

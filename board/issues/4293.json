@@ -1,0 +1,34 @@
+{
+  "number": 4293,
+  "kind": "pull_request",
+  "title": "docs(automation): 补上声明式 connectors: 的手写授权指南 (#4289)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T03:40:13Z",
+  "updated_at": "2026-07-31T03:53:26Z",
+  "closed_at": "2026-07-31T03:53:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T03:53:23Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4293",
+  "body": "Closes #4289(源头:#4287 豁免审计的结论项)。\n\n## 缺口\n\nADR-0097 让连接器成为**租户手写的声明式元数据**——一条 `connectors:` 条目写上 `provider`,启动时被通用执行器物化成可派发的连接器,不用写插件代码。但全仓没有任何一页教怎么写:auth 是密钥面(`credentialRef` 的硬规矩只活在 schema 注释里)、`providerConfig` 是开放面(故意不由 stack schema 校验,写错 `os validate` 不报、直接硬启动失败)。人和 AI 作者都只能读 ADR 或读源码。\n\n> 关于「connector 是流程的一部分、设计器里配、AI 在写」的疑问,会话里核实过:flow 的 `connector_action` 节点只是**派发**已物化的连接器;连接器实例本身是 stack 级元数据(`packages/metadata/src/plugin.ts:88` 把 `connectors:` 集合映射为 kind `connector`),`DEFAULT_METADATA_TYPE_REGISTRY` 里没有它,Studio 元数据管理建不了。而「AI 在写」正是要写这页的原因——docs + skills 就是 AI 授权的供料面,指南落地后变体闸门还会强制它跟 schema 同步(见下)。\n\n## 内容\n\n新页 [`content/docs/automation/connectors.mdx`](https://github.com/objectstack-ai/objectstack/blob/claude/connector-writing-guide-687260/content/docs/automation/connectors.mdx)(issue 建议 `integration/`,但 capabilities 页现有链接、物化器归属 service-automation、`connector_action` 都指向 automation 分区,单页新开顶级分区太重):\n\n- **三种条目形态**:插件注册 / provider-bound 实例(ADR-0097)/ 目录描述符(`enabled: false` 惯例),何时用哪种;\n- **三个 provider 的 `providerConfig` 契约**(rest 的 `baseUrl`+`defaultHeaders`→单 `request` 动作;openapi 的 `spec` 三形态+`operationId` 派生动作;mcp 的 `transport`+`include`→tools/list 派生动作),并明确写出「工厂在启动时校验、stack schema 故意不管」;\n- **五种 auth 变体**逐个示例,`credentialRef` 解析路径(开源层=环境变量、企业层=vault resolver),`basic` 的 username 可留元数据、密码走 ref,`api-key` 的 `headerName`/`paramName`,以及 **`oauth2` 在声明式形态里是有意缺席**(企业层,ADR-0015)——写明防止作者当成遗漏;\n- **内联密钥的拒绝**:✗/✓ 对照 + 真实报错文案(ADR-0097 §3);\n- **失败模式表**:配置错误(未装 provider、坏 config、解析不到 ref、重名、stdio 未 opt-in)= 硬启动失败 vs 运维故障(上游不可达)= degraded + 5s→5min 退避自愈;reload 软化语义;\n- **stdio 默认拒绝**的安全 Callout 与 `declarativeStdio` opt-in 写法;\n- 指向 showcase 可运行示例(不新编一份)。\n\n导航接线:automation `meta.json`/index 卡片与 bullet、flows.mdx `connector_action` 段落、capabilities/integrations.mdx、ai/connect-mcp.mdx(注明与之相反方向)。\n\n## Ledger 同步(issue 的「落地时同步做」)\n\n`packages/spec/variant-docs.json` 两条 connector-auth 豁免按其自述「when one is written, bind it and delete this exemption」换成 `docs:` 绑定,`$comment` 审计记录补一行闭环说明。`check:variant-docs` 从 6 governed 升到 **8 governed / 12 exempt**——此后 schema 每加一种 auth 变体,#4177 闸门强制同步本页。\n\n## 验证(#4218 教训:每个示例对着真 schema 验过)\n\n- 临时脚本(已删)用 **`DeclarativeConnectorEntrySchema`**(比 `defineConnector` 更严,含 superRefine)runtime-parse 了页面全部 4 个完整示例 + 5 个 auth 片段,并断言 5 条文档声称的拒绝真的复现(内联 `authentication`、无 provider 的 auth/providerConfig、provider-bound 授权 actions、`token` 字段不存在);派发片段过 `defineFlow`:15/15 ✓\n- 4 个 `{/* os:check */}` 标记块进入 `check:skill-examples`,对 built dist 类型检查:202 例 ✓\n- `check:variant-docs` ✓、`node scripts/check-doc-authoring.mjs` ✓(215 files clean)\n- 写作过程中被「对着代码写」抓出并修掉的两处事实错误:registry 路径实为 `GET /api/v1/automation/connectors`(注释里的 `GET /connectors` 是简写);showcase 只有 rest/mcp 实例有派发流程,openapi 实例没有——页面措辞已按实际写\n- changeset:空(docs-only,循 #4279/#4283 惯例)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

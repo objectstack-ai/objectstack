@@ -1,0 +1,34 @@
+{
+  "number": 4363,
+  "kind": "issue",
+  "title": "分页读取在没有 orderBy 时同样不确定:tie-breaker 只覆盖了「排了序的翻页」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T08:55:05Z",
+  "updated_at": "2026-07-31T11:04:57Z",
+  "closed_at": "2026-07-31T11:04:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4363",
+  "body": "## TL;DR\n\nobjectui#3106 的服务端一半刚刚收口了「**有** `orderBy` 的分页」——driver 在非空 `orderBy` 后追加唯一 tie-breaker,使翻页成为结果集的一个划分。**没有 `orderBy` 的分页仍然不确定**,而这恰恰是列表视图最常见的形态:视图没配 `sort`、用户也没点排序时,ListView 不发 `$orderby`。\n\n## 现状\n\n`SqlDriver.find()` 与 `MongoDBDriver.find()` 在 `orderBy` 为空时不产生任何 ORDER BY / sort,直接 `LIMIT/OFFSET`(`skip/limit`)。两种后端对此都不作承诺:\n\n- SQL:无 ORDER BY 时行序由计划决定。实践中小表常呈现插入序,一旦走上并行扫描、索引扫描或 `VACUUM`/页分裂之后就未必。\n- MongoDB:无 `sort` 时按自然序返回,而自然序在文档移动后会变。\n\n后果与 objectui#3106 描述的完全同构:第 2 页重复第 1 页已给过的行,同时另一行永远不出现。每一页都是满的、每一行都真实、两处症状相隔几屏,没人会把它们联系起来。\n\n## 为什么当时没有一并修\n\n不是遗漏,是刻意留白,理由写在了契约里(`packages/spec/src/contracts/data-driver.ts` 的 `IDataDriver.find`):\n\n> Deliberately NOT covered: a paged read with no `orderBy` at all. That is non-deterministic on every backend by definition; imposing an order on callers who asked for none is a separate decision.\n\n给「没要求排序的调用方」强加一个 ORDER BY,影响面比追加 tie-breaker 大得多:\n\n- 它会改变**每一条无排序 find 的执行计划**,不只是分页的那些。顺序扫描可能被换成索引扫描,大表上未必更快。\n- 它对不分页的 `find()` 也生效(除非再加条件),而那是绝大多数调用点。\n- 追加 tie-breaker 只是让一个**已经存在**的 ORDER BY 变得完整;这一条是**凭空造一个**。\n\n## 可选方案(需要拍板)\n\n1. **仅在分页时补默认排序** —— `orderBy` 为空且 `limit`/`offset` 存在时,按主键排序。语义最贴切(「翻页必须确定」),不碰非分页读取。代价:分页读取的计划会变,大表需要实测。\n2. **全量补默认排序** —— 一致性最好,影响面最大,倾向不做。\n3. **维持现状 + 上移到 API 边界** —— 让 protocol 在「`top`/`skip` 存在而 `sort` 缺失」时告警或拒绝,把决定权交给调用方。与 #4226 拒绝不可读 sort 的姿态同源(未生效的东西不该看起来生效了),但会打破大量现有调用方。\n\n倾向 **1**,但需要在真实数据量上先量一次计划变化再定。\n\n## 关联\n\n- objectui#3106 —— 列头排序在服务端分页下只排了当前页;其服务端一半是本 issue 的前半。\n- #3948 —— 「未生效的表达式不该看起来生效了」原则出处。\n- #4226 / #4256 —— sort 轴上「拒绝而非静默降级」的既定姿态。\n\n按 AGENTS.md Prime Directive #10 从 tie-breaker PR 中拆出,而不是就地扩大范围。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

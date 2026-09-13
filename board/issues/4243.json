@@ -1,0 +1,32 @@
+{
+  "number": 4243,
+  "kind": "issue",
+  "title": "`sys_migration` 由 service-storage 注册——账本是平台基础设施，不该由一个可选服务持有",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-07-31T00:31:45Z",
+  "updated_at": "2026-07-31T01:32:27Z",
+  "closed_at": "2026-07-31T01:32:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4243",
+  "body": "## 现状\n\n`sys_migration`（#3617 的部署级数据迁移标记账本）目前由存储服务注册，和它自己的对象排在一起：\n\n```ts\n// packages/services/service-storage/src/storage-service-plugin.ts:194\nobjects: [SystemFile, SystemUploadSession, SysAttachment, SysMigration],\n```\n\n这在当时是对的，而且是有意为之、写在对象自己的头注释里的：\n\n```\n// packages/platform-objects/src/system/sys-migration.object.ts\nRegistered by the first consuming service (`@objectstack/service-storage`);\nthe row contract lives in `@objectstack/spec/system` (`DataMigrationFlagSchema`)\nso any package can read flags without depending on this one.\n```\n\n「第一个消费者注册它」在只有一个消费者时说得通。\n\n## 为什么现在该动\n\n账本已经不止一个消费者，而新增的这些**与存储无关**：\n\n- #4235 的 `os migrate value-shapes` —— 门禁的是 `lookup`/`location` 等引用与结构化 JSON 值形态，整条路径不碰文件。\n- #4215 的从空创建记账 —— 新库创建时记账两个标记。\n\n结果是 `packages/cli/src/utils/data-migration-plugins.ts` 里那个 helper：**一个和文件毫无关系的迁移，也必须把 `StorageServicePlugin` 启起来，只为了让内核里有 `sys_migration` 这张表**。我在合入 #4235 时把这条约束写进了该文件的注释，但那是绕过，不是修复。\n\n## 影响面（不是线上事故）\n\n实际部署路径没问题：`os serve` 会自动装配 storage，所以被服务起来的部署总有这张表，运行时门禁读得到自己的标记。\n\n真正的代价是结构上的，以及一个安全但错误的静默行为：**任何不带 storage 服务组装的内核都没有这张表**，而引擎那个参数化 helper 的语义是「所有不知道的方式都答 false」，于是门禁一律落回 legacy 姿态（宽松值继续只告警）。这个方向是刻意选的、也是安全的（fail toward retention），但原因错了——它表达的是「本部署没跑过这个迁移」，而实际情况是「本部署根本没装账本」。这两件事不该长得一样。\n\n## 建议\n\n把 `SysMigration` 的注册从 service-storage 挪到平台基础设施那一层，让它随内核存在而存在，与是否装了存储无关。契约本来就已经在 `@objectstack/spec/system`（`DataMigrationFlagSchema`），读者侧不依赖 platform-objects，所以这次挪动影响的只有写者与注册点。\n\n顺带需要一并想清楚的：\n\n- 挪完之后 `buildDataMigrationPlugins()` 里那段「所有 gated migration 都启同一套 plugin 以保证找到同一个账本」的约束可以放松——只有文件迁移真正需要 storage。\n- 如果确实存在「没有账本」与「有账本但没跑过」需要区分的场景，考虑让前者可分辨，而不是共用同一个 false。\n\n## 关联\n\n#3617（账本本身）、#3438（三项已全部完成：`698cbc2` / #4215 / #4235）、#4235（引入第二类消费者、并在 `data-migration-plugins.ts` 记录了这层耦合）。"
+}

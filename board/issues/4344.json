@@ -1,0 +1,35 @@
+{
+  "number": 4344,
+  "kind": "pull_request",
+  "title": "feat(lint,spec): L2 action body 写不存在字段从盲区变为作者时 lint 告警 (#4271)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T07:10:29Z",
+  "updated_at": "2026-07-31T07:27:40Z",
+  "closed_at": "2026-07-31T07:27:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T07:27:38Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4344",
+  "body": "## 背景\n\n#4305(commit c1d44f7dc)让 L2 hook body 的写集在作者时可查。但 **action body 是同一个artefact**:同一个 `HookBodySchema`、`actionBodyRunnerFactory` 里同一个 `HookBodySchema.safeParse`、同一个 QuickJS 沙箱。所以它以同样的方式失败 —— action 里写\n\n```js\nawait ctx.api.object('crm_deal').update({ stag: 'won' });\n```\n\n跑通、返回成功给调用方,未知列静默不落库。写面还有一半是盲的。\n\n## 这个 PR\n\n新规则 **`action-body-write-unknown-field`**(advisory,永不 gate),挂进 `REFERENCE_INTEGRITY_RULES`,所以 `os validate` / `os lint` / `os compile` 一起报。\n\nruntime 从两处读 action(`collectBundleActions`:顶层 `actions` 与 `objects[].actions`),两处都走;`defineStack` 合并过的 action 同时存在于两处,只报一次,报在作者写的位置。\n\n## 只移植 `ctx.api` 一族 —— 这是重点,不是省事\n\n**`ctx.input` 不适用。** action 的 `ctx.input` 是它的 **params 包**(`input: unwrapProxyToPlain(actionCtx?.params)`),不是记录。拿这些名字去对象字段里找,会把每一个**拼写正确的参数**都告警一遍 —— 纯误报机器,而一条误报就足以让一个 advisory lint 被无视。\n\n**`ctx.record` 也不是写面。** runner 交给 body 的是一份普通快照(`record: unwrapProxyToPlain(actionCtx?.record)`),`boundActionHandler` 只 `return result.value`,没有 `applyMutationsToInput`(那是 hook 路径独有的)。所以 `ctx.record.x = …` 对**已声明字段和未声明字段一样**被丢弃。这跟\"未知列静默消失\"是两种缺陷;只报未声明的那一半,等于暗示已声明的那一半会落库 —— 恰好是这个规则家族要消灭的假完成。单独开了 issue 跟踪,不在本 PR 混做。\n\n## 台账做成 partition,不是第二份清单\n\n- `ACTION_BODY_WRITE_PATTERN_IDS`(今天只有 `api-crud-literal`)\n- `ACTION_BODY_WRITE_EXCLUSIONS`(两条 input 族,**各带 reason**)\n\n测试断言两半**恰好覆盖** `HOOK_BODY_WRITE_PATTERNS`。以后 hook 侧加第四条模式,这个规则的测试直接红,逼人做分类决定 —— 沉默不算决定。\n\n用 include-list 而非 exclude-list 是有意的:未分类的新模式在这里是哑的(漏报),不会带着没推敲过的语境上线(误报)。跟 extractor 的静默 bail 是同一个不对称。\n\n延续 #4305 的 reconciliation 姿态,并且更严一档:\n\n- 每条 applicable 模式**端到端**过完整 validator 验一遍 —— prefilter、模式过滤、字段判定都在例子和 finding 之间,任一环节静默吞掉都会被抓;\n- 每条 exclusion 验的是\"共享 extractor 仍然抽得到,但本规则不报\" —— 证明排除的是**适用性**,不是抽不出来。\n\nextractor、字段索引、系统列集合都从 hook 模块复用(`SYSTEM_FIELDS` 提升为 `BODY_WRITE_SYSTEM_FIELDS` 并导出,不进 barrel)。两份 system 列清单迟早会给出两个不同答案。\n\n## 一个跑出来的真 bug\n\n拿 showcase 打反例(`progress` → `progres`)跑 `pnpm validate`,**同一条告警报了两次**。\n\n`defineStack` 的 `mergeObjectActions` 把带 `objectName` 的 action 追加进对象、同时保留顶层条目;而 suite 跑在 **Zod parse 之后**的 stack 上,parse 会重建每个节点 —— 两份副本\"结构相等、引用不同\",身份去重(runtime 用的那种)在这里等于没去重。单测用共享引用的 fixture 是过得去的**假测试**。\n\n改为按值去重(绑定对象 + name + body source),单测改成用两个克隆对象。复跑:恰好 1 条,带 `Did you mean 'progress'?`。还原后 showcase 本身零告警(真实 app 上无误报)。\n\n## boot path\n\n比 hook 侧紧一档:唯一适用的模式根在 `ctx.api`,所以 body 不含 `api` 标识符就**连 parse 都不做**,更别说加载 ~9 MB 的 TypeScript。`lazy-deps.test.ts` 的 in-process 与两个 dist 探针都加了这条契约。\n\n## spec\n\n`ScriptBodySchema` 与 `ActionSchema.body` 指向 action 侧规则,并写明 `ctx.input`(params)与 `ctx.record`(会被丢弃的快照)都不是记录写面。**只动 JSDoc**,没碰 `.describe()` —— `check:generated` 8/8 全部 up to date。\n\n## 验证\n\n| 门 | 结果 |\n|---|---|\n| `@objectstack/lint` test | 607 passed |\n| `@objectstack/spec` test | 7153 passed |\n| `@objectstack/cli` test | 628 passed |\n| lint / spec `typecheck` | clean |\n| `@objectstack/spec check:generated` | 8/8 up to date |\n| eslint(改动文件) | 0 errors |\n| showcase `os validate` | 反例恰好 1 条(带 did-you-mean);还原后 0 条 |\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

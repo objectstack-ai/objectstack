@@ -1,0 +1,30 @@
+{
+  "number": 4052,
+  "kind": "issue",
+  "title": "BatchOptions.validateOnly 声明了 dry-run 但从不实现 —— \"预演\"会真实落库(PD #10)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T07:09:35Z",
+  "updated_at": "2026-07-30T07:38:26Z",
+  "closed_at": "2026-07-30T07:38:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4052",
+  "body": "## 问题\n\n`BatchOptionsSchema`(`packages/spec/src/api/batch.zod.ts:64`)声明了:\n\n```ts\nvalidateOnly: z.boolean().optional().default(false)\n  .describe('If true, validate records without persisting changes (dry-run mode)'),\n```\n\n该字段挂在 `updateManyData` / `deleteManyData` 的 `options` 上(`protocol.zod.ts:526,541`)以及 `/batch` 请求体里。但**运行时没有任何一处读它** —— 全仓 grep `validateOnly` 的消费者为零(只有 schema 声明和一个断言默认值能解析的测试)。`protocol.ts` 的 `updateManyData` / `deleteManyData` / `batchData` 都无条件落库。\n\n## 为什么这比无害的 no-op 更糟\n\n`validateOnly` 的语义是**数据安全承诺** —— 调用者以为在跑一次不落库的预检(导入前校验一批记录、CI 里验证 payload),实际行为是**照常写库**。这个字段把\"预演\"骗成了\"真删/真改\"。这是 PD #10「声明 ≠ 强制」里危害最高的一类:不是能力缺失,而是**契约主动误导**。\n\n对比同组三个兄弟,全都真实生效,唯独它悬空:\n\n| 选项 | 运行时消费点 |\n|------|------|\n| `atomic` | `protocol.ts:3482` + `rest-server.ts:6607`(`atomic===false → 400`) |\n| `returnRecords` | `protocol.ts:3501` |\n| `continueOnError` | `protocol.ts:3486,3610` |\n| **`validateOnly`** | **无** |\n\n## 决定:墓碑退役(而非仓促实现)\n\n一个真正的 dry-run 有独立的设计空间(no-commit 下的 cascade / 唯一约束语义、响应契约该如何表达每行\"若执行是否会通过\"),值得在有真实需求时单独立项做对,而不是为了填坑仓促实现。因此:\n\n- `batch.zod.ts`:`validateOnly` → `retiredKey(...)` 墓碑(写它 → 解析报错并给出处方,而非静默剥除,ADR-0104)。\n- `step18.semantic[]` 注册一条 semantic 迁移记录(与 `analytics-query-request-format-retired` 同型:声明但从未实现、无存储可改写,故为 semantic TODO 而非 stack conversion),使 `spec-changes.json` / upgrade-guide / `spec_changes` MCP 工具如实记录本次退役。\n- major changeset。\n\n`validateOnly` 是 optional + 有 default,退役不影响任何现有正确调用者。日后要做 dry-run 随时可重新引入一个设计完整的版本。\n\n## 顺带(同一 PR)\n\n`packages/spec/src/api/plugin-rest-api.zod.ts:918` 的 `requestSchema: 'CreateManyRequestSchema'` 是一处**悬空引用** —— 从未有 schema 导出此名(真实契约是 `protocol.zod.ts` 的 `CreateManyDataRequestSchema`)。该字符串运行时和 OpenAPI 生成都不消费,是文档字符串失真,危害低于 `validateOnly`。改指向真实存在的 `CreateManyDataRequestSchema`。"
+}

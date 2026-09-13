@@ -1,0 +1,35 @@
+{
+  "number": 4091,
+  "kind": "pull_request",
+  "title": "fix(tooling): docs-drift stops flagging docs for tests-only changes",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T09:20:18Z",
+  "updated_at": "2026-07-30T09:42:04Z",
+  "closed_at": "2026-07-30T09:42:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T09:42:03Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4091",
+  "body": "Tooling only, no package changes. Found while working the #4045 line — three of its PRs tripped it in a row.\n\n## The false positive\n\n`affected-docs.mjs` derives changed-package roots from **every** file under `packages/`, tests included. So a PR that changes only a test file flags every hand-written doc that names those packages:\n\n| PR | diff | drift comment said |\n|---|---|---|\n| #4064 | 1 test file + empty changeset | 6 `packages/services` docs |\n| #4078 | 1 test file + empty changeset | 6 `packages/services` docs |\n| (one before) | tests only | same 6 |\n\nA test observes behaviour rather than defining it, so it **cannot** make an implementation-accuracy doc stale. Every one of those was a guaranteed-false finding.\n\n## Why precision matters here specifically\n\nThe script's own header says over-inclusion is preferred to misses, and for real code changes that is right — the periodic full audit is the backstop. But a category that is *always* false is a different thing: a reader who learns the comment is noise stops reading it, and then it fails on the PR where it is correct. Same reason a flaky test is worse than no test.\n\n## The change\n\n- **Test files are dropped** before the package roots are derived: `*.test.*` / `*.spec.*` at any depth (covering `.integration.test.ts` and `.conformance.test.ts`), plus anything under `__tests__` / `__mocks__` / `__fixtures__`.\n- **The narrowing is not silent.** The excluded count rides the summary line and `testFilesSkipped` in `--json`. A tool that quietly narrows its own scope reads as \"nothing to see here\" when it means \"I did not look\".\n- **`--self-test`**, following the `check-error-code-casing` / `check-route-envelope` convention, run by the workflow before it computes the mapping — so a regression fails loudly instead of quietly emptying the comment.\n- **The workflow now also triggers on the mapper's own paths** (second commit — see below).\n\n## Verified against real history, not by inspection\n\nRan the patched mapper over the actual commits:\n\n| commit | content | before | after |\n|---|---|---|---|\n| `46e86bad` (#4078) | tests only | 6 docs | **0 docs**, `1 test file(s) excluded` |\n| `4965bfac` (#4059) | `engine.ts` + `formula` | 11 docs | **11 docs** (unchanged), `1` skipped |\n| `--all` | full audit scope | 178 | **178** (unchanged) |\n\nThe second row is the one that matters — it proves implementation detection is intact, not just that the noise is gone.\n\n## The self-test earns its place\n\nReplacing the anchored match with a naive `path.includes('test')` — the plausible wrong way to write this — fails **7 cases**, including the direction that would turn the optimisation into a miss:\n\n```\n✗ \"a zod schema\": packages/spec/src/automation/control-flow.zod.ts → expected false, got true\n✗ \"no false positive on a bare name\": packages/spec/src/latest.ts → expected false, got true\n✗ \"a command NAMED test is not a test file\": packages/cli/src/commands/test.ts → expected false, got true\n✗ \"__mocks__\": packages/foo/src/__mocks__/driver.ts → expected true, got false\n```\n\n`latest.ts` contains `test` as a substring, which is exactly the sneaky case an unanchored check swallows.\n\n## Correction, and a second gap CI surfaced\n\nAn earlier revision of this description said this PR's own drift comment \"should now report 0 docs, which is itself a live demonstration of the fix\". **That was wrong.** CI on the first push showed no drift comment at all: the workflow triggers on `paths: ['packages/**']`, and this PR touches only `scripts/` and `.github/`, so `Flag docs affected by code changes` never ran.\n\nWhich surfaced a real gap worth fixing rather than working around — the self-test step had been added but was **structurally unreachable by the change most likely to break it**. Editing `affected-docs.mjs` was the one change its own guard could never see.\n\nThe second commit adds `scripts/docs-audit/**` and this workflow file to the trigger. A PR touching only those now runs the self-test and gets the comment step's existing `No hand-written docs reference the 0 changed package(s). ✅` branch, which is the correct answer. This PR exercises it.\n\n## Not done here\n\nA package's `CHANGELOG.md` is arguably the same class — changeset releases touch every `packages/*/CHANGELOG.md` and would light up everything — but those PRs are bot-generated and nobody reads the comment on them, so I left the scope to the observed problem rather than widening it unasked.\n\nThere is no test harness for root `scripts/` (`pnpm test` is `turbo run test`, workspace packages only), which is why this uses the repo's `--self-test` convention rather than a vitest file.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QoA8AV99Ss1RRkLLAYmDzq"
+}

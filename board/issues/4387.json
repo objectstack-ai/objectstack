@@ -1,0 +1,32 @@
+{
+  "number": 4387,
+  "kind": "pull_request",
+  "title": "fix(objectql): reject wire-only alias spellings (sort/select/skip/populate) on direct engine calls",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T10:19:07Z",
+  "updated_at": "2026-07-31T10:33:23Z",
+  "closed_at": "2026-07-31T10:33:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T10:33:21Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4387",
+  "body": "Implements option **(1)** of #4371 — the small, exact fix that closes the reachable hole. Refs #4371 (kept open for option (2): unknown-key enforcement, which needs its own caller survey).\n\n## The bug\n\n#4346 made the engine fold `filter`→`where` and `top`→`limit` on all six methods. The other four pairs in `RPC_QUERY_ALIAS_SLOTS` — `select`→`fields`, `sort`→`orderBy`, `skip`→`offset`, `populate`→`expand` — fold at the RPC/protocol layer only, because their value shapes need lowering (`sort`'s `{field: 'asc'}` record form, `populate`'s name list) that belongs there. A **direct** `engine.find()` never crosses that layer: the key rode the AST verbatim, drivers read only the canonical name, and the request succeeded with the parameter silently discarded — `sort` + `limit` (\"the latest N\") returning an arbitrary N. Three shipped instances were fixed in #4370.\n\n## The fix\n\n`find`/`findOne` now **reject** a non-null wire-only spelling:\n\n> `find('task') does not accept 'sort': 'sort' is a wire spelling of 'orderBy', folded by the RPC/protocol layer — a direct engine call bypasses that fold, so the value would be silently dropped, not applied. Pass 'orderBy' (SortNode[]: [{ field, order: 'asc' | 'desc' }]) instead.`\n\n- `ENGINE_WIRE_ONLY_SLOTS` is derived as the complement of the slots the engine folds — the spec table stays the ONE place the mapping is declared (#3795 discipline), and a seventh pair added there lands on exactly one side of the split.\n- Rejecting, not folding: folding here would re-implement the RPC layer's shape lowering per reader — the exact #3795 condition — and #4346 deliberately scoped the engine fold to the two slots needing no lowering. One fold, one owner; the wire path is pinned unchanged end-to-end (real protocol → real engine).\n- `null` stays a withdrawal (rides through for drivers to ignore), matching the fold's own rule.\n- The where-only methods (`update`/`delete`/`count`/`aggregate`) deliberately do NOT get this rejection: their contracts honour no sort/projection/pagination in **either** spelling, so \"pass `orderBy` instead\" would redirect the caller to a key those methods silently ignore too. That is option (2)'s territory.\n\n## The fourth in-repo instance, found in the engine's own house\n\n`seedAutonumber` passed `select: ['id', field]` — the projection never applied (the scan worked only because an unprojected row still carries the field). Worse, its `catch { return 0 }` would have swallowed the new rejection into \"seed from 0\", i.e. **duplicate autonumbers**. Now passes `fields`.\n\n## Call-site survey (why this is safe to throw)\n\nBalanced-paren scan of every `.find(`/`.findOne(` argument text across this repo **and** the `cloud` repo, plus the indirect channels (`ObjectRepository`/`ScopedContext`, sandbox body facade, plugin-auth adapter, settings/CLI engine wrappers, metadata database-loader, flow `get_records` executor): **zero** remaining callers pass these keys to a direct engine call. Every wire ingress (REST, RPC, http-dispatcher) folds at the protocol layer. Driver-contract tests asserting `driver.find` ignores non-QueryAST keys are a different layer and untouched.\n\nSurvey leftovers filed/noted: #4386 (pre-existing `executeDataAction` query-fallback bug found while surveying); expand-nested alias keys (`expand: {rel: {sort}}`) are still silently dropped — noted on #4371 for option (2)'s scoping.\n\n## Tests\n\n12 new pins in `engine-wire-alias-reject.test.ts`: each of the four spellings refused on `find` (driver untouched), `findOne({sort})` refused, SortNode[]-shaped `sort` still refused (the KEY is the contract), multi-alias single report, canonical bag reaches the driver, `null` withdrawal, `{filter, top}` fold unregressed, and wire `sort`/`select`/`skip` through the real protocol layer folding to canonical and passing the guard.\n\nLocal: objectql 1462, runtime 995, rest 539, cli 629, client 204, metadata-protocol 136, plugin-sharing 226, plugin-approvals 330, plugin-dev 24, plugin-pinyin-search 14, verify 7 — all green; `objectql` typecheck clean.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

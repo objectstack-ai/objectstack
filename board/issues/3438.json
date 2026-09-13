@@ -1,0 +1,32 @@
+{
+  "number": 3438,
+  "kind": "issue",
+  "title": "D1 非媒体类型的按部署扫描门禁 + D2 动作参数 17.0 默认严格 —— 证据来源与载体已定于 ADR-0104 2026-07-30 附录（修订版）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-24T14:14:54Z",
+  "updated_at": "2026-07-31T05:10:36Z",
+  "closed_at": "2026-07-31T05:10:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3438",
+  "body": "## 背景\n\nADR-0104 的 D1(#3429)和 D2(#3432)都已合并。两者的新校验按 ADR 的 R1/R2/R3 纪律都以 **warn-first** 落地——违规仅告警放行,通过环境开关才转严格,目的是不让历史上静默错配的数据/调用在升级瞬间硬失败:\n\n| 阶段 | 新校验 | 开关(opt-in 严格) | 位置 |\n|---|---|---|---|\n| D1 | 记录写入时,此前完全不校验的类型(单值 lookup/master_detail/user/tree、file 系、location/address/composite/repeater/record/vector)的值形状 | `OS_DATA_VALUE_SHAPE_STRICT_ENABLED=1` | `packages/objectql/src/validation/record-validator.ts` |\n| D2 | 动作派发时(REST + MCP)声明参数的 required / 值形状 / 未知键 | `OS_ACTION_PARAMS_STRICT_ENABLED=1` | `packages/runtime/src/http-dispatcher.ts` |\n\nADR-0104 明确写了这是过渡态:「The flip to strict-by-default rides a later minor once telemetry is quiet.」本 issue 跟踪这次翻转。\n\n## 目标\n\n在 warn-first 的告警在生产/dogfood 静默一段(确认没有正当调用被误伤)后,把两个开关翻成**默认严格**:\n\n- [ ] **D1**:`record-validator.ts` 的 `VALUE_SHAPE_STRICT()` 默认返回 `true`;违规从 `console.warn` 变为 `400 VALIDATION_FAILED`(`invalid_type`)。保留一个**关闭**逃生阀(如 `OS_DATA_VALUE_SHAPE_STRICT_ENABLED=0` / `OS_ALLOW_LAX_VALUE_SHAPE`),便于个别环境临时回退。\n- [ ] **D2**:`http-dispatcher.ts` 的 `actionParamsStrict()` 默认返回 `true`;REST 违规 `400`、MCP 抛错。同样保留关闭逃生阀。\n- [ ] 环境变量按 Prime Directive #9 收敛命名(翻转后主开关语义从 `_ENABLED`(opt-in)变成 opt-out,考虑用 `OS_ALLOW_*` / `OS_SKIP_*` 形式,并用 `readEnvWithDeprecation` 兼容一版旧名)。\n- [ ] 现有 warn-first 测试补上「默认即严格」的对偶用例(D1 的 `record-validator.test.ts`、D2 的 dogfood `action-params-contract.dogfood.test.ts` 目前显式 set 开关才测严格路径——翻转后默认路径即严格)。\n- [ ] changeset 标注为**行为破坏**:过去静默放行的畸形值/参数包升级后会 400。发版说明列清两类。\n- [ ] 翻转前先跑一遍存量体检:对代表性租户/showcase 采集 warn-first 告警,确认没有需要先修的正当用法(ADR-0104 R1)。\n\n## 前置条件 / 触发时机\n\n- warn-first 已在生产观测「足够久且安静」(具体窗口由维护者定;建议至少覆盖一个发版周期)。\n- 两次翻转**各走一个后续 minor**(不必同一版),互不依赖,可分别评估节奏。\n\n## 关联\n\n- ADR-0104 `docs/adr/0104-field-runtime-value-shape-contract.md`(D4 rollout、R1/R2/R3)\n- D1 #3429 · D2 #3432\n- 与 D3(file-as-reference)无依赖关系,可并行。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

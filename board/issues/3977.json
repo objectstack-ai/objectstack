@@ -1,0 +1,32 @@
+{
+  "number": 3977,
+  "kind": "issue",
+  "title": "Field-level error codes are four vocabularies with no schema — needs its own catalog (ADR-0112 D6 follow-up)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T00:42:01Z",
+  "updated_at": "2026-07-30T05:39:03Z",
+  "closed_at": "2026-07-30T05:39:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3977",
+  "body": "Split out of #3841 by [ADR-0112](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0112-error-code-vocabulary-and-ledger.md) ruling **D6**: the top-level `error.code` vocabulary is settled (SCREAMING_SNAKE, standard catalog + ledger), but **field-level** codes are a genuinely different vocabulary with different emitters (validators) and different consumers (form UIs), and were deliberately not decided there. `FieldErrorSchema.code` was widened to `z.string()` in the ADR-0112 batch-1 PR so the spec stops declaring an enum nothing complies with; this issue is where the real field-level decision happens.\n\n## The four vocabularies on the same wire position\n\nThe per-field `code` inside the validation `fields[]` array is emitted in four unrelated dialects:\n\n1. **Record/rule validators** (`packages/objectql/src/validation/record-validator.ts:240-334`, `rule-validator.ts:539-887`): `required`, `max_length`, `min_length`, `invalid_email`, `invalid_url`, `invalid_phone`, `invalid_number`, `min_value`, `max_value`, `invalid_boolean`, `invalid_date`, `invalid_time`, `invalid_option`, `invalid_type`, `invalid_initial_state`, `invalid_transition`, `rule_violation`, `invalid_format`, `invalid_json`, `json_schema_violation`. Of these only `invalid_format` was ever in `StandardErrorCode`.\n2. **Import coercion** (`packages/rest/src/import-coerce.ts:287-346`): `invalid_boolean`, `invalid_number`, `invalid_date`, `invalid_option`, `reference_ambiguous`, `reference_not_found`.\n3. **Raw Zod passthrough** (`packages/rest/src/rest-server.ts:89-96`, `zodIssuesToFields`): `invalid_type`, `too_small`, `unrecognized_keys`, … — whatever Zod's issue codes are, `?? 'invalid'`.\n4. **The declared-but-never-complied-with** `StandardErrorCode` members (`value_too_long` vs the emitted `max_length`, `missing_required_field` vs the emitted `required`, …).\n\n## Also unsettled, same surface\n\n- **Array name drift**: the wire carries `fields` (`packages/runtime/src/validation-failure.ts:45`); the spec declares `fieldErrors` (`EnhancedApiErrorSchema`). The client renames at `packages/client/src/index.ts:4482`.\n- **No schema exists for the wire `fields[]` element shape at all** — nothing validates any of the four dialects.\n\n## What needs deciding\n\n1. One field-level catalog (its own closed enum in spec — casing decision included: these are also machine constants per ADR-0112 D8, so presumably SCREAMING, but the validator dialect is the de-facto standard and form UIs may already string-match — survey consumers first, including objectui form renderers).\n2. Zod passthrough: map Zod issue codes into the catalog at the `zodIssuesToFields` boundary instead of leaking library internals onto the wire.\n3. `fields` vs `fieldErrors` naming, and a declared schema for the element shape, so the conformance suites can assert it.\n\n## Guard note\n\n`FieldErrorSchema.code`'s banner comment in `packages/spec/src/api/errors.zod.ts` points here. When this lands, that field tightens from `z.string()` to the new enum and the banner comes off."
+}

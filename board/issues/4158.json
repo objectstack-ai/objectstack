@@ -1,0 +1,30 @@
+{
+  "number": 4158,
+  "kind": "issue",
+  "title": "`wait` 声明了超时契约但完全没有实现：`onTimeout` 零读取者，`timeoutMs` 被当成定时时长用 —— showcase 自己在依赖它",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T12:57:10Z",
+  "updated_at": "2026-07-31T04:57:21Z",
+  "closed_at": "2026-07-31T04:57:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4158",
+  "body": "做 #4045 的 `wait` 契约毕业时发现的，属于「已声明但从不被读」那条臂 —— 而且是 PD #10 的形状：宣传了一个运行时不提供的能力。\n\n## 两处，合起来是一件事\n\n**1. `waitEventConfig.onTimeout` 有零个读取者。**\n\n```ts\n// packages/spec/src/automation/flow.zod.ts:210\nonTimeout: z.enum(['fail', 'continue']).default('fail').describe('Behavior when the wait times out'),\n```\n\n在 framework 仓库里搜 `onTimeout`（排除 `dist/`、`.d.ts`、测试），除定义处外的命中全是无关的：`acquireConnectionTimeout` 注释、`actionTimeoutMs`、`connectionTimeoutMs`。没有任何路径读它。它带 `.default('fail')`，所以每个 wait 节点都被盖上一个不起作用的值。\n\n**2. `waitEventConfig.timeoutMs` 唯一的读取者把它当别的东西用。**\n\n声明的语义是超时上限：\n\n```ts\n// flow.zod.ts:209\ntimeoutMs: z.number().int().min(0).optional().describe('Maximum wait time before timeout (ms)'),\n```\n\n而唯一读它的地方把它当**定时时长的兜底**：\n\n```ts\n// packages/services/service-automation/src/builtin/wait-node.ts\nconst durationMs =\n  parseIsoDuration(wec.timerDuration) ??\n  (typeof wec.timeoutMs === 'number' ? wec.timeoutMs : undefined);\n```\n\n即：没写 `timerDuration` 时，`timeoutMs` 变成了「等多久」，而不是「最多等多久」。（`engine.ts:3135` 读的 `node.timeoutMs` 是节点上的另一个字段，不是这个。）\n\n**合起来：`wait` 根本没有超时实现。** Zod 和文档描述的「等待超时后 fail 或 continue」这套契约在运行时不存在。\n\n## 为什么这条值得单独立项\n\n**我们自己的示例在依赖它。**\n\n```ts\n// examples/app-showcase/src/automation/flows/index.ts:554\nwaitEventConfig: { eventType: 'timer', timerDuration: 'PT1M', onTimeout: 'continue' },\n```\n\n`onTimeout: 'continue'` 什么都不做。而且 `timeoutMs` 进了生成参考文档（`content/docs/references/automation/flow.mdx:107` 的 `waitEventConfig` 类型里列着 `timeoutMs?: integer`），所以这是**已发布**的表面，不是内部细节。\n\n## 两条路，需要人来定\n\n不是可以顺手猜的 —— 两条都会改动已发布契约：\n\n**A. 实现它。** 在 resume 触发器之外再排一个一次性超时 job：到点后 `resume(runId)` 并按 `onTimeout` 决定是让该节点失败还是继续往下走。要注意冷启动重排那一遍（`rearmSuspendedWaitTimers`）也得认识这个第二个 deadline，否则重启后超时就丢了 —— 这正是 ADR-0019 后续为定时器补 `waitUntil` 持久化时踩过的那类问题。同时得把 `timeoutMs` 从「时长兜底」改回「超时上限」，那是一个行为变更：今天只写 `timeoutMs` 的流程会从「等 N 毫秒」变成「立刻不带 deadline 挂起」。\n\n**B. 撤回它。** 给两个键上墓碑、停止发布，并把 showcase 那处 `onTimeout` 删掉。如果 `timeoutMs` 的实际用法就是「时长」，那更诚实的做法是把它并进 `timerDuration`（`parseIsoDuration` 已经接受裸数字当毫秒，所以 `timerDuration: 60000` 已经能表达同一件事）。\n\n我倾向 **B 的后半段**：`timerDuration` 已经能表达 `timeoutMs` 今天实际做的事，而真正的超时语义是个新特性，应该在有人真的要它的时候按需求做，而不是为了对齐一段没人实现过的描述文字去补。但这条要你拍。\n\n## 相关\n\n- #4045 —— 「声明 vs 实际读取」未对账这条主线；本条是它 caveat 清单里 `wait` 那格查出来的第二个结果\n- 配套 PR 做的是同一节点的**另一半**（loose `config` 后门毕业进 ADR-0087 D2 转换层），并**刻意保留**了 `timeoutMs` 当时长的现有行为 —— 在一次契约清理里顺手改行为是不对的\n- PD #10（不得宣传运行时不提供的能力）、#4120 / #3786（同一形状在 metadata 表单族上 17 个里命中 4 个）\n\n## 未覆盖\n\n只搜了 framework 仓库。objectui 侧是否有读 `onTimeout` 的设计器代码没查 —— 但本仓库里没找到 `waitEventConfig` 的任何设计器表单，所以大概率也没有。\n"
+}

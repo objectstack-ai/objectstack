@@ -1,0 +1,30 @@
+{
+  "number": 4314,
+  "kind": "issue",
+  "title": "CI: Dogfood shards and rerun-safety-nightly still present a #4250-style stall as hang-until-timeout — roll out run-with-stall-guard",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T05:38:41Z",
+  "updated_at": "2026-07-31T06:17:29Z",
+  "closed_at": "2026-07-31T06:17:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4314",
+  "body": "## 背景\n\n#4309(closes 方向为 #4250 的止损)给 `Test Core` 加了 `scripts/run-with-stall-guard.mjs`:输出静默超过 `--stall-minutes` 即判定停摆 —— 打印判词(冻结时刻、最后一行输出、rerun 分诊指引)、杀掉测试进程组、exit 75(`EX_TEMPFAIL`)。同时由 guard 自己 tee 日志并透传真实退出码,退役了 `… 2>&1 | tee` + `set -o pipefail` 的掩红隐患。\n\n但同样的停摆模式(#4250:输出冻结、job 挂 `in_progress` 直到兜底超时)在其余跑测试套件的 job 里仍是\"挂到超时\":\n\n## 现状清单(截至 #4309 合并后的 main)\n\n| 位置 | 现状 | 停摆的呈现 |\n|---|---|---|\n| `ci.yml` → Dogfood 两个 shard 的 `Boot example apps and exercise real user flows` | `set -o pipefail` + `2>&1 \\| tee \"$RUNNER_TEMP/dogfood.log\"`,job timeout 45 分钟 | 挂最多 45 分钟。Dogfood 起真实 example app + 真实 HTTP 栈,恰是 #4250 怀疑的\"真实引擎/句柄\"高危区 |\n| `rerun-safety-nightly.yml` → pass 1 与 pass 2(同一工作树跑两遍全量,dogfood 含在内) | job timeout **120 分钟**,无输出监测;pass 2 用 `if ! pnpm turbo run test …` 包着自定义 `::error` 块 | 挂最多 120 分钟,且是 nightly,没人盯 |\n| (顺带评估)`coverage-nightly.yml` 的 spec 覆盖跑 | 无 tee,30 分钟 timeout,无停摆检测 | 挂最多 30 分钟 |\n\n## 要做的事(纯搬运)\n\n把上述测试步骤改为经 `run-with-stall-guard.mjs` 执行,阈值参考(健康时输出连续,阈值取最长静默间隔的 ~5 倍):\n\n- Dogfood shard:`--stall-minutes 10`,`--log \"$RUNNER_TEMP/dogfood.log\"` 路径不变 → 后续的 Test completeness guard **无需改动**;\n- rerun-safety 两遍:`--stall-minutes 10~15`。pass 2 的 `if !` 包装与 guard 兼容(停摆时 exit 75 同样进入 error 块),但注意该 error 文案断言\"第二遍失败 = 状态泄漏\" —— 停摆红会被它误导,建议区分 exit 75(停摆)与其它非零(真的 rerun-unsafe)两种文案;\n- coverage-nightly 视改动成本顺手处理或明确豁免(说明原因)。\n\n## 验收\n\n- 跑测试套件的 workflow 中不再出现 `… 2>&1 | tee` + `set -o pipefail` 组合(`ci.yml` 里 `No compiled test files in any dist` 的 pipefail 是 `find` 检查,不在此列);\n- 每个跑套件的 job:停摆阈值 ≪ job timeout,停摆以带判词的红呈现,而非 `in_progress` 挂到兜底。\n\n## 相关\n\n- #4250 —— 停摆现象与根因追踪(根因排查不在本 issue 范围)\n- #4309 —— Test Core 的 guard 落地(实现与阈值取值的先例)"
+}

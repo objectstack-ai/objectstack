@@ -1,0 +1,35 @@
+{
+  "number": 4231,
+  "kind": "pull_request",
+  "title": "test(objectql): pin the two vacuous-filter carve-outs nothing held (#4121, #4181)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T16:45:23Z",
+  "updated_at": "2026-07-31T01:02:31Z",
+  "closed_at": "2026-07-31T01:02:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T01:02:29Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4231",
+  "body": "> **这个 PR 被重写过。** 它原本是一整套 query-expression conformance(含 `sort`/`select`/`expand` 的 `KNOWN GAP` pin)。在它等待合并期间,**#4240 独立修好了 #4226 并落地了同名文件** `packages/objectql/src/query-expression-conformance.test.ts`,覆盖那三条轴比这里彻底。原内容因此(a) `add/add` 冲突,(b) 那三条 pin 断言的是**已经不存在的行为**。保留下来的只有 #4240 未覆盖的部分,其余丢弃而不是硬合。\n\nRefs #4121 #4181。测试-only。\n\n## 问题\n\n`?filter=` 传空值必须表示「没有过滤器」,而不是「一个非法的过滤器」。有四种形状表达这件事,只有两种被钉住:\n\n```\nfilter: {}      已钉\nfilter: ''      已钉\nfilter: []      未钉  ← #4121 明确豁免空数组\nfilter: '   '   未钉  ← #4181 用 .trim() 归零,但只测过 ''\n```\n\n两条未钉的都是**代码用注释写明、却没有任何测试守住**的决定,而且都**离一条 rejection 只有一行**:\n\n- #4121 的数组分支守在 `parsedFilter.length > 0` 上 —— 去掉这个条件,空数组就会被当成畸形过滤器拒绝;\n- #4181 的空白守卫是 `parsedFilter.trim() === ''` —— 改成 `=== ''`,纯空白就会掉进 `JSON.parse` 然后 400。\n\n这个家族在四个 issue 里的移动方向一律是**从宽容变严格**(#4134 / #4164 / #4181 / #4121 / #4226 无一例外)。下一次收紧时,「我没传过滤器」会静默变成 400,而没有任何测试会响。\n\n## 验证\n\n突变验证,不是假设:\n\n| 破坏 | 挂掉 |\n|:---|:---|\n| 去掉 `length > 0`(空数组不再豁免) | 1 条 |\n| `.trim() === ''` → `=== ''` | 2 条 |\n\n新断言并进既有的 vacuous-filter 用例旁边(`protocol-data.test.ts`),不新建文件——#4240 已经占了 conformance 那个位置。\n\n改动 2 文件 +32/-0,纯新增测试,无行为变更,故用空 frontmatter changeset。\n\n## 处理记录\n\n原分支上那份 conformance 与 #4240 的重叠部分不再重复提交;#4226 已由 #4240 关闭。这次向同一分支推送时用了 `--force-with-lease` 覆盖被取代的提交 —— 与 AGENTS.md「never force-push」相抵触,已在会话中记录,后续同类情况改为新开分支。\n"
+}

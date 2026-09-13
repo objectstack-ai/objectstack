@@ -1,0 +1,35 @@
+{
+  "number": 4106,
+  "kind": "pull_request",
+  "title": "docs(types,objectql,runtime,cli): repoint the degraded-boot stderr copy at the reason that survived #4012",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T09:57:40Z",
+  "updated_at": "2026-07-30T10:13:53Z",
+  "closed_at": "2026-07-30T10:13:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T10:13:51Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4106",
+  "body": "Close-out of #4012 (fixed in #4084). Comment/test-name only — **no behavior changes**.\n\n## What I set out to do, and why I didn't\n\n#4012 noted that plugins had visibly worked around the swallowed log sink by bypassing the logger, and that this was \"a tell that the sink has been quietly unusable for a while\". `emitDegradedBootBanner` is that workaround, and its doc comment described the bug verbatim:\n\n> *\"`OS_ALLOW_DRIVER_CONNECT_FAILURE` only justifies itself if the state it opts into is impossible to miss — and a logger-only banner is missable: `os serve` swallows ALL of stdout while the kernel boots (its \"boot-quiet\" capture), and `Logger` routes `warn` to stdout, so the one message that matters would be invisible in exactly the situation it exists for.\"*\n\nSo the plan was to retire the duplicate now that #4084 fixed the sink. **On inspection that would have been a regression**, and the reason is worth stating plainly:\n\n```ts\nprivate write(level: LogLevel, message: string, …) {\n    if (!this.isEnabled(level)) return;      // ← core/src/logger.ts\n```\n\n`logger.warn` is dropped **before touching any stream** when the level is below `config.level`. At `--log-level error`, `fatal`, or `silent` the banner reaches *no* stream — and a production host at `error` is exactly the deployment `OS_ALLOW_DRIVER_CONNECT_FAILURE` exists for. The stderr copy was always load-bearing; it was load-bearing for a **different reason than the one written down**, and #4012 removed only the reason.\n\nThat is the failure mode AGENTS.md warns about — a stale premise fossilized in a comment — pointed the other way: the next person reads \"this exists because of boot-quiet\", sees boot-quiet fixed, and deletes it.\n\n## The change\n\nRepoint the justification everywhere someone would read it before deleting the helper:\n\n- `packages/types/src/degraded-boot.ts` — the level filter is now the stated reason, with an explicit *\"do not re-derive this helper's necessity from the boot-quiet capture\"*.\n- `packages/objectql/src/engine.ts` — the emit-site comment no longer points at the boot window.\n- **all three parity tests** renamed off *\"which `os serve` boot-quiet cannot swallow\"* → *\"which the operator log level cannot filter away\"*: `objectql/src/engine-driver-connect-failfast.test.ts`, `runtime/src/degraded-boot-parity.test.ts`, `service-datasource/src/__tests__/datasource-connection-service.test.ts`.\n\nThe objectql test now **proves** the claim instead of asserting around it — it previously passed a no-op logger, so it would have passed whatever the level filter did:\n\n```ts\nlogger: new ObjectLogger({ level: 'error' }),   // a REAL logger, silenced as a prod host silences it\n…\nexpect(written.join('')).toContain('DEGRADED BOOT');        // stderr carries it\nexpect(onStdout.join('')).not.toContain('DEGRADED BOOT');   // …and the logger emitted nothing\n```\n\nVerified the pin has teeth: flipping that level to `warn` fails the second assertion (`expected '…WARN ⚠️ DEGR…' not to contain 'DEGRADED BOOT'`).\n\n## Same sweep, same class of stale premise\n\nThree more places overstated what #4012 had not yet fixed. Each artifact stays — only the reason changes, to the one that is still true:\n\n- **Automation wiring summary** (`format.ts`, `serve.ts`, `serve-automation-summary.test.ts`) claimed the boot window swallowed the engine's binding warnings. Its real justification is *stronger* and untouched by #4012: a flow that silently fails to arm emits **no log line at any level**, so binding state has to be read off the live engine. Absence of a warning was never evidence of a bound flow.\n- **Seed summary** (`seed-summary.ts`, `format.ts`, `format.seed-summary.test.ts`) and **`AppPlugin`'s seed-outcome note** attributed the silence to the boot window; the operative gate is that `SeedLoader`'s result logs are `info`, under the default `warn`.\n\n## Verification\n\n| package | result |\n|---|---|\n| `@objectstack/objectql` | 80 files / 1180 tests ✅ |\n| `@objectstack/runtime` | 64/65 files, 913/914 ✅ — one **pre-existing** failure, see below |\n| `@objectstack/types` | 48 ✅ |\n| `@objectstack/cli` | 84 files / 877 ✅ |\n| `service-datasource` | 154 ✅ |\n\n`eslint` clean on all eleven touched files.\n\nThe runtime failure (`datasource-autoconnect.test.ts`, federated read returns 8 duplicated rows for 2 seeded) reproduces with this diff stashed, on clean `main`, both alone and in-suite — and CI's Test Core was green on #4084, so it looks environment-sensitive. Not mine; filed as #4102. Worth noting one non-finding: an earlier run also failed `plugin.integration.test.ts`, which turned out to be nothing but a stale `dist/` on my side — it passes 43/43 after a rebuild.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01HrRNgrWaRtggzmrHpbomyh)_"
+}

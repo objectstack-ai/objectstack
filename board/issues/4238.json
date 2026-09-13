@@ -1,0 +1,35 @@
+{
+  "number": 4238,
+  "kind": "pull_request",
+  "title": "test(spec,client,runtime): both producers of /ai/agents are enveloped now — relocate the declaration and pin it (#4053)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T17:01:10Z",
+  "updated_at": "2026-07-31T00:39:41Z",
+  "closed_at": "2026-07-31T00:39:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T00:39:39Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4238",
+  "body": "Closes the remainder of #4053. Companion: objectui#3080.\n\n## Where #4053 actually stands\n\nThe issue asked for three steps plus one relocation. Checking each rather than assuming:\n\n| step | status |\n|---|---|\n| cloud `buildAgentRoutes` emits `{ success: true, data }` | ✅ cloud#929 |\n| framework `runtime/src/domains/ai.ts` fallback, same shape | ✅ #4124 |\n| framework SDK — \"correct it or delete it outright\" | ✅ **needed no change**, and that is the finding |\n| `AiAgentsResponseSchema` describes `data`, not the body | ❌ **this PR** |\n\nThe SDK row is the one worth stating plainly, because \"no diff\" reads like an oversight. `unwrapResponse` returns `body.data` when a body carries a boolean `success` and a `data` key, so `body?.agents` reads `.agents` off `{ agents }` whichever producer answered. That is true *only* because the conversion relocated the payload; the flatten would have made this exact line read `undefined`. The line now says so, instead of leaving the next reader to re-derive it.\n\n## The declaration follows the wire\n\n`AiAgentsResponseSchema` was declared as the whole `GET /api/v1/ai/agents` body. Since the conversion it is what travels under `data` — so it says that now, along with why this was **#3843's relocation** (a declared payload moving unchanged) rather than **#3983's flatten** (an ad-hoc `{ links }` wrapper being reshaped). That reasoning existed only in the two producers that implement it and in a closed PR body; it belongs on the thing both of them import.\n\n## One pin, in the package both producers share\n\n`packages/spec/src/api/ai-agents-envelope.test.ts` asserts **both halves** of the contract — `envelopeViolations` clean **and** `data` parsing as the declared payload — with the drifts pinned as negatives: the flattened conversion, the pre-#4053 bare body, an `agents` key mirrored beside `data` (the #4038/#4049 shim), and a row missing `capabilities`.\n\nNote which check catches the flatten:\n\n```ts\nconst body = { success: true, data: [ASK, BUILD] };\nexpect(envelopeViolations(body)).toEqual([]);                       // ← envelope is FINE\nexpect(AiAgentsResponseSchema.safeParse(body.data).success).toBe(false);\n```\n\nThe envelope is conformant; it is the payload that stops matching its declaration. A suite leading with `envelopeViolations` alone passes that body — which is exactly how it would ship.\n\nIt lives in `spec` because nothing else can hold it. Each producer pins its own body in its own repo and neither can pin the other's, and `scripts/check-route-envelope.mjs` reaches neither: dispatcher domains return `{ status, body }` for a central sender (#4049), and cloud is outside the framework guard entirely. What both producers *do* share is this package.\n\n## Records that had gone stale\n\nFour comments across `runtime` and `client` still described cloud as unenveloped and the migration as in flight, and the `client` suite's header said \"cloud's has not yet [converted]\".\n\nOn this route that is not cosmetic. The entire reason #4053 exists is that a wrong belief about the shape produces no error, no 403 and no log — just a hidden AI surface, which is *also* what a seat-less caller (ADR-0068) and a Community Edition deployment correctly see. A reader who believes the servers are still bare is one step from \"clean this up\".\n\nThe `client` suite keeps reading the unenveloped body, retitled to say why: an SDK outlives the server it is pointed at, so a current client talking to a pre-conversion deployment is ordinary, not hypothetical.\n\n## Verification\n\nRe-run after merging `main` (see below), so these are the numbers for the merged tree rather than the branch point:\n\n| gate | result |\n|---|---|\n| `@objectstack/spec` | **7149 passed** (276 files; 7 of them new here) |\n| `@objectstack/client` | 205 passed |\n| `@objectstack/runtime` | 956 passed |\n| `check:route-envelope` (+ self-test) | **0 ratcheted, both surfaces** |\n| `check:role-word` · `check:nul-bytes` | clean |\n| `tsc --noEmit` — spec, client | clean |\n\n`runtime`'s `tsc --noEmit` reports two pre-existing `TS6133` unused-symbol errors in `domains/mcp.ts` and `domains/meta.ts` — neither file is in this diff, and `runtime` has no `type-check` script, so this is not the gate that package ships behind. Recorded rather than quietly skipped.\n\n### Why `main` is merged in\n\n#4222 landed while this was open and edits `packages/runtime/src/domains/ai.ts` — the same file, changing the sibling mounted-but-unimplemented refusal from 404 to 501 and re-pinning `check-route-envelope.mjs`. Git reported no conflict, but \"no conflict\" is not \"still correct\" when another PR rewrites the same function, so `main` is merged here and the gates above were re-run against the result. #4222 explicitly left `GET /ai/agents`'s empty-list 200 alone; the two changes sit side by side. (`check:route-envelope` now audits 16 dispatcher domains rather than 15 — #4222's new `domains/unavailable.ts`.)\n\nCarries an **empty changeset** — the sanctioned \"this PR releases nothing\" declaration. There is no behavior change: comments, one doc-block relocation, and a test file."
+}

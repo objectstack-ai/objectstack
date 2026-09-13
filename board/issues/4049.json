@@ -1,0 +1,35 @@
+{
+  "number": 4049,
+  "kind": "pull_request",
+  "title": "fix(runtime)!: the /share-links dispatcher domain stops emitting a duplicate link/links beside data (#4038)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T06:56:56Z",
+  "updated_at": "2026-07-30T07:09:37Z",
+  "closed_at": "2026-07-30T07:09:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T07:09:35Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4049",
+  "body": "Closes #4038. The producer-side other half of #3983 — and the cloud sweep that issue was waiting on came back **clean**, so this is smaller than filed.\n\n## What the shim was\n\nCreate and list answered with the payload under **two** keys:\n\n```ts\n{ success: true, data: link,  link  }   // POST /share-links\n{ success: true, data: links, links }   // GET  /share-links\n```\n\nThat duplicate existed so readers predating the envelope kept working — which is exactly why objectui's `ShareDialog` reads `body.links ?? body.data`. It stayed alive because the *other* surface for these same paths (the sharing plugin's routes) answered bare, so consumers genuinely needed both.\n\n#3983 moved that surface onto `data`. The first branch of every `??` then had no producer left, and the duplicate had no reader anywhere.\n\n## The sweep #4038 was blocked on\n\n| repo | result |\n|---|---|\n| **framework** | no consumer of these routes at all |\n| **objectui** | `ShareDialog` already falls through to `body.data`; nothing else reads them |\n| **cloud** | **clean** — see below |\n\n`cloud` was the blocker, and I could reach it after all. It touches share-links in exactly two places (`objectos-runtime/src/artifact-kernel-factory.ts`, `service-cloud/src/default-environment-plugins.ts`), and both only **register** `SharingServicePlugin` into a per-environment kernel with `registerShareLinkRoutes: false` — precisely so *this* dispatcher serves the paths. Zero calls to the endpoints, zero body reads, zero `body.link` / `body.links` anywhere in the repo.\n\n## Shape\n\n| route | was | now |\n|---|---|---|\n| `POST /share-links` | `{ success, data: link, link }` | `{ success, data: link }` |\n| `GET /share-links` | `{ success, data: links, links }` | `{ success, data: links }` |\n\n`data` is unchanged on both — only the duplicate key is gone. Anything reading `body.data`, or going through `ObjectStackClient.unwrapResponse`, sees no difference at all. Only a raw reader of top-level `body.link` / `body.links` would move, and there isn't one.\n\nThe list route now goes through `deps.success(...)` like the domain's other three. **Create stays hand-built** — `deps.success` hardcodes status 200 and this route is a **201**, which is the same reason `/keys` hand-builds its own 201, and the same shape it uses. My own issue text said to route *both* through the helper; that was wrong about the status, and I've corrected it on the issue.\n\n## Guard\n\n`scripts/check-route-envelope.mjs` does not and **cannot** cover this file — it scans route modules that write via `res.json(...)`, while dispatcher domains return `{ status, body }` for a central sender. So this drift was invisible to that guard by construction, which is worth stating plainly: the guard's 7/0/1 is a claim about route *modules*, not about every REST body the platform emits.\n\nThree tests in `domain-handler-registry.test.ts` cover it instead — two per-route, plus a general one asserting no success body carries a top-level key outside `success` / `data` / `meta`, so a *new* duplicate spelling fails too. Restoring the duplicates fails all three.\n\n## What I deliberately did **not** do\n\n#4038's step 3 said to delete objectui's `body.links ?? body.data` tolerance, and I'm declining that — correcting my own recommendation.\n\nWith both producers converged, that `??` is no longer **drift** (two live producers disagreeing, which was the actual bug); it's **version skew** (one producer changed, the consumer still supports the older one). `@object-ui/components` publishes standalone against peer deps, so dropping it turns \"new console, older framework\" from *working* into a **silently empty share list** — a bad failure mode to trade for removing one `??`. Deleting it wants a version gate, which is a larger call than this issue. Noted on #4038 rather than left implicit.\n\n## Verification\n\n| gate | result |\n|---|---|\n| `@objectstack/runtime` | **909 passed (65 files)** |\n| `@objectstack/client` | 200 passed (14 files) |\n| new tests are load-bearing | restoring the duplicates → **3 of 3 fail** |\n| `check:route-envelope` + `--self-test` | 7 conformant / 0 ratcheted / 1 exempt |\n| spec `tsc --noEmit` · `check:docs` · `check:skill-refs` · `check:react-blocks` | all clean |\n| `check:error-code-casing` · `check:console-sha` · `check:nul-bytes` · `check:role-word` · `check:org-identifier` | all clean |\n| `eslint --no-inline-config` on changed files | clean |\n\nNo `.objectui-sha` bump needed — this touches no frontend, so the console pin stays where #4037 left it (`check:console-sha` confirms it is still in sync).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01CYbS3kS8xzsHNXFTzp4e2z)_"
+}

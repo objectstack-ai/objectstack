@@ -1,0 +1,35 @@
+{
+  "number": 4297,
+  "kind": "pull_request",
+  "title": "chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T04:27:01Z",
+  "updated_at": "2026-07-31T04:41:25Z",
+  "closed_at": "2026-07-31T04:41:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T04:41:24Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4297",
+  "body": "Closes #4261.\n\n## 问题\n\n`AGENTS.md` 的 Post-Task Checklist 要求 breaking changeset 写清 FROM → TO 迁移,理由是这段文字「ships to consumers as `CHANGELOG.md` inside the npm package and is what an upgrading agent greps after the tombstone error」。但这条送达路径在 69 个可发布包里断了 68 条:npm 无条件打包的只有 `package.json` / `README*` / `LICENSE*`(老版本 npm 曾包含 CHANGELOG,现在不含),而 canonical 白名单 `[\"dist\", \"README.md\"]` 从未列过它。实测(npm 10.9.7)`@objectstack/types`:tarball 3 个文件,70KB 的 `CHANGELOG.md` 留在了仓库里。只有 `@objectstack/spec` 显式列了它。\n\n撞到 tombstone 报错的场景恰恰是「本地只有 `node_modules`、没有仓库」的场景 —— 迁移说明必须坐在 tarball 里才 grep 得到。按 issue 的方向 1 落地:**让约定成真**,而不是改写约定。\n\n## 改了什么\n\n**1. 68 个包的 `files` 补上 `\"CHANGELOG.md\"`**,canonical 白名单变为 `[\"dist\", \"README.md\", \"CHANGELOG.md\"]`。每个包磁盘上都已有 CHANGELOG.md(changesets 维护),无一例外。\n\n**2. `check:published-files` 新增第五条不变量 COMPLETE**:白名单没有覆盖 `CHANGELOG.md` 的包直接挂在始终必跑的 `lint` job 上,报错正文带 #4261 的因果和一行修法 —— 下一个新包不可能再静默切断这条路径。\n\n- `CHANGELOG.md` 进入 CANONICAL 集合(声明无需理由),同时进入新的 REQUIRED 集合(不声明就报错)。两者分开:CANONICAL 是「可以」,REQUIRED 是「必须」。\n- `@objectstack/spec` 在 `EXTRA_ENTRIES` 里的 CHANGELOG.md 登记随之溶解进 canonical 集合(双向核对会把留下的死条目当错误,所以必须删)。\n- `ALWAYS_PACKED` 的注释同步改写:CHANGELOG 不在 npm 无条件打包集里,正是 COMPLETE 存在的原因。\n\n## 验证\n\n- `--self-test`:21 个模式断言 + 11 个分类断言,新增 3 个钉住 COMPLETE 所依赖的匹配形状(字面量命中、`dist` 不吞它、`CHANGELOG.mdx` 近似名不误命中)。\n- `pnpm check:published-files`:69 个可发布包全绿。\n- 反向测试:删掉任一包的该条目,门禁如期报错并给出修法。\n- `npm pack --dry-run` on `@objectstack/types`:tarball 现在含 70.8kB `CHANGELOG.md`(issue 里实测缺失的正是它);`@objectstack/spec` 不回归。\n- `pnpm lint`(改动脚本零告警)、`check:nul-bytes` / `check:doc-authoring` / `check:role-word` / `check:org-identifier` / `check:release-notes`、`check-changeset-no-major`(本 changeset 全 patch)、`check-changeset-fixed` 均通过。\n- changeset 覆盖全部 68 个改动包(patch);`changeset status` 解析通过。\n\n## 顺带发现,未塞进本 PR\n\n`.changeset/adapter-hono-auth-wildcard-yields.md` 仍引用改名前的 `@objectstack/adapter-hono`(现为 `@objectstack/hono`),`changeset status` / `changeset version` 会在它上面崩 —— 预存在于 main,与本 PR 无关,已另行处理。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

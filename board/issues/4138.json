@@ -1,0 +1,35 @@
+{
+  "number": 4138,
+  "kind": "pull_request",
+  "title": "fix(cli,runtime): a named artifact that is missing is a broken instruction, not an empty boot — and the ordering claims say what the kernel resolves (#4110 follow-up, #4131)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T10:58:57Z",
+  "updated_at": "2026-07-30T11:51:55Z",
+  "closed_at": "2026-07-30T11:51:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T11:51:52Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4138",
+  "body": "#4110 / #4085 的跟进。一条原则贯穿全部改动：**「平台可以没有应用」是关于能力的陈述，它不授权把「缺失的、被指名的输入」猜成「你是想空启动」。**\n\n> 原本这个 PR 只是修一条假注释（#4131 第一步）。推演「裸 `os serve` 是否该合流到 `os start` 的空启动」这个问题时，我发现 **#4110 自己在 artifact 一侧留了同类的洞**，于是一并修掉 —— 都是同一条判据。\n\n## 一、我在 #4110 留的洞：被指名的 artifact 缺失会静默空启动\n\n#4110 让「artifact 不存在」在整条链路上都不致命（`loadArtifactBundle` 记日志返回 null、`MetadataPlugin` 空状态启动）。对**约定位置** `<cwd>/dist/objectstack.json` 是对的 —— 那只是「还没编译」。但 `OS_ARTIFACT_PATH` / `{ artifactPath }` 按设计**跳过存在性检查**（交给 loader 惰性校验），于是宽容度也漏给了它们：\n\n```\nOS_ARTIFACT_PATH=/nope os serve\n→   No objectstack.config.ts found — booting from artifact (default host)...\n→   ✓ Server is ready\n```\n\n**整个启动输出里那个路径出现 0 次**（实测）。serve 的静默启动窗口会丢弃 loader 那句平静的 ENOENT 行 —— 因为 #4110 把它从 `warn`（会被 #4084 缓存回放）改成了 `log`（被丢弃）。#4110 之前这个 case 是**大声死掉**的，所以这是我引入的退步。\n\n**判据是「被指名 vs 约定」，不是 errno。** `createDefaultHostConfig`（无 config 的启动，artifact 就是整个部署）现在对「被指名的本地 artifact 不存在」抛错，指名路径**和**指名它的来源。loader 的宽容度不动，`createStandaloneStack` 完全不碰 —— #4085 修好的 config 启动路径不受影响。\n\n## 二、`serve` 的「找不到」现在说出它找过哪里\n\n两种真实情况是**文件名拼错**和**cwd 不对**，后者更常见。现在给出 config 绝对路径、artifact 绝对路径、以及 `OS_ARTIFACT_PATH is not set.`，并指向 `objectstack start`（那才是**有意**的无应用启动）。\n\n**行为不变**：仍然报错退出。`os serve` 是被要求去加载某个东西的；凭空变出一个零对象平台会把错误藏在一个跑着的服务器后面 —— 正是 #4085 的形状。\n\n## 三、这条报错原本会被截断（测试逮到的，不是 review 逮到的）\n\n新加的 e2e 第一次跑就红了：输出只剩前两行。`this.exit(1)` 走到 oclif 的 `process.exit`，**不等管道 stdout 排空**，多次 `console.log` 的尾巴丢失 —— 丢掉的恰好是「去哪儿找」。这就是 #4012 的形状。两处 pre-flight 报错都改成**一次 write**。\n\n其中端口占用那条的**验证状态我说明白**：靠构造保证（一次 write），**没有** driven test —— 触发它需要生产模式下占用端口，我没为它写 e2e。\n\n## 四、#4131 第一步：顺序声明说实话（含一条钉错东西的测试）\n\n`createStandaloneStack` 的注释声称 `defaultDatasourcePlugin` 的**数组位置** \"MUST precede ObjectQLPlugin: its start() connects the default driver\"。两处都不对：连接在 `init()`；而依赖图会把 ObjectQLPlugin **拓扑提前**到它前面（实测 resolved init：objectql **#10**、default-datasource **#16**）。\n\n更值得修的是：`standalone-stack.test.ts` 里那条测试**断言的正是这个数组下标**，理由写着「schema sync needs the driver」—— 和假注释同一个错误信念。有人把真契约破坏掉（把 connect 从 `init()` 挪到 `start()`），它照样绿。现在改成钉**真正定序的那条声明依赖**：删掉数组位置它不会响，删掉 `dependencies` 它会响。\n\n真实契约（phase 切分 + 声明依赖）本来就记在 `default-datasource-plugin.ts` 的 **\"Ordering — phase, not list position\"** 里，那段还记着当初教会我们这件事的「shipping a server with no tables」。#4131 记录的是病根：**同一子系统被同类顺序 bug 咬过两次，两次的修法都是写注释**。\n\n## 验证\n\n`packages/runtime/src/standalone-stack.test.ts` —— **18 passed**（12 → 18）：\n- 被指名的 `OS_ARTIFACT_PATH` 缺失 → 抛错且**指名路径**；\n- 显式 `artifactPath` 缺失 → 抛错；\n- `requireArtifact: false` 下**依然**抛错（「artifact 可选」≠「忽略你指名的那个」）；\n- 控制组：无人指名时保留原有 `No artifact source available` 报错（守卫不得吞掉它）；\n- 控制组：`http(s)://` 不做文件系统检查。\n\n`packages/cli/test/serve-no-artifact.e2e.test.ts` —— **4 passed**（驱动真实 `os serve`，全文件无 `os compile`）：无 artifact 的应用能启动并出现在已启动插件集合里 / 裸 `export default {}` 能启动 / **无 config 无 artifact 时拒绝并说出找过哪里且不曾 ready** / 无法注册的 app 不拖垮平台且打印原因。\n\n**反向验证**：撤掉 `default-host.ts` 的守卫 → 3 条新测试失败、其余 15 条不变；截断那条则是 e2e 先红后绿。\n\n自动化：`pnpm build` 全量通过（含 tsc）；`@objectstack/runtime` 926 passed、`@objectstack/cli` 881 passed；改动文件 ESLint 无告警。base 已合入最新 main（含 #4133 对 #4116 ledger 的修复），本地 `check:wildcard-fallthrough` 在合并后的树上 `✓ 7 yielding / 0 ratcheted / 5 exempt`。\n\n## 未纳入\n\n不新增 `--empty` 之类用户面开关：`OS_BOOT_EMPTY=1` 已存在、`os start` 已覆盖「有意的无应用启动」。裸 `os serve` **不**合流到空启动 —— 理由见第二节。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Ve9HidCGRGtS2UjNPUGHSV"
+}

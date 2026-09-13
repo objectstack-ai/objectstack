@@ -1,0 +1,32 @@
+{
+  "number": 4345,
+  "kind": "issue",
+  "title": "action body 里写 ctx.record 被静默丢弃 —— 已声明字段也一样(#4271 家族)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T07:11:11Z",
+  "updated_at": "2026-07-31T09:07:23Z",
+  "closed_at": "2026-07-31T09:07:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4345",
+  "body": "## 现象\n\nL2 action body 里对 `ctx.record` 的任何赋值都被静默丢弃 —— **已声明字段和未声明字段一样**。没有任何诊断,action 照常返回成功。\n\n```ts\ndefineAction({\n  name: 'close_deal',\n  objectName: 'crm_deal',\n  type: 'script',\n  body: {\n    language: 'js',\n    // stage 是 crm_deal 上确实声明了的字段\n    source: \"ctx.record.stage = 'won'; return { ok: true };\",\n    capabilities: ['api.write'],\n  },\n});\n```\n\n调用后 action 返回 `{ ok: true }`,记录**没有**任何变化。\n\n## 为什么\n\n`packages/runtime/src/sandbox/body-runner.ts`:\n\n1. `buildActionSandboxContext` 交给 body 的是一份**普通快照**,不是 proxy:\n   ```ts\n   record: unwrapProxyToPlain(actionCtx?.record),\n   ```\n   `unwrapProxyToPlain` 是 `Object.fromEntries(Object.entries(v))` —— 一个新对象。\n2. `boundActionHandler` 只 `return result.value`。hook 路径上把 VM 内改动写回宿主的 `applyMutationsToInput`,**action 路径根本没调用**。\n\n所以写进 VM 里那份快照的东西,连出 VM 的机会都没有。\n\n## 为什么值得单独记一笔\n\n这是 #4001 那一族(\"静默 no-op 制造假完成\")的形状:作者以为自己改了记录,runtime 说成功,数据没动。\n\n跟 #4271 / #4305 / #4344 处理的\"未知列静默不落库\"**不是同一个缺陷**:\n\n- 那个是\"写了个不存在的字段,已声明的字段照常落库\";\n- 这个是\"**所有**写都不落库,包括完全正确的字段名\"。\n\n正因如此,#4344(action body 写集 lint)**刻意不检查 `ctx.record`**:在那里只报未声明字段,等于暗示已声明字段会落库 —— 反而放大了这个坑。留言在 `validate-action-body-writes.ts` 头注释里,指回本 issue。\n\n## 目前的处境\n\n没有任何文档声称 `ctx.record` 可写 —— `ScriptContext` 里写的是 \"the record loaded by the dispatcher before the action ran\"(`packages/runtime/src/sandbox/script-runner.ts`),读的语义。`content/docs/ui/actions.mdx` 里的示例也都只读(`ctx.recordId || (ctx.record && ctx.record.id)`)。\n\n所以这**不是** declared ≠ enforced —— 没有东西声明它可写。但类型上是裸的 `record?: unknown`,而同一个 `ctx` 上 `ctx.input` 在 hook 里**确实**是写回去的,作者按类比推断\"record 也能写\"是完全合理的。\n\n## 可选方向(需要决策,不是已定方案)\n\n1. **只读到底 + 说清楚。** `ScriptContext.record` 标注只读语义,`ActionSchema.body` 的文档写明\"要落库走 `ctx.api.object(...)`\",再加一条 advisory lint:action body 里出现 `ctx.record.<field> = …` 就告警(不管字段声没声明),提示改用 `ctx.api`。成本最低,跟当前实现一致。\n2. **让它写回。** 在 `boundActionHandler` 里补 record 的 mutation 写回。这需要先想清楚:写回到哪(dispatcher 预取的那份?)、要不要落库、跟 `requiresRecord: false` 怎么处理、权限走谁的 context。比看上去大,而且 action 的返回值语义(`result.value`)本来就是显式的。\n3. **干脆不给。** 把 `ctx.record` 从 action 沙箱上下文里去掉,只留 `ctx.recordId`,让作者显式 `ctx.api.object(...).findOne(...)`。破坏性最大。\n\n倾向 1 —— action 的写路径本来就是 `ctx.api`,`ctx.record` 是预取的读快照,这个模型是自洽的,缺的只是\"说出来 + 在作者时拦一下\"。\n\n## 参考\n\n- 沙箱两条路径:`packages/runtime/src/sandbox/body-runner.ts`(`buildActionSandboxContext` / `boundActionHandler` / `applyMutationsToInput`)\n- 上下文类型:`packages/runtime/src/sandbox/script-runner.ts`(`ScriptContext.record`)\n- 相关:#4271、#4305、#4344\n"
+}

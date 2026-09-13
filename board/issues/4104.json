@@ -1,0 +1,30 @@
+{
+  "number": 4104,
+  "kind": "issue",
+  "title": "执行 ADR-0115：退役 plugin-dev 的 stub 台面 —— A 档+护栏 / B 档并 #4089 / C 档 / 文档收敛",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T09:55:48Z",
+  "updated_at": "2026-07-30T11:59:43Z",
+  "closed_at": "2026-07-30T11:59:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4104",
+  "body": "按 Prime Directive #10 记录。#4093 的评估已裁决（ADR-0115，PR #4103，已合并）：「stub 填满槽位」整体作废，plugin-dev 收敛为纯装配插件。\n\n**执行形态最终为一个 PR：#4137**（原定两个；#4086 合并后 #4089 已被 #4082 在源头修掉，B 档 core 半边完成，PR 边界失去理由；维护者指示一次完成全部开发）。ADR-0115 的 post-#4086 对账更新记录了这次收敛。\n\n- [x] **前置：#4086 已合**（#4058 step 2）—— 其最终形态**保留**了 `ai`/`automation`/`notification` 的注册（只加门），删除决定明文归到本评估 A 档 → 三者并入 #4137 的删除清单。\n- [x] **#4089 已关**（#4082 在源头给 core 五个 fallback 打了 `__serviceInfo`）。\n- [ ] **#4137（实施，一个 PR）**：A 档（`data`/`auth`/`security.*`/`ui` + 上述三个）+ B 档（`metadata` 手写份与四个包装 —— kernel 的 `CORE_FALLBACK_FACTORIES` 预注入使行为无变化）+ C 档（`file-storage`/`search`/`realtime`/`workflow`）全部删除；`NODE_ENV === 'production'` 护栏（逃逸阀 `OS_ALLOW_DEV_PLUGIN_IN_PRODUCTION=1`）；`service-storage`/`service-realtime` 装配自动接线；FROM→TO breaking changeset；文档收敛（packages.mdx / README / class doc / services-checklist i18n 表）。\n- [x] **终态 grep 已验**（在 #4137 分支上）：`DEV_STUB_FACTORIES` / `DEV_STUB_SELF_INFO` / `SHAPELESS_STUB_SELF_INFO` / `NO_DEV_STUB_SERVICES` 与填充循环消失；`grep -r \"createMemoryMetadata\\|registerInMemory\" packages/plugins/plugin-dev/src` 为空。\n\n验证记录见 #4137 正文（plugin-dev 10/10 · runtime 924/924 · core 415/415 · 端到端空槽/真实服务/预注入三方核实）。\n\n关联：#4093（评估）、PR #4103（ADR-0115）、PR #4137（实施）、#4086、#4089、#4000、#4058、ADR-0076 D12。"
+}

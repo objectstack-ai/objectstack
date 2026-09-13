@@ -1,0 +1,35 @@
+{
+  "number": 4178,
+  "kind": "pull_request",
+  "title": "feat(spec): 未声明键 lint 从 2 个面扩到全部可 lint 元数据集合 (#3786)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T14:06:01Z",
+  "updated_at": "2026-07-30T14:39:31Z",
+  "closed_at": "2026-07-30T14:39:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T14:39:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4178",
+  "body": "承 [#4148](https://github.com/objectstack-ai/objectstack/pull/4148)(已合并)。当时 lint 只盖 `object` / `field` —— 因为 #4120 是在那两个面上抓到真漂移的。合并后量了一下:**那两个是样本,不是总体**。\n\n## 测量结果\n\n25 个可授权元数据类型里,`.strict()` 的只有一小撮(#4001 Tier-A 的 `flow`/`permission`/`position`/`tool`,以及**本 PR 评审期间刚毕业的 `app`**,#4165)。**其余全部**对未声明键的行为与 `field` 一模一样 —— 解析通过、值被丢、零信号。作者在 `page`、`agent`、`dashboard` 上写错键,和 #4120 之前毫无区别,而 lint 看不见。\n\n另外,#4148 里我说「先跑一段收集实证、再定 `.strict()` 收紧的排期」—— 但只盖 2 个面时,那句话缺乏支撑。\n\n## 做法:覆盖面是派生的,不是列出来的\n\n遍历器现在走**全部可 lint 集合**(当前 16 个:object, page, dashboard, report, dataset, action, job, agent, skill, hook, mapping, datasource, view, email_template, doc, book),且三个输入全部派生:\n\n| 问题 | 来源 |\n|:---|:---|\n| 有哪些集合 | `PLURAL_TO_SINGULAR` —— normalizer 用的同一张边界映射,新集合注册进去的那一刻就被覆盖 |\n| 每个集合由哪个 schema 裁决 | `getMetadataTypeSchema` —— 类型→Zod 的唯一注册表 |\n| lint 是否有意义 | **读 schema 自己的未知键姿态**(见下) |\n\n在终结手抄清单的工具里再手写第三份「lint 覆盖哪些类型」的清单,就是 #3786 本身。\n\n**姿态规则保证 lint 永远不会与 parse 唱反调:**\n\n- **strip**(zod 默认)→ lint:parse 会静默丢键,报的就是这份静默\n- **strict** → 跳过:parse 自己会响亮拒绝、带 schema 自己的墓碑处方 —— 再叠一个可能措辞不一致的告警帮不了任何人。**这个桶会随 #4001 tier 毕业而增长**\n- **passthrough** → 跳过:键会存活,没有东西被丢,报「dropped」就是撒谎\n- **union**(`view` 的三形态)→ 成员键并集;仅当有成员 strip 且无成员 passthrough 时可 lint\n\n## 评审期间发生的事,恰好证明了设计\n\nCI 第一轮红了:**#4165 在本 PR in-flight 时把 `app` 收成 `.strict()`**(并行 agent 在推进 tier 程序)。派生自动适应 —— `app` 掉出可 lint 集合,因为它的 parse 已经响亮 —— 而**逐名钉死的覆盖断言把这次收缩变成了红测试而非无声事件**。这正是钉名单存在的意义:覆盖缩水时,由人确认это是「毕业」而不是回归,然后把名字从覆盖名单挪进 strict 名单。已随 merge main 一并处理,changeset 和 docs 的措辞也改为描述规则而非快照。\n\n## 结构:遍历器搬进 `kernel/`\n\n盖全部类型意味着 import 全部 schema,而 lint 原来住的 `/data` 子路径被**前端 bundle 消费**(objectui 从那里拿 `REFERENCE_VALUE_TYPES`)—— 把 schema 宇宙拖进前端 chunk 是真实回归。所以:遍历器 → `kernel/metadata-authoring-lint.ts`(紧挨它读的 schema 注册表);比对器、guidance 表、finding 类型留在 `data/`(前端安全)。**包根导出不变**,`defineStack` / `os validate` / `os build` 零改动直接获得更宽覆盖。\n\n唯一的 import 位置变化:`lintUnknownAuthoringKeys` 不再从 `/data` 子路径导出(root / `/kernel` 可用;changeset 里写了 FROM→TO)。\n\n## 验证\n\n- **三个示例 app 全 clean,零误报**(showcase:28 pages / 29 flows / 11 actions ……)。第一次跑 showcase 炸了 —— 是 stale dist 缺 #4160 刚加的 `FormSection.pane`(AGENTS.md 里写明的那个 check:api-surface 陷阱),重建即消失,与本改动无关\n- **变异测试三方向全红**:砍掉 union 处理(`view` 掉出覆盖,被点名断言抓住)、反转 strict 过滤(flow 开始被重复报告)、悄悄跳过一个集合(pages)—— 恢复后全绿\n- 覆盖断言:**派生结果 ≥15 且逐名点名**(含 union 代表 `view`),并且**每个可 lint 集合都真的对 bogus 键产出 finding** —— 「覆盖」是被证明的,不是被声称的\n- merge main 后 spec **7133 tests / 274 files 全绿**;六个生成物闸门全 PASS;端到端确认 `pages.home.visibleWhenn`、`agents.helper.temprature` 都被报出\n\n## 这一步之后\n\n`listLintableAuthoringCollections` 作为数据导出 —— #4001 的 strict tier 排期现在有了真实证据基座,而且每次毕业都会以「覆盖断言变红 → 挪名单」的形式被显式记录。"
+}

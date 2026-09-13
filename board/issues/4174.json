@@ -1,0 +1,32 @@
+{
+  "number": 4174,
+  "kind": "issue",
+  "title": "service-job: cron jobs registered before kernel:ready never fire — placeholder drops them and the DbJobAdapter upgrade does not migrate",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T13:52:43Z",
+  "updated_at": "2026-07-30T15:00:20Z",
+  "closed_at": "2026-07-30T15:00:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4174",
+  "body": "## Symptom\n\nIn the default `JobServicePlugin` configuration (`adapter: 'auto'`/`'db'`), **cron-scheduled jobs registered by plugins never fire**. Interval jobs run fine. A/B measured on a real app: an interval 15s job ran 23 times while a cron `*/1 * * * *` job ran 0 times, and none of the jobs appeared in `sys_job`.\n\n## Root cause (three stacked)\n\n1. `JobServicePlugin.init` registers a placeholder `IntervalJobAdapter` so callers can `getService('job')` during init — but the placeholder **silently drops `cron` schedules** (no timer, no error; `interval-job-adapter.ts` \"stored but not actively scheduled\").\n2. The upgrade to the croner-backed `DbJobAdapter` happens at `kernel:ready`, which runs **after every business plugin's `start()`** — so all business registrations land on the placeholder.\n3. The upgrade calls `replaceService('job', dbAdapter)` **without migrating** the already-registered jobs: cron entries are lost for good, and the placeholder's interval timers keep running on the orphaned adapter (which is why interval jobs look healthy and nothing lands in `sys_job`).\n\n## Expected\n\nRegistrations made before the upgrade must follow the service: cron entries should run via the DbJobAdapter's cron routing and persist to `sys_job`. An adapter that cannot execute a schedule type must say so instead of silently discarding it.\n\nFound via real-app dogfooding (os-tianshun-ehr platform defect registry PLAT-DEF-016, on 17.0.0-rc.0).\n"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 4265,
+  "kind": "issue",
+  "title": "`check:generated` fails on main: `check:strictness-ledger` (#4232) was never classified in its ledger",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T01:08:45Z",
+  "updated_at": "2026-07-31T02:13:52Z",
+  "closed_at": "2026-07-31T02:13:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4265",
+  "body": "`pnpm --filter @objectstack/spec check:generated` 目前在 `main` 上对所有人失败:\n\n```\n✗ check:generated ledger is out of sync with package.json:\n\n  `check:strictness-ledger` exists in package.json but is in neither GATED nor NO_GENERATOR.\n    Classify it: does it compare a checked-in artifact against a generator, or audit source?\n```\n\n#4232 往 `packages/spec/package.json` 加了 `check:strictness-ledger` 脚本,但没有在 `scripts/check-generated.ts` 的 gate 台账里归类。这正是该脚本的双向对账按设计工作(AGENTS.md:\"A new `check:`/`gen:` script that nobody classified fails the run rather than quietly dropping out of coverage\")—— 但失败现在挡住了 AGENTS.md 要求每个 agent 在推送 spec 改动前跑的那条命令(\"Don't match by hand\"),于是大家只能退回手工对表跑单个 gate,而这恰是 `check:generated` 存在的意义。\n\nCI 不受影响(两个 workflow job 跑的是单个 gate),这也是它能在 main 上留存而不红的原因。\n\n归类看起来很直接:`check-strictness-ledger.mts` 是拿手工维护的台账审计源码、没有生成器,应归 `NO_GENERATOR` —— 但确认归类是 #4232 作者的裁决。\n\n在为 #4249(#4263)跑推送前工件检查时撞上。"
+}

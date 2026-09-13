@@ -1,0 +1,32 @@
+{
+  "number": 4033,
+  "kind": "issue",
+  "title": "Analytics: a timeDimensions-bucketed query drops the bucket label from rows and fields — trend charts get counts with no x-axis",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T05:11:06Z",
+  "updated_at": "2026-07-30T08:16:11Z",
+  "closed_at": "2026-07-30T08:16:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4033",
+  "body": "## 结论\n\n用 `timeDimensions` 做时间分桶的 analytics 查询，**SQL 正确地 SELECT 了分桶列，但响应把它丢了** —— `rows` 里只剩度量值，`fields` 也不声明该维度。用 `dimensions` 传字符串维度则正常返回。趋势图拿到 N 个柱子却没有任何 x 轴标签。\n\ndogfood 真实运行 app（showcase，SQLite）实测发现，非静态分析。\n\n## 复现\n\n```\nPOST /api/v1/analytics/query\n{\"cube\":\"showcase_delivery\",\"measures\":[\"count\"],\n \"timeDimensions\":[{\"dimension\":\"due_date\",\"granularity\":\"month\"}]}\n```\n\n响应：\n\n```json\n{\"success\": true, \"data\": {\n  \"rows\":   [{\"count\": 2}, {\"count\": 8}],\n  \"fields\": [{\"name\": \"count\", \"type\": \"number\"}],\n  \"sql\": \"SELECT date_trunc('month', due_date) AS \\\"due_date\\\", COUNT(*) AS \\\"count\\\" FROM \\\"showcase_task\\\" GROUP BY date_trunc('month', due_date)\"\n}}\n```\n\n`sql` 字段自证：分桶列**被 SELECT 了且带 `AS \\\"due_date\\\"` 别名**，只是没进 `rows`/`fields`。\n\n对照组（同一 cube，改用字符串维度）完全正常：\n\n```\n{\"cube\":\"showcase_delivery\",\"measures\":[\"count\"],\"dimensions\":[\"priority\"]}\n→ rows: [{\"priority\":\"high\",\"count\":3}, {\"priority\":\"low\",\"count\":1},\n         {\"priority\":\"medium\",\"count\":4}, {\"priority\":\"urgent\",\"count\":2}]\n   fields: [{\"name\":\"priority\",\"type\":\"string\"}, {\"name\":\"count\",\"type\":\"number\"}]\n```\n\n所以不是「分组没生效」（分组是对的，2+8=10=全量），是**投影/字段声明只覆盖了 `dimensions`，漏了 `timeDimensions`**。\n\n## 影响\n\n任何用 `timeDimensions` 的趋势图/时间序列 widget：数据点数量和数值都对，但每个点没有时间标签。前端要么渲染出无标签的柱子，要么只能靠数组下标猜时间 —— 后者在有空桶时会错位。\n\n## 定位线索\n\n`packages/services/service-analytics/src/analytics-service.ts` 约 961 行：ad-hoc cube 合成时 `timeDimensions` 确实被登记进了 `dimensions` map（`type: 'time'`），所以 SQL 编译拿得到它。漏的应该在结果投影/`fields` 推导那一段 —— 它似乎只枚举 `query.dimensions`，没有把 `query.timeDimensions` 并进去。（未深挖，留给修复者确认。）\n\n## 与 temporal 线的关系\n\n**不是** #3912/#3994/#4022 这条线引入的：字符串维度走同一条投影路径且正常，说明问题在 `timeDimensions` 的字段枚举，与存储形态无关。但它落在同一域内，且正是「后端数据对、前端看不到」的那类问题，所以单独记录而不是并入已合并的 PR。\n\n## 顺带确认（都正常）\n\n同轮 dogfood 验证的其余项全部通过，一并记录以免误伤：`dateRange` 窗口过滤判别性正确（宽窗口=全量 10 行，2010 空窗口=0 行）、走的是 native-SQL 分支（`date_trunc` + `$1/$2` 绑定，即 #3979 契约钩子那条缝）。"
+}

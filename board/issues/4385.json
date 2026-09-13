@@ -1,0 +1,35 @@
+{
+  "number": 4385,
+  "kind": "pull_request",
+  "title": "fix(lint): 零字段对象是「无法判断」而非「没有这个字段」(#4383)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T10:11:11Z",
+  "updated_at": "2026-07-31T10:24:27Z",
+  "closed_at": "2026-07-31T10:24:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T10:24:25Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4385",
+  "body": "Closes #4383\n\n## 问题\n\n`hook-body-write-unknown-field` 和 `action-body-write-unknown-field` 会把**每一个**写到「不声明 `fields` 的对象」的字段标成未知字段——external 对象、数据源自省 schema(列在运行时解析)都属于这一类。\n\n修复前实测:\n\n```\nhook  : [\"hook-body-write-unknown-field / warning\"]     ← 误报\naction: [\"action-body-write-unknown-field / warning\"]   ← 误报\nflow  : []                                              ← 正确\n```\n\n## 根因\n\n`indexObjectFields` 对这类对象返回的是**空 Set**,不是 `undefined`。而两条规则只问了「这个对象在不在 stack 里」:\n\n```ts\ntargetSets.every((s) => s !== undefined)   // 空 Set 不是 undefined\nif (!known) continue;                       // 空 Set 是 truthy\n```\n\n空 Set 既不是 undefined 也不是 falsy,于是它成了 `has(field)` 的答案——而这个答案恒为 `false`。\n\n那张字段表不是**空的**,是**未知的**。\n\n## 为什么算 bug 而不是保守取舍\n\n同一家族里另外两条规则早就区分了这两者,而且各自写了理由:\n\n- `validate-searchable-fields` skip #2 —— \"external objects and datasource-introspected schemas whose columns are resolved at runtime\";\n- `validate-flow-node-writes`(#4369)—— 因为它 gating,加了这道 guard。\n\n四条里两条有、两条没有。正是 #3583 建套件、#4330 收拢 system-fields 在处理的漂移形状。而且它直接违反那两条规则自己头注释里的原则:「a false positive kills an advisory lint」。\n\n## 修法:修一次,不是修两次\n\n新增共享的 `judgeableFieldsOf(index, objectName)` —— 仅当声明的字段名足以支撑一个「这个名字解析不到任何东西」的判断时才返回它们,两种无法判断的情形(跨包对象、零字段对象)都返回 `undefined`。三条 write-set 规则的查表全部改走它,所以第四条规则不可能再漏掉同一道 guard。\n\n它属于家族内部,**不**从包 barrel 再导出,与 `indexObjectFields`、`IMPLICIT_FIELDS` 一致。\n\n## 一个需要点名的语义决定\n\n**多目标 hook 里只要有一个目标无法判断,现在整体跳过**,而不是拿剩下的凑合判。\n\n理由:`ctx.input` 的 finding 只在字段**在每一个目标上都不存在**时才报,而那个无法判断的目标恰恰是它可能存在的地方。只判断其余目标,等于用覆盖不到\"每一个\"的证据去断言\"每一个都没有\"。这与该规则自己声明的不对称取向一致:宁可漏报,不可误报。\n\n## 验证\n\n- 修复后对同一组 repro:三条规则全部 `[]`;\n- 回归护栏:正常对象上的未知字段仍然照报(`normal: [\"hook-body-write-unknown-field\"]`),每个新增 skip 旁边都配了一条这样的测试,防止 guard 把真 finding 一起吞掉;\n- `@objectstack/lint` 42 文件 / 665 测试全绿(新增 5 条),`typecheck` 干净。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 4247,
+  "kind": "issue",
+  "title": "flow errorHandling.maxRetries 有两个默认值:schema 声明 0、引擎回退 3 —— 重试次数取决于流程有没有过 schema",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T00:43:55Z",
+  "updated_at": "2026-07-31T01:39:19Z",
+  "closed_at": "2026-07-31T01:39:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4247",
+  "body": "发现于 #4219 的文档准确性审计。`content/docs/automation/flows.mdx` 把 `maxRetries` 记作「Maximum retry attempts (0-10)」,审计 agent 想补上默认值时发现 spec 和引擎给的是两个不同的数,属于双事实源,需要 owner 定夺,故按 Prime Directive #10 转 issue 而非在文档里二选一。\n\n## 两处声明\n\n**spec 侧** —— `packages/spec/src/automation/flow.zod.ts:434`:\n\n```ts\nmaxRetries: z.number().int().min(0).max(10).default(0).describe('Number of retry attempts (only for retry strategy)'),\n```\n\n**引擎侧** —— `packages/services/service-automation/src/engine.ts:3501`(`retryExecution()` 内):\n\n```ts\nconst maxRetries = errorHandling.maxRetries ?? 3;\n```\n\n## 实际后果\n\n`??` 只在 `maxRetries` 为 `undefined` 时生效,所以结果取决于这个 flow 是否经由 `FlowSchema` 解析过:\n\n| 路径 | `errorHandling.maxRetries` | 实际重试次数 |\n|:---|:---|---:|\n| 过了 schema 解析(`.default(0)` 填值) | `0` | **0** |\n| 未过 schema,直接构造对象喂给引擎 | `undefined` | **3** |\n\n同一份作者意图(「没写 maxRetries」),两条路径给出 0 次和 3 次两种行为。`retryExecution` 里紧邻的 `retryDelayMs ?? 1000` / `backoffMultiplier ?? 1` 与 schema 的 `.default(1000)` / `.default(1)` 是**一致**的,只有 `maxRetries` 这一条对不上 —— 看起来像 schema 默认值后来从 3 调成 0 时漏改了引擎侧,而不是有意的双轨设计。\n\n## 建议方向(不预设结论)\n\n契约优先(Prime Directive #12)下,spec 是唯一契约,引擎不该自带一套回退值:把 `?? 3` 改成 `?? 0` 与 schema 对齐,或者干脆去掉回退、让引擎只接受已解析的 flow。但「不写就不重试」(0)与「不写默认重试 3 次」(3)哪个是想要的产品行为,需要 owner 拍板 —— 定了之后文档才能写上确定的默认值。\n\n顺带:如果结论是 0,`strategy` 默认为 `'fail'` 意味着重试路径本来就要显式 `strategy: 'retry'` 才会进入,那么 `maxRetries` 默认 0 会让「只写了 `strategy: 'retry'`、没写次数」变成一次都不重试 —— 这个组合是否合理也值得一并确认。"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 4203,
+  "kind": "issue",
+  "title": "check:generated 台账缺 `check:variant-docs` 分类——#4177 落地后本地 wrapper 在 main 上直接红",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T15:11:26Z",
+  "updated_at": "2026-07-30T16:45:14Z",
+  "closed_at": "2026-07-30T16:45:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4203",
+  "body": "#4177（8c2db68，`feat(spec): fail CI when a schema variant is missing from its hand-written doc`）往 `packages/spec/package.json` 加了 `check:variant-docs`，但没有在 `packages/spec/scripts/check-generated.ts` 的台账里把它分类进 `GATED` 或 `NO_GENERATOR`。台账的双向对账（设计如此）现在在 **main** 上直接失败：\n\n```\n✗ check:generated ledger is out of sync with package.json:\n\n  `check:variant-docs` exists in package.json but is in neither GATED nor NO_GENERATOR.\n    Classify it: does it compare a checked-in artifact against a generator, or audit source?\n```\n\nCI 的两个 job 逐个跑单门，所以 CI 仍绿；红的是 AGENTS.md 让每个改过 spec 的人本地必跑的聚合入口 `pnpm --filter @objectstack/spec check:generated`——它现在在对账阶段就退出，**一个门都不跑**。这正是台账存在的意义（「A new `check:`/`gen:` script that nobody classified fails the run rather than quietly dropping out of coverage」），只是这次抓到的是 #4177 自己。\n\n修法一行：按 `check:variant-docs` 的实际性质分类——它审计的是手写文档对 schema variant 的覆盖、没有配套 `gen:`，应该进 `NO_GENERATOR`（与 `check:liveness` 等同类）。若它其实比较 checked-in 产物（`packages/spec/variant-docs.json` 是 #4177 新增的生成物），则进 `GATED` 并登记对应 generator。以 #4177 作者的意图为准。\n\n发现于 #4191 的 storage-form 轴工作中（spec 文档改动后按 AGENTS.md 跑 `check:generated` 时撞上）；与该任务无关，按 Prime Directive #10 单独立项。"
+}

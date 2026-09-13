@@ -1,0 +1,34 @@
+{
+  "number": 3903,
+  "kind": "issue",
+  "title": "[P2] The spec contract stops at authored source — stored metadata is rehydrated unparsed, unconverted, and ungated",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T16:07:49Z",
+  "updated_at": "2026-07-31T05:59:46Z",
+  "closed_at": "2026-07-31T05:59:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3903",
+  "body": "Found while retiring the three deprecated aliases (#3855 / #3883). Filed per Prime Directive #10 rather than widening that PR.\n\n## The shape of it\n\nEvery mechanism this platform has for evolving the metadata contract — the `ActionSchema`/`FieldSchema` transforms, the ADR-0087 D2 conversion layer, the D3 migration chain, the #3883 tombstones, the #3895 authorable-surface ratchet — operates on **authored source**. None of it reaches metadata **stored in `sys_metadata`**, which is a first-class authoring path: `object` is `allowRuntimeCreate: true` (`metadata-plugin.zod.ts:599`) and Studio's build surface writes there.\n\nFour things I verified rather than assumed:\n\n**1. Stored rows are rehydrated without parsing.** `plugin.ts:1422` reads `sys_metadata` rows with `type: 'object'`, pulls their embedded `actions`, and hands each one straight to `runner(action)` at `:1549`. No `ActionSchema.parse`, no normalization, no conversion.\n\n**2. The conversion layer has exactly one consumer outside `spec`.** `applyConversionsToFlow` in `services/service-automation/src/engine.ts:1453` — the `registerFlow` rehydration seam PD #12 already names. Flows only. Nothing in `objectql` or `metadata` converts on the stored-metadata read path.\n\n**3. Where `ObjectSchema.parse` *does* run on the registration path, its result is discarded.** `registry.ts:1099`:\n\n```ts\ntry {\n  this.validate(type, item);   // → ObjectSchema.parse(item) for type === 'object'\n} catch (e: any) {\n  console.error(`[Registry] Validation failed for ${type} ${baseName}: ${e.message}`);\n}\n```\n\nRegistration proceeds regardless. So a schema rejection on this path is a log line, not a gate.\n\n**4. `os migrate meta` rewrites sources, not rows.** It reads the config module and writes a migrated stack; nothing walks `sys_metadata`.\n\n## What follows\n\n**No regression from #3883** — worth stating plainly, because it was my first worry and it turned out to be wrong. The alias was never lowered on the stored path either (that path never parsed), so nothing that worked stopped working. The `no runtime behaviour changes` claim in that changeset holds.\n\n**But the two contracts have silently diverged, and have for a long time.** On the authored path an alias is lowered, then removed, then rejected with a prescription. On the stored path it is whatever an ad-hoc reader happens to do with it. Today that is exactly two hand-rolled accommodations:\n\n| Surface | Stored-path handling |\n|---|---|\n| flow node config | `applyConversionsToFlow` — the real conversion layer, wired in by hand at one seam |\n| `field.conditionalRequired` | a bare `??` in `objectql/src/validation/rule-validator.ts` |\n| everything else | nothing |\n\n**And the `??` cannot be retired on a schedule.** I kept it deliberately in #3883 and wrote that it \"retires when that stored metadata is migrated\". Having now looked: *there is no mechanism that would ever migrate it*. As written it is permanent, and it is precisely the form PD #12 names as debt — a bare `??` rather than a declared, warned, lintable shim. Unlike the six in #3796 it cannot be fixed by warning the author, because after protocol 17 there is no author: the key is unwritable, and the only thing that still carries it is data at rest.\n\n**The #3883 tombstones are audible to authors and inaudible to the runtime.** By design they surface as a `tsc` error and a parse error. On the registration path the parse error is swallowed at `registry.ts:1099`, so the same removal that stops an author cold passes a stored row through with a `console.error`.\n\n## The decision this needs\n\nNot something to pick unilaterally — it is a question about how far the protocol contract is meant to extend:\n\n1. **Convert on the stored read path.** Run `applyConversions` where `sys_metadata` rows are rehydrated, the way service-automation already does for flows. Makes conversions universal and gives the `??` an actual expiry. Cost: a conversion pass on every metadata load, and a decision about what a *retired* conversion means for data at rest (a row written under 14 may outlive its window).\n2. **Give `os migrate meta` a stored mode** (`--stored` / an admin route) that rewrites rows in place. Keeps the load path cheap and makes migration an explicit operator action — but only helps deployments that run it, which is the thing #3855 concluded we cannot rely on.\n3. **Declare stored metadata out of scope** and say so where it can be read: the accommodations stay permanent by policy, PD #12 gets an explicit carve-out for data at rest, and `rule-validator.ts`'s comment stops promising a retirement that will not come.\n\nWhichever way it goes, `registry.ts:1099` swallowing a validation failure deserves its own answer — a rejection that only reaches `console.error` is the \"declared ≠ enforced\" pattern this repo keeps closing everywhere else.\n\nRefs #3713, #3742, #3754, #3796, #3855, #3883, #3895, ADR-0087 D2/D3, AGENTS.md PD #12."
+}

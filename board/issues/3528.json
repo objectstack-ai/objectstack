@@ -1,0 +1,32 @@
+{
+  "number": 3528,
+  "kind": "issue",
+  "title": "Console: screen-flow Submit never calls the resume endpoint — every screen flow is un-completable from the UI",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T02:36:16Z",
+  "updated_at": "2026-07-30T04:48:12Z",
+  "closed_at": "2026-07-30T04:48:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3528",
+  "body": "## Summary\n\nIn the Console, pressing **Submit** on a screen-flow step does nothing. No network request is made, the dialog closes, and the flow stays paused forever. Every screen flow in an app is therefore un-completable from the UI.\n\nThe backend is fine — `POST /api/v1/automation/:flow/runs/:runId/resume` exists and works. The Console simply never calls it.\n\n## Environment\n\n- `@objectstack/*` **16.1.0**\n- Node 22.22.3, dev server (`objectstack dev`), wasm sqlite\n- App: HotCRM (open source, https://github.com/objectstack-ai/hotcrm)\n\n## Steps to reproduce\n\n1. Define any `type: 'screen'` flow with a `screen` node, and a `type: 'flow'` action targeting it.\n2. Open a record, click the action.\n3. The screen renders correctly (fields, labels, options all come through).\n4. Fill it in and press **Submit**.\n\n## Expected\n\nThe Console POSTs the collected variables to the run's resume endpoint, the flow continues past the screen node, and the downstream nodes execute.\n\n## Actual\n\n- The dialog closes.\n- **Zero network requests are issued** (verified in devtools; the only automation call in the whole interaction is the initial `POST /api/v1/automation/:flow/trigger`).\n- No records are created or updated. No console errors, no server errors.\n\n### Concrete case\n\nHotCRM's `lead_conversion` flow — its flagship \"convert a lead into an account/contact/opportunity\" journey:\n\n```\nBefore Submit:  crm_account total = 5,  lead.status = 'new',  lead.is_converted = false\nAfter  Submit:  crm_account total = 5,  lead.status = 'new',  lead.is_converted = false\n```\n\nThe same flow completes correctly when driven over HTTP by hand:\n\n```bash\nRUN=$(curl -s -b cookies.txt -X POST \\\n  \"$HOST/api/v1/automation/schedule_followup/trigger\" \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"recordId\":\"<leadId>\",\"objectName\":\"crm_lead\",\"params\":{\"recordId\":\"<leadId>\"}}' \\\n  | jq -r .data.runId)\n\ncurl -s -b cookies.txt -X POST \\\n  \"$HOST/api/v1/automation/schedule_followup/runs/$RUN/resume\" \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"variables\":{\"subject\":\"Send proposal\",\"dueDate\":\"2026-07-30\",\"activityType\":\"email\",\"priority\":\"high\"}}'\n# → {\"success\":true,\"data\":{\"success\":true,\"output\":{},\"durationMs\":7182}}\n# → the crm_task is created, and the downstream update_record node runs too\n```\n\nSo: engine ✅, resume route ✅, flow definition ✅ — only the Console's Submit handler is missing the call.\n\n## Notes\n\n- `@objectstack/client`'s `automation` surface (`dist/index.mjs`) exposes `getFlow`, `execute`, `listRuns`, `getRun` — but **no `resume`**. That looks like the root cause: the SDK the Console builds on has no way to express the call.\n- Impact is total for screen flows: they are the documented way to build guided, multi-step business actions, and none of them can be finished by a user.\n\n## Related\n\nFiled alongside a second Console-side action defect (modal-typed actions submitting to `meta/object/<target>`), found in the same pass.\n"
+}

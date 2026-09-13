@@ -1,0 +1,34 @@
+{
+  "number": 4302,
+  "kind": "pull_request",
+  "title": "fix(release): rename stale @objectstack/adapter-hono ref in pending changeset",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T04:51:25Z",
+  "updated_at": "2026-07-31T04:58:47Z",
+  "closed_at": "2026-07-31T04:58:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T04:58:44Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4302",
+  "body": "## Why\n\n`changeset version` hard-fails on any changeset that names a package not present in the workspace, and one pending changeset still references the Hono adapter by its old scoped name:\n\n```\n🦋  error Error: Found changeset adapter-hono-auth-wildcard-yields\n    for package @objectstack/adapter-hono which is not in the workspace\n```\n\n`.changeset/adapter-hono-auth-wildcard-yields.md` (the #4117 fix) says `@objectstack/adapter-hono`, while the workspace package at `packages/adapters/hono` is named **`@objectstack/hono`**. Same class of release blocker as #3635 (the scaffolder rename): `pnpm changeset status` and the version step of the v17 train die before the Version Packages PR can be created.\n\n## What\n\n- Renamed the frontmatter entry to `\"@objectstack/hono\": patch` — the bump intent is preserved (the #4117 fix lives in that package).\n- Added an empty changeset (`fix-stale-hono-changeset-ref.md`) to satisfy the Check Changeset gate; it releases nothing, per the #3635 convention.\n\n## Verification\n\n- A sweep of all 559 pending `.changeset/*.md` frontmatters (974 package refs) plus `pre.json` `initialVersions` against the 77 workspace package names found exactly this one stale reference — nothing else.\n- `pnpm changeset status` reproduced the exact error above with the old name, and exits cleanly after the rename.\n- Full end-to-end run of the CI command `pnpm run version` (`changeset version` + protocol/template sync scripts) completes cleanly and computes **`17.0.0-rc.1`** across the fixed group, with the sync scripts reporting lockstep (`PROTOCOL_VERSION 17.0.0`, blank template `^17.0.0`, `engines.protocol '^17'`). Version artifacts were discarded after verification; only the changeset fix ships.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

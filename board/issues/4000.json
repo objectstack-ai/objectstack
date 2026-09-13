@@ -1,0 +1,32 @@
+{
+  "number": 4000,
+  "kind": "issue",
+  "title": "plugin-dev 的 analytics dev stub 仍会填满槽位，dispatcher 不检查 handlerReady —— #3891 退役 shim 后同形状的最后一处残留（dev-only）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T02:24:09Z",
+  "updated_at": "2026-07-30T07:58:23Z",
+  "closed_at": "2026-07-30T07:58:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4000",
+  "body": "按 Prime Directive #10 记录，#3891 / PR #3989 任务中发现的同类残留。\n\n## 现象\n\n#3989 退役了协议装配里的降级 analytics shim：槽位空 → `/analytics/*` 404、discovery 报 `unavailable`。但 **dev 模式**下这个语义会被 plugin-dev 重新破坏：\n\n- `packages/plugins/plugin-dev/src/dev-plugin.ts:269` 的 `createAnalyticsStub` 在 dev 装配里注册 `analytics` 服务，把槽位填上；\n- 它按 D12 诚实自述（`_dev: true` → 归一化为 `{ status: 'stub', handlerReady: false }`），discovery 层没问题；\n- 但 dispatcher 的 `/analytics` 域（`packages/runtime/src/domains/analytics.ts`）只判 `getService('analytics')` 真假，**不读 `handlerReady`** —— stub 存在就会被当真实现调用，返回 stub 数据 + 200。\n\n这正是 #3891 修掉的形状（\"槽位被非真实现占住 → 200 + 假数据\"），只是限定在显式 opt-in 的 dev 模式，严重性低得多——但 D12 的结论第 3 条写的是\"Consumers treat only `handlerReady: true` / `status: 'available'` as a real capability\"，dispatcher 作为 consumer 并没有执行这一条。\n\n## 修法（二选一）\n\n1. **删掉 dev analytics stub**（倾向）。空槽位 404 现在本身就是诚实信号（#3989 之后 discovery 会如实报 `unavailable`），dev 模式下伪造一份 analytics 数据的价值存疑；真要在 dev 里用 analytics，装真引擎即可（`@objectstack/service-analytics` 支持 InMemory 策略）。\n2. **dispatcher 域尊重 `handlerReady: false`**：`domains/analytics.ts` 解析服务后读 `readServiceSelfInfo`，`handlerReady === false` 视同槽位空 → `handled: false` → 404。这条更通用（覆盖其他 dev stub 服务域），但改动面大——各域都要统一决定是否采纳。\n\n若选 2，建议一并盘点其他 dev stub 服务域（storage / search / automation / realtime / notification / ai）是否同样被 dispatcher 当真实现调用。\n\n关联：#3891、#3989、#3878、ADR-0076 D12。"
+}

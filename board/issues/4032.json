@@ -1,0 +1,35 @@
+{
+  "number": 4032,
+  "kind": "pull_request",
+  "title": "fix(runtime,rest): advertise `mcp` only when it is actually serveable",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T05:09:28Z",
+  "updated_at": "2026-07-30T05:17:09Z",
+  "closed_at": "2026-07-30T05:17:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T05:17:08Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4032",
+  "body": "Fixes #4024.\n\n## The bug\n\nBoth discovery producers gated `/mcp` on `isMcpServerEnabled()` alone. The dispatcher documented why that was safe:\n\n> `declared === enforced` here is guaranteed by a LOCKSTEP … `os serve` auto-loads plugin-mcp from the SAME `isMcpServerEnabled()` flag that gates this advertisement, so whenever `/mcp` is advertised the handler is mounted (a key / token yields 401, never a 404/501). Kept flag-based on purpose — **`@objectstack/rest` advertises `mcp` from the identical single source (rest-server.ts), so the two discovery producers stay symmetric.**\n\nThe reasoning is correct about `os serve` and I want to be explicit that the CLI path was never broken: `packages/cli/package.json` declares `@objectstack/mcp`, `serve.ts:724` auto-pushes the capability, and the loader `import()`s it from inside the CLI package — so it resolves regardless of what the app depends on. `os dev` spawns `os serve --dev`, so it inherits that.\n\nBut the lockstep is a property of **the CLI**, not of the dispatcher, and the claimed symmetry with `@objectstack/rest` does not hold. `@objectstack/rest` has **no** `@objectstack/mcp` dependency, mounts **no** `/mcp` route, and performs **no** auto-load. So a host that embeds it without plugin-mcp advertised `/mcp` in `/discovery` and then got 501 from `domains/mcp.ts`.\n\nEvery *other* optional route in that table is service-presence gated (`hasUi`, `hasFiles`, `hasAnalytics`, `hasI18n`, …). `mcp` was the lone exception, and the exception is what broke.\n\nThis is a contract problem, not a tidiness one: `/discovery` is what a third-party client reads to decide what exists, and the objectui Integrations page renders its MCP connect card from this field.\n\n## Reproduced\n\n#4024 was filed as static analysis with the repro **explicitly listed as not done**. It reproduces. Flag on, service absent, old gate — the new pairing assertion fails with the defect stated verbatim:\n\n```\nAssertionError: discovery advertised mcp (true) while POST /mcp returned 501 — declared ≠ enforced\n```\n\n## The fix\n\nFlag **and** serveable, on both producers.\n\n- **Dispatcher** gates on the handler's *own* predicate — `typeof mcpSvc?.handleHttpRequest === 'function'`, byte-identical to what `handleMcpRequest` 501s on. Gating on mere service presence would still over-promise when a wrong-shaped service is registered.\n- **`@objectstack/rest`** probes via the per-request kernel (shape) or the single-env `serviceExistsProvider` (existence) — the same two paths `resolveRegisteredServices` already uses for nav capability gates. I checked that `rest-api-plugin.ts` *always* wires the latter, so the gate is live in real deployments rather than decorative. When it genuinely cannot probe, it keeps the prior flag-only answer: \"unknown\" is not \"absent\", and hiding a working endpoint would be the opposite over-correction (fail-open, ADR-0057 D10).\n\n`os serve` / `os dev` are unaffected — they load the plugin, so the service resolves and `/mcp` is still advertised.\n\n## The seam that should have caught this\n\n`route-parity.integration.test.ts` has carried an `mcp` opt-out in `stubServicesPlugin` since it was written, and **nothing ever passed it** — `bootServe()` was called with no args and with `{ notification: false }`, never `{ mcp: false }`. Its MCP test (*\"MCP is advertised AND reachable\"*) stubs the service in unconditionally, proving the lockstep only under the one condition where it cannot fail.\n\nSo the single capability whose advertisement was not service-presence gated was also the single one whose absence was never tested. The seam is now used.\n\nAlso added rest-side coverage, because the three existing `routes.mcp` tests construct `RestServer` with three args and therefore *all* take the unprobeable path — without new cases the rest half would have shipped with **no coverage at all**. New cases: absent → omitted, present → advertised, unprobeable → flag-only.\n\nEach new assertion was verified to fail against the old gate and pass against the new one. The two \"present\" / \"unprobeable\" cases pass under both gates by design — they are guard rails against over-correction, not regression detectors, and I'm noting that rather than implying they bite.\n\n## Testing\n\n- runtime + rest **906 passed** (65 files)\n- rest alone **494 passed** (34 files)\n- `pnpm lint` clean; 0 type errors\n- Changeset: `@objectstack/runtime` + `@objectstack/rest` patch\n\n## Note on branching\n\nThis landed on a new branch rather than the session's designated `claude/global-actions-unreachable-rw7hpk`, whose PR (#4015) is merged. Separate issue, separate branch — say the word if you'd rather it be re-pointed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_011AvZj6cLX7APd7roh2eK4F\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011AvZj6cLX7APd7roh2eK4F)_"
+}

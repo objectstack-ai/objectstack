@@ -1,0 +1,35 @@
+{
+  "number": 4114,
+  "kind": "pull_request",
+  "title": "fix(runtime,metadata-protocol): 两个 discovery builder 计算 `metadata` 槽位，不再互相矛盾 (#4089)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T10:18:51Z",
+  "updated_at": "2026-07-30T10:46:56Z",
+  "closed_at": "2026-07-30T10:46:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T10:46:53Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4114",
+  "body": "Closes #4089\n\n## 背景：#4089 的两半，第一半已由 #4082 落地\n\nissue 提的\"需要的决定\"选了第 1 条（给五个 core fallback 加 `__serviceInfo`），这部分在 #4058 step 1 / PR #4082 里已经做完了 —— `_fallback: true` 全部换成 `__serviceInfo`，`createMemoryMetadata` / `Cache` / `Queue` / `Job` / `I18n` 现在都自称 `degraded`。issue 标题里的 i18n fallback 也随之被通用循环正确读到。\n\n**剩下的是 issue 最后一段那条核对**：\n\n> dispatcher 的 discovery 已经给 `metadata` 硬编了 `degraded` + \"In-memory registry; DB persistence pending\"，而 metadata-protocol 那侧的 builder 硬编了 `available`。两个 builder 对同一个槽位说法不同，也一并在这条里核对。\n\n核对结果：这不只是\"说法不同\"，而是 D12 的标记机制**在这个槽位上根本没被执行过**。`metadata` 不在读 `__serviceInfo` 的那个循环里，而在循环上方一个 \"kernel-provided (always available)\" 硬编块里，两个 builder 各写一份，且方向相反：\n\n| builder | 硬编值 | 谁被说错 |\n|:---|:---|:---|\n| `runtime/http-dispatcher.ts:997` | 永远 `degraded` + \"DB persistence pending\" | 装了 MetadataPlugin、`sys_metadata` 真落库的栈被说成没有持久化 |\n| `metadata-protocol/protocol.ts:1407` | 永远 `available` | 跑内核内存 fallback 的栈被说成与持久化注册表完全等价（#4089 报的那半） |\n\n所以每个 builder 各对一半的栈说错，方向还相反 —— 同一个 `discovery.services.metadata`，取决于哪个 host 回答，消费者拿到两个不同答案。#4082 刚给 `createMemoryMetadata` 加上的标记在两边都没人读，因为两边都没读任何东西。\n\n## 改动\n\n两个 builder 都改成读注册进槽位的实现自己的 `__serviceInfo`（`readServiceSelfInfo`）：\n\n- 内核内存 fallback、plugin-dev 的 dev registry → `status: 'degraded'` + **该实现自己的 message**（写明缺什么、装什么补上），而不是一句通用文案；\n- MetadataPlugin，或任何不带标记的实现 → `available`，无 message；槽位为空也走这一支（`/meta` 由 protocol 提供，与该服务在不在无关）。\n\n`handlerReady: true` 两边都**无条件**写死，且刻意不从自述里取：它回答的是\"`/api/v1/meta` 挂没挂\"，而这条路由由 protocol 提供 —— 槽位里放一个 degraded 实现不会把它卸掉。（对比 `realtime`：D12 在那里钉 `handlerReady: false`，因为那边**根本没有** HTTP surface。）这也正是 #4089 里\"门只读 `handlerReady`，修这个标记不会改变任何路由行为\"那条判据成立的原因。\n\n`data` 保留硬编，附理由：ObjectQL 是它唯一的 producer，而 plugin-dev 总是把 `ObjectQLPlugin` 作为子插件加载（`dev-plugin.ts:523-525`），所以在任何能构建 discovery 的栈里，plugin-dev 的 `data` stub 都进不了槽位。**不过这条\"真话\"来自加载顺序约定而非构造保证**，按 Prime Directive #10 单独记为 #4130（含两条候选决定），不在本 PR 扩范围。\n\n不涉及任何路由 / 门控 / dispatch 行为：`svcAvailable` 和各 domain 的 predicate 一行未动。\n\n## 测试\n\n- `packages/runtime/src/http-dispatcher.test.ts` — 两个方向各一条（真实 `createMemoryMetadata` ⇒ `degraded` + 它自己的 message；无标记服务 ⇒ `available` 且无残留的 \"persistence pending\"），外加**这次真正要钉住的不变量**：同一个服务实例交给两个 builder，`status` / `handlerReady` / `message` / `route` 必须一致。\n- `packages/objectql/src/protocol-discovery.test.ts` — metadata-protocol 侧同样两个方向。\n- `packages/objectql/src/plugin.integration.test.ts` — 端到端：真实 `ObjectKernel` + `ObjectQLPlugin`（不带 MetadataPlugin），内核注入 fallback → protocol shim 走活的服务注册表 → discovery 必须说 `degraded`。自述标记只有在 builder 真去读的时候才有用，这条钉的就是整条链。\n\n已跑通：`runtime`(65 files) `metadata-protocol`(17) `objectql`(80/1183 tests) `spec`(269) `core`(26) `rest`(35) `plugin-hono-server`(12) `plugin-dev` `metadata` `hono` 全绿；改动文件 eslint 干净，`http-dispatcher.ts` / `protocol.ts` 无新增类型错误。\n\n## 文档 / changeset\n\n- `docs/adr/0076-objectql-core-tiering.md` — D12 inventory 里给 `svcAvailable` 那条加 #4089 update：标记被尊重，但有两条 entry 从来没走过它。\n- `content/docs/kernel/services-checklist.mdx` — discovery 样例里那句旧文案就是这次删掉的硬编，改成 fallback 的真实输出并说明它是\"计算出来的\"。\n- `content/docs/api/index.mdx` — 样例里的 `available` 明确成 MetadataPlugin 的情形（该页把样例框定为 minimal install，而 minimal install 现在报 `degraded`）。\n- `content/docs/api/client-sdk.mdx`、`content/docs/releases/implementation-status.mdx` — docs-drift 报的 19 篇里真正重复了旧硬编的两篇：SDK 样例无条件打印 `metadata: degraded`；status 表还写着\"in-memory only, DB persistence pending\"（`sys_metadata` 持久化早已随 MetadataPlugin 发布）。该行仍保留 ⚠️ —— 剩下的 gap（多实例同步、迁移工具、热重载）与持久化无关。\n- changeset：`discovery-metadata-slot-computed.md`（两个包 patch；discovery 输出对消费者可见）。"
+}

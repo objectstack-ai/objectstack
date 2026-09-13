@@ -1,0 +1,30 @@
+{
+  "number": 4291,
+  "kind": "issue",
+  "title": "ci.yml 的 generated paths filter 是门输入集合的手工副本、无人对账——三次漂移在案，收编剩余 4 个门后应整个删除",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-07-31T03:36:38Z",
+  "updated_at": "2026-07-31T03:59:12Z",
+  "closed_at": "2026-07-31T03:59:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4291",
+  "body": "#4255 把「台账 ↔ package.json」对上了。还剩另一本无人对账的账：**`ci.yml` 的 `generated` paths filter 是每个门输入集合的手工副本**，filter 自己的注释写着 \"keep the two in lockstep\"，但没有任何东西强制这句话。\n\n**三次漂移在案，每次都是撞上了才发现、事后补一段注释而不是加一个门：**\n\n1. **#2584** 把生成页面搬了位置，filter 继续盯着旧路径——生成块的手改「从那时起一直没人查」（filter 注释原话）。\n2. **#3855** filter 列了具体 spec 路径但没有 schema 目录，`check:authorable-surface` 恰好在会删 authorable key 的 PR 上休眠。\n3. **`packages/spec/json-schema.manifest.json` 从来就没被 filter 覆盖过**——它是 #2978 的棘轮台账，而 `json-schema/` 是 gitignore 的构建产物，所以这个 manifest 是「上次 emit 过哪些 schema」的**唯一持久记录**。`build-schemas.ts` 的报错文案要求退役 schema 时「在同一个 PR 里从 manifest 删掉 key」——但只改 manifest 的 PR 不命中 filter 任何一条路径，**跳过它自己的验证者**。\n\n**结构性观察**：10 个门里已经有 6 个逃出 filter（`check:docs`、`check:skill-refs`、`check:react-blocks`、`check:api-surface`、`check:exported-any`、`check:skill-examples`），每次逃跑都留了一段注释说明 filter 辜负了它。这说明正确的终局不是「再加一本账去对第一本账」，而是**收编剩余 4 个门、把 filter 整个删掉**——消除重复知识优于给重复知识加对账。\n\n**成本已实测，不构成障碍**：`check:docs` 步骤在 CI 里耗时 **4 秒**，而它 = `gen:schema`（跑完整的 `build-schemas.ts`）+ `build-docs.ts --check`。也就是说那个「可能很贵」的 `check:authorable-surface` 跑的是同一个脚本、同一个 job 已经在每个 PR 上付过这笔钱了。同 job 其余门：`check:skill-refs` 0s、`check:react-blocks` 1s。整个 typecheck job 5 分 03 秒，其中 3 分 15 秒是 workspace build。搬 4 个门约加 5–8 秒。\n\n**删除安全性**：`needs.filter.outputs.generated` 只被该 job 自己的 `if:` 引用；且 lint.yml 的注释明写该 job \"It is not required, either\"，删掉不会卡住分支保护。\n\n**修法**：把 `check:skill-docs` / `check:spec-changes` / `check:upgrade-guide` / `check:authorable-surface` 搬进 lint.yml 的无 filter required job，删掉 `check-generated` job 与 `generated` filter 及其 output，并更新所有指向它的陈述（lint.yml 注释、`check-generated.ts` 头注释、AGENTS.md）。\n\nRefs #4255, #2584, #3855, #2978, #3883, #3733"
+}

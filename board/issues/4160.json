@@ -1,0 +1,35 @@
+{
+  "number": 4160,
+  "kind": "pull_request",
+  "title": "feat(spec): `FormSection.pane` — explicit split-pane placement (objectui#2153 follow-up)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T13:06:18Z",
+  "updated_at": "2026-07-30T13:21:10Z",
+  "closed_at": "2026-07-30T13:21:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T13:21:08Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4160",
+  "body": "## Why\n\nA `type: 'split'` form view has no way to say which pane a section renders in — the ObjectUI renderer hardcodes *first section left, everything else right*. Evaluated against two criteria (platform long-term soundness, AI-authoring error avoidance):\n\n- The positional rule is **invisible in the metadata**: nothing in the JSON records the assignment, so an agent asked to add or reorder sections silently moves them across the divider. Implicit positional semantics are the class of rule AI authors reliably get wrong.\n- An author cannot place two sections in the left pane at all.\n- The `'split'` enum comment claimed *\"Master-Detail split\"* — but master-detail already has two homes (`subforms` on the form, related lists on record pages). A third would be redundant vocabulary (another AI-error source: three dialects for one intent). Split's only non-redundant meaning is the side-by-side section layout, so the comment now says that.\n\n## What\n\n`FormSectionSchema.pane: 'primary' | 'secondary'` (optional):\n\n- **Explicit, per-section** — survives reordering; an agent editing the view sees and preserves placement.\n- **Omitted → the legacy rule** (first section `primary`, rest `secondary`) — keyless metadata keeps its exact layout, zero migration.\n- **Split-only, fail-loud**: a `FormViewSchema` refinement rejects `pane` on any other form type at parse — covering the legacy `groups` alias and the defaulted `type: 'simple'`. \"Accepted but ignored\" is the one failure mode this key must never have. Probed zod 4.4.3 before relying on it: `.extend()` **keeps** refinements, so the flattened runtime-overlay variant in `ViewMetadataSchema` (view.zod.ts:1491) enforces it too.\n- Strict two-value enum — `pane: 'left'` is a parse error, not free text; orientation-neutral names survive `splitDirection: 'vertical'` and map 1:1 onto ObjectUI's already-shipped `fieldPanes` keys (`primary`/`secondary`, objectui#3012).\n\nAlso: the showcase task `split` view declared a **single** section — which renders as a plain, unsplit form, i.e. the demo never demonstrated the feature — and now has two sections with explicit panes. `authorable-surface.json` regenerated (exactly one new entry: `ui/FormSection:pane`).\n\n## Verification\n\n- 5 new cases in `view.test.ts`: accepts panes on split (omitted stays `undefined`), rejects typo values, rejects `pane` on non-split with a pointed message at `sections.1.pane`, same for the `groups` alias, and defaulted-`type` counts as non-split.\n- `@objectstack/spec`: 273 files / **7124 tests** green; build green (incl. the Studio JSON-schema derivation path).\n- `@objectstack/example-showcase`: 60/60 green after building its dep graph — the updated config round-trips the full Zod parse (`gap-fill` imports `objectstack.config.js`).\n\n## Follow-up (ObjectUI)\n\n`SplitForm` maps sections → `FormSchema.fieldPanes` by the hardcoded slice today; the follow-up PR reads `section.pane` with the same positional default. No compile-time dependency on this spec version (the key arrives as plain JSON), but this PR merges first per cross-repo convention.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

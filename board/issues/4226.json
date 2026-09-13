@@ -1,0 +1,34 @@
+{
+  "number": 4226,
+  "kind": "issue",
+  "title": "REST 列表：`sort` / `select` / `expand` 指向不存在的字段时被静默丢弃（filter 轴已收口，这三条轴还没有）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T16:30:09Z",
+  "updated_at": "2026-07-31T00:40:15Z",
+  "closed_at": "2026-07-31T00:40:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4226",
+  "body": "## TL;DR\n\n#4134 / #4164 / #4181 / #4121 把 **filter 轴**收口成了「要么生效,要么抛错」。同一台机器在**另外三条轴**上还在漏气:`sort`、`select`、`expand` 指向不存在的字段/关系时,一律静默不生效并返回 `200`。\n\n## 实测(真实 ObjectQL 引擎 + 真 registry;5 行,插入顺序 `C A E B D`)\n\n```\n── SORT ──────────────────────────────────────────────\nsort=title              -> 200  ABCDE            ✅ 真实字段,排序生效\nsort=-title             -> 200  EDCBA            ✅\nsort=no_such_field      -> 200  CAEBD            ❌ 与「完全不排序」逐字节相同\nsort={oops (乱码)       -> 200  CAEBD            ❌\norderBy:[{field:不存在}] -> 200  CAEBD            ❌\n\n── SELECT ────────────────────────────────────────────\nselect=title            -> 200  keys=id,title    ✅\nselect=no_such_field    -> 200  keys=<全部字段>   ❌ 要一列,给了全部\nselect=title,no_such    -> 200  keys=id,title    ⚠️ 未知的那半被静默丢弃\n\n── EXPAND ────────────────────────────────────────────\nexpand=project_id       -> 200  展开为 {id,name}  ✅\nexpand=no_such_rel      -> 200  无该键,无报错     ❌\n```\n\n对照:filter 轴上任何一种坏输入现在都是 `400`(`INVALID_FILTER` / `INVALID_FIELD` / `INVALID_REQUEST`)。\n\n## 三条轴的危害不一样,不该一刀切\n\n**`sort` —— 最该修。** 结果集不变,所以不像 filter 那样致命;但 `sort` + `top` 正是调用方取「最新 N 条」的写法,排序被丢弃后拿到的是**任意 N 条**,且完全无法察觉。这与 #4181 里 export 路由 `orderby` 的那半是同一个 bug(那半已修:`400 INVALID_REQUEST`),list 路由这半没修 —— 又是一次「两条路由对同一份输入给出相反答案」。\n\n**`select` —— 需要先定性。** 当前行为是 `engine.find` 的两段逻辑叠加:先丢弃未知列(注释里写明是刻意的 OData / `SELECT *` 容忍),再用「空投影就退回 `*`」防止 SQL 报错。结果是 `?select=<拼错>` **要一列拿到全部** —— 一个用途是「返回更少」的参数,失败方向却是「返回更多」。是否该拒绝有两种读法:\n- 按 #3948 原则:一个没生效的投影不该看起来像生效了 → 拒绝未知列;\n- 按现有注释:与 Salesforce/OData 的宽容语义对齐 → 保持。\n\n我倾向至少把**全未知投影退回 `*`** 这一支改掉(那是纯粹的过度返回,与 FLS/数据最小化方向相反),部分未知那支可以另议。\n\n**`expand` —— 最轻。** 不改结果集也不改字段,只是关系没展开;但同样静默。\n\n## 已经钉住了\n\n`packages/objectql/src/query-expression-conformance.test.ts`(随本轮工作提交)把这三条轴以 **`KNOWN GAP` pin 测试**的形式写进了 CI:每条轴都有一个「真实字段确实生效」的对照组(否则 pin 会 vacuously 通过)和一个钉住当前行为的断言。**修好其中任何一条,对应的 pin 会失败** —— 那正是提示,把该用例从 `KNOWN GAP` 挪到上面 `bad — rejected` 的形状里,而不是放宽断言。\n\n该文件同时用突变测试验证过有效性:把 #4134 / #4164 / #4181 / #4121 各自还原一次,分别挂 2 / 1 / 5 / 3 条。\n\n## 关联\n\n#4134、#4164、#4181、#4121(filter 轴四案,均已合并)、#3948(原则出处:*An unapplied filter must not look like a satisfied one* —— 这里是它在 sort/projection/expand 上的推论)。\n"
+}

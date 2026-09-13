@@ -1,0 +1,35 @@
+{
+  "number": 4237,
+  "kind": "pull_request",
+  "title": "refactor(service-settings)!: settings error bodies use the declared `details` slot (#4224)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T16:59:39Z",
+  "updated_at": "2026-07-31T00:40:22Z",
+  "closed_at": "2026-07-31T00:40:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T00:40:19Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4237",
+  "body": "Closes #4224.\n\n## The finding, confirmed\n\nFour `/api/settings/*` error branches spread ad-hoc context as **siblings of `code` and `message`** inside `error`. `ApiErrorSchema` declares `code`, `message`, `category?`, `httpStatus?`, `details?`, `requestId?` — and none of `namespace`, `key`, `reason`, `fields`.\n\nThe bodies passed every gate anyway, for two independent reasons that happened to line up: `ApiErrorSchema` is a plain `z.object`, so unknown keys are **stripped** rather than rejected, and `envelopeViolations` inspects only the body's *top* level. Conformant by stripping, not by declaration. The same module already used `error.details` correctly one branch over (`SETTINGS_ACTION_FAILED`), so this was one file speaking two dialects rather than a missing capability — as the issue says.\n\nA survey of the sibling route modules confirms settings was the outlier: `i18n`, `storage` and `share-link` take no extra parameter at all, and `package-routes.ts` already names its one `details`.\n\n## FROM → TO\n\nValues unchanged in every case; only the position moves.\n\n| Code | HTTP | FROM | TO |\n|---|---|---|---|\n| `SETTINGS_FORBIDDEN` | 403 | `error.namespace` | `error.details.namespace` |\n| `UNKNOWN_KEY` | 400 | `error.namespace`, `error.key` | `error.details.{namespace,key}` |\n| `SETTINGS_LOCKED` | 409 | `error.namespace`, `error.key`, `error.reason` | `error.details.{namespace,key,reason}` |\n| `SETTINGS_VALIDATION` | 400 | `error.namespace`, `error.fields` | `error.details.{namespace,fields}` |\n\n## The decision the issue asked for\n\n**`error.details` is the home, and `SETTINGS_VALIDATION.fields` joins the field-level vocabulary properly rather than dodging it.**\n\nADR-0114 (#3977) landed the vocabulary D6 deferred: `fields` now means `FieldError[]` — `{ field, code, message, label?, constraint? }` with `code` from a closed 27-member catalog. That makes the middle option the worst one: putting the existing `Record<key, message>` under the name `fields` inside `details` would leave **one spelling meaning two shapes**, which is the exact drift these ADRs exist to prevent. So the map becomes the declared array:\n\n- `required` — an empty required specifier\n- `invalid_format` — a value that misses its declared `pattern`, which travels as `constraint.pattern`\n\nIt stays `details.fields` rather than a top-level `error.fields` because `fields` is declared on `EnhancedApiErrorSchema`, **not** on the base `ApiErrorSchema` these routes emit. `validation-failure.ts` puts the dispatcher's array in the same place for the same reason, and objectui's `extractFieldErrors` already reads `details.fields` — so settings validation failures become renderable per-field in the console with no per-surface special case.\n\nThe constraint kind is knowable at the throw site and nowhere after it (the route only ever saw prose), so the exported `SettingsValidationError.fields` changes with the wire rather than being reconstructed from message text.\n\n## What keeps it fixed\n\n`sendError`'s last parameter is tightened from `extra?: Record<string, unknown>` to `Pick<ApiError, 'category' | 'httpStatus' | 'details' | 'requestId'>` — the loose edge the issue names — and `code` from `string` to the closed ADR-0112 `ErrorCode` union (all seven codes this module emits are already in the standard catalog or the ledger). An undeclared sibling is now a **compile error at the call site** instead of a key that quietly evaporates at the schema boundary.\n\nThe conformance suite gains the assertion neither existing gate could make: every key of `body.error` must be one `ApiErrorSchema.shape` declares. It is derived from the schema rather than restated, so a field added to the contract is allowed the moment it is declared and one removed stops being allowed — a hand-written list's failure mode is that it silently keeps blessing a retired key.\n\n### On not generalising this into `envelopeViolations`\n\nTempting, since that is where the check structurally belongs — but wrong here. `DispatcherErrorResponseSchema` is a **declared superset** of `ApiErrorSchema` that legitimately carries `route` / `hint` / `service` as siblings, and `buildApiError` has an `extra` parameter for exactly that. A blanket \"no undeclared key inside `error`\" rule in the shared checker would fail those conformant bodies. The generalisation needs a per-module notion of *which* error schema applies; that is a larger change than this issue, so the assertion stays local and honest — settings emits the base `ApiError` and nothing more.\n\n## Breaking, and the cross-repo half\n\n**The issue's \"write-only today\" note is right for three of the four keys but not the fourth.** Its grep covered `packages/` and `examples/` in this repo; `error.key` has a live reader one repo over — objectui's `SettingsView` save handler renders the locked key in a toast.\n\nSo this ships tolerant-read-first (the objectui#2869 pattern ADR-0112 records):\n\n1. **objectstack-ai/objectui#3079** — console reads `error.details?.key ?? error.key`\n2. **this PR** — server moves the keys\n\nLanding this one first shows `Locked by environment: undefined` to anyone on a console built before it. The changeset carries the full FROM → TO mapping and the one-line consumer fix, per AGENTS.md.\n\n## Verification\n\n- `pnpm --filter @objectstack/service-settings test` — 13 files, 194 tests, green\n- `pnpm --filter @objectstack/spec test` — 276 files, 7174 tests, green\n- `pnpm check:route-envelope` — 7 conformant, 0 ratcheted\n- `pnpm check:error-code-casing` — clean across 2492 files\n- **Both new pins verified to fail against the pre-#4224 shape** — reintroducing the sibling spread on one branch turns the suite red with `error carries keys ApiErrorSchema does not declare: ['namespace','key']`, so these are pins rather than assertions that cannot fail\n- No `packages/spec` exports added or removed, so `gen:api-surface` is untouched\n- `@objectstack/verify` has one pre-existing failure in this environment (`Failed to resolve entry for package \"@objectstack/runtime\"`, an unbuilt sibling) — reproduced with these changes stashed, unrelated\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Tv2NYMBTrzVVRWiWWuyec5)_"
+}

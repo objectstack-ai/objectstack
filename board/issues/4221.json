@@ -1,0 +1,34 @@
+{
+  "number": 4221,
+  "kind": "pull_request",
+  "title": "fix(spec): type-check defineApp's navigation again — #4171 fixed only half the annotation (#3786)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T16:25:43Z",
+  "updated_at": "2026-07-30T16:49:52Z",
+  "closed_at": "2026-07-30T16:49:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T16:49:50Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4221",
+  "body": "## The bug\n\n`NavigationItemSchema` is recursive, so it cannot infer its own type and carries a hand-written annotation instead. #4171 fixed that annotation's **Output** half — it had been `z.ZodType<any>`, which made the exported `NavigationItem` `any` for every consumer.\n\n`z.ZodType` takes two parameters, `<Output, Input>`, and **`Input` defaults to `unknown`**. Naming only the first left the input half at that default, so `z.input<typeof AppSchema>` resolved `navigation` to `unknown` — and `unknown` accepts everything. `defineApp(config: z.input<typeof AppSchema>)` is the documented authoring entry point, and this compiled clean:\n\n```ts\ndefineApp({\n  name: 'my_app',\n  label: 'My App',\n  navigation: [{ totally: 'made up' }, 42, 'nonsense'],\n});\n```\n\nEvery authoring path through the app schema — `AppInput`, `NavigationAreaSchema`, `NavigationContributionSchema` — was unchecked the same way.\n\nParsing was never affected: the schema rejects all of the above at runtime. Only the compile-time contract lied, which is why nothing in the 7165-test suite noticed. #4171's fix was verified through `z.infer`; nobody re-measured `z.input`, and half a fix looks identical to a whole one.\n\nThis is the #3786 shape at the type level: two descriptions of one key set, where the second one silently constrains nothing.\n\n## The fix\n\nA new exported `NavigationItemInput` describes the authoring side, and the annotation now names both parameters.\n\nThe two unions genuinely differ and one cannot serve both: `GroupNavItemSchema.expanded` and `UrlNavItemSchema.target` carry `.default()`, so those keys are **required** in the parsed output and **omissible** when authoring. Reusing `NavigationItem` as the input type would force authors to write values the schema exists to supply.\n\n## The mechanism, not a comment\n\n`packages/spec/src/ui/app.nav-type-assertions.ts` is a non-test `src` module — the package's `tsc --noEmit` CI gate excludes test files, so probes must live outside them to be checked at all. It is referenced by no tsup entry and re-exported by no barrel, so it adds nothing to any build.\n\nIt pins both unions and, critically, the **wiring** between them and the schema. My first cut only pinned the unions, and mutation testing caught that: a correct `NavigationItemInput` that no schema references still leaves every authoring path at `unknown` — precisely the state being fixed. The load-bearing assertions therefore go through `AppInput`.\n\nEvery probe was mutation-tested:\n\n| Mutation | Result |\n| --- | --- |\n| Drop the `Input` parameter (`z.ZodType<NavigationItem>`) | 3 wiring assertions red |\n| `expanded: .default(false)` → `.optional()` | output-side assertion red |\n| Leak `children` onto a flat (`page`) input branch | input-side assertion red (added after this mutation initially survived) |\n\n## Compatibility\n\nNothing changes at runtime, and nothing changes for code reading a parsed app. Code that *authors* navigation is now type-checked where it was not, so genuinely malformed navigation that used to compile will surface as a compile error — pre-existing bugs becoming visible, not new restrictions.\n\nTwo notes on what the checked type says:\n\n- Authoring types (`AppInput`, `NavigationItemInput`) let you omit `expanded` and `target`; parsed types (`App`, `NavigationItem`) still guarantee both are present.\n- Annotating a hand-written literal with the parsed type (`const APP: App = {…}`) still requires spelling out every defaulted key. That was already true — this PR just makes the authoring alternative actually check its contents.\n\n## Verification\n\n- `tsc --noEmit` (@objectstack/spec) — clean\n- spec suite — 276 files, 7165 tests passing\n- `check:api-surface` — 1 added (`NavigationItemInput`), 0 breaking; snapshot regenerated\n- `check:docs` — 250 generated files in sync\n- `@objectstack/downstream-contract` typecheck — clean\n- `examples/*` typecheck (4 packages) — clean\n\n## Note on scope\n\nThis was found while investigating why cloud's admin app stopped compiling after #4194. That specific failure turned out to be a *different* thing — cloud annotates a hand-authored literal with the output type `App` and omits `expanded` on five groups, which is cloud's fix to make and matches what `setup.app.ts` / `studio.app.ts` already do in-repo. I initially misdiagnosed it as a missing `group` branch in the `NavigationItem` recursion knot and wrote a fix for that; measurement showed the `GroupNavItem` alias already carried the knot, so that edit was a semantic no-op and was reverted rather than shipped with a comment claiming it fixed something. The unchecked input type is the real defect the investigation surfaced.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UXGj3Z5TmwSV6RK2oGc3cb)_"
+}

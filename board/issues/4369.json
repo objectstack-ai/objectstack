@@ -1,0 +1,35 @@
+{
+  "number": 4369,
+  "kind": "pull_request",
+  "title": "feat(lint): flow update_record 写不存在字段从盲区变为 gating error (#4271)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T09:17:13Z",
+  "updated_at": "2026-07-31T09:30:34Z",
+  "closed_at": "2026-07-31T09:30:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T09:30:32Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4369",
+  "body": "## 背景\n\n#4305(hook body)和 #4344(action body)开出来的 write-set 规则家族有**第三个面**,而且正是文档最久推荐为\"另外两个的安全替代\"的那个。\n\nflow `update_record` 节点的 `config.fields` 里写一个目标对象根本没声明的字段,**没有任何东西会报**:\n\n- `validate-readonly-flow-writes.ts` 走的就是这张 map,却显式跳过未知 key ——\n  `if (!meta) continue; // unknown field — a form/field-layout lint concern, not this rule's`\n  ——转介给一条并不检查写侧的规则;\n- `validate-flow-template-paths.ts` 检查的是插进节点 config 的 `{record.<path>}` **读** token,从来不看写侧的 key。\n\n#4355 刚刚把 `hook-bodies.mdx` 改写为如实记录这个洞:\n\n> **Prefer a flow `update_record` node when the write set is fixed — but not for *this* check.** … writing a field the object never declares is currently reported by nothing at all. On that one axis an L2 body is now the better-checked surface.\n\n本 PR 就是让这句话重新变成假的那一半。\n\n## 新规则 `flow-node-write-unknown-field`\n\n接入 `REFERENCE_INTEGRITY_RULES`,所以 `os validate` / `os lint` / `os compile` 一次全覆盖 —— 比隔壁手工接线的 readonly 规则多一条路径。\n\n**它 gate,两个兄弟规则只 advise —— 这是刻意的,不是不一致。**\n\n1. **确定性对齐的是 readonly 规则,不是 body 规则。** hook/action 规则 advisory 是因为它们**解析 JavaScript**,findings 的质量取决于 extractor,一个误报就废掉一条 advisory lint。这里没有解析:`config.fields` 是字面 map,`objectName` 是字面串——和隔壁同一个 config key、已经 gating 的 `flow-update-readonly-field` 是同一确定性。同一张 map 里,对\"引擎会剥掉的写\"报 error、对\"根本不存在的列\"只报 warning,不自洽。\n\n2. **运行时后果不是\"跳过未知名字、其余照常\"** —— 那是 `page-field-unknown` / `form-field-unknown` 保持 advisory 的判据。两半都是实测,不是推断:\n   - 过引擎时未声明的 key 原样到达 `driver.update`(flow executor 直连 data engine;UPDATE 路径只剥 readonly/readonlyWhen;SQL driver 的 `formatInput` / `applyWriteColumnMap` 用 `m[k] ?? k` 直接放行);\n   - SQLite/knex 上变成 `update \"deal\" set \"name\" = 'n2', \"stagee\" = 'won' … → no such column: stagee`。语句**整条被拒**:同一 payload 里拼对的 `name` 也没落库(实测该行仍是旧值),报错点离作者的笔误很远;\n   - schemaless 数据源上没人拒,于是脏 key 落进一个对象从未声明的列,任何 schema 驱动的读面都不会返回它。\n\n   这正是 `validate-searchable-fields` 对 stale entry、`validate-flow-template-paths` 对 filter 位置 token 的判据:**miss 会打断或污染操作就 gate,只是让输出变窄就 advise**。\n\n## 三个面共用一套定义\n\n`indexObjectFields` 和 `IMPLICIT_FIELDS` 从 hook 规则 import 而非复制,所以三条规则对\"什么字段不写在 `fields` 里也可写\"给出同一个答案 —— 避免 #4330 在隔壁包收拾掉的那种漂移。\n\n## 静默 bail 的边界\n\n每一条都是为了让 gate 只在确定的事情上开火:模板化 `objectName`、非字面 `fields`、跨包对象、**声明零字段的对象**(external / 数据源自省 schema,与 `validate-searchable-fields` 同一跳过)、点号 key。\n\n`runAs` 刻意不看 —— 与跳过 `runAs:'system'` 的 readonly 规则相反:提权能绕过 readonly strip,但没有任何运行身份能变出一列。\n\n## 覆盖范围写成数据\n\n`FLOW_WRITE_NODE_TYPES`(当前仅 `update_record`)+ `FLOW_WRITE_NODE_TYPES_DEFERRED`(`create_record`,带理由),对着 spec 里 executor 推导出的 config schema **行为式**做 partition 测试 —— 将来哪个节点类型长出 `fields` 写 map,会直接测试失败逼人分类,而不是静默留在没覆盖的一半。\n\n## 验证\n\n- `@objectstack/lint` 42 文件 / 654 测试全绿;`@objectstack/cli` 64 文件 / 628 测试全绿;`pnpm --filter @objectstack/lint typecheck`、`check:type-check-coverage`、spec `check:api-surface`、`check:docs`、`check:doc-authoring` 全部干净。\n- **三个 example 全部通过新 gating**:app-crm、app-todo、app-showcase。\n- **端到端证明规则真的接上了**:往 app-todo 植入 `priority` → `priorityy`,`os validate` exit code 0 → 1,报出 did-you-mean、rule id 和 `flows[1].nodes[3].config.fields.priorityy`;还原后回到 0。\n\n## 文档\n\n`hook-bodies.mdx` 与 `hooks.mdx` 里 #4355 刚写下的那两句\"这一轴上 hook body 反而是更好检查的面\",改成轴已经翻回来 —— 并说明 flow 侧比 body 侧**高一级**而不只是持平。\n\n`@objectstack/spec`:`ScriptBodySchema` 的 \"prefer a flow `update_record` node, whose structural `fields` config is error-checked\" 注释现在点名了让这句成立的规则。纯注释,无 schema / 生成物变更(`check:api-surface` 已确认)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

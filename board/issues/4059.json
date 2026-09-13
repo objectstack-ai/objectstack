@@ -1,0 +1,35 @@
+{
+  "number": 4059,
+  "kind": "pull_request",
+  "title": "feat(automation,formula): warn on undeclared flow-node config keys (#4045)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T07:26:15Z",
+  "updated_at": "2026-07-30T07:39:43Z",
+  "closed_at": "2026-07-30T07:39:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T07:39:41Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4059",
+  "body": "Step 3a of #4045's staged plan, after #4050 (step 1). This is the half that changes the feedback an **author** gets; the rest of #4045 is internal de-duplication.\n\n## The vacuum\n\n`FlowNodeSchema.config` is `z.record(z.unknown())`, so a misspelled or invented config key is accepted in total silence. Measured on merged `main` before this change:\n\n```ts\n{ name: 'a', required: true, visibleIf: 'b == true' },   // typo for visibleWhen\nhideWhen: 'nope', submitLabel: 'Go', totallyMadeUp: 42,  // invented\n```\n\n`registerFlow` does not complain. The key is never read, so there is no runtime error to trace back — the only symptom is a feature that quietly does not happen. That is the exact shape that made #3528 take three passes and two wrong diagnoses.\n\n## What this adds\n\n`registerFlow` walks each node's `config` against its descriptor's `configSchema`:\n\n```\n[flow 'lead_conversion'] node 'screen_1' (screen): unknown config key `visibleIf`\n  at config.fields[0].visibleIf — It is not declared by this node type's\n  configSchema, so nothing reads it. Declared here: name, label, type, required,\n  visibleWhen.\n```\n\n## Two things I got wrong first, both caught by the tests\n\n**1. A top-level-only check would have missed the motivating case.** My first version compared only `Object.keys(config)`. `visibleWhen` is a property of `screen`'s `fields[].items`, **not** of config's top level — so `visibleIf` got no report at all. The walk now descends where the schema declares structure (`properties`, and `items` of an array) and **stops at free-form keyValue maps**, whose keys are author data (`filter: { status: 'stale' }`). Both behaviours are pinned by tests.\n\n**2. The did-you-mean heuristic misses this very typo.** `nearestName('visibleIf', …)` returns nothing: edit distance is 4 against a threshold of 3. Loosening the shared helper is the wrong fix — it also backs the unknown-field and unknown-role diagnostics, where a looser threshold means confidently wrong suggestions across hundreds of candidates. A config object declares at most a dozen keys, so the **declared set is now printed always** and the suggestion is a bonus for the cases it does catch (`titl` → `title`). Both branches are tested.\n\n## Warn, never reject — and why that is not timidity\n\nAn undeclared key is one of three things, and this seam cannot yet tell them apart:\n\n| | Example | Hard-failing would |\n|---|---|---|\n| Author typo | `visibleIf` | ✅ be right |\n| Executor reads it, schema never declared it | `notify.source` (until #4050) | ❌ break working apps |\n| Dead config | `mode: 'records'` (found below) | ❌ break stored flows for nothing |\n\nOnly **4 of the 13** schema-carrying builtins have been audited for the middle population. Hard-failing now would gamble on the other nine, and the first customer to upgrade would find the answer as `registerFlow` throwing. The warning is what *measures* that distribution; tightening is a later per-key decision, and belongs with a tombstone that carries the prescription (the `UNKNOWN_KEY_GUIDANCE` pattern in `object.zod.ts`).\n\nSoft-fail matches `validateNodeTypes` immediately above it — same function, same `logger.warn` channel, same reasoning. **The published `configSchema` is unchanged**, so no consumer — designer form generation included — sees a different shape. That is what makes this step trivially revertible.\n\n## Measured against our own apps before shipping\n\nA diagnostic that floods is worse than none, so I ran it over every flow in `app-crm` and `app-showcase`:\n\n```\nflows registered: 30\nunknown-key warnings: 1\n```\n\n**One warning, and it is a real finding** — fixed here. `showcase_inquiry_purge`'s `get_record` node carried:\n\n```ts\nconfig: { objectName: 'showcase_inquiry', filter: { status: 'closed' },\n          mode: 'records', limit: 200, outputVariable: 'closedInquiries' }\n```\n\nNo executor reads `mode`. `if (limit && limit > 1)` is what selects the list read (`find` vs `findOne`), so the flow works **because of `limit: 200`** — while the comment above it credited `mode` for that behaviour. Left in place, our own showcase would warn on every dev boot and keep advertising a `mode: 'records'` idiom that does nothing, which is precisely the kind of thing an AI author copies.\n\n## Scope note\n\nEngine seam only. I said earlier this would cover `objectstack validate` too, and that was wrong: `packages/lint` cannot see the descriptor registry, so doing it now needs either an `AutomationEngine` booted inside the CLI with a `getService(){throw}` cast (registering executors as a side effect to read metadata — a smell) or splitting declaration from registration across 12 `register*` functions. Both are worse than waiting: once `configSchema`s move to `spec` in steps 2/4, `packages/lint` can import them directly and the author-time seam is free. I would rather say so than quietly narrow the claim.\n\n## Test plan\n\n| Check | Result |\n|---|---|\n| `@objectstack/formula` | ✅ 265 passed |\n| `@objectstack/service-automation` | ✅ 448 passed (8 new) |\n| `app-showcase` `validate` | ✅ PASS (16 objects, 22 flows) |\n| `app-showcase` `typecheck` | ✅ PASS |\n| ESLint on changed files | ✅ clean |\n\nNew coverage pins: the nested typo is located to `config.fields[0].visibleIf`; the flow **still registers** (`getFlow` returns it); every undeclared key is reported, not just the first; a fully declared config is silent; a schemaless type (`decision`) is silent; keyValue map keys are not flagged; and the did-you-mean fires when the distance is actually within threshold.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QoA8AV99Ss1RRkLLAYmDzq\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QoA8AV99Ss1RRkLLAYmDzq)_"
+}

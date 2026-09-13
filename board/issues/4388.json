@@ -1,0 +1,35 @@
+{
+  "number": 4388,
+  "kind": "pull_request",
+  "title": "fix(lint): flow 规则能看进 try_catch / loop / parallel 嵌套 region(#4380)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T10:25:37Z",
+  "updated_at": "2026-07-31T10:39:29Z",
+  "closed_at": "2026-07-31T10:39:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T10:39:26Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4388",
+  "body": "Closes #4380\n\n## 问题\n\n`packages/lint` 里每一条走 flow 节点的规则都手写了同一行:\n\n```ts\nconst nodes = Array.isArray(flow.nodes) ? (flow.nodes as AnyRec[]) : [];\n```\n\n于是它们全都对同一件事失明。`FlowRegionSchema` 持有完整的 `nodes: z.array(FlowNodeSchema)`,四个 config 槽位带 region:`try_catch.config.try` / `.catch`、`loop.config.body`、`parallel.config.branches[].nodes`,而且可以任意嵌套。节点一挪进去,检查就留在了外面。\n\n同一组坏节点,顶层 vs `try_catch` 内部,实测:\n\n| 规则 | 严重级 | 顶层 | 嵌套 |\n| :--- | :--- | :--- | :--- |\n| `flow-node-write-unknown-field` | error | 1 | **0** |\n| `flow-update-readonly-field` | error | 1 | **0** |\n| `approval-approver-*` | error/warning | 1 | **0** |\n| `flow-template-unknown-field`(filter 位置) | error | 1 | **1,但降级成 warning** |\n\n## 最后一行才是最麻烦的\n\n`validate-flow-template-paths` 对节点整个 `config` 做递归 string-leaf 扫描,所以它**碰巧还看得见**嵌套节点里的 token——但 `collectNodeLeaves` 只在拿到的那个节点的顶层拆 `filter` 键。嵌套后位置信息丢失:\n\n```\nFLAT     error  \tflow \"f\" node \"get_record\"\tflows[0].nodes[1]\nNESTED   warning\tflow \"f\" node \"try_catch\"  \tflows[0].nodes[1]\n```\n\n于是 #3810 那条「条件被抹掉会**放宽**查询、运行时直接拒绝执行该节点」的 gating 判断,变成一行黄色 advisory,还定位到外层 `try_catch` 而不是真正跑不了的 `get_record`。\n\n**看得见 ≠ 判断对了**,而且这比干脆漏掉更糟:一行黄色读起来像「已经检查过,只是建议性的」。\n\n## 修法:一次遍历,不是五份\n\n新增 `flow-walk.ts`——包里已有的 `page-walk.ts` 的 flow 侧对应物,理由也照抄它自己写下的那句:这个遍历微妙到「复制它已经造出过一条死规则」。\n\n`walkFlowNodes(flow, flowPath)` 产出每个节点及其**真实** config 路径(`flows[0].nodes[1].config.catch.nodes[0]`)、用于诊断的 region 面包屑(`try_catch \"Guard\" › catch`)和深度。四条规则改走它。\n\nFinding 现在落在**真正出问题的那个节点**上——在有多个 region 的流里,一个指向容器的路径没法据以行动。\n\n## 重复计数的坑一次性解决,不留给每个调用方\n\n容器节点也会被产出(它自己的 config 值得检查——`loop` 的 `collection`、`try_catch` 的 `retry`),但它的 `config` 物理上**包含**所有后代,所以递归扫 config 的规则会把每个嵌套 finding 报两遍。`WalkedFlowNode.localConfig` 是剥掉 region 槽位后的容器 config,递归扫描方用它。测试钉住:嵌套 token 只报一次,同时容器自己的 `collection` token 照报。\n\n## 防漂移\n\n`REGION_SLOTS` 写成数据,并对着 spec 自己的 region-bearing config schema **行为式推导**(槽位 = 接受 `{nodes: […]}` 的键)做 pin,而不是复述——所以第五种构造会让测试失败,而不是变成第五个静默盲区。`MAX_REGION_DEPTH` 防止手写(未 parse)的 stack 把 lint 挂住。\n\n## 验证\n\n- 端到端:嵌套现在与顶层**逐条一致**,包括恢复的 `error` 严重级;\n- app-showcase 里 `showcase_resilient_sync` 的 `catch` 分支中有一个 `update_record`,**此前从未被任何规则检查过**。它字段是对的,所以校验依旧干净;故意把字段名改坏后,`os validate` 现在 exit 1 并报出:\n\n```\nflow \"showcase_resilient_sync\" › try_catch \"Push with retry\" › catch › node \"Flag Sync Failure\":\n  update_record writes 'sync_statuss', but object 'showcase_task' declares no such field. …\n  rule: flow-node-write-unknown-field  at flows[24].nodes[1].config.catch.nodes[0].config.fields.sync_statuss\n```\n\n- 三个 example 全部 exit 0;`@objectstack/lint` 43 文件 / 689 测试全绿(新增 25 条),`typecheck` 干净。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

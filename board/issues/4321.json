@@ -1,0 +1,35 @@
+{
+  "number": 4321,
+  "kind": "pull_request",
+  "title": "fix(spec,runtime): 槽查找 any 规则补上类型实参形态并把作用域扩到全部 packages(#4251 第一批)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T05:55:36Z",
+  "updated_at": "2026-07-31T06:39:58Z",
+  "closed_at": "2026-07-31T06:39:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T06:39:57Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4321",
+  "body": "Refs #4251(#4127 工作线,承接 #4214 的批次模式)。Closes #4320。本 PR 是新清扫线的**第一批**:规则补全 + 棘轮落地 + 规则现有作用域内的站点全部清零,以及对首个产出(#4320)的收尾。\n\n## 1. 两个缺口,如 issue 所述\n\n**选择器缺口。** 原有两个选择器只匹配变量注解(`: any`)和 `as any`,而代码库实际使用的形态是**类型实参**——`ctx.getService<any>('data')`——80 个非测试站点,零匹配。新增第三个选择器(`typeArguments.params.0.type=\"TSAnyKeyword\"`),纯 AST,无需类型信息,`UNCONTRACTED_SLOTS` 豁免机制原样沿用。\n\n**作用域缺口。** `files` 原来止步于 `packages/runtime`。现扩到 **`packages/**`** —— 不是 issue 建议的\"按包点名\",理由写进了配置注释:按包圈定会把这次的缺口按包再造一遍;全量作用域 + 逐文件祖父名单,新包生来就在规则之下。\n\n## 2. 棘轮(可见的)\n\n以清空名单跑一遍扩域后的规则做的全量枚举:**180 个站点、44 个文件**(issue 的 80 只数了非测试的 `<any>` 形态;注解形态和测试文件让它翻倍)。其中 4 个 runtime 文件本批清零,**40 个文件进 `SLOT_LOOKUP_UNSWEPT`** ——集中一处、只减不增、每批删几行的那种名单(`--no-inline-config` 下逃生口本来就只能住在 config 里)。`http\\.server` 进 `UNCONTRACTED_SLOTS`:三个 provider,无书面契约,调用方只读 `getPort()`。\n\n## 3. ⚠️ 本批的产出:两条从未执行过的数据源注册分支 → #4320 一并收尾\n\n给 runtime 的三个站点补类型时发现:`DefaultDatasourcePlugin` 的 parity 分支和 `DriverPlugin.start()` 的整个函数体都探测 `metadata.addDatasource` ——**整个仓库没有任何 metadata 服务实现过这个方法**(`getDatasources` 同理,唯二引用就是这两个探测点自身)。守卫恒假/恒提前返回,每一次启动都没跑过;`DriverPlugin.start()` 的提前返回甚至连它自己收尾的 debug 日志都一并跳过。\n\n处理:**删除死代码**,而不是给幻影方法编一个本地类型(那是 #4127 编目过的\"第二份没人校验的契约\")。`registerInMemory('datasource', …)` 才是现行可见性路径(#3827),它就活在被删分支的上方两行。\n\n**#4320 的 enforce-or-remove 取证与裁决(第三个 commit)**:issue 问\"遥测是否需要真正的具名数据源可见性\"。取证答案:**具名辅助驱动的路由从来不经过那个选项** ——引擎按 **driver 名**路由(`DriverPlugin.init()` 注册 `driver.<name>` → ObjectQL 发现循环收编 → `engine.ts` 的 `LIFECYCLE_DATASOURCE = 'telemetry'` 在 `this.drivers` 里查这个名字),这正是选项一直无效而 serve 的遥测分库一直**工作正常**的原因。故走 **remove**:\n\n- `DriverPluginOptions` 删除(模块内类型,从未从包根导出),构造函数收窄为 `(driver, driverName?)`;\n- `serve.ts` 去掉选项实参,遥测接线注释改为明说 driver-name 机制;\n- `@objectstack/runtime` major changeset 携带 FROM → TO 迁移说明;行为零变化(被配置的代码从未运行过)。\n\n这正是 issue 预告的\"产出不只是外观\":`<any>` 一天在,编译器一天看不见这两条死分支。\n\n## 4. 按证据补的契约成员(全部 optional)\n\n| 契约 | 新增 | 证据 |\n|---|---|---|\n| `IDataEngine` | `getDefaultDriverName?` / `getDriverByName?` | ObjectQL 实现(engine.ts 的 drivers 注册表);DefaultDatasourcePlugin 经它们把默认 driver 重注册为 `driver.<name>` 服务,`os migrate`(SQL_DRIVER_SERVICES)和 serve 的存储探测都从那里定位 driver |\n| `IMetadataService` | `registerInMemory?` | `MetadataManager` 实现(metadata-manager.ts:379),启动期种子原语,GitOps 工件可列出但不落 DB(ADR-0015 Addendum、#3827) |\n\nOptional 的理由:`IDataEngine` 还有测试假引擎和远端/虚拟引擎这类不带 driver 注册表的占用者;runtime 调用点本来就用 `?.` 探测,补类型后一行未改。测试站点(真实 ObjectQL 引擎)用 `?.` / `!` 显式断言该表面存在——缺了就 fail,而不是滑过去。两篇契约参考文档(`data-engine.mdx` / `metadata-service.mdx`,docs drift check 点名)已同步。\n\n## 5. runtime 作用域内清零明细\n\n- 3 个 src 站点(issue 点名的那三个)→ 传契约类型;\n- 6 个 test 站点的 `data` 查找 → `IDataEngine`;\n- 5 个 test 站点的 `http.server` 查找 → 槽豁免,零代码改动。\n\n## 验证\n\n| 项 | 结果 |\n|---|---|\n| `pnpm lint`(`--no-inline-config`) | clean |\n| `@objectstack/spec` check:generated | 8/8 up to date |\n| 全量 turbo build | 71 包全绿 |\n| spec / objectql / runtime / metadata / plugin-webhooks / cli | 7137/277 · 1345/85 · 954/67 · 281/13 · 25/3 · 628/64 全绿 |\n| changeset | `slot-lookup-type-argument-ratchet.md`(spec、runtime patch);`retire-inert-driver-plugin-options.md`(runtime **major**、cli patch,含迁移说明) |\n\n后续批次:按 `SLOT_LOOKUP_UNSWEPT` 逐文件清扫(rest-api-plugin 14 处、auth-plugin 20 处是大头),每批删名单若干行。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01AWW5xEALZNU5VBXfGyWPGz"
+}

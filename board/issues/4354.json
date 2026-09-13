@@ -1,0 +1,32 @@
+{
+  "number": 4354,
+  "kind": "issue",
+  "title": "Surface flow run summaries (selected / acted / skipped) — a scheduled flow that does nothing is currently indistinguishable from one with nothing to do",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T08:15:59Z",
+  "updated_at": "2026-07-31T10:29:10Z",
+  "closed_at": "2026-07-31T10:29:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4354",
+  "body": "\nPackage: `@objectstack/service-automation@16.1.0`\nCompanion to #4347, which is the bug this one is about *detecting*.\n\n## Problem\n\nA scheduled flow that selects records and then acts on none looks exactly like a flow that had no work to do. Both:\n\n- report `success: true`\n- emit no log\n- run on schedule, every time\n- write nothing\n\nThere is no signal, anywhere, that distinguishes \"nothing to do\" from \"broken\".\n\nThis is not hypothetical. In the hotcrm reference app, #4347 left three scheduled flows completely inert — the stalled-deal sweep found every stalled deal and nudged nobody, the renewal sweep never booked a renewal, the campaign enrolment action enrolled nobody. They ran daily, on time, green, for as long as they had existed.\n\nThey were caught only by adding runtime tests that assert on records written. Nothing in production could have surfaced it, and no operator could have been expected to notice.\n\n## Why this matters more than a normal observability gap\n\nAutomation is exactly the category where nobody is watching. A UI bug generates a support ticket within the hour. A scheduled sweep that silently stops working generates **no signal at all** — the work simply never happens, and the absence of an outcome is invisible. The longer it runs, the more normal the silence looks.\n\n## Request\n\nExpose a per-run summary for every flow execution:\n\n- records **selected** by each data node\n- records **acted on** (created / updated / deleted)\n- iterations **skipped** by a gate, ideally with which gate\n- terminal status per node\n\nSurface it in two places:\n\n1. **Console** — a run history view per flow. `selected 30, acted 0` is then obvious on day one.\n2. **Queryable** — so an operator can alert on it (`selected > 0 && acted == 0` over N consecutive runs is a near-perfect broken-sweep detector).\n\n## Note: the engine already has most of this\n\n`AutomationEngine` carries `recordLog`, `executionLog` and `listRuns` internally, and `executeNode` already collects `steps` with per-node results. The information appears to exist already — the gap looks like surfacing rather than instrumentation.\n\n## Why the app cannot reasonably do this itself\n\nWe considered an app-level detector in hotcrm (counters via `assignment`, a comparison via `decision`, an alert via `notify`) and rejected it:\n\n- It would be built from the same primitives that failed silently in #4347 — a silent-no-op detector that can itself silently no-op is not a foundation.\n- `script` nodes cannot fill the gap: the built-in runtime treats inline `config.script` as a no-op and logs *\"no server-side JS sandbox — this node is a no-op\"*. Emitting a summary from a flow requires registering real `functions`.\n- Every app would have to build and maintain its own version, and throw it away once the platform surfaces the real thing.\n\nThis belongs in the platform: one implementation, every flow, no per-flow instrumentation.\n\n## Suggested minimum viable version\n\nIf the full history view is a large piece of work, a much smaller version captures most of the value: **log a single structured line per flow run** with selected/acted counts. That alone turns an invisible failure into a greppable one.\n\nRelated: #4347."
+}

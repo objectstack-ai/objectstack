@@ -1,0 +1,34 @@
+{
+  "number": 4046,
+  "kind": "pull_request",
+  "title": "docs(agents): list which spec artifact each CI gate guards, and how to regenerate it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T06:29:59Z",
+  "updated_at": "2026-07-30T06:45:31Z",
+  "closed_at": "2026-07-30T06:45:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T06:45:29Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4046",
+  "body": "Follow-up to #4040 — the DX gap that PR hit twice. Docs only, no code.\n\n## Why\n\n`packages/spec` has **eight** checked-in generated artifacts, each with its own CI gate, split across two jobs (`TypeScript Type Check` in `lint.yml`, `Check Generated Artifacts` in `ci.yml`). Each job runs its gates **sequentially**, so the first stale artifact masks every one behind it — you get one red build *per artifact*, not one for all of them.\n\nAGENTS.md documents the auto-gen boundary (\"never hand-edit `content/docs/references/`\") but never maps *a change* to *the generator it invalidates*. So the mapping gets rediscovered from red CI.\n\n#4040 paid it twice, neither time a logic error:\n\n1. Correcting a `.describe()` string → stale `content/docs/references/automation/node-executor.mdx` → `check:docs` red.\n2. Fixed that, pushed → **now** `check:api-surface` red, because five new exports weren't in `api-surface.json`. Invisible until the first was fixed.\n\nA `.describe()` reads like a comment and lands in published docs; adding one export lands in a snapshot. Neither is obvious from the diff.\n\n## What this adds\n\nA change → gate → regenerate table:\n\n| You changed | Gate that fails | Regenerate with |\n|:---|:---|:---|\n| A `.describe()` / TSDoc on any schema | `check:docs` | `gen:schema && gen:docs` |\n| A public export (added / removed / renamed) | `check:api-surface` | `gen:api-surface` |\n| An authorable key on a metadata schema | `check:authorable-surface` | `gen:schema` |\n| An ADR-0087 conversion / migration registry | `check:spec-changes`, `check:upgrade-guide` | `gen:spec-changes`, `gen:upgrade-guide` |\n| A `SKILL.md` | `check:skill-docs`, `check:skill-refs` | `gen:skill-docs`, `gen:skill-refs` |\n| The react-blocks contract | `check:react-blocks` | `gen:react-blocks` |\n\nPlus a copy-pasteable loop that runs all eight, so the tooling says which artifact is stale instead of CI saying it one push at a time.\n\nIt also records that `check:liveness`, `check:empty-state`, `check:skill-examples` and `check:react-conformance` have **no** generator — a failure there is a real finding to fix, not an artifact to regenerate. Worth stating, because the reflex after reading the table would be to look for a `gen:` counterpart that doesn't exist.\n\n## A trap found while verifying this section\n\nRunning the loop on a **clean checkout of merged `main`** reported:\n\n```\n@objectstack/spec public API changed: 2 breaking (removed/narrowed), 0 added.\n  ./data   - canonicalAstOperator (function)\n  ./api    - FieldErrorCode (type)\n```\n\nNothing had been removed. `check:api-surface` reads the built `dist/*.d.ts`, not `src/` — and my `dist` predated the merge, so the newer checked-in snapshot looked like it had lost exports. `pnpm build` and it passes.\n\nThat is exactly the shape of a bug someone would otherwise file against `main`, so the caveat is now in the section, the loop starts with `pnpm build`, and the phantom pair is named so the next person recognises it.\n\n## Test plan\n\nEvery command in the new section was run as written, from a clean checkout of merged `main` (`e4c61a7`) after `pnpm build`:\n\n```\ncheck:docs                   PASS\ncheck:api-surface            PASS\ncheck:authorable-surface     PASS\ncheck:spec-changes           PASS\ncheck:upgrade-guide          PASS\ncheck:skill-refs             PASS\ncheck:skill-docs             PASS\ncheck:react-blocks           PASS\n```\n\nSingle file, +43/−0, no code touched.\n\n## Note on the branch\n\nThe designated branch's previous PR (#4040) is merged and GitHub auto-deleted the branch, so this is a fresh branch of the same name off merged `main` (`e4c61a7`) with one new commit — not stacked on merged history, and no force-push involved.\n\n## Not done here\n\nAn aggregate `gen:all` / `check:generated` script would beat a documented loop, but it adds a script name and a maintenance surface to a repo with strong conventions — worth your call rather than my guess. Say the word and I'll add it.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QoA8AV99Ss1RRkLLAYmDzq\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QoA8AV99Ss1RRkLLAYmDzq)_"
+}

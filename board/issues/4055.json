@@ -1,0 +1,35 @@
+{
+  "number": 4055,
+  "kind": "pull_request",
+  "title": "feat(spec)!: EnhancedApiError.fieldErrors → fields, tombstoned (ADR-0114 D4, #3977)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T07:12:39Z",
+  "updated_at": "2026-07-30T07:29:55Z",
+  "closed_at": "2026-07-30T07:29:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T07:29:53Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4055",
+  "body": "Executes ADR-0114 **D4**, the one thing #4035 decided but deliberately left undone because retiring an authorable key needs its own sequence.\n\n## The rename\n\n`EnhancedApiError.fieldErrors` → `fields`. The array and its element shape are unchanged — only the property name.\n\nThe wire has always carried `fields`: the validators, import coercion, `validation-failure.ts`, `@objectstack/client` and the console's field-error extractor all say it. `fieldErrors` was declared and emitted by nobody, so anyone reading `error.fieldErrors` was reading a field no server sent — ADR-0078's silently-inert declaration, sitting on the error envelope.\n\n## Tombstoned, not deleted\n\n`EnhancedApiErrorSchema` is not `.strict()`, so a plain removal would let a producer still writing `fieldErrors` **parse clean and lose the array** — a validation failure that mentions no field. `retiredKey()` (ADR-0104) turns that into a rejection carrying the rename, so the failure is loud at the write side instead of silent at the read side. Two tests pin both halves: the old name throws with `fields` in the message, the new name parses.\n\n## A semantic chain entry, not a conversion — and that's the point\n\nThe ADR-0104 guard requires a registered retirement surface so the change reaches the documentation channel. The obvious move is a D2 conversion, and it would have been wrong here.\n\nA conversion's job is rewriting author **metadata**. This is a response envelope: no stack, example or template has ever carried the key (checked across `packages/`, `examples/`, `templates/`, `apps/`), so `os migrate meta` has no source to rewrite. A conversion with an identity fixture and `expectedNotices: 0` would claim a rewrite that does not exist.\n\nThe precedent is one step earlier in the same major: `analytics-query-request-query` / `-format` are HTTP-only surfaces whose own migration step says *\"No stored metadata carries this shape (it was HTTP-only), so the change is two semantic TODOs for API callers rather than a stack conversion.\"* Same situation, same treatment — a `semantic` entry with a reason and an acceptance criterion, which is what actually reaches `spec-changes.json` (ADR-0087 D4), the generated upgrade guide, and the `spec_changes` MCP tool. The guard accepts semantic surfaces for exactly this reason.\n\nThe generated guide entry now reads:\n\n> **`enhanced-api-error-field-errors-renamed`** — `api.enhancedApiError.fieldErrors` → fields\n> - Why not automatic: … This is a RESPONSE surface: no stack, example or template carries the key, so there is no source for the chain to rewrite — the schema tombstones it via retiredKey() and consumers move their read themselves.\n> - Done when: No consumer reads `error.fieldErrors`; per-field validation detail is read from `error.fields`, and constructing an EnhancedApiError with `fieldErrors` fails to parse with the rename prescription instead of silently losing the array.\n\n## Two doc examples were teaching the opposite of this ADR\n\nBoth fixed rather than left for the drift advisory to re-flag:\n\n- **`error-handling-server.mdx`** hand-rolled a Zod → `fields[]` mapping with `code: 'invalid_field' as const` — a *top-level* code in a *field* position, and a private reimplementation of the translation ADR-0114 D3 centralised. It now calls `zodIssuesToFields`, the mapping the platform's own routes use, with a comment naming what that buys (`too_small` splitting by `origin`, a missing property becoming `required`).\n- **`error-handling-client.mdx`**'s error class carried the dead name through its constructor, field and iteration.\n\nAlso gone: `error-catalog.mdx`'s \"widen the cast until the two names converge\" workaround, since they have now converged.\n\n## Test evidence\n\n| Suite / gate | Result |\n|:---|:---|\n| `pnpm turbo run test` (CI's command) | 123/126 tasks ✅ |\n| dogfood (excluded from the above by design) | 71 files / 410 ✅ |\n| spec `errors` + `conversions` + `migrations` | 99 ✅ |\n| `check:docs` / `check:spec-changes` / `check:upgrade-guide` | ✅ |\n| `check:authorable-surface` (the guard that demanded this) | ✅ |\n| `check:api-surface` / `check:skill-refs` / `check:skill-docs` | ✅ |\n| `check:skill-examples` | ✅ 198 examples |\n| `check:error-code-casing` | ✅ 2416 files, 0 violations |\n\n`@objectstack/runtime` fails one test, `datasource-autoconnect.test.ts` — the same pre-existing failure as #4035, which did **not** reproduce on CI there (17/17 green) and which I reproduced on that PR's parent commit. My diff touches spec and docs only.\n\nRefs #3977, #4035. Completes ADR-0114.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01MaSQn77TT5fUgHK9CesaDK\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01MaSQn77TT5fUgHK9CesaDK)_"
+}

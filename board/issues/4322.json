@@ -1,0 +1,35 @@
+{
+  "number": 4322,
+  "kind": "pull_request",
+  "title": "fix(spec,rest,runtime): request bodies are checked against the schemas the catalog declares (#3899)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T05:57:51Z",
+  "updated_at": "2026-07-31T08:07:59Z",
+  "closed_at": "2026-07-31T08:07:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T08:07:56Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4322",
+  "body": "Closes #3899(建议 ①②④;建议 ③ 的 filter-normalizer 已由 #4128 一轮修完,`$or`/`$not` 现为树节点、未知操作符直接 throw,本 PR 无需改动)。\n\n## 范围核对(issue 核对于 93f267f81,此后已落地的部分)\n\nIssue 表中 7 个 schema,有 4 个已被单独 issue 接线:`DeleteManyDataRequestSchema`(#3897)、`UpdateManyDataRequestSchema`(#3933)、批量上限与单一 Zod 源(#3939/#3944)、`SharingRuleSchema`(#3896);`AnalyticsQueryRequestSchema` 也已在 #3878/#3891 之后接上(`domains/analytics.ts` 的 `assertAnalyticsQueryBody`,信封形状已退役、schema 现为 `.strict()` + retiredKey 墓碑)。**本 PR 收掉剩余的一半,并补上把\"声明=生效\"钉死的门。**\n\n## ① 目录停止承诺没做的事(`plugin-rest-api.zod.ts`)\n\n- **删除 4 条幽灵 notifications 端点**(`/devices` ×2、`/preferences` ×2):服务端路由 #3612 已删(实际上从未建成,`packages/client/src/index.ts` 有原话),目录却一直连 `requestSchema` 一起声明着——与 #3718 删 `DEFAULT_AI_ROUTES` 同病同药。\n- **automation trigger 条目改为真实路径** `/trigger` → `/trigger/:name`,并摘掉 `AutomationTriggerRequestSchema` 声明——该 schema 描述的 `{trigger, payload}` 形状与真实 wire(name 在路径、body 是 params 包)从未一致。\n- **新增 `POST /:object/query` 条目**(挂载已久、目录一直缺席),declare `FindDataRequestSchema`。\n- **create/update 重指向** `CreateDataRequestSchema`/`UpdateDataRequestSchema`(旧名描述的 `{ data }` 信封不是 wire 形状)。\n- **GET/DELETE 条目摘掉 requestSchema**(输入全在路径/查询串,body 无从违反;`GetMetaItemRequestSchema`/`IdRequestSchema` 保留为协议方法契约)。`SaveMetaItemRequestSchema` 同摘:`item: z.unknown()` 在入口永不可能失败,真正的门是 metadata 层的按类型校验(422 + issues)。\n\n## ② 声明的 schema 接到真实入口\n\n**rest-server**(沿用 #3933/#3944 的\"路径参数最后合并 + `zodIssuesToFields`\"范式,400 信封与 updateMany/deleteMany 完全一致):\n\n| 路由 | 之前 | 现在 |\n|---|---|---|\n| `POST /data/:object/query` | `query: req.body \\|\\| {}` 原样透传,畸形 body 静默变全量读 | `FindDataRequestSchema` 校验;路径 object 最后写入并**随查询下传**(body `object` 不能再与路径矛盾);校验后转发合并后的原始 body,不注入 parse 产物 |\n| `POST /data/:object` | `data: req.body` 裸传 | `CreateDataRequestSchema`(非 record body → 400) |\n| `PATCH /data/:object/:id` | 裸传 | `UpdateDataRequestSchema` |\n| `POST /data/:object/batch` | 注释自述\"未校验\" | `BatchUpdateRequestSchema`;上限检查移到形状检查之后(#3944 同序) |\n| `POST /data/:object/createMany` | `records: req.body \\|\\| []` | `CreateManyDataRequestSchema`(裸数组 wire 不变;发 `{records:[...]}` 信封会拿到带指引的 400) |\n\n**runtime dispatcher**(analytics 入口的 throw-duck-shape 范式,两个错误出口都映射为 400,#3918 已钉):\n\n- `POST /notifications/read`:接 `MarkNotificationsReadRequestSchema`。旧读法 `Array.isArray(body?.ids) ? … : []` 把 `{\"notificationIds\":[...]}`/`{\"ids\":\"n1\"}` 静默变成 `markRead(userId, [])`——200、`readCount: 0`、角标永不清零(issue ③ 原例)。\n- `POST /automation`(registerFlow):`name` 必须为非空字符串——拼错 name 曾把流程注册到 `undefined` 键下并回显 200。\n- `POST /automation/:name/toggle`:严格 `{ enabled?: boolean }`——`{\"enable\": false}`(少个 d)曾**启用**流程并返回 200 `{enabled: true}`;现在 400 并点名错键。空 body = enable 的既有语义保留。\n- `PUT /automation/:name`:定义必须是对象(`definition` 信封是既有双方言,原样保留、未新增)。\n- `validationFailure`/`fieldsFromZodIssues` 从 analytics 内联提升到 `validation-failure.ts`(与识别器同文件,构造与识别不可能漂移),analytics/notifications/automation 三处共用。\n\n## ④ 门\n\n- **spec**(`plugin-rest-api.schema-refs.test.ts`):每个 `requestSchema`/`responseSchema` 字符串必须解析到真实导出的 Zod schema(#3944 记过的悬空名 `CreateManyRequestSchema` 这一类从此结构性不可能);`requestSchema` 只允许出现在 POST/PUT/PATCH 上;#3899 接线的 7 条声明有防回退底线。\n- **rest + runtime**(两个 `request-schema-gate.conformance.test.ts`):枚举目录中声明 `requestSchema` 的已挂载路由,逐条发违反 schema 的 body,断言 400 `VALIDATION_FAILED` + `fields[]` 且协议层/服务从未被调用;每条配合规 body 的阳性对照(证明 400 来自 schema 而非路由坏了)。**完整性棘轮**:新声明一条 `requestSchema` 而不加违规用例,套件直接红——声明从此跑不赢生效。\n- automation 三处手写守卫另有专测(`automation-body-validation.test.ts`,不在目录门内但钉死 issue ③ 的语义翻转)。\n\n## 门当场抓到的两处真实漂移(本 PR 顺带修掉)\n\n这两处都不是我改出来的,是新门**第一次运行**就照出来的既有\"声明 ≠ 实际\",与本 issue 是同一种病:\n\n1. **`QuerySchema` 的 search 契约与 ADR-0061 服务的形状不符**。schema 只声明了结构化的 `FullTextSearchSchema`,而 ADR-0061 D1 的规范拼写是**裸字符串**(客户端只说搜什么,服务端决定搜哪些字段),顶层 `searchFields` 窄化更是完全没声明——可执行器、conformance ledger、dogfood HTTP 证明用的都是后者。入口一开始校验 body,dogfood 的 `showcase-search` 立刻红。按 contract-first 修在 spec 侧(`search: string | FullTextSearch`、正式声明 `searchFields`),并在 rest 门里钉了该 wire 形状的阳性用例。连带:`QUERY_AST_KEYS`(`Record<keyof QueryAST, true>`,存在意义就是\"spec 加键、REST 边界没跟上就编译不过\")如设计般把构建拦红,补键后顺手清掉 `RESERVED_LIST_QUERY_PARAMS` 里那份手写的 `'searchFields'` 副本。\n2. **两份手写查询文档只教了对象形**,`query-syntax.mdx` 的类型签名 `search?: FullTextSearch` 已是字面错误,`searchFields` 一字未提。同一种病上移一层,一并校正。\n\n## 一处 CI 稳定性修复(`354caba`,与请求体校验无关,但本 PR 被它挡住)\n\n`Test Core` 在本分支连续两次停摆在**完全相同**的位置,被杀任务都是 `@objectstack/driver-mongodb#test`。取证后根因明确:该包三个套件在**模块加载期**从 fastdl.mongodb.org 抓 ~123MB 的 mongod 二进制,代码只防了\"下载失败\"(try/catch → skip,文件头注释写明意图正是\"别让它拖垮整个 Test Core\"),没防\"下载卡住\"——挂起时 promise 永不 settle,套件既不跑也不跳,就地停住。`instance.launchTimeout` 不覆盖这一段(它约束的是二进制就位后 spawn mongod)。\n\n**不是本 PR 的 diff 引起**:同一任务在 main(40 分钟前)是 cache miss 真跑的,日志有完整的 `Downloading MongoDB \"8.2.6\": 0% → 100%` 并通过;是网络侧在变而等待没有上界。但任何改动 `@objectstack/spec` 的 PR 都会让全仓缓存失效、让这个任务真跑,于是必然撞上,重跑绕不过去。\n\n修法是给等待加 120s 截止时间,让\"卡住\"落进套件**本来就有**的 skip 分支——降级结果与可见性不变(warn + 跳过),只是从\"永不发生\"变成\"有界发生\"。取证与讨论记在 [#4250](https://github.com/objectstack-ai/objectstack/issues/4250#issuecomment-5140428634)(该 issue 已记录的三次机制不同,是另一条线索,未受影响)。\n\n## 行为变更\n\n违反已声明契约的 body 从\"静默换一种语义执行\"变为 `400 VALIDATION_FAILED + fields[]`。合规调用方(SDK 全部方法已逐一核对发送形状)不受影响;曾依赖畸形 body 被静默接受的调用按 `fields[]` 指引改正即可。细节见 changeset。\n\n## 验证\n\n- 新增门测试先行验证会红:catalog 旧状态下 spec 门直接失败(端点数、幽灵路由),rest/runtime 门在未接线的路由上拿到 2xx 而非 400。\n- 全量回归:`spec` 7145 / `rest` 536 / `runtime` 977 / `objectql` 1373 / `metadata-protocol` 122 / `driver-mongodb` 160 全绿;全量构建 71/71;`check:generated` 8/8;`check:liveness` 绿(新声明的 `query/searchFields` 与转为 union 叶子的 `query/search` 均已登记台账)。\n- 改动文件 ESLint 干净。\n- 既有调用方核对:`client.data.query/create/update/batch/createMany`、`client.notifications.markRead`、`client.automation.toggle/execute` 发送形状全部合规;既有集成用例发送的都是合规 body,全数通过。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01EynH7cngDczRGMkGMudJpC"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 4038,
+  "kind": "issue",
+  "title": "The /share-links dispatcher domain emits `data` AND a legacy `link`/`links` beside it — a producer-side shim that outlived its readers",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T05:28:38Z",
+  "updated_at": "2026-07-30T07:09:37Z",
+  "closed_at": "2026-07-30T07:09:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4038",
+  "body": "Found while sweeping consumers for #3983. Not fixed there because deleting it needs a cloud-side check that is out of that PR's scope (Prime Directive #10).\n\n## The shim\n\n`packages/runtime/src/domains/share-links.ts` answers create and list with the payload under **two** keys:\n\n```ts\n// POST /share-links → create\nreturn { handled: true, response: { status: 201, body: { success: true, data: link, link } } };\n\n// GET /share-links?object&recordId → list\nreturn { handled: true, response: { status: 200, body: { success: true, data: links, links } } };\n```\n\nNote these bypass `deps.success()` — the domain's other three routes (`revoke`, `resolve`, `messages`) go through it and emit a clean `{ success: true, data }`. Only these two hand-build a body, and the only reason to is the duplicate key.\n\nThat is a **producer-side compatibility shim**: the legacy `link` / `links` keys are there for readers written before the envelope existed. Prime Directive #12 is about deleting *consumer*-side sniffing by fixing the producer; this is the mirror image — a producer emitting two dialects at once so consumers never have to choose.\n\n## Why it can go now (and why not yet)\n\n#3983 removes the reason it exists. Before that PR, the sharing plugin's routes answered bare `{ link }` / `{ links }` while this domain answered enveloped, so every consumer had to tolerate both:\n\n```ts\n// objectui packages/components/src/share/ShareDialog.tsx\nsetLinks(body.links ?? body.data ?? []);\nconst newLink = created.link ?? created.data;\n```\n\nThat `??` is reading the *plugin's* shape first and this domain's second. Once #3983 lands, both surfaces answer `data`, the fallback is dead code, and the duplicate key has no reader left in either repo.\n\n**What still needs checking before deletion:** this domain is the *designed primary* surface for cloud's per-environment kernels (`registerShareLinkRoutes: false`, per the #2462 step-① note in the file header). Anything in `cloud` reading `body.link` / `body.links` off these two routes would break. I can't see that repo from this session, so the sweep has to happen there.\n\n## Suggested shape of the fix\n\n1. Sweep `cloud` for `body.link` / `body.links` reads against `POST|GET /share-links`.\n2. Drop the duplicate keys and route both through `deps.success(...)` like the domain's other three routes — which also removes the two hand-built bodies.\n3. Delete the now-dead `?? body.data` / `?? created.data` fallbacks in objectui's `ShareDialog` (they become unreachable, and leaving them implies a shape that no longer exists).\n4. Add the two routes to the dispatcher's envelope coverage so a hand-built body can't come back.\n\nStep 3 is the part worth doing even if 1–2 are deferred: a tolerance kept after its reason is gone reads as \"both shapes are still live\" to the next person, which is how #3833 happened.\n\n## Scope note\n\n`scripts/check-route-envelope.mjs` does **not** cover this file — it scans route *modules* that write via `res.json(...)`, and the dispatcher domains return `{ status, body }` objects for a central sender instead. So this drift is invisible to that guard by construction. Whether the guard should grow a second mode for the domain handlers is a bigger question than this issue; worth raising separately if the dispatcher turns out to have more of these."
+}

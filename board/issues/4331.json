@@ -1,0 +1,32 @@
+{
+  "number": 4331,
+  "kind": "issue",
+  "title": "CI: Temporal Conformance 的两个 skewed-zone 步骤没挂 run-with-stall-guard,mid-suite stall 烧满 30 分钟才被 cancel",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T06:19:26Z",
+  "updated_at": "2026-07-31T06:52:07Z",
+  "closed_at": "2026-07-31T06:52:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4331",
+  "body": "#4298(`scripts/run-with-stall-guard.mjs`)把 **Test Core** 的 mid-suite stall 转成了带标签的快速失败(`--stall-minutes 10`,ci.yml:153/165),但 **Temporal Conformance (live PG + MySQL)** 的两个测试步骤还是裸跑:\n\n- `Run driver-sql suite against both live servers`(ci.yml:315)\n- `Run the non-SQL temporal backends under the skewed process zone`(ci.yml:353)\n\n## 实测现场(PR #4305,连续两轮)\n\n该 PR 的 delta 只有 `packages/lint` 新规则 + `packages/spec` 一段 JSDoc 注释;skewed-zone 步骤测的五个包(core/formula/driver-memory/driver-mongodb/service-analytics)**没有一个依赖 lint**,而 main 在同一时间窗同 job 3-4 分钟即绿(run 30608331534 / 30607301713)。两轮 stall 点还不一样:\n\n- [run 1](https://github.com/objectstack-ai/objectstack/actions/runs/30605552249/job/91076958454):卡在 `packages/core` kernel.test 执行中途,30m15s 被 cancel;\n- [run 2](https://github.com/objectstack-ai/objectstack/actions/runs/30607641947/job/91083294282):05:51:07 五个包全部打完 `Done` 后**零输出 24 分钟**,06:15 被 cancel —— 疑似 vitest/pnpm 进程句柄泄漏导致不退出。\n\n即:与 Test Core 同款的非确定性 stall,只是发生在没有 guard 的 leg 上,于是每次都烧满 job 超时、以「The operation was canceled」收场,红得毫无信息量,还会把无辜 PR 拖红。\n\n## 建议\n\n两个步骤同样包上 `node scripts/run-with-stall-guard.mjs --stall-minutes 10 -- …`(与 Test Core 相同参数),让 stall 变成带日志尾巴的快速失败;run 2 的「全部 Done 后不退出」形态也值得让 guard 在子进程退出后对残留句柄兜底(如果 guard 目前只盯输出静默,这一形态正好覆盖)。\n\n发现自 #4305 的 CI 排查,与该 PR 内容无关,故单独立此 issue。"
+}

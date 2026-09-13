@@ -1,0 +1,32 @@
+{
+  "number": 4383,
+  "kind": "issue",
+  "title": "[lint] 零字段对象(external / 数据源自省 schema)让 hook / action write-set 规则把每一个写都误报",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T10:02:46Z",
+  "updated_at": "2026-07-31T10:24:26Z",
+  "closed_at": "2026-07-31T10:24:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4383",
+  "body": "## 现象\n\n对象**不声明 `fields`**(external 对象、数据源自省 schema —— 列在运行时解析)时,`hook-body-write-unknown-field` 和 `action-body-write-unknown-field` 会把 body 里**每一个**字段写标成「对象没有这个字段」。\n\n实测(已构建的 `@objectstack/lint` dist,对象为 `{ name: 'legacy_deal', external: true }`,不带 `fields`):\n\n```\nhook  : [\"hook-body-write-unknown-field / warning\"]     ← 误报\naction: [\"action-body-write-unknown-field / warning\"]   ← 误报\nflow  : []                                              ← 正确跳过\n```\n\n三条同族规则,两条误报、一条正确。\n\n## 根因\n\n`indexObjectFields`(`validate-hook-body-writes.ts:228`)对零字段对象返回一个**空 Set**,而不是 `undefined`。下游两处都只判断「有没有这个对象」,不判断「这个对象有没有可判断的字段表」:\n\n- `validate-hook-body-writes.ts:421` —— `targetSets.every((s) => s !== undefined)`,空 Set 不是 `undefined`,于是 `inputJudgeable` 为 true,随后 `targetSets.some((s) => s.has(field))` 必然为 false → 报;\n- `validate-hook-body-writes.ts:458` / `validate-action-body-writes.ts:255` —— `if (!known) continue`,空 Set 是 truthy,于是 `known.has(field)` 必然为 false → 报。\n\n## 为什么这是 bug 而不是保守取舍\n\n同一个跳过在这个家族里已经存在两处,而且都写了理由:\n\n- `validate-searchable-fields.ts` 的 skip #2 —— 「An object that declares no field map at all — external objects and datasource-introspected schemas whose columns are resolved at runtime」;\n- `validate-flow-node-writes.ts:210`(#4369)—— 加了 `if (known.size === 0) return;`,理由是该规则 gating,不能对着看不见的字段表开火。\n\n四条规则里两条有、两条没有,正是 #3583 / #4330 在收拾的那种漂移。而且它直接违反那两条规则自己写在头注释里的原则:\n\n> Everything statically unknowable is skipped SILENTLY, asymmetrically favouring missed findings over false ones — **a false positive kills an advisory lint**\n\n零字段对象恰恰是「statically unknowable」的教科书情形。\n\n## 建议\n\n两处各加一道 guard,并把理由注释对齐 `validate-searchable-fields` 的 skip #2:\n\n- hook 规则:`inputJudgeable` 追加 `targetSets.every((s) => s.size > 0)`(多目标 hook 里只要有一个目标的字段表为空,`ctx.input` 写就无法判断);\n- hook + action 的 `ctx.api` 分支:`if (!known || known.size === 0) continue;`。\n\n各配一条测试。改动很小,但要注意多目标 hook 那一支不是简单照抄——需要决定「部分目标可判断」时的语义(建议与现有 `some(has)` 的宽松取向一致:任一目标不可判断即整体跳过)。\n\n## 版本\n\n`@objectstack/*@17.0.0-rc.0`,`main` @ `38182ffb8`。发现自 #4369 / #4374 的收尾核查——写 flow 规则时为 gating 加了这道 guard,回头核对才发现两个 advisory 兄弟没有。\n\n相关:#4380(同一批核查发现的嵌套 region 盲区)"
+}

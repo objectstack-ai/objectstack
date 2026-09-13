@@ -1,0 +1,35 @@
+{
+  "number": 4025,
+  "kind": "issue",
+  "title": "`metadataForms` translation slot has a full resolver and zero producers anywhere in the repo — the same blind spot `globalActions` had before #4015",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "documentation"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T04:46:09Z",
+  "updated_at": "2026-07-30T05:24:57Z",
+  "closed_at": "2026-07-30T05:24:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4025",
+  "body": "**Closing as invalid — my central claim was wrong, and the cause was a truncated grep.**\n\nI claimed `metadataForms` had \"zero producers anywhere in the repo\". It has producers, and they are exactly where `check-i18n-coverage.mjs` said they were:\n\n- `packages/platform-objects/src/metadata-translations/index.ts` exports `MetadataFormsTranslations`, a real `TranslationBundle` populating the slot in **four** locales:\n  ```ts\n  export const MetadataFormsTranslations: TranslationBundle = {\n      en: { metadataForms: enMetadataForms },\n      'zh-CN': { metadataForms: zhCNMetadataForms },\n      'ja-JP': { metadataForms: jaJPMetadataForms },\n      'es-ES': { metadataForms: esESMetadataForms },\n  };\n  ```\n- backed by committed, hand-editable generated bundles — `apps/translations/{en,zh-CN,ja-JP,es-ES}.metadata-forms.generated.ts`\n- re-exported from `packages/platform-objects/src/index.ts`\n- gated by `pnpm check:i18n`, which fails when a committed bundle drifts from a fresh extract\n- and covered by `metadata-forms-vocabulary.test.ts`\n\nSo the comment I called stale —\n\n> the platform metadata-form baseline is folded away (it is owned and translated by platform-objects)\n\n— is **accurate**. Nothing to fix, and the \"either the surface is untranslated or the slot is dead weight\" dilemma I posed was a false one: neither is true.\n\n## How I got it wrong\n\nI ran a repo-wide grep for `metadataForms` and piped it through `head -15`. `grep -r` walks in filesystem order, not alphabetical, so the 16 `platform-objects` matches fell past the cutoff and I read the truncated 15 lines — all from `spec` and `rest` — as the complete result set. The actual count is **88** matches, 16 of them in `platform-objects`.\n\nA count would have been safe. A truncated listing read as exhaustive was not, and \"zero producers\" is precisely the kind of claim that needs the former.\n\nI also verified this wasn't a history artifact: `packages/platform-objects/src/metadata-translations/index.ts` existed at the commit I swept.\n\n## What survives\n\n**#4015's finding stands.** Re-running the sweep correctly (`rg --pcre2`, no truncation, over every authorable `TranslationData` slot the resolver reads):\n\n| slot | producer files |\n|:---|---:|\n| `objects` | 113 |\n| `settings` | 23 |\n| `apps` | 21 |\n| `dashboards` / `pages` | 13 each |\n| `messages` | 12 |\n| `settingsCommon` | 4 |\n| `validationMessages` | 3 |\n| `metadataForms` | 2 |\n| `globalActions` | 2 |\n\n`globalActions`'s two hits are the showcase specimen added in #4015 and `packages/lint/src/validate-translation-references.ts`, which *validates* the slot rather than producing it. So before #4015 it genuinely had no producing bundle — that claim was correct.\n\n## Why I'm not building the proposed ratchet\n\nThe \"≥1 producer per authorable slot\" gate I suggested would be **green on arrival**: every slot has producers. Its sole motivating example (`globalActions`) is already fixed by #4015, and the case for it in this issue rested on a finding that turned out to be my own analysis error. Shipping a CI gate justified that way is worse than not shipping it — it would carry a rationale that does not survive reading.\n\nIf a producer-side gate is still wanted on its own merits, it's a small script and worth deciding deliberately rather than as a follow-on to a retracted finding. Happy to write it if someone wants it; I'd rather not smuggle it in under this issue.\n\nSorry for the noise."
+}

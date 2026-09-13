@@ -1,0 +1,34 @@
+{
+  "number": 4261,
+  "kind": "issue",
+  "title": "68 个已发布包的 npm tarball 里没有 CHANGELOG.md,但 AGENTS.md 说升级者会去 grep 它",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T01:04:06Z",
+  "updated_at": "2026-07-31T04:41:25Z",
+  "closed_at": "2026-07-31T04:41:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4261",
+  "body": "发现于 #4248 的实现过程。给那 20 个包补 `\"files\": [\"dist\", \"README.md\"]` 时,需要先确认这个白名单到底会漏掉什么,于是实测了 npm 的「无条件打包」清单 —— 结果和仓库自己写下的约定对不上。\n\n## 现状\n\n`AGENTS.md` 的 Post-Task Checklist 第 3 条把 CHANGELOG 当成 breaking change 的交付面:\n\n> **Breaking changesets must carry their migration.** … this text ships to consumers as `CHANGELOG.md` inside the npm package and is what an upgrading agent greps after the tombstone error.\n\n但 `files: [\"dist\", \"README.md\"]` 并不包含 `CHANGELOG.md`,而 npm 也**不会**无条件打包它。实测(npm 10.9.7)`@objectstack/types` —— 它有一个 70KB 的 `CHANGELOG.md`:\n\n```\n$ cd packages/types && npm pack --dry-run\nnpm notice Tarball Contents\nnpm notice 11.4kB LICENSE\nnpm notice 8.8kB  README.md\nnpm notice 1.1kB  package.json\nnpm notice total files: 3\n```\n\n`CHANGELOG.md` 不在里面。npm 无条件打包的只有 `package.json` / `README*` / `LICENSE*` / `main` 指向的文件 / `bin` 目标 —— 老版本 npm 曾把 CHANGELOG 算进去,现在不算了。\n\n69 个可发布包里,只有 `@objectstack/spec` 一个在 `files` 里显式列了 `\"CHANGELOG.md\"`。其余 **68 个都发不出去**。\n\n## 为什么值得决定\n\n这不是「白名单收紧造成的回归」——那 49 个早就声明了 `files` 的包一直如此,#4248 补的 20 个只是从「全都发」变成「和其他包一致」。真正的问题是**约定和实现对不上**:仓库要求 breaking changeset 正文写清 FROM → TO 迁移,理由是升级者(尤其是 agent)撞到 tombstone 报错后会去包里 grep 这段文字;而除了 spec,这段文字根本没进 tarball。\n\n换句话说,写迁移说明的那条纪律,它宣称的送达路径有 68/69 是断的。\n\n## 两个方向,需要选一个\n\n1. **让约定成真** —— 把 `CHANGELOG.md` 加进所有可发布包的 `files`,并把它纳入 `check:published-files`(#4248 新增)的 canonical set,这样新包不会再漏。成本是每个 tarball 多一个文件(spec 的 CHANGELOG 已经在发,量级可接受)。\n2. **让约定说实话** —— 承认 CHANGELOG 只经 GitHub Release / 文档站送达,把 `AGENTS.md` 那句「ships to consumers as CHANGELOG.md inside the npm package」改掉,别让人以为 grep 得到。\n\n倾向 1:tombstone 报错的场景恰恰是「本地只有 node_modules,没有仓库」的场景,那时能 grep 到的只有 tarball 里的东西。但这是发布产物的范围决定,不该顺手塞进 #4248 的 PR 里,所以单独开一个。"
+}

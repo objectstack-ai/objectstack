@@ -1,0 +1,32 @@
+{
+  "number": 4045,
+  "kind": "issue",
+  "title": "A designer `configSchema` and the keys its executor actually reads are still unreconciled — `notify` honours `cfg.source`, which no schema declares",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T06:22:17Z",
+  "updated_at": "2026-07-31T02:15:55Z",
+  "closed_at": "2026-07-31T02:15:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4045",
+  "body": "Follow-up to #4027, which closed only the **expression** subset of that gap (#4040).\n\n## What #4040 fixed, and what it didn't\n\n#4027 described two hand-written lists nobody reconciled: a node type's designer `configSchema`, and what the rest of the platform does with the keys it declares. #4040 built a ledger + ratchet for the *expression* slots — every `xExpression` property a builtin declares is now validated and cannot silently go unchecked again.\n\nThe other half is untouched. A `configSchema` is written by hand next to an executor that reads `config` by hand, and nothing compares them. A property can be:\n\n- **declared but never read** — an author fills in a Studio field that does nothing (the `visibleWhen` shape, now covered for expressions only);\n- **read but never declared** — the executor honours a key the designer never offers, so it is reachable only by hand-authored metadata.\n\n## The concrete instance found while doing #4040\n\n`notify`'s executor reads `cfg.source` as a nested `{ object, id }` shape:\n\n```ts\n// packages/services/service-automation/src/builtin/notify-node.ts:92-93\nconst src = (cfg.source ?? null) as { object?: unknown; id?: unknown } | null;\nconst object = toStr(interpolate(cfg.sourceObject ?? src?.object, variables, context));\n```\n\nIts `configSchema` declares `recipients, title, message, channels, topic, severity, sourceObject, sourceId, actorId, actionUrl, payload` — **no `source`**. So:\n\n1. An author using Studio's generated form can never set the nested shape.\n2. Metadata that *does* carry `source` works at run time, with no schema describing it and no test pinning it.\n3. The `cfg.sourceObject ?? src?.object` line is a consumer-side fallback of exactly the kind Prime Directive #12 calls debt — a second de-facto contract next to the declared one. If `source` is legacy, it belongs in the ADR-0087 D2 conversion layer (like `flow-node-notify-config-aliases` already does for `to`/`subject`/`body`/`url`) so it is declared, tested and removable on a schedule. If it is current, it belongs in the `configSchema`.\n\nEither way the current state is the one #4027 was filed about: two lists, no reconciliation, drift invisible until someone trips on it.\n\n## Scope caveat — this is one instance, not an audit\n\nI only checked the four executors whose config reads were easy to enumerate (`crud`, `screen`, `notify`, `http`) while working on #4040. `notify.source` is what that turned up; `crud` and `http` looked consistent, and I did **not** check `connector_action`, `loop`, `map`, `parallel`, `try_catch`, `subflow`, `wait` or `script`. The remaining node types have the same structure, so more drift is likely.\n\nTwo non-findings worth recording so nobody re-chases them: `config.expand` appears in `crud-nodes.ts` only inside an error-message string (it is a **start**-node key, and `start` is structural with no descriptor), and `update_record` / `delete_record` neither declare nor read `outputVariable` — consistent, not drift.\n\n## Proposed\n\n1. **Decide `notify.source`** — conversion-layer alias, or declared property. Not something to guess at; it changes the designer form.\n2. **A declared-vs-read ratchet.** Harder than the expression one, because \"what the executor reads\" is not machine-readable today. Options, roughly in increasing cost:\n   - a per-node-type ledger of read keys, asserted against `configSchema` (hand-maintained, but the ratchet keeps it honest — same shape as #4040 and #3569);\n   - static analysis of `cfg.<key>` / destructuring in each executor (fragile against indirection, but zero maintenance);\n   - derive the `configSchema` *from* a Zod schema the executor itself parses `config` with, so the two cannot diverge by construction. Most correct, most invasive, and the only option that also gets the runtime the type/`required`/unknown-key enforcement `configSchema` currently does **not** provide (see the corrected TSDoc in #4040).\n3. Whichever is chosen, `log`/report what is deliberately designer-only or read-only, rather than leaving the exemption implicit.\n\n## Related\n\n- #4027 / #4040 — the expression subset, closed\n- #3528 — the incident that started this line\n- #3569 — the dispatcher↔client route ledger this mirrors\n- ADR-0087 D2 — the conversion layer where a legacy alias belongs\n- Prime Directive #12 (contract-first, no consumer-side fallbacks), #10 (declared ≠ enforced)"
+}

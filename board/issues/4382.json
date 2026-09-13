@@ -1,0 +1,35 @@
+{
+  "number": 4382,
+  "kind": "pull_request",
+  "title": "fix(lint,metadata): 撤销 `http.server` 豁免 —— 它的理由本身是错的 (#4251)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T10:02:24Z",
+  "updated_at": "2026-07-31T10:14:23Z",
+  "closed_at": "2026-07-31T10:14:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T10:14:21Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4382",
+  "body": "清单里的 **①**。\n\n## 那条豁免的理由是错的\n\n#4321 把 `http.server` 写进 `UNCONTRACTED_SLOTS`,理由写的是\"不存在 `IHttpServer` 契约\"。**该契约存在** —— `packages/spec/src/contracts/http-server.ts` —— 而且写下这条豁免时,**已经有 8 个调用点在用 `getService<IHttpServer>(…)`**。\n\n豁免和别的断言一样是一个 claim,而这一条建立在没人核过的前提上 —— **正是这条规则本身要抓的那种形状**。\n\n## 撤销之后露出 9 处\n\n| | 处 |\n|---|---|\n| 从未入列的文件 | 7 |\n| 已入列文件的计数增长 | 2 |\n\n两种基线都不能合法吸收。全部类型化到 `IHttpServer`;`packages/metadata/src/plugin.ts` 因此**整个清空**,基线**下降到 168 站点 / 36 文件**,并少掉一个文件。\n\n8 个测试站点调 `getPort()`(契约上是可选成员),按契约写成 `getPort!()` —— 它们刚 bootstrap 完自己的 server,这个断言是准确的。\n\n## 另外两点:已确认,只报告不改\n\n**`http.server` 与 `http-server` 是同一个实例的两个注册名。** plugin-hono-server 和 qa 的 node-plugin 各自并排注册两行;runtime 的 `config.server` 路径只注册带点的那个。`metadata/src/plugin.ts` 用 `??` 同时读两个 —— 这就是它一直没暴露的原因。**本 PR 不删任何注册** —— 那是运行时行为变更,该由决定规范名的人来做。\n\n**`IHttpServer` 有两份定义,而且已经分叉。** `packages/spec/src/contracts/http-server.ts`(15 个导入方)声明了 `write?()` 和 `end?()`;`packages/core/src/contracts/http-server.ts`(8 个导入方)没有。**spec 那份是超集,也是 ledger 指向的那份,所以它是源**;core 那份是过期的近似复制,应当改为 re-export。单独一个变更 —— 合并一份重复契约不是 lint 修复。\n\n## 给写更宽 HTTP 契约的人留一条证据\n\n`getRawApp()` 现在有了**第三个**独立消费方(metadata 的 HMR 路由,加上 cloud-connection 的两个)。它刻意不在 `IHttpServer` 上 —— 契约框架无关,raw app 是框架自己的句柄 —— 所以每个消费方各自具名声明。**三个足够用来判断这是不是仍然是对的答案了。**\n\n## 验证\n\n- `pnpm check:slot-lookup` 强制模式:`✓ 168 unswept site(s) in 36 file(s), none new`;`no files added`(对 d92c72d)\n- `eslint --no-inline-config` 全部改动文件 —— 干净\n- `metadata` dts build 成功(该包在 type-check DEBT 名单,build 才是类型门 —— 这是上个 PR 的教训)\n- `runtime` **995 / 68**、`client` **204 / 15**、`metadata` **281 / 13**、`http-conformance` **46 / 2** —— 全绿\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

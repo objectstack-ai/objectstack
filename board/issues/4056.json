@@ -1,0 +1,34 @@
+{
+  "number": 4056,
+  "kind": "pull_request",
+  "title": "chore(guard): extend the route-envelope check to the dispatcher domains (#4038 follow-up)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T07:18:18Z",
+  "updated_at": "2026-07-30T07:21:25Z",
+  "closed_at": "2026-07-30T07:21:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T07:21:23Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4056",
+  "body": "Closes the blind spot I documented in #4049, and turns #4053's warning into a CI failure instead of an issue nobody reads.\n\nGuard-only — no product code changes. One file plus a changeset.\n\n## The gap\n\nThe platform answers REST from two kinds of file:\n\n| | how it answers | scanned before |\n|---|---|---|\n| route modules (`*-routes.ts`) | `res.json(...)` | ✅ |\n| dispatcher domains (`runtime/src/domains/*.ts`) | RETURN `{ status, body }` for a central sender | ❌ |\n\nThe second never calls `res.json`, so the scan couldn't see it **by construction** — not an oversight in the scan, a category it wasn't built for.\n\nThat cost something real. `/share-links` emitted its payload under both `data` and a legacy `link` / `links` for as long as nothing looked, and it surfaced only because #3983's consumer sweep happened to walk past it — #4038, fixed in #4049. Exactly the \"a module nobody thought to check never gets audited\" argument that made #3843's scan repo-wide in the first place, one level up.\n\n## What it counts\n\nHand-built `response: { … }` literals per domain. A domain answering only through `deps.success` / `deps.error` / `deps.routeNotFound` / `deps.errorFromThrown` hand-builds **zero** and cannot drift — the envelope lives in one place for all of them. Any hand-built response now needs a declared count plus a `note`.\n\n**Hand-building is not automatically wrong**, which is the part worth getting right rather than banning outright. Four kinds show up and only the last is drift:\n\n1. **Enveloped, but the helper can't express it.** `deps.success` hardcodes status 200, so a 201 must be assembled by hand; `deps.error` carries no headers, so a 405 with `Allow:` must be too. → `keys.ts`, `share-links.ts`, one in `mcp.ts`\n2. **Passthrough of a body this dispatcher doesn't own** — an upstream Web Response, another service's result. → `mcp.ts`, `ai.ts`\n3. **A foreign wire format a client library requires** — `/auth` answers better-auth's shapes because better-auth's client parses them. → `auth.ts` ×4\n4. **Drift.**\n\n```\n✓ Dispatcher domains — 16 audited: 11 helper-only, 5 with declared hand-built responses (1 ratcheted)\n  ⚠ ratchet #4053: packages/runtime/src/domains/ai.ts — …\n```\n\n## The ratchet is the point\n\n`ai.ts` → **#4053**. `GET /ai/agents` is `disposition: 'sdk'` but unenveloped, and the SDK compensates by reading `.agents` off the raw body. Convert it the way the other five were converted — payload directly under `data` — without changing cloud and the SDK in the same batch, and `client.ai.agents.list()` returns an **empty list, silently**. Which is indistinguishable from the legitimate \"no AI service configured\" state, so nobody notices.\n\nI filed that as an issue an hour ago. An issue only helps someone who happens to read it; a ratchet stops the person who doesn't. That's the actual value here — the rest of the table currently catches nothing, and I'd rather say so than oversell it.\n\n## A false positive the self-test caught mid-write\n\nMatching the `response` key alone counted a **payload field** named `response` — `deps.success({ response: … })` — as a hand-built response. It now requires `response` to be a sibling of `handled`, which is what makes the pair an `HttpDispatcherResult` rather than just an object with that key.\n\nWorth flagging because it's the same over-broad-match class as `privateOk` in #4037, and because the assertion that caught it was one I wrote expecting it to pass.\n\n## Verification\n\n| gate | result |\n|---|---|\n| `check:route-envelope --self-test` | passes — **5 new assertions** (helper-only, hand-built caught, mixed file, commented-out ignored, payload-field-named-`response` ignored) |\n| `check:route-envelope` | 8 route modules: 7/0/1 · **16 domains: 11 helper-only, 5 declared, 1 ratcheted** |\n| guard actually bites | added a hand-built `response` to a helper-only domain (`ui.ts`) → fails with the site and the four-kind prompt, exit 1 |\n| `check:error-code-casing` · `check:console-sha` · `check:nul-bytes` · `check:role-word` · `check:org-identifier` | clean |\n| `eslint --no-inline-config` | clean |\n\nEmpty changeset — CI guard, releases nothing.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01CYbS3kS8xzsHNXFTzp4e2z)_"
+}

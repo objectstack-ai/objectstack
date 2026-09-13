@@ -1,0 +1,30 @@
+{
+  "number": 4022,
+  "kind": "issue",
+  "title": "Field.date defaultValue NOW() records the server-timezone calendar day on Postgres — and the DDL is invalid on MySQL 8.0",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T04:43:17Z",
+  "updated_at": "2026-07-30T05:07:37Z",
+  "closed_at": "2026-07-30T05:07:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4022",
+  "body": "## 结论\n\n#3994 做 F5（`Field.time` 的 `NOW()` 默认值）分析时刻意留下的同族缺口，现已实测确证：`Field.date` 的 `defaultValue: 'NOW()'` 在非 SQLite 方言仍走 `knex.fn.now()` → `CURRENT_TIMESTAMP`，产生两个问题。\n\n## 实测（PG 16 / MariaDB 10.11，方法与 #3994 相同）\n\n**PG —— 记错日历日（P2）**。`date` 列的默认表达式是裸 `CURRENT_TIMESTAMP`（`information_schema.columns.column_default` 实测），插入时按**服务器 `TimeZone`** 取日历日。把服务器设为 UTC-12（`Etc/GMT+12`）后，在 UTC `2026-07-30` 当天靠默认值插入的行存的是 **`2026-07-29`**。对 Asia/Shanghai（+8）的生产服务器，UTC 每天 16:00 之后的默认日期都会记成**下一天** —— 与 #3928 修掉的「同一时刻不同日历日」是同一族，只是走的是 DDL 默认值而不是比较值。\n\n**MariaDB —— driver 路径侥幸正确，但有两处隐患（P3）**。同样的裸 `current_timestamp()` 默认按**插入方 session 时区**求值；driver 自己的连接被 #3942 钉在 UTC，所以 driver 插入实测正确（UTC-12 全局时区下仍存 `2026-07-30`）。但：\n1. 任何**非 driver** 客户端（psql/mysql CLI、别的应用）靠默认值插入取的是自己 session 的时区 —— 同一列的默认日期取决于谁插的；\n2. **MySQL 8.0 直接拒绝 DATE 列上的裸 `CURRENT_TIMESTAMP` 默认**（只允许 TIMESTAMP/DATETIME）—— 与 #3994 里 TIME 列的情况完全相同，MariaDB 宽松才让这条 DDL 建得出来。CI 的 temporal-conformance 跑的是 MySQL 8.0，只是还没有任何用例建过 `date` + `NOW()` 列。\n\nSQLite 不受影响：`nowColumnDefault` 已经发 `strftime('%Y-%m-%d','now')`，UTC 语义。\n\n## 修法\n\n与 #3994 D-C3 完全同构，`nowColumnDefault` 的 `date` 档补上非 SQLite 分支：\n\n- PG：`(timezone('utc', now())::date)`\n- MySQL：`(cast(utc_timestamp() as date))`（表达式默认，MySQL 8.0.13+/MariaDB 10.2+，与 TIME 修复相同的版本地板）\n\n存量列的旧默认不迁移（与 datetime/time 的既有政策一致：默认值只管新建列；如需收敛可后续跟 `migrateMysql*` 模式，但 date 列连 MODIFY 加宽的需求都没有，单独动默认值不值当）。\n\n## 复现\n\n探针脚本同 #3994 方法论：声明 `{ due_on: { type: 'date', defaultValue: 'NOW()' } }`，查 `information_schema` 的默认表达式，然后把服务器/全局时区设为 `-12:00` 后靠默认插入，对比存储字面量与 UTC 当日。"
+}

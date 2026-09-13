@@ -1,0 +1,34 @@
+{
+  "number": 4355,
+  "kind": "pull_request",
+  "title": "docs(hook-bodies): 写集一节改为准确的覆盖面描述 —— #4305/#4344 之后\"没有静态检查\"已不成立 (#4351)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T08:38:20Z",
+  "updated_at": "2026-07-31T08:42:35Z",
+  "closed_at": "2026-07-31T08:42:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T08:42:33Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4355",
+  "body": "Closes #4351.\n\n## 问题\n\n`content/docs/automation/hook-bodies.mdx` 的 \"Not statically checked: the write set\" 一节声称写面**完全没有**静态检查,并称其为 \"accepted gap with no planned closure\"。自 #4305(`validateHookBodyWrites`)与 #4344(action 侧姊妹规则)起,这不成立 —— `hook-body-write-unknown-field` / `action-body-write-unknown-field` 会解析 L2 body,把字面写集拿去和目标对象声明的字段比对,未知字段带 did-you-mean 告警。\n\n\"declared ≠ enforced\" 的镜像:**enforced ≠ declared** —— 能力已交付,文档还在说没有。作者按文档放弃一个真实存在的护栏,和按文档相信一个不存在的护栏,代价是对称的。\n\n## 改动\n\n**`hook-bodies.mdx`** —— `### Not statically checked: the write set` → `### Write-set checking`\n\n- 覆盖面写准:三种字面写法按 hook / action 分列成表(action 的 `ctx.input` 是 params bag,只有 `api-crud-literal` 过继),advisory `warning` 不 gate,跑在 `os validate` / `os lint` / `os compile`。\n- 单列 **\"A missing warning is not a clean bill of health\"**:computed key、spread、动态对象名、wildcard `ctx.input`、多目标部分命中、跨包对象、aliased input —— 静态不可知的一律静默跳过,所以**告警的缺席不等于正确**。\n- #3700(结构化 `writes`,closed as not planned)保留为准确历史,但撤回 \"accepted gap\" 的结论:缺口是从另一头(解析写集)关的,不是没关。\n\n**`hooks.mdx`** —— 三处交叉链接指向被改名的锚点,且都在复述已撤回的说法,一并更新。wildcard 那条反而更锐利:wildcard hook 的 `ctx.input` 写恰恰是 lint **必须**跳过的那一种。\n\n## 两条前提按实测修正,而非照抄\n\n原 issue 的清单里有两条建立在错误前提上。我实测后按事实写,并各开了独立跟进项。\n\n**1. flow `update_record` 根本没有未知字段检查。**\n\n原文档建议\"优先用 flow `update_record`,它有 hook body 没有的静态检查\"—— 在这条轴上现在正好反了。同一 stack 三个面写同一个不存在字段 `stagee`,`validateReferenceIntegrity` 的实际输出:\n\n| 写面 | 结果 |\n|---|---|\n| hook body `ctx.input.stagee = …` | `hook-body-write-unknown-field` (warning) |\n| action body `ctx.api.object('deal').update({stagee})` | `action-body-write-unknown-field` (warning) |\n| flow `update_record` `fields: { stagee }` | **什么都不报** |\n\n`validate-readonly-flow-writes.ts` 是唯一走 `update_record.fields` 的规则,而它显式跳过未知字段(`if (!meta) continue; // unknown field — a form/field-layout lint concern, not this rule's`)。建议予以保留(结构化 diff、gating 的 `flow-update-readonly-field` 仍然成立),但把 gap 点明。\n\n**2. \"silently never lands\" 两个方向都不对。**\n\nlint 自己的诊断文案说未知列静默消失。实测:没有任何一层剥离它 —— `applyMutationsToInput` 是裸 `Object.assign`,`validateRecord` 只遍历已声明字段 —— 所以它一路到驱动:\n\n- **SQL 驱动**:未知列进入 knex 语句,**整条写失败**(better-sqlite3 实测 `table deal has no column named stagee`,零行落库);\n- **schemaless 驱动**(memory / MongoDB):杂散键**确实**被持久化。\n\n文档原来那段运行时描述是对的,予以保留并按驱动族拆开写细。lint 的文案问题属代码缺陷,单独跟进。\n\n## 边界\n\n`ctx.record` 那一半不属于本 PR —— 那是 #4345,已在同名 PR 里连同 sandbox-surface 表和 signature-conventions 一起处理。\n\n## 验证\n\n- 两个 MDX 经 `@mdx-js/mdx` + `remark-gfm` 编译通过;`fumadocs-mdx` 生成通过。\n- 新表经 remark 解析确认每行 3 列,`\\|` 正确渲染为字面 `|`。\n- 全仓已无 `not-statically-checked-the-write-set` 锚点残留,亦无 \"accepted gap\" / \"not statically validated\" 等旧说法。\n- `content/docs/automation/` 为手写目录(生成的只有 `content/docs/references/`),不受 `check:docs` 影响。\n\n纯文档,无行为变更,空 changeset。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 4267,
+  "kind": "issue",
+  "title": "[P3] spec: `check:generated` fails its own ledger reconciliation — `check:strictness-ledger` is unclassified",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T01:23:41Z",
+  "updated_at": "2026-07-31T02:07:15Z",
+  "closed_at": "2026-07-31T02:07:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4267",
+  "body": "~~Found while doing the #4196 retirement. Out of scope there; filing rather than widening it.~~\n\n**Already fixed — closing.** #4252 (`6e357ed`) added the classification to `check-generated.ts` while this was being written:\n\n```ts\ncheck: 'check:strictness-ledger',\nwhy: 'audits the hand-written #4001 strictness ledger against the z.object sites in src — no artifact',\n```\n\nI filed against a `main` that was minutes stale. Verified on `origin/main`: `check:generated` reconciles and runs its gates. Leaving the original report below for the record.\n\n---\n\n## The finding\n\n`pnpm --filter @objectstack/spec check:generated` — the local \"run every gate and report **all** stale artifacts at once\" runner that AGENTS.md §\"Touched `packages/spec`?\" tells you to reach for — failed before running a single gate:\n\n```\n✗ check:generated ledger is out of sync with package.json:\n\n  `check:strictness-ledger` exists in package.json but is in neither GATED nor NO_GENERATOR.\n    Classify it: does it compare a checked-in artifact against a generator, or audit source?\n```\n\n`check:strictness-ledger` was added in #4232 (`scripts/check-strictness-ledger.mts`, wired into CI at `.github/workflows/spec-liveness-check.yml:75`) without a matching entry in `check-generated.ts`'s ledger. This is the reconciler working exactly as designed — its own comment says an unclassified `check:`/`gen:` script \"fails the run rather than quietly dropping out of coverage\", and AGENTS.md notes it caught its own `package.json` entry on the first run. Nothing was broken; the classification was simply missing, and #4252 supplied it in the bucket predicted here (`NO_GENERATOR`).\n\n## Blast radius\n\nLow. `check:generated` is **not** in any workflow — CI runs the individual gates in `Check Generated Artifacts` / `TypeScript Type Check` / `spec-liveness-check`, all of which were green throughout. It cost only local time: an agent following the AGENTS.md instruction got a reconciliation error instead of the gate report, and had to fall back to the hand-rolled `for c in check:…` loop (which is precisely the thing `check:generated` exists to replace, and precisely the loop the `| tail -1` masking trap lives in).\n\nRefs #4232, #4252, #4196."
+}

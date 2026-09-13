@@ -1,0 +1,35 @@
+{
+  "number": 4374,
+  "kind": "pull_request",
+  "title": "feat(lint): flow-node-write-unknown-field 覆盖 create_record(#4271)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T09:37:26Z",
+  "updated_at": "2026-07-31T09:50:35Z",
+  "closed_at": "2026-07-31T09:50:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T09:50:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4374",
+  "body": "## 背景\n\n#4369 只把 flow write-set gate 落在 `update_record` 上,把 `create_record` 连同理由一起停在 `FLOW_WRITE_NODE_TYPES_DEFERRED` —— gating 规则一次只用一个**实测过**的面来赚它的严重级,而且把剩下那一半写成数据而不是留成沉默。\n\n本 PR 实测另一半,并把它移过来。\n\n## INSERT 的失败方式一样,而且更狠一档\n\n同一张字面 `config.fields`、同一个 `objectName` 绑定、同一条到 driver 的路径:引擎把未声明的 key 连同审计戳原样交给 `driver.create`。SQLite/knex 上变成:\n\n```\ninsert into `deal` (`created_at`, `id`, `name`, `stagee`, `updated_at`) values (…) returning *\n  - table deal has no column named stagee\n```\n\n语句整条被拒,同 payload 里拼对的字段也没落库。**多出来的伤害是事后什么都不存在**:行根本没被创建,于是后面每个从该节点 `outputVariable` 读 `{<node>.id}` 的节点,都在使用一条从未写入的记录。`update_record` 失败至少还留着原记录。\n\n所以 message 只在 `create_record` 上加上 \"…and the record is never created at all\",而不是把一句话糊成两边都能套。\n\n## 其余不动\n\n同一个 rule id、同一个 `error` 严重级、同一批静默 bail(模板化 `objectName`、非字面 `fields`、跨包对象、零字段对象、点号 key),`runAs` 依然不看。每条 skip 现在在 create 面上也各有一条测试钉住,两个节点类型不会各走各的。\n\n## 空的 deferred 列表是刻意保留的\n\npartition 测试是**行为式**地从 spec 里 executor 推导出的 config schema 求出\"带 `fields` 写 map 的节点类型\"全集,所以将来某个类型长出写 map,它两边都不在,测试直接失败逼人分类。把这个空数组删掉,就是把这次强制决策退回成默认值。\n\n## 两个非成员改为按失败形状排除,而非省略\n\n- `get_record.fields` 是 projection(`z.array(z.string())`)—— 一个**读**,未知项让选择变窄,不会打断语句;\n- `screen.defaults` 被 object-form screen 转发进客户端渲染的 `ScreenSpec`,未知 key 是渲染器忽略的预填。\n\n后者正是这条规则的 `error` 严重级用来对照定义的那个\"跳过它、其余照常渲染\"的惰性情形。新增一条测试钉住:ledger 之外的节点类型即使带 `fields` 也保持沉默。\n\n## 验证\n\n- `@objectstack/lint` 42 文件 / 660 测试全绿(新增 6 条);`typecheck`、`check:doc-authoring` 干净。\n- **三个 example 在 create_record 纳入覆盖后依然全部通过** —— 包括 crm 的 convert-lead 流(先建 account 和 opportunity,再更新 lead)。\n\n文档无需改动:#4369 落下的那两处措辞说的是 \"prefer a flow `update_record` node … the field-existence check gates there too\",本次扩大覆盖没有让其中任何一句变假。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 4096,
+  "kind": "issue",
+  "title": "StorageServicePlugin warns \"storage adapter swapped (LocalStorageAdapter → LocalStorageAdapter) … files may be unreachable\" on every clean boot",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T09:28:26Z",
+  "updated_at": "2026-07-30T13:43:20Z",
+  "closed_at": "2026-07-30T13:43:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4096",
+  "body": "Newly visible after #4084 unblocked boot-phase logging. Every `os dev` / `os serve` boot of `examples/app-todo` prints:\n\n```\nWARN StorageServicePlugin: storage adapter swapped (LocalStorageAdapter → LocalStorageAdapter).\nExisting files were NOT migrated and may be unreachable through the new adapter.\n```\n\nThe adapter was swapped for **the same adapter class**, and the warning claims a data-reachability risk that did not occur. It fires on a clean boot where nothing changed.\n\n## Mechanism\n\n`packages/services/service-storage/src/storage-service-plugin.ts`:\n\n- `applySettings()` reads the `storage` settings namespace and bails only when *every* value is empty:\n  ```ts\n  const hasAny = Object.values(values).some((v) => v !== undefined && v !== null && v !== '');\n  if (!hasAny) return;\n  const next = await this.buildAdapterFromValues(values);\n  this.storage.swap(next);           // line 335 — unconditional\n  ```\n- `swap()` then invokes the `onSwap` callback registered at line 172, which warns unconditionally:\n  ```ts\n  const prevName = (prev as any)?.constructor?.name ?? 'unknown';\n  const nextName = (next as any)?.constructor?.name ?? 'unknown';\n  ctx.logger.warn(`StorageServicePlugin: storage adapter swapped (${prevName} → ${nextName}). ` +\n    'Existing files were NOT migrated and may be unreachable through the new adapter.');\n  ```\n\nOnce the settings service has persisted defaults for the `storage` namespace, `hasAny` is true on every subsequent boot, so a same-kind, same-config adapter is rebuilt and swapped in, and the warning fires — forever.\n\n## Why it is worth fixing rather than ignoring\n\nThe warning is correct and valuable for a *real* adapter change (Local → S3), which is genuinely a data-reachability event. Crying wolf on every boot is how an operator learns to skim past it — and this one now sits in the boot-diagnostics block right where real warnings land.\n\n## Suggested fix\n\nSkip the swap when the rebuilt adapter is equivalent to the current one (same class **and** same resolved config), so `onSwap` only fires on an actual change. Comparing constructor names alone is not enough — Local→Local with a different `rootDir` *is* a real migration hazard and must still warn."
+}

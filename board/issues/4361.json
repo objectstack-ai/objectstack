@@ -1,0 +1,32 @@
+{
+  "number": 4361,
+  "kind": "pull_request",
+  "title": "fix(spec,plugins): 清扫 auth/session 一族的槽查找 —— 31 处类型化,并揪出 user-import 的 metadata reader 指着一个没有该方法的服务 (#4251)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T08:52:46Z",
+  "updated_at": "2026-07-31T09:08:32Z",
+  "closed_at": "2026-07-31T09:08:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T09:08:30Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4361",
+  "body": "#4251 清扫的 **B2 批次** —— auth / session 一族,该族里的擦除一个不留。基线棘轮 **171 → 140 站点、40 → 37 文件**,三个文件全部退出祖父名单。\n\n| 文件 | 站点 |\n|---|---|\n| `plugins/plugin-auth/src/auth-plugin.ts` | 20 |\n| `plugins/plugin-hono-server/src/current-user-endpoints.ts` | 10 |\n| `plugins/plugin-security/src/security-plugin.ts` | 1 |\n\n## 产出\n\n**`POST /admin/import-users` 在探测一个该服务从来没有的方法。** 这条路由解析 `metadata` 槽,然后用 `metadataService?.getMetaItem` 决定要不要把导入的字段强制转换依赖传下去:\n\n```ts\nconst metadataService: any = (() => {\n  try { return ctx.getService?.('metadata'); } catch { return undefined; }\n})();\n...(metadataService?.getMetaItem ? { getMetaItem: … } : {}),\n```\n\n`getMetaItem` 是 **protocol** 的方法 —— `ObjectStackProtocolImplementation`,由 `MetadataProtocolPlugin` 注册在 `protocol` 槽下。占着 `metadata` 槽的是 `MetadataManager`,它没有、也从来没有过这个方法。所以这个三元判断在任何部署上都是假,依赖从未传入:导入行未经类型强制就写进了 `sys_user`,而声称相反的分支就摆在那里。\n\n这和 #4127 那个死掉的 `automation.trigger`、#4321 的 `registerInMemory` 探测是同一个形状 —— 代码宣称、运行时给不出的能力,被 `any` 一直盖着。**把这次查找类型化到 `IMetadataService`,正是让这个死探测变成编译错误的那一步。** 路由现在读 `protocol`。\n\n**`/me/apps` 伸进了 ObjectQL 的私有状态。** 它读的是 `(ctx.getService('objectql') as any)?._registry`,而**同一个文件里**往上两个 handler 的 `/auth/me/permissions`,读的是同一个对象同一个字段上的公开 `registry` getter。两处现在都走公开访问器。唯一那个 stub 了 `_registry` 的测试,钉住的就是这次私有伸手,改 stub `registry`。\n\n## 契约:按证据补\n\n`IDataEngine` 的读方法(`find` / `findOne` / `count` / `aggregate`)现在声明了它们一直在接受的尾随 `options?: BaseEngineOptions` 参数。ObjectQL 自己给 `EngineReadOptions` 写的注释就是理由:\n\n> 读方法历史上把执行上下文放在 query 里,写方法放在尾随的 `options.context` 里 …… 同一个 `{ context }` 对象作为 `insert` 的第 3 个参数是对的,作为 `find` 的第 3 个参数却被**静默丢弃** —— 一个本意为 `isSystem` 的绕过就这么凭空消失了。\n\n引擎两条通道都收(`options.context` 优先)。但**契约**只暴露了 query 那条,于是每个用尾随通道的调用方 —— 包括 current-user endpoints 的权限集加载器 —— 只能靠把查找擦成 `any` 才能够到它。这正是本 issue 在扫的那种擦除,只不过是在它的成因那一层。\n\n加一个可选尾随参数不破坏任何实现方(`data-engine.test.ts` 里既有的\"最小实现\"用例本身就证明少写参数仍然满足接口),也不破坏任何调用方。`BaseEngineOptions` **本来就已导出** —— 只是躺在 \"legacy/deprecated\" 标题下无人使用,这也正是契约当初去找、没找到的原因;现在把它挪到其余 QueryAST 对齐类型旁边,并附上理由。新增一个 spec 测试,把这个参数钉在**调用点**上 —— 旧契约当初拒绝它的那个位置。\n\n## 契约够不到的地方,逃生口是具名的\n\n有三个槽今天还给不出 spec 类型。每一个都拿到一个窄的、有文档的本地接口,而不是 `any` —— 沿用 plugin-audit 的写法(`MessagingEmitSurface` / `AuditI18nSurface`):\n\n- `security.permissions` → `PermissionEvaluatorSurface`。plugin-security 的 `PermissionEvaluator`;plugin-hono-server 不能对一个可选插件产生运行时依赖(下面那些 `!evaluator` 分支*就是*它的缺席)。\n- `settings` → `SettingsReadSurface`。service-settings 同理。\n- `objectql` 超出 `IDataEngine` 的部分 → `EngineRegistrySurface`(`registry` / `getSchema`)与 `EngineExtensionSurface`(`registerHook` / `registerMiddleware`)。\n\n最后这条是**刻意留的范围**,不是遗漏。`@objectstack/runtime` 的 `DomainHandlerContext` 上 `getObjectQL` 那段现存记录写得很清楚:ObjectQL 确实比 `IDataEngine` 宽,更宽的那部分没人写过契约,把整个东西标成 `IDataEngine` 会是\"看着更舒服的那个谎\",把缺口埋在一堆 cast 底下。这些声明就是那份契约将来要据以书写的具体输入 —— 也是它落地时(B3)要删掉的东西。\n\n顺带一提:`SettingsReadSurface` 一开始漏了 `subscribe`,编译器当场点出 6 个调用点(brand name / SMS locale / auth 命名空间的实时重绑)。`any` 不会说一个字。`SettingsChangeHandler` / `SettingsUnsubscribe` 在 `@objectstack/spec/system` 已有公开类型,所以直接复用而不是另起一套形状。\n\n## 范围外,只报告不修\n\n规则仍然看不见的**第三种形状**,与已记录的\"包装函数返回注解\"残留不同,而且不需要类型信息就能抓:\n\n```ts\nlet ql: any;\nql = ctx.getService('objectql');   // 声明符上没注解、没类型实参、没有 as\n```\n\n全仓约 20 处(`runtime/app-plugin.ts` ×4、`cloud-connection/*`、`core/fallbacks/authored-translation-sync.ts` …)。细节回帖到 #4251。\n\n## 验证\n\n- `pnpm check:slot-lookup` (强制模式) → `✓ ratchet holds: 140 unswept site(s) in 37 file(s), none new`;`baseline key set verified against 6a67d7a: no files added`\n- `eslint --no-inline-config` 全部改动文件 —— 干净\n- 全仓 `pnpm typecheck` —— **110/110 任务通过**\n- `@objectstack/spec` **7157 tests / 278 files**、`objectql` **1394 / 87**、`runtime` **951 / 66**、`plugin-auth` **579 / 26**、`plugin-security` **677 / 32**、`plugin-hono-server` **135 / 12** —— 全绿\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 4090,
+  "kind": "pull_request",
+  "title": "test(spec): envelopeViolations — the conformance check BaseResponseSchema cannot express",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T09:13:45Z",
+  "updated_at": "2026-07-30T09:46:16Z",
+  "closed_at": "2026-07-30T09:46:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T09:46:14Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4090",
+  "body": "Closes a gap in my own prior work on the #3843 line: the assertion those suites lead with proves less than their comments claim.\n\n## The overclaim\n\nEvery conformance suite opens with this, under a comment I wrote in #3972 and reused since:\n\n```ts\n// The contract itself, imported — not a restatement of it.\nconst parsed = BaseResponseSchema.safeParse(body);\nexpect(parsed.success, `body is not a BaseResponse: …`).toBe(true);\n```\n\nIt isn't the contract. Demonstrably:\n\n```ts\nBaseResponseSchema.safeParse({ success: true })                     // ✅ passes\nBaseResponseSchema.safeParse({ success: true, data: link, link })   // ✅ passes\n```\n\n`BaseResponseSchema` is `{ success, error?, meta? }` — it **declares no `data`** (each response type adds its own via `.extend({ data })`), and a plain `z.object` **strips** unknown keys rather than rejecting them.\n\nSo it catches the one drift it was added for — a missing or non-boolean `success`, the flag `unwrapResponse` keys on, which is what #3675 / #3689 / #3843 were about — and nothing else. That second body is precisely the duplicate-payload drift `/share-links` shipped until #4038 / #4049 removed it, and `safeParse` passed it the entire time.\n\nWhat was actually catching it: assertions each suite hand-wrote alongside (`deadTopLevel`, `expectData`, the `ENVELOPE_KEYS` loop I wrote once in `domain-handler-registry.test.ts`). That works exactly as long as whoever writes the next suite remembers to.\n\n## `envelopeViolations(body)`\n\nReturns every departure as readable reasons; empty means conformant.\n\n| rule | why |\n|---|---|\n| `success` must be a **boolean** | the flag `unwrapResponse` keys on; without it a body is handed to callers raw |\n| a success body must carry `data` | `undefined` only — `null`, `[]`, `{}`, `0`, `''` are payloads, not absences |\n| a failure body must carry `error` with string `code` + `message` | the nested form, not the pre-#3675 bare string |\n| no top-level key outside `success`/`data`/`error`/`meta` | the **general form** of the duplicate-payload drift |\n\nIt deliberately does *not* check the shape of `data`. That's each route's own payload schema, and conflating the two is what let `SettingsNamespacePayload` describe a whole body before #3843 and only `data` after it.\n\nPlaced in `contract.zod.ts` beside the schema it completes, alongside the plain predicates `spec/api` already exports (`standardErrorCodeForHttpStatus`, `readServiceSelfInfo`). **No new package** — and `BaseResponseSchema` itself is untouched, because adding `data` or `.strict()` would hit every `.extend()` caller and every producer for no gain over fixing this in the assertions.\n\n## Verification\n\nTwo directions, because either alone would be misleading.\n\n**The pairing is load-bearing.** I reintroduced the exact `/share-links` drift (`{ success: true, data, link: data }`). The new assertion fails with `stray top-level key `link` — the payload belongs under `data``; the old `safeParse` line still passes. That contrast *is* the argument for the change.\n\n**The rules aren't too strict.** Every existing suite runs unchanged and green — nothing legitimate is flagged:\n\n| package | result |\n|---|---|\n| `@objectstack/spec` | **6951 passed** (incl. 14 new for the predicate) |\n| `@objectstack/rest` | 505 passed |\n| `@objectstack/runtime` | 914 passed |\n| `@objectstack/client` | 200 passed |\n| storage · settings · datasource · i18n · sharing | 220 · 189 · 154 · 62 · 225 |\n| spec `tsc --noEmit` · `check:docs` · `check:skill-refs` · `check:react-blocks` | clean |\n| `check:route-envelope` · `check:error-code-casing` · `check:console-sha` · `check:nul-bytes` · `check:role-word` · `check:org-identifier` | clean |\n| `pnpm lint` | **0 errors in source** (see note) |\n\n**Two local-artifact notes**, both of which look like failures and aren't:\n\n- `pnpm lint` reports 61 errors — *all* inside `.cache/objectui-96ee72e85439/`, the gitignored console build artifact my earlier `.objectui-sha` bump left in this worktree. Zero in real source; CI checks out fresh and never sees it.\n- The first `rest` run showed 8 anonymous-deny 401 failures. That's the stale-dist signature I flagged in #4037's method note — I'd rebuilt only `spec`, not its dependents. A full `turbo run build` cleared it (505/505). Same for the recurring `runtime` `datasource-autoconnect` failure: gitignored `.objectstack/data/memory-driver.json` accumulating rows across local runs, 914/914 once removed.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01CYbS3kS8xzsHNXFTzp4e2z)_"
+}

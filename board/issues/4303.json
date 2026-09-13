@@ -1,0 +1,35 @@
+{
+  "number": 4303,
+  "kind": "pull_request",
+  "title": "fix(data): `sort` 的点号路径被拒绝（400 INVALID_SORT），不再静默降级为不排序 (#4256)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T04:56:48Z",
+  "updated_at": "2026-07-31T05:35:07Z",
+  "closed_at": "2026-07-31T05:35:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T05:35:04Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4303",
+  "body": "Closes #4256。\n\n## TL;DR\n\n#4226 收口后唯一漏网的 sort 形态补上了：`?sort=account.company_name`（点号路径）现在在共享 normalizer 处被拒 —— `400 INVALID_SORT`，消息说明它想跨的关系、以及正确做法（用公式/汇总字段把值反范式化到本对象再排）。此前它是 `200` + 未排序行：头段是真实字段所以过闸，然后 `SqlDriver` 渲染出 `\"account\".\"company_name\"` 撞上从未 join 的表，#3821 兜底**丢掉排序**重跑；Mongo / memory driver 则把路径解析到行内，而外键是标量 id，排序照样无效。`sort` + `top` 的「最新 N 条」于是变成任意 N 条，响应里没有任何信号。\n\n## 采用 issue 的方案 1（ingress 拒绝），决策依据\n\nIssue 要求先量影响面再定。已对 framework / objectui / cloud 三仓做了穷尽调查：\n\n- **真实调用方发出点号 sort 的数量：0。** 视图/报表/仪表盘元数据、examples、seeds、`sys_saved_report` 种子里全部是平面字段名。\n- **objectui 结构上产生不了点号 sort key**：lookup 列按自己的平面字段名作为列 key（`accessorKey: fieldName`），关联数据走独立的 `$expand` 参数嵌在同一平面 key 下；SortBuilder 的字段选项来自 `objectDef.fields` 的平面枚举，无自由输入。通用表格的列头排序是纯客户端的，不出网。\n- **cloud 全部 ~25 处 sort 均为平面单字段。**\n- **测试无一依赖点号 sort**（无论断言丢弃还是依赖功能），文档也没有任何一页在教它 —— 仅有的两处提及都是警告。\n\n因此不需要 deprecation 轮次，直接拒绝的爆炸半径就是手写请求 —— 恰好是被静默降级误导的那批调用方。\n\n**残余风险（grep 覆盖不到的）**：客户库里的存量视图元数据。`ObjectView` 会把工具栏排序持久化进保存视图，`sys_saved_report` 存用户排序；但由于没有任何 UI 路径和种子能写出点号值，存量里存在点号 sort 的唯一途径是管理员在 Studio 元数据管理里手改 JSON（`SchemaForm` 的 repeater 是裸文本输入）。若要绝对确定，可在生产库对保存视图/报表做一次一次性查询。\n\n## 实现\n\n`assertSortFieldsExist`（`packages/metadata-protocol/src/protocol.ts`）在原有 unknown-field 检查之后加点号检查，消息按头段区分两种误解：\n\n- 头段**是** reference 字段（`project_id.name`）→ 指名它想跨的关系，处方是反范式化（公式/汇总字段）；\n- 头段**不是**（`title.length`）→ 陈述契约：sort 只作用于整列，不进入列值内部。\n\n未知头段（`no_such.title`）保持 #4226 的 typo 答案且优先报告 —— 与 expand gate 的 `unknown` > `not-a-reference` 优先级一致。仅注册表有字段表时生效（与所有 #4226 gate 相同的分层）；直接调 `engine.find()` 的内部调用方不受影响。expand 子查询的嵌套 `orderBy` 不经过顶层 gate，无误伤。\n\n顺带查证：QueryAST 的显式 `joins`（点号排序唯一可能合法的场景）已在 #4294 被 tombstone —— 「join 别名排序」这个合法形态不存在。\n\n## 实测（真引擎 + 真 registry，showcase fresh 实例，与 issue 实测表同法）\n\n```\n?sort=project.name      -> 400 INVALID_SORT  「follows the relationship 'project'…Denormalise…」  ✅（修复前：200 + 未排序）\n?sort=no_such.title     -> 400 INVALID_SORT  「not a field on object…」                           ✅（不变）\n?sort=-title            -> 200，正确排序                                                          ✅（控制组）\n?sort=project           -> 200（裸外键列仍可排）                                                   ✅（控制组）\n?sort=title.length      -> 400 INVALID_SORT  「whole columns, not values inside them」            ✅\n```\n\n## 测试与文档\n\n- `query-expression-conformance.test.ts` 新增 12 个用例：七种 wire 拼写的点号拒绝、关系/非关系两种消息、typo 优先级、裸外键控制组、`top` footgun 收口。\n- 受影响包全绿：metadata-protocol 122 / objectql 1357 / rest 521。全仓套件在本机 turbo 并行下有资源型超时抖动（五次失败为五个不同包，含 auth 注册测试 10s 超时，transform 124s —— 均单独复跑全绿），以远端 CI 为准。\n- 文档：`query-syntax.mdx` §3 告警改写（「仍静默降级」的前提已不成立）、`queries.mdx` info callout 与 `data-api.mdx` 参数表/示例表补点号形态。\n- changeset：`@objectstack/metadata-protocol` patch。\n\n## 关联\n\n#4256 / #4226（PR #4240）/ #3821 / #3948 / #4294（joins tombstone）\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

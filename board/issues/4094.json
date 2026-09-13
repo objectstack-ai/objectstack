@@ -1,0 +1,35 @@
+{
+  "number": 4094,
+  "kind": "pull_request",
+  "title": "fix(spec): the liveness gate stops trusting the direction it never checked",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T09:25:59Z",
+  "updated_at": "2026-07-31T04:06:32Z",
+  "closed_at": "2026-07-31T04:06:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T04:06:29Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4094",
+  "body": "Follow-up to #4080, which documented this hole. Closing it turned out to be ~130 lines.\n\n## The hole\n\nThe liveness gate walks the **schema** and looks each property up in the ledger. That direction is well defended — a property with no row is `UNCLASSIFIED` and fails CI (the ratchet). The reverse had **no check at all**, and the two removal routes make that gap load-bearing:\n\n| Route | Key in the walked shape? | Its row | What happened if you got it wrong |\n|---|---|---|---|\n| `retiredKey()` tombstone | **yes** (`z.never()` is a property) | must **stay** | deleting it → `UNCLASSIFIED`, fails CI (14 at once in the #3896 sweep) |\n| strict removal | no | must **go** | leaving it → **nothing asked, ever** |\n\nThe forward pass stops enquiring about a key it can no longer see, so a stale `dead`/`live` claim about a property that does not exist rots in place — still read by anyone treating the ledger as the capability catalogue it doubles as.\n\nNot hypothetical: the report `aria`/`performance` rows outlived their schema keys by a full release and were deleted by hand in the #3896 sweep, noticed only because someone happened to be reading the file. One direction failed loudly; the other never failed at all — the same silent-no-op shape this whole ledger exists to catch, one layer up.\n\n## The fix, and why it fails rather than warns\n\n`scripts/liveness/orphans.mts` — a pure scan run off the **same walk** the forward pass classifies against, so the two directions can never disagree about what the schema contains.\n\nIt's a **hard failure**. The tree is orphan-free across all sixteen governed types, so there's no debt to amortise and nothing to soften; a warning would have re-created the original defect one layer up — the ledger README's own verdict is that a permanently-noisy check is a check nobody reads, the same way a stale row is a claim nobody re-tests.\n\nThe error text names **both** causes, because which one applies is the author's judgement:\n\n1. delete the row (the strict-removal case), or\n2. if the property really *is* still authorable, fix the **walk** — a property the walk cannot see is a property the ratchet cannot govern (e.g. one living on a union member `shapeOf` skips).\n\nIt also restates the asymmetry inline, so the tempting wrong fix — deleting a tombstoned key's row — is warned against at the point of failure rather than in a doc.\n\n**Deliberately silent in one case:** a row declaring `children` on a non-container. The forward pass already reports that as `UNCLASSIFIED` with a more precise message, and two headings for one fix reads as two problems. Confirmed against `tool.parameters` (a `z.record`, undrillable): the forward pass claimed it, the orphan scan stayed quiet.\n\n## How it's proven, given the tree is clean\n\nA green gate proves nothing about whether the scan can *fire*, so:\n\n- **`orphans.test.ts` (9 cases)** — both orphan levels, the tombstone that must NOT flag, the deferred non-container, entry fields (`status`/`evidence`/`verifiedAt`/`authorWarn`) that are not child props, and absent/empty `props`. The logic module + colocated test matches the `evidence.mts` / `verification.mts` / `empty-state.mts` pattern already in that directory.\n- **End-to-end injection** — a real orphan added to a real ledger, twice: `tool/category` (top level) and `view/list.ghostListKey` (drilled child). Each failed the gate with exit 1 and printed the full prescription. Ledgers restored and verified byte-identical (`git diff` on `liveness/*.json` empty).\n\n## Docs corrected\n\nBoth the skill (#4080) and the ledger README carried the now-false claim that this direction never fails. Both updated to describe the orphan leg as the fix, with the asymmetry table intact.\n\n## Verification\n\n- All **ten** spec gates pass. `check:api-surface` failed first on a dist predating `2af1988` — the stale-dist false alarm the skill documents; rebuilt, then green. Reporting it because the trap is the point.\n- Liveness script suite **98/98**; spec `tsc` clean.\n- Gate-only change under `packages/spec/scripts/`, which is not in the package's published `files` — empty changeset.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QuViRSR1j6GJjf9qGbnqFX)_"
+}

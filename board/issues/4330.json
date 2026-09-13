@@ -1,0 +1,32 @@
+{
+  "number": 4330,
+  "kind": "issue",
+  "title": "lint: five hand-copied `SYSTEM_FIELDS` lists in packages/lint should derive from the spec's declarations",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T06:19:18Z",
+  "updated_at": "2026-07-31T07:05:11Z",
+  "closed_at": "2026-07-31T07:05:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4330",
+  "body": "Noticed while adding `searchable-field-unknown` (#4328).\n\nFive rules in `packages/lint` each carry their own copy of \"registry-injected columns present on almost every object but absent from authored `fields`\", and they have already drifted from one another:\n\n| file | contents |\n|:--|:--|\n| `validate-widget-bindings.ts:238` | `id`, 4 audit, `owner_id`, `organization_id`, `tenant_id`, `user_id`, `deleted_at` |\n| `validate-page-field-bindings.ts:72` | same list, comment says \"Copied verbatim from `validate-widget-bindings`\" |\n| `validate-translation-references.ts:173` | same list |\n| `validate-react-page-props.ts:214` | same list |\n| `validate-flow-template-paths.ts:93` | **different** — adds `name`, `owner`, `is_deleted`, `record_type`; its comment says it \"mirrors `validateFormLayout`'s system-field set plus the audit/tenant columns from `FIELD_GROUP_SYSTEM_FIELDS`\" — i.e. it names the canonical source and then hand-copies anyway |\n\nThis is exactly the shape #3786 fixed for the audit-provenance family: a four-name list hand-copied four times across two repos, each under a comment asking to be kept in sync with one of the others. The spec now owns two declarations that between them cover the whole set:\n\n- `FIELD_GROUP_SYSTEM_FIELDS` (`@objectstack/spec/data`) — audit provenance + `organization_id` / `tenant_id` / `is_deleted` / `deleted_at`\n- `SystemFieldName` (`@objectstack/spec/system`) — `id`, `created_at`, `updated_at`, `owner_id`, `tenant_id`, `user_id`, `deleted_at`\n\n`validate-searchable-fields.ts` (#4328) derives from both rather than adding a sixth copy:\n\n```ts\nconst SYSTEM_FIELDS: ReadonlySet<string> = new Set<string>([\n  ...FIELD_GROUP_SYSTEM_FIELDS,\n  ...Object.values(SystemFieldName),\n]);\n```\n\n**Suggested fix:** lift that into one module-local export in `packages/lint` (e.g. `system-fields.ts`) and point the five existing rules at it. Two judgement calls the conversion has to make deliberately rather than by accident:\n\n1. The derived union is a **superset** of the four identical copies (it adds `is_deleted`), which only makes those rules more permissive — safe, and the direction the comments already argue for (\"deliberately generous: over-inclusion costs at worst a missed warning; under-inclusion costs a false one\").\n2. `validate-flow-template-paths` additionally exempts `name`, `owner` and `record_type`, which are **not** system columns in the same sense — `name` in particular is an ordinary authored field on most objects. Whether those belong in the shared set or stay local to that rule needs a decision, not a mechanical merge.\n\nNot folded into #4328 to keep a new gating rule's diff reviewable."
+}

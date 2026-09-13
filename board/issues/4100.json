@@ -1,0 +1,36 @@
+{
+  "number": 4100,
+  "kind": "pull_request",
+  "title": "fix(driver-memory): persistence opt-in again + move the remaining suites to in-memory SQLite (#4065)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T09:44:35Z",
+  "updated_at": "2026-07-30T12:53:29Z",
+  "closed_at": "2026-07-30T12:53:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T12:53:27Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4100",
+  "body": "Closes #4065.\n\n保留 `@objectstack/driver-memory`（不删包），但把它退回文档里早已写明的角色，并停止在测试与脚手架里依赖它。\n\n> ## ⚠️ 与 #4083 重叠 —— 需要你确认一处\n>\n> 本分支开着的时候，main 上落了 **#4083（#4111 + #4108）**，处理的是同一个隐患。冲突已全部按「main 优先」解决，**其工作原样保留**：\n>\n> - `default-datasource-driver-factory.ts` —— 整取 main。它的 `buildMemoryConfig`/`scopeMemoryPersistence` 会把**已请求的**持久化模式展开成 per-datasource 目的地，我的版本没有；我的丢弃。\n> - `sqlite-driver-fallback.ts` —— 整取 main 的无条件 `persistence: false`。我原来让它跟随所替代的 sqlite 目标（file → `'file'`），那会把 #4083 刚修掉的**进程级共享文件别名**问题重新引入。\n> - `datasource-autoconnect.test.ts` —— 整取 main，**回退**本分支把该文件迁到 wasm SQLite 的改动。main 在那里加了「内存池不留痕」的回归测试；跑在 SQLite 池上它会**空洞地通过**（这种池根本不写 `.objectstack/`）。该文件留在 memory driver 上，继续守它被写出来要守的东西。\n>\n> **本分支存活下来的，是 #4083 刻意留下的另一半：driver 自身的默认值。** #4111 修了工厂路径，#4108 明确写进文档：直接构造的 `new InMemoryDriver()` 仍保持 `'auto'`，仍会相对 CWD 写 `.objectstack/data/memory-driver.json`。而 #815 的验收需求第 1 条说那个默认值从来就不是被接受的设计——所以这里把它改成 `false`。\n>\n> 两者互补：#4083 的 scoping 仍是唯一能阻止两个**已选择持久化**的池共用一个文件的机制，其显式 `false` 变成双保险。\n>\n> **需要你点头的是**：这与 #4108 刚写进文档的说法相反（那句已在本 PR 中一并更新）。如果你当时是有意保留 `'auto'`，说一声我就把 P0 撤掉，只留 P1/P2。\n\n## 关键发现：`'auto'` 默认值是实现偏离，不是产品决策\n\n#4065 判断「改默认是破坏性的（#815 的 dev/UED 诉求依赖它）」。核对 #815 的验收需求后，这句不成立：\n\n> **1. 统一持久化入口：** … 默认情况下不启用持久化（纯内存，行为不变）。\n>\n> **5. 配置示例：** `// 纯内存` → `new InMemoryDriver()`\n\n#815 明确要求持久化 **opt-in**，并把 `new InMemoryDriver()` 标注为纯内存。今天的 `'auto'`（Node.js 下 = 落盘）是从这份已验收设计上漂移出来的。\n\n漂移能存活的原因不是「没有测试」：`MemoryConfigSchema` **确实**钉住了默认值，断言的是 `'auto'`；driver 也实现 `'auto'`；两边一致，看起来已验证。没人核对的是「一致的那个值是不是 #815 定的那个」。driver 自己的 `persistence.test.ts` 也抓不到——每个用例都显式传 `persistence`，省略路径从未被覆盖。\n\n## 改了什么\n\n**P0 — 默认值（`82b161f`，经合并后收敛）**\n- `InMemoryDriverConfig.persistence` 与 `MemoryConfigSchema` 默认值 `'auto'` → `false`\n- `DevPlugin` 显式 `persistence: false`，与它并排的 cache / queue / job / i18n / storage / search stub 一致\n- 新增 3 个行为测试。**落地前先验证过它们在旧默认值下会红**，不是空测试\n- 工厂与 sqlite 兜底两处改为 #4083 的实现（见上）\n\n**P1 — 测试迁移（`a7e932f`）**\n\n9 个测试文件从 mingo 换到 `SqliteWasmDriver({ filename: ':memory:' })`，与 `bootStack` 一致（纯 JS 无原生编译，CI 安全；真 SQL 语义）。迁移暴露的每一处失败都是 memory driver 一直在吸收的 fixture 缺陷：\n\n| 症状 | 真因 |\n|:---|:---|\n| REST 返回 **404 `OBJECT_NOT_FOUND`** | bootstrap 之后注册的对象错过建表同步；SQL 首写 `no such table`，被 REST 错误映射成 404 —— 路由形状的症状，DDL 形状的病因 |\n| `sys_notification` 写入失败 | `MessagingServicePlugin` 写它但不声明它（那是 platform object），精简 kernel 没加载 platform-objects。mingo 首次触碰自动建表，把这个遗漏完全盖住 |\n| 驱动未连接 | memory 不需要 `connect()`，SQL 需要 |\n\n**刻意不动的**：`read-coercion-conformance` 保留双 driver 矩阵；以及主体就是 memory driver 或其接线的套件（`standalone-stack` 的 `memory://`、`sqlite-driver-fallback`、CLI driver 标签测试、driver-memory 自身套件），**外加合并后新增的 `datasource-autoconnect`**。\n\n> 初版分析里我建议把 memory **加回** date-bucket / empty-group parity 网关。按「暂时不需要使用和维护」的意图这条已撤回。\n\n**P2 — 脚手架与文档（`988910a`）**\n- `os init` 与 `create-objectstack` blank 模板不再列 `@objectstack/driver-memory`（冗余：`@objectstack/runtime` 已依赖三个 driver，CLI 四个全带；且唯一点名 memory 读起来像背书，而它是 dev 步降的**末位**）\n- `drivers.mdx` 的「两条构建路径」表格保留 #4108 的结构，事实按新默认值更正\n\n**（`e6c2adb`）** 类 docstring 的 \"production-ready\" 去掉。它不存储任何约束（`create()` 就是 `table.push()`，无主键/唯一/NOT NULL/外键/列类型），`bulkCreate` 会落两行同 `id` —— #4065 的第二个发现。按 Prime Directive #10，driver 转维护态就裁掉声明。\n\n**（`e7d31c6`）收尾 cwd 写副作用** —— 追这个残留挖出两个真问题：\n\n1. **`projectRoot` 只管了一半的栈。** `createStandaloneStack` 的 `projectRoot` 文档说是把 boot 的落盘状态限定在项目目录，它也确实重定向了默认 sqlite 库——但从未传给 `MetadataPlugin`，其 `FileSystemRepository` 仍以 `process.cwd()` 为根。于是同一个「项目根」指向两个目录。现已转发 `rootDir`，`bootSchemaStack` 也接受 `projectRoot`。\n2. **CLI 把自己的测试编译进了 `dist/`，而 vitest 会去跑它们。** `tsconfig.build.json` 收录整个 `src` 且无 exclude，于是每个 `src/**/*.test.ts` 都产出 `dist/**/*.test.js`：`files: [\"dist\"]` 把它们**发布**了出去；本包没有 vitest 配置，`vitest run` 会把编译副本和源码一起收集——**81 个测试文件 / 849 个用例，而源码只有 58 / 581**。\n\n   这会**静默地让改动失效**：对源码测试的修复看起来「没生效」，因为跑的仍是修复前的编译副本。它同样允许源码测试被改成通过、而陈旧副本继续断言旧行为。现已在构建中排除测试文件。其他包不受影响（用 tsup，只产出声明的入口；已扫描确认只有 CLI 命中）。\n\n## 验证\n\n- **全量测试跑两遍**（第二遍 `--force` 强制真实重跑）：**129/129 两次全绿**。此前第二遍必红 —— #4065 的核心诉求已达成\n- **合并 main 之后，含 dogfood 的全量强制重跑：132/132 全绿**\n- CLI 套件连跑两遍不再留下 `.objectstack`\n- `pnpm run lint` 干净\n\n## 一处保留（by design，非残留）\n\n`showcase_external.db`。这是 showcase 外部 datasource 声明按设计写的相对路径，fixture 播种有 `count === 0` 守卫、**幂等**、已 gitignore —— 与 `memory-driver.json` 每跑一次累加 2N 行不是同一类。写在 `examples/app-showcase/` 自己项目目录里是正确的；dogfood 目录下那份是因为 dogfood 从自己的包目录引导 showcase app。要消除后者只能改 example app 的声明契约、加测试专用 env 开关、或重构 dogfood 的 cwd —— 都比一个幂等的 gitignored 小文件代价大，故未动。\n"
+}

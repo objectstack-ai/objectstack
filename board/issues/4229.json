@@ -1,0 +1,36 @@
+{
+  "number": 4229,
+  "kind": "pull_request",
+  "title": "refactor(types,rest,services,plugin-sharing): one shared writer for the response envelope, and `error.code` is enforced at compile time (#3973)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T16:43:59Z",
+  "updated_at": "2026-07-31T02:05:55Z",
+  "closed_at": "2026-07-31T02:05:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T02:05:53Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4229",
+  "body": "Closes #3973.\n\n`BaseResponseSchema` declares one envelope for every REST body the platform emits. It declared it once; the code that *wrote* it was copied per route module. After #3843 and #3983 converted the last drifting one, seven modules each carried their own two-line `sendOk` / `sendError` pair — the envelope's shape in **fourteen places rather than one**.\n\n#3973's option 1 (consolidating i18n's four inline success builders) had already shipped. This is **option 2**, whose stated blocker was *placement, not design*.\n\n## Placement, answered by precedent\n\n| Candidate | Verdict |\n|---|---|\n| `packages/spec` | Ruled out — schemas-only (Prime Directive #2) |\n| `packages/core` | All seven depend on it, but writing an HTTP envelope is not kernel business |\n| **`@objectstack/types`** | ✅ Depends on nothing but `@objectstack/spec`, so every caller can reach it |\n\n`@objectstack/types` is already where the repo puts a helper the HTTP boundaries share: [`error-leak.ts`](packages/types/src/error-leak.ts) (#3867) sits one file over and made the identical argument first — *\"do not ship driver internals to clients\" is a property of the HTTP boundary, not of one router*. Writing the declared envelope is the same kind of property.\n\nThe builders take a structural `{ status(n), json(body) }`, so the package imports **no HTTP contract at all** — `IHttpResponse` satisfies it, and so does the `any`-typed `res` the three older modules carry.\n\n## `error.code` is now checked by the compiler\n\nAll seven copies typed the parameter `code: string`. ADR-0112 (#3841) closed the vocabulary — `ErrorCode` is `StandardErrorCode ∪ ERROR_CODE_LEDGER` — but an invented code was still caught only at **runtime**, by a conformance suite parsing a driven body, i.e. only on routes some test happened to drive.\n\n```ts\nsendError(res, 400, 'NOT_A_REGISTERED_CODE', 'invented');\n// Argument of type '\"NOT_A_REGISTERED_CODE\"' is not assignable to parameter of type 'ErrorCode'.\n```\n\nVerified with a probe rather than inferred from a silent typecheck: `TS2345` on an unregistered code, and `TS2578` on a *valid* code under `@ts-expect-error` (proving the directive-detector is active, so the test's suppression is real). This cost **zero call-site churn** — every code the seven modules emit was already registered.\n\n## The guard got stronger, not just updated\n\n`scripts/check-route-envelope.mjs` counts response write sites per module. A module routing everything through the shared pair builds **none** itself:\n\n| | before | after |\n|---|---|---|\n| each of the seven modules | `2 / 1 / 1` | `0 / 0 / 0` |\n| the shared pair | — | `2 / 1 / 1`, pinned |\n\nSo the invariant is now **total for the surface** rather than per-module, and what the count asserts changed from *\"your two builders are the enveloped ones\"* to *\"you have no builders\"*. A new route that hand-rolls a body still moves it off zero and fails. A `SHARED_BUILDER` check makes deleting or relocating the one writer a loud failure instead of silently leaving nothing pinned. Two self-test cases were added for the consolidated shape.\n\n## Nothing changes on the wire\n\nThe seven pairs were identical modulo the optional `status` and `extra` parameters this one unions. Every module's driven conformance suite still parses its real bodies against the real spec schemas. One internal call site was rewritten: `package-routes` passed `details` positionally and now passes `{ details }`, producing the same `error.details` it always did.\n\nPer-module rationale (what each emitted pre-#3843, why its codes were minted, why `/external/validate` keeps its computed `ok`) was **preserved and lifted into each module header**, not deleted with the builders.\n\n## Verification\n\n- `pnpm test` — **132/132 turbo tasks green**\n- 1455 tests across the seven affected packages, including every driven envelope conformance suite\n- `pnpm check:route-envelope` + self-test, `pnpm build`, `pnpm lint`, `pnpm check:error-code-casing`\n- `origin/main` merged and everything re-run after (per AGENTS.md multi-agent discipline #9/#10)\n\n> Two earlier full-suite runs failed on **unrelated load-induced 5s timeouts** — `service-settings` once, then `rest`'s `import-integration.test.ts` (xlsx parsing) under `import 823s` of contention. Both pass standalone, neither touches changed code, and a different package failed each run. Re-running at `--concurrency=3` was clean.\n\n## Out-of-scope findings filed rather than folded in (Prime Directive #10)\n\n- **#4224** — `settings-routes` passes `namespace` / `key` / `reason` / `fields` as siblings of `code`, which `ApiErrorSchema` does not declare; they are conformant only because `z.object` strips them. This is precisely why `extra` stays `Record<string, unknown>` rather than the declared fields — tightening it is a wire change, deliberately out of scope for a consolidation that changes no bytes.\n- **#4225** — three `admin-routes` handlers resolve `externalService()` but answer 503 saying *the datasource-admin service* is unavailable. This was the \"adjacent, one line\" note at the bottom of #3973; filed separately so closing that issue does not bury it.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

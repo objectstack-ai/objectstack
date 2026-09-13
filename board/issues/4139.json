@@ -1,0 +1,32 @@
+{
+  "number": 4139,
+  "kind": "pull_request",
+  "title": "fix(tooling): drop the retired /storage mount from the wildcard gate — main is red",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T11:02:28Z",
+  "updated_at": "2026-07-30T11:06:54Z",
+  "closed_at": "2026-07-30T11:06:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4139",
+  "body": "**`main` is currently red, and every open PR inherits it.** Three lines.\n\n## What happened\n\n#4122 added the wildcard fall-through guard with a `MOUNTS` ratchet declaring:\n\n```js\n'packages/adapters/hono/src/index.ts:all `${prefix}/storage/*`': {\n  ratchet: '#4117 — terminal, same shape as #4088; adapter has no in-repo consumer',\n},\n```\n\n#4112 (*\"retire the /storage dispatcher bridge — it never spoke the storage contract\"*) had already removed that mount. What survives at `packages/adapters/hono/src/index.ts:351` is a comment about it:\n\n```ts\n// This used to be `app.all(prefix + '/storage/*')` feeding …\n```\n\nThe two PRs landed in an order that left the declaration pointing at nothing, so the guard fails:\n\n```\n✗ wildcard fall-through guard (#4116)\n\n  packages/adapters/hono/src/index.ts:all `${prefix}/storage/*`\n    DECLARED but not found by the scan. Moved, renamed or deleted? Update MOUNTS.\n\n1 problem(s).\n```\n\nThat is the `ESLint` job, which runs `pnpm check:wildcard-fallthrough`. Reproduced on a pristine `origin/main` worktree, and on an unrelated PR branch (objectstack-ai/objectstack#4135, which touches only `packages/spec/src/ui/**`) — this is not caused by any open change.\n\n## The fix\n\nRemove the entry, which is exactly what the guard's own message asks for. Nothing is being un-ratcheted: the mount it described no longer exists, so there is no fall-through left to classify.\n\n## Verification\n\n```\n✓ wildcard fall-through: 6 yielding / 1 ratcheted / 5 exempt (12 namespace-claiming mounts)\n```\n\nThe script's own 15-case self-test (`--self-test`) still passes, and it is the first half of the CI command, so both halves are covered.\n\nNo changeset — tooling-only, no published package affected.\n\nRefs #4116, #4122, #4112\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

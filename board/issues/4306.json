@@ -1,0 +1,35 @@
+{
+  "number": 4306,
+  "kind": "pull_request",
+  "title": "test(runtime,objectql): the D12 honesty gate iterates the fake inventory, not spot checks (#3898)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T04:59:02Z",
+  "updated_at": "2026-07-31T05:24:42Z",
+  "closed_at": "2026-07-31T05:24:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T05:24:39Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4306",
+  "body": "## 背景\n\n#3898 盘点的三个洞,核对当前 main,已全部由已合并的 PR 修复:\n\n| 洞 | 修复 | 路线 |\n|:---|:---|:---|\n| 洞 1 —— `_fallback` 标记不被 `readServiceSelfInfo` 识别 | #4082(#4058 step 1,即 issue #4089) | 走了与 #3898 建议 1 **相反且更优**的路线:不教 reader 认第三种标记,而是把五个内存兜底(`metadata`/`cache`/`queue`/`job`/`i18n`)全部改带标准 `__serviceInfo`,message 逐个点名缺什么,`_fallback` 从生产代码中消失。`app-plugin.ts` 的 i18n 诊断分支也改读 `readServiceSelfInfo` |\n| 洞 2 —— `data` 槽位不传实例 | #4141(issue #4130) | `svcAvailable(routes.data, 'kernel', dataSvc)` 补上第三参,附跨 builder 一致性 pin |\n| 洞 3 —— `metadata` 硬编码 degraded / `protocol.ts` 硬编码 available | #4114 | 两个 discovery builder 都改为读实现的 D12 自描述,方向相反的两个硬编码同时消灭 |\n\n## 本 PR:补建议 4 的防复发门\n\n现有测试是逐槽位 spot-check;`fallbacks.test.ts` 在**工厂层**遍历 `CORE_FALLBACK_FACTORIES`,但 **discovery 层** `cache`/`queue`/`job` 三个槽位没有任何 pin —— 把它们的 `svcAvailable(…, svc)` 第三参删掉(正是洞 2 的复发形态)不会有任何测试变红。\n\n两个 discovery builder 的套件各加一条表驱动的门:遍历 `CORE_FALLBACK_FACTORIES`(plugin-dev stub 表按 ADR-0115 退役、`_fallback` 被消灭后,这就是完整的已知 fake 清单),逐一注册进各自槽位,断言 discovery 报 `degraded`、绝不 `available`。新增兜底进表当天即被门覆盖。\n\n- `packages/runtime/src/http-dispatcher.test.ts` —— dispatcher builder(`getDiscoveryInfo`)\n- `packages/objectql/src/protocol-discovery.test.ts` —— metadata-protocol builder(`getDiscovery`)\n\n## 验证\n\n- 负向验证门确实咬人:模拟删掉 `cache` 槽第三参 → `services.cache.status: expected 'available' to be 'degraded'`,还原后绿\n- `@objectstack/runtime` 全套 955/955 通过;`@objectstack/objectql` 全套 1346/1346 通过\n- 空 changeset(test-only,Releases nothing,循 #4283 惯例)\n\nCloses #3898\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

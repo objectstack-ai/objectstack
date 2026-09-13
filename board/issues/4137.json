@@ -1,0 +1,36 @@
+{
+  "number": 4137,
+  "kind": "pull_request",
+  "title": "feat(plugin-dev)!: retire the stub table — DevPlugin assembles real plugins, empty slots stay empty (ADR-0115)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T10:53:23Z",
+  "updated_at": "2026-07-30T11:59:44Z",
+  "closed_at": "2026-07-30T11:59:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T11:59:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4137",
+  "body": "Closes #4104. 执行 ADR-0115（PR #4103 裁决）的全部实施。按维护者指示（\"统一 ADR，并继续完成所有开发\"），原定两个实施 PR 收敛为**这一个** —— #4089 已被 #4082 在源头修掉，PR 边界失去存在理由。\n\n> **与在途工作的两次合流**：本 PR 开着的时候 main 先后合入 #4112（#4087：退役 dispatcher 的 /storage bridge）与 **#4126（#4093 的 A 档子集：安全三件套删除 + 生产护栏）**。两者在 plugin-dev 里的改动都落在本 PR 整体删除的代码内，由删除吸收；重叠处采纳 #4126 的已上线语义 —— 逃逸阀名为 **`OS_ALLOW_DEV_PLUGIN`**、护栏为模块级 `assertNotProduction()`、security 槽位缺失时打一条响亮的 \"NOT enforced\" boot warn（均已移植进终态，并有测试钉住）。#4126 另开的 **#4113**（runtime 的 /auth mock fallback）是 plugin-dev **之外**的最后一个造假者：本 PR 删 `auth` stub 既不加重也不修复那条路径（两者同等造假、都产不出身份解析器认可的会话），#4113 保持独立跟踪 —— ADR 对账更新第 4 条记录了这一点。\n\n## 删掉的（A+B+C 三档一次清空）\n\n`dev-plugin.ts` 的整张 stub 台面消失：\n\n- **A 档（造假类）**：`data`、`auth`、无形状 `ui`，加 #4086 留下的 `ai`/`automation`/`notification`（`security.*` 三件套已由 #4126 先行删除）。\n- **B 档（重复类）**：手写的 `metadata` 第二份 + `cache`/`queue`/`job`/`i18n` 包装。**行为无变化** —— 端到端证实 kernel 本来就用 `CORE_FALLBACK_FACTORIES`（`kernel.ts:322`）为空的 core 槽位预注入同一批 fallback。\n- **C 档（真干活但归属错误）**：`file-storage`/`search`/`realtime`/`workflow` 四个内存实现。\n\n`DEV_STUB_FACTORIES` / `DEV_STUB_SELF_INFO` / `SHAPELESS_STUB_SELF_INFO` / `NO_DEV_STUB_SERVICES` / 填充循环全部不复存在 —— ADR 终态 grep 为空。\n\n## 新增的\n\n- **生产护栏（D6，#4126 首发、本 PR 保留）**：`assertNotProduction()` 在 `NODE_ENV === 'production'` 拒绝初始化；逃逸阀 `OS_ALLOW_DEV_PLUGIN=1`（PD #9 形状）。\n- **装配自动接线（D4 精化）**：`@objectstack/service-storage`（local 磁盘适配器）与 `@objectstack/service-realtime`（默认内存适配器）作为可选子插件，装了即接线 —— 复用 3b 节 i18n 自动检测先例。零配置 dev 的存储/实时能力由**真实现**保住。\n- **breaking changeset**：完整 FROM→TO 表（每个退役槽位一行 + 一行修法），launch window 规则下以 `minor` 进 fixed group。\n\n## 文档收敛（D7）\n\n`packages.mdx` 条目、包 README、class doc、`services-checklist.mdx` 的 i18n 注册表格全部改为装配现实；ADR-0115 增补 post-#4086 对账更新（含 #4126/#4113 的第 4 条事实）。\n\n## 验证（两次合流后最新）\n\n- `@objectstack/plugin-dev` 10/10 · `@objectstack/runtime` 923/923 · `@objectstack/plugin-hono-server` 132/132 · `@objectstack/core` 415/415 · eslint 干净 · tsup（含 DTS）通过\n- **端到端**（真实 DevPlugin 装配起 ObjectKernel + dispatcher + Hono）：全部退役槽位 `getService` 抛错（空槽），`/api/v1/automation` 404，`/api/v1/ai/agents` 保留 200 `{\"agents\":[]}` 礼遇；`file-storage` 解析为真实 `SwappableStorageService`，`realtime` 解析为真实 `InMemoryRealtimeAdapter`；kernel 的 `CORE_FALLBACK_FACTORIES` 预注入不受影响。\n- 新测试钉住：空槽终态（逐槽位点名，防止台面局部复活）、生产护栏 + 逃逸阀、自动接线的诚实降级路径、security 缺失时的响亮 warn。\n\n## 过程记录（CI 一度静默）\n\nPR 创建后 GitHub 对 `mergeable_state: dirty`（与 main 冲突）的 PR **静默跳过** `pull_request` 工作流 —— 空提交与 close/reopen 都无法触发。两次合入 main 解决冲突后恢复正常。\n\n## 风险与缓冲\n\n对外部 17.x-rc 消费者 breaking：changeset 表即处方；#4082/#4086 起 discovery 已把这些槽位如实广告为 `stub`/不可服务，实际影响面已核实为仓库内零调用点（`search`/`workflow`/`ui`）或有真实替代（其余）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01BEM82RNKyyyTNPYHK1VJJS"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 4298,
+  "kind": "pull_request",
+  "title": "chore(spec): the field-file collection proof stops being an orphan tag",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T04:37:10Z",
+  "updated_at": "2026-07-31T04:58:18Z",
+  "closed_at": "2026-07-31T04:58:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T04:58:15Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4298",
+  "body": "Follow-up hygiene spotted while verifying #4094: the liveness gate has been printing a warning on every run since #4285 landed the field-file collection dogfood test.\n\n## The warning\n\n```\n⚠ 1 unregistered dogfood proof tag(s) — add to proof-registry.mts:\n    @proof: adr0104-field-file-collection (in packages/qa/dogfood/test/field-file-collection.dogfood.test.ts)\n```\n\nThat is the registry's **reverse-integrity leg** doing exactly its job. An orphan `@proof:` tag means a proof was written but never wired into the ADR-0054 high-risk-class list — so nothing connects the test to the surface it guards, and the test's standing as a *proof* is asserted only by its own header comment.\n\n## Registered honestly unbound, not bound\n\n`bound: true` requires **both** a runtime proof and a governed ledger entry to carry it. This class has the first and not the second:\n\n- the collection contract the proof exercises is the `lifecycle` ttl declared on the **system** object `sys_file` (`packages/services/service-storage/src/objects/system-file.object.ts`), not an authorable per-type property;\n- `object.lifecycle` is already bound to `data-lifecycle` (`adr0057-lifecycle-bounded-growth`), and a ledger entry carries **one** `proof` ref;\n- the rest of the route — exclusive ownership, release-on-write, the per-deployment migration gate — is service code with no authorable surface to govern.\n\nSo there is no other entry to bind instead. Faking a binding would misrepresent both what the proof covers and what that entry is proven by, so `blockedReason` records the reason — the same shape as `flow-runas-userless` and `scope-depth-cli-fallback`, which are blocked for the identical one-entry-one-ref reason.\n\n## Enforcement is unchanged\n\n`BOUND_PROOF_PATHS` skips unbound classes, so the bound-class list and the pinned path map in `proof-registry.test.ts` are byte-identical — no new CI obligation lands on any ledger entry. The only behavioural change is that the gate runs clean.\n\n## Verification\n\n- `pnpm check:liveness` — green, warning gone; the `prove-it-runs` bound-class line is unchanged (still the same 17 labels).\n- Liveness script suite **98/98**, including the two registry invariants this entry has to satisfy (`unbound classes record an honest blockedReason`, `every class proofId is in KNOWN_PROOF_IDS`).\n- Spec suite **277 files / 7128 tests**; `tsc --noEmit` clean.\n- Gate-only change under `packages/spec/scripts/`, which is not in the package's published `files` — empty changeset.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

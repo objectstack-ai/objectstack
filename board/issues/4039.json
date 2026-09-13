@@ -1,0 +1,35 @@
+{
+  "number": 4039,
+  "kind": "pull_request",
+  "title": "fix(spec,drivers): the view filter vocabulary and the AST vocabulary now agree (#3948)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T05:31:53Z",
+  "updated_at": "2026-07-30T05:43:36Z",
+  "closed_at": "2026-07-30T05:43:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T05:43:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4039",
+  "body": "#3948 item 3 — the root cause. Item 1 shipped in #4029 and turned this class of failure from silent into loud; this removes the cause.\n\n## The disagreement\n\n`VIEW_FILTER_OPERATORS` (`ui/view.zod.ts:74`) is what an author may declare on a `ViewFilterRule`, and what `ViewFilterRuleSchema` validates against. `VALID_AST_OPERATORS` (`data/filter.zod.ts`) gates `isFilterAST()`, which decides whether a filter is parsed into a query at all.\n\nThey disagreed on **8 of 19** members:\n\n```\nequals   not_equals   greater_than   less_than\ngreater_than_or_equal   less_than_or_equal   before   after\n```\n\n`equals` is on that list. An author could declare any of them, the schema validated them, `defineStack` accepted them — and then `isFilterAST()` refused the filter, the protocol passed the array through unconverted, and the driver could not apply it.\n\nSix of the eight were reachable only in theory, because ObjectUI's adapter alias table happened to translate them. **The correctness of the query path was resting on a hand-written table in a different repository being complete**, and for `before`/`after` it wasn't — which is how this surfaced (objectstack-ai/objectui#2974).\n\n## What changed\n\n**`AST_OPERATOR_MAP` is now the single source of truth.** `VALID_AST_OPERATORS` is derived from its keys rather than restated:\n\n```ts\nexport const VALID_AST_OPERATORS = new Set(Object.keys(AST_OPERATOR_MAP));\n```\n\nThey were two independent hand-written lists that happened to agree, with nothing enforcing it — and the two failure directions are both invisible: a name in the Set with no lowering hits `convertComparison`'s `$${op}` fallback and reaches the driver as an unknown `$`-operator; a name in the Map but not the Set makes `isFilterAST()` refuse the filter entirely. (Verified they were byte-identical before this change, so the derivation is behaviour-preserving.)\n\nThe map gained the eight canonical view spellings plus the squashed/short forms stored metadata carries (`notequals`, `greaterthanorequal`, `eq`, `gt`, …) — `saveMeta` persists the authored body verbatim, so those are live in rows, not historical.\n\n**New export `canonicalAstOperator(op)`** folds every accepted spelling of one comparison onto a single infix form. Both drivers now call it instead of growing private alias lists — which is precisely what let them accept different vocabularies before #4029.\n\n`like`/`ilike` are deliberately **not** folded onto `contains`: driver-sql passes them to SQL verbatim, so folding would silently wrap the value in `%…%` and change what the query means.\n\n## Widening only\n\nNo spelling was removed, so nothing that validated before stops validating, and there is no stored-data migration. A filter that previously threw (after #4029) or was silently dropped (before it) now compiles.\n\n## Verification\n\n| Suite | Result |\n|---|---|\n| `@objectstack/spec` | **6922 pass** across 266 files |\n| `objectql` | **1171 pass** across 80 files |\n| `driver-sql` | **487 pass** |\n| `driver-memory` | **178 pass** (was 153 — the gate grew and its parity test follows it) |\n| `check:api-surface` / `check:authorable-surface` / `check:spec-changes` | pass |\n\nThe api-surface ratchet caught the new export exactly as designed (0 breaking, 1 added); regenerated and committed.\n\n**The new parity test was confirmed to fail without the fix** — removing `before`/`after` from the map produces 5 failures naming them specifically.\n\n## A note on how this was found\n\ndriver-memory's parity test from #4029 iterates `VALID_AST_OPERATORS` directly, so widening the gate immediately failed it — the drivers' array paths lagged the gate by 20 spellings. That is the test doing its job, and it is why `canonicalAstOperator` exists rather than two more hand-written alias lists. driver-sql had the identical gap and no test to catch it."
+}

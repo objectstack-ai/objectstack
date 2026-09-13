@@ -1,0 +1,35 @@
+{
+  "number": 4078,
+  "kind": "pull_request",
+  "title": "test(automation): reconcile the control-flow designer forms against their Zod (#4045)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T08:37:36Z",
+  "updated_at": "2026-07-30T08:53:30Z",
+  "closed_at": "2026-07-30T08:53:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T08:53:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4078",
+  "body": "#4045 step C, region half — after #4050 (step 1), #4059 (3a) and #4064 (step A). Tests only, no production code.\n\n## The gap\n\n`loop` / `parallel` / `try_catch` each carry **two** descriptions of the same config:\n\n| | artifact | job |\n|---|---|---|\n| descriptor `configSchema` (hand-written literal) | drives the Studio form | what an author can set |\n| `control-flow.zod.ts` | validates the value | what the runtime accepts |\n\nNothing compared them. #4064 pinned the *shape* of the first; this pins the **relationship**, so neither side can gain or lose a key without the other noticing.\n\nBoth directions matter:\n\n- **Zod accepts a key the form omits** — #3528's failure inverted. A real config key with no way to author it in Studio, discoverable only by reading the executor. That is exactly how `notify.source` sat unnoticed until #4050.\n- **The form offers a key the Zod rejects** — the author fills in a field whose value is then dropped or fails to parse.\n\n## Why the two sources are not merged — measured, not assumed\n\nI ran the generation on main `53fbf49` (options as in `control-flow.test.ts`):\n\n| node | published form | generated from Zod | |\n|---|---|---|---|\n| `loop` | 597 chars, depth 5, 25 keys | **5,537**, depth **14**, **201** keys | 9.3× |\n| `parallel` | 294 chars, depth 6, 16 keys | **5,112**, depth **15**, **189** keys | 17.4× |\n| `try_catch` | 737 chars, depth 5, 40 keys | **10,739**, depth **14**, **397** keys | 14.6× |\n\nGeneration **succeeds** — no recursion error — but emits **no `$defs` and no `$ref`**. `FlowNodeSchema` is inlined in full at every region key, so `loop.body` arrives as the entire node/edge definition:\n\n```json\n\"body\": { \"type\": \"object\", \"properties\": { \"nodes\": { \"minItems\": 1, \"type\": \"array\",\n  \"items\": { \"type\": \"object\", \"properties\": {\n    \"id\": {…}, \"type\": {…}, \"label\": {…},\n    \"config\": { \"type\": \"object\", \"propertyNames\": {…}, \"additionalProperties\": {} },\n    \"connectorConfig\": {…} } } } } }\n```\n\nversus the published `nodes: { type: 'array' }` with **no `items`** — opaque, because a loop body is edited on the **canvas**, not in a property form.\n\nMaking the generated output usable means a projection that prunes ~90% of it back off (201 → 25 keys), at which point \"one source\" is a fiction: you maintain the Zod, the projection rules, *and* a check that the projection still does the right thing — three things instead of two.\n\n**This corrects the premise #4045 opened with** (and my own first analysis on it), which treated these three as redundant copies awaiting de-duplication. They are a second artifact with a different job, and the gaps are deliberate. Full data [in the issue](https://github.com/objectstack-ai/objectstack/issues/4045#issuecomment-5128364563).\n\n## So the divergence is declared rather than erased\n\nA `DELIBERATELY_SHALLOW` ledger names each shallow key with its reason (`loop.body`, `parallel.branches`, `try_catch.try`, `try_catch.catch`), and every entry must name a key **both sides still declare** — so it cannot rot into a reference to something renamed away. Same bidirectional discipline as the #4040 expression ledger.\n\n## One deliberate limitation, stated in the file\n\nThis compares **key sets**, not generated shapes. Generating needs `z.toJSONSchema`, and `service-automation` does not depend on `zod` — only `@objectstack/spec` does. Adding that edge to the package graph to run a test is not worth it when `schema.shape` yields the key set without it, and the key set is where the drift that matters lives. The depth divergence is measured once in the table above, and its form half is pinned by `config-schemas.test.ts`. The test file says all of this, so the next reader does not assume it was forgotten.\n\n## Verified to bite in all three directions\n\nAn assertion that never fails is decoration:\n\n```\n# Zod gains a key the form does not offer\n× 'loop': the form offers exactly the keys the Zod accepts\nAssertionError: loop: accepted by the Zod but absent from the designer form:\n  expected [ 'brandNewRegionKey' ] to deeply equal []\n\n# the form gains a key the Zod rejects\n× 'loop': the form offers exactly the keys the Zod accepts   (inverse set)\n\n# a ledger entry points at a renamed key\n× every ledger entry names a key both sides actually declare\nAssertionError: loop.bodyRenamedAway: not on the form any more\n```\n\n## Test plan\n\n| Check | Result |\n|---|---|\n| `@objectstack/service-automation` | ✅ 457 passed (5 new) |\n| ESLint on the new file | ✅ clean |\n| spec `check:api-surface` / `check:authorable-surface` / `check:docs` | ✅ PASS |\n\nThe negative controls rebuilt spec, which regenerates `authorable-surface.json` — checked back to clean and the gates re-run, so no generated artifact rides along in this diff.\n\nEmpty changeset — tests only, nothing releases.\n\n## Remaining in #4045\n\n- **Flat half of step C** — `screen` / CRUD / `http` / `notify` have no region keys, so the single-Zod-source route stays viable there; the one thing needing explicit handling is `additionalProperties` on the 7 keyValue slots (`z.record()` emits `{}`, not the load-bearing `true`; `.meta({ additionalProperties: true })` overrides it, and objectui accepts `{}` anyway per `json-schema-to-fields.ts:456`).\n- **Step 3b** — tightening the #4059 unknown-key warning into an error still needs a release of real-world distribution data first.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QoA8AV99Ss1RRkLLAYmDzq\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QoA8AV99Ss1RRkLLAYmDzq)_"
+}

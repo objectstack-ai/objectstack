@@ -1,0 +1,35 @@
+{
+  "number": 4266,
+  "kind": "pull_request",
+  "title": "fix(spec,service-automation)!: `errorHandling.maxRetries` has one default, and `strategy: 'retry'` states its count (#4247)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T01:17:32Z",
+  "updated_at": "2026-07-31T01:39:20Z",
+  "closed_at": "2026-07-31T01:39:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T01:39:18Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4266",
+  "body": "Closes #4247.\n\n## 先说一个把结论改了的发现\n\nissue 把两条路径列成并列的两种可能。实际读了调用图之后，其中一条**不存在**：\n\n`retryExecution` 只有一个调用点（`execute()` 里 `flow.errorHandling?.strategy === 'retry'`），`flow` 来自 `this.flows`；而 `this.flows` 只有两处写入 —— `registerFlow`（`FlowSchema.parse` 之后）和版本回滚（重新放回一份已经 parse 过的快照）。**没有绕过 schema 喂给引擎的路**，所以 `?? 3` 在今天的调用图里根本够不到。\n\n这不是\"少了一件事要修\"，而是把问题换了一个：真正在跑的行为是**唯一那条** —— `strategy: 'retry'` 不写次数 ⇒ `maxRetries` 被 `.default(0)` 填成 0 ⇒ 一次都不重试。也就是 issue 末尾那个\"顺带\"其实是主症状：**声明了 `retry`，运行时不 retry**，正是 Prime Directive #10 推论说的\"不要展示运行时并不交付的能力\"。\n\n（`?? 3` 仍然要删 —— 它是第二份契约，随时可能因为新增一条载入路径而复活成真 bug。）\n\n## 改了什么\n\n**1. 引擎不再自带默认值（PD #12）。** `retryExecution` 的参数从\"五个 optional 字段 + 五个 `??`\"改成 parse 后的 `NonNullable<FlowParsed['errorHandling']>`，直接解构。这样安全，是因为上面那条不变量（`this.flows` 只装 parse 输出）；而用 parsed 类型做参数，也是防止第二套默认值长回来的机制 —— 哪天 spec 不再给某个旋钮默认值，这里是编译错误，不是又一次\"引擎悄悄猜一个\"。\n\n**2. `strategy: 'retry'` 必须写 `maxRetries >= 1`（BREAKING）。** 引擎那份删掉之后，\"不写\"就明确是 0 了 —— 而重试 0 次就是 `strategy: 'fail'` 换个名字。这里**没有替 owner 在 0 和 3 之间选**，而是让\"不写\"这个状态不再合法：schema 用 `superRefine` 拒绝两种拼法（省略→默认 0，和显式写 0），错误信息带处方。\n\n为什么是\"拒绝\"而不是\"默认 3\"：flow 级重试**是整条流程从头再跑一遍**，已经成功的 CRUD 节点会再执行一次、外呼会再发一次。给只写了 `strategy: 'retry'` 的存量流程静默改成跑 3 遍，是一次无声的行为变更；拒绝则是一行就能修的响亮失败，且作者拿回的正是他本来以为自己声明的东西。`maxRetries: 0` 在 `'fail'`/`'continue'` 下仍然合法（它们根本不读）。\n\n**3. 迁移链把它作为 semantic TODO 暴露。** 加了 `flow-retry-max-retries-required`：这一项**没有无损重写** —— 填 0 保住了 parsed 路径的实际行为却违背作者写下的字面意思，填任何正数都是一个新决定。所以 `os migrate meta` 报给你，而不是替你改。（这条是被 `packages/cli/test/migrate-meta.e2e.test.ts` 逼出来的：它断言迁移产物在**当前** schema 下可解析，而 fixture 的 `{ strategy: 'retry', fallbackNodeId: 'n9' }` 去掉 `fallbackNodeId` 之后正好撞上新约束 —— 一个很好的证据，说明这类元数据确实存在于升级路径上。）\n\n## 改动清单\n\n| 文件 | 改动 |\n|:---|:---|\n| `packages/spec/src/automation/flow.zod.ts` | `superRefine` 拒绝 `'retry'` + `maxRetries < 1`；`.describe` 与注释写明\"这里是唯一的默认值来源\" |\n| `packages/services/service-automation/src/engine.ts` | 删掉 `retryExecution` 的五个 `??`，参数改为 parsed 类型 |\n| `packages/spec/src/migrations/registry.ts` | step17 新增 semantic TODO + rationale 段落 |\n| `packages/spec/liveness/flow.json` | `maxRetries` 条目补 note/verifiedAt —— 双默认值这件事记进账本 |\n| `packages/cli/test/migrate-meta.e2e.test.ts` | fixture 补 `maxRetries: 2`（它测的是 `fallbackNodeId` 移除，不是重试次数） |\n| `content/docs/automation/flows.mdx` | 补全每个旋钮的默认值；新增\"`strategy: 'retry'` 得说重试几次\"小节；讲清 `maxRetries` 数的是**重跑次数**不是总次数 |\n| `content/docs/releases/v17.mdx` | Smaller breaking changes 一条，带 FROM → TO |\n| `docs/protocol-upgrade-guide.md`, `packages/spec/spec-changes.json` | 生成物，`gen:upgrade-guide` / `gen:spec-changes` 重跑 |\n\n## 测试\n\n新增 `packages/services/service-automation/src/flow-retry-attempt-count.test.ts`（6 例）—— 钉住的是从 schema 看不出来的那部分：**次数本身**。`maxRetries: 2` ⇒ 总共跑 3 次（既不是旧 parsed 路径的 1 次，也不是旧 `?? 3` 的 4 次）；两种非法拼法在 `registerFlow` 被拒；`'fail'` 下写满旋钮仍然只跑一次；以及\"引擎拿到的 block 五个字段都是实值\"这条让删 `??` 得以成立的不变量。\n\nspec 侧 `flow.test.ts` 新增 `#4247` describe（5 例），并修正一处原本用 `{ strategy: 'retry' }` 当载体去测 backoff 默认值的用例。\n\n- `@objectstack/spec`：276 files / 7154 tests ✅\n- `@objectstack/service-automation`：44 files / 482 tests ✅\n- `migrate-meta.e2e`：6/6 ✅\n- 本地门禁：`check:liveness`、`check:docs`、`check:authorable-surface`、`check:spec-changes`、`check:upgrade-guide`、`check:strictness-ledger`、`check:skill-examples`、`check:doc-authoring`、`check:nul-bytes`、`check:release-notes` 全绿；改动文件 eslint 干净\n\n## 两条与本 PR 无关的环境噪音\n\n1. **`pnpm --filter @objectstack/spec check:generated` 在 `main` 上就是红的**（stash 掉全部改动复验过）：`check:strictness-ledger` 是 #4232 新加的脚本，没有在 `check-generated.ts` 的 `GATED` / `NO_GENERATOR` 里分类。**这个 PR 的 CI 不会因此变红** —— `Check Generated Artifacts` job 跑的是 `check:skill-docs` / `check:spec-changes` / `check:upgrade-guide` / `check:authorable-surface`，`check:generated` 本身没有任何 workflow 调用。已由 #4255（正是\"从不在 CI 上执行\"这一点）、#4265、#4267 覆盖，不在本 PR 范围内。\n2. **`@objectstack/cli` 有 8 个 e2e 用例失败**（`serve-no-artifact`、`serve-boot-diagnostics`、`emit-json-pipe`、`sqlite-occupancy`）：只在我这个容器里，干净树上一模一样地失败 —— 工作区没有全量构建导致的，CI 上不复现。"
+}

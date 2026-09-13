@@ -1,0 +1,32 @@
+{
+  "number": 4012,
+  "kind": "issue",
+  "title": "`os dev` and `os serve` swallow every plugin boot-phase log line — WARN-level boot diagnostics are invisible on both CLI entrypoints",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T02:41:53Z",
+  "updated_at": "2026-07-30T09:29:22Z",
+  "closed_at": "2026-07-30T09:29:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4012",
+  "body": "Found while verifying ADR-0110 D5's boot inventory (#4011). The inventory turned out to have its own placement bug (fixed there), but proving that exposed a bigger, older one: **no plugin's boot-phase logger output reaches the console on either CLI entrypoint**, at any log level.\n\n## Evidence\n\nAll on `main` (`d6bfb3d`), `examples/app-todo`, injected with a deliberately undeclared handler so a boot WARN is *guaranteed* to be emitted (verified below):\n\n| Run | Lines | Plugin boot WARNs | `bootstrap` / `kernel:ready` traces |\n|---|---|---|---|\n| `os dev` (default level) | 31 | **0** | **0** |\n| `os dev --log-level debug` | 2,360 | **0** | **0** |\n| `os serve objectstack.config.ts` | 19 | **0** | **0** |\n| Programmatic `kernel.bootstrap()` with a plain logger | — | ✅ present | ✅ present |\n\nThe debug run is the damning one: it happily streams **thousands** of *data-phase* kernel lines (`\"event\":\"beforeFind\"` × 2,524, `\"event\":\"afterUpdate\"` × 2,472 …) yet contains **zero** boot-phase lines — not `Triggering kernel:ready hook` (`kernel.ts:363`, a plain `logger.debug`), not `✅ Bootstrap complete`, not one plugin `logger.warn`. So the logger sink is live and verbose — but only from some point *after* boot. Everything a plugin says during init/start/kernel:ready goes nowhere.\n\nThe two `⚠` lines that DO appear in the default output (`⚠ Console dist not found…`, `⚠ Flows: 4 flow(s) declared but…`) are the CLI's own hand-rendered summary, not kernel logger output — which is presumably why the gap has been invisible: the summary *looks* like boot diagnostics exist.\n\n## Why this is a real defect and not cosmetics\n\n- `serve.ts`'s own `--log-level` help text states the contract this breaks: *\"Defaults to … `warn` **so flow/hook execution failures surface (ADR-0032)**.\"* A flow or hook that fails during boot-phase binding surfaces nowhere.\n- ADR-0110 D5's `[action-governance]` inventory — the checklist that justifies D3's no-opt-out refusal (#3987 removed the migration valve on exactly the argument that \"the boot inventory names every offender\") — is emitted correctly since #4011 but still invisible on `os dev`/`os serve`.\n- Every degraded-boot warning a plugin emits through its logger (as opposed to `console.warn` directly) is in the same hole. Plugins have visibly worked around this already — the `DEGRADED BOOT` datasource warnings print via bare `console.*`, bypassing the logger, which is a tell that the sink has been quietly unusable for a while.\n\n## What \"fixed\" looks like\n\nBoot-phase `logger.warn`/`logger.error` from plugins reach the console on `os dev` and `os serve` at the default level, same as data-phase lines already do. Two plausible shapes:\n\n1. attach the console sink to the kernel logger **before** `kernel.bootstrap()` instead of after; or\n2. buffer boot-phase records and flush them right after the CLI banner/summary.\n\n(1) is presumably how it was always meant to work. A regression test can reuse #4011's positive-control recipe: boot an example with an injected undeclared handler through the CLI path and assert `[action-governance]` appears on stdout — that single assertion covers the whole class, because it fails whenever boot-phase WARNs are swallowed.\n\n## Relationship to v17\n\nNot release-blocking on its own — nothing that previously surfaced regresses. But it hollows out two documented v17 stories (the D5 checklist; ADR-0032's warn-by-default) until fixed, so it is worth triaging right behind the release."
+}

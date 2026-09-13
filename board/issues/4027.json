@@ -1,0 +1,32 @@
+{
+  "number": 4027,
+  "kind": "issue",
+  "title": "A designer `configSchema` and the executor's wire payload are two unchecked lists — nothing validates flow node config keys at author time",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T04:52:52Z",
+  "updated_at": "2026-07-30T06:21:49Z",
+  "closed_at": "2026-07-30T06:21:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4027",
+  "body": "## Summary\n\n`FlowNodeSchema.config` is `z.record(z.unknown())`. Nothing validates a flow node's config keys — not the compiler, not `objectstack validate`, not the runtime. A misspelled key, or a key written in the wrong expression dialect, is silently accepted and silently does nothing.\n\nSeparately but for the same reason: a node type's **designer `configSchema`** (what Studio offers the author) and the **wire payload its executor hand-builds** are two independent lists that nobody cross-checks. A property can exist in one and not the other indefinitely.\n\nBoth halves of this were the root cause of #3528, which took three passes and two wrong diagnoses to find.\n\n## Evidence: how #3528 actually happened\n\n`visibleWhen` was on the `screen` node's designer form from #3304 — `screen-nodes.ts:66`, typed `xExpression`, documented as bare CEL, offered to authors in Studio. The executor's field mapper built the paused payload from `name` / `label` / `type` / `required` / `options` / `defaultValue` / `placeholder` and **dropped it**. `ScreenFieldSpec` in the contract stopped at `placeholder` too, and objectui's client type mirrored the contract faithfully.\n\nSo no client was ignoring the predicate — **none ever received it**. Authors wrote conditional visibility, every field rendered unconditionally, and no layer errored. The key had zero test coverage for four months.\n\nThat was fatal rather than cosmetic because `required` *is* honoured: a field optional-by-design but required-when-shown becomes permanently required once its predicate is dropped, and a runner validating the full field list dead-ends the run. Fixed in #3771 + objectui#2899.\n\nThe app-side half is the other face of the same gap. HotCRM authored the predicate in the wrong dialect:\n\n```ts\nvisibleWhen: '{createOpportunity} == true'   // `{var}` template dialect — never resolves as a predicate\nvisibleWhen: 'createOpportunity == true'     // what a screen field actually takes: bare CEL\n```\n\nBoth dialects appear in the same flow file — `{var}` is correct for `get_record` filters, `update_record` fields and decision conditions. It passed `tsc`, passed `objectstack validate`, passed the runtime, and shipped in the reference app (hotcrm#505).\n\n## Why the existing ratchets don't catch it\n\n- `FlowNodeSchema.config` being an open record is deliberate — node types are extensible and each owns its own config shape. But that means the *only* description of a node's valid config is its designer `configSchema`, and nothing connects that to validation.\n- `configSchema` is already machine-readable and already tested (`config-schemas.test.ts` asserts shape per node type). The information needed is present; it just isn't used as a validator or compared against the executor.\n\n## Proposed\n\nSame shape as the dispatcher↔client route ledger from #3569, applied to node config:\n\n1. **A `configSchema` ↔ wire-payload consistency ratchet.** For each builtin node type, assert every property the designer declares is either forwarded by the executor or explicitly listed as designer-only-by-design. A new declared property that no executor reads fails the check instead of quietly doing nothing. `visibleWhen` is the regression test.\n2. **Author-time validation of node config against `configSchema`.** `objectstack validate` already loads the node registry; validating each node's `config` against its own type's `configSchema` (unknown-key warning at minimum, so extensibility isn't broken) would have rejected the HotCRM predicate — or at least flagged the unknown key — before publish.\n3. **Dialect discipline where two dialects coexist.** Screen-field `visibleWhen` is bare CEL while sibling config keys are `{var}` templates. A bare-CEL `xExpression` field containing `{...}` is almost certainly a dialect confusion and is cheap to flag.\n\n## Scope caveat\n\nI only audited the `screen` node. The other builtin node types have the same structure — a hand-written designer `configSchema` beside a hand-written executor payload — and were **not** checked. There may be more dropped properties of exactly this kind; the ratchet in (1) is what would tell us rather than another incident.\n\n## Related\n\n- #3528 — the incident\n- #3771 / objectui#2899 / #3788 — the `visibleWhen` fix (contract, console, pin)\n- hotcrm#505 — the app-side dialect fix\n- #3569 — the dispatcher↔client route ledger this mirrors\n- #3558 — the prebuilt-console-pin trap that made #3528 take three passes"
+}

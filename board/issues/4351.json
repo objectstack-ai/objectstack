@@ -1,0 +1,32 @@
+{
+  "number": 4351,
+  "kind": "issue",
+  "title": "docs(hook-bodies): 写集一节还在说\"没有静态检查\",#4305 之后已不成立(enforced ≠ declared)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T07:39:10Z",
+  "updated_at": "2026-07-31T08:42:34Z",
+  "closed_at": "2026-07-31T08:42:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4351",
+  "body": "## 现象\n\n`content/docs/automation/hook-bodies.mdx` 的 \"Not statically checked: the write set\" 一节声称写面**完全没有**静态检查:\n\n> **Not checked — write side.** Nothing validates *which fields* your body writes. … no lint can verify they exist. This is an **accepted gap** with no planned closure\n\n自 #4305(`validateHookBodyWrites`,已合入 main)起,这段话不成立:`hook-body-write-unknown-field` 会把 L2 hook body 里 `ctx.input.x = …` / `Object.assign(ctx.input, {x})` / `ctx.api.object('y').update({x})` 三类字面写解析出来,拿去和目标对象声明的字段比对,未知字段带 did-you-mean 告警(advisory,不 gate)。#4344 正在把同一套搬到 action 的 `ctx.api` 写面。\n\n## 为什么值得记\n\n这一节的下游建议全是从\"没有检查\"推出来的,现在读起来会把作者推离真正的工具:\n\n- \"**Check your write targets by hand.**\" —— 已经有 lint 在报了;\n- \"**Prefer a flow `update_record` node** … so they get the static checking hook bodies can't.\" —— 这条建议本身仍然对(flow 是 error,hook 是 advisory),但理由错了:hook body 现在**有**静态检查,差别是严重级别和覆盖面(字面模式 vs 结构化 `fields`),不是有无。\n\n\"declared ≠ enforced\" 的镜像:这里是 **enforced ≠ declared** —— 能力已经交付了,文档还在说没有。作者按文档放弃一个真实存在的护栏,和按文档相信一个不存在的护栏,代价是对称的。\n\n## 需要改什么\n\n1. 把 \"Not checked — write side\" 改写成准确的覆盖面描述:检查哪三类字面模式、advisory 不 gate、哪些静态不可知(computed key、spread、aliased input、动态对象名、`object:'*'`)因而**告警的缺席不等于正确**。\n2. #3700(结构化 `writes` 声明,closed as not planned)仍然是准确的历史,但 \"accepted gap with no planned closure\" 的结论要撤回 —— 缺口是用另一条路(解析写集)关的,不是没关。\n3. 保留 flow `update_record` 的建议,把理由换成 error-vs-advisory + 结构化 vs 字面。\n4. #4344 落地后,同一节要补 action 侧的 `ctx.api` 写面。\n\n## 边界\n\n`ctx.record` 那一半**不属于**本 issue:那是 #4345(所有写都被丢弃,不分声没声明),已在同名 PR 里连同本文件的 sandbox-surface 表和 signature-conventions 一起处理了。本 issue 只针对\"未知字段写\"这一族的文档描述。\n\n## 参考\n\n- `content/docs/automation/hook-bodies.mdx` \"Not statically checked: the write set\"\n- `packages/lint/src/validate-hook-body-writes.ts`(#4305)\n- 相关:#4271、#4305、#4344、#4345\n"
+}

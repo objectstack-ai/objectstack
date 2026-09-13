@@ -1,0 +1,30 @@
+{
+  "number": 4249,
+  "kind": "issue",
+  "title": "The same three datasource-admin routes answer 400 with the wrong service's error code (#4225 follow-up, one field over)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T00:46:04Z",
+  "updated_at": "2026-07-31T03:00:40Z",
+  "closed_at": "2026-07-31T03:00:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4249",
+  "body": "#4225 / #4234 fixed the 503 `message` on the three routes in `packages/services/service-datasource/src/admin-routes.ts` that resolve `external-datasource` rather than `datasource-admin`. The identical mis-attribution survives one field over, on the 400 path — and this one is machine-readable.\n\n## The finding\n\n`admin-routes.ts` has one shared 400 helper:\n\n```ts\nconst badRequest = (res: any, err: unknown) =>\n  sendError(res, 400, 'DATASOURCE_ADMIN_ERROR', err instanceof Error ? err.message : String(err));\n```\n\nAll three `external-datasource` routes route their failures through it:\n\n| Route | resolves | 400 `error.code` |\n|---|---|---|\n| `GET /:name/remote-tables` | `external-datasource` | `DATASOURCE_ADMIN_ERROR` |\n| `POST /:name/test` | `external-datasource` | `DATASOURCE_ADMIN_ERROR` |\n| `POST /:name/object-draft` | `external-datasource` | `DATASOURCE_ADMIN_ERROR` |\n\nThe ledger says what that code means, in as many words:\n\n```ts\n// packages/spec/src/api/error-code-ledger.zod.ts\n'@objectstack/service-datasource': [\n  'DATASOURCE_ADMIN_ERROR',      // lifecycle/validation refusal from the datasource-admin service\n],\n```\n\nSo a `no such schema` raised by the **external-datasource** introspector is reported as a lifecycle/validation refusal from **datasource-admin**. Same class as #4225, but where that one misled a human reading prose, this misroutes a client switching on `error.code`.\n\n## Why #4225 deliberately did not fix it\n\n#4225's argument was that `SERVICE_UNAVAILABLE` is correct for all nine routes — ADR-0112's ledger asks generic conditions to reuse the standard catalog rather than register a per-service synonym — so only the `message` was wrong, and `message` is free text. `DATASOURCE_ADMIN_ERROR` is neither generic nor free: `ApiErrorSchema.code` is the closed `ErrorCode` union, so correcting it means editing the ledger. That is a spec change, and #4234 kept `error.code` byte-identical on all nine routes on purpose.\n\n## What the fix has to decide\n\nThe sibling surface does not settle it either. `packages/rest/src/external-datasource-routes.ts` catches on the **import** route only:\n\n```ts\nsendError(res, 400, 'EXTERNAL_IMPORT_ERROR', ...)   // import only\n```\n\nIts `GET /external/tables` and `POST /external/tables/:remote/draft` carry no `try`/`catch` at all. So the same two service operations — `listRemoteTables`, `generateObjectDraft` — reach REST by two paths with **different failure contracts**: a 400 `DATASOURCE_ADMIN_ERROR` through `admin-routes.ts`, and an uncaught throw through `external-datasource-routes.ts`. Worth settling in one pass rather than fixing the code string alone.\n\nRoughly:\n\n1. Register `EXTERNAL_DATASOURCE_ERROR` and use it on the three routes. `EXTERNAL_IMPORT_ERROR` is already registered next door under `@objectstack/rest`, so the owner package for a new one needs a decision too.\n2. Widen `EXTERNAL_IMPORT_ERROR` to cover introspection — but the name says *import*, and these are not imports, so this is only honest with a rename.\n3. Decide these are not 400s at all, and let an introspection failure surface the way the rest surface currently lets it: uncaught.\n\n## The current drift is pinned by a test\n\n`packages/services/service-datasource/src/__tests__/envelope.conformance.test.ts` asserts the wrong code today:\n\n```ts\n{\n  name: 'a remote-table introspection failure',\n  status: 400,\n  code: 'DATASOURCE_ADMIN_ERROR',\n  run: () => drive(mount({ listRemoteTables: async () => { throw new Error('no such schema'); } }), '/api/v1/datasources/ext/remote-tables'),\n},\n```\n\nThat row moves with the fix, whichever option wins.\n\nPre-existing, like #4225: #3843 carried every code string over verbatim."
+}

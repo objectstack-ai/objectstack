@@ -1,0 +1,30 @@
+{
+  "number": 4116,
+  "kind": "issue",
+  "title": "终结式命名空间通配已修四次、发现四次都靠人手 —— 缺的是枚举，不是又一个 per-plugin 测试",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T10:23:37Z",
+  "updated_at": "2026-07-30T10:44:46Z",
+  "closed_at": "2026-07-30T10:44:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4116",
+  "body": "按 Prime Directive #10 记录。#4088 / #4092 与 cloud#923 收尾时提出。\n\n## 现象\n\n挂在通配路径上的 handler（`app.all('/api/v1/auth/*', h)`）声明了**整个命名空间**。Hono 对同一路径按**注册顺序**依次执行 handler，先产出 Response 的赢。所以只要那个 handler 是**终结式**的（总是应答、从不 `next()`），同前缀下其他插件的路由就只有\"恰好注册得更早\"才能被访问到 —— 而插件注册顺序既没人声明、也没人测试。\n\n这个形状已经付了四次代价，**四次都是有人为了别的事读代码时偶然发现的**：\n\n| 事故 | 后果 |\n|---|---|\n| #2567 | raw `/data` 的匿名拒绝只在 REST 先注册时成立 —— 加载顺序一变，匿名数据访问被静默重新打开 |\n| #4018 | standalone `/discovery` 被 dispatcher 的遮蔽，于是第三份供给长期漂移无人察觉 |\n| #4088 / #4092 | `AuthPlugin` 的 `/api/v1/auth/*` 吞掉 `plugin-hono-server` 的 `/auth/me/permissions`（console 的**整个权限层**），除非 server 插件先注册 |\n| [cloud#923](https://github.com/objectstack-ai/cloud/pull/923) | `AuthProxyPlugin` 同一形状。而且 cloud **已经真的踩过**：`apps/{objectos,cloud}/server/index.ts` 记着 staging 上 Console 404 on `/api/v1/auth/me/permissions` |\n\nCI 对这四个一个都没拦住，对第五个也不会。\n\n## 为什么不是再写一个 per-plugin 测试\n\n#4092 与 cloud#923 各自带了一个驱动测试，钉住**那一个** catch-all 的落穿。这些值得有，但它们结构上不可能覆盖下一个通配 —— 测试只能驱动它被写下那天已经存在的路由。\n\n**从来不存在的是枚举。** \"这个仓库里有哪些 handler 声明了命名空间、每一个是不是终结式\" 这个问题一直没有答案，所以新的终结式 catch-all 落地时没有任何东西会失败。\n\n## 建议：一个全仓 AST 扫描 + 三态 ledger\n\n照 `check-route-envelope.mjs`（#3843）的既有形状做，包括最关键的那条：**扫到但未登记 = 错误，而不是默认放行**。正是\"默认放行\"让上面四个攒起来的。\n\n三态，与 #3843 同构：\n\n- `yields` —— handler 收 `next` 并调用它。**由 AST 验证**，所以条目不会腐烂：把 `next()` 删掉就会失败。\n- `exempt` —— 附**理由**，给那些**本就应该**独占整个命名空间的（传输适配器的单一入口、SPA 静态子树、第三方中间件工厂）。\n- `ratchet` —— 当前是终结式、被跟踪、**未被祝福**：记当前状态 + 将修它的 issue。\n\n没有第四种\"没人看过\"的状态。\n\n**必须用 AST 而非正则**：\"这个 handler 调了 `next()` 吗\"是关于**参数绑定**的问题，不是关于文本 `next(` 附近出现过。注释里提到 `next()`、字符串里提到、或者内层闭包自己的 `next` —— 三者都能骗过文本匹配，而且**是朝\"通过\"的方向骗**，缺陷照样发货。参数名也不一定叫 `next`。\n\n## 已经扫出来的东西\n\n原型扫描在 `packages/` 下找到 **13 处**命名空间挂载（手工 grep 当初只找到 3 处），其中两处是**真实的、未被跟踪的**同类缺陷：`packages/adapters/hono/src/index.ts` 的 `${prefix}/auth/*` 与 `${prefix}/storage/*` 都是终结式。该适配器全仓无消费者，所以今天没坏东西，但它是发布出去的包 —— 详见随后的独立 issue。"
+}

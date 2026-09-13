@@ -1,0 +1,30 @@
+{
+  "number": 4255,
+  "kind": "issue",
+  "title": "check:generated 的双向对账从不在 CI 上执行——#4203 关闭次日即被 #4232 原样复现，main 的本地 wrapper 又红了",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-07-31T00:53:31Z",
+  "updated_at": "2026-07-31T01:57:29Z",
+  "closed_at": "2026-07-31T01:57:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4255",
+  "body": "#4203 修的是症状（`check:variant-docs` 缺分类），没修机制。机制性缺口是：**台账的双向对账只在聚合入口 `check:generated` 里跑，而 CI 从不跑聚合入口**——`ci.yml` 的 `check-generated` job 逐个跑单门。于是\"新增 `check:`/`gen:` 脚本而不改 `check-generated.ts`\"这一形态的 PR 永远 CI 全绿、落地后 `main` 上的本地 wrapper 立刻红（对账阶段退出，一个门都不跑）。\n\n**已复现第二次。** #4232（19365b7，昨天）新增 `check:strictness-ledger`，未分类。此刻在 `main` 上：\n\n```\n✗ check:generated ledger is out of sync with package.json:\n\n  `check:strictness-ledger` exists in package.json but is in neither GATED nor NO_GENERATOR.\n    Classify it: does it compare a checked-in artifact against a generator, or audit source?\n```\n\n即 AGENTS.md 要求每个 spec 改动者本地必跑的入口，在 #4203 关闭约一天后再次在 `main` 上不可用。上次是靠 #4194 恰好也要加脚本、撞上同一堵墙才顺手修掉的——没有门，靠运气。\n\n**为什么把对账加进 `ci.yml` 的 `check-generated` job 是无效的**：该 job 由 `generated` paths filter 门控，filter 的 15 条路径里没有 `packages/spec/package.json`——而这恰是每个此形态 PR 必改的文件。实测 #4177 和 #4232 的改动面（changeset + spec-liveness-check.yml + package.json + 脚本 + 文档）对 filter **一条都不命中**，两个肇事 PR 都整体跳过了这个 job。\n\n**修法**（与 `check:docs`/`check:skill-refs`/`check:react-blocks` 的既有先例同构——\"unfiltered required job 里放不能休眠的门\"）：\n\n1. `check-generated.ts` 加 `--reconcile-only` 模式：只跑 `reconcileLedger` 即退出，不跑 8 个门。只读 `package.json` 与脚本内数组，无需 build，亚秒级。\n2. `lint.yml` 的 required \"TypeScript Type Check\" job 加一步 `pnpm --filter @objectstack/spec check:generated --reconcile-only`。\n3. 顺手把 #4232 的 `check:strictness-ledger` 分类进 `NO_GENERATOR`（它审计手写的 strictness ledger 文档，无 generator 可登记），让 `main` 的 wrapper 恢复绿。\n\n对账是双向的，此门同时覆盖另一侧：删除/重命名脚本但台账仍点名 → 同样在 PR 上红，而不是留下悬空引用。\n\nRefs #4203, #4177, #4183, #4194, #4232"
+}

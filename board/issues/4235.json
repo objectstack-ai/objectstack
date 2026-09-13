@@ -1,0 +1,35 @@
+{
+  "number": 4235,
+  "kind": "pull_request",
+  "title": "feat(migrate): `os migrate value-shapes` —— 引用/结构化 JSON 值形态的按部署门禁（#3438 第 2 项）",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T16:57:24Z",
+  "updated_at": "2026-07-30T19:21:11Z",
+  "closed_at": "2026-07-30T19:21:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T19:21:09Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4235",
+  "body": "## ADR-0104 D1 的第二个证据门禁（#3438 第 2 项）\n\n媒体类已由 #3681 按部署翻转；本 PR 给引用（`lookup`/`master_detail`/`user`/`tree`）与结构化 JSON（`location`/`address`/`composite`/`repeater`/`record`/`vector`）**建立它们自己的门禁**，而不是去借文件迁移那个标记——后者断言的是「文件值已迁移、归属已对账」，对 `lookup` id 或 `location` 载荷是否规范**什么都没说**。\n\n```bash\nos migrate value-shapes           # 扫描：只报告，不写任何东西\nos migrate value-shapes --apply   # 扫描 + 零违规时记录部署标记\n```\n\n### 刻意没有回填\n\n姊妹迁移会转换遗留文件值，因为**是平台收窄了那个存储形态、因此欠这笔转换**。而畸形的 `location` 是应用数据，正确值只有作者知道。所以本命令只报告并给出处方（点名对象、字段、类型、条数、样本 record id、parse issue），由运维修完重跑。\n\n由此得到一个漂亮的简化：**没有可转换的东西，`--apply` 唯一的写入就是标记行**，于是 #3617 的不变量平凡成立——dry run 什么都不改，且「这次运行是否改变了本部署的姿态」从不取决于它发现了什么。\n\n### 反漂移：扫描器与校验器共用同一个谓词\n\n`valueShapeViolation` / `isScannableValueShapeField` 从 `record-validator` 导出、被扫描器 import。**两份「什么算畸形」的实现只要差一个子句，部署就会通过扫描却仍被拒写**——那等于标记在断言一个校验器不认的事实，正是 ADR 上一层禁止的「借来的证据」。有一个测试直接钉住这条属性：同一个值必须既被扫描器计数、又被 strict 写入路径拒绝。\n\n### 分层：扫描器不写标记\n\n`scanValueShapes` 是只读的（它接受的 engine 类型根本没有写入面）。**标记的读者用 spec 契约，只有写者依赖 platform-objects**——这是 `sys-migration.object.ts` 自己写下的设计意图。让引擎去写标记会反转依赖方向，所以组合放在 CLI 命令里。\n\n### 其他\n\n- `OS_ALLOW_LAX_VALUE_SHAPES` 逃生阀，优先级与媒体半边一致：opt-out &gt; 全类 opt-in &gt; 标记。矛盾配置落在安全侧（错误地宽松只是没人看的告警，错误地严格是能工作的应用停止写入）。\n- 引擎两个标记的读取重构成一个按 id 参数化的 helper，&#34;所有不知道的方式都答 false&#34; 只写一遍。\n- **截断或有对象读不出来的扫描，即使零违规也不开门**——「我们读到的那部分里没有」不是标记所断言的命题。\n\n### 与 #4215 的相遇（合并 main 后）\n\n本 PR 开着的时候，#4215 把 **#3438 第 3 项**（新库从空创建时记账两个标记）落到了 main 上，并顺带在 `migration.zod.ts` 里声明了 `VALUE_SHAPES_MIGRATION_ID`——两边同名常量，这是本次唯一的冲突，解法是留一份声明加 main 的 `CREATION_ATTESTED_MIGRATION_IDS`。已核对 #4215 对 `engine.ts` 的改动（`getSchemaSyncStats` 聚合）在合并后完整保留。\n\n合并暴露出文档三处不自洽，一并修掉（见 `13606e0`）：\n\n- 新小节插进了 files-to-references 小节中间，把它的收尾段和「写入规则」callout 劈到了新小节后面——挪回各自命令名下。\n- 那句「其他值类不受影响，`lookup`/`location` 保持 warn-first」现在有了自己的门禁，改为指向它。\n- v17 发布说明由 #4215 写下「attests **both** flags」，但第二个标记及其命令在发布说明里从未出现过；升级清单里「`OS_DATA_VALUE_SHAPE_STRICT_ENABLED` 会打开一些背后没有迁移的值类」也不再成立。补上命令、分开标记的理由，以及自己的升级清单条目。\n- 「从空创建」那节的逃生阀只提了 `OS_ALLOW_LAX_MEDIA_VALUES`，补上本 PR 引入的 `OS_ALLOW_LAX_VALUE_SHAPES`。\n\n### 验证（合并 main 之后重跑）\n\n| 套件 | 结果 |\n|---|---|\n| `@objectstack/objectql` | 1277 passed |\n| `@objectstack/spec` | 7163 passed |\n| `@objectstack/cli` | 622 passed |\n| `@objectstack/service-storage` | 256 passed |\n| `@objectstack/platform-objects` | 246 passed |\n| `@objectstack/driver-memory` | 265 passed |\n| `spec check:generated`（8 项生成物） | 全 PASS |\n| `check-release-notes` / `check-doc-authoring` | PASS |\n| ESLint（全部改动 TS 文件） | 干净 |\n| docs 站点构建 | PASS |\n\n全量构建 71 包通过。（objectql +5 / spec −4 相对合并前，来自 #4215 新增测试与 #4233 退休 plugin 生命周期钩子。）\n\n### 一个顺带发现（另开 issue，未在本 PR 扩大范围）\n\n`sys_migration` 目前**只由 service-storage 注册**——这在只有存储一个消费者时说得通，现在有了第二个与存储无关的消费者。实际部署路径没问题（`os serve` 会自动装配 storage），但这层耦合应当解开：账本是平台基础设施，不该由一个可选服务持有。已在 `data-migration-plugins.ts` 注释中记录。\n\n### 关联\n\n#3438 三项：第 1 项已合并（`698cbc2`），第 3 项由 #4215 合并，本 PR 是第 2 项——合入后 #3438 全部完成。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016zgA8CQMJeJbFEjnbib1Uv"
+}

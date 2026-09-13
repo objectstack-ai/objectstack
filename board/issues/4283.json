@@ -1,0 +1,34 @@
+{
+  "number": 4283,
+  "kind": "pull_request",
+  "title": "docs(skills): hook 示例改用 defineHook(),不再教裸 `: Hook` 字面量 (#4274)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T02:38:24Z",
+  "updated_at": "2026-07-31T02:47:53Z",
+  "closed_at": "2026-07-31T02:47:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T02:47:51Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4283",
+  "body": "Closes #4274(#4269 / #4273 的后续)。\n\n#4273 落地了 `defineHook()`,`schema.mdx` 与 `object.zod.ts` 的处方均已指向工厂,但 skills(AI 作者的第一入口)还在 18 处教旧姿势 —— AI 照 skill 写出的 hook 拿到 tsc 绿就报告完成,「import 即校验」闭环在最主要受众上落空。\n\n## 改动(纯文档,机械替换)\n\n- **`const x: Hook = {…}` → `const x = defineHook({…})`** ×18,涉及:\n  - `SKILL.md`(os:check 打标块 + CRM 蓝图表格行措辞)\n  - `rules/hooks.md`(Quick Reference)\n  - `rules/validation.md`(外部校验示例)\n  - `references/data-hooks.md`(定义示例、fillPositionOnHire 打标块、cookbook ×10、Method 3 约定扫描、组合/条件示例)\n- **「工厂优先于裸字面量」注记** ×2(`rules/hooks.md`、`references/data-hooks.md` 定义节),与 #4273 在 `schema.mdx` 的注记同款措辞。\n- import 相应改为值导入(`import { defineHook, HookContext }`),无残留未用的 `Hook` 类型导入。\n\n## 防「照抄即崩」核查\n\n`HookSchema` 是 strict 的 —— 包上 `defineHook()` 后,示例里的未知顶层键会从装饰性类型变成运行时抛错。对全部 15 个改写块扫描顶层键,均只含合法 schema 键,无一例外。\n\n## 验证\n\n- `check:skill-examples`:198 个 prose 片段对构建后 dist 类型检查全绿(含本次改写的打标块)。\n- 无包代码变更,不需要 changeset(skills/ 不在任何发布包的 files 白名单内)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

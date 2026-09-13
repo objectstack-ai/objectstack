@@ -1,0 +1,32 @@
+{
+  "number": 4149,
+  "kind": "issue",
+  "title": "spec 的 kernel/dev-plugin.zod.ts 声明了一套 plugin-dev 从未实现的 Dev Mode 协议 —— 零消费者，待 enforce-or-remove 评估",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T12:01:18Z",
+  "updated_at": "2026-07-30T13:17:55Z",
+  "closed_at": "2026-07-30T13:17:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4149",
+  "body": "按 Prime Directive #10 记录，ADR-0115 实施（PR #4137）后做 spec 侧描述修正（#4093 后续第 2 项）时发现。\n\n## 现象\n\n`packages/spec/src/kernel/dev-plugin.zod.ts` 声明了完整的「Dev Mode Plugin Protocol」授权面：\n\n- `DevPluginConfigSchema`：`preset`（minimal/standard/full 三档）、`fixtures`（glob 加载 + resetBeforeLoad + envFilter）、`tools`（HMR / request inspector / DB explorer / mail catcher / `/_dev/docs`）、dev-tools 仪表盘 `port`（默认 4400）、`open`、`simulatedLatency`；\n- `DevServiceOverrideSchema`：按服务的 `strategy: 'mock' | 'memory' | 'stub' | 'passthrough'`。\n\n**没有任何一项被实现**：真实的 `@objectstack/plugin-dev` 消费的是自己的 `DevPluginOptions` 接口（port/seedAdminUser/authSecret/services 布尔开关/extraPlugins/stack），从不 import 这个 schema；ADR-0115 之后它是纯装配插件，`strategy: 'stub'` 这一档描述的行为刚刚被整体退役。仓库内消费者为零（仅生成物 `json-schema/kernel/Dev*.json` 与 spec 自身的 shape 测试）。\n\n这是 ADR-0078「声明即谎言」/ PD #10「declared ≠ enforced」在 kernel 命名空间的一个整族实例，且与 ADR-0115 的方向直接冲突（schema 教人配置 stub 策略，平台已裁决 stub 不存在）。\n\n## 需要的决定（ADR-0049 enforce-or-remove）\n\n1. **remove（倾向）**：整族退役（5 个导出 + json-schema 5 份 + api-surface + authorable-surface……走 `spec-property-retirement` 的全套 14 面）。理由：零消费者、与 ADR-0115 冲突、`devPlugins` 的外层接线也从未存在（stack/manifest 里没有这个键）。\n2. **enforce**：把 `@objectstack/plugin-dev` 改造成消费此 schema —— 但 preset/fixtures/devtools 是三个独立的大特性，没有需求记录支撑。\n\nPR #4137 的后续描述修正只在文件头加了「declared-but-unconsumed，待本 issue 处置」的诚实说明，不动 schema 本身。\n\n关联：#4093、ADR-0115、ADR-0078、ADR-0049、PR #4137。"
+}

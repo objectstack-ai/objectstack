@@ -1,0 +1,35 @@
+{
+  "number": 4031,
+  "kind": "pull_request",
+  "title": "feat(spec,objectql,driver-sql)!: ADR-0113 accepted — required is a write contract, storage.notNull is the column constraint",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T05:05:32Z",
+  "updated_at": "2026-07-30T05:43:31Z",
+  "closed_at": "2026-07-30T05:43:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T05:43:29Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4031",
+  "body": "Implements the three adjudications on ADR-0113's open questions and lands P0. The ADR moves **Proposed → Accepted** with the resolutions written in.\n\n## The adjudications\n\n**Q1 — spelling: `storage: { notNull: true }`.** The decisive argument is orthogonality: the write contract and the column constraint form a genuine 2×2 and every cell exists in the platform's own objects — `required` alone is the criteria_json posture, **`storage.notNull` alone is the engine-populated column** (audit fields, the tenant column), which a single `requiredEnforcement` enum cannot express at all. `notNull` is also vocabulary a model already knows from the SQL corpus — no invented term to hallucinate values for.\n\n**Q2 — uniform semantics, by explicitization rather than inference.** `required: true` means the write contract on new and deployed objects alike — semantics conditioned on deployment history are unreasonable-about by construction for an author (human or AI) who sees only the source. The draft's \"loader treats an already-NOT NULL column as storage.notNull\" is rejected as self-contradictory (that inference IS history-dependence); instead the **`field-required-notnull-explicit` conversion** stamps `storage: { notNull: true }` onto every pre-17 required field — under the old semantics that column *was* created NOT NULL, so the rewrite writes down what the text already meant. **Migration-chain-only**: this is a default flip, not a rename; a loader that auto-applied it would stamp the constraint back onto 17-authored sources that deliberately omit it.\n\n**Q3 — folded in and generalized.** Rather than `requiredWhen` \"adopting\" `required`'s asymmetry, both become corollaries of one rule, now the ADR's core:\n\n> **The non-regression invariant**: a write may not take a record from compliant to violating; a pre-existing violation does not block writes that leave it in place. Operationally: *reject iff the merged post-state violates AND the pre-state complied.*\n\n## What changed\n\n- **spec**: `FieldSchema.storage.{notNull}`; `required`'s describe states the write contract; `storage.notNull` × `requiredWhen` rejected at the parse seam (`superRefine`) — when the condition is false the contract permits null but the column would refuse it; two gates that cannot both be honest.\n- **objectql, record-validator**: an update PATCHing `null` into a required field is **rejected** — before this PR the update path skipped the required check entirely, so a null-out silently passed (a real hole, found while implementing). Omitted fields still never block; legacy null rows rest; autonumber stays exempt.\n- **objectql, rule-validator**: `requiredWhen` applies the invariant with a pre-state check against the prior record it already fetches. A write flipping the condition true without providing the field is rejected (it *creates* the violation); the legacy-row lockout #3929 documented is cured — **the test pinning the old lockout behavior is deliberately flipped**, with the rationale in place.\n- **driver-sql**: `createColumn` emits NOT NULL from `storage.notNull`, not `required`; drift compares against `storage.notNull`. A column *stricter* than its declaration is `needs_confirm` — dev auto-reconcile **no longer silently strips a stray NOT NULL** (supersedes the #2178 self-heal, whose test is rewritten with the reasoning) — and *silent* when the field is write-gated by `required`, which is every pre-17 source after a runtime upgrade; nagging all of them would bury real drift. New posture-matrix test covers all five cells.\n- **conversion + chain step** replayed by the chain-composability gate; `spec-changes.json` / upgrade guide carry the entry.\n- ADR-0113 rewritten (Accepted); v17 release-notes section + upgrade-checklist item; field ledger (`required` re-verified with new evidence, `storage` added); major changesets for the three packages.\n\n## Verification\n\n- `packages/spec` **6903**, `packages/objectql` **1179**, `driver-sql` **485** tests green — including the flipped/rewritten pins, 6 new schema tests, 5 new record-validator tests, 4 new rule-validator non-regression tests, and the drift posture matrix.\n- All spec gates green: `check:liveness`, `check:empty-state`, `check:authorable-surface`, `check:api-surface`, `check:spec-changes`, `check:upgrade-guide`, `check:docs` (251), `check:skill-refs`, `check:skill-examples` (198), `check:i18n`.\n- Docs sweep for old-semantics teaching (\"required creates NOT NULL\"): zero hits in hand-written docs and skills.\n- P1 (Console required-marker from the write contract, objectui) and P2 (`criteria_json` flips to `required: true`, guard consolidation) follow as separate PRs.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QuViRSR1j6GJjf9qGbnqFX)_"
+}

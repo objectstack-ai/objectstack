@@ -1,0 +1,35 @@
+{
+  "number": 4086,
+  "kind": "pull_request",
+  "title": "fix(runtime,metadata-protocol): every dispatcher domain gates on handlerReady, not slot occupancy (#4058 step 2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T09:11:48Z",
+  "updated_at": "2026-07-30T10:11:25Z",
+  "closed_at": "2026-07-30T10:11:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T10:11:22Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4086",
+  "body": "Closes #4058. 接 **#4082（step 1）** 落地 step 2。\n\n#4000 让 `/analytics` 执行了 ADR-0076 D12 结论第 3 条，其余域仍只判槽位占用 —— 自述 `handlerReady: false` 的占位者照样被当真实现调用，编造的答案以 200 发出。step 1 把两类实现分开了，这个 PR 是读这个区分的门。\n\n> **与 #4082 的分工**：本分支开着的时候 #4082 落地了分类那一半，而且做得更好 —— 一张可审的 `DEV_STUB_SELF_INFO` 表、连 kernel 自己的 fallback 一起覆盖（`_fallback: true` 那个没人认识的标记，本分支曾另开 #4089，现已在源头修掉并关闭）、彻底去掉 `_dev: true` 而不是留作来源标记、还给无 HTTP 面的 `cache`/`queue`/`job`/`realtime` 显式设了 `handlerReady: false`（本分支漏了这层）。所以本分支只留 #4082 明确留开的那半：门。分类实现与其测试已按 main 的版本收敛。\n\n## 门（一个谓词）\n\n新增 `packages/runtime/src/service-serveable.ts` 的 `isServiceServeable`（吸收了 #4000 的 `isAnalyticsServiceServeable`），由以下全部读取：\n\n- 六个 dispatcher 自有域：`/analytics`、`/automation`、`/notifications`、`/ai`、`/storage`、`/i18n`\n- 路由挂载门（analytics）\n- discovery 的 `routes` / `features`\n- metadata-protocol discovery builder 的 route 广告\n\n自述 `handlerReady: false` 的占位者，得到的回答与空槽**完全一致** —— 各域原本的 404，或 `/storage`、`/i18n` 用的那个显式 501。\n\n**判据是 `handlerReady` 而不是 `status`，这正是它能安全推广的原因**：真干活的实现声明 `degraded`，`handlerReady` 默认 `true`，继续服务。所以 `file-storage` / `i18n` / `metadata` / `workflow` 没有任何回退，只有编造的那类被当空槽。\n\n`discovery.services.*` 保持按存在与否判定：已注册的 stub 仍报 `{ enabled: true, status: 'stub', handlerReady: false }` 且不带 `route` —— 比塌缩成 `unavailable` 说得更多。\n\n## 顺手修好的一处\n\n`/ai` 在 stub 占槽时**原本更差**：因为 stub 是 truthy，请求会穿到 `!routes` 的 503「AI service routes not yet initialized」，同时丢掉 console 每次导航轮询的 `GET /ai/agents` 空列表礼遇。视同空槽后两者都回来了。\n\n## 刻意没动的部分\n\n- **`/data`、`/meta`、`/auth` 与安全路径不加门**。它们的 dev stub 支撑的是 dev 栈自己的主回路，加门会把 dev 栈本身 404 掉。它们已被 step 1 诚实标成 `stub`。\n- **不删任何 stub**。#4058 原文倾向连 `automation`/`notification`/`ai` 的 stub 一起删掉，但 step 1 把它们标成 `stub` 之后，**门已经让它们的 HTTP 面等于空槽**（下面端到端有证），所以\"造假类该不该继续占槽\"变成了一个可以单独决定的问题 —— 归到 #4093 的 A 档，与 `data`/`auth`/`security.*` 一起评估（其中三个 `security.*` 撞在本 ADR 自己写的「fallback 可以降级功能、绝不能降级安全语义」上，那条可能不该等评估）。\n- **metadata-protocol 的 route 抑制只覆盖 dispatcher 自有的六个槽位**。`search`（REST 层）、`workflow`、`graphql`、queue/job/cache 的路由由注册该服务的插件自己挂，`handlerReady` 说明不了那条路由挂没挂，抑制它是猜而不是诚实 —— 有一条测试专门钉这个边界。\n\n## 验证\n\n- 合并 main 后：runtime **923** / plugin-dev **8** / objectql **1183** / metadata-protocol **99** / core **415** 全过；`pnpm build` 71/71；eslint 干净\n- **端到端**（真实 plugin-dev 装配 + dispatcher，跑在 step 1 的分类之上）：\n\n```\nservices:  automation   stub      handlerReady=false route=—\n           notification stub      handlerReady=false route=—\n           ai           stub      handlerReady=false route=—\n           file-storage degraded  handlerReady=true  route=/api/v1/storage\n           i18n         degraded  handlerReady=true  route=/api/v1/i18n\nrequests:  GET  /automation    handled=false      POST /ai/chat      404\n           GET  /notifications handled=false      GET  /ai/agents    200 {\"agents\":[]}\n           GET  /i18n/locales  200\n```\n\n三个 stub **仍然注册着**，但已经拿不到 route、请求得到空槽的回答 —— 这就是\"不删也诚实\"的证据，也是把删除留给 #4093 的依据。\n\n新增测试：域级（stub → 空槽答案 且**不被调用**；degraded → 照常服务）、discovery 级（`routes`/`features` 与域一致，`services` 仍报 stub）、metadata-protocol builder 级（含非 dispatcher 自有槽位保持按存在判定的边界）。\n\n## 关联的域外 issue（Prime Directive #10）\n\n- **#4087** —— dispatcher 的 `/storage/upload` 用 `upload(file, { request })` 调契约里的 `upload(key, data, options?)`，`Buffer.from({ request })` 直接 TypeError。装了 service-storage 时被它自己的 `/api/v1/storage/*` 遮蔽，所以只在没插件拥有该前缀时可达 —— 那里必崩。与本 PR 无关（改动前后走同一行），端到端验证时撞出来的，上面日志末尾就是它。\n- **#4089** —— core 五个内存 fallback 的标记问题，已由 #4082 在源头修掉，**已关闭**。\n- **#4093** —— 上一层评估：「stub 填满槽位」这个早期设计是否整体作废（含本 PR 刻意留下的删除决定）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_018UNGqBQcdJ2RYHtWgntJ9B"
+}

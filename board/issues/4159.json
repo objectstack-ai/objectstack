@@ -1,0 +1,35 @@
+{
+  "number": 4159,
+  "kind": "pull_request",
+  "title": "fix(plugin-hono-server): current-user 端点改由「拥有该请求的 kernel」应答 (cloud#927)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T13:05:48Z",
+  "updated_at": "2026-07-30T13:19:06Z",
+  "closed_at": "2026-07-30T13:19:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T13:19:04Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4159",
+  "body": "cloud#927 的框架侧。#4144 补的是\"**有没有**提供者\"，这条是\"**哪个 kernel** 提供\"——两件不同的事，后者在多租户宿主上一直是错的。\n\n## 问题：注册期的定位器 ≠ 拥有该请求的 kernel\n\n这三条端点从**注册时**捕获的服务定位器解析答案。单环境宿主上那就是唯一的 kernel，因此正确。**多租户**宿主上那是路由外壳，而身份不在那里：\n\n- cloud 的 `ArtifactKernelFactory` 把 `AuthPlugin` 挂在**每个环境**的 kernel 上（per-project HKDF secret）；\n- 宿主 kernel 刻意不挂 —— `objectos-stack.ts` 原话：\"AuthPlugin is intentionally NOT injected on the host\"；\n- 全仓 `registerService('auth', …)` 只有 `plugin-auth` 一处。\n\n于是 `ctx.getService('auth')` 在宿主上抛错 → `resolveCtx` 落到 catch → 返回 `undefined` → 端点走匿名分支：\n\n```\nGET https://os-<id>.objectos.app/api/v1/auth/me/permissions\n→ 200 {\"authenticated\": false}          // 无论调用者是谁、有没有登录\n```\n\n**这比报错更糟**：objectui 的 `MePermissionsProvider` 把 `authenticated:false` 当作**匿名**并保持宽松默认（`return data.authenticated !== true`）—— 匿名/公开面没有可解析的权限是设计使然，锁死每个字段会把公开表单弄坏。所以已登录 tenant 用户的 console，其 FLS / `apiOperations` 提示是**系统性错误**的。不是权限绕过（ADR-0057 D10 起服务端才是权威闸门，仍然逐请求强制），但正是 `foldWildcardSuperUser` / `clampManagedObjectWrites` 那一整套整形逻辑存在的目的（让客户端提示与服务端实际强制一致），只不过错在上一层。\n\n## 改法：走宿主已有的 `kernel-resolver` 缝\n\n框架早就为这件事声明了规范缝：`kernel-resolver`（ADR-0006 Phase 5），dispatcher 从那时起一直在用。**这三条端点不查它，才是缺陷本身。** 现在改为逐请求查询，多租户路由从此只有一份策略而不是两份。\n\n四种结果，两条失败路径都是刻意的：\n\n| resolver | 行为 |\n|:---|:---|\n| **未注册** | 不变。单环境宿主、`os serve`、QA conformance 宿主零差异。 |\n| 返回一个 kernel | 用**那个** kernel 的 `auth`/`objectql`/`metadata`/`security.permissions` 应答。**这就是修复。** |\n| 返回 `undefined` | 用注册期定位器 —— 这正是该缝对\"无 scope／控制面请求\"的契约，那种宿主上默认 kernel 确实是对的答案。 |\n| **抛错** | **不给答案**：错误自带 status 就用它（cloud 的 `KernelWarmingError` 是 503 + `Retry-After`），否则 503 `environment_unavailable`。退回默认 kernel 会交回一个自信而错误的 `{authenticated:false}`，客户端据此 fail-OPEN —— 严格劣于一个可重试的错误。 |\n\n**逐请求惰性读取**，绝不在注册时捕获：宿主可能在 `kernel.bootstrap()` **之前**注册这些路由（为了抢在 `/api/v1/auth/*` 通配之前，见 cloud#924），而那早于注册 resolver 的插件跑 `init()`。测试里 resolver 是**在** `registerCurrentUserEndpoints` 之后才装进服务表的，正是为了钉住这一点。\n\n三个 handler 用一层包装，让逐请求定位器**遮蔽**（shadow）注册期的 `ctx` —— handler 体一行未改，而不是逐个读去穿参数。\n\n## 影响面 / FROM → TO\n\n`CurrentUserEndpointsContext` 增加可选 `getKernel(): unknown`，即该缝需要的 `defaultKernel`。`PluginContext` 本来就满足，所以**挂 `HonoServerPlugin` 的宿主无需改动**；自己手写定位器的宿主应该补上：\n\n```diff\n registerCurrentUserEndpoints({\n   rawApp: httpServer.getRawApp(),\n-  ctx: { getService: (n) => kernel.getService(n) },\n+  ctx: { getService: (n) => kernel.getService(n), getKernel: () => kernel },\n });\n```\n\n不补的话，多租户宿主问不到\"谁拥有这个请求\"，就退回旧的（错误的）来源 —— 是**静默降级**而非中性选择，所以即使当下是单环境也值得补。\n\n## 已知代价（issue 里点名要求评估的两条）\n\n多租户宿主上每个这三条的请求现在都会走一次 `resolveKernel`，对 cloud 而言就是 `resolveByHostname`（冷分片会构建 tenant driver，可能数秒）+ `KernelManager.getOrCreate`（可能冷建 kernel）。两点判断：\n\n1. **不是新增开销**：console 的其余数据调用本来就全部经过 dispatcher，走的是同一个缝。轮到取权限时环境 kernel 通常已经热。\n2. **冷的时候答案是诚实的**：503 + `Retry-After` 正是同一宿主上 `/api/v1/auth/*`（`AuthProxyPlugin`）和 dispatcher 已经在给的形状，客户端可以重试；而旧行为是一个不可重试、静默 fail-open 的 200。\n\n> 顺带记一笔（**不在本 PR 范围**）：objectui 的 `MePermissionsProvider` 在 fetch 失败时渲染 `errorFallback ?? loadingFallback`，而 console 没传 `errorFallback` —— 所以 503 期间 console 停在 LoadingScreen 而不会自动重试。它已经暴露了 `retry`，接上是 objectui 侧一个独立的小改动。\n\n## 验证\n\n| 范围 | 结果 |\n|:---|:---|\n| `plugin-hono-server` 全量 | 13 files / **149 passed**（新增 12） |\n| `turbo run test --affected` | **73/73 packages** |\n| ESLint job 全部门禁（含 `check:authz-resolver`、`check:wildcard-fallthrough`、`check:error-code-casing`） | PASS |\n| `packages/spec` 八个生成物门禁 | PASS |\n| `tsc --noEmit` | clean |\n\n新增 12 例：\n\n- 解析出的**环境 kernel 应答**（旧行为在这里是 `{authenticated:false}`）；\n- 且在宿主**自己也有 `auth`** 时仍然**优先环境 kernel** —— 钉住\"这是解析取胜\"而不只是\"填了个空洞\"；\n- 三条端点都走同一解析；\n- resolver 收到的是**去掉 prefix 的 `routePath`**（cloud 的 resolver 对它施加控制面跳过策略）、第二参是**宿主 kernel**、headers 是真的 `Headers`；\n- 未注册 resolver／返回 `undefined`／返回默认 kernel／没有 `getKernel` —— 四种都保持旧答案；\n- warming 503 带 `Retry-After: 4`；\n- 无 status 的失败是 503，并**显式断言不是** `{authenticated:false}`；\n- resolver 抛 4xx 原样透传。\n\n## 关联\n\n- cloud#927（本 PR 的 issue）、cloud#924 / cloud#928（补上 serverless 路径的提供者，本 PR 的前置）；\n- #4144（导出注册面）、#4073 / #4079、ADR-0006 Phase 5（`KernelResolver` 缝）。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016gEeLZ4oTeSXG6fKG1r3vd\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016gEeLZ4oTeSXG6fKG1r3vd)_"
+}

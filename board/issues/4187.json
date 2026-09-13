@@ -1,0 +1,32 @@
+{
+  "number": 4187,
+  "kind": "issue",
+  "title": "ADR-0116 收尾：12 个消费方在 init() 硬取服务却未声明 requiresServices（均已被硬依赖保护，是诊断质量而非正确性问题）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T14:28:20Z",
+  "updated_at": "2026-07-31T00:41:17Z",
+  "closed_at": "2026-07-31T00:41:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4187",
+  "body": "ADR-0116（#4131，PR #4163）建立了声明式排序契约；PR #4185 补齐了 provider 侧的 20 个 `providesServices`。本 issue 记录审计的**另一半**——消费方侧，以及一个反直觉但重要的结论：**这一批不是活的 bug**。\n\n## 审计结论\n\n对每个插件大括号配对提取 `init()` 方法体（剥离注释后），按调用是否位于 `try`/`if` 内分类，发现 **12 个插件在 `init()` 里同步硬取服务**（其中 11 个取的是 `manifest`）却没有声明 `requiresServices`：\n\n| 插件 | init 硬取 | 已声明的 `dependencies` |\n|:---|:---|:---|\n| `com.objectstack.audit` | `manifest` | `['com.objectstack.engine.objectql']` |\n| `com.objectstack.service.reports` | `manifest` | 同上 |\n| `com.objectstack.service.approvals` | `manifest` | 同上 |\n| `com.objectstack.service.sharing` | `manifest` | 同上 |\n| `com.objectstack.service.email` | `manifest` | 同上 |\n| `com.objectstack.security` | `manifest` | 同上 |\n| `com.objectstack.service.realtime` | `manifest` | 同上 |\n| `com.objectstack.service.messaging` | `manifest` | 同上 |\n| `com.objectstack.auth` | `data`, `manifest` | `dependencies: string[] = [...objectql]` |\n| `com.objectstack.metadata.protocol` | `objectql` | 对象字面量 `dependencies: [...objectql]` |\n| `com.objectstack.plugin-webhook-outbox` | `manifest` | `['com.objectstack.service.messaging']` → 传递到 objectql |\n| `customer-plugin`（`packages/core/examples/api-registry-example.ts`） | `api-registry` | 示例文件 |\n\n**12 个全部已经通过声明的硬依赖被正确排序**，没有一个是活的 #4085 类暴露。`plugin-webhook-outbox` 是唯一靠**传递依赖**保护的（→ messaging → objectql），能跑，但比其余的脆一层。\n\n> 排查提示，免得后来者重蹈：我中途一度判定 `plugin-auth` 与 `metadata-protocol` \"无任何依赖声明、属于活的暴露\"——**是错的**，grep 模式的问题。前者写作 `dependencies: string[] = [...]`（名字与 `=` 之间有类型标注），后者写作对象字面量的 `dependencies: [...]`（冒号非等号）。搜依赖声明时两种语法都要覆盖。\n\n## 因此：不建议批量补 `requiresServices`\n\n对**已声明硬依赖**的消费方，`requiresServices` 大体上是在重复内核已经强制的事——缺 provider 时内核先报的是 `Dependency 'com.objectstack.engine.objectql' not found`，已经够指名道姓了。硬加一遍收益很小，却要在 12 个文件里引入需要逐个判读的语义。\n\n`requiresServices` 真正不可替代的场合是**软依赖消费方**：插件在 provider 缺席时要降级（所以不能用硬 `dependencies`），但在 provider 在场时又必须排在它后面。**目前全仓只有 `AppPlugin` 一个**，已在 #4163 声明。\n\n## 建议的处理\n\n1. **新插件写进检查清单**：在 `init()` 里同步取服务时，二选一——要么声明硬 `dependencies`（provider 必然在场），要么 `optionalDependencies` + `requiresServices`（可降级）。裸取且不声明是 #4085 的配方。\n2. **`plugin-webhook-outbox` 值得显式化**：它对 `manifest` 的依赖目前挂在 `messaging → objectql` 这条传递链上，messaging 哪天不再依赖 objectql 就会断。加一条 `dependencies` 直连 objectql，或加 `requiresServices: ['manifest']` 让失败可指名。\n3. **`plugin-auth` 有一处矛盾代码**（顺带发现，可另开）：init 里 `const dataEngine = ctx.getService<any>('data'); if (!dataEngine) { warn('No data engine service found - auth will use in-memory storage') }` —— 但 `getService` 在服务缺失时是**抛错**而不是返回 `undefined`，所以那条降级分支在 ObjectKernel/LiteKernel 上是**死代码**。要么改成 try/catch 真正降级，要么删掉分支并声明依赖，别让代码宣称一种它并不具备的容错。\n4. **ADR-0116 D4 的复评时机**：等声明覆盖面稳定后，再决定要不要从 `requiresServices`/`providesServices` 自动推导排序。**当前证据反而支持继续不做**——provider 侧刚补齐、消费方侧一致选择了硬依赖，说明现有的两级机制（硬依赖排序 + 服务声明校验/诊断）已经覆盖了真实用法。\n\n## 审计脚本\n\n审计用的一次性脚本没有入库（它是排查工具，不是产品代码）。若要做成常驻 lint，要点是：大括号配对提取 `init()` 体（正则必须容忍 `): Promise<void>` 这种返回类型标注，否则会漏掉本仓库的主流写法——第一版就因此只扫到 10 个文件而非 35 个）、先剥离注释（否则 TSDoc 里的 `ctx.getService('manifest')` 会被当成真实依赖）、再按 `try`/`if` 嵌套判定是硬取还是可降级。"
+}

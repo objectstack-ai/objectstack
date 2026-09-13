@@ -1,0 +1,35 @@
+{
+  "number": 4084,
+  "kind": "pull_request",
+  "title": "fix(cli): serve's boot-quiet window buffers plugin log lines instead of discarding them (#4012)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T09:09:47Z",
+  "updated_at": "2026-07-30T09:29:23Z",
+  "closed_at": "2026-07-30T09:29:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T09:29:21Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4084",
+  "body": "Closes #4012.\n\n## The drain\n\n`serve` blanks stdout while the kernel boots so the startup banner is readable. That window dropped what it intercepted:\n\n```js\nprocess.stdout.write = (chunk, ...rest) => {\n  if (bootQuiet) return true;  // swallow\n  ...\n};\n```\n\n`ObjectLogger` routes `debug`/`info`/`warn` to **stdout** and only `error`/`fatal` to stderr — so that one line swallowed every boot-phase `logger.warn` any plugin emits. `os dev` spawns `serve` with inherited stdio, so a single drain blinded both entrypoints at every log level.\n\nThat also explains the issue's two puzzles. `--log-level debug` streamed 2,360 data-phase lines with zero boot-phase ones because the sink was live all along — just not until after the window closed. And the `⚠` lines that *did* appear reached the terminal via `console.warn`, which writes to stderr and was never patched — the same reason the `DEGRADED BOOT` datasource notices had already been worked around into bare `console.*`.\n\nIt inverted the flag's own promise, too: the default is `warn` precisely *\"so flow/hook execution failures surface (ADR-0032)\"*.\n\n## The fix\n\nThe window is worth keeping, so it becomes a buffer rather than a drain — the issue's option (2).\n\n- **`BootLogCapture`** (new, `packages/cli/src/utils/boot-log-capture.ts`) is a line-oriented, bounded sink for the intercepted bytes. It classifies each line against `ObjectLogger`'s three renderings (pretty / text / json, ANSI-stripped) and retains only records at `warn` or above, so buffer size tracks a boot's *warnings* rather than its chattiness. Chunks that split mid-line are carried across writes, and a trailing unterminated record still flushes — that is the shape the last warning before a crash arrives in.\n- The retained records **replay under the banner**, beside the automation and seed summaries that already exist for exactly this reason. The startup chatter the window exists to hide is still dropped.\n- **Three exits carry them, not just the healthy one:** the banner, `OS_MIGRATE_AND_EXIT` (a deploy pipeline must not lose a degraded-boot warning), and serve's error path — a boot that died is when its warnings matter most, and it never reaches the banner.\n- At **`--verbose` / `--log-level debug|info` the window no longer opens at all.** Buffering a stream the operator explicitly asked to watch would be the flag defeating itself.\n\nOption (1) from the issue — attach the sink before `bootstrap()` — turned out not to map onto the code: there is no sink to move. `Kernel` takes `logger?: Partial<LoggerConfig>` and builds its own `ObjectLogger`, and the \"sink\" is serve's stdout patch. Making it level-aware is the same idea landed where the mechanism actually lives.\n\n## Verification\n\nOn `examples/app-todo`, before → after:\n\n| | lines | WARN lines | `[action-governance]` |\n|---|---|---|---|\n| `os serve` (before) | 25 | **0** | **0** |\n| `os serve` (after) | 33 | **5** | ✅ names all 8 unbound actions |\n| `os dev` (after) | — | **5** | ✅ |\n\n```\n  ⚠ Boot diagnostics — 5 warnings logged during startup:\n    …WARN [auth] no cache service registered — rate-limit counters use a per-process in-memory store…\n    …WARN [AppPlugin] [protocol] package 'com.example.todo' declares no engines.protocol range…\n    …WARN Driver already registered, skipping {\"driverName\":\"com.objectstack.driver.sql\"}\n    …WARN [action-governance] declared script actions with NO handler — a button wired to nothing (ADR-0078)…\n         {\"count\":8,\"actions\":[\"todo_task:clone_task\",\"todo_task:complete_task\", … ]}\n    …WARN StorageServicePlugin: storage adapter swapped (LocalStorageAdapter → LocalStorageAdapter)…\n    run with --log-level debug to watch the boot stream live\n```\n\n## Tests\n\n- **13 unit cases** pin the classifier and the buffer, driving a **real `ObjectLogger`** through the **real interception** — so a change to its line format fails here rather than silently reopening the hole. They also pin the other half of the split: an `info`-level host still gets a clean banner.\n- **2 end-to-end cases** boot a real stack through `bin/run-dev.js` and read its stdout, using the issue's recipe with a config-only positive control (a declared `script` action with no handler, which the ADR-0110 D5 inventory always warns about). One asserts `[action-governance]` on stdout at the default level; the other asserts boot traces stream at `--log-level debug`.\n\nBoth e2e cases were confirmed to **fail against the pre-fix command** and pass after. Full CLI suite: 84 files / 877 tests green; `eslint src` clean.\n\n## What the newly-visible warnings turned up — all filed separately\n\nMaking these lines visible immediately paid for itself. None of the following are touched by this PR:\n\n- **#4095 — config-booted apps lose their `onEnable` hook.** The `[action-governance]` line above is not cosmetic: `POST /api/v1/actions/todo_task/complete_task` returns `404 Action 'complete_task' on object 'todo_task' not found`, and `--log-level debug` shows `No runtime.onEnable function found {\"appId\":\"com.example.todo\"}`. The example is correctly authored; the handlers never register, so all eight of its buttons are dead over HTTP. This is the ADR-0110 D5 checklist catching a real one on its first observable boot.\n- **#4085 — `os serve <config>` cannot boot without a prebuilt `dist/objectstack.json`**, dying with `Service 'manifest' is async - use await` (reproducible on `examples/app-todo` by moving its artifact aside). The e2e fixture here runs `os compile` first for that reason.\n- **#4096 — `StorageServicePlugin` warns \"adapter swapped (LocalStorageAdapter → LocalStorageAdapter) … files may be unreachable\" on every clean boot**, where nothing changed.\n- **#4097 — example apps declare no `engines.protocol` range**, so ADR-0087's compatibility check is skipped on the very templates users copy."
+}

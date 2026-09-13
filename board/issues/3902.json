@@ -1,0 +1,33 @@
+{
+  "number": 3902,
+  "kind": "issue",
+  "title": "fix(sharing): 共享授权面自身无鉴权——任何登录用户可撤销他人的共享；且 `edit` 档共享同时放行删除",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T16:06:03Z",
+  "updated_at": "2026-07-30T05:20:52Z",
+  "closed_at": "2026-07-30T05:20:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3902",
+  "body": "在 #3865 / #3901（摘除 `full` 访问级别）的评估过程中发现两处独立问题，都不属于那次修复的范围。二者共同的根因是**共享层缺少\"谁有权管理共享\"和\"哪些动词属于哪一档\"的模型**——#3901 修的是共享档位的*表述*，这里是共享的*授权*与*语义边界*。\n\n按影响排序。\n\n---\n\n## 1. `/shares` 端点完全没有鉴权（P0，已端到端实测）\n\n`GET` / `POST` / `DELETE /api/v1/data/:object/:id/shares` 三个路由的 handler 只调用 `enforceAuth`（`rest-server.ts:1136` —— 仅检查 auth-gate 与匿名拒绝，**不做任何对象级或记录级权限判断**），随后直接把请求交给 `SharingService`，而该服务内部一律以 `SYSTEM_CTX` 读写 `sys_record_share`（`sharing-service.ts:37`）。\n\n结果是：**共享这张安全表本身，不受任何访问控制保护**。既没有\"调用者能否看到这条记录\"，也没有\"调用者是否有权共享/取消共享它\"。\n\n### 实测复现\n\n`pnpm dev:crm -- --fresh`，用 `POST /api/v1/auth/sign-up/email` 自助注册一个普通用户 Mallory（无任何 position / permission set），目标是 admin 拥有的 `crm_account` 记录。\n\n**基线** —— Mallory 可读、不可写，符合预期：\n\n```\nGET   /data/crm_account/:id   → 200\nPATCH /data/crm_account/:id   → 403 PERMISSION_DENIED (row-level security)\n```\n\n**① 撤销他人的共享 —— 直接可利用，没有任何一层拦住：**\n\n```\n# admin 给同事授予共享\nadmin  POST   /data/crm_account/:id/shares      → 201  (recipient=trusted_colleague)\n\n# Mallory 用 share id 撤销它\nmallory DELETE /data/crm_account/:id/shares/:sid → 204\n\n# 复查：同事的共享没了\nadmin  GET    /data/crm_account/:id/shares      → recipient 列表中不再有 trusted_colleague\n```\n\n`revoke(shareId)` 只按 id 删除，既不校验调用者，也不校验该 share 是否属于这条记录。**任何登录用户只要拿到（或枚举到）一个 share id，就能静默剥夺任意用户对任意记录的访问。** 这是完整的越权写，无需任何权限。\n\n**② 枚举他人记录上的共享 —— 信息泄露：**\n\n```\nmallory GET /data/crm_account/:id/shares → 200，列出该记录上全部共享行\n```\n\n泄露\"谁能访问什么\"，同时也把 ① 所需的 share id 直接送到手上。\n\n**③ 给自己授权 —— 写入成功，但当前被另一层挡住：**\n\n```\nmallory POST /data/crm_account/:id/shares\n        {\"recipientId\":\"<自己>\",\"accessLevel\":\"edit\"}   → 201\n        → 落库 access_level=edit, granted_by=<Mallory 自己>\n\nmallory PATCH /data/crm_account/:id                    → 仍然 403 (row-level security)\n```\n\n**这里要说清楚，避免夸大**：共享行确实被写进去了（未经授权的安全数据写入，且 `granted_by` 记为攻击者自己），但后续写入仍被 **RLS** 拒绝——拦住她的是 `plugin-security` 的行级安全，**不是** sharing 层。sharing 层是会放行的。所以在 CRM 默认配置下③**没有**形成读写提权，纵深防御起了作用。\n\n但这层防御是配置相关的、不是设计保证的：在以 sharing 为实际写入门的对象上（`sharingModel: private` / `public_read` 且无更严的 RLS 策略收窄），同一个自授就会真正授予编辑权。把安全依赖寄托在\"另一层恰好也拦着\"上不成立——①已经证明当那一层不存在时会发生什么。\n\n### 建议方向\n\n`ISharingService` 需要一个\"共享管理权\"的概念，并在 REST 层强制：\n\n- **读/列出** — 至少要求调用者对该记录有可见性（复用 `buildReadFilter` / `canEdit`）。\n- **授予** — 参照 Salesforce（记录所有者、其管理层级、Modify All 持有者可共享）与 Dataverse（需要该表的 `Share` 特权）。最小可行版本：所有者 + 具备该对象管理能力者。\n- **撤销** — 至少要求调用者当初有权授予它；并且校验 `shareId` 确实属于路径里的 `(object, recordId)`。\n\n注意这同时是 `full` 档\"再共享\"语义所缺的地基（#3865）：在这个模型建立之前，\"可再共享\"根本无处安放。\n\n---\n\n## 2. `edit` 档共享同时放行删除（P1，设计分歧）\n\n`sharing-plugin.ts:613`：\n\n```ts\nif (op === 'update' || op === 'delete') {\n  const ok = await service.canEdit(ctx.object, String(id), exec ?? {});\n```\n\n`update` 与 `delete` 共用一个 `canEdit` 门，而 `canEdit` 接受 `edit` 档共享。也就是说**一次\"编辑\"共享同时授予了删除**（前提是调用者的对象级 CRUD 里有 delete）。\n\n主流平台不是这样：\n\n- **Salesforce** —— Read/Write 共享明确**不能**删除；删除保留给所有者、角色层级上级、Modify All。\n- **Dataverse** —— `Delete` 是与 `Write` 并列的独立特权，共享掩码里也是独立位。\n- **Odoo** —— record rules 的 `write` 与 `unlink` 是两个独立布尔。\n\n即\"编辑\"和\"删除\"在业界是**不同的动词**，共享一个门是语义收缩。#3901 已把 `full` 那个更糟的谎言摘掉（它宣称授予删除却什么都没给）；这一条方向相反——**给得比说的多**。\n\n**这是破坏性变更**：把删除从 `edit` 档拿走，会让现有依赖此行为的部署失去删除能力。需要独立 ADR 决定：\n\n- 是否新增独立的删除档 / 能力位（Dataverse 式掩码），还是删除彻底只归所有权与 DEPTH 范围；\n- 迁移期怎么走（先告警观察，还是直接收紧）。\n\n---\n\n## 关联\n\n- #3865 / #3901 —— 摘除 `full` 档；该 PR 描述里把这两条记为 \"后续（不在本 PR 范围）\"。\n- 第 1 条与 #3901 中\"再共享语义缺地基\"的结论直接相关。\n- ADR-0057（DEPTH 范围）、ADR-0090（权限模型 v2）是第 2 条的设计上下文。\n\n## 复现环境\n\n`main` @ f00d8d4（#3901 合并后），`pnpm dev:crm -- --fresh`，SQLite driver，单租户。第 1 条的①②与第 2 条的代码路径与 #3901 无关，在该 PR 之前即存在。"
+}

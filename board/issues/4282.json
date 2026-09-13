@@ -1,0 +1,35 @@
+{
+  "number": 4282,
+  "kind": "pull_request",
+  "title": "fix(hono,plugin-hono-server,runtime): one CORS source and one registry key — the last derivable copies from the #3786 sweep",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T02:34:08Z",
+  "updated_at": "2026-07-31T03:31:15Z",
+  "closed_at": "2026-07-31T03:31:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T03:31:14Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4282",
+  "body": "## First, two corrections\n\n**The sweep report was based on an incomplete scan.** I said the #3786 sweep was \"basically clean\". The scan globbed `packages/*/src`, which is one level deep, so it missed everything under `packages/plugins/` and `packages/adapters/`. Re-running across all 72 packages found the instances below.\n\n**And the CI wiring I proposed is already on `main`, in a better form.** #4203 landed `check:generated --reconcile-only` in `lint.yml`'s unfiltered job. That is strictly better than what this branch first pushed: it runs only the reconciliation instead of re-running all eight artifact gates that already have their own steps, and it sits in an unfiltered required job so it cannot go dormant behind a paths filter (#4203's comment notes `ci.yml`'s `generated` filter doesn't watch `package.json` — the one file every offending PR must touch). That change has been dropped from this PR.\n\n## The drift: a CORS default, on the one description callers actually read\n\n`HonoCorsOptions.allowHeaders`' TSDoc promised:\n\n> Defaults to `['Content-Type', 'Authorization', 'X-Requested-With']`, which is sufficient for cookie and bearer-token auth.\n\nThe real default carries **three more**: `X-Tenant-ID` and `X-Environment-Id` (multi-tenant routing) and `If-Match` (the OCC token on record PATCHes, objectui#2572). Anyone sizing a custom `allowHeaders` against that sentence drops all three, and every cross-origin save fails in the browser with \"Failed to fetch\".\n\nThe instructive part: **three** Hono CORS sites each carried their own copy of the defaults under \"keep in sync\" comments, and the copies all agreed. What drifted was the *doc* — the only description with no counterpart to be diffed against, and the only one a caller reads.\n\nBoth defaults are now single constants, `DEFAULT_CORS_ALLOW_HEADERS` / `DEFAULT_CORS_EXPOSE_HEADERS`, exported from `@objectstack/plugin-hono-server` and imported by the adapter (which already depends on it — no new edge, no cycle). The TSDoc links them rather than restating them, and documents an asymmetry it never mentioned: `allowHeaders` **replaces** the default, `exposeHeaders` **merges** with it.\n\n`hono-plugin.test.ts` stopped stubbing `./adapter` wholesale and keeps the real constants via `importOriginal`. It asserts exact header lists, so a mocked copy would have made the test agree with itself instead of with what ships.\n\n## A hand-copied service-registry key\n\n`runtime`'s share-links domain resolved `'shareLinks'` as a string literal — copied from `SHARE_LINK_SERVICE`, whose own doc-comment says \"keep in sync with the SharingPlugin registration\". It now imports the constant. A drifted copy resolves nothing, so every share link answers `501 Sharing is not configured for this environment` on an environment where it is configured perfectly well.\n\n## A duplicate ledger entry — the same defect one level up\n\n`check-generated.ts` carried **two** `NO_GENERATOR` entries for `check:strictness-ledger`, because #4203 and #4252 each added one without seeing the other. Functionally harmless (the ledger is read into a `Set`), but two comments told overlapping versions of one story. #4203's is kept — the fuller account, from the PR that fixed the underlying problem.\n\n## Checked and left alone\n\n`ApprovalStatus` (5 values) and `ApprovalActionKind` (12 values) versus their `plugin-approvals` selects: diffed verbatim, **no drift**. Both remain hand-copied across a package boundary under \"keep in sync\" comments — real derivation candidates, but correct today and a larger change than this PR's scope.\n\n## Verification\n\n| mutation | result |\n| --- | --- |\n| remove `If-Match` from `DEFAULT_CORS_ALLOW_HEADERS` | `should allow If-Match by default` fails, by name |\n\n- turbo `test --force` across the touched packages — **28/28 tasks green** (plugin-hono-server 155 tests, hono 73, runtime 67 files)\n- `check:generated --reconcile-only` — PASS (16 `check:` + 10 `gen:` scripts, all classified)\n\nNote for reviewers: two build failures hit while verifying (`service-messaging` → `@objectstack/platform-objects/audit`, `service-i18n` → `@objectstack/types`) were both stale worktree installs after `main` advanced, fixed by `pnpm install`. Neither is a code issue."
+}

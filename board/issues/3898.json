@@ -1,0 +1,32 @@
+{
+  "number": 3898,
+  "kind": "issue",
+  "title": "ADR-0076 D12 诚实能力层的三个洞:`_fallback` 标记不被识别、`data` 槽位不传实例、`metadata` 硬编码 degraded",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T15:19:50Z",
+  "updated_at": "2026-07-31T05:53:44Z",
+  "closed_at": "2026-07-31T05:24:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3898",
+  "body": "ADR-0076 D12 / #2462 立的规矩是：**自认是 stub / dev fake / degraded 的服务，discovery 必须照实报，永远不报 `available`**，免得 AI agent 和 Console 把假能力当真能力。这个机制本身是对的（#3878 里的 analytics shim 就是靠它自报 degraded 的），但它目前有三个洞。\n\n## 洞 1 —— 标记有三种，诚实层只认两种\n\n`packages/spec/src/api/discovery.zod.ts:129` 的 `readServiceSelfInfo` 识别：\n\n- `svc[SERVICE_SELF_INFO_KEY]`（`__serviceInfo`）\n- `svc[SERVICE_DEV_MARKER_KEY]`（plugin-dev 的 `_dev: true`）\n\n但 `packages/core/src/fallbacks/*` 的内存兜底用的是**第三种**：`_fallback: true`\n（`memory-cache.ts:15`、`memory-i18n.ts:126`、`memory-job.ts:13`、`memory-metadata.ts:24`、`memory-queue.ts:14`）。\n\n`readServiceSelfInfo` 不认识它 → 返回 `undefined` → `http-dispatcher.ts:888` 的 `svcAvailable` 落到默认分支 `{ status: 'available', handlerReady: true }`。\n\n**目前真正上线的是 i18n**：`packages/runtime/src/app-plugin.ts:1173` 在 stack 声明了 translations 但没装 `I18nServicePlugin` 时自动 `registerService('i18n', createMemoryI18n())`。于是 discovery 对外说\"i18n 完全可用\"，实际是个进程内存实现。\n（cache / queue / job 的 `_fallback` 版本目前只被 plugin-dev 消费，且它在外面套了 `_dev: true`，所以那三个槽位没有暴露；`createMemoryMetadata` 我没找到运行时注册点。）\n\n全仓唯一消费 `_fallback` 的地方是一行日志：`app-plugin.ts:1227`。\n\n## 洞 2 —— `data` 槽位根本没把实例传进去\n\n`packages/runtime/src/http-dispatcher.ts:943`：\n\n```js\ndata: svcAvailable(routes.data, 'kernel'),\n```\n\n`svcAvailable(route?, provider?, svc?)` 的第三参是被检查的对象。这里省略了 → `readServiceSelfInfo` 从不被调用 → **无论槽里装的是谁**（包括 plugin-dev 的 data stub）永远报 `available / handlerReady: true`。\n\n对比同一段里其它槽位都规规矩矩传了实例（`auth`/`analytics`/`i18n`/`cache`/...），这看起来是漏了一个参数，不是有意的。\n\n## 洞 3 —— `metadata` 硬编码 degraded，方向反了\n\n`http-dispatcher.ts:942`：\n\n```js\nmetadata: { enabled: true, status: 'degraded' as const, handlerReady: true,\n            route: routes.metadata, provider: 'kernel',\n            message: 'In-memory registry; DB persistence pending' },\n```\n\n不看实例、恒为 degraded。所以装了真正的 `MetadataManager`（有 DB 持久化）的部署，discovery 依然对外说\"内存注册表，DB 持久化待办\"。前两个洞是\"假的报成真的\"，这个是\"真的报成假的\" —— 同一张表里两个方向都不可信。\n\n`packages/metadata-protocol/src/protocol.ts:1393-1394` 有一处对称问题：`metadata` / `data` 被硬编码成 `status: 'available', provider: 'objectql'`。\n\n## 为什么值得修\n\n这张表不是装饰：\n\n- `objectui/packages/react/src/hooks/useDiscovery.ts:190` 按 `status === 'available' || 'degraded'` 决定一个能力是否可用（它**正确地**拒绝了 `stub`，是唯一做了区分的消费者）；\n- `objectui/.../ConditionalAuthWrapper.tsx:114` 直接读 `services.auth.status === 'degraded'` 改变渲染；\n- D12 的原始动机就是 AI agent 会读这张表来决定\"我能不能用这个能力\"。\n\n一个报 `available` 的内存 i18n，和 #3878 里那个报 degraded 的 analytics shim 是同一类东西 —— 区别只是**前者连自报都没做到**。\n\n## 建议\n\n1. `readServiceSelfInfo` 增加对 `_fallback: true` 的归一化（→ `status: 'degraded'`，配一句 message 指向对应的 ServicePlugin），与现有 `_dev` 分支同构；\n2. `data:` 补上第三参；\n3. `metadata:` 改为读实例（真 manager → available，内存兜底 → degraded），`protocol.ts:1393` 同步；\n4. 补一条门：**遍历所有已知 fake（3 种标记）逐一注册进槽位，断言 discovery 不把任何一个报成 `available`** —— 这类洞会随着新增兜底不断复发，靠人肉 review 拦不住。\n\n关联：#3878、#3891、ADR-0076 D12、#2462。\n\n<sub>核对于 `origin/main` @ 93f267f81。</sub>\n"
+}

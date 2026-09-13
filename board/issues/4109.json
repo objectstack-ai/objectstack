@@ -1,0 +1,35 @@
+{
+  "number": 4109,
+  "kind": "pull_request",
+  "title": "fix(spec,service-analytics): the matrix's token axis + its sixth consumer, and the dropped $between it found (ADR-0053 D-A3.1)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T10:11:00Z",
+  "updated_at": "2026-07-30T11:26:38Z",
+  "closed_at": "2026-07-30T11:26:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T11:26:36Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4109",
+  "body": "#4081（ADR-0053 D-A3）的补完。矩阵本体已由 #4098 先行落地；本 PR 与其合流，补上 #4098 的 ADR 附录里明确记为**仍然开放**的两处覆盖，并修掉补覆盖时矩阵当场抓到的缺陷——以及顺着成因挖出的一整类。\n\n## 一、relative-token 轴（#4098 附录记为开放）\n\n四次事故都发生在 token 解析之下，但作者实际书写的就是 `{today}` / `{90_days_ago}` / `{current_month_end}`，而没有任何测试证明解析后的比较值在各后端落到同一批行。\n\n- `TemporalCase` 新增 `tokenFilter?` 与 `dateRange?`，加上钉死的参考瞬间 `TEMPORAL_NOW`。\n- 能触达 `@objectstack/core` 的消费者把 token 拼写解析后必须落在与字面量拼写**相同的行集**——resolver 漂移与 evaluator 漂移由此可分。`formula` 依赖刻意止于 spec，只跑字面量。\n- 同时补：`TemporalRow.writerForm`（D-E4 混合写入者播种）、负 epoch 行、`date` 的相等与 `$in`（#1874 起源形态）、`driver-sqlite-wasm` 继承护栏、`driver-sql` 未回填 legacy 双扫。\n\n## 二、第六个消费者：`NativeSQLStrategy`\n\n它正是 #3650 事发的那个面，也是唯一手工拼 SQL、不走驱动编译器的后端，却在矩阵的后端表里没有消费者。原因很说明问题：它现有的套件断言的都是 **SQL 字符串**，而**谓词被丢掉对字符串断言完全隐形**——SQL 依然合法，只是更宽。新消费者用真实引擎（`sql.js`）执行并断言**行 id**。\n\n## 三、它当场抓到的缺陷：`$between` 谓词凭空消失\n\n首跑即红：`$between` 返回**全表**。成因在共享的 `filter-normalizer`——`MONGO_TO_CUBE_OP` 里没有 `$between`，未映射的算子被 `continue` 掉，谓词直接从 WHERE 消失。两条策略都吃这个归一化器，所以都中招。用户侧症状就是 #3650：带区间过滤的图表画出整个数据集。\n\n修法：`$between` **下降为它的两个界**（`gte` + `lte`），上界自动继承各策略已有的整日日历规则，不需要第二份实现——与 #4098 修 preview 的做法一致。\n\n## 四、收口成因本身（Closes #4128）\n\n只修 `$between` 等于只修实例。按同一把尺子把整个可授权词汇过了一遍，又挖出两处比「丢弃」更糟的——**语义被悄悄写反**：\n\n| 算子 | 修复前 | 修复后 |\n|---|---|---|\n| `$startsWith` / `$endsWith` | 静默丢弃 → 全表 | 带锚点的 `LIKE 'x%'` / `LIKE '%x'`；ObjectQL 侧透传规范算子，锚点不依赖 regex 方言 |\n| `$null` | 静默丢弃 → 全表。**这是 Console「为空/不为空」筛选器产生的形状**，即这类 widget 一直在显示全部行 | 按布尔值编译为 `IS NULL` / `IS NOT NULL` |\n| **`$exists`** | 被**与取值无关**地映射成 `set`，`{$exists: false}` 编译成 `IS NOT NULL`——**与语义完全相反** | 与 `$null` 一起显式解析：键→名的映射表表达不了「含义随取值翻转」的算子，这正是反转的成因 |\n| **`$notContains`** | 在 `ObjectQLStrategy` 没有 case，落到 `default: return v0` 返回裸值——「不包含 x」被编译成「**等于 x**」 | 透传 `$notContains` |\n| 未知算子 | 归一化层 `continue` 丢弃；ObjectQL 层当成相等 | **两处都抛错**（#3948 先例） |\n\n`$or` / `$not` 仍跳过（需要递归 WHERE 构建器），但这一条现在**写进模块文档作为已声明的缺口**，不再是隐性的。\n\n> 顺带更正我在 #4128 里的一处错误：原文把 `$regex` 列为 spec 词汇，实际是我 grep 时把注释当成了声明——可授权词汇里没有它。\n\n## 验证（本地全绿）\n\n| 包 | 结果 |\n|---|---|\n| spec | 6987 |\n| service-analytics | **413**（原 360） |\n| driver-sql | 矩阵 43（16 字面 + 11 token + 16 legacy） |\n| driver-sqlite-wasm / driver-memory / formula | 27 / 27 / 16 |\n\n两个新套件都用 `git stash` 实测过修复前的行为：`$between` 4 例红、算子覆盖 6 例红。mongodb 套件本沙箱无二进制而 skip，CI 真实执行。spec 八个生成物 gate 全 PASS。\n\nRefs #4081，Closes #4128。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01TqqZmPS5a4gJGBoCTwipFr"
+}

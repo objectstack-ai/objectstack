@@ -1,0 +1,35 @@
+{
+  "number": 4381,
+  "kind": "pull_request",
+  "title": "fix(spec,service-automation,lint): flow metadata is canonicalized inside structured regions (#4347)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T10:02:02Z",
+  "updated_at": "2026-07-31T10:31:18Z",
+  "closed_at": "2026-07-31T10:31:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T10:31:16Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4381",
+  "body": "Closes #4347.\n\n## 问题\n\n`registerFlow` 用三道 pass 归一化存量 flow —— ADR-0087 转换表、`FlowSchema.parse`、ADR-0032 谓词校验 —— 而这三道**都只遍历 `flow.nodes` / `flow.edges`**。ADR-0031 的容器节点把整张子图放在自己开放的 `config` 里（`loop.config.body`、`parallel.config.branches[]`、`try_catch.config.try`/`.catch`），于是三道 pass 都停在容器边界上，元数据变成了**随嵌套深度而变**：\n\n- 同一个节点，放在顶层会被转换，放进 loop body 就不会；\n- 同一个谓词，在顶层边上存成 `{ dialect: 'cel', source }` 信封，在 loop body 的边上留成裸字符串。\n\n报告方（hotcrm）因此上线了三个\"哑火\"的 sweep：每次运行都 `success: true`，查询正确、选中的记录也完全正确，然后什么都不做，日志里也没有任何痕迹 —— 不去断言写入的记录，就无法把\"这次没活干\"和\"这个门根本没打开\"区分开。\n\n### 与 issue 描述的一处出入（已核实）\n\nissue 里那段 repro 在当前 `main` 上**已经能跑通**：`loop` / `parallel` / `try_catch` 三个执行器在 #4277 之后都会在运行时用 `parseNodeConfig` 解析自己的 config，而 `LoopConfigSchema.body` 就是 `FlowRegionSchema`，所以 region 边的谓词在**执行时**会被归一化，门是开的。\n\n真正仍然存在的缺陷是 issue 标题所指的那个：**转换表压根到不了 region 里的节点**，以及所有\"不重新 parse 就读 region\"的消费方（Studio 设计器、`getFlow`、版本历史）看到的仍是未归一化的形状。本 PR 附带的第一个测试就是在 fix 之前失败、fix 之后通过的复现。\n\n## 改动\n\n### `packages/spec` — `mapFlowNodes` 递归进 region\n\n`conversions/walk.ts` 现在按容器类型 + region 形状双重判定后下探，支持任意深度嵌套（`loop` → `try_catch` → `loop`）。notice 的 path 会带上 region 位置：\n\n```\nflows[0].nodes[3].config.body.nodes[1].config.filter\n```\n\n这对两条**改变行为而非拼写**的转换最关键：loop body 里的 `webhook` / `http_request` 保留了没有任何执行器认领的 type（整个 run 直接失败）；`delete_record` 保留了 `config.filters`，导致执行器读的规范键 `filter` 根本不存在 —— 这正是 `flow-node-crud-filter-alias` 当初要防的\"条件被抹掉\"风险。\n\n槽位表声明在 `walk.ts` 本地（该模块是纯形状 walker，刻意不引入 schema），由一个 reconciliation 测试钉死在 `LOOP_NODE_TYPE` / `PARALLEL_NODE_TYPE` / `TRY_CATCH_NODE_TYPE` 和三个 config schema 的 shape 上，所以新增第四种容器构造时不会悄悄漏掉这里。\n\n### `packages/spec` — 新增 `normalizeControlFlowRegions`\n\n在 load seam 上、`validateControlFlow` 之后调用：每个 region 走自己的 schema 解析（递归，因为 region 会嵌套），使嵌套的边和节点与顶层携带同样的规范形状。解析不通过的 region **原样保留** —— 拒绝畸形 region 仍然是 `validateControlFlow` 的职责，所以\"哪些 flow 能注册\"没有变化。\n\n### `packages/spec` — 新增 `collectFlowGraphs`\n\n返回 flow 自身的图 + 每个嵌套 region，各带一个 scope 标签。两个谓词校验器都改成遍历它：引擎的 `validateFlowExpressions` 和 `@objectstack/lint` 的 `validateStackExpressions`。于是它们本来要抓的 `{record.x}` 花括号陷阱（#1491）在 loop body 里也会被抓到，并指明位置：\n\n```\nflow 'sweep' · loop 'sweep_loop' body · edge 'b1' (gate→write) condition\n```\n\n此前这种写法能过 `objectstack validate`、能过注册，只在运行时炸掉，而那条诊断信息恰好被压掉了。\n\n### `service-automation` — 收紧 legacy `{var}` 路径（issue 的\"次要加固\"）\n\n`evaluateCondition` 的模板兜底路径现在**拒绝未解析的点号引用**，而不是把它当字符串比：\n\n```\n'oppRecord.amount > 500000'  →  'oppRecord.amount' > '500000'  →  'o' > '5'  →  恒为 true\n```\n\n—— 一个报告成功、却从来没有真正拦截过任何东西的门。抛错信息带上源码和修法（换成 CEL 信封，或者本来就想用 `{var}` 方言的话把引用括起来）。\n\n同时移除了那段 `try { … } catch { return false }`：块内没有任何会抛的语句（`indexOf` / `slice` / `Number` / `compareValues` 都是全函数），它什么也没保护，却会把新的拒绝原样吞回成\"静默的错误答案\" —— 正是 ADR-0032 §1c 为 CEL 路径立下的那条规矩。\n\n只拒绝**带点**的引用。裸词比较是刻意保留的：`'{status} == active'` 是有文档的 legacy 写法，替换之后两边都是普通词；小数字面量（`1.5`）也不是引用。\n\n## 测试\n\n新增 3 个测试文件（共 32 个用例），每个都是**对称性断言** —— 同样的元数据，一份放顶层、一份放 loop body，结果必须一致：\n\n- `packages/spec/src/conversions/region-walk.test.ts` — 转换进入 loop / parallel / try_catch，三层嵌套，copy-on-write 保持（未改动的分支保持同一引用），形状门控（`http` 节点的 `config.body` 请求体不会被误当作子图），恶意 `type: 'constructor'` 不会走到 `Object.prototype`，自引用 region 不会无限递归，以及槽位表的 reconciliation。\n- `packages/spec/src/automation/region-normalization.test.ts` — 嵌套谓词被信封化并与顶层一致、parallel 分支的 `name` 不被吞掉、幂等 + copy-on-write、解析失败的 region 原样返回、`collectFlowGraphs` 的 scope 串联。\n- `packages/services/service-automation/src/nested-region-parity.test.ts` — 走真正的 `registerFlow` seam：issue 的 repro（裸字符串与显式信封两种写法都存下信封、都开门、条件为假时仍然不开门），转换后的嵌套 `webhook` 节点真的被执行（测试里**只注册规范 type 的执行器**，未转换就会失败），嵌套 CRUD 别名归一化，以及 loop body 里的花括号陷阱现在会被注册期拒绝。\n- `packages/lint/src/validate-expressions.test.ts` — 作者期（`objectstack validate`）的对应用例。\n\n## 验证\n\n| gate | 结果 |\n|:---|:---|\n| `pnpm build` | 71/71 ✅（含 showcase artifact 构建，会跑 lint 校验器） |\n| `pnpm test` | 132/132 ✅ |\n| `pnpm typecheck` | 119/119 ✅ |\n| `pnpm lint` | ✅ |\n| `pnpm --filter @objectstack/spec check:generated` | 8/8 ✅ |\n| `check:api-surface` / `check:exported-any` | ✅（`api-surface.json` 已重新生成：新增 3 个导出） |\n\n## 刻意不做的事\n\n`validateNodeTypes` 和 `validateNodeConfigKeys` 仍然只走顶层节点。前者是 soft-fail（warn），后者是 hard-fail —— 让它进 region 有可能拒绝现有 flow，属于独立的行为变更，不该顺手塞进这个 PR。转换现在能到达 region，本 PR 针对的别名场景已经覆盖到了。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01HSBbKMdDgHjGpQdrvQUQXj)_"
+}

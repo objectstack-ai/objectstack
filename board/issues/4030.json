@@ -1,0 +1,30 @@
+{
+  "number": 4030,
+  "kind": "issue",
+  "title": "ADR-0105 D10: layered master data (group template + org override) — awaiting its follow-up ADR",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T05:05:08Z",
+  "updated_at": "2026-07-30T06:32:15Z",
+  "closed_at": "2026-07-30T06:32:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4030",
+  "body": "Split out of #3541 at close-out (2026-07-30): Phase 0 / Phase 1 / Phase 2 D8+D9 shipped and verified; **D10 is the one remaining framework-side item of Phase 2**, and it is a design item, not a code item.\n\n## What ADR-0105 D10 reserves\n\nA spec-level pattern for the SAP material-master / 用友-金蝶 distribution shape: an object may declare layered governance — group-level **template rows** (platform-global or group-org-owned, read-shared) plus per-org **override rows** linked to the template, with a resolution rule (org override wins).\n\nThe ADR deliberately reserves the concept only. The mechanics are explicitly deferred to a follow-up ADR:\n\n- linkage field between override and template rows;\n- resolution in the read path vs a view layer;\n- distribution policies: 集团统管 / 分级 / 自由;\n- how the layered read composes with the D2 union wall and D5 stamping (a template row is readable across the wall *by design* — the first deliberate exception to `organization_id IN accessible_org_ids`, which is exactly why it needs its own decision record).\n\n## Status\n\n**None of ADR-0106…0113 is that ADR** (verified during the 2026-07-30 re-evaluation of #3541). Per ADR-0049 discipline, nothing ships before the decision record exists — the concept is reserved, not licensed.\n\n## Definition of done\n\nThe follow-up ADR is proposed (own proposal PR + own tracking issue, per convention — as ADR-0105 itself did via #3499 → #3541). This issue closes when that tracking issue exists and takes over.\n\nRefs: [ADR-0105 §D10](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0105-group-tenancy-posture-and-first-class-org-scope.md), #3541 (close-out), objectstack-ai/cloud#874 (master-data *distribution management* is the commercial face and stays cloud-side per the repo split)."
+}

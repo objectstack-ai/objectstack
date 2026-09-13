@@ -1,0 +1,35 @@
+{
+  "number": 4108,
+  "kind": "pull_request",
+  "title": "docs(drivers,spec): say which memory-driver path persists, now that only one of them does (#4083)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T10:03:59Z",
+  "updated_at": "2026-07-30T10:42:57Z",
+  "closed_at": "2026-07-30T10:42:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T10:42:55Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4108",
+  "body": "**范围已缩减。** 本 PR 原本修的是 #4083 的代码，但 #4111 在我推送期间落地了同一个修复，而且是超集（同样的 `persistence: false` 默认 + 转发 `config`，另加**按数据源隔离持久化目标**）。我的代码改动已全部丢弃、合并 main 时一律取 main 版本 —— **现在只剩 #4111 没覆盖的文档增量**。\n\n## 为什么还需要这一条\n\n#4111 只改了代码。文档仍停留在旧世界，而且恰好停在读者最先看的位置：\n\n**`content/docs/data-modeling/drivers.mdx`** 写着 \"Data is lost when the process exits\"，紧接着的示例是 `new InMemoryDriver()` —— 对**直接构造**这条路径今天仍然是假的：它保留 `'auto'` 默认，在 Node 下写相对 CWD 的 `.objectstack/data/memory-driver.json`，下次启动读回来。#4111 改的是数据源工厂那条路径，没动驱动默认值，所以这句话现在只对一半成立。\n\n改成把两条构建路径分开讲，并补上两件读者会踩的事：直接构造的两个 `'auto'` driver 仍共享同一个默认路径；单元测试该写 `persistence: false`（正是让本仓库自己的 ADR-0062 验收测试\"全新检出通过、之后每次失败\"的那个坑）。\n\n**`packages/spec/src/data/driver/memory.zod.ts`** 的 `persistence` 把 `'auto'` 记为唯一默认，没有任何地方提到数据源工厂会覆盖它。TSDoc 与 `.describe()` 补上这个分叉，免得契约与运行时各说各话（PD #12）—— 也写明了显式请求持久化时目标会按数据源隔离（#4111 的行为）。\n\n## 验证\n\n纯文档 + TSDoc，无逻辑改动。`check:docs` / `check:api-surface` / `check:authorable-surface` / `check:doc-authoring` 均 PASS，本次无生成物变化。"
+}

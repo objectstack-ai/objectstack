@@ -1,0 +1,32 @@
+{
+  "number": 3459,
+  "kind": "issue",
+  "title": "ADR-0104 D3 wave 2 — file-as-reference:独占所有权模型 + 到开启回收的分步序列(PR-5b 门禁改由 #3617 承载)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-24T15:21:41Z",
+  "updated_at": "2026-07-30T15:31:08Z",
+  "closed_at": "2026-07-30T15:30:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3459",
+  "body": "跟踪 ADR-0104 D3 wave 2。**所有权模型已于 2026-07-27 定案**（ADR addendum），序列相应重排。\n\n## 定案：字段引用是**独占**的\n\n附件面（`sys_attachment`）故意**共享**一个文件给多条记录——那是它的特性。字段引用取相反模型：**一个文件最多被一个 `(对象, 记录, 字段)` 槽位拥有**，所有权记在 `sys_file.ref_object` / `ref_id` / `ref_field`；把已被拥有的 id 写进第二个槽位会**复制字节**到新的 `sys_file`，而不是共享行。\n\n理由是失败模式不对称，不是优雅：\n\n- **共享**的最坏情况——文件的可读集合变成所有引用者的**并集**（把私有记录的 id 拷进公开记录 = 无声泄漏），以及一次漏记就授权**不可逆删除**。\n- **独占**的最坏情况——字节重复占用。花钱，可恢复。\n\n存储成本应在**字节层**用内容哈希去重解决（`sys_file.etag` 已在），而不是在行层共享——**去重字节，不去重行**。\n\n## 核心安全原则\n\n> 一个文件变得可回收，只能因为平台**观察到它唯一的所有者放手了**，绝不能因为一次扫描**推断出**没人引用它。\n\n独占所有权**彻底消除了计数**：没有计数，就没有漏记能授权删除；也化解了新账本的冷启动隐患。\n\n## 序列与进度\n\n- [x] **PR-1** `/upload/complete` 返回 fileId，client 透出 — #3465\n- [x] **PR-2** 读路径 fileId → `FileValueSchema` 解析（批量、无 N+1、双模式安全）— #3473\n- [x] **PR-3** 独占所有权：`ref_*` 列 + claim/release 写路径 + copy-on-claim — #3527\n- [x] **PR-4** 受管下载（从**唯一**拥有记录派生权限；`acl: 'public_read'` 为 opt-out）+ `verifyFileReferences()` R4 验收门 — #3534\n- [x] **PR-6** 遗留值回填（本地 resolver URL / `data:` URI 转换；外部 URL 只报告不重托管）— #3535\n- [x] **PR-7** objectui 采纳（三形态读取、提交裸 id、修掉 `mimeType`/`mime_type` 大小写漂移）— objectui#2828\n- [x] **PR-5a** 写切换：`accept`/`maxSize` 声明并**服务端强制**；存储形态收窄为 `sys_file` id，inline blob 降为 `expanded` 读形态 — #3555\n- [x] **PR-5b** 开启回收：release 侧打墓碑 + reap guard 扫描时复核所有权列（**同一 change**），门禁读部署级标记（#3617），sweep 前 fresh 复读 — #4208\n\n## 顺序修正（已落地）\n\n旧计划把写切换和开 GC 打包、回填排在后面。**两处都错了**：\n\n1. **回填必须先于写切换**。记录里还存着遗留值时就收窄可接受的存储形态，会让任何改写该字段的 update 被拒——在回填赶上之前，正常工作的应用会挂。\n2. **回填 + 对账必须先于开 GC**。一本账在被证明与现实一致之前，不该被授予对不可逆删除的权力。\n\n## PR-5a 为什么今天不是破坏性变更\n\n值形态检查是 **warn-first**（ADR-0104 R1/R2）：还没回填的行照样写得进去，作者拿到的是指名字段的告警。硬拒绝只在部署方主动打开 `OS_DATA_VALUE_SHAPE_STRICT_ENABLED` 时发生——而那应该在跑完回填并用 `verifyFileReferences()` 确认对账之后。strict 默认值的翻转由 #3438 跟踪。\n\n## PR-5b 的两条硬约束\n\n1. **两半必须同一个 change**：放松 `scope === 'attachments'` 墓碑护栏 **和** 扩展 `sys_file` reap guard 的扫描时复核到所有权列。只做前一半**比完全不做更糟**——打了墓碑而 guard 仍只复核 `sys_attachment`（对字段文件恒为空），会让每一次释放都变成**保证性**的字节删除，而不只是有风险。这一点在 `releaseOwnership` 的文档注释和一条专门的回归测试里都锁死了。\n2. **R4 验收门（可执行）**：`verifyFileReferences()` 必须在**真实租户数据**上、**连续 ≥7 天**报告**零阻断项**才允许合并。阻断项 = `unowned_reference`（持有但无人拥有）、`foreign_owner`（持有的文件被别的槽位拥有）、`shared_reference`（一个文件被两个槽位持有）。提示项（`stale_owner` / `unreferenced_file`）倒向保留，不阻断。\n\nR5（公开姿态清单）和 R6（子键读取静态扫描）依然有效。\n\n**PR-5b 的合并与迁移的实际执行都需要明确的人工决定，不应自动进行。**（已于 2026-07-30 经人工授权合并，#4208；各部署的迁移执行仍由其运维自行决定。）"
+}

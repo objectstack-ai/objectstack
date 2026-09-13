@@ -1,0 +1,35 @@
+{
+  "number": 4153,
+  "kind": "pull_request",
+  "title": "fix(analytics): a new spec aggregate can no longer silently return a row count",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T12:45:07Z",
+  "updated_at": "2026-07-30T12:56:23Z",
+  "closed_at": "2026-07-30T12:56:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T12:56:21Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4153",
+  "body": "Track C item 4 of objectstack-ai/objectui#2945 — *\"`AggregationFunction`: three places in lockstep\"*. It is the one Track C item that needs no production data scan, because it narrows nothing.\n\nThey agreed only by coincidence, and the failure mode when they stop agreeing is **silent wrong numbers**.\n\n## The three places\n\n| # | Where | Contents |\n|---|---|---|\n| 1 | `AggregationFunction` — `@objectstack/spec/data` | `count, sum, avg, min, max, count_distinct, array_agg, string_agg` (8) |\n| 2 | `UNSUPPORTED_AGGREGATES` — `dataset-compiler.ts:24` | `array_agg, string_agg` (2, rejected at compile with a clear error) |\n| 3 | the aggregate `switch` — `native-sql-strategy.ts` | 6 cases, then `default: return 'COUNT(*)'` |\n\n8 − 2 = 6 = the six cases. **Today.** Add a ninth member to the spec — `median`, `percentile`, anything — and it would:\n\n1. **pass the compiler's gate**, because it is not in `UNSUPPORTED_AGGREGATES`;\n2. **be advertised as supported** by that gate's own error message, which listed `count, sum, avg, min, max, count_distinct` as hand-written prose — a third copy of the vocabulary, in a user-facing string;\n3. **reach the `switch`, match no case, and fall to `default: COUNT(*)`.**\n\nThe author asks for a median and gets a row count. No error, no log, wrong figures on a dashboard. Structurally the same silent-wrong-answer shape as the filter operators in #3948 — an unhandled member of a vocabulary yielding a plausible-looking result instead of a failure — this time in the analytics SQL builder.\n\n## The fix: derivation plus a guard, no behaviour change\n\n- The `switch` becomes **`AGGREGATE_SQL`**, a table keyed by aggregate, so its coverage can be asserted. A `switch` gave a test no purchase.\n- The error message's prose becomes **`SUPPORTED_AGGREGATES`** = `AggregationFunction.options` minus `UNSUPPORTED_AGGREGATES`. One subtraction, not a third list.\n- **`aggregation-lockstep.test.ts`** asserts the arithmetic in both directions: the lowered set equals the admitted set; every spec member is either lowered or explicitly rejected; nothing is both; the rejection list names only aggregates the spec actually has (a stale entry there silently *widens* what v1 claims to support); and the two halves partition the vocabulary.\n- One test drives the real compiler and checks the error message names every supported aggregate — so the derived list cannot regress to prose without failing.\n\n## Verified to have teeth\n\nAdding a hypothetical `median` to the spec's `AggregationFunction`:\n\n```\nAssertionError: these would fall through to the COUNT(*) fallback and return a\nrow count: expected [ 'median' ] to deeply equal []\n  Tests  3 failed | 4 passed (7)\n```\n\nThe same edit was **green** before this change — which is the whole point.\n\n## What is not changed\n\nSame six aggregates, same six SQL expressions, same `COUNT(*)` fallback for everything else. No narrowing, no migration, no SQL diff.\n\n## Reported, not fixed\n\nThat fallback is also reached by a measure whose `type` is `number`/`string`/`boolean` — a custom SQL **expression**, per `AggregationMetricType` in `data/analytics.zod.ts` — whose expression is then replaced by a row count.\n\nDatasets cannot produce one: `aggregateToMetricType` only ever returns an `AggregationFunction` member. So it needs a hand-authored Cube to reach. Emitting `col` instead is a behavioural change in an analytics SQL path, and deserves its own change with its own tests rather than riding along here. The strategy's doc comment now records it so it is not rediscovered from scratch.\n\n## Verification\n\n- `@objectstack/service-analytics`: **420 tests across 32 files**, green (7 new).\n- `tsc --noEmit`: **0 errors** in the three touched files. (Three remain in the package, all pre-existing in `__tests__` files this PR does not touch.)\n- `eslint --no-inline-config`: clean on all three.\n\nRefs objectstack-ai/objectui#2945, #3948\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

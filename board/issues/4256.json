@@ -1,0 +1,34 @@
+{
+  "number": 4256,
+  "kind": "issue",
+  "title": "`sort` 的点号路径（`?sort=account.company_name`）仍然静默降级为「不排序」——#4226 收口后唯一漏网的 sort 形态",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T00:53:57Z",
+  "updated_at": "2026-07-31T05:35:05Z",
+  "closed_at": "2026-07-31T05:35:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4256",
+  "body": "## TL;DR\n\n#4226（PR #4240）让 `sort` 指向不存在的字段变成 `400 INVALID_SORT`。有一种形态**故意**被放过了，这里把它单独记下来，因为它需要一个产品决策而不只是一个 gate。\n\n`?sort=owner_ref.title` —— 点号路径 —— 仍然是 `200` + **未排序**的行，没有任何报错。\n\n## 实测\n\n真引擎 + 真 registry，`probe_task` 有 `owner_ref`（lookup）字段：\n\n```\n?sort=owner_ref.title   -> 200，ids [\"t1\",\"t2\",\"t3\"]（插入顺序，排序未生效）\n?sort=no_such.title     -> 400 INVALID_SORT                                  ✅\n```\n\n## 为什么会这样（不是疏忽，是分层的结果）\n\n`assertSortFieldsExist` 按**头段**判定字段是否存在 —— 与 `engine.find()` 校验投影的方式一致，也与 #4134 的隐式 filter gate 一致。`owner_ref` 是真实字段，所以 `owner_ref.title` 过闸；`no_such.title` 的头段不存在，所以被拦下。\n\n过闸之后交给 driver，`SqlDriver` 把点号路径原样交给 Knex，渲染成 `\"owner_ref\".\"title\"`，数据库报 unknown column，driver 的兜底重试**丢掉排序**重跑（objectstack#3821：行比行的顺序重要）。于是：查询成功，行全在，顺序是任意的。\n\n这一条已经写进 `content/docs/protocol/objectql/query-syntax.mdx` 的告警里（PR #4240 补的），所以它是**已记录的行为**，不是未知的坑。但它仍然是 #3948 意义上的静默降级 —— 而且是 `sort` 轴上最后一个。\n\n## 危害与已修的那些同级\n\n`sort` + `top` 是取「最新 N 条」的写法。`?sort=-account.created_at&top=10` 拿到的是**任意 10 条**，与 #4226 修掉的那些在调用方视角下没有区别。\n\n## 三条路，需要决策\n\n1. **在 ingress 拒绝跨表排序** —— `400 INVALID_SORT`，消息说明「排序只能作用于本表的列，请用公式/汇总字段把值反范式化到本对象上」（正是 `query-syntax.mdx` 现在给的建议）。最小、与 #4226 一致，但**会让今天静默不排序的调用方开始收到 400**。\n2. **真正实现关联排序** —— join 或子查询。最贵，而且 `expand` 走的是批量 `$in` 二次读而非 join，与现有架构不合。\n3. **维持现状** —— 已记录在案，不再动。\n\n我倾向 **1**：#4226 的整个论证就是「一个没生效的表达式不该看起来像生效了」，把唯一的例外留下需要一个理由，而「实现起来贵」不是那个理由 —— 拒绝很便宜。但这条会改变现有调用方的行为，所以不该由实现者单方面决定。\n\n需要先量一下影响面：有多少地方在发点号路径的 `sort`（objectui 的视图配置、保存的报表、`sys_saved_report` 里的存量数据），再决定是直接拒还是先加一轮 deprecation 告警。\n\n## 关联\n\n- #4226 / PR #4240（sort / select / expand 收口；本 issue 是它明确留在范围外的一条）\n- #3821（`SqlDriver` 丢掉未知 ORDER BY 列并返回未排序行的兜底）\n- #3948（原则出处）\n- #4254（`searchFields` / `groupBy` / `aggregations` —— 同一轮盘点里的另外三条轴）"
+}

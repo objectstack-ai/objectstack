@@ -1,0 +1,32 @@
+{
+  "number": 4358,
+  "kind": "issue",
+  "title": "console 记录详情页附件面板:沉在整页最底部不可发现(无位置配置)+ 文案未 i18n 中文界面裸奔英文",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T08:40:28Z",
+  "updated_at": "2026-07-31T12:12:47Z",
+  "closed_at": "2026-07-31T12:12:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4358",
+  "body": "<!-- src: steedos-labs/os-project-titanwind-ehr#656 -->\n\n## 现象\n\n`enable.files: true` 的对象,记录详情页的附件面板存在两个问题(17.0.0-rc.0,`packages/console` RecordDetailView):\n\n### 1. 附件面板固定沉在整页最底部,不可发现\n\n附件面板渲染在详情 tab 正文的最末尾——在讨论(feed)时间线**下面**。讨论时间线会随系统动态无限增长,附件被推得越来越深,用户不滚到页面尽头根本不知道这条记录有附件。\n\n实测截图(记录有 1 个附件,需滚过 4 条系统动态才能看到):\n\n<img width=\"1440\" alt=\"attachments panel buried at page bottom\" src=\"https://github.com/user-attachments/assets/d3905361-1440-4b55-a086-06648d9770c6\" />\n\n且应用层无任何元数据旋钮可调位置——扫过 RecordDetailView 资产,附件相关只有 `enable.files` 一个开关(有/无),没有 position/placement 类配置。\n\n**期望**(任一即可):\n- 附件面板上移到讨论区上方;或\n- 作为与「详情 / 相关 / 历史」并列的独立 tab,带数量角标(截图里「相关 2」已有同款角标先例)。\n\n### 2. 附件面板文案未 i18n,中文界面裸奔英文\n\n面板标题「Attachments」、按钮「Upload」等全部走 `t('detail.attachments', { defaultValue: 'Attachments' })` 形态的内联英文兜底。全量扫 console dist 资产:**任何 i18n 资源里都没有 `detail.attachments` / `detail.uploadAttachment` / `detail.loadingAttachments` / `detail.noAttachments` 这些键**(zh 资源里只有 Studio 设置面板的「附件(files)」),所以中文界面必然显示英文。\n\n且服务端翻译无法兜底:console 端会把服务端翻译包整体包进 `app.*` 命名空间,而组件 lookup 是无前缀的 `t('detail.*')`,永远命不中(与 form.createDescription 覆盖不了是同一根因)。\n\n## 复现\n\n1. 任一对象 `enable: { files: true }`,记录上传一个附件,再制造几条 feed 动态;\n2. 中文 locale 打开记录详情页;\n3. 滚到页面最底部才能看到附件面板,且标题为英文「Attachments」。\n\n## 环境\n\n- `@objectstack/console` 17.0.0-rc.0(资产 `RecordDetailView-BzGkapku.js`)\n- 下游项目 issue:steedos-labs/os-project-titanwind-ehr#656\n"
+}

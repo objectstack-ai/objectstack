@@ -1,0 +1,32 @@
+{
+  "number": 4364,
+  "kind": "issue",
+  "title": "sys_notification (L2 event object) not provisioned — MessagingService emit() dedupKey idempotency silently broken",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T09:06:04Z",
+  "updated_at": "2026-07-31T09:20:48Z",
+  "closed_at": "2026-07-31T09:20:48Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4364",
+  "body": "## Summary\n\nThe messaging service's L2 event object `sys_notification` is never provisioned by the runtime, so `MessagingService.emit()`'s `dedupKey` idempotency silently does not work: every duplicate `emit` with the same `dedupKey` fans out again and produces duplicate `sys_inbox_message` rows.\n\n## Environment\n\n`@objectstack/*` **17.0.0-rc.0** (runtime + service-messaging + platform-objects), sqlite driver, single-tenant dev stack (`objectstack dev`).\n\n## Observed\n\n- `MessagingServicePlugin` loads and `emit()` → inbox channel works: `sys_inbox_message` and `sys_notification_receipt` rows are written, the Console bell reads them fine.\n- But the database contains **no `sys_notification` table at all** (`.tables` shows `sys_notification_preference/_subscription/_template/_receipt` and `sys_inbox_message`, not the event object itself).\n- Consequently the `notification_id` carried on inbox/receipt rows does not exist in any table — `writeEvent` falls into its synthesize-an-id degradation path (the code comments this as the \"no data layer\" case, but here the data layer exists; the event object is simply not provisioned).\n- `findEventByDedupKey` therefore never finds a prior event (\"tolerating lookup failure\"), so a repeated `emit` with the same `dedupKey` is **not** short-circuited.\n\n## Expected\n\n`sys_notification` should be provisioned with the rest of the messaging schema so that:\n1. `emit()` persists a real L2 event row, and\n2. `dedupKey` dedup actually short-circuits repeats, as documented in `EmitInput`.\n\n## Impact\n\nEvery caller relying on `emit({ dedupKey })` idempotency (flow `notify` node, app-level notification bridges) can deliver duplicate in-app messages on retry/replay. Inbox read/mark-read is unaffected (it keys consistently off the synthesized id), though receipts reference a dangling `notification_id`.\n"
+}

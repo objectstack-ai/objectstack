@@ -1,0 +1,30 @@
+{
+  "number": 4097,
+  "kind": "issue",
+  "title": "Example apps declare no `engines.protocol` range — ADR-0087's compatibility check is skipped on the templates users copy",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T09:28:33Z",
+  "updated_at": "2026-07-30T17:41:29Z",
+  "closed_at": "2026-07-30T17:41:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4097",
+  "body": "Newly visible after #4084 unblocked boot-phase logging. Booting `examples/app-todo` prints:\n\n```\nWARN [AppPlugin] [protocol] package 'com.example.todo' declares no engines.protocol range;\nloading under protocol 17.0.0 without a compatibility check (ADR-0087).\n```\n\nThe same warning appears for the minimal fixture I wrote for #4084's e2e test, i.e. it is what *any* newly authored package gets.\n\n## Why it matters\n\nThe examples are templates — people copy `objectstack.config.ts` out of them to start a project. An omission here propagates into every derived app, and each one silently opts out of the ADR-0087 compatibility check that exists to catch a package built against an older protocol major. The check is exactly the thing a v17 upgrade needs, and it is off by default in the apps we ship as the reference.\n\n## Suggested fix\n\nDeclare an explicit `engines.protocol` range in `examples/app-todo`, `examples/app-crm`, and `examples/app-showcase` (and whatever `os init` scaffolds), so the shipped templates model the right thing. Worth deciding at the same time whether a package with no range should stay a warning or become a lint failure at `os compile` — the warning has been unobservable on both CLI entrypoints until now, so \"nobody complained\" carries no information."
+}

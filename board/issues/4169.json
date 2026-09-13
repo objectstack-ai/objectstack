@@ -1,0 +1,35 @@
+{
+  "number": 4169,
+  "kind": "pull_request",
+  "title": "fix(data): reject unknown list query params instead of reading them as zero-matching filters (#4134)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T13:20:11Z",
+  "updated_at": "2026-07-30T13:44:25Z",
+  "closed_at": "2026-07-30T13:44:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T13:44:23Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4169",
+  "body": "Closes #4134。\n\n## 问题\n\n`GET /api/v1/data/:object` 把任何未保留的查询参数当作字段级等值过滤器 —— 这正是 `?status=done` 等价于 `?filter={\"status\":\"done\"}` 的机制。但当参数名对应不到任何字段时，这个谓词**永远不可能匹配**，于是 `?pageSize=5` 在一个有 10 条记录的对象上返回 `200` + `total: 0`：结构合法，且与「这个对象确实是空的」完全无法区分。\n\n写路径对同一个未知字段名早就是大声拒绝的（`400 INVALID_FIELD`）。同一份知识 —— 这个字段存不存在 —— 一边强制、一边静默清零。\n\n## 改动\n\n`findData` 在把剩余参数降为隐式过滤器**之前**，先按对象元数据校验字段名，并抛出写路径自己的信封：`400 INVALID_FIELD` + `field` + `object`。这是 #3948 给 driver-memory 定的那条规则往上一层的镜像 —— *an unapplied filter must not look like a satisfied one*。\n\n```json\n{\n  \"error\": \"Unknown field 'pageSize' on object 'showcase_task'. Query parameters that are not reserved are read as field filters, so an unknown name can only match zero records. Did you mean the 'top' query parameter (OData spelling '$top')?\",\n  \"code\": \"INVALID_FIELD\",\n  \"field\": \"pageSize\",\n  \"object\": \"showcase_task\"\n}\n```\n\n几个实现上的决定：\n\n- **校验在 `!options.where` 分支之前**。否则 `?filter=…&pageSize=5` 会走短路分支，坏参数既不生效也不上报 —— 失败与否不该取决于旁边还传了什么。\n- **拒绝时带建议**：已知方言给出规范参数（`pageSize`/`perPage`/`page`/`sortBy`/`q` → `top`/`skip`/`sort`/`search`），看起来像拼写错误就给最近的真实字段名（`stauts` → `status`）。OData 拼写是查表得到的，不是加 `$` 前缀拼出来的 —— 排序的 OData 拼写是 `$orderby` 而不是 `$sort`，建议一个会被 `$` 守卫拒掉的参数等于让调用方再吃一个 400。\n- **保留参数集用 `Record<keyof QueryAST, true>` 钉死在 spec 上**，双向都由 `tsc` 把关：AST 新增一个 key 在这里是编译错误，而不是悄悄给那个新 key 重演一遍本 issue。集合里包含 `object` / `joins` / `having` / `windowFunctions` —— `POST /data/:object/query` 的 body 就是 `Partial<QueryAST>`，少了它们 `client.data.query('task', { object: 'task', limit: 5 })` 会把 `object` 读成过滤器然后匹配零行。\n- **分级沿用 #3770 对象网关的做法，往下一层**：没有 registry、或 schema 没有字段表（无 registry 的 Lite/edge 宿主、engine 替身、列不在本地镜像的外部数据源）时无从判断，网关就让路。\n- `skip` 现在在归一化阶段无条件删除 —— 它是纯传输别名，留下一个 null 的 `skip` 会被下面的字段网关报成「未知**字段**」，对一个真实参数来说是误导。\n\n## 验证\n\n**协议层**（`protocol-data.test.ts`，engine 替身钉决策规则）：拒绝形状与字段、多个坏参数、显式 filter 在场时仍拒绝、真实字段仍降为隐式过滤器、`id` 放行、点号路径按首段判断、每个保留参数与 `$` 别名都不受影响、POST body 的结构化 AST key 放行、两级让路条件，以及一条**「只建议真正接受的拼写」** —— 把每个建议回灌进 `findData` 确认它返回 200。\n\n**真实引擎**（新增 `protocol-unknown-query-param.test.ts`，10 行 `showcase_task` + 真 registry）：因为网关的权威是 registry 的字段表，而那张表不是作者声明的那张 —— `applySystemFields` 在注册时注入了审计/租户/owner 列。只有真 registry 能证明 `?owner_id=` / `?created_at=` 仍然可过滤，而 `?pageSize=` 被拒。issue 里那份实测表格逐行钉住。\n\n**REST 层**（`rest.test.ts`）：`mapDataError` 的新分支必须排在通用 4xx 透传之前，否则 `field` 会被吞掉。\n\n**跑起来的服务器**（`pnpm dev -- --fresh -p 39847`，showcase，已自行关闭）—— issue 的实测表格逐行复现：\n\n```\nGET /data/showcase_task                 -> 200  total=10             ✅ 基线\nGET /data/showcase_task?status=done     -> 200  total=2              ✅ 真实字段过滤\nGET /data/showcase_task?status=zzz      -> 200  total=0              ✅ 真实字段无匹配，0 依然正确\n\nGET /data/showcase_task?zzzz=1          -> 400  INVALID_FIELD zzzz     (曾经 200 + total=0)\nGET /data/showcase_task?pageSize=5      -> 400  INVALID_FIELD pageSize\nGET /data/showcase_task?page_size=5     -> 400  INVALID_FIELD page_size\nGET /data/showcase_task?perPage=5       -> 400  INVALID_FIELD perPage\n\nGET /data/showcase_task?$top=5 / ?top=5 / ?limit=5   -> 200  total=10 records=5   ✅ 未受影响\n```\n\n外加一轮全参数冒烟（`select` / `sort` / `expand` / `search` / `populate` / `filters` / `skip` / `count` / `distinct` / `owner_id` / `created_at` / `export`）全部 200，`POST /query` 带完整 QueryAST body（含 `object` 键）200，body 里塞垃圾键 400。\n\n`pnpm test` 全绿（132/132 turbo 任务，含 dogfood），`eslint` 干净，`check:route-envelope` / `check:error-code-casing` / `check:doc-authoring` 等 gate 全部 PASS。未触碰 `packages/spec` 源码（只 import 了一个 type），所以生成物 gate 不涉及。\n\n## 对调用方的影响\n\n传了对不上任何字段的参数，现在拿到 `400` 而不是空的 `200`。分页是 `top` / `$top` / `limit`，偏移是 `skip` / `$skip` / `offset`。所有文档化参数、所有 `$` 前缀 OData 别名、`POST /data/:object/query` 的完整 `QueryAST` body 都不受影响。字段名恰好撞上保留参数（`count`、`cursor`、`object`、`top`、`search` …）的对象走显式形式：`?filter={\"count\":3}`。\n\n顺带一提：jQuery 那种 `?_=1699999` 缓存击穿参数现在也会 400。仓库内的客户端都不发它，而「大声」正是本 issue 要的方向，所以没有为它开口子。\n\n`../objectui` 无需改动 —— 它的数据适配器（`rawFindWithPopulate`）只发 `populate` / `top` / `skip` / `search` / `searchFields` / `select` / `sort` / `filter`，console 的审计日志页只发 `$filter` / `$orderby` / `$top` / `$skip`，marketplace 只发 `limit`，全部是规范拼写。\n\n## 范围边界（Prime Directive #10）\n\nissue 里问到「是否存在依赖未知参数被忽略的现存调用方」—— 排查下来仓库内没有，但顺带撞到一个**邻居 bug**：显式 `filter` 在场时，同时传的**真实**字段参数被静默丢弃（既不合并进 `where` 也不报错，作为野键留在 AST 上）。方向相反（多返回而非清零），病因同一个。本 PR 刻意没有动它 —— 修它要先定语义（AND 合并 vs 拒绝冲突），已开 #4164 跟踪，并在代码注释与测试里把这条边界钉住。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01CKsxtrsCwSL3uAcxAdVj83)_"
+}

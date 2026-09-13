@@ -1,0 +1,35 @@
+{
+  "number": 4315,
+  "kind": "pull_request",
+  "title": "fix(data): `searchFields` / `groupBy` / `aggregations` 指向不存在的字段时被拒绝，而不是静默降级 (#4254)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T05:39:16Z",
+  "updated_at": "2026-07-31T07:35:30Z",
+  "closed_at": "2026-07-31T07:35:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T07:35:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4315",
+  "body": "Closes #4254\n\n## TL;DR\n\n#4226（PR #4240）把 `sort` / `select` / `expand` 收口后，同一台机器在剩下三条点名字段的轴上继续漏气。三条现在都在**共享的 normalizer**（`findData`）里被拒绝，于是 `GET /data/:object`、`POST /data/:object/query`、export 路由和 runtime dispatcher 给出同一个答案：\n\n```\nsearch=alpha&searchFields=no_such -> 之前 200 + 比收窄更多的行     现在 400 INVALID_FIELD\ngroupBy=[no_such]                 -> 之前 200 + N 组塌成 1 组       现在 400 INVALID_FIELD\nsum(no_such)                      -> 之前 200 + 求和得 0            现在 400 INVALID_FIELD\n```\n\n## 三条轴分别怎么改的\n\n### `searchFields` → `400 INVALID_FIELD`，三段式消息\n\nissue 点名要与 #4226 给 `expand` 的三段式同构，落地为三条消息，因为修法不同：\n\n1. **根本不是字段** —— 请求里的拼写错误。带 `Did you mean` 建议；点号路径（`parent_id.title`）单独提示「search 只扫本对象自己的列」，因为引擎按**精确名**求交集，头段校验会把回退兜回来。\n2. **是字段但不可搜索** —— 修的是对象。消息按 allowed 集的来源分两支：声明了 `searchableFields` 的对象指向声明本身；auto-default 的对象说明该字段被排除的原因（类型 / 系统列 / hidden）并给出「声明 `searchableFields`」的出路。\n3. **`searchableFields` 里声明了、字段却不存在** —— **陈旧声明，bug 在对象上**。单独一条消息是因为 objectui 的列表搜索把 `schema.searchableFields` **原样回声**成 `$searchFields`（`ListView.tsx`），把它报成「调用方拼错」会让人去修根本没写错的请求。仍然是 400：全部请求名都陈旧时，引擎的回退会扫默认全集 —— 正是本轴要堵的「要收窄、结果放宽」。\n\n两支（全未知 / 部分未知）都拒，与 issue 的裁决一致。allowed 集由 `resolveSearchFieldResolution` 解析 —— 该函数从 objectql **移入 `@objectstack/spec/data`**（`search-fields.ts`），引擎的 search 展开和这个 gate 消费同一份实现，gate 不可能放行一个引擎会丢弃的名字，也不可能拒掉一个引擎会扫的（#4240 用 `REFERENCE_VALUE_TYPES` 堵 expand 漂移的同一手法）。引擎侧 `resolveSearchFields` 的容忍**未动**（内部调用方不经过 ingress）。\n\n覆盖引擎实际读取的**每种拼写**：`searchFields` / `$searchFields`（逗号串与数组）以及 `search: { query, fields }` 对象形态（数组与逗号串——第二种是复查引擎时发现的：`engine.find` 经 `requestedFields` 也消费字符串形态，只按 `Array.isArray` 镜像会留下缺口）。报错引用调用方真正写下的参数名。\n\n### `groupBy` → `400 INVALID_FIELD`\n\nin-memory 回退路径把未知列对每行投影成 `undefined ?? null`，所有行进同一个桶：`[{no_such: null, n: 3}]` —— `n` 是真实行数，结构完全合法，图表照画一根柱子。SQL 原生路径则把 `GROUP BY no_such` 交给数据库（`SqlDriver` 是否吞错未定）——issue §4 点名的「两条路径可能给出相反答案」，在共享 ingress 收口后两条路径先给出同一个 400。字符串与结构化 `{field, dateGranularity}` 两种形态都校验；按**精确名**判定（分组语义就是本对象的列）。\n\n### `aggregations` → `400 INVALID_FIELD`\n\n`sum(<拼错>)` 把一列 `undefined` 折成 `0`，和真实的「本季度 0」同形；`avg`/`min`/`max` 得 `null` 同理。`aggregations[].field` 逐项校验；`count` 无 `field`（或 `'*'` 哨兵）是唯一合法的无字段形态，放行。\n\n### 顺带：无法读取的形态 → `400 INVALID_QUERY`（catalog 里首个 emitter）\n\n`groupBy: \"status\"`（裸字符串）、`[42]`、`{dateGranularity:'month'}`（没有 field）、枚举外的 function / dateGranularity、缺 `alias` —— 每一种此前要么被 `Array.isArray` 路由守卫忽略（行**未分组**原样返回），要么算出静默占位值（`null` 结果、键名 `\"undefined\"` 的列、未知粒度下一行一桶）。`INVALID_QUERY`（\"Malformed query syntax\"）自写进标准 catalog 起没有任何 emitter —— 与 #4240 启用 `INVALID_SORT` 同一姿势。形态检查**不依赖 registry**（分层里 legacy/registry-less 宿主也拒形态，只跳过字段名检查），与 #4196 投影形态检查同序。\n\n## 分层与边界\n\n- 与 #4226 完全一致：registry + 字段表在 → 权威；无 registry / 无字段表 / legacy 数组字段表 → 字段名 gate 跳过（形态 gate 仍生效）。四条旧轴 + 三条新轴共用同一次 `resolveQueryFields` 解析。\n- 未知对象仍是 `404 OBJECT_NOT_FOUND`，任何新 gate 不得把它变成 400（有 pin）。\n- 引擎内部调用方（hooks / flows / `engine.aggregate` 直调，包括 analytics service 与 action-execution）不经过本 ingress，不受影响。\n- `@objectstack/rest`：`isExpectedQueryRejection` 补上 `INVALID_FILTER` / `INVALID_SORT` / `INVALID_QUERY` —— 前两个自 #4181 / #4240 起每次拒绝都被同时记为 \"[REST] Unhandled error\"，本来就该在这个名单里。\n\n## 测试\n\n`packages/objectql/src/query-expression-conformance.test.ts` 新增 `#4254` describe 块（37 个用例，全文件 77 个全绿），照搬 #4240 的纪律：\n\n- **每条轴都有对照组**，且这次对照组要求测试驱动真的执行：共享 memory driver 补了 `$or` / `$contains` 求值（否则任何 search 都全命中，「searchFields 真的收窄了行集」的断言 vacuously 绿），聚合用例删掉 driver 的 `aggregate` stub 走引擎真正的 in-memory 回退（issue 实测的那条路径）。\n- issue transcript 逐条落地：`search=a` 命中 title 与 notes 各一行 → `searchFields=title` 收到一行 → `searchFields=no_such` 400（此前是两行）；`groupBy=[status]` 真分两组 → `[no_such]` 400（此前一桶）；`sum(estimate)` 真合计 → `sum(no_such)` 400（此前 0）。\n- 另有：五种 override 拼写同答案并引用原参数名、声明式与 auto-default 两支的「不可搜索」消息、陈旧声明（objectui 回声形）、日期分桶对照与非法粒度、`count(*)` 两种拼写放行、七轴合成请求、404 优先、legacy 数组字段表只降级字段名检查。\n- 全仓 `pnpm test`：**132/132 任务绿**（含 dogfood HTTP 级 430 例）。`check:generated`（api-surface 已重生成）、`check:liveness`、`check:exported-any` 均绿。\n\n## 文档\n\n`data-api.mdx` 在 #4240 的「Nor is a sort…」旁新增三轴一节（请求 → 结果对照表 + 各轴为何要紧）；参数表补 `search` / `searchFields` 行；`error-catalog.mdx` 的 `INVALID_QUERY` 从占位描述改为写明其 emitter，`INVALID_FIELD` 列全七条轴；`queries.mdx` / `query-syntax.mdx` 在聚合与搜索小节各加 ingress 行为 callout。search 会格 ledger（`search-conformance.ledger.ts`）的 enforcement 指针随实现迁移更新。\n\n## 对调用方的影响\n\n- 点名**真实字段**的请求不受影响。\n- `searchFields` / `groupBy` / `aggregations[].field` 中点名不存在字段的请求现在**显式失败**，而不是收到一个被放宽 / 未分组 / 合计为 0 的 200。\n- 一个已知的边缘：对象的 `searchableFields` 声明里若有**陈旧条目**（字段后来改名），objectui 回声该声明的列表搜索会开始收到 400（消息直指对象与修法）。配套的 authoring-time lint（`searchableFields ⊆ fields`）已作为后续任务另开。\n\n## 关联\n\n- #4226 / #4240（sort / select / expand，本 issue 明确划出的剩余部分）\n- #4134 / #4164 / #4181 / #4121（filter 轴四案）· #3948（原则出处）\n- ADR-0061（`searchFields` override 语义）· #4294（QueryAST 墓碑与 liveness ledger，已合并进本分支）\n\n---\n_Generated with [Claude Code](https://claude.com/claude-code)_\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 4277,
+  "kind": "issue",
+  "title": "3b — wire the flow executors to `parse()` their config, and tighten the undeclared-key warning into an error",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T02:14:37Z",
+  "updated_at": "2026-07-31T06:40:21Z",
+  "closed_at": "2026-07-31T06:40:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4277",
+  "body": "承接 #4045 的**最后一项**，也是它唯一有意推迟的一项。#4045 本体（configSchema ↔ 执行器对账）已关闭；这条只装剩下的「让运行时真的执行契约」。\n\n## 现状：契约齐了，但没有任何一处 `parse`\n\n对账工作已经把材料备齐 —— 每个扁平内置节点都有一份**从读执行器写出**的 Zod：\n\n| 文件 | 覆盖 |\n|---|---|\n| `automation/control-flow.zod.ts` | loop / parallel / try_catch |\n| `automation/io-node-config.zod.ts` | notify / http（#4210） |\n| `automation/builtin-node-config.zod.ts` | CRUD 四件 / screen / map（#4228） |\n\n但它们**全是纯契约导出**：`service-automation` 里唯一的 `.parse(` 是 `wait-node.ts` 的 `Date.parse()`。所以今天仍然是 #4040 更正过的那句话所描述的状态 —— `configSchema` 不提供类型 / `required` / 未知键的运行时校验，`FlowNodeSchema.config` 是 `z.record(z.unknown())`，作者写错的键静默通过。\n\n#4059 已让 `registerFlow` 对未声明的键**发警告**（带路径、did-you-mean 与已声明键清单），但只是警告。\n\n## 两半，可以分开做\n\n**(a) 执行器 `parse`。** 平台级的单一决定，不是逐节点的工作 —— 因为今天没有任何节点在 parse。有真实行为风险：今天能加载的 config 可能开始 parse 失败。\n\n**(b) 未知键 warn → error。** 需要墓碑式的处方，照 `object.zod.ts:1243` 的 `UNKNOWN_KEY_GUIDANCE` 模式立。\n\n## 为什么必须等 #4059 的一个 release 数据\n\n这不是拖延，是有依据的等。未知键有三类，这个缝今天分辨不了：\n\n1. 作者拼错（想拒绝）\n2. **执行器真的在读、但 schema 从未声明**（拒绝会打断正在工作的 app）\n3. 死配置（无害）\n\n而对账工作恰恰**证明了第 2 类既真实又不少**：光是 6 个扁平节点就查出 7 个（`get_record.fields`、`screen.recordId`、`screen.fields[].options`/`defaultValue`/`placeholder`、`map.indexVariable`/`input`），外加 `notify.source`、`wait` 的六个 loose 键、`connector_action` 的三元组、`map.flow`。这些现在都已声明或进了转换层，但它们说明的是：**在收紧之前，得先知道存量 metadata 里未声明键的真实分布**，而这正是 #4059 的警告在收集的东西。\n\n直接 fail 等于拿存量 app 赌一个没测量过的分布。\n\n## 落地时的约束（对账过程中攒下的，别重新踩）\n\n- **keyValue 槽位**：`z.record()` 产出 `additionalProperties: {}` 而非契约要求的 `true`；`.meta({ additionalProperties: true })` 可覆盖。objectui 的 `json-schema-to-fields.ts:456` 判的是 `!== undefined && !== false`，`{}` 照样渲染 keyValue —— 真正会红的是平台自己的 `config-schemas.test.ts`（严格 `toBe(true)`），它比它保护的消费者更严。\n- **区域型节点（loop/parallel/try_catch）不要合并成单一源**：#4064/#4078 已用实测否掉 —— 生成结果 9–17× 大、深 9 层、全内联无 `$ref`，要可用就得写投影裁掉九成，那时「单一真相源」是假的。它们走的是对账 ratchet，不是同源生成。\n- **`assignment` 不可 parse**：没有 `assignments` 包装时顶层 config 键就是作者自选的变量名，任何固定键集或 catchall 都无意义。它已入账为不可对账，收紧时必须整体豁免。\n- **契约未必在 `config` 里**：`wait` 用 `waitEventConfig`、`connector_action` 用 `connectorConfig`，都是 `FlowNodeSchema` 上声明的兄弟字段。任何建立在「configSchema ↔ 执行器读了什么」上的收紧都要把这种情况算进去，否则会把它们误报成读了没声明的键。\n\n## Related\n\n- #4045 —— 本体，已关闭（对账 + ratchet 完成）\n- #4059 —— 未声明键警告，本项的数据来源与前置门\n- #4040 —— 表达式子集的 ledger + ratchet\n- Prime Directive #10（declared ≠ enforced）"
+}

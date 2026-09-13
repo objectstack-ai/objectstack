@@ -1,0 +1,32 @@
+{
+  "number": 4270,
+  "kind": "issue",
+  "title": "`sys_secret` 由 service-settings 注册，但它有三类生产者且引擎自己就是其一 —— 而且是 fail-closed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T01:38:26Z",
+  "updated_at": "2026-07-31T02:48:20Z",
+  "closed_at": "2026-07-31T02:48:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4270",
+  "body": "## 现状\n\n#4258（`68dea0b`，closes #4243 / #4236）把 `sys_migration` 的注册从 service-storage 挪到了 `PlatformObjectsPlugin`，确立了「平台系统对象由平台层注册」这个落脚点。同一形状的问题在 `sys_secret` 上还在，而且更尖锐。\n\n对象定义住在 `@objectstack/platform-objects/src/system/sys-secret.object.ts`，注册权却在 settings 服务手里：\n\n```ts\n// packages/services/service-settings/src/manifest.ts:9\n/** Objects owned by service-settings. Currently just the K/V store. */\nexport const settingsObjects: any[] = [SysSetting, SysSecret, SysSettingAudit];\n```\n\n## 为什么这次比 #4243 更该改\n\n**一、`sys_secret` 有三类生产者，代码里已经写明了，只有一类是 settings。** `serve.ts:2295-2298` 的注释自己点了名：\n\n> Credentials are bound through the SAME crypto provider used for `secret` fields below (`sharedCryptoProvider`), so every secret in `sys_secret` (**settings, secret fields, datasource creds**) shares one key.\n\n三者对应：\n- `SettingsService` —— 加密设置项（正当属主）；\n- **ObjectQL 引擎自身** —— `encryptSecretFields()`（`engine.ts:1662`）直接对 driver 写：`engine.ts:1708` 取 driver、`1716` `create('sys_secret', …)`；读侧 `resolveSecret()`（`engine.ts:1768`）在 `1774` 取同一个 driver；\n- `service-datasource` —— `datasource-secret-binder.ts:93/108/115` 对 `sys_secret` 做 insert/delete/find。\n\n**二、引擎的调用点是通用写路径，不是 settings 内部路径。** `encryptSecretFields` 由 `engine.ts:3115`（insert）、`3417`/`3443`（update）调用，也就是**任何业务对象的普通写入**。而 `secret` 是可授权字段类型（`Field.secret()`，`packages/spec/src/data/field.zod.ts:696`；`object.test.ts:1485` 即 `api_key: { type: 'secret' }`）。所以这条路径对任何写 `secret` 字段的 app 对象都成立，与 settings 无关。\n\n**三、失败姿态是 fail-closed，不是 fail-lenient。** 这是与 #4243 最大的区别。`sys_migration` 缺席时门禁静默落回 legacy（安全但原因错了）；`sys_secret` 缺席时直接抛错：\n\n```ts\n// packages/objectql/src/engine.ts:1706-1714\nlet secretDriver;\ntry {\n  secretDriver = this.getDriver('sys_secret');\n} catch {\n  throw new Error(\n    `Cannot persist secret field \"${object}.${field}\": the sys_secret store is not available. `\n      + 'Ensure the platform-objects (sys_secret) are registered before writing secret fields (fail-closed).',\n  );\n}\n```\n\n**注意这句报错的措辞：`Ensure the platform-objects (sys_secret) are registered`。引擎已经认为 `sys_secret` 该由 platform-objects 注册**——实际注册者却是 service-settings。错的不只是耦合，连错误信息指认的责任方都是错的：运维照着这句去查 platform-objects 会一无所获。\n\n**四、两处头注释对属主的说法互相矛盾。** `sys-secret.object.ts:27-28` 写：\n\n> managedBy: 'engine-owned' — never edited from a generic Object grid. All writes flow through `SettingsService` and an `ICryptoProvider`.\n\n但引擎是绕过 `SettingsService` 直接写 driver 的（`engine.ts:1716`）。「All writes flow through SettingsService」在 `secret` 字段这条路径上不成立。\n\n## 影响面\n\n和 #4243 一样，**不是线上事故**：`os serve` 的已知服务表里有 settings（`serve.ts:433-436`），所以被服务起来的部署总有这张表。\n\n但「没装 settings 的内核」是这份代码明确承认存在的配置——`serve.ts:2173-2174` 自己写着「hosts without the settings service」。在那类内核上，任何带 `secret` 字段的对象一旦 insert/update 就**硬失败**，而失败信息指向一个并不负责注册它的包。\n\n顺带一提，#4258 让 `os migrate value-shapes` 不再装配 settings。该命令严格只读（`--apply` 只写 `sys_migration` 标记本身），且 `resolveSecret` 是显式 API、普通 `find` 不触发，所以那条路径现在是安全的——但这恰好说明「不带 settings 的内核」已经从假设变成了仓库里跑着的现实。\n\n## 建议\n\n把 `SysSecret` 的注册从 `settingsObjects` 挪到 `PlatformObjectsPlugin`（`packages/platform-objects/src/plugin.ts`），与 #4258 对 `SysMigration` 的处理一致，让引擎那句报错变成真话。\n\n实现时需要注意的：\n\n- **移除而非并存**。#4236 提醒过要确认「同一对象注册两次」的行为；#4258 的做法是把原注册点删掉，只留一处。这里同理——从 `settingsObjects` 里摘掉 `SysSecret`，不要两边都注册。\n- 确认 `settingsObjects` 是否还被别处当作「settings 拥有的对象集合」使用（权限、manifest 声明、迁移脚本等），摘除后语义是否仍自洽。\n- **`sys_setting` / `sys_setting_audit` 不建议一并搬。** 我查过，没找到 settings 服务之外的读者（`sys_setting` 的引用全部落在 platform-objects 的对象定义自身、spec 的名字常量表和 service-settings 内部），settings 服务就是它们的正当属主。这次只动 `sys_secret`。\n- 同步修掉两处失真注释：`sys-secret.object.ts:28` 的「All writes flow through SettingsService」，以及 `manifest.ts:8` 的「Objects owned by service-settings」。\n\n## 关联\n\n- #4243 / #4236 —— 同一形状的前一例（`sys_migration`），已由 #4258（`68dea0b`）解决，并确立了 `PlatformObjectsPlugin` 作为平台系统对象的注册点。\n- ADR-0066 D2/④ —— `sys_secret` 作为环境加密密钥库的定位（见 `sys-secret.object.ts:39-40`）。"
+}

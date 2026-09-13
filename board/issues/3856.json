@@ -1,0 +1,32 @@
+{
+  "number": 3856,
+  "kind": "issue",
+  "title": "[P3] objectui `ActionRunner`: the `execute || target` fallback is dead code since #3742 — confirm and delete",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T11:54:13Z",
+  "updated_at": "2026-07-30T08:07:12Z",
+  "closed_at": "2026-07-30T08:07:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3856",
+  "body": "Filed per Prime Directive #10. The work lands in the sibling repo `objectui`, so it is tracked here rather than folded into a framework PR.\n\n## Background\n\n#3713 recorded that three readers resolved \"the author declared both `target` and `execute`\" in two opposite directions, and objectui's `ActionRunner` was one of them — it did `execute || target`, preferring the deprecated alias, while the spec transform preferred `target`. An action declaring both ran one script server-side and a different one client-side.\n\n#3742 fixed this **by construction** rather than by patching each reader: the `ActionSchema` transform now drops `execute` from the parsed output entirely. Its changeset called this out explicitly —\n\n> It also fixes unpatched renderers by construction: an `execute || target` reader falls through to `target` once the alias is gone.\n\n— and noted the objectui counterpart ships separately.\n\n## The claim to verify\n\nBecause `execute` no longer exists on parsed metadata, `execute || target` in `ActionRunner` can only ever evaluate to `target`. The fallback is unreachable. It is harmless today, but it is exactly the kind of residue that reads as a live contract to the next person: someone maintaining `ActionRunner` sees two slots, assumes both are real, and re-introduces a dialect (Prime Directive #12 — \"a tolerant fallback fossilizes the wrong convention into a second de-facto contract\").\n\n`z.infer<typeof ActionSchema>` no longer carries `execute`, so a TypeScript reader in objectui should already fail to compile against a current spec — which is worth checking, because if it still compiles, something in objectui is reading a looser type than the spec's.\n\n## Suggested shape\n\n1. In `objectui`, locate every `execute` read on action metadata (`ActionRunner.executeScript` and any sibling — the dashboard/page action paths are worth grepping too, not just the one named in #3713).\n2. Confirm each is unreachable against the current spec type, then delete the fallback so the renderer reads `target` only.\n3. If any of them still typechecks, that is the real finding — it means the reader is typed against something other than `z.infer<typeof ActionSchema>`, and the type, not the fallback, is the bug.\n\nRefs #3713, #3742, #3743, #3838."
+}

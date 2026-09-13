@@ -1,0 +1,34 @@
+{
+  "number": 4312,
+  "kind": "pull_request",
+  "title": "docs: implementation-accuracy audit of the #4212-family affected docs",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T05:33:51Z",
+  "updated_at": "2026-07-31T06:24:27Z",
+  "closed_at": "2026-07-31T06:24:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T06:24:25Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4312",
+  "body": "## What\n\nRan the repo's `docs-accuracy-audit` workflow scoped to the drift-check advisory from #4242 (its 14 docs) plus 4 more that a grep for the retired surfaces implicated. **158 evidence-backed fixes across 18 docs**, each cited to `file:line`, then **29 adversarial-verifier repairs** on top.\n\nThe findings are mostly the \"copy this and it breaks\" class:\n\n| Doc | Fixes | Examples |\n|---|---:|---|\n| `kernel/cluster.mdx` | 22 | A documented `eventBus.emit(...)` that exists nowhere in `packages/`; a `ctx.cluster` PluginContext property that does not exist; `defineStack({ cluster })` that `stack.zod.ts` silently strips; `postgres`/`nats` listed as shipped drivers when neither package exists; `REDIS_URL` for the real `OS_CLUSTER_DRIVER`; an at-least-once delivery promise no shipped driver provides |\n| `protocol/kernel/plugin-spec.mdx` | 20 | `plugin.manifest.ts` as the manifest filename — grep-empty across `packages/`, `apps/`, `examples/`; the real one is `objectstack.plugin.json`. Also `context.plugins.isInstalled()` (no such member), compound semver ranges (`'>=1.0.0 <2.0.0'`) that make the resolver **throw**, and `init` ordering described as registration order when `bootstrap()` runs a dependency topological sort |\n| `concepts/metadata-lifecycle.mdx` | 17 | |\n| `protocol/kernel/index.mdx` | 15 | |\n| `kernel/services-checklist.mdx` | 13 | |\n| `data-modeling/formulas.mdx` | 11 | |\n| `releases/v9.mdx` | 10 | |\n| `protocol/objectql/state-machine.mdx` | 8 | |\n| `plugins/index.mdx` | 7 | `os dev` defaults to a project-anchored SQLite file, not an auto-registered memory driver |\n| `kernel/services.mdx`, `releases/implementation-status.mdx` | 6 each | |\n| `deployment/vercel.mdx` | 5 | |\n| `protocol/objectql/query-syntax.mdx`, `permissions/authentication.mdx` | 4 each | |\n| `kernel/events.mdx`, `data-modeling/external-datasources.mdx` | 3 each | `credentialsRef: 'secret:…'` — the shipped binder only resolves `sys_secret:<id>`, so the sample as written fails closed at connect |\n| `deployment/migration-from-objectql.mdx`, `plugins/packages.mdx` | 2 each | A `^3.1.0` pin that can never resolve to the current 16.1.0 line |\n\n## Adversarial verification — all 18 docs\n\n**36/36 agents completed, 0 errors.** Every doc carries a verifier pass that re-checked each applied fix against live code and repaired over-corrections. That phase earned its keep — the audit agents were confident and sometimes wrong:\n\n- `enforceNetworkAccess` invented for the real `enforceNetworkRequest` (`plugin-permission-enforcer.ts:212`);\n- a retirement callout widened to \"None of it existed\" over a list containing `onEnable`, which would have contradicted the **live** app-bundle contract `AppPlugin.start()` dispatches (`app-plugin.ts:574`);\n- `cluster.lock.withLock(key, fn)` attributed to service-job's cron scheduler, which actually does `lock.acquire(...)` + manual release (`cron-job-adapter.ts:139-147`);\n- a \"(planned)\" marker dropped from the webhook dispatcher, filing an already-shipping partitioned dispatcher under \"Not started\".\n\n91 residual items the verifiers flagged as suspected-but-unproven are recorded in the run journal rather than guessed at in prose.\n\n## Verification\n\n- `pnpm --filter @objectstack/docs build` — exit 0, all pages compile.\n- `node scripts/check-doc-authoring.mjs` — 215 files clean.\n- `node scripts/check-role-word.mjs` — OK. The audit removed a `role` occurrence from `kernel/events.mdx` and one from `services-checklist.mdx` (4 → 3); since that check is a ratchet, an *improvement* fails the gate until recorded, so the baseline is ratcheted down in its own commit.\n- Prose/example changes only; no code paths touched.\n\n## Follow-ups the audit surfaced but did not fix\n\n- `packages/core/README.md:64,94` still documents `ctx.eventBus.on/.emit` as part of `PluginContext`. No such runtime object exists — a **code**-side stale doc, not fixable here.\n- `kernel/cluster.mdx`'s `leader-elected` strategy resolves only to `packages/spec/src/kernel/cluster.zod.ts` and its test — no runtime consumer of `clusterScope` / `leaderStrategy`. Another declared-but-unbuilt surface wanting its own ADR-0049 enforce-or-remove pass.\n- `ClusterDriverSchema` is a closed enum, so a driver registered under an arbitrary name via `registerClusterDriver('etcd', …)` can never be selected — `driver: 'custom'` resolves only a factory registered under the literal key `'custom'`.\n- `examples/app-showcase/src/system/datasources/showcase-external.datasource.ts` still carries the broken `credentialsRef: 'secret:warehouse/password'` form in a commented-out demo — the likely origin of the doc error."
+}

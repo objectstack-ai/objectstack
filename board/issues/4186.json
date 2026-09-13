@@ -1,0 +1,32 @@
+{
+  "number": 4186,
+  "kind": "issue",
+  "title": "plugin-audit 的 zh-CN 本地化用例在全仓并行下必然超时：冷 `import('@objectstack/core')` 撞 20s testTimeout",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T14:27:41Z",
+  "updated_at": "2026-07-30T15:05:13Z",
+  "closed_at": "2026-07-30T15:05:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4186",
+  "body": "发现于 ADR-0116 的收尾验证（#4131 / PR #4163、#4185）。**与那些改动无关**，是一个独立的测试基础设施问题。\n\n## 现象\n\n`packages/plugins/plugin-audit/src/audit-writers.test.ts` 里的\n\n```\n× localizes verb + object label to the workspace locale (zh-CN)   20094ms\n```\n\n- **单独跑 `pnpm --filter @objectstack/plugin-audit test`：4 文件 / 46 用例全过。**\n- **全仓 `pnpm test` 下必失败**，我这里连续两次复现（20347ms / 20094ms），都是撞 20s 的 `testTimeout`，不是断言失败。\n\n## 机制（已定位）\n\n罪魁是 helper 里的**动态导入**：\n\n```ts\n// audit-writers.test.ts:544\nasync function makeI18n() {\n    const { createMemoryI18n } = await import('@objectstack/core');\n    const { AuditTranslations } = await import('./translations/index.js');\n    ...\n}\n```\n\n关键证据是**同文件内相邻用例的耗时对比**：\n\n| 用例 | 耗时 |\n|:---|---:|\n| `localizes verb + object label …(zh-CN)` ← 全文件**第一个**调用 `makeI18n()` | **20094ms**（超时） |\n| `localizes the generic update fallback` ← 紧随其后，调用同一个 helper | **104ms** |\n| `falls back to the object def label, then English…` | 1ms |\n\n也就是说付出代价的只有**第一次冷加载** `@objectstack/core`（一个 110KB+ 的 barrel，带大量传递依赖）：模块解析 + 转换在 turbo 把十几个包的 vitest worker 同时压满时超过 20 秒；之后命中缓存就回到毫秒级。单独跑时机器不拥塞，冷加载够快，所以永远看不到。\n\n## 为什么值得修而不是忍\n\n这个用例目前把\"全仓 `pnpm test` 是否绿\"变成了一个**取决于机器负载**的问题——本地看到的红灯与代码质量无关，会持续消耗每个跑全量测试的人的注意力（我这次就为它多花了两轮排查）。而且它是\"沉默的负载探测器\"：机器越忙越红，最容易在最需要可信信号的时候骗人。\n\n## 可能的修法（未定，列给接手的人）\n\n1. **把动态导入提到模块顶层的静态 import**——最直接。`createMemoryI18n` 与 `AuditTranslations` 都没有需要延迟加载的理由（不是可选依赖、不是循环依赖规避——这点需要确认后再动）。\n2. 给这个文件或这个用例单独放宽 `testTimeout`——治标，且把负载敏感性留在原地。\n3. 在 `beforeAll` 里预热一次导入，让冷加载成本不计入任一用例的超时预算。\n\n倾向 1，但要先确认当初写成 `await import()` 是不是在规避某个循环依赖（`plugin-audit` → `core` 方向上应该不存在，但值得查一下再改）。\n\n## 复现\n\n```bash\npnpm test          # 全仓并行 → plugin-audit 必红\npnpm --filter @objectstack/plugin-audit test   # 单独 → 46/46 绿\n```\n\n注意：`pnpm test 2>&1 | grep ...` 这类写法拿到的退出码是管道末端命令的，会把这次失败显示成\"成功\"——排查时请直接取 `pnpm test` 自身的退出码（我第一轮就是这么误判为全绿的）。"
+}

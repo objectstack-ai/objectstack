@@ -1,0 +1,35 @@
+{
+  "number": 4166,
+  "kind": "pull_request",
+  "title": "fix(cli,service-storage): stop re-pointing the storage adapter every boot — and mean it when it warns (#4096)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T13:15:40Z",
+  "updated_at": "2026-07-30T13:43:21Z",
+  "closed_at": "2026-07-30T13:43:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T13:43:19Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4166",
+  "body": "Closes #4096.\n\n## The issue's premise was half right — the warning was telling the truth\n\n#4096 reports this on every clean boot and calls it spurious:\n\n```\nWARN StorageServicePlugin: storage adapter swapped (LocalStorageAdapter →\nLocalStorageAdapter). Existing files were NOT migrated and may be unreachable\nthrough the new adapter.\n```\n\nI built the \"nothing changed, so don't swap\" fix first — and the warning **survived it**. A probe at the decision point said why:\n\n```\nvalues.local_root = \"./.objectstack/data/uploads\"\ncurrent  = local://./storage                        ← what the plugin was running\nnext     = local://./.objectstack/data/uploads      ← what settings said\n```\n\nThe backing store really was moving on every boot. The adapter was starting in the **wrong directory** and being corrected seconds later, and the warning was an accurate report of a real misconfiguration nobody could act on.\n\n## Root cause: option keys nothing reads\n\n`serve` constructed the plugin with `{ driver: 'local', root }`. `StorageServicePluginOptions` declares **neither key** — it takes `{ adapter, local: { rootDir } }`. Both were dropped on the floor, so:\n\n- the plugin fell back to its own `./storage` default;\n- **`OS_STORAGE_ROOT` did nothing** — a documented env var with no effect;\n- uploads landed in `./storage`, not the `.objectstack/data/uploads/` the code comment promises;\n- the `storage` settings namespace then corrected the root on its first read (its manifest default at `storage.manifest.ts:38` *is* `./.objectstack/data/uploads`), swapping the adapter and warning — forever.\n\nA plain object literal passed to a parameter without an index signature type-checks fine and does nothing at runtime. Nothing was going to catch this except reading it.\n\n## Three defects, three fixes\n\n1. **`serve` passes what the plugin reads** — `{ adapter: 'local', local: { rootDir } }`. Extracted as `resolveStorageCapabilityArg` so the option **shape** is pinned by tests, including an explicit `not.toHaveProperty('driver'|'root')`.\n2. **A swap is skipped when nothing changed.** The plugin records what the running adapter points at and compares resolved *configurations*, instead of rebuilding whenever the settings namespace held any value — true on every boot once that namespace persists its own defaults.\n3. **The warning means what it says.** It fires when the **backing store moved** (kind change, different root, different bucket/region/endpoint) — not merely when the adapter object was replaced. A credential rotation swaps so the new key takes effect and logs at `info`: same bucket, nothing stranded. A `swap()` from a caller that resolved no target **still warns** — ignorance must not silence the one message that exists to be impossible to miss.\n\nPath spellings are normalised, so the platform writing one default two ways (`./.objectstack/data/uploads` in the settings manifest, `.objectstack/data/uploads` in the CLI) is not read as a migration between a directory and itself.\n\nThe fingerprint that decides \"did anything change\" includes S3 credentials and is **never logged**; the `location` that goes into the warning text deliberately excludes them, and a test asserts it.\n\n## Verification\n\n`examples/app-todo`, real boot:\n\n| | before | after |\n|---|---|---|\n| Boot-diagnostics warnings | 4 | **3** — storage line gone |\n| `adapter swapped` occurrences | 1 | **0** |\n| `./storage` created | yes | **no** — uploads go to the intended root |\n\n## Tests\n\n- **19** unit cases on the target resolver and the swap/warn split, weighted toward the distinctions that matter: credential rotation (swap, don't warn), `basePath` change (URLs move, bytes don't), kind change, same bucket on a different endpoint, `./x` vs `x`, and the unknown-caller case that must still warn.\n- **4** plugin-level cases pinning what a boot *does* and *says* — including that a quiet boot does not disarm the next genuine migration.\n- **7** on the CLI option shape.\n\nConfirmed to fail against the pre-fix code (3 plugin cases fail, one with the exact `adapter swapped (LocalStorageAdapter → LocalStorageAdapter)` text). `service-storage` 19 files / **241** tests; `cli` 89 files / **917** tests; `eslint` clean; `tsc` error count unchanged from `main` (42 pre-existing, none added).\n\n## Left alone deliberately\n\n`config.storage` authored with the `driver`/`root` dialect is still forwarded verbatim and still not read by the plugin — the same mismatch one layer up, so a host writing `{ driver: 's3', … }` silently gets local disk. Fixing it means deciding whether the plugin accepts that dialect or the config schema is wrong; a lenient alias here would fossilize the wrong contract (AGENTS.md Prime Directive #12), so it is filed separately rather than papered over. The helper's doc comment says so at the call site.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01HrRNgrWaRtggzmrHpbomyh)_"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 4334,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): read decorations stop round-tripping into persisted metadata bodies (#4326)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T06:34:36Z",
+  "updated_at": "2026-07-31T06:55:40Z",
+  "closed_at": "2026-07-31T06:55:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T06:55:39Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4334",
+  "body": "Closes #4326。这是 #4317(#3903)的两个收尾之一,顺带做完了当时留下的残留核查。\n\n## 问题\n\n`getMetaItem`/`getMetaItems` 给每个被服务的文档盖上 `_diagnostics`(预览读还加 `_draft`),而写入端按设计 **verbatim 持久化** request body(ADR-0005 §Validation——用 `parsed.data` 会把 Studio 专有的辅助字段剥掉)。中间没有任何一处剥离装饰,于是最标准的设计器往返:\n\n```\nGET(带装饰)→ 改一个字段 → PUT 整个 body → 逐字节入库\n```\n\n把**读取时刻的过期判定写进了** `sys_metadata.metadata`、它的 checksum、以及此后每一条 history diff。\n\n**为什么一直没人发现:**读取端每次都重算,`decorateMetadataItem` 用 `{ ...item, _diagnostics }` 展开,新判定盖住旧的——用户永远看不到错误的诊断。坏掉的是**存储的字节**:一次纯装饰的重存会让内容 checksum 漂移,history diff 里出现作者从没写过的诊断噪音。\n\n也正因为不可见,这里需要的是**盯住存储字节的钉子测试**而不是行为测试。我用禁用修复的方式验证过:三条往返测试全部变红,恢复后全绿——测试确实咬得住。\n\n## 改动\n\n`saveMetaItem` 在**所有**读取 body 的步骤之前剥离装饰(破坏性变更 diff、schema 网关、authoring 网关、持久化),新增 `stripReadDecorations`(导出供测试)。\n\n几个刻意的设计选择:\n\n- **静默剥离**,不同于旁边那个 layered-envelope 的**拒绝**:那是调用方发错了文档、必须让他改;而这两个键是我们自己的装饰,骑在一份\"除此之外正是作者所编辑的\"文档上——拒绝标准往返是敌意的。剥离恢复的是\"往返后行体逐字节相同\"这条不变式。\n- **不碰** ADR-0010 保护信封(`_lock`/`_lockReason`/`_provenance`)与 `_packageId`:那些是写入端合法承载并合并的信封状态(`mergeArtifactProtection`),不是读取装饰。误剥会放松打包件的锁。\n- 无可剥时**返回同一引用**,常见路径零分配(沿用 `graftNormalizedOperators` 的纪律)。\n- `_diagnostics` 其实有**两个生产者**:除 `decorateMetadataItem` 外,视图容器展开的命名冲突告警(`stampRenameWarning`,spec/ui/view.zod.ts)也盖同一个键。两者都是从文档派生的,所以都不该待在文档里——按键剥离对两者都成立。\n\n## 顺带:#3903 的残留核查已闭环\n\n我在 #4317 里把 `SysMetadataRepository` 判定为\"版本层、刻意不转换\",但没穷尽验证有没有服务路径绕过 protocol 的已转换缝隙。这次把 `get()` 的全部调用方过了一遍,结论写进了方法文档:\n\n| 调用方 | 用途 | 判定 |\n|---|---|---|\n| `saveMetaItem` / `revertCommit` / `deleteMetaItem` | 只取 `hash`(父版本谱系、存在性探测) | verbatim 正确——转换会改变 hash 所依据的 body,破坏配对 |\n| `diffMeta` | `current.body` 与 `sys_metadata_history` 的行体对比 | verbatim **载重**——history 按设计 verbatim,只转换一侧会把\"转换本身\"渲染成用户改动 |\n| `publishPackageDrafts`(seed) | draft body → `applySeedBodies` | 唯一结构上的服务路径;**今天是空的**(没有任何转换针对 seed/dataset 面),已在文档里点名为\"若将来有,要接的缝隙\" |\n\n`getByHash` 无外部消费者、`listDrafts` 不返回 body、`history` 按设计 verbatim。边界成立。\n\n## 测试\n\n新增 `protocol.read-decorations.test.ts`(8 条):\n\n- 单元:剥两个键、无可剥返回同引用、非对象直通、不改动入参、**不碰**保护信封与 `_packageId`;\n- 集成(stub 引擎,断言存储字节):GET→编辑→PUT 后行体无 `_diagnostics` 且除被编辑键外与首存逐字节相同;预览读的 `_draft` 不入库(draft 态仍在 `state` 列);纯装饰重存 **checksum 不漂移**。\n\n合并 main 后重跑:metadata-protocol 136、rest 523、runtime 951、plugin-security 677、metadata 281、objectql 1374,全绿。ESLint 干净(`sys-metadata-repository.ts` 那条 `rule not found` 在 main 上同样存在,与本改动无关,未触碰)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

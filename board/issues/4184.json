@@ -1,0 +1,35 @@
+{
+  "number": 4184,
+  "kind": "pull_request",
+  "title": "fix(analytics)!: a measure emits what it declares, instead of `COUNT(*)` (#4157)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T14:23:39Z",
+  "updated_at": "2026-07-30T14:36:38Z",
+  "closed_at": "2026-07-30T14:36:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T14:36:36Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4184",
+  "body": "Closes #4157.\n\n## `COUNT(*)` was the answer to three different questions\n\n`NativeSQLStrategy.resolveMeasureSql` could not answer three inputs, and returned `COUNT(*)` to each — **aliased under the name the caller asked for**, so the result looked like an answer rather than a failure:\n\n| Input | What came back |\n|---|---|\n| a measure the cube does not declare | `COUNT(*) AS \"revenue\"` — a row count presented as revenue |\n| a `number`/`string`/`boolean` metric | the author's SQL expression discarded, replaced by a row count |\n| an unrecognised `type` | same silent substitution |\n\nThe first is the one most likely to bite: `lookupMember`'s synthetic relation fallback is **dimension-only** (`if (kind === 'dimension')`), so *any* undeclared or mistyped measure name reached it.\n\nThe second is what the spec explicitly invites — `AggregationMetricType` documents those three as *\"Custom SQL expression returning a number / string / boolean\"*. The measure's `sql` **is** the computation: a ratio, a `CASE`, a window function. There is nothing to wrap; the only correct emission is the expression.\n\n## Now\n\n- undeclared measure → **throws**, naming the measures the cube does declare, so a typo is self-correcting;\n- custom-expression type → **emits the expression unwrapped**;\n- unrecognised type → **throws**, naming both accepted vocabularies;\n- the six aggregates are byte-for-byte unchanged.\n\n## A dot no longer implies a relationship hop\n\n`qualifyAndRegisterJoin` split any dotted string into a join chain. So the expression `SUM(account.amount)` became:\n\n```sql\n\"SUM(account\".\"amount)\"          -- the \"column\"\nLEFT JOIN \"SUM(account\" ON …     -- a join to a table that does not exist\n```\n\nInvalid SQL plus a phantom join. That was harmless only while the result was being thrown away for `COUNT(*)` — emitting the expression makes it matter, so the fix is a precondition, not a bonus.\n\nA dotted string is now a path only when **every segment is a bare identifier**. `account.amount` still lowers to `\"account\".\"amount\"` with its `LEFT JOIN`; an expression is emitted as written. This also fixes the same mangling for an **aggregate** measure whose `sql` is an expression — `type: 'sum'` with `sql: 'SUM(account.amount)'` was producing the same garbage, independently of #4157.\n\n## Breaking, narrowly — and deliberately\n\nTwo inputs that used to produce SQL now raise: a query naming an undeclared measure, and a cube measure whose type is outside `AggregationMetricType`.\n\nBoth were returning **a wrong number rather than data**, so nothing correct can depend on them. A caller who was silently getting row counts will now see an error — which is the point, and the same trade #3948 settled for the drivers.\n\n**Datasets are unaffected.** `aggregateToMetricType` only ever emits an `AggregationFunction` member and throws for a measure with no aggregate, so a compiled dataset never had a custom-expression measure or an unknown type. The reachable path is a hand-authored Cube.\n\n## The guard\n\n`metric-type-coverage.test.ts` asserts the aggregate and expression sets **partition** `AggregationMetricType`, so a tenth metric type fails a test rather than reaching the throw.\n\nBoth sets are **named**, not derived as each other's complement. Deriving would have classified a new *aggregate* the spec grows (`median`, …) as an expression and emitted a bare column — a different silent wrong answer. Same reasoning as #4153, which named the aggregate set for the same reason.\n\n## Verification\n\n- **460 tests across 35 files** green — including the four existing suites that assert `COUNT(*)`. All four use a **declared** `type: 'count'` metric (`{ type: 'count', sql: '*' }`), so none of them relied on a fallback; that is what makes this safe.\n- **14 new tests**: the three expression types emitted verbatim, grouped and ungrouped; the expression-with-a-dot left intact with no phantom join; a real relationship path still qualified and joined; and each of the three throws, including that the error text names the declared measures and both vocabularies.\n- Confirmed the tests have teeth: reverting all three fixes fails **6 of 10** in the behaviour suite, naming each regression.\n- `tsc --noEmit`: 0 errors in the three touched files, with workspace deps built with types. `eslint --no-inline-config`: clean.\n\nOne judgement left in place on purpose: in a grouped query a custom expression must itself be aggregate-shaped, because measures never join `GROUP BY` (only dimensions do). That is the author's contract to keep — silently substituting `COUNT(*)` was not keeping it for them, and the code comment now says so.\n\nRefs #4153, #3948, objectstack-ai/objectui#2945\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 4172,
+  "kind": "pull_request",
+  "title": "fix(service-job): migrate early registrations across the placeholder→DbJobAdapter upgrade — cron jobs finally run",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T13:47:00Z",
+  "updated_at": "2026-07-30T15:00:21Z",
+  "closed_at": "2026-07-30T15:00:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T15:00:19Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4172",
+  "body": "Closes #4174\n\n## Summary\n\nPlugin-registered cron jobs never fired in the default (`adapter: 'auto'`/`'db'`) configuration. Three stacked causes, found via real-app dogfooding (A/B measured: an interval 15s job ran 23 times while a cron `*/1 * * * *` job ran 0 times):\n\n1. `JobServicePlugin.init` registers a placeholder `IntervalJobAdapter` synchronously so callers can `getService('job')` during init — but that placeholder **silently ignores `cron` schedules** (no timer, no error).\n2. The upgrade to the croner-backed `DbJobAdapter` happens in `kernel:ready`, which runs **after every business plugin's `start()`** — so all their registrations land on the placeholder.\n3. The upgrade swapped the service via `replaceService` **without migrating** the already-registered jobs: cron entries were lost for good, and the placeholder's interval timers kept running on the orphaned adapter — which is exactly why interval jobs looked healthy while cron jobs did nothing, and why none of them showed up in `sys_job`.\n\n## Fix\n\n- The `kernel:ready` upgrade now snapshots every registration made against the placeholder (`getRegistrations()`), stops the placeholder first (a brief gap beats a double-fire), then re-schedules everything on the `DbJobAdapter` — whose cron routing makes the cron entries actually run and persists them to `sys_job`.\n- `IntervalJobAdapter` warns per cron registration it cannot execute (it has no cron engine), and the no-engine path summarizes stranded cron jobs in one line instead of staying silent.\n- `replaceService` failure now returns early instead of migrating onto a service nobody resolves.\n\n## Tests\n\n- New `job-service-plugin.test.ts`: early cron + interval registrations both follow the upgrade (service swapped, `listJobs` complete, `sys_job` rows present, placeholder emptied, migrated handler still fires via `trigger`); the no-engine path warns loudly about stranded cron jobs.\n- `pnpm vitest run` in `packages/services/service-job`: 5 files, 39 tests, all green; `pnpm build` clean.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

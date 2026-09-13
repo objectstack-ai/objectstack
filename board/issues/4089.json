@@ -1,0 +1,30 @@
+{
+  "number": 4089,
+  "kind": "issue",
+  "title": "core 的内存 fallback 带 _fallback: true 而非 __serviceInfo，readServiceSelfInfo 不识别 —— AppPlugin 注册的 i18n fallback 在 discovery 里报 available",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T09:12:36Z",
+  "updated_at": "2026-07-30T09:57:28Z",
+  "closed_at": "2026-07-30T09:57:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4089",
+  "body": "按 Prime Directive #10 记录，#4058 / PR #4086 期间发现的另一个注册路径上的同类问题。\n\n> **已由 #4082（#4058 step 1，commit `45dc446`）修复 —— 按本 issue 倾向的第 1 条方案。** 五个 fallback 都加上了 `__serviceInfo: { status: 'degraded', message: … }`，message 逐个点名缺什么（`memory-job` 的 `schedule()` 因为没有 timer 永不触发、`memory-queue` 无持久化/重试/跨实例分发…），并且给无 HTTP 面的三个（`cache`/`queue`/`job`）显式设了 `handlerReady: false`，与 realtime 先例一致 —— 这一层比本 issue 提议的更细。`app-plugin.ts` 那个 duck-typed 的 i18n 诊断也改成读 `readServiceSelfInfo` 了。据此关闭。\n\n## 现象（原文）\n\nADR-0076 D12 的标记约定是 `__serviceInfo`（`readServiceSelfInfo`，`packages/spec/src/api/discovery.zod.ts`），另外识别 plugin-dev 的历史 `_dev: true`。但 **`_fallback: true` 不在识别列表里**，而 core 的五个内存 fallback 恰恰只带这个：\n\n| 文件 | 标记 |\n|:---|:---|\n| `packages/core/src/fallbacks/memory-cache.ts:15` | `_fallback: true, _serviceName: 'cache'` |\n| `packages/core/src/fallbacks/memory-job.ts:13` | `_fallback: true, _serviceName: 'job'` |\n| `packages/core/src/fallbacks/memory-queue.ts:14` | `_fallback: true, _serviceName: 'queue'` |\n| `packages/core/src/fallbacks/memory-i18n.ts:126` | `_fallback: true, _serviceName: 'i18n'` |\n| `packages/core/src/fallbacks/memory-metadata.ts:24` | `_fallback: true, _serviceName: 'metadata'` |\n\n其中 i18n 这个会被真的注册进槽位：`packages/runtime/src/app-plugin.ts:1215-1218`，声明了 translation bundle 的 stack 会自动拿到 `createMemoryI18n()` 作为 `i18n` 服务。`readServiceSelfInfo` 对它返回 `undefined`（= 自称完全真实），于是 discovery 报 `status: 'available', handlerReady: true`，与装了 `@objectstack/service-i18n` 没有区别。\n\n这正是 D12 的根因描述（\"discovery builder 把任何在场的服务都报成完全真实\"）在**另一个 producer** 上的残留：D12 修的是 plugin-dev 的 stub 与 analytics fallback，core 的 fallback 家族没进那次盘点。\n\n## 严重性\n\n比 #4058 低，因为这些 fallback 是\"真干活的内存实现\"，`handlerReady: true` 本身是对的 —— 过度声明的只是 `status`（该 `degraded` 而不是 `available`）。按 #4058 落地的判据（门只读 `handlerReady`），修这个标记**不会**改变任何路由行为，只让 discovery 更准。\n\n不过 `memory-metadata` 的声明面更大（元数据不落 `sys_metadata`），把它报成 `available` 更容易误导 agent —— dispatcher 的 discovery 已经给 `metadata` 硬编了 `degraded` + \"In-memory registry; DB persistence pending\"，而 metadata-protocol 那侧的 builder 硬编了 `available`。两个 builder 对同一个槽位说法不同，也一并在这条里核对。\n\n## 需要的决定\n\n二选一，倾向第 1 条：\n\n1. **给这五个 fallback 加 `__serviceInfo: { status: 'degraded', message: … }`** —— 与 #4058 里 plugin-dev stub 的做法一致，标记本身自带\"缺什么、装什么补上\"。`_fallback: true` 保留作来源标记（`app-plugin.ts:1271` 的 i18n 诊断读它）。\n2. 让 `readServiceSelfInfo` 把 `_fallback: true` 归一化成 `{ status: 'degraded', handlerReady: true }` —— 少改几个文件，但又多一个隐式方言，与 `_dev` 同样的债；而且 message 只能是通用文案，说不出各槽位缺的是什么。\n\n关联：#4058、#4000、#3028、#2462、#4082、ADR-0076 D12。\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 4230,
+  "kind": "pull_request",
+  "title": "fix(rest): `GET /data/:object/export` honours a `search` term",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T16:45:01Z",
+  "updated_at": "2026-07-30T16:55:30Z",
+  "closed_at": "2026-07-30T16:55:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T16:55:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4230",
+  "body": "Found while auditing objectui's `ListView` export path (objectui#3072 follow-up).\n\n## The bug\n\nThe streaming export route accepted `filter` and `orderby` but had **no way to carry the search term**. A user who searched a list and then exported downloaded the *unsearched superset* — more rows than the screen showed, in a file that looks authoritative, with nothing anywhere indicating the difference.\n\nThe route's own comment claimed the opposite:\n\n> Mirrors the active view's filter + sort so the exported file matches what the user sees.\n\nIt mirrored the *filter* half. There was no field for the other half — objectui's `ExportDownloadRequest` had no `search` either, so the client couldn't have sent one.\n\nSame family as a dropped filter (#3948, #4181): a plausible answer that is quietly broader than the one asked for.\n\n## The change\n\nTwo query params, both matching the list endpoint's semantics:\n\n| param | behaviour |\n|---|---|\n| `search=<term>` | folded into `findData` as `$search`, so it **composes** with `filter` (`{ $and: [filter, search] }`) rather than replacing it. Empty / whitespace-only terms are ignored, not applied as a blank predicate. |\n| `searchFields=a,b` | ADR-0061 override for which fields the term scans. Only meaningful alongside `search`; the engine intersects it with the object's allowed searchable set, exactly as on the list endpoint. |\n\n**Backward compatible in both directions.** Unknown query params on this route were already ignored, so a client that sends `search` to an older server gets today's behaviour rather than an error — which means the objectui side can land independently.\n\n## Verification\n\nReal engine + real protocol + in-memory driver (`export-integration.test.ts`), no protocol mocks.\n\nThe composition test is built so **each half alone returns a different non-empty result, and only \"both applied\" returns none** — `filter: done=true` → `写代码`, `search: 文档` → `写文档`, together → 0 rows. A test where the two halves agree would have passed just as well with `search` dropped entirely; I wrote that weaker version first and it survived the revert check, so it was replaced.\n\n**Reverting `rest-server.ts` fails 4 of the tests.** Full `@objectstack/rest` suite: 35 files / 519 tests green.\n\nThe file's in-memory driver also learned `$or` / `$contains`. `$search` folds to `{ $or: [{ field: { $contains: term } }] }`, and this driver skipped `$`-prefixed keys — so it returned every row regardless, and an \"it filtered\" assertion would have passed for the wrong reason.\n\n## Note\n\n`packages/rest/src/package-routes.ts` has two pre-existing `TS2345` errors on `main` (verified against a clean tree). Untouched here.\n\nRefs #3948, #4181, objectui#3072\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

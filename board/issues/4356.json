@@ -1,0 +1,35 @@
+{
+  "number": 4356,
+  "kind": "pull_request",
+  "title": "fix(objectql,spec): `filter` folds to `where` on EVERY engine method; `top`/`limit` joins the #3795 slot table (#4346)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T08:38:42Z",
+  "updated_at": "2026-07-31T08:52:06Z",
+  "closed_at": "2026-07-31T08:52:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T08:52:04Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4356",
+  "body": "Closes #4346. Refs #3795, #4181, #3713, ADR-0057.\n\n## 问题\n\n`filter` → `where` 的别名折叠在**引擎层**只存在于六个方法中的一个。`ObjectQL.find()` 折叠(注释还写明了后果),`findOne`/`count`/`update`/`delete`/`aggregate` 原样透传 —— `ast.where === undefined`,每个 driver 都读作\"无谓词\":\n\n| 调用 | 修复前 | 修复后 |\n|---|---|---|\n| `find({filter: {status:'done'}})` | `[b, c]` ✅(唯一折叠的) | 不变 |\n| `findOne({filter: {status:'done'}})` | 表首行(任意行) | 匹配行 |\n| `count({filter})` | 整表计数 | 匹配计数 |\n| `update(data, {filter, multi:true})` | **全表改写** | 匹配行 |\n| `delete({filter, multi:true})` | **清空整表** | 匹配行 |\n| `aggregate({filter, …})` | 聚合全表 | 匹配行 |\n\n可达且真实:废弃的 `DataEngine{Query,Update,Delete,Count,Aggregate}OptionsSchema` 都声明 `filter` 为合法选项,`ScopedContext`/`ObjectRepository`(交给 L2 hook 体的跨对象 API)原样转发,spec 自己的 hook 文档教的就是这个坏调用。仓内也有真实受害者:`auth-manager.ts` 的 `stampIdentitySource` 用 `findOne({filter: {id}})`(拿到的是表首行)和 `count({filter: …})`(数的是整表)—— 本修复使这两处回归声明语义。\n\n## 修复\n\n**一次折叠,三个读者。** 每个引擎入口经由 #3795 的既有机制(`RPC_QUERY_ALIAS_SLOTS` + `foldQueryAliasSlots`)折叠,替换 `find` 手写的守卫,不再新增开写副本:别名单独出现即折入规范键、相同值冗余坍缩、**不同值抛错**(\"Send exactly one\",#4181 规则)、显式 `null` 别名视为撤回。写路径在 `withResolvedWhere` 之前折叠,folded `filter` 里的 `{filter-placeholder}` token 同样解析(#3810 语义对齐)。\n\n**第六对别名。** `top` → `limit` 加入 `RPC_QUERY_ALIAS_SLOTS`(#3795 的 scope note 把它排除在外)。协议层原来是**反向**折叠(`options.limit = Number(options.top)` —— 别名覆盖规范键),引擎层是规范键优先,`{top: 1, limit: 3}` 经 HTTP 得 1、进程内得 3。现在 wire 归一化、RPC parse、引擎三个读者语义一致:`top` 单独出现仍限行,冲突拒绝。\n\n**文档。** `hook.zod.ts` 的 hook 示例与 `engine.ts` 的 `createContext` 示例改教 `where`;`check:docs` 通过(无生成物漂移)。\n\n## 针脚(pin)\n\n- `engine-filter-alias.test.ts`(新,真实引擎 + 内存 driver,issue 的三行数据集):六方法 `{filter}` 单独生效、六方法 `{filter, where}` 冲突拒绝且**写路径确认未落盘**、相同值坍缩、`null` 撤回、`{top}` 限行、`{top, limit}` 冲突拒绝/相同坍缩、`findOne({top})` 仍单行、`{filter: {id}}` 走 by-id 快径、ScopedContext/ObjectRepository 钩子门面路径(文档教的那个调用)。\n- `protocol-data.test.ts`:SLOTS 表加 `['top','limit',5,3,5]` 行,自动获得 alias-alone / conflict / identical 三组针脚。\n- `data-engine.test.ts`(spec):RPC parse 折叠 `top`→`limit` 并丢弃别名;冲突用例加 `{top:1, limit:3}`。\n\n## 验证\n\n- spec 7156 ✅ / objectql 1418(88 文件)✅ / metadata-protocol 136 ✅ / rest 523 ✅ / runtime 951 ✅,受影响包 typecheck ✅,`check:docs` ✅,全仓 `pnpm test` 除 `@objectstack/dogfood` 的 2FA lockout 用例 5s 超时外全绿 —— 该用例与本改动无交集(better-auth 2FA 路径全程 `where`),单文件复跑 5/5 绿,符合本机 turbo 并行资源噪音的已知模式。\n\n## 行为变化说明\n\n之前各层各自\"选赢家\"的冲突拼写(`{where: X, filter: Y}`、`{top: 1, limit: 3}`)现在在每条路径上一致地**大声拒绝**,不再按层静默取不同值。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 4061,
+  "kind": "pull_request",
+  "title": "refactor(spec)!: retire three orphan operator vocabularies (objectui#2945 Track A)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T07:36:52Z",
+  "updated_at": "2026-07-30T08:36:04Z",
+  "closed_at": "2026-07-30T08:36:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T08:36:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4061",
+  "body": "Track A of objectstack-ai/objectui#2945 — the one track of that issue that is safe to land today. Three operator vocabularies with **no importer at all**, each contradicting the vocabulary that is actually enforced.\n\nZero-consumer verified by grep across framework `packages/` + `apps/`, objectui, and cloud, on this branch's merge base (not read from the audit).\n\n## `AggregationFunctionEnum` — `shared/enums.zod.ts`\n\nIts own doc comment claimed it was *\"used across query, data-engine, analytics, field\"*. It was used by nothing.\n\n`AggregationFunction` (`data/query.zod.ts`) is what the query engine, `service-analytics`' dataset compiler and the native-SQL strategy all gate on — and the two disagreed:\n\n| | members |\n|---|---|\n| `AggregationFunctionEnum` (removed) | count, sum, avg, min, max, count_distinct, **percentile, median, stddev, variance** |\n| `AggregationFunction` (kept) | count, sum, avg, min, max, count_distinct, **array_agg, string_agg** |\n\nIt also exported a **type** named `AggregationFunction` while `data/query.zod.ts` exports a **value** of that name — the same identifier in two declaration spaces with different members, which is a trap waiting for whoever first writes `z.infer<typeof AggregationFunction>` next to a bare `AggregationFunction` annotation.\n\n## `FilterOperator` — `api/websocket.zod.ts`\n\n`FilterOperator` fed `EventFilterCondition` → `EventFilterSchema` → `EventSubscriptionSchema.filters`. The whole subtree is removed, `filters` included.\n\nNo runtime ever evaluated an event filter: `matchesSubscription` matches on object name and event type only (`contracts/realtime-service.ts`), and the subscription shape the transports actually carry is the separate, deliberately unvalidated `filters: z.unknown()` on `SubscriptionEventSchema` (`api/realtime.zod.ts`).\n\nSo this was a *second* modelling of event filtering, disagreeing with both the live one and with `VALID_AST_OPERATORS`, that advertised a capability no code provided — **a subscriber who set `filters` would have received every event.** Removed rather than wired up: the surface that matters is the realtime contract, and it should grow one filter vocabulary rather than inherit an orphan's.\n\n## `ODataFilterOperatorSchema` — `api/odata.zod.ts`\n\nNothing parses an OData `$filter` against it. `$filter` is carried as an opaque string (`ODataQuerySchema.$filter`, and the `odata` adapter template in `query-adapter.zod.ts` — which only `@see`s this file, it does not import it). An enum mixing operators with `(` and `)` could not validate an expression anyway: it describes tokens, not a grammar.\n\nA real OData implementation needs a parser, and that parser should lower onto `AST_OPERATOR_MAP` (`data/filter.zod.ts`) like every other entry point. Kept as an enum, this was only a way for the count of filter vocabularies to grow.\n\n`ODataFilterFunctionSchema` (contains/startswith/tolower/…) is an adjacent orphan, left in place: it is a *function* vocabulary, not an operator one, and out of scope here.\n\n## Why this is `major`, and why it is still safe\n\nAll three were reachable as public exports (`@objectstack/spec/shared`, `@objectstack/spec/api`), so removing them is breaking and the changeset is `major` — it lands in the 17.0.0 that is already accumulating majors in `pre` mode.\n\nNothing is **narrowed**. No accepted value stops being accepted, so no already-stored metadata and no in-flight payload changes meaning. That distinction is the whole point of objectui#2945: narrowing `VALID_AST_OPERATORS` turns a working bare-triple filter into a silently unfiltered query (#3948), and retiring a `VIEW_FILTER_OPERATORS` alias orphans live `sys_metadata` rows, because `saveMeta` persists the authored body verbatim. Both remain blocked. Deleting an orphan is not in that class.\n\nIn-file comments record what was removed and why at each of the three sites, so the next audit finds the reasoning instead of re-deriving it.\n\n## Verification\n\n- Full `@objectstack/spec` suite: **6917 tests across 266 files, all pass**.\n- `tsc --noEmit` on `packages/spec`: clean.\n- Affected suites specifically (`websocket`, `odata`, `shared/enums`): 122 pass.\n\nRefs objectstack-ai/objectui#2945, objectstack-ai/objectui#2901, #3948\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

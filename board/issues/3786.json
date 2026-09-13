@@ -1,0 +1,32 @@
+{
+  "number": 3786,
+  "kind": "issue",
+  "title": "排查「手抄 spec 清单 + \"keep in sync\" 注释」模式:一天内确认三例,全部曾静默漂移",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T05:22:02Z",
+  "updated_at": "2026-07-30T13:50:23Z",
+  "closed_at": "2026-07-30T11:09:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3786",
+  "body": "2026-07-28 一天之内,同一个缺陷形状确认了三例 —— **消费方手抄一份 spec 拥有的清单,注释写着\"保持同步\",没有任何机制保证** —— 且每一例都真的漂移过、都是静默失效(能力缺席,无报错):\n\n| 实例 | 两份清单 | 漂移后果 | 修复 |\n|:---|:---|:---|:---|\n| #3723 | better-auth 角色注册表 vs `sys_invitation.role`/`sys_member.role` 选项 | app 角色可请求、永不可存储 | #3747:派生 + 闸门 |\n| cloud#898 | `KNOWN_METADATA_CATEGORIES` vs `PLURAL_TO_SINGULAR` | `positions[]` 在发布/导出时被静默丢弃,托管环境整体缺席 | 派生 + 闸门 |\n| cloud 同一清单的**上一次**漂移(ADR-0046) | 同上 | `docs`/`books`/`themes` 等被丢弃 | 当时手工补(未加闸门 → 于是有了第二次) |\n\n另有一个刚出现的小型变种:cloud#898 自己的 `CLOUD_ONLY_METADATA_CATEGORIES` 把 `triggers` 归类为\"cloud 特有\",而它实为 framework `METADATA_ALIASES` 的键(`triggers: 'hooks'`)—— 修手抄漂移的那次修复里又埋了一处小的分类手抄(已单开 cloud issue)。\n\n## 请求:当模式排查,不是当孤立 bug\n\n三例覆盖两个仓库、彼此独立发生,说明这不是巧合而是惯性写法。值得主动扫一遍三个仓库(framework / objectui / cloud),而不是等下一次静默失效自己冒出来:\n\n1. **注释线索**:`grep -riE \"keep.*in sync|kept in step|保持同步\"` —— 写了这句注释的地方,几乎就是没有闸门的地方;\n2. **字面量对照**:凡是硬编码的字符串数组/枚举,与 `@objectstack/spec` 的导出(`PLURAL_TO_SINGULAR`、`METADATA_ALIASES`、字段类型清单、内置角色/身份常量等)做交集比对,找出\"像是抄的\"清单;\n3. **objectui 是重点嫌疑**:它消费 spec 的类型/枚举清单做渲染分发,而本轮没有覆盖它。\n\n每找到一处,修法是现成的模板(#3747 / cloud#898):**从唯一来源派生;确实无法派生的,加一条「集合覆盖/不相交」断言当闸门**。注释不是机制。\n\n_按 Prime Directive #10/#12 立项;规模超出单个 PR 的顺手范围,故单开。_"
+}

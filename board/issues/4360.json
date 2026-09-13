@@ -1,0 +1,35 @@
+{
+  "number": 4360,
+  "kind": "pull_request",
+  "title": "test(cli): pin `os serve` config-boot for the authored shape #3887 reported",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T08:47:20Z",
+  "updated_at": "2026-07-31T09:24:15Z",
+  "closed_at": "2026-07-31T09:24:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T09:24:13Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4360",
+  "body": "## 一句话\n\n#3887 报的崩溃早已被 #4110(closes #4085)修好,但**它报的那个形态从来没有被测试钉住**。本 PR 补上那一次 boot,并顺带把 #3887 关掉。\n\n## 事实核实(不是推断)\n\n按 issue 里逐字的复现跑了一遍当前 `main`:\n\n```\nLoading objectstack.config.ts...\n✓ Server is ready\nPlugins: 29 loaded\n         … com.objectstack.metadata, ObjectQL, cfgload, RestAPI, …\n```\n\n`Service 'manifest' is async - use await` 没有了,`artifact read FAILED` 也没有了(后者在 #4110 里被改成 ENOENT 时的正常 `no compiled artifact at …`)。\n\n而且不止「没崩」——登录后对 `cfg_note` 做了真实读写,确认对象是真的在服务:\n\n```\nPOST /api/v1/data/cfg_note  → {\"id\":\"cfg_note-…\",\"title\":\"hello 3887\", …}\nGET  /api/v1/data/cfg_note  → {\"records\":[…],\"total\":1}\n```\n\n#4110 没有 link #3887,所以它一直挂着 OPEN。\n\n## 为什么还要加测试:现有的 pin 盖不住这个形态\n\n`serve-no-artifact.e2e.test.ts` 已有 4 个 boot,但**每一个 fixture 都是 plain object literal**(`export default { … }`),没有一个走 `defineStack()`。这不是无谓的区别:\n\n- `defineStack` 会 **parse + normalize**。同一份 config 经过它之后,每个 object 被盖上 `datasource: 'default'`,每个 field 被补成完整 descriptor。literal fixture 原样进 boot,只有这个 fixture 是「spec 产出的样子」进 boot。\n- 这样的 fixture **只能放在真实 `node_modules` 解析得到的地方**:`@objectstack/spec` 对 config bundler 是 external(`BUNDLE_REQUIRE_EXTERNALS`),所以它没法像其它三个那样待在 OS tmpdir 里。\n\n第二点正是**这个洞能活过修复的原因**——不是没人想到,是放不进去。所以新 fixture 落在本包的 gitignored `tmp/` 下,和用户工程一样经由真实 `node_modules` 解析。\n\n## 这个断言是有承重的\n\n把 fixture 的 `manifest.id` 改掉之后跑,测试变红,**而 server 依然正常起来**:\n\n```\n❯ test/serve-no-artifact.e2e.test.ts:207\n    expect(stdout, `app plugin missing from the boot banner`).toMatch(/Plugins:[\\s\\S]*cfgload/)\n```\n\n也就是说它断言的是「app 真的注册并 start 了」,不是「banner 里有字」。\n\n## 范围说明(写进文件了,避免后人读多)\n\n这一 boot 钉的是**这个形态的端到端**(config 加载 → app 注册 → 无 `dist/` 起服务),**不是 fault 1 的机制**。单独 revert CLI 侧的 append 已经复现不出崩溃了 —— ADR-0116(#4131)之后 plugin ordering 变成 declared、kernel-enforced 的契约(那个 commit 原话:「`kernel.use()` registration order proves nothing」,并且点名 AppPlugin/#4085 是标准例子)。两个保证都要,但钉在不同层。\n\n## 验证\n\n- `pnpm vitest run test/serve-no-artifact.e2e.test.ts` → 5/5(merge `main` 后重跑,含 `pnpm install --frozen-lockfile` + 全量 `pnpm build`,71/71)\n- `pnpm exec eslint` / `pnpm typecheck`(`@objectstack/cli`)→ clean\n- `node scripts/check-type-check-coverage.mjs` → OK(#4348 的 test-layer ratchet 也过)\n\n⚠️ 本机跑测时长抖动很大(同一文件 9.5s→478s):是本机另外六个 worktree 在并行跑 suite 造成的资源噪音,不是新测试的成本 —— 已确认无我这边遗留的 serve 进程,机器空闲时新测试单独跑 15.5s。\n\nCloses #3887\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

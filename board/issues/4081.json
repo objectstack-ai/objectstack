@@ -1,0 +1,34 @@
+{
+  "number": 4081,
+  "kind": "issue",
+  "title": "ADR-0053 D-A3：立温度一致性矩阵作为运行期回归棘轮（这条接缝已坏四次）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T08:55:41Z",
+  "updated_at": "2026-07-30T09:52:43Z",
+  "closed_at": "2026-07-30T09:52:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4081",
+  "body": "ADR-0053 里**唯一从未立项**的决策。原文（`docs/adr/0053-date-and-datetime-semantics.md:403`）要求覆盖 `field-type × operator × relative-token × driver` 并断言**行结果**而非发出的 SQL；后续两份附录（D-D2、D-E4）又各自给它加了一个轴。\n\n## 为什么现在做\n\n这条接缝到目前为止**坏了四次**，每次都是有人偶然撞到才发现：\n\n| | 症状 | 修复 |\n|---|---|---|\n| #3650 | 窗口被整个丢弃 → 画出全部历史 | PR #3766 |\n| #3773 | SQLite 上 datetime 分桶恒为 NULL | PR #3775 |\n| #3777 | 裸日期上界丢当天数据（默认配置即命中） | PR #4041 / #4048 |\n| #4047 | memory/mongo 跨类型比较恒 false（mongo 上窗口返回空集） | PR #4060 |\n\n四次修完，六个求值面的行为**刚刚被统一**，但没有任何东西阻止第五次。现在是成本最低的时刻：所有单元格都有实证探针、非 UTC 活库 job 已就位、语义刚被写进 ADR 还没漂移。再拖，探针会随重构散落，就得重新考古。\n\n## 现状盘点（不是「没有覆盖」，是「覆盖不成矩阵」）\n\n**已有**：`sql-driver-calendar-day-upper-bound.test.ts`、`sql-driver-datetime-canonical-storage.test.ts`、`memory-datetime-storage.test.ts`、`mongodb-datetime-storage.test.ts`、`matches-filter.test.ts` 的日历日段……每个都在证明**自己那个 issue**，各写各的夹具，没有共同真相。\n\n**缺口**：\n1. **relative-token 轴基本空白**。`{today}` / `{30_days_ago}` 在 `filter-tokens.ts` 解析后进驱动，没有任何测试端到端断言「token → 行结果」在各驱动上一致。\n2. **driver 轴不完整**。ADR 原文只写 `{SQLite, Postgres at minimum}`；现在 memory / mongo / MySQL / sqlite-wasm 都有实现，且 #4047 证明非 SQL 驱动会以**不同方式**坏。\n3. **新增两轴未成体系**：`bound-semantics {point, whole-day}`（D-D2）、`storage-form {canonical, legacy-epoch, legacy-naive, mixed-writer-form}`（D-E4）。\n\n## 建议的形状：照抄 `filter-logic-conformance.ts`\n\n仓库里已有这个模式的成功先例——`packages/spec/src/data/filter-logic-conformance.ts`，自称「每个 filter 后端都对照检查的唯一真相」，被四个后端消费（driver-sql、driver-memory、formula、service-analytics）。它就是为**同一类问题**（各后端对 `$or` 语义各执一词）建的。\n\n温度矩阵应当是它的孪生：\n\n- `packages/spec/src/data/temporal-conformance.ts` —— 导出 `TEMPORAL_CONFORMANCE_ROWS`（一份跨越午夜/当天多时刻/月末/闰日/负 epoch 的夹具）与 `TEMPORAL_CONFORMANCE_CASES`（`{ name, fieldType, filter, expected: string[], note }`，note 指向它防的那个 issue）。\n- 每个后端一个瘦测试文件消费它，与 `*-or-semantics.test.ts` 的现有惯例一致：driver-sql、driver-sqlite-wasm、driver-memory、driver-mongodb、formula `matchesFilterCondition`、service-analytics preview-evaluator。\n- **断言行 id 集合**，不断言 SQL —— ADR 原文的硬性要求。\n\n放 spec 的理由与 `nextUtcCalendarDay` 同（见 ADR D-D2）：所有后端已依赖 spec，零新增依赖边。\n\n## 落地建议（可分两步，不必一次做完）\n\n1. **先建夹具 + 把现有分散断言迁进来**。这一步不改任何生产代码，纯粹是把四次修复留下的知识收敛成一张表——失败信息里带 note，下次谁碰坏了立刻知道自己踩的是哪个已修 issue。\n2. **再补 relative-token 轴**，接 `filter-tokens.ts` 的解析结果跑同一批 case。\n\n`Temporal Conformance (live PG + MySQL)` job（#3979 建，`ci.yml:216`）已经在 `TZ=America/New_York` + 服务器 `Asia/Shanghai` 下跑整个 driver-sql 套件，所以 SQL 侧的新文件**自动**获得非 UTC × 活库覆盖，无需改 workflow。memory/mongo/formula 的文件走普通 `Test Core`。\n\n## 验收\n\n矩阵红一次就说明某个后端偏离了共识 —— 这正是前四次事故缺的那个信号。\n\n## 关联\n\n#3650 / #3773 / #3777 / #4042 / #4047，PR #3766 / #3775 / #4041 / #4048 / #4060 / #4076；ADR-0053 D-A3（本项）、D-D2、D-E4。"
+}

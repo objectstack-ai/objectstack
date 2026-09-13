@@ -1,0 +1,32 @@
+{
+  "number": 3900,
+  "kind": "issue",
+  "title": "plugin-dev 的 stub 全部 fail-open(verify() 恒 admin、checkObjectPermission() 恒 true、compileFilter() 恒 null)且无任何生产环境护栏",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T15:20:07Z",
+  "updated_at": "2026-07-31T05:34:34Z",
+  "closed_at": "2026-07-31T05:34:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3900",
+  "body": "低优先级 —— 从 #3878 的同类扫查里出来的最后一条。**目前不是活着的洞**（仓库里没有任何地方自动挂 `DevPlugin`，只有 README 示例），但它把 fail-open 的实现注册进了 `auth` / `security.*` 这些正式槽位，且没有任何护栏阻止它出现在非开发环境。\n\n## 现状\n\n`packages/plugins/plugin-dev/src/dev-plugin.ts`：\n\n```js\n:214  async verify() { return { success: true, user: { id: 'dev-admin', email: 'admin@dev.local', name: 'Admin', roles: ['admin'] } }; }\n:216  async getCurrentUser() { return { id: 'dev-admin', ... roles: ['admin'] }; }\n:239  checkObjectPermission() { return true; }\n:246  compileFilter() { return null; }\n```\n\n- `verify()` **不看 token**，任何请求都解析成 `dev-admin` / `roles: ['admin']`。`packages/runtime/src/security/resolve-execution-context.ts:104,120` 正是从 `auth` 服务解析请求身份的。\n- `checkObjectPermission()` 恒 true → `plugin-hono-server/src/hono-plugin.ts:1112` 生成的 `GET /auth/me/permissions` 会告诉客户端每个对象都可写。\n- `compileFilter()` 返回 `null` = \"无行级谓词\"，即 RLS 关闭（真实现见 `plugin-security/src/rls-compiler.ts:148`，签名 `(policies, executionContext?, clause?)`）。\n- `maskResults(results)`（`:253`）原样返回，字段级掩码关闭。\n\n全文件**没有 `NODE_ENV` 字样**，也没有任何其它环境判断。\n\n这些 stub 都带 `_dev: true`，所以 discovery 会照实报 `status: 'stub'`（D12 这部分是工作的，见另一条 issue 里的三个洞）—— 但**报得诚实不等于拒绝服务**：路由该放行还是放行。\n\n## 为什么还是想记一笔\n\n1. 它注册的是 `auth` / `security.permissions` / `security.rls` / `security.fieldMasker` —— 系统里安全语义最强的四个槽位，且四个的降级方向**全部是放开**而不是关闭。\n2. 目前拦住它的唯一东西是\"没人写这行代码\"。一个 preset、一个 example、一次为了本地调试临时加上后忘了摘掉的提交，就够了。\n3. 这与 #3891 是同一个模式的两端：那边是**丢掉**身份导致中间件放行，这边是**伪造**身份直接放行。\n\n## 建议（任一即可）\n\n- `DevPlugin` 构造/`start` 时检查 `NODE_ENV === 'production'`（或复用 `os serve` 已有的环境判定），命中则**拒绝启动并打印为什么**，与 `serve.ts:1606` 那段 `OS_ALLOW_DEGRADED_TENANCY` 的处理方式对齐（那里是 `process.exit(1)` 而不是 warn，理由写得很清楚：throw 会被外层 catch 吞掉而静默降级启动）；\n- 需要在类生产环境用它时，走一个显式的 `OS_ALLOW_DEV_STUBS=1`，并在启动横幅上打标。\n\n<sub>核对于 `origin/main` @ 93f267f81。已确认 `packages/`、`examples/`、`apps/` 及 cloud 仓内均无 `new DevPlugin(` 的实例化（仅 plugin-dev 自身 README）。</sub>\n"
+}

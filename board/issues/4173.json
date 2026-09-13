@@ -1,0 +1,30 @@
+{
+  "number": 4173,
+  "kind": "issue",
+  "title": "spec 应导出 import 布尔 token 表(BOOL_TRUE/BOOL_FALSE)—— objectui 预检还抄着最后一份手抄清单(承 #3786)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T13:50:00Z",
+  "updated_at": "2026-07-30T15:21:32Z",
+  "closed_at": "2026-07-30T15:21:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4173",
+  "body": "#3786 模式排查的 objectui 侧已完结(objectui#3017 → objectui#3019 + objectui#3043):九处手抄清单里八处已改为从 `@objectstack/spec` / `@object-ui/types` 单一来源派生,**唯一无法派生的就剩 ImportWizard 预检的布尔 token 表** —— 因为 spec 没有导出它。\n\n## 现状\n\n- 唯一来源:服务端 `import-coerce.ts` 的 `BOOL_TRUE` / `BOOL_FALSE`(各 10 token:`true/t/yes/y/1/on/是/对/✓/√` 与 `false/f/no/n/0/off/否/错/✗/×`)。\n- objectui 侧镜像:`packages/plugin-grid/src/importCoercionContract.ts`,现以「true/false 两集 + 不相交/trim-lowercase 归一化断言 + 钉扎清单」当闸门(objectui#3043)。闸门能把**本仓**的手滑改动变成红测试,但对**服务端**的改动依然只能靠人对表 —— 预检与服务端一旦不一致,要么预览把服务端能收的值标红,要么放行的值被服务端以 `invalid_boolean` 拒掉。\n\n## 请求\n\n1. 从 `@objectstack/spec`(建议 `data` 子路径,与 `REFERENCE_VALUE_TYPES` 同处)导出这两个 token 集;\n2. 服务端 `import-coerce.ts` 改为消费 spec 导出(删掉本地表);\n3. objectui 随后把 `importCoercionContract.ts` 的本地集换成 import、删除钉扎清单 —— 退役路径已写在该文件与其测试的头注释里。\n\n## 顺带(可选)\n\n服务端 `REFERENCE_TYPES = new Set([...REFERENCE_VALUE_TYPES, 'reference'])` 与 objectui 的 `REFERENCE_IMPORT_TYPES` 现在是**同链但各自 + 'reference'**;若 spec 直接导出含 `'reference'` 的完整集,两侧的字面量残留也能一并收敛(objectui 侧测试已埋了「spec 若纳入 'reference' 则提示退役别名」的断言)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

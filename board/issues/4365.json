@@ -1,0 +1,32 @@
+{
+  "number": 4365,
+  "kind": "issue",
+  "title": "[approvals] 转签审计默认 comment 落裸用户 ID(\"<from_id> → <to_id>\"),审批动态里看不出谁转给谁",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T09:07:38Z",
+  "updated_at": "2026-07-31T12:14:43Z",
+  "closed_at": "2026-07-31T12:14:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4365",
+  "body": "## 现象\n\nconsole 审批中心(`/_console/apps/setup/system/approvals`)打开一条审批请求,「审批动态」里的转签条目长这样:\n\n> 转签 · Dev Admin\n> *\"Jfyo0owBk90dmVCRfYfJNp9CErER6GqC → ajrUFxCjpjvl1VYMACCWDTsPsgTJHWFG\"*\n\n条目头的操作者(Dev Admin)是解析过显示名的,但「谁转给谁」这条最关键的信息是两个裸 user id,业务用户完全看不懂。\n\n## 根因\n\n1. **服务端把裸 ID 当人类可读注释写库**:`packages/plugins/plugin-approvals/src/approval-service.ts` 的 `reassign()`,审计行默认注释:\n\n   ```ts\n   comment: input.comment ?? `${from} → ${to}`,   // from/to 都是 user id\n   ```\n\n2. **`sys_approval_action` 没有结构化的 from/to 字段**,转签双方只存在于这条自由文本 comment 里。\n\n3. **console 只能原样渲染**:`apps/console/src/pages/system/ApprovalsInboxPage.tsx`(~L1907)把 `a.comment` 直接斜体引用输出。comment 是不透明文本,客户端既没法可靠解析也没法补救——下游项目无任何覆盖通道。\n\n## 建议\n\n倾向结构化方案:\n- `sys_approval_action` 增加 `reassign_from` / `reassign_to`(或 payload 字段),`getRequest`/`listRequests` 返回时随 `actor_name` 一并解析显示名;\n- console 转签条目渲染成「从 A 转给 B」,`comment` 回归纯用户输入(用户没填就不显示);\n- 最低成本兜底:写默认 comment 前先解析两个 id 的显示名(但 comment 承载结构化语义仍不理想,且存量行已坏)。\n\n## 版本 / 下游\n\n- `@objectstack/*@17.0.0-rc.0`\n- 下游项目 steedos-labs/os-project-titanwind-ehr#664(有截图)\n"
+}

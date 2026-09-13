@@ -1,0 +1,32 @@
+{
+  "number": 3785,
+  "kind": "issue",
+  "title": "flaky: plugin-audit zh-CN 摘要与 cloud-connection marketplace seed 在整仓并发下偶发失败(单跑必过)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T05:21:35Z",
+  "updated_at": "2026-07-30T16:36:00Z",
+  "closed_at": "2026-07-30T16:36:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3785",
+  "body": "#3723 / PR #3747 期间两轮整仓 `npx turbo test` 各偶发失败**不同的**包,单独重跑及干净工作树上均通过。记录下来,免得下一个 agent 重新排查一遍 —— 我为排除自己的改动做了两轮 stash 对照才确认无关。\n\n> **✅ 已解决（2026-07-30）**：两半都已定位根因并修复 —— plugin-audit 见 PR #4193，cloud-connection 见 PR #4217。结论见下方评论；两者是**同一症状、不同根因**。\n\n## 观测(2026-07-28,worktree 基于 #3747 分支,改动不涉及这两个包)\n\n**第一轮**(`turbo test`,99 任务):\n\n```\nFAIL src/audit-writers.test.ts > audit writers — localized activity summaries (framework#3039)\n     > localizes verb + object label to the workspace locale (zh-CN)\n@objectstack/plugin-audit: Tests 1 failed | 45 passed (46)\n```\n\n**第二轮**(`turbo test --continue`,132 任务)—— plugin-audit 这轮通过,换 cloud-connection 挂:\n\n```\nFAIL src/marketplace-install-local-seed-lookup.test.ts > marketplace install — seed lookup resolution\n     > writes target record ids (never raw externalId strings) for package objects unknown to the metadata service\nFAIL src/marketplace-install-local-state-machine-exempt.test.ts > marketplace install — state_machine initialStates exemption (#3433)\n     > lands every mid-lifecycle seed row (no initialStates rejection on the marketplace seam)\n@objectstack/cloud-connection: Tests 2 failed | 62 passed (64)\n```\n\n**对照**:\n- `turbo test --filter=@objectstack/plugin-audit --force` → 46/46 通过\n- `turbo test --filter=@objectstack/cloud-connection --force` → 64/64 通过\n- `git stash -u` 后干净树上两包同跑 → 全过\n\n## 归类\n\n与 #3060 / #3662 同一类:仅在整仓满并行负载下出现,单包必绿。两处都是会启动真实 kernel 的重型测试,疑似负载下的时序/资源争用,但**未定位根因** —— 本 issue 首先是记录,其次才是修复请求。\n\n失败断言本身值得看一眼的线索:\n- plugin-audit 那条涉及 zh-CN 本地化摘要 —— i18n bundle 的异步加载在负载下是否有竞态;\n- cloud-connection 两条都在 marketplace install 的 seed 路径 —— 与 #3433 修复的 seam 相关,失败形态是 seed 行未落全。\n\n## 建议\n\n按前例(#3662 的处理方式)排查:若是超时类,对齐兄弟用例的显式 timeout;若是真竞态,则是产品 bug 不是测试 bug,需要升级处理。\n\n_按 AGENTS.md Prime Directive #10 立此 issue;发现于 #3747 的验证过程,与该 PR 改动无关。_\n\n---\n\n## 结案摘要（2026-07-30）\n\n上面那条\"建议\"里的分诊二分法是对的，两半都落在**超时类**，但根因不同——`i18n bundle 的异步加载是否有竞态`这个猜测方向也对了一半：确实是异步加载，但是异步**模块加载**，不是数据竞态。\n\n| | plugin-audit（#4193） | cloud-connection（#4217） |\n|:---|:---|:---|\n| 冷导入位置 | **测试文件自己**的 helper | **生产代码** install handler（故意不 mock，为了让 mock 能介入） |\n| 能否根治 | 能 —— 提为顶层静态 import | 不能 —— 动态导入是有意设计，不该为测试改产品代码 |\n| 处置 | 20347ms → **1ms**，删掉 timeout 覆盖 | 预算 30s → 120s，对齐兄弟用例 |\n\n两处都不是竞态：断言均通过，失败形态是纯超时。整仓 `pnpm test` 现已 **132/132、退出码 0**。\n\n一条留给后来者的经验：`marketplace-install-local-seed-lookup` 早在此前就已被单独修好（提到 120s 并留下\"an import stall, not a hang\"的诊断注释），但**修复没有推广到同包的兄弟用例**，于是本 issue 的另一半又挂了三个月。同类修复记得扫一遍同源用例——判据是 `{不 mock 该模块} ∩ {真正走到那条路径}`。"
+}

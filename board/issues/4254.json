@@ -1,0 +1,34 @@
+{
+  "number": 4254,
+  "kind": "issue",
+  "title": "REST 读路径：`searchFields` / `groupBy` / `aggregations` 指向不存在的字段时被静默降级（#4226 收口后剩下的三条轴）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T00:53:28Z",
+  "updated_at": "2026-07-31T07:35:29Z",
+  "closed_at": "2026-07-31T07:35:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4254",
+  "body": "## TL;DR\n\n#4226（PR #4240）把 `sort` / `select` / `expand` 三条轴收口成了「要么生效，要么抛错」，加上 filter 轴的 #4134 / #4164 / #4181 / #4121，读路径上**四条**点名字段的轴已经收满。\n\n同一台机器在**另外三条**上还在漏气，而且失败方向和已修的那些一模一样：\n\n```\n── searchFields ──────────────────────────────────────\nsearchFields=title           -> 200  命中 1 行        ✅\nsearchFields=no_such_field   -> 200  命中 2 行        ❌ 要收窄，结果放宽了\nsearchFields=title,no_such   -> 200  用 [title]       ⚠️ 未知的那半静默丢弃\n\n── groupBy ───────────────────────────────────────────\ngroupBy=[status]             -> [{status:'open',n:2},{status:'done',n:1}]  ✅\ngroupBy=[no_such_field]      -> [{no_such_field:null, n:3}]                ❌ 3 组塌成 1 组\n\n── aggregations ──────────────────────────────────────\nsum(amount)                  -> 真实合计                                   ✅\nsum(no_such_field)           -> [{status:'open',s:0},{status:'done',s:0}]  ❌ 求和得 0\n```\n\n## 实测\n\n真 `ObjectQL` 引擎 + 真 registry，3 行（`open`×2 / `done`×1），走引擎的 in-memory 聚合回退路径（`driver-memory` / `driver-rest` / 部分 SQL driver 走的就是这条）。\n\n### 1. `searchFields` —— 与 `select` **完全同构**，且端到端可见\n\n根因在 `packages/objectql/src/search-filter.ts:111-116`：\n\n```ts\nif (requested && requested.length > 0) {\n  const allowSet = new Set(allowed);\n  const validated = requested.filter((f) => allowSet.has(f));   // ← 部分未知：静默丢弃\n  if (validated.length > 0) return validated;\n}\nreturn allowed;                                                  // ← 全未知：退回全集\n```\n\n这就是 #4226 在 `select` 上修掉的那两段逻辑的逐行同构：**先丢弃未知项，再在结果为空时退回全集**。\n\n`resolveSearchFields` 直接测：\n\n```\nallowed default          : [\"title\",\"notes\",\"status\"]\nrequested=[\"title\"]      : [\"title\"]\nrequested=[\"no_such\"]    : [\"title\",\"notes\",\"status\"]   ← 要一列，给了全部\nrequested=[\"title\",\"no_such\"] : [\"title\"]                ← 未知的那半无声无息\n```\n\n端到端（`search=alpha`，`title:'Alpha'` 在 t1，`notes:'alpha in notes'` 在 t2）：\n\n```\n?search=alpha&searchFields=title           -> ids [\"t1\"]\n?search=alpha&searchFields=no_such_field   -> ids [\"t1\",\"t2\"]    多返回一行\n```\n\n**这一条比 `select` 那条更值得修，因为它改变结果集**（`select` 只改列）。`searchFields` 是 ADR-0061 的 override，唯一用途就是**收窄**搜索范围，失败方向却是**扩大** —— 同一个反直觉方向。\n\n**而且它落在刚修好的那个 bug 的隔壁。** `searchFields` 目前在框架内的唯一调用方是 `GET /data/:object/export`（`rest-server.ts:4757-4763`，`export-honors-search-term` 刚合入）。那个 changeset 自己写的动机是：\n\n> exporting after a search downloaded the **unsearched superset** — more rows than the screen showed, in a file that looks authoritative, with nothing indicating the difference.\n\n`searchFields=<拼错>` 现在做的正是这件事：导出一个**比请求更宽**的集合，文件看起来同样权威。同一条路由，同一个失败方向，刚被堵上的洞的旁边。\n\n### 2. `groupBy` —— N 组塌成 1 组，结果看起来完全正常\n\n`groupBy` / `aggregations` 是 `QUERY_AST_KEYS` 的成员，所以不会掉进隐式 filter 桶，但**也没有任何字段校验**：`findData` 原样转给 `engine.aggregate()`（`protocol.ts:3746-3752`）。\n\nin-memory 路径上 `projectGroupValue(row, 'no_such_field')` 对每一行都得 `undefined`，于是所有行进同一个桶：\n\n```\ngroupBy=[no_such_field] -> [{ no_such_field: null, n: 3 }]\n```\n\n`n: 3` 是**真实的行数**，结构也完全合法 —— 和「这个对象的该列真的只有一个取值」一模一样。一个图表拿到这个会画出一根柱子，没有任何东西提示分组没生效。\n\n### 3. `aggregations` —— `sum` 得 0，与真实的 0 无法区分\n\n```\nsum(no_such_field) -> [{status:'open', s:0}, {status:'done', s:0}]\n```\n\n财务报表里的「本季度营收 0」和「字段名拼错了」返回同一个东西。`avg` / `min` / `max` 同理。\n\n### 4. 顺带：两个后端可能给出相反答案\n\n上面是 in-memory 回退路径的实测。SQL driver 走的是原生 `aggregate`，`GROUP BY no_such_field` 会被数据库拒绝 —— 具体是抛出还是被吞成 `[]` 未实测（`SqlDriver` 对 `no such column` 有识别与重试逻辑）。**如果两条路径给出不同答案，那就是 #4226 里点名的「两条路由对同一份输入给出相反答案」在聚合轴上的重演**，值得一并实测确认。\n\n## 建议\n\n按 #3948 原则（*An unapplied filter must not look like a satisfied one*）在同一个 ingress 收口，复用 #4226 落地的 `resolveQueryFields`（`protocol.ts`，已经是四条轴共用的一次解析）：\n\n- **`searchFields`** → 未知字段 `400 INVALID_FIELD`。两支都拒（全未知 / 部分未知），理由与 #4226 对 `select` 的裁决一致：一个没生效的收窄不该看起来像生效了。注意 `resolveSearchFields` 的 `allowed` 是**可搜索字段子集**而非全部字段，所以「这个字段存在但不可搜索」需要单独一条消息（与 #4226 给 `expand` 的三段式消息同构）。\n- **`groupBy` / `aggregations`** → 未知字段 `400 INVALID_FIELD`。`aggregations[].field` 与 `groupBy[]` 都要校验；`count(*)` 这类无 field 的形态要放行。\n- 分层沿用 #4226：registry + 字段表在 → 权威；无 registry / 无字段表 / legacy 数组字段表 → 跳过。引擎内部调用方不受影响。\n\n## 关联\n\n- #4226 / PR #4240（sort / select / expand，已合并）—— 本 issue 是它明确划在范围外的剩余部分\n- #4134 / #4164 / #4181 / #4121（filter 轴四案，均已合并）\n- #3948（原则出处）\n- ADR-0061（`searchFields` override 的来源）\n- `export-honors-search-term`（刚给 export 路由加上 `search` / `searchFields` 的那个改动）"
+}

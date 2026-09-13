@@ -1,0 +1,34 @@
+{
+  "number": 4181,
+  "kind": "issue",
+  "title": "REST 列表：无法解析的 `filter` JSON 被静默忽略 —— 返回未过滤整页（#4134/#4164 家族第三员）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T14:18:08Z",
+  "updated_at": "2026-07-30T16:16:56Z",
+  "closed_at": "2026-07-30T16:16:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4181",
+  "body": "## TL;DR\n\n`GET /api/v1/data/<object>?filter={status:done`（JSON 少个引号）—— `findData` 的解析容忍 `try { JSON.parse } catch { /* keep as-is */ }` 把**原始字符串**塞进 `where`，驱动层对字符串 where 静默忽略，返回**未过滤的整页**。\n\n这是 #3948 那条原则（*an unapplied filter must not look like a satisfied one*）目前最恶性的破缺形态：#4134 是清零（少了），#4164 是丢一个谓词（多了一点），这里是**整个过滤器蒸发**（全都多了）。如果 filter 承担的是业务性收窄，多返回就是数据泄露的形状。\n\n## 实测（真实 InMemoryDriver + 真 registry，3 行数据其中 1 行 `status=done`）\n\n```\nbaseline (no filter)                     -> 200 total=3\nfilter='{\"status\":\"done\"}' (合法 JSON)    -> 200 total=1   ✅\nfilter='{status:done'      (垃圾字符串)   -> 200 total=3   ❌ 整页，无警告\nfilter='{status:done' + top=2            -> 200 total=3 records=2   ❌ 还在装模作样地分页\n```\n\n调用方拿到 `total=3` 和完全正常的信封，没有任何信号表明自己的 filter 从未生效。\n\n## 病灶\n\n`packages/metadata-protocol/src/protocol.ts` 的 filter alias 链：\n\n```ts\nif (typeof parsedFilter === 'string') {\n    try { parsedFilter = JSON.parse(parsedFilter); } catch { /* keep as-is */ }\n}\n...\noptions.where = parsedFilter;   // 字符串原样成为 where\n```\n\n建议的方向：JSON.parse 失败即 **400**（`INVALID_REQUEST` 或注册一个专码，信封里带上解析失败的原文片段）。「宽容地保留原字符串」不是任何调用方需要的行为——没有驱动能消费字符串 where，这个容忍只制造静默。#4164 的 AND 合并已刻意绕开非 object 的 where（不往垃圾里合并谓词），并在测试里 pin 了这条路径的现状，等本 issue 在源头修掉。\n\n## 顺带坐实的同链小弟\n\nbody 同时带 `where` 和 `filter` 时，`options.filter ?? options.filters ?? options.$filter ?? options.where` 让 `filter` 静默赢：\n\n```\n{ where: {status:'done'}, filter: {status:'open'} }   -> 200 total=2 (= status:open；where 被丢)\n```\n\n显式对显式的 drop。低频（body 是 `Partial<QueryAST>`，规范键是 `where`），但同病。修法可以跟主案一致：两者并存且不相等 → 400，或 AND 合并——留给实现者与 #4164 的语义对齐。\n\n## 关联\n\n#4134（未知参数清零，已修）、#4164（已知字段参数被显式 filter 挤掉，修复中）、#3948（原则出处）。三案修完建议补一个家族级 conformance：**每一条 filter 表达路径，要么生效，要么抛错**。\n"
+}

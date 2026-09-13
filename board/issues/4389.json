@@ -1,0 +1,34 @@
+{
+  "number": 4389,
+  "kind": "issue",
+  "title": "registerFlow's three validators still walk top-level nodes only — a region's malformed structure, unknown node type and undeclared config key all pass registration",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T10:40:25Z",
+  "updated_at": "2026-07-31T11:36:31Z",
+  "closed_at": "2026-07-31T11:36:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4389",
+  "body": "#4347 / #4381 的后续。那次修掉了「元数据随嵌套深度而变」的**转换**和**谓词校验**两半:\n\n- `mapFlowNodes` 递归进 region,ADR-0087 转换表能到达嵌套节点;\n- 新增 `collectFlowGraphs`,引擎的 `validateFlowExpressions` 和 lint 的 `validateStackExpressions` 都改成遍历它。\n\n`registerFlow` 里**另外三个校验器仍然只遍历 `flow.nodes`**,同一个形状的洞还留着:ADR-0031 容器把整张子图放在自己开放的 `config` 里,校验器停在容器边界,于是「校验了一部分、却按整个 flow 汇报」。\n\n## 三个缺口\n\n| 校验器 | 位置 | 失败方式 | region 里的现状 |\n|:---|:---|:---|:---|\n| `validateControlFlow` | `spec/src/automation/control-flow.zod.ts` | hard-fail | 只验顶层容器。**嵌套**容器(loop body 里再放一个 loop)畸形时注册照过,要到运行时 `findRegionEntry` 才抛 —— 违背 ADR-0031 的「reject the malformed before it can run」 |\n| `validateNodeTypes` | `engine.ts:2732`(`flow.nodes.map(...)`) | soft-fail(warn) | region 里引用了没有执行器的 type,注册期一声不吭,运行时 `NO_EXECUTOR` |\n| `validateNodeConfigKeys` | `engine.ts:2803`(`for (const node of flow.nodes)`) | **hard-fail** | region 里的未声明 config 键完全不检查 —— #4277 要抓的 `visibleIf` 拼写错误,放进 loop body 就恢复成静默通过 |\n\n三个都是 `for (const node of flow.nodes)` 这一行的问题,`collectFlowGraphs(flow)` 已经在 `@objectstack/spec/automation` 里,改动量各自都在个位数行。\n\n## 为什么值得单开\n\n不是没顺手做,是**风险不对等**,混在 #4381 里会让那个 PR 的 blast radius 说不清:\n\n- `validateNodeTypes` 是 warn,扩进 region 几乎零风险,可以直接做;\n- `validateControlFlow` 和 `validateNodeConfigKeys` 都是 hard-fail,**扩大遍历范围 = 可能新拒一批现在能注册的 flow**。这是行为变更,不是 bugfix,需要先量一遍存量再决定。\n\n## 建议的落地顺序\n\n1. **先量**:拿 `collectFlowGraphs` 写一个只读脚本,跑 `examples/app-showcase`、`examples/app-crm`、`examples/app-todo` 的全部 flow,统计三个校验器扩到 region 之后会新增多少 violation,分别是什么。没有这个数,后两步没法判断。\n2. **`validateNodeTypes` 直接扩**(warn,无风险)。\n3. **`validateNodeConfigKeys` / `validateControlFlow`**:如果第 1 步显示存量为 0,直接收紧;如果非 0,先把 region 部分降级成 warn 走一个版本,再提到 error —— 就是 #4059 → #4277 那条 warn-then-error 的阶梯。\n\n## 复现\n\n```ts\n// 顶层:注册期 hard-fail(#4277)\n{ id: 'scr', type: 'screen', config: { visibleIf: '…' } }\n\n// 同一个节点放进 loop body:注册期静默通过\n{ id: 'loop', type: 'loop', config: {\n    collection: '{rows}',\n    body: { nodes: [{ id: 'scr', type: 'screen', config: { visibleIf: '…' } }], edges: [] },\n} }\n```\n\n`validateControlFlow` 的那一条同理 —— 把一个双入口(畸形)region 从顶层 loop 挪进另一个 loop 的 body,注册就不再拒了。\n\n## 不在范围内\n\n`evaluateCondition` 的 legacy `{var}` 路径上剩下的静默 `false`(无运算符分支、以及未解析的 `{token}` 被当字符串比)是另一类问题,和遍历无关,建议另开。"
+}

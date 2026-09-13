@@ -1,0 +1,35 @@
+{
+  "number": 4284,
+  "kind": "pull_request",
+  "title": "fix(objectql): 让开门广告停止在它不成立的地方发声（#3438 收尾）",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T02:42:28Z",
+  "updated_at": "2026-07-31T04:04:24Z",
+  "closed_at": "2026-07-31T04:04:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T04:04:22Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4284",
+  "body": "## 范围已经变了：广告本身被 #4253 抢先落地，本 PR 缩为修它的两个缺陷\n\n这个 PR 原本做的是 ADR-0104 rollout 要求的两处广告位。开着的时候 **#4253 把同一件事合进了 main**（`3ec8186cb`），`os migrate meta` 的收尾列表和 boot 那一行都已经在了，而且它挂在 `kernel:bootstrapped` 而非 ready 路径上——刻意避开 storage ready 的竞态，比我原来的位置对。**我的那份实现已全部撤掉，改用 main 的。**\n\n留下的是两个真实缺陷，都在 #4253 刚落地的那行广告上，且都**无条件**发生在生产里。\n\n### 一、那行广告在每一个部署上都响\n\n`objectHasCoveredValueField`——本应让「没有被覆盖字段的对象不必付出标记查询」的休眠短路——按**原始类型**判断，而真实 registry 会给它注册的每个对象**注入**被覆盖类型的字段：`organization_id` 与 `owner_id`（都是 `system`）、`created_by` 与 `updated_by`（都在 `SKIP_FIELDS`），四个 `lookup`。`validateRecord` 在到达值形态检查之前把它们逐个跳过，于是这个短路对**存在的每一个对象**答 true，从未生效，它的 WeakMap 缓存的是一个常量。\n\n改为使用校验器自己的 `isScannableValueShapeField`——扫描器早就 import 的那个谓词。「什么算被覆盖字段」的三份读法差一个子句，正是一个门禁最终去治理无人执行的字段的方式，也正是 #4235 自己论证过要防的形状。\n\n### 二、那行广告在环境开关已经定调时说假话\n\n广告完全不看环境变量，而它所报告的两个姿态都在部署标记**之前**短路：\n\n- `OS_DATA_VALUE_SHAPE_STRICT_ENABLED=1` → `VALUE_SHAPE_STRICT()` 让两个 `*StrictEffective` 直接返回 strict。此时「checked but NOT enforced here」**是假话**。\n- `OS_ALLOW_LAX_VALUE_SHAPES=1` / `OS_ALLOW_LAX_MEDIA_VALUES=1` → 运维主动选了宽松，跑那个迁移不会改变他得到的东西，指着它就是噪音。\n\n两个门禁各查自己那一对（`mediaPostureSetByEnv` / `valueShapePostureSetByEnv`），因为**两个 opt-out 是分类的、而 opt-in 同时打开两类**；做成兄弟函数的理由与 `mediaStrictEffective` / `valueShapeStrictEffective` 是兄弟一致。判定按代价从低到高，没什么可播报的内核仍然到不了标记查询。\n\n### 为什么 #4253 自己的测试抓不到这两个\n\n`engine.test.ts` 里 `vi.mock('./registry')`——**mock 掉的 registry 只会把测试自己写的字段交给引擎**，那四个注入的 lookup 根本不存在，环境开关也没有被覆盖。所以这些用例放在独立文件里，走真实 `registerApp → registry` 路径，这是测试能看见部署所看见之物的唯一方式。\n\n回归守卫已取证：把谓词改回原始类型写法，`stays silent when no object declares a covered field` 立刻转红（只声明 text/textarea 的 `note` 照样触发广告）；改回来即绿。#4253 的 125 条测试在本 PR 下全部照常通过。\n\n**执行语义没有任何变化**：同样的门禁、同样的开关、同样的默认值。标记读取本就按进程记忆化，所以这修正的是 ADR 声明的性质，而非用户可见的开销。\n\n## 改动范围\n\n相对 main 只有 5 个文件：\n\n| 文件 | 内容 |\n|---|---|\n| `packages/objectql/src/engine.ts` | 谓词修正 + 两个环境守卫（+46 −11） |\n| `packages/objectql/src/validation/record-validator.ts` | 导出 `valueShapePostureSetByEnv` / `mediaPostureSetByEnv`（+35） |\n| `packages/objectql/src/value-shape-scan-advisory.test.ts` | 真实 registry 下的 7 条用例（新增） |\n| `.changeset/adr-0104-gate-announcement-tells-the-truth.md` | patch changeset（新增） |\n| `content/docs/releases/v17.mdx` | 补上这行广告的适用范围（+15） |\n\n## 验证\n\n全量 workspace 构建后：\n\n| 套件 | 结果 |\n|---|---|\n| `@objectstack/objectql` | 1345 passed（含新增 7 条） |\n| `@objectstack/cli` | 628 passed |\n| `spec check:generated` | 8/8 全 PASS |\n| 全量构建 71 包（含 DTS） | PASS |\n| `check:release-notes` / `check:doc-authoring` | PASS |\n| ESLint（全部改动文件） | 干净 |\n\n## 关联\n\n#3438 的工作项 2 尾部。广告位本体由 #4253 落地，本 PR 修它的两个缺陷；工作项 1（D2 翻转）与工作项 3（新库创建时记账）已分别落地。本 PR 合入后 #3438 可关闭。\n\n一处留给维护者定夺：ADR-0104 第 826–833 行仍写着 `os migrate meta` 会显示门禁状态，而 #4253 有意没这么做（该命令不开数据库）。理由在它的提交说明里，**决策记录本身仍未修订**——是否改 ADR 那句请你定。"
+}

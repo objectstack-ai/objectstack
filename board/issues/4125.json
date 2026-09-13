@@ -1,0 +1,35 @@
+{
+  "number": 4125,
+  "kind": "pull_request",
+  "title": "feat(spec): the relative-token axis completes the temporal conformance matrix (ADR-0053 D-A3.2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T10:31:50Z",
+  "updated_at": "2026-07-30T11:41:29Z",
+  "closed_at": "2026-07-30T11:41:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4125",
+  "body": "**Superseded by #4109 — closing without merging.**\n\n#4109 landed the same relative-token axis while this was in review, and its version is strictly richer: 7 consumers vs 5 here (it adds `driver-sqlite-wasm` and the NativeSQL strategy), 16 cases, both the `tokenFilter` and `dateRange` spellings, a `writerForm` axis for genuinely mixed writer populations, a pre-epoch row, and a legacy-storage sweep. Everything this PR asserts, #4109 asserts too.\n\nParallel work — nothing wrong with #4109; this branch simply lost the race and re-implementing on top of it would add nothing.\n\n**One piece is being carried forward separately.** #4109's `formula` suite consumes `TEMPORAL_CASES` but says nothing about why it does *not* run the token axis, which reads as an omission rather than the architectural fact it is: an RLS `check` is a CEL expression compiled by `compileCelToFilter`, where a relative date is the function `today()` evaluated at compile time, and `resolveFilterTokens` runs only on the ObjectQL read path (verified: `plugin-security` never calls it). Without that noted in the suite, the next person to look will either \"fix\" a non-gap or quietly assume coverage that cannot exist. A follow-up PR adds just that comment."
+}

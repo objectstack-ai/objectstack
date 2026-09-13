@@ -1,0 +1,34 @@
+{
+  "number": 3941,
+  "kind": "issue",
+  "title": "SQLite runs journal_mode=delete, which serializes the dev server against every CLI tool sharing the file",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T11:09:05Z",
+  "updated_at": "2026-07-30T08:25:29Z",
+  "closed_at": "2026-07-30T08:25:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3941",
+  "body": "Found while dogfooding the #3917 occupancy check (#3940). Not a crash — a default worth revisiting.\n\n## Fact\n\n`SqlDriver.connect()` sets `PRAGMA auto_vacuum = INCREMENTAL` but never touches `journal_mode`, so every ObjectStack SQLite database runs SQLite's built-in default:\n\n```\n$ # a live examples/app-crm database under `objectstack serve`\njournal_mode = delete\n```\n\n## Why it matters\n\nThe platform's normal shape is **several processes on one file**: a dev server, `os migrate`, `os meta resync`, a test run. Rollback-journal mode is the worst mode for that:\n\n- **No reader/writer concurrency.** A writer takes an EXCLUSIVE lock over the whole database; every reader blocks. WAL lets readers proceed against the last committed snapshot while a writer works.\n- **No record of who is attached.** Locks exist only for the duration of a transaction, so an idle connection is invisible. This is what defeated the first cut of the occupancy check (#3924): the SQL probe reported idle against a live server, and the migration ran unannounced. #3940 works around it by inspecting file descriptors (`/proc` / `lsof`) — a workaround for a database-level property, and one that only sees same-user processes.\n- **`-wal`/`-shm` heuristics don't apply**, so the conventional \"is this database in use\" signals are all unavailable.\n\n## Ask\n\nConsider `PRAGMA journal_mode = WAL` for file-backed SQLite in `SqlDriver.connect()`.\n\nNot free, and the reason this is an issue rather than a PR:\n\n- **WAL does not work on network filesystems** (NFS/SMB). A deployment with its database on a share would break; needs a fallback when the pragma fails, and the pragma failing is not always loud.\n- **WAL is persistent** — set once, it stays in the file. So this is a one-way migration for existing databases unless explicitly reverted, and a database opened by an older reader still works but the mode change is not transparent.\n- **Extra files.** `-wal`/`-shm` beside the database affect anything that copies or backs up the file naively.\n- `auto_vacuum = INCREMENTAL` + WAL interact — worth checking the ADR-0057 space-reclaim path still behaves.\n\nIf WAL is adopted, the `file_open` signal in #3940 stays useful (it names the process, which WAL's lock probe cannot), but the SQL probe becomes authoritative rather than a fallback.\n\n## Scope note\n\nDeliberately kept out of #3940, which fixes the occupancy check as-is. Changing the journal mode is a driver-wide behaviour change with its own compatibility surface and deserves its own decision."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 4051,
+  "kind": "pull_request",
+  "title": "docs: 修正 ObjectQL 参考中时间字段的存储形态与过滤语义",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T07:09:18Z",
+  "updated_at": "2026-07-30T07:41:10Z",
+  "closed_at": "2026-07-30T07:41:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T07:41:08Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4051",
+  "body": "纯文档。temporal 那条线（#3912 #3928 #3942 #3954 #3979 #3994 #4022）改变了 `Field.date` / `Field.datetime` / `Field.time` **物理上到底是什么**，三篇手写文档仍在描述 #3912 之前的世界。\n\n## 改了什么\n\n- **`protocol/objectql/types.mdx`** —— 逐类型的存储形态与各方言物理列类型：SQLite 规范 UTC ISO 文本、PG `timestamptz`、MySQL `DATETIME(3)`（并说明**为什么不是 `TIMESTAMP`**：2038 天花板、丢毫秒、按 session 时区转换）；`time` 为 `HH:MM:SS`、毫秒非零才带 `.fff`；MySQL 字面量重拼；新增 `defaultValue: 'NOW()'` 一节写明三方言统一读 UTC 时钟。\n- **`protocol/objectql/query-syntax.mdx`** —— 比较值表：过滤值与写入走**同一个**规范化函数，所以比较两侧在每个方言上同形。\n- **`data-modeling/queries.mdx`** —— 同样的比较值规则（查询编写者视角）+ 日期分桶按 UTC 边界。\n\n## 与 main 的冲突已解，且我改的是自己那侧\n\n合并 main 时 `query-syntax.mdx` 冲突，且不是文本撞车，是**互斥的事实断言**：本 PR 原文写「裸日期上界打在 `datetime` 列上会停在午夜、漏掉当天绝大部分」，main 写「driver 编译成半开区间 `< 次日`，整天都包含」。\n\n查证结果是 **main 对、本 PR 过时** —— #4041（*bare-day upper bounds cover the whole day on Field.datetime*，修 #3777）在这批文档写完之后才落 main。已取 main 侧表述，并确认另外两篇没有同类过时断言。\n\n## 范围说明\n\n同一轮还审了另外 9 篇，但它们的 agent 跑在陈旧基线（`48724d6`，早于本条线全部工作）上，产出描述的是已被取代的行为，**刻意不纳入**。这 9 篇在 main 上的原文并无错误的时间字段声明，只是措辞笼统，略过不会留下错误内容。\n\n纳入的这三篇来自落在 `99b4392`（含全部 temporal 工作）的 worktree，经对抗验证，我另外逐条比对了新增断言与实现。\n\n## 验证\n\n`pnpm docs:build` 通过（解冲突后重跑）。无包变更，changeset 为空 frontmatter（不发版）。\n\n⚠️ **CI 未能在此分支派发**：`f417927` 的 check suites 中不存在 `github-actions` app（只有 vercel / fly-io / claude / cloudflare），因此没有任何 Actions run。冲突解除后（`dirty` → `blocked`）仍未恢复；close/reopen 与空提交重触发均无效。同期其他分支 CI 正常，故非全仓故障。合并前需要有权限的人看一下仓库侧该分支的 Actions 状态。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01TPxNwPnjcn599ujXpU3ibJ"
+}

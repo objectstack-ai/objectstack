@@ -1,0 +1,35 @@
+{
+  "number": 4393,
+  "kind": "pull_request",
+  "title": "fix(spec,core,cloud-connection,metadata): HTTP 契约归一 —— 死影子副本删除,http.server 定为 canonical 并入账 ledger (#4251)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T10:45:12Z",
+  "updated_at": "2026-07-31T11:13:54Z",
+  "closed_at": "2026-07-31T11:13:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T11:13:52Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4393",
+  "body": "决策 memo 的 **1**(HTTP 归一)。动手取证后,事实比 memo 里说的更有意思:**core 那份\"分叉的第二定义\"其实是死影子。**\n\n## `packages/core/src/contracts/` 整个目录是死代码,已删除\n\n三个文件(http-server.ts / data-engine.ts / logger.ts)**零导入方**:没有任何 relative import、没有子路径导出(`package.json` 只导出 `.` 和 `./logger`)、不是 tsup entry。core 的 barrel 一直在从 spec re-export(\"Re-export contracts from @objectstack/spec for backward compatibility\")——**所有从 `@objectstack/core` 导入 `IHttpServer` 的 8 个文件,拿到的本来就是 spec 版**。\n\n但影子已经**分叉**:spec 的 `IHttpResponse` 长出了 `write?`/`end?`、`IHttpRequest` 长出了 `rawBody?`,影子从未跟上。谁 grep 进这个文件,读到的就是一份没人执行的过期契约 —— 与 #4382 那条错误豁免同一类\"查错地方然后得出有依据的错误结论\"。删除零风险:根本没人够得到它。\n\n## `http.server` 定为 canonical,ledger 入账\n\n`ServiceSlotContracts` 新增:\n\n```ts\n'http.server': IHttpServer;   // canonical\n'http-server': IHttpServer;   // deprecated alias,同一实例\n```\n\n跨仓证据:framework 的 hono-plugin、qa node-plugin,cloud 的 objectos / cloud 两个 server 入口,**全部**注册 canonical;alias 处处标着 \"backward compatibility\";runtime 的 `config.server` 路径**只注册 canonical**。\n\n由此揪出一个真实 miss:cloud-connection 三个插件(marketplace-proxy / runtime-config / marketplace-install-local)**只读 alias**,在 `config.server` 路径上读到的是空槽。已全部改为 canonical 优先 + alias 兜底(兜底随 alias 注册一起死)。注册本身这个 release 不动,两处注册点补上弃用注释。ledger 测试钉住两个条目 + alias 等同性。\n\n> cloud 仓库还有两个 alias-only 读取方(auth-proxy、ai-token-guardrail)—— cloud 侧跟进,已在 issue 记录。\n\n## `getRawApp?(): any` 进契约\n\n四个消费方各自本地声明过它(cloud-connection ×2、metadata HMR、cloud node-server)—— 四份真相。现在 **spec 声明一次**,写明:`any` 是刻意的且仅此一处(句柄的真实类型属于框架,契约点名它就背上框架依赖);adapter 不被要求暴露内部,消费方 feature-detect。三个本地 `RawAppHost` / `HttpServerWithRawApp` 类型全部删除。\n\n## 搭车:`IMetadataService` bulk 方法的 options\n\n`bulkRegister` 的契约把实现一直收的 `& MetadataWriteOptions` 那一半漏了(实现第一行就解构 `notify`);`bulkUnregister` 干脆没声明 options 而 manager 收。与 B2 的 `IDataEngine` 读方法缺口同形 —— 按实现补上,纯增量。\n\n## 验证\n\n- ratchet:`167 / 36, none new`(marketplace-install-local 顺手 17→16)\n- spec build(dts)+ **7192 tests / 281 files**;core / metadata / cloud-connection / plugin-hono-server dts build 全过(DEBT 包以 build 为类型门)\n- runtime **1001/69**、rest **539/36**、plugin-auth **579/26**、plugin-sharing **226/11**、service-settings **196/14**、metadata **281/13**、hono-server **135/12**、http-conformance **46/2**\n- eslint 全部改动文件干净\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

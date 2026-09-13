@@ -1,0 +1,34 @@
+{
+  "number": 4065,
+  "kind": "issue",
+  "title": "本地 `pnpm test` 只能跑绿一次：InMemoryDriver 默认把数据落盘，datasource-autoconnect 测试在第二次运行必然失败",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T07:46:05Z",
+  "updated_at": "2026-07-30T12:53:29Z",
+  "closed_at": "2026-07-30T12:53:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4065",
+  "body": "在 #3941 的工作中跑了两遍全量测试，第二遍开始 `@objectstack/runtime` 必然红。与 #3941 无关（把改动 stash 掉、只留干净树同样复现），是一个独立的既有问题。\n\n## 事实\n\n`packages/runtime/src/datasource-autoconnect.test.ts:117` 用固定 id 播种两行后断言精确集合：\n\n```ts\nawait driver.bulkCreate('ext_note', [\n  { id: 'n1', title: 'first' },\n  { id: 'n2', title: 'second' },\n]);\nconst rows = await engine.find('ext_note');\nexpect(rows.map((r) => r.title).sort()).toEqual(['first', 'second']);\n```\n\n而 `InMemoryDriver` 的 `persistence` **默认是 `'auto'`**（`packages/plugins/driver-memory/src/memory-driver.ts:36,1262`），在 Node.js 下 auto 就是**文件持久化**，默认落到 `.objectstack/data/memory-driver.json`（#815 引入）。测试里的 `new InMemoryDriver()` 没有关掉它，于是：\n\n```\n第 1 次运行：文件不存在 → 2 行 → PASS，并把 2 行写进 packages/runtime/.objectstack/data/memory-driver.json\n第 2 次运行：先 load 出上次的 2 行 → bulkCreate 再追加 2 行 → 4 行 → FAIL\n第 N 次运行：2N 行\n```\n\n实测报错，以及行数逐次增长（同一台机器上连续几次运行分别是 12 / 14 行）：\n\n```\nAssertionError: expected [ 'first', 'first', 'first', …(11) ] to deeply equal [ 'first', 'second' ]\n```\n\n落盘文件里的 `created_at` 直接给出了证据 —— 同一组 `n1`/`n2` 带着不同运行的时间戳堆叠：\n\n```json\n{ \"ext_note\": [\n  { \"id\": \"n1\", \"title\": \"first\", \"created_at\": \"2026-07-30T07:36:20.147Z\" },\n  { \"id\": \"n2\", \"title\": \"second\", \"created_at\": \"2026-07-30T07:36:20.147Z\" },\n  { \"id\": \"n1\", \"title\": \"first\", \"created_at\": \"2026-07-30T07:41:12.295Z\" },\n  ...\n] }\n```\n\n`rm -f packages/runtime/.objectstack/data/memory-driver.json` 后立刻恢复 10/10 通过 —— 确认就是这个文件。\n\n## 为什么一直没人撞见\n\n`.objectstack` 在 `.gitignore:120`，CI 每个 job 都是全新 clone，所以**每次都恰好是\"第一次运行\"**。只有在同一个工作树里跑第二遍的人（本地开发、agent 连续验证）才会看到，而且症状——一个跟 SQLite/WAL 毫无关系的 memory driver 测试突然红——很容易被误判成自己的改动搞坏了。我就先怀疑了自己半天。\n\n## 顺带暴露的两件事\n\n1. **`bulkCreate` 不校验 id 唯一性。** 同一个 `id: 'n1'` 被追加成多行共存，`find` 全都返回。这是 memory driver 与 SQL driver 的一处真实语义差异（后者会撞主键），值不值得单独修另说，但至少不该只在这个测试里以\"行数变多\"的形式被发现。\n2. **测试对 cwd 有隐式写副作用。** 单元测试在包目录下写文件本身就不该发生，`packages/plugins/driver-memory/.objectstack`、`packages/cli/.objectstack` 也都有同样的残留目录。\n\n## 建议处置\n\n按代价从小到大，前两条足以让 CI 与本地都可重复：\n\n- **测试侧**：`datasource-autoconnect.test.ts` 里构造 driver 时显式 `persistence: false`（纯内存正是这个测试想要的），或者把断言从\"精确集合\"改成\"包含 n1/n2\"并在 `beforeAll` 里清库。倾向前者 —— 断言精确集合是对的，问题在存储不该跨进程。\n- **扫一遍同类用法**：`grep -rn \"new InMemoryDriver()\" packages` 里凡是测试内构造的，都在继承这个默认值。`createDefaultDatasourceDriverFactory` 的 `memory` 分支也是无参构造，也就是说**任何用 memory datasource 的测试**都在往 cwd 写文件。\n- **默认值本身要不要改**：`'auto'` 在 Node.js 下静默落盘，对\"in-memory driver\"这个名字来说是个意外的默认。改默认是破坏性的（#815 的 dev/UED 诉求依赖它），所以倾向不动默认、而是让**测试与工厂**显式表态；但如果决定动，需要 ADR + changeset，且要覆盖 `os dev` 依赖持久化的路径。\n\n## 关联\n\n- #815（memory driver 落盘能力的出处，默认 `'auto'`）\n- #3941 / 本次 PR（发现路径，无因果关系）\n- Prime Directive #10\n"
+}

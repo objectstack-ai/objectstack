@@ -1,0 +1,32 @@
+{
+  "number": 4224,
+  "kind": "issue",
+  "title": "settings error bodies carry four keys `ApiErrorSchema` does not declare, conformant only because `z.object` strips them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T16:29:32Z",
+  "updated_at": "2026-07-31T00:40:20Z",
+  "closed_at": "2026-07-31T00:40:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4224",
+  "body": "Surfaced while consolidating the seven envelope builders onto one shared pair (#3973). Filed rather than folded in, because fixing it is a **wire change** and #3973 was explicitly a consolidation that changes no bytes.\n\n## The finding\n\n`settings-routes.ts` passes ad-hoc keys as SIBLINGS of `code` and `message` inside `error`:\n\n```ts\nsendError(res, 403, 'SETTINGS_FORBIDDEN', err.message, { namespace: err.namespace });\nsendError(res, 409, 'SETTINGS_LOCKED',    err.message, { namespace, key, reason });\nsendError(res, 400, 'UNKNOWN_KEY',        err.message, { namespace, key });\nsendError(res, 400, 'SETTINGS_VALIDATION', err.message, { namespace, fields });\n```\n\n`ApiErrorSchema` (`packages/spec/src/api/contract.zod.ts`) declares `code`, `message`, `category?`, `httpStatus?`, `details?`, `requestId?`. `namespace` / `key` / `reason` / `fields` are none of those. Because the schema is a plain `z.object`, unknown keys are **stripped** rather than rejected — so these bodies are conformant *by stripping*, not by declaration, and `envelopeViolations` (which only inspects the body's top level) does not see them either.\n\nThe same module already uses the declared slot correctly one branch over:\n\n```ts\nsendError(res, 400, 'SETTINGS_ACTION_FAILED', result.message ?? '…', { details: result });\n```\n\nso this is an inconsistency inside one file, not a missing capability.\n\n## Why it is not urgent\n\nNothing in the repo reads `error.namespace` / `error.key` / `error.reason` / `error.fields` — `grep` across `packages/`, `examples/` finds no consumer. They are write-only today.\n\n## Why it is worth closing anyway\n\nIt is the reason the shared `sendError` types its last parameter `Record<string, unknown>` rather than the declared optional fields of `ApiError`:\n\n```ts\n// packages/types/src/response-envelope.ts\nextra?: Record<string, unknown>,\n```\n\nThat is the one loose edge on an otherwise closed builder — the same builder that now types `code` as the closed ADR-0112 `ErrorCode` union. Move settings' four call sites under `details` and the parameter can be tightened to the declared fields, which closes the envelope's error half the way #3841 closed its vocabulary.\n\n## Decision needed\n\nWhether `error.details` is the right home (it is the declared slot, and the module already uses it), or whether these belong in the `fields[]` field-level vocabulary that ADR-0112 D6 / #3977 carve out — `SETTINGS_VALIDATION` in particular passes `fields`, which reads like the latter.\n\nEither way it is a change to what `/api/settings/*` puts on the wire for four error branches, so it wants a changeset with the FROM → TO mapping."
+}

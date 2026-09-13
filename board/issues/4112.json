@@ -1,0 +1,35 @@
+{
+  "number": 4112,
+  "kind": "pull_request",
+  "title": "fix(runtime,hono,plugin-dev): 退役 dispatcher 的 /storage bridge —— 它从来没按契约调用过 storage (#4087)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T10:14:50Z",
+  "updated_at": "2026-07-30T10:41:12Z",
+  "closed_at": "2026-07-30T10:41:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T10:41:10Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4112",
+  "body": "Closes #4087。取 issue 里的**方案 2（退役这条 bridge）**，并且核查后发现比 issue 描述的更彻底——下面第 1 节说明为什么另外两个前提也需要更正。\n\n## 1. 核查结论：两条路由都是假的，而且它们一直是可达的\n\n`upload` 那条 issue 已经说清楚了（`upload(key, data, options?)` 被当成 `upload(file, { request })` 调，对 `S3StorageAdapter` / `LocalStorageAdapter` / `SwappableStorageService` / plugin-dev 内存实现都是 TypeError）。核查时另外两点和 issue 的判断不一致：\n\n**① `GET /storage/file/:id` 并不是\"不受影响\"。** 契约是 `download(key: string): Promise<Buffer>`，而 dispatcher 分支在 `result.url && result.redirect` / `result.stream` / `result.mimeType` 上做判断。Buffer 上这些属性全是 `undefined`，所以每个分支都落空，最后 `deps.success(buffer)` 把字节数组当 JSON 返回（`{\"type\":\"Buffer\",\"data\":[…]}`）。多余实参确实被忽略了，但**返回值处理面向的是一个仓库里不存在的接口**——全仓搜索没有任何 `file-storage` 实现返回过 `{ url | redirect | stream | mimeType }` 这个形状。而且传进去的是 `sys_file` 的 id，不是 storage key：LocalStorageAdapter 会 `fs.readFile` 一个不存在的路径 → ENOENT → 500。\n\n**② 不是被 service-storage \"遮蔽\"了。** service-storage 挂的是 `/storage/upload/presigned`、`/storage/upload/complete`、`/storage/upload/chunked/*`、`/storage/files/:fileId[/url]`、`/storage/_local/raw/:token`——**没有** `/storage/upload`，也没有 `/storage/file/:id`。两条路径不冲突，所以装了 service-storage 的完整栈里 bridge 依然挂着、依然可达，只是**没有调用方**：SDK 不拼这两个 URL，console 也不调，唯一指向它们的是 `content/docs/api/plugin-endpoints.mdx` 那张表——照文档调的人拿到的就是 500。\n\n这两点让\"方案 2\"更站得住：#3584 当初把这两条留下的理由是\"low-level redirect/stream 兼容面\"，而这个兼容面从来不存在。\n\n顺带一个域外发现（已在本 PR 一并修）：**hono adapter 挂的是 `app.all('${prefix}/storage/*')` 通配**，为两条死路由占了整个 `/storage` 子树——子树下任何其他路径都会拿到 bridge 自己的 404，而不是继续往下匹配。\n\n## 2. 改了什么\n\n**删除：**\n- `packages/runtime/src/domains/storage.ts`（整个域）\n- `HttpDispatcher.handleStorage()` + domain registry 注册\n- dispatcher-plugin 的两处 `server.post/get` 挂载\n- hono adapter 的 `/storage/*` 通配（storage 现在走通用 catch-all）\n- `route-ledger.ts` 两行（原地留了 tombstone 注释，写清楚为什么不该再长回来）\n\n**为了守住 declared === enforced（Prime Directive #10）：**\n- discovery 的 `routes.storage` 继续用 `isServiceServeable` 门控（#4058 step 2 引入的共享谓词）。注释里记了为什么 `file-storage` 这一槽在没有 dispatcher domain 之后仍然该被这个谓词管：`handlerReady` 在这里不是任何东西的代理，它就是\"这个槽有没有 HTTP 面\"这个事实本身。\n- plugin-dev 的 `file-storage` 自述加 `handlerReady: false`。#4058 当时特意让它继续服务，因为那时 `/storage` bridge 还在；bridge 退役后没有任何东西把 HTTP 路由到这个槽，`false` 才是诚实值——和 `realtime` 自 ADR-0076 D12 起的位置一样。实现对 in-process 调用照常工作，只是不再被广播成可达的 HTTP 能力。\n\n**文档：**\n- `content/docs/api/plugin-endpoints.mdx`：storage 那张表换成 service-storage 的真实协议（带 SDK 列），并按该文件既有的 #3718 先例加了一段 callout 说明旧表错在哪。\n- `docs/audits/2026-07-dispatcher-client-route-coverage.md`：在 §4 Resolution 后追加 #4087 修正，记录 #3584 那次没有核到的前提。\n- `scripts/check-route-envelope.mjs`：从 `DISPATCHER_DOMAINS` 移除 `storage.ts`（否则该 gate 报\"declared but not found\"）。\n\n**测试：**旧的 `handleStorage` 用例全部替换。它们正是这个缺陷能活下来的原因——每个都 mock 了 handler 想要的形状而不是 `IStorageService` 声明的形状（`upload` 只断言\"被调用过\"，`download` mock 成 `{ data, mimeType }`，而契约是 `Promise<void>` 和 `Promise<Buffer>`），所以 500 的路由测出来是绿的。现在钉的是\"不存在\"本身：没有 `handleStorage` 方法、`/storage` 不被 registry 认领（槽位空和被占用两种情况都测）、hono 上 `/storage/upload/presigned` 落到 catch-all。\n\n## 3. 与 #4058 step 2（#4086）的关系\n\n#4086 在本 PR 开出后合入 main，改到了同一片地方（给每个 dispatcher domain 上 `isServiceServeable`，`/storage` 也在内）。合并冲突的处理写在 merge commit 里，摘要：\n\n- `domains/storage.ts` **保持删除**。#4086 给 bridge 上了门控，但没有改那次调用——它仍然是 `upload(file, { request })` 打 `upload(key, data, options?)`。给一个两种答案都服务不了的 handler 上门控，只是换了调用方拿到哪种失败。\n- discovery 取 main 的 `isServiceServeable`，删掉本分支自己引入的 `filesServeable`——同一个谓词，main 的位置更好。\n- #4086 加进 handlerReady 测试块的两个 `/storage` 用例随域一起删。其中「degraded store keeps serving」那个是问题形状的标本：它拿 `upload` mock 成 resolve `{ key }` 去断言 200，而契约的返回类型是 `Promise<void>`。\n- `metadata-protocol` 的 `file-storage` 留在 `DISPATCHER_GATED_SERVICES` 里，只是注释不再引用一个已经不存在的 `/storage` bridge。\n\n## 4. 迁移\n\n实际上没有东西需要迁移——两条路由都完不成一次请求。对照关系写在 changeset 里（`.changeset/retire-dispatcher-storage-bridge.md`，minor）：\n\n| 旧 | 新 |\n|---|---|\n| `POST /api/v1/storage/upload` | `POST /storage/upload/presigned` → 直传 → `POST /storage/upload/complete`，或 `client.storage.upload(file)` |\n| `GET /api/v1/storage/file/:id` | `GET /storage/files/:fileId/url`（`client.storage.getDownloadUrl`），或 `GET /storage/files/:fileId`（浏览器稳定 URL，302） |\n\n没装 `@objectstack/service-storage` 时 `/api/v1/storage` 现在没有 handler——和其他未安装能力的答案一致。\n\n## 5. 验证\n\n- `pnpm --filter @objectstack/runtime test` → 65 files / 916 tests（合并 main 后）\n- `@objectstack/hono` 67、`@objectstack/metadata-protocol` 110、`@objectstack/plugin-dev` 8、`@objectstack/types` 48 全绿\n- `pnpm lint`、`check:route-envelope`、`check:doc-authoring`、`check:nul-bytes`、`check:role-word`、`check:org-identifier`、`check:authz-resolver`、`check:error-code-casing`、`check:release-notes`、`check:node-version` 全过\n- 唯一的本地失败是 `packages/runtime/src/datasource-autoconnect.test.ts`「makes the federated object queryable through the engine with zero app code」。**这条在未改动的 main 上同样失败**（已 `git stash` 后复跑确认：`expected [ 'first', 'first', 'first', …(7) ] to deeply equal [ 'first', 'second' ]`），与本 PR 无关；分支 `claude/datasource-autoconnect-federation-test-32356t` 已在处理。补一个数据点：单文件跑也复现，所以不是跨文件污染。\n\n## 6. 域外发现 → #4127\n\n修完这条之后，我用同一把尺子（\"调用点 vs `packages/spec/src/contracts/*`\"）扫了其余 dispatcher domain，结果记在 **#4127**：`/notifications` 的三个方法、`/automation` 的三个方法、`/i18n` 的 `getFieldLabels` 都不在各自契约里（方向和 #4087 相反——调用点和实现是对的，契约漏了声明），三处都靠 `typeof x.foo === 'function'` duck-type 绕过。不在本 PR 范围。\n\n`RouterConfigSchema.mounts.storage = '/storage'` 保持不变——这个 mount 前缀现在由 service-storage 兑现，依然成立。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015T5CeitwV1jXLvsL1A84tw)_"
+}

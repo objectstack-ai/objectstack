@@ -1,0 +1,35 @@
+{
+  "number": 4124,
+  "kind": "pull_request",
+  "title": "fix(runtime): the /ai/agents degraded fallback answers in the declared envelope (#4053)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T10:30:26Z",
+  "updated_at": "2026-07-30T12:38:34Z",
+  "closed_at": "2026-07-30T12:38:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T12:38:32Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4124",
+  "body": "The framework half of #4053, and the guard's **last ratchet retires** — 0 ratcheted on both surfaces.\n\n```\n✓ Route modules      — 8 audited: 7 conformant, 0 ratcheted, 1 exempt\n✓ Dispatcher domains — 16 audited: 11 helper-only, 5 declared, 0 ratcheted\n```\n\n## The finding: this did not need a three-repo batch\n\n#4053 opened by saying the conversion \"must land with cloud and the SDK together or `ai.agents.list()` silently returns `[]`\". Checking the SDK properly showed that is true of **one** of the two possible conversions, not both:\n\n```ts\nprivate async unwrapResponse<T>(res: Response): Promise<T> {\n  const body = await res.json();\n  if (body && typeof body.success === 'boolean' && 'data' in body) return body.data as T;\n  return body as T;\n}\n```\n\n| conversion | what `unwrapResponse` returns | `list()` does `body?.agents` |\n|---|---|---|\n| **`data: { agents }`** (this PR) | `{ agents: [...] }` | ✅ works |\n| `data: [...]` (flattened) | `[...]` | ❌ `undefined` → **`[]`** |\n\nSo with the relocation variant the SDK needs no change, and **each surface converts independently**. Cloud's `service-ai` still answers unenveloped and keeps working unchanged; objectui already reads all four shapes (objectui#2992).\n\n## Why relocation is the right reading, not just the convenient one\n\n#3983 set the precedent that `data` carries the payload **directly**, and following it here would have looked consistent. The distinction:\n\n- `AiAgentsResponseSchema` is a **declared** payload schema.\n- share-links' `{ links }` was an ad-hoc wrapper with no schema behind it.\n\nSo this is the **#3843 relocation** — a declared payload moving under `data` unchanged, exactly as `SettingsNamespacePayload` did — rather than a reshape. The convenient answer and the correct one coincide, which is worth stating explicitly so the next person doesn't read it as precedent-breaking.\n\n## Why the wrong choice would have been invisible\n\n`useAiSurfaceEnabled` gates the **entire AI surface** on `agents.length > 0`, deliberately: the route is access-filtered per caller, so it is the only signal that is both edition- and user-aware (ADR-0068). An empty catalog is therefore a **correct** answer:\n\n| | what the user sees |\n|---|---|\n| seat-less user (correct) | AI surface hidden |\n| CE deployment, no `service-ai` (correct) | AI surface hidden |\n| flattened conversion (bug) | **AI surface hidden** |\n\nNo error, no 403, no failed request, no log. That is why the road not taken is pinned as a test rather than left as a comment: `{ success: true, data: [ASK, BUILD] }` asserts `[]`, so the cost is recorded.\n\n## Changes\n\n- `runtime/src/domains/ai.ts` — the fallback goes through `deps.success`\n- `scripts/check-route-envelope.mjs` — `ai.ts` drops to `handBuilt: 1` (the remaining one is the AI-service passthrough) and loses its ratchet\n- `packages/client/src/ai-agents-envelope.test.ts` — 5 new tests over both live shapes\n- the dispatcher's own fallback test now asserts the envelope and that no top-level `agents` survives\n\n## Verification\n\n| gate | result |\n|---|---|\n| `@objectstack/runtime` | **914 passed** |\n| `@objectstack/client` | **205 passed** (5 new) |\n| `@objectstack/rest` · `@objectstack/spec` | 505 · 6987 |\n| `check:route-envelope` + self-test | **0 ratcheted, both surfaces** |\n| all ten TypeScript Type Check gates | clean |\n| six `check:*` guards | clean |\n\n**Stale-dist note again**, third time this session and the same shape: `check:api-surface` first reported `- TemporalCase`, `- TemporalRow` … \"5 breaking\" — none of them mine, and I added no exports in this PR. Restarting the branch onto a newer `main` leaves `packages/spec/dist` behind it; rebuilding spec clears it. Recording it because the message names *other people's* exports as breaking changes, which reads as something far worse than it is.\n\n## What remains on #4053\n\nCloud's `service-ai` (`routes/agent-routes.ts:352` → `{ status: 200, body: { agents } }`). Genuinely optional now rather than blocking: it works as-is against both consumers, and converting it is a one-line change whenever that repo is being touched anyway. I've left #4053 open with that reduced to its actual scope.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01CYbS3kS8xzsHNXFTzp4e2z)_"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 4134,
+  "kind": "issue",
+  "title": "REST 列表：未知查询参数被静默当作字段过滤器 —— `?pageSize=5` 返回 200 + 空列表",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T10:51:54Z",
+  "updated_at": "2026-07-30T13:44:24Z",
+  "closed_at": "2026-07-30T13:44:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4134",
+  "body": "## TL;DR\n\n`GET /api/v1/data/<object>` 把**任何**未识别的查询参数当成字段过滤器。参数名对应的字段不存在时，不报错、不警告，返回 **HTTP 200 + `total: 0`**。\n\n写路径对同一类输入是**大声拒绝**的（`INVALID_FIELD`），读路径却静默清零——`declared ≠ enforced` 的读写不对称。\n\n## 实测（干净的 `--seed-admin` showcase 实例，库内 10 条 `showcase_task`）\n\n```\nGET /api/v1/data/showcase_task                 -> 200  total=10   ✅ 基线\nGET /api/v1/data/showcase_task?status=done     -> 200  total=2    ✅ 真实字段过滤生效\nGET /api/v1/data/showcase_task?status=zzz      -> 200  total=0    ✅ 真实字段无匹配，0 正确\n\nGET /api/v1/data/showcase_task?zzzz=1          -> 200  total=0    ❌ 字段根本不存在\nGET /api/v1/data/showcase_task?pageSize=5      -> 200  total=0    ❌\nGET /api/v1/data/showcase_task?page_size=5     -> 200  total=0    ❌\nGET /api/v1/data/showcase_task?perPage=5       -> 200  total=0    ❌\n```\n\n对照：分页参数的**真实**拼写都正常。\n\n```\n?$top=5 / ?top=5 / ?limit=5                    -> 200  total=10  records=5  ✅\n```\n\n## 为什么这值得修\n\n**1. 与写路径不一致。** 同一个不存在的字段名，写路径明确拒绝：\n\n```json\n{\"error\":\"Unknown field 'title' on object 'showcase_account'\",\"code\":\"INVALID_FIELD\",\"field\":\"title\"}\n```\n\n读路径却把它当成一个永远匹配不上的谓词。同一份「字段是否存在」的知识，一边强制、一边静默。\n\n**2. 失败方向是「少了」而不是「错了」。** 这正是 #3777 那一族的形状：HTTP 200、结构合法、`records: []`——与「确实没有数据」完全无法区分。调用方（尤其是 AI agent 和第三方集成）会把它读成空结果集而不是自己参数拼错了。\n\n**3. `pageSize` / `perPage` 是极高频的猜测名。** 来自其它框架的开发者第一反应就是这两个之一，而平台用的是 `$top`/`top`/`limit`。猜错的代价是一个看起来完全正常的空列表。\n\n**4. 仓库已经为同一疾病定过调子。** #3948 在 driver-memory 上把「无法识别的过滤操作符」从静默放行改成**抛错**，理由写在代码注释里：*\"An unapplied filter must not look like a satisfied one.\"* 这里是它的镜像——一个打在不存在字段上的过滤器，不该看起来像一个「没有匹配」的过滤器。\n\n## 建议\n\n读路径在把查询参数降为字段过滤器之前，先按对象元数据校验字段名；未知字段返回 **400 + `INVALID_FIELD`**，复用写路径已有的错误形状与文案（包含字段名，理想情况下带 near-miss 建议，如 `pageSize` → 你是否想用 `$top`）。\n\n需要先确认的边界（我没有深挖，留给实现者）：\n- 是否存在依赖「未知参数被忽略/降为过滤器」的现存调用方（objectui 列表、导出、公开表单）；若有，需按 ADR-0087 的转换层惯例声明别名而不是放宽校验；\n- `$`-前缀的系统参数集（`$top`/`$skip`/`$filter`/`$expand`/`$orderby`/`$select`/`$search`…）与保留名（`limit`/`top`/`filters`…）要一并列入白名单，避免误伤。\n\n## 溯源\n\n在为 #3777 做浏览器端到端验证时撞到：我的探针用了 `?pageSize=200`，列表一直返回空，一度被我怀疑成 RLS/组织作用域的可见性缺陷。**排查后与可见性无关**——同一条记录 `GET /data/<obj>/<id>` 正常、`?filters={\"id\":...}` 也正常，只有那个拼错的参数会清零。也就是说这个坑真实地误导了一次排查。\n\n## 关联\n\n#3948（driver-memory：无法识别的过滤操作符改为抛错，同一原则）、#3777 一族（silent-zero 失败形状）、AGENTS.md Prime Directive #10（`declared ≠ enforced`）。"
+}

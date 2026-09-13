@@ -1,0 +1,35 @@
+{
+  "number": 4120,
+  "kind": "pull_request",
+  "title": "fix(spec,rest): 手抄清单排查 — 元数据表单 ↔ Zod 对账闸门 + 五处静默漂移 (#3786)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T10:25:27Z",
+  "updated_at": "2026-07-30T11:09:35Z",
+  "closed_at": "2026-07-30T11:09:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T11:09:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4120",
+  "body": "按 #3786 排查「手抄 spec 清单 + \"keep in sync\" 注释」模式。framework 侧最大的一窝在 `packages/spec` 自己的元数据表单里:`METADATA_FORM_REGISTRY` 的 17 份 `defineForm` 全部手写 Zod 的键名却从不 import 它 —— 两份清单、一句\"保持同步\"、零机制。**十七份里已有四份漂移,且全部静默**。\n\n## 已确认的漂移(全部无报错)\n\n失败原因一致:`ObjectSchema` / `FieldSchema` 刻意不是 `.strict()`,所以表单提供的、schema 未声明的键**解析通过后被静默丢弃** —— 正是 `field.zod.ts` 的 prune 墓碑注释里已用散文写明的 ADR-0104 失败类。\n\n| 表单 | 漂移 | 作者实际看到的 |\n|:---|:---|:---|\n| `object` | `capabilities` 不是 ObjectSchema 的键(应为 `enable`) | 整个 Capabilities 分区 7 个开关**存不进去** |\n| `object` | 内联字段网格提供了 16 个 `FieldSchema` 从未声明的键 | PII / Encrypted / Indexed / Immutable 等开关**存不进去** |\n| `report` | `aria` + `performance` 已被 #3496 从 ReportSchema 删除,表单照旧渲染 | Advanced 两个控件**存不进去** |\n| `hook` / `action` | `body.memoryMb` 缺失 | L2 内存上限**无法在 Studio 设置**(讽刺的是 `hook.form.ts` 自己的文档注释就写着这个键) |\n| `page` | `interfaceConfig.sort` 缺失 | 页面默认排序**根本无法设置** |\n\n`object` 那 16 个键分两类,每个判定都有据可依:schema 做过的**改名**(`referenceFilter`→`lookupFilters`、`cascadeDelete`→`deleteBehavior`、`formula`→`expression`、`displayFormat`→`autonumberFormat`、`summaryType`/`summaryField`→`summaryOperations`),以及**已被 prune 为两层皆死**的键(`indexed` #2377,以及 `auditTrail`/`dataQuality`/`encryptionConfig` 家族)。\n\n顺带暴露一个后果:这些漂移已经渗进**生成物**并被认真翻译了 —— 四个语种的 metadataForms bundle 里躺着一批\"存不进去的开关\"的译文。本 PR 一并重新生成。\n\n## 机制\n\n`metadata-form-zod-reconciliation.test.ts` 遍历每份注册表单,与 `getMetadataTypeSchema()` 对账。**两个方向刻意不对称**:\n\n- **form-only**(表单提供了 Zod 不接受的键)= 永远是缺陷,**不可登记豁免**。没有任何设计理由让作者去填一个值会被丢弃的控件。\n- **zod-only**(Zod 接受但表单不提供)= 可能是刻意的(废弃键不对新作者开放;快速添加的精选子集),**可登记**,但必须带理由,并按 #4045 / #4040 的规矩校验非空、且两侧仍能解析。\n\n**变异测试验证闸门确实会红**:重新加回一个被丢弃的键 / 删掉一个已覆盖的键 / 让表单提供一个已登记豁免的键 —— 三种方向分别触发 1、4、4 个失败。\n\n## 另外两处\n\n- `ActionAiCategorySchema` 的注释说它镜像 `ai/tool.zod` 的 `ToolCategorySchema`、要求\"两侧同时更新\" —— 但 #3896 已经把 `ToolCategorySchema` 连同它所类型化的惰性 `tool.category` 一起删了。**该指令指向一个不存在的源**,读者会去找一个并不存在的第二侧。这是该模式的终末形态:注释腐烂得比清单还安静。改为声明其唯一权威地位(无需闸门 —— 已无对账对象)。\n- `rest-server.ts` 的 `TRANSLATABLE_META_TYPES` 手抄集合改为**派生**:`translateMetadataDocument` 的 `if` 链改成 dispatch table,导出 `TRANSLATABLE_METADATA_TYPES`。第二份清单是被**消灭**而不是被检查 —— derive-or-gate 里更好的那一半。\n\n## 验证\n\n`packages/spec` 7008 tests、`rest` 505、`platform-objects` 239 全绿;spec 八个生成物闸门 + `check:i18n`(9 包)全 PASS。\n\n## 尚未处理(建议另开)\n\n- **`AUDIT_TIMELINE_FIELDS`**(`objectql/validation/rule-validator.ts`)—— 注释\"Kept in sync with registry.ts\",目前**内容一致但无闸门**。派生需要把 `registry.ts` 的四段 if 链重构成数据表,动的是热路径,值得单独一个 PR 带自己的测试。顺带一提:这份 4 元审计字段清单**跨两仓至少有四份拷贝**(见下)。\n\n- **objectui(#3786 点名的头号嫌疑)已扫描完毕 → objectstack-ai/objectui#3017**。结论:**六处候选,目前全部内容一致,没有查到活的漂移**,但同样零闸门。其中最扎眼的是两处抄的正是「spec 已经为此导出的常量」,可以直接删掉第二份清单:\n  - `ActionDefaultInspector.tsx` 的 `LOCATIONS` ← spec 已导出 `ACTION_LOCATIONS`;\n  - `FlowReferenceField.tsx` 的 `KIND_TO_RECORD_LOOKUP` ← spec 的 `APPROVER_VALUE_SOURCES` **就是为了让 objectui 别再自己推导而专门发布的**(其文档注释记载了 #3508 那次翻车:设计器自带的第一份数据契约抄错了,把目录类 kind 全接到元数据注册表上,候选返回空、控件退化成自由文本框,于是 `sales_manager` 被打进只接受三个值的字段)。spec 侧用 `satisfies` 保证了新增 `ApproverType` 不声明 binding 即编译错误 —— 但这层保证一步都没传导到 objectui。\n\nCloses #3786 的 framework 部分。"
+}

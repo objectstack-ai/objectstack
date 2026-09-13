@@ -1,0 +1,35 @@
+{
+  "number": 4259,
+  "kind": "pull_request",
+  "title": "refactor(metadata)!: 删除 `artifact-api` artifact source——零消费者，owner 已裁决不保留 (#4246)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T01:01:47Z",
+  "updated_at": "2026-07-31T02:43:03Z",
+  "closed_at": "2026-07-31T02:43:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T02:43:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4259",
+  "body": "Closes #4246\n\n## ⚠️ 本 PR 中途转向：从「声明它」改为「删除它」\n\n第一个 commit（5597fab）按 issue 的选项 1 落地——判定实现有效、把注释和文档改成「已实现」，顺带修了一条死掉的 URL 判据。**随后跨仓库的消费者审计推翻了保留它的前提，owner 裁决删除**，第二个 commit（660124f）执行。最终 diff 以删除为准；下面按最终状态描述。\n\n## 裁决依据：三条证据\n\n1. **两个仓库、零调用点。** 本仓库和 cloud 里都不存在 `mode: 'artifact-api'` 的生产调用。「从云端拉 artifact」的两条真实路径各有归属：cloud 运行时用自己的 `ArtifactApiClient`（TTL 缓存、singleflight、hostname 解析、runtime 配置注入——本 option 永远不该长成的超集）；OSS 运行时装包走 `@objectstack/cloud-connection`（`os package install`，ADR-0008）。\n2. **一半输入契约自 v5.0 起就是死的，一年多无人报。** URL 判据里的 `/api/v{n}/cloud/projects/` 段被 v5.0 改名删掉后永不匹配，「完整 URL」形态一律被二次拼接后 404。这种 bug 的沉默期本身就是消费者数量的证据。\n3. **唯一不可替代的能力被 owner 明确放弃。** Bearer 鉴权拉取**私有**环境 artifact 是 `local-file` 做不到的唯一一件事（`local-file` 的 URL 分支不发鉴权头）。owner 确认「私有 artifact 密封部署」当前不是需要支持的场景。\n\n## 删了什么\n\n| 项 | 说明 |\n|---|---|\n| `artifactSource` 的 `artifact-api` union 成员 | 类型收窄为单成员 `{ mode: 'local-file', path, fetchTimeoutMs? }` |\n| `_loadFromArtifactApi()` | 连同其 `environmentId` 前置检查 |\n| `_fetchJson` 的 `token` 参数 | 唯一调用方随上者消失 |\n| 三个 bootstrap 分派点的 `artifact-api` 分支 | 收敛为单一 `local-file` 路径 |\n\n## 删除是响亮的，不是静默的\n\nTS 层面 union 已收窄，但 JS 调用方 / `any` 管道仍可能塞进旧配置。旧分派的 fall-through 会把「不支持的 source」当成「没有 source」——`eager` 下就是**静默转去扫文件系统**，boot 出跟调用方点名的 artifact 毫无关系的内容。因此 `start()` 现在前置拒绝任何非 `local-file` 的 mode，`artifact-api` 得到指名道姓的迁移消息（指向 `/pub` 路由的 `local-file` URL 形态和 `@objectstack/cloud-connection`）。\n\n## 迁移\n\n公开 / 按 commit 固定的 artifact 走既有的 `local-file` URL 形态（所有 bootstrap mode 都认）：\n\n```ts\nartifactSource: {\n  mode: 'local-file',\n  path: 'https://cloud.example.com/pub/v1/environments/env_42/artifact?commit=cmt_1a2b',\n}\n```\n\n`private` 环境仍可通过同一 `/pub` 路由的**精确 commit 深链**分发；完全私有的拉取无替代——是决策，不是疏漏。装包进运行中的实例用 `os package install`。\n\n## 测试\n\n- 钉住 `artifact-only` 和 `eager` 下对已删 mode 的响亮拒绝（`eager` 额外断言**没有**退化去扫文件系统——守卫要防的正是这个）\n- 钉住迁移目标本身：`local-file` 拉 http(s) URL、解析信封、注册进 manager——错误消息指的路必须真实存在\n- 顺带汰换了那条「碰巧过」的旧测试：`rejects.toThrow(/artifact-api/)` 匹配的是缺 `environmentId` 的消息恰好含这串字符，对「是否实现」什么也没证明\n- `pnpm --filter @objectstack/metadata test` — 13 files / 281 tests 全绿；build + `tsc --noEmit`（plugin.ts）干净\n\n## 文档\n\n`implementation-status.mdx`、`metadata-service.mdx`、`packages/metadata/ROADMAP.md`、spec 里 bootstrap 的注释——全部改为描述单一 `local-file` source 并记录删除决策。#4246 立案的起因（每轮文档审计都重新撞上注释与实现的矛盾）随之终结。`hook-bodies.mdx` 的 `cloud-artifact-api` 指 cloud 侧控制面插件（另一仓库的服务端，不受影响），ADR-0005 属历史记录，均未动。\n\n## Breaking\n\n`@objectstack/metadata` major changeset。删除 public API 成员；仓库内所有 `local-file` 调用方（`standalone-stack.ts`、`serve.ts`、`start.ts`）不受影响。"
+}

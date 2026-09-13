@@ -1,0 +1,32 @@
+{
+  "number": 4320,
+  "kind": "issue",
+  "title": "DriverPluginOptions 两个选项均为无效配置 —— serve.ts 传入的 `datasourceName: 'telemetry'` 从未注册过任何数据源",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T05:53:51Z",
+  "updated_at": "2026-07-31T06:39:58Z",
+  "closed_at": "2026-07-31T06:39:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4320",
+  "body": "从 #4251 的类型化清扫中发现(Prime Directive #10:范围外发现单独立 issue,不静默扩大 PR 范围)。\n\n## 现状\n\n`DriverPlugin.start()` 原有的数据源注册逻辑整体被 `if (!metadata?.addDatasource) return;` 守卫,而 **`addDatasource` / `getDatasources` 在整个仓库中没有任何实现**——`metadata` 槽的占用者 `MetadataManager` 从未提供过这两个方法,唯二引用就是这两个探测点本身。也就是说该分支在每一次启动中都提前返回,从未执行过。#4251 的 PR 已删除这段死代码(带类型的查找无法再表达对幻影方法的探测,这正是规则想要的效果)。\n\n留下的问题:`DriverPluginOptions` 的两个选项(`datasourceName`、`registerAsDefault`)配置的就是这段死代码,因此**自始至终都是无效配置**,但接口仍然对外声明它们。\n\n## 受影响的真实调用点\n\n`packages/cli/src/commands/serve.ts:1008`:\n\n```ts\nawait kernel.use(new DriverPlugin(telemetry.driver, { datasourceName: 'telemetry', registerAsDefault: false }));\n```\n\n这个调用点**相信**自己注册了名为 `telemetry` 的数据源——实际从未发生。需要判断:遥测驱动是否需要真正的具名数据源可见性?若需要,现行路径应是 ADR-0062 的 `DatasourceConnectionService` + `registerInMemory('datasource', …)`(参见 `DefaultDatasourcePlugin.registerVisibility`),而不是复活 `addDatasource`。\n\n## 待决策(enforce-or-remove,同 ADR-0049 的思路)\n\n- **remove**:删除 `DriverPluginOptions` 两个成员(破坏性——`serve.ts` 的对象字面量会编译失败,需一并清理),changeset 写明 FROM → TO;或\n- **enforce**:让 `DriverPlugin` 通过现行的 declaration 路径真正兑现 `datasourceName`(需要论证 DriverPlugin 作为「测试与预构建/代理驱动的逃生舱」是否应当承担这个职责——`DefaultDatasourcePlugin` 的文档明确说它不再是 standalone 默认启动路径)。\n\n倾向 remove:能力已由 ADR-0062 路径承接,DriverPlugin 保持纯粹的 driver 服务注册器。\n\n## 备注\n\n当前代码中 `DriverPluginOptions` 的 TSDoc 已标注 ⚠️ INERT 并指向本 issue;构造函数仍接受该参数(仅为源码兼容,不再存储)。"
+}

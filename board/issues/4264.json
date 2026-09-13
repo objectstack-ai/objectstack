@@ -1,0 +1,32 @@
+{
+  "number": 4264,
+  "kind": "issue",
+  "title": "Three datasource routes still surface a service throw as the adapter's non-envelope 500 (#4249 follow-up)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T01:08:37Z",
+  "updated_at": "2026-07-31T05:48:57Z",
+  "closed_at": "2026-07-31T05:48:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4264",
+  "body": "#4249(修复见 #4263)给了 rest 表面两条 introspection 路由失败契约:`listRemoteTables` / `generateObjectDraft` 抛出现在两条路径都回声明信封内的 `400 EXTERNAL_DATASOURCE_ERROR`。该修复只覆盖 issue 点名的路由;还有三条兄弟路由完全没有 `catch`:\n\n| 路由 | 模块 / 服务调用 | 今天抛出时 |\n|---|---|---|\n| `GET /api/v1/datasources` | `service-datasource/admin-routes.ts`(`listDatasources`) | 适配器 500 |\n| `POST /api/v1/datasources/:name/external/refresh-catalog` | `rest/external-datasource-routes.ts`(`refreshCatalog`) | 适配器 500 |\n| `POST /api/v1/datasources/:name/external/validate` | `rest/external-datasource-routes.ts`(`validateAll`) | 适配器 500 |\n\n\"适配器 500\" 具体是 `plugin-hono-server/src/adapter.ts` 回的 `500 { error: 'No response from handler' }`:handler 的 rejection 被吞掉(`.catch(() => resolve(null))`),兜底 body 是 #3675 之前的形态 —— `error` 是裸字符串、没有 `success` 标志、没有 `error.message`。按声明信封读的客户端拿到 `body.error.message === undefined`,没有可切换的 code,真实原因彻底丢失(甚至没有日志)。\n\n`scripts/check-route-envelope.mjs` 结构上看不到这一类:它审计的是响应**写点**,而未捕获的抛出根本不写响应 —— 非信封 body 是隔了一个包的适配器造出来的。只有驱动式测试能发现。\n\n若接受,修复形状与 #4249 相同:包住服务调用,回该路由注册的 refusal code(list 路由 `DATASOURCE_ADMIN_ERROR`,两条 federation 路由 `EXTERNAL_DATASOURCE_ERROR`)—— 或者用 `INTERNAL_ERROR`,因为比如 `listDatasources` 失败更像后端故障而非 refusal;值得先裁决再动手。无论哪个胜出,信封一致性套件补上对应行。\n\n修 #4249 时发现;当时不顺手扩散,因为这三条路由的契约不与任何东西分叉 —— 只是纯粹未覆盖(Prime Directive #10)。"
+}

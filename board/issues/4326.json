@@ -1,0 +1,30 @@
+{
+  "number": 4326,
+  "kind": "issue",
+  "title": "[P3] Read decorations (_diagnostics, _draft) round-trip into persisted sys_metadata bodies",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T06:11:45Z",
+  "updated_at": "2026-07-31T06:55:40Z",
+  "closed_at": "2026-07-31T06:55:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4326",
+  "body": "Found while wiring #3903 (stored-metadata conversion, PR #4317). Filed per Prime Directive #10 rather than widening that PR.\n\n## What happens\n\n`getMetaItem` / `getMetaItems` decorate every served item with `_diagnostics` (`decorateMetadataItem`, metadata-diagnostics.ts), and draft reads add `_draft: true`. `saveMetaItem` deliberately persists the request body **verbatim** (ADR-0005 §Validation — `parsed.data` would strip Studio-only auxiliary fields), and it strips neither decoration. So the standard Studio round-trip\n\n```\nGET (body + _diagnostics) → edit → PUT the whole body → persisted verbatim\n```\n\nwrites the **stale read-time verdict into the stored row**: into `sys_metadata.metadata`, into the checksum, into `sys_metadata_history` diffs.\n\nVerified against the built spec: the type schemas are strip-mode, so the save gate does not reject the key (`view`/`object`/`action` all `safeParse` successfully with `_diagnostics` present) — it just persists.\n\n## Why it stays invisible (and why it still matters)\n\n- Reads always recompute: `decorateMetadataItem` spreads `{ ...item, _diagnostics }`, so the fresh verdict shadows the persisted stale one — users never see wrong diagnostics.\n- But the row body, its checksum, and every history diff carry diagnostic noise; a body-equality or checksum comparison across a GET→PUT round-trip is polluted; and `computeMetadataDiagnostics` already has to strip its own key defensively before validating (metadata-diagnostics.ts `stripDiagnostics`) — the write path never got the matching half.\n\n## Suggested fix\n\n`saveMetaItem` strips the read-only decorations (`_diagnostics`, and `_draft` unless the write is itself the draft-mode marker) from `request.item` before the destructive-change diff / validation / persistence — mirroring the existing layered-envelope rejection, but as a silent strip since these keys are our own decoration, not author data. One place, both decorations, plus a pin test that a GET→PUT round-trip persists a byte-identical body.\n\nRefs #3903, PR #4317, ADR-0005 §Validation."
+}

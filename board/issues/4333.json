@@ -1,0 +1,35 @@
+{
+  "number": 4333,
+  "kind": "pull_request",
+  "title": "refactor(spec)!: the honesty layer reads one marker — `_dev` is retired (#4319)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T06:26:49Z",
+  "updated_at": "2026-07-31T06:55:12Z",
+  "closed_at": "2026-07-31T06:55:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T06:55:10Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4333",
+  "body": "## 背景\n\n`readServiceSelfInfo` 识别两种标记:标准的 `__serviceInfo` 描述符,以及 plugin-dev 的遗留 `_dev: true`(归一为 `{ status: 'stub', handlerReady: false }`)。\n\n`_dev` 的**生产者已清零**:ADR-0115 退役了写它的 stub 表,framework / objectui / cloud 三个仓扫下来只剩注释。也就是说这个分支只被测试 fixture 触发。\n\n## 为什么删而不是留个无害别名\n\n一个 boolean 说不出\"这个服务是**哪一种**不真实\"。\n\n- `stub` —— 编造答案,dispatcher 域**拒绝调用**它;\n- `degraded` —— 真的在服务,只是能力削减,域**继续服务**它。\n\n这是每个 consumer 实际据以判断的分界,而 `_dev: true` 把两者压成同一个\"fake\"。#4058 的\"要不要把 dispatcher 门推广到所有域\"之所以长期答不了,正是因为这个压缩 —— 直到 #4082 把它拆开(plugin-dev 的实现按真实类别重新分类)才有了答案。\n\n三种标记至此归一为一种,而且两次退役都**不是教 reader 认新方言**,是把生产者迁到描述符上:\n\n| 标记 | 结局 |\n|:---|:---|\n| `_fallback: true` | #4082:五个 kernel 兜底改带 `__serviceInfo`(它本来就没有任何 reader —— 这正是它们被报成 `available` 的原因) |\n| `_dev: true` | 本 PR:ADR-0115 退役 stub 表后已无生产者,删除 reader |\n| `__serviceInfo` | 唯一存活 |\n\n## 代价(已写进 changeset、ADR 和一条测试)\n\n一个仍然带着 `_dev: true` 的服务,现在读作**无标记**,即完全真实 —— 这是**过度上报**,正是 D12 要防的方向。之所以可接受,只因为生产者计数为零。外部实现者通过 npm 包的 `CHANGELOG.md` 拿到 FROM → TO 映射(升级时 agent 会 grep 的正是这个)。\n\n## 改动\n\n- 删 `SERVICE_DEV_MARKER_KEY` 导出与 `readServiceSelfInfo` 的 `_dev` 分支;`api-surface.json` 重新生成(减一行),spec 八个 artifact 门全绿\n- 四处测试 fixture 改写为 `__serviceInfo: { status: 'stub' }` —— 它们钉的一直是\"stub 绝不被报成 available\",不是标记的拼写\n- 一条测试反转,钉住新事实:退役标记读作无标记\n- ADR-0076 结论 11 记录本次退役及其代价\n- breaking changeset,body 带 FROM → TO 与\"不迁移会怎样\"\n\n## 验证\n\n`@objectstack/spec` 7149/7149、`@objectstack/objectql` 1374/1374、`@objectstack/runtime` 951/951、`@objectstack/core` 437/437 全部通过;`pnpm build` 通过(删公开导出没有编译期断链);`check:generated` 八门全绿。\n\nCloses #4319\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

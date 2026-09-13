@@ -1,0 +1,32 @@
+{
+  "number": 3973,
+  "kind": "issue",
+  "title": "Six route modules now each carry their own copy of the envelope builders, and i18n's four are still inline",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T00:26:17Z",
+  "updated_at": "2026-07-31T02:05:55Z",
+  "closed_at": "2026-07-31T02:05:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3973",
+  "body": "Carried out of #3843 (PR #3972) rather than left buried in it. #3843 asked for the guard to be shared and the four drifting modules converted; both are done. What it did *not* ask for — and what the conversion makes visible — is that the **builders** are still copied per module.\n\n## The state after #3843\n\nSix route modules emit the declared envelope. Each defines its own two-line pair:\n\n| Module | builders |\n|---|---|\n| `service-storage/storage-routes.ts` | local `sendOk` / `sendError` |\n| `service-settings/settings-routes.ts` | local `sendOk` / `sendError` |\n| `service-datasource/admin-routes.ts` | local `sendOk` / `sendError` |\n| `rest/external-datasource-routes.ts` | local `sendOk` / `sendError` |\n| `rest/package-routes.ts` | local `sendOk` / `sendError` |\n| `service-i18n/i18n-service-plugin.ts` | local `sendError`; **success built inline in 4 routes** |\n\nSo the envelope's shape now lives in eleven places rather than one. Nothing is *wrong* — the shared conformance guard (`@objectstack/route-envelope-conformance`) proves all six agree today, which is exactly why this is a cleanup rather than a bug. But the guard proves agreement; it does not create it. A seventh module starts by copying the pair again.\n\nThis is the same argument #3843 made about the *scan* one layer over: three copies was the signal it wanted lifting. Six copies of the builder is the same signal.\n\n## The i18n half of it\n\n`i18n-service-plugin.ts` is the one module still building success bodies inline, once per read route:\n\n```ts\nres.json({ success: true, data: { locales } });                              // :190\nres.json({ success: true, data: { locale, translations } });                 // :205\nres.json({ success: true, data: { object: objectName, locale, labels } });   // :226\nres.json({ success: true, data: { object: objectName, locale, labels } });   // :237\n```\n\nThose bodies are **correct** — `packages/runtime/src/i18n-success-envelope.conformance.test.ts` drives them — so this is not the envelope drift #3843 was about. It is a weaker guard: a fifth read route could get the shape wrong and only a driven test would notice. #3843 pinned it as an explicit ratchet in `service-i18n/src/error-envelope.conformance.test.ts`:\n\n```ts\ncheckRouteEnvelope({ source, module: 'i18n-service-plugin.ts', jsonCallSites: 5, successBuilders: 4, errorBuilders: 1 });\n```\n\nwhich fails on any new inline body and drops to the default `2 / 1` the moment the four are consolidated.\n\n## What needs deciding\n\n1. **Consolidate i18n only.** Add a `sendOk` to `i18n-service-plugin.ts`, delete the ratchet, all six modules then pass the shared guard on its defaults. Small, mechanical, no cross-package movement.\n2. **One shared runtime builder for all six.** The envelope is declared once in `packages/spec`; the thing that *writes* it could be too. `sendOk` / `sendError` need nothing but a `{ status(n): this; json(body): unknown }` shape, so a structurally-typed pair has no dependencies at all and every module can import it. The blocker is placement, not design: `packages/spec` is schemas-only (Prime Directive #2), and the callers span `rest` + four `services/*`, which rules out anything that depends on them.\n3. **Leave it.** The guard already fails any module that disagrees, and six two-line copies are cheap. Costs nothing today; pays the copy again per new module.\n\nRecommendation: **1, then 2.** (1) is worth doing regardless — it retires a ratchet and makes the guard uniform. (2) is the real consolidation, and it wants the placement question answered deliberately rather than by whoever writes the seventh module. Worth sequencing after #3841/#3842, since a shared builder is the natural place to enforce a `code` vocabulary once one is chosen.\n\n## Adjacent, one line, noted here rather than filed twice\n\n`admin-routes.ts` answers `datasource_admin_unavailable` on three routes whose missing dependency is the **external-datasource** service, not the admin one (`GET /:name/remote-tables`, `POST /:name/test`, `POST /:name/object-draft` all resolve `externalService()` and then call the shared `unavailable()` helper). Pre-existing, untouched by #3843 — which deliberately carried every code string over verbatim — and a natural pickup for whoever does #3841's sweep."
+}

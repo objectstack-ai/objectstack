@@ -1,0 +1,35 @@
+{
+  "number": 4323,
+  "kind": "pull_request",
+  "title": "fix(spec,data): the five RPC query aliases resolve by one fold — spec table, not per-reader prose (#3795)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T05:58:10Z",
+  "updated_at": "2026-07-31T06:30:44Z",
+  "closed_at": "2026-07-31T06:30:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T06:30:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4323",
+  "body": "Closes #3795. The sweep's live-and-inverted cluster: `RpcQueryOptionsSchema` stated its five alias precedences in prose only, so both readers re-implemented them — `protocol.ts` had **four of five backwards** (canonical consulted last), and disagreed with the runtime dispatcher's copy on three, so the same request resolved differently per path (`?select=a&fields=b` → `[a]` or `[b]` depending on which route served it).\n\n## What changed\n\n**The mapping lives once, in the spec.** `packages/spec/src/data/data-engine.zod.ts` now exports `RPC_QUERY_ALIAS_SLOTS` (the five pairs) and `foldQueryAliasSlots` (the fold), and both consumers run the same table:\n\n1. **Schema transforms** — `RpcQueryOptionsSchema` (find/findOne) and the four `RpcLegacyFilterMixin` options (update/delete/count/aggregate requests) fold at parse. Parsed output speaks canonical QueryAST keys only; the alias keys are **dropped from the output type**, so a TS consumer reading `parsed.query.populate` fails to compile instead of silently reading `undefined` — the #3742/#3764 shape one layer down, hence the **minor** for `@objectstack/spec`.\n2. **`protocol.ts findData`** — the four inverted open-coded folds are gone; the wire fold runs the spec table extended with the wire-only spellings (`filters`, `$filter`, `$expand` — the last settling the `$expand ?? expand` inversion the issue flagged \"worth settling in the same pass\").\n3. **`runtime/domains/data.ts`** — the dispatcher's second copy of the fold (opposite precedence on three pairs) is **deleted**, not fixed in place. GET-list wire params ride to `findData` verbatim; one fold, one answer.\n\n## The rule (per slot)\n\n#4181 had already replaced \"pick a winner\" with \"refuse ambiguity\" for the filter pair, with rationale that applies verbatim to the other four (\"picking one is the silent drop itself\"). This PR generalizes that rule rather than implementing the doc block's silent canonical-wins, and rewrites the doc block to match:\n\n- **alias alone** → folds into the canonical key, alias dropped — every previously-working single-vocabulary request keeps working on every path;\n- **both spellings, same value** → redundant, tolerated, alias dropped;\n- **both spellings, different values** → `400 INVALID_REQUEST` (wire) / parse failure (schema), naming the spellings the caller actually wrote (`$expand`, not `expand` — the #4226 discipline) and the canonical key;\n- **explicit `null` spelling** → a *withdrawal*, never a conflict: a null alias is dropped silently, a null canonical keeps its slot-specific answer (preserves #4226's pinned `{orderBy: null, sort}` behavior and #4181's `{where: null}` rejection).\n\n## Behavior changes (deliberate, all toward one answer)\n\n| request | before | after |\n|---|---|---|\n| `?filter=X&where=Y` (GET list) | `Y` silently (dispatcher) | `400` — matches what `POST /query` already did (#4181) |\n| `{select: a, fields: b}` | `[a]` — alias clobbered canonical | `400` |\n| `{skip: 10, offset: 0}` | `10` — alias clobbered canonical | `400` |\n| `{populate: [a], expand: b}` | `populate` won, canonical only as fallback | `400` |\n| `{sort: a, orderBy: b}` | `b` silently | `400` (consistency — one rule for all five slots) |\n| any alias **alone** | worked | unchanged ✔ |\n| both spellings, **identical** value | passed | unchanged ✔ |\n| `{expand: ['a','b']}` on `POST /query` | latent bug: array survived the block whole, #4226 gate read its **indices** → `400 Unknown field '0'` (or raw array reached the driver registry-less) | lowers to `{a: {…}, b: {…}}` like `populate` always did |\n\nCallers mixing vocabularies with *different* values were already getting a wrong/ambiguous answer on at least one path — nothing that worked consistently before stops working.\n\n## Pins\n\n- **spec**: per-pair fold-to-canonical + alias-absent-from-output, record-sort lowering, identical-tolerated/conflict-refused, all five conflict pairs (`data-engine.test.ts`).\n- **protocol**: `it.each` over all five slots × {fold, conflict, redundant-identical}; rejection message quotes wire spellings incl. OData; canonical-only untouched; null-withdrawal; expand-array lowering (`protocol-data.test.ts`). The #4181 suite passes unchanged — the shared fold preserves its semantics exactly.\n- **runtime**: dispatcher test now pins verbatim pass-through (`http-dispatcher.test.ts`).\n\n## Verification\n\n- `spec` 7132 / `objectql` 1365 / `runtime` 954 / `metadata-protocol` 122 tests green.\n- Full `pnpm test`: 131/132 tasks green; the one failure was `dogfood/two-factor-lockout` timing out at 5s under parallel load — passes standalone, untouched by this PR.\n- `check:generated` all 8 gates green; `api-surface.json` (+4 exports) and `content/docs/references` regenerated via `--fix`.\n- Changeset: minor `@objectstack/spec`, patch `@objectstack/metadata-protocol` + `@objectstack/runtime`.\n\n## Scope notes\n\nPer the issue: `$top`/`$select`/`$orderby`/`$skip` (the OData rewrite loop) and the engine-level `top`→`limit` alias are left as-is; `visibleWhen` family already correct; the remaining `@deprecated` spec markers are renamed exports with no key-precedence risk.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

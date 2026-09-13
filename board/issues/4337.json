@@ -1,0 +1,35 @@
+{
+  "number": 4337,
+  "kind": "pull_request",
+  "title": "ci: Temporal Conformance's two test steps run under the stall guard (#4331)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T06:42:40Z",
+  "updated_at": "2026-07-31T07:14:03Z",
+  "closed_at": "2026-07-31T07:13:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4337",
+  "body": "Closes #4331\n\n## 改了什么\n\nTemporal Conformance (live PG + MySQL) job 的两个测试步骤原来裸跑 `pnpm test`,现在和 Test Core(ci.yml:153/165)一样包上 `run-with-stall-guard`,参数相同(`--stall-minutes 10`):\n\n| 步骤 | log |\n|:--|:--|\n| `Run driver-sql suite against both live servers` | `$RUNNER_TEMP/temporal-driver-sql.log` |\n| `Run the non-SQL temporal backends under the skewed process zone` | `$RUNNER_TEMP/temporal-non-sql.log` |\n\n**两步的 TZ 断言原样留在 guard 之前、不被包进去** —— 那个 `node -e` 必须能在任何测试启动前直接中断该步骤。已验证 `TZ=UTC` 时 step 在 `bash -e` 下于断言处退出 1,guard 根本不会被执行到。\n\n10 分钟的取值:该 job 健康跑完是 3–4 分钟,10 分钟静默不可能是\"慢\",与 Test Core 保持一致。\n\n## 关于 issue 里提的第二种形态 —— 结论是 guard 已经覆盖,不需要新检测器\n\nissue 猜测「如果 guard 目前只盯输出静默,这一形态正好覆盖」,这个判断是对的,而且我实测确认了,没有只靠读代码:\n\n- **形态 A(run 2:五个包全部 `Done`、进程不退出、零输出)** —— 子进程还活着但不再产出字节,watchdog 只看静默、不看子进程死活,所以照样在阈值处触发:判 stall → 杀整个进程组 → exit 75。判决里引用的 last line 正是 turbo 的完成摘要。\n- **形态 B(顶层命令已退出、但残留孙进程仍握着 stdout/stderr 管道)** —— guard 走的是 `child.on('exit')` 而不是 `'close'`,所以是立即返回子进程真实退出码(实测 elapsed 0s),不会被泄漏的管道句柄吊住。这一条本来就是对的,我把它写进注释免得日后有人\"顺手\"改成 `'close'` 把洞开出来。\n\n顺带确认退出码没被吞:红套件穿过 guard 仍然 exit 1。\n\n因此脚本里**没有加任何兜底逻辑**,唯一的改动是判决文案:原文只描述了 mid-suite 那一种形态(「This is the #4250 failure mode」),在 post-Done 形态下会把人引去找一个根本不存在的卡死测试文件。现在它同时点名两种形态,并说明用 last line 来区分。\n\n## 验证\n\nCI 配置改动,靠机械验证而非跑真套件(guard 本身在 Test Core / Dogfood / 两个 nightly 上已在跑):\n\n- YAML 解析通过;两个 step 的 `run` body 过 `bash -n`。\n- 把 step body 抽出来、用一个打印 argv 的假 `pnpm` 执行,确认 `--` 之后传给 guard 的参数与原来的 pnpm 调用**逐字相同**(含第二步那串多行 `--filter` 续行),TZ 断言仍先跑并打印 skewed zone。\n- `TZ=UTC` 时步骤在断言处退出 1,不进 guard。\n- 形态 A / 形态 B / 红套件三个用例按上文实测。\n\n未加 `check-test-completeness.mjs` 后置步骤(Test Core 和 Dogfood 有):issue 没有要求,是否适用于这两个套件的输出形态需要单独判断,不在本 PR 范围内扩。\n\nchangeset 为空 frontmatter(CI-only,releases nothing),沿用 `test-core-stall-guard.md` / `stall-guard-rollout.md` 的惯例。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

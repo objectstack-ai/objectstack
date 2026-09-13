@@ -1,0 +1,32 @@
+{
+  "number": 4087,
+  "kind": "issue",
+  "title": "dispatcher 的 /storage/upload 用 upload(file, {request}) 调用契约里的 upload(key, data, options?) —— 对任何实现都会 TypeError",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T09:12:16Z",
+  "updated_at": "2026-07-30T10:41:11Z",
+  "closed_at": "2026-07-30T10:41:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4087",
+  "body": "按 Prime Directive #10 记录，#4058 / PR #4086 端到端验证时撞出来的域外问题。\n\n## 现象\n\n`packages/runtime/src/domains/storage.ts` 的 `POST /storage/upload` 分支：\n\n```ts\nconst result = await storageService.upload(file, { request: context.request });\n```\n\n两个实参。但契约（`packages/spec/src/contracts/storage-service.ts`，以及 `storage-service.test.ts` 里的一致用法）是三个：\n\n```ts\nupload(key: string, data: Buffer | ReadableStream, options?: StorageUploadOptions): Promise<void>\n```\n\n所有真实实现都按契约来 —— `s3-storage-adapter.ts:147`、`local-storage-adapter.ts:133`、`swappable-storage-service.ts:54`，service-storage 自己的 `storage-routes.ts:644` 也是 `upload(payload.k, data, { contentType })`。\n\n于是 dispatcher 这条路把 **`key` 传成了文件对象、`data` 传成了 `{ request }`**。实测（plugin-dev 的内存 storage 占槽时）：\n\n```\nTypeError [ERR_INVALID_ARG_TYPE]: The first argument must be of type string or an instance of\nBuffer, ArrayBuffer, or Array or an Array-like Object. Received an instance of Object\n    at Function.from (node:buffer:328:9)\n    at Object.upload (packages/plugins/plugin-dev/dist/index.js:81:37)\n    at handleStorageRequest (packages/runtime/dist/index.js:3657:41)\n```\n\n换成真实 adapter 不会更好：`local-storage-adapter` 会拿文件对象去 `path.join`，S3 会拿它当 object key。\n\n## 为什么一直没暴露\n\n装了 `@objectstack/service-storage` 时，它自己在 `/api/v1/storage`（`storage-routes.ts:129` 的 `basePath`）挂了一整套真实路由，把 dispatcher 这个 bridge 遮蔽掉了。所以这条分支只在**没有插件拥有 `/api/v1/storage`** 时才可达 —— 也就是恰好只在 dev stub / 自装配栈里，那里它必然崩。\n\n`GET /storage/file/:id` 不受影响：`download(id, { request })` 的多余实参被忽略，行为正确。\n\n## 与 #4058 无关\n\n改动前后走到的是同一行：#4058 之前的门是 `!storageService`（stub 是 truthy → 进入），之后是 `isServiceServeable`（内存 storage 声明 `degraded` → 同样进入）。纯属既有缺陷，只是端到端验证时才被看见。\n\n## 需要的决定\n\n不是\"给 dispatcher 加个 `??` 兼容两种签名\"（Prime Directive #12：不要在消费端长出第二套事实上的契约）。真正的问题是这个 bridge 到底该不该存在：\n\n1. **按契约修调用点** —— 从请求里解析出 key + bytes（multipart / raw body），再 `upload(key, data, { contentType })`。要顺带定义 dispatcher 这层怎么拿 `contentType` 和文件名。\n2. **退役这条 bridge** —— `/storage` 的 HTTP 面归 service-storage（它已经是唯一实现，且路由更完整：分片、签名 URL、生命周期）。空槽按 #4058 的规则答 501，与 analytics 的处理同形。倾向这条：一个 500 的 bridge 比没有 bridge 更糟，而\"装 service-storage\"本来就是唯一能真正用起来的路径。\n\n关联：#4058、#4000、#3891、ADR-0076 D11/D12。\n"
+}

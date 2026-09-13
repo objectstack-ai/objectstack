@@ -1,0 +1,35 @@
+{
+  "number": 4367,
+  "kind": "pull_request",
+  "title": "fix(data): paging a sorted read is a partition of the result set, not five queries that share a WHERE clause (objectui#3106)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T09:08:04Z",
+  "updated_at": "2026-07-31T09:37:10Z",
+  "closed_at": "2026-07-31T09:37:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T09:37:08Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4367",
+  "body": "## What\n\n`ORDER BY status LIMIT 50 OFFSET 50` names a sort key that **does not identify a row**. No backend promises that rows with equal keys keep the same relative arrangement between two queries — MongoDB [documents the opposite](https://www.mongodb.com/docs/manual/reference/method/cursor.sort/#sort-consistency): `sort` + `skip`/`limit` on a non-unique key may return the same document more than once.\n\nSo paging a sorted list was never a partition of the collection:\n\n```\npage 1: ORDER BY status LIMIT 5 OFFSET 0   -> [… r04 …]\npage 2: ORDER BY status LIMIT 5 OFFSET 5   -> [… r04 …]     r04 twice; one row never served at all\n```\n\nEvery page is full. Every row is real and belongs. The duplicate sits several screens from the omission — which is why this is found by a user counting records, never by reading a response.\n\n## How\n\n`SqlDriver` and `MongoDBDriver` append a **unique tie-breaker** to any non-empty `orderBy`, in the **last requested key's direction**. Determinism holds either way, but a same-direction suffix is the one a compound index can still walk in a single pass.\n\nTwo deliberate restrictions:\n\n- **`SqlDriver` applies it only to objects it created itself** (`initObjects` records those in `managedObjectFields`). A federated table (ADR-0015) may carry no `id` column, and guessing there is *worse than doing nothing*: the unknown-column error is answered by #3821's recovery ladder retrying with **no ORDER BY at all** — trading a reshuffle among ties for the loss of the caller's whole sort.\n- **`driver-memory` needed no change.** `Array#sort` is stable and the backing table's order does not move between reads, so it already conformed. It gets a suite anyway: that guarantee is implicit, and a refactor that looks like a speed-up (a hand-rolled sort, or sorting the array in place) would remove it without failing any other test in the package.\n\n`MongoDBDriver`'s two sort sites (`find` and `_findStream`) were identical copies; they now share one `buildSortSpec`, so the tie-breaker cannot be added to one and forgotten in the other.\n\n## The contract\n\nThe obligation is now **normative on `IDataDriver.find`**, and the cases are **shared** — `PAGINATION_CASES` in `@objectstack/spec/data`, following the `TEMPORAL_CASES` precedent. A future driver is held to this by a gate rather than by remembering it.\n\nEach driver runs the shared cases; `driver-sql` and `driver-mongodb` additionally assert the emitted clause. That second half matters here: SQLite over a twelve-row table returns ties in rowid order every time, so the property test alone would pass the day someone deletes the feature. On MongoDB the property test is the real one.\n\n## Tests\n\n| suite | result |\n|---|---|\n| `driver-sql` (full) | 603 passed, 38 skipped |\n| `driver-memory` (full) | 275 passed |\n| `driver-mongodb` (full, real MongoDB via `mongodb-memory-server`) | 173 passed |\n| `pnpm --filter @objectstack/spec check:generated` | all 8 artifacts up to date (`api-surface.json` regenerated for the 2 new exports) |\n\n## Out of scope\n\nA paged read with **no** `orderBy` at all is non-deterministic on every backend by definition, and imposing an order on callers who asked for none changes plan selection far more broadly than this does. Filed as #4363 per Prime Directive #10 rather than folded in here.\n\n## Context\n\nThis is the server-side half of objectui#3106 (column-header sort under server pagination). The client half lands in `objectui`; that work makes low-cardinality columns like `status` the *most common* sort key, which turns this from a latent property violation into a daily one.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

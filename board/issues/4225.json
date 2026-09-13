@@ -1,0 +1,32 @@
+{
+  "number": 4225,
+  "kind": "issue",
+  "title": "Three datasource-admin routes answer 503 naming the wrong service (carried out of #3973 so it is not buried)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T16:29:51Z",
+  "updated_at": "2026-07-31T00:39:42Z",
+  "closed_at": "2026-07-31T00:39:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4225",
+  "body": "Recorded as an \"adjacent, one line\" note at the bottom of #3973. That issue is closed by the builder consolidation, which does not touch this — so filing it separately rather than letting it go down with the issue that mentioned it.\n\n## The finding\n\n`packages/services/service-datasource/src/admin-routes.ts` has one shared 503 helper:\n\n```ts\nconst unavailable = (res: any) =>\n  sendError(res, 503, 'SERVICE_UNAVAILABLE', 'The datasource-admin service is not available.');\n```\n\nNine routes call it. Six of them resolve `adminService()`, so the message is right. **Three resolve `externalService()`** — a different service — and still answer that the *datasource-admin* service is unavailable:\n\n| Route | resolves | 503 message says |\n|---|---|---|\n| `GET /:name/remote-tables` | `externalService()` | datasource-admin |\n| `POST /:name/test` | `externalService()` | datasource-admin |\n| `POST /:name/object-draft` | `externalService()` | datasource-admin |\n\nSo an operator whose `external-datasource` service is unwired is told to go look at `datasource-admin`, which is running fine.\n\n## Why the code is not the bug\n\n`SERVICE_UNAVAILABLE` is correct for all nine — ADR-0112's ledger explicitly asks generic conditions to reuse the standard catalog rather than register a per-service 503 synonym, and `admin-routes.ts` documents that decision inline. Which service is down is carried by `message`, exactly as intended. The `message` is simply wrong on three routes.\n\n## Fix\n\nGive `unavailable` a service-name parameter (or add a second helper), so the three external-datasource routes name `external-datasource`. `packages/rest/src/external-datasource-routes.ts` already has the correct string for its own surface:\n\n```ts\nsendError(res, 503, 'SERVICE_UNAVAILABLE', 'The external-datasource service is not available.');\n```\n\nPre-existing — #3843 deliberately carried every code string over verbatim, and #3973 changed no bytes on the wire. A natural pickup for whoever next sweeps this module."
+}

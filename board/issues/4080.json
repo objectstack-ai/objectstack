@@ -1,0 +1,34 @@
+{
+  "number": 4080,
+  "kind": "pull_request",
+  "title": "docs(skills): the retirement kit becomes a playbook — plus the form.data correction the docs missed",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T08:43:21Z",
+  "updated_at": "2026-07-30T09:10:39Z",
+  "closed_at": "2026-07-30T09:10:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T09:10:37Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4080",
+  "body": "The #3896 enforce-or-remove line retired 20+ authorable keys across six metadata types, and every batch re-derived the same procedure from scratch — including the parts that only announce themselves as a red build. This sediments it as an internal skill, and fixes one docs defect the last batch left behind.\n\n## `.claude/skills/spec-property-retirement/SKILL.md`\n\nCovers what nothing else in the repo documents: the disposition gate (enforce vs `experimental` vs remove, and the docs-shaped fields deliberately exempt), the three removal routes and how to pick one, the **fourteen** surfaces a removal touches, the gate loop, and the traps that each cost a red build. It deliberately does *not* repeat `liveness/README.md` (how a verdict is reached) or AGENTS.md (the eight generated artifacts) — it points at them.\n\nTwo findings earned their own sections:\n\n**The ledger discipline is OPPOSITE per route, and the two failures are not symmetric.** `retiredKey()` leaves the key in the walked shape, so its liveness entry must **stay** (`dead` + `verifiedAt` + a REMOVED note); a strict removal takes the key out of the shape, so its entry must **go**. Deleting a tombstoned key's entry reports it UNCLASSIFIED and fails CI — 14 at once during the sweep. The reverse is never checked at all: the gate walks the schema and looks entries up, and never walks entries looking for absent schema keys, so a leftover entry after a strict removal rots invisibly. That asymmetry is how the stale report `aria`/`performance` entries survived a release before a human deleted them as hygiene. One direction fails loudly; the other never fails.\n\n**The build is the referee, not the ledger.** A `dead` verdict is an *input* to removal, not a substitute for the build's own proof. `view.form.data` was on the worklist and the removal broke `gen:schema` — `defineForm` writes `data: { provider: 'schema', schemaId }` onto every metadata form and `metadata-protocol` serves it. The correct response is to correct the ledger, not force the removal. One of fourteen keys was refuted this way; the skill says to budget for it.\n\n## The bug this fixes\n\nThat correction is exactly what went wrong. When `form.data` flipped back to `live` in #4054, the schema, ledger entry, conversion and tests were all corrected — but two prose surfaces were not:\n\n- `content/docs/releases/v17.mdx` — the dead-cluster row still listed form `data` as removed\n- `packages/spec/liveness/README.md` — the view row said `form.{data,defaultSort,aria} REMOVED`\n\nBoth told authors to delete a key `defineForm` requires. Both now state it stays live, with the reason. Note the ledger *counts* were right the whole time (4 dead = responsive/performance/defaultSort/aria) — only the prose drifted, which is why no gate caught it. **The correction path is precisely the one nobody had a checklist for**, so the skill now carries one.\n\n## AGENTS.md\n\nTwo pointers it was missing:\n\n- The Post-Task Checklist's retirement note said only `UNKNOWN_KEY_GUIDANCE`, while `build-schemas.ts` has prescribed `retiredKey()` first since #3855. Now names both routes and flags that they imply opposite ledger dispositions.\n- The Skills section listed only the published `skills/` catalog, leaving both internal playbooks undiscoverable from the file agents are told to read first. Now names `dogfood-verification` and `spec-property-retirement`, with the `metadata.internal: true` requirement.\n\n## Verification\n\n- All **ten** spec gates pass: `check:liveness`, `check:empty-state`, `check:authorable-surface`, `check:docs`, `check:api-surface`, `check:spec-changes`, `check:upgrade-guide`, `check:skill-refs`, `check:skill-docs`, `check:skill-examples`.\n- `check:i18n`, `check:doc-authoring`, `check:release-notes`, `check:nul-bytes` clean.\n- The skills-catalog boundary test (`packages/create-objectstack/src/template-consistency.test.ts`, 18/18) enforces `metadata.internal: true` on every `SKILL.md` outside `skills/` — it reads `git ls-files`, so the new file was staged before the run actually validated it.\n- Confirmed the skill-docs/skill-refs generators are scoped to root `skills/` + an `objectstack-` prefix, so an internal skill does not move those artifacts.\n- The gate loop the skill ships was run as written. It captures exit codes explicitly instead of piping — the skill's own §6 warns that `| tail -1` masks them, and the first draft of that loop leaned on an implicit `$?`.\n- Empty-frontmatter changeset: this releases nothing.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QuViRSR1j6GJjf9qGbnqFX)_"
+}

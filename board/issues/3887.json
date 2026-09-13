@@ -1,0 +1,32 @@
+{
+  "number": 3887,
+  "kind": "issue",
+  "title": "serve 对「bare defineStack config + objects、无 dist artifact」的形态启动失败:`Service 'manifest' is async - use await`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T14:24:15Z",
+  "updated_at": "2026-07-31T09:24:14Z",
+  "closed_at": "2026-07-31T09:24:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3887",
+  "body": "## 一句话说明\n\n一个只有 `objectstack.config.ts`(`defineStack` + objects)、**没有** `dist/objectstack.json` 的工程,`objectstack serve` 启动失败,报 `✗ Service 'manifest' is async - use await`。这是 #3886 做 stashed-baseline 对照实验时发现的**预存问题**(基线与改动后逐字节同样失败),按 PD#10 记录。\n\n## 复现\n\n```bash\nmkdir demo && cd demo   # 需在 @objectstack/spec 可解析的目录下\ncat > objectstack.config.ts <<'TS'\nimport { defineStack } from '@objectstack/spec';\nexport default defineStack({\n  manifest: { id: 'com.test.cfgload', name: 'CfgLoad', type: 'app', version: '1.0.0' },\n  objects: [{ name: 'cfg_note', label: 'Note', fields: { title: { type: 'text' } } }],\n});\nTS\nOS_DATABASE_URL=memory://x objectstack serve -p 38746\n```\n\n输出:\n\n```\n[StandaloneStack] artifact read FAILED: path='.../dist/objectstack.json' error=ENOENT ...\n  ✗ Service 'manifest' is async - use await\n```\n\n## 事实核实\n\n- 该形态走 `shouldBootWithLibrary(config)` → `createStandaloneStack`(bare `defineStack` 的默认路径),artifact 缺失只是 warning,boot 继续,随后死在 `manifest` service 的异步解析上。\n- 在 #3886 的 worktree 上 `git stash` 掉全部改动、重建后**同样失败** —— 与 datasource 声明化(#3869/#3886)无关。\n- 同一 config 先 `objectstack build` 再 serve(有 artifact)可正常启动 —— 所以受影响的是「没跑过 build 直接 serve/dev」的首次体验路径,`create-objectstack` quickstart 若先 build 则不受影响。\n\n报错文案指向 kernel 的 service factory 异步检测(`Service 'X' is async - use await`),大概率是某处对 `getService('manifest')` 的同步调用在此形态下撞上了 async factory —— 没有继续深挖,避免在 #3886 里扩 scope。\n\n## 影响\n\n新手最自然的动作之一(「写个 config 直接 serve」)在无 artifact 时启动失败,且报错与真实原因(缺 artifact?manifest 服务时序?)相距很远。\n\n## 关联\n\n- #3886(发现现场,含对照方法)\n- Prime Directive #10"
+}

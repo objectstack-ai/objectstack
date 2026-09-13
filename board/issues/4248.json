@@ -1,0 +1,34 @@
+{
+  "number": 4248,
+  "kind": "issue",
+  "title": "20 个已发布包没有 files 白名单,把 src/、测试文件和构建脚本一起发到 npm",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T00:44:24Z",
+  "updated_at": "2026-07-31T02:05:48Z",
+  "closed_at": "2026-07-31T02:05:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4248",
+  "body": "发现于 #4206:那个 PR 要把 `<包根>/scripts/**` 排除出 docs-drift 的实现改动判定,落地前需要核实「有没有包把 `scripts/` 当运行时代码发布」。核查 `files` 字段时发现了一个更广的打包卫生问题。\n\n## 现状\n\n仓库里 **20 个非 private 包没有 `files` 字段**,npm 因此按默认规则打包整个目录:\n\n```\npackages/formula                        @objectstack/formula\npackages/sdui-parser                    @objectstack/sdui-parser\npackages/connectors/connector-mcp       @objectstack/connector-mcp\npackages/connectors/connector-openapi   @objectstack/connector-openapi\npackages/connectors/connector-rest      @objectstack/connector-rest\npackages/connectors/connector-slack     @objectstack/connector-slack\npackages/plugins/embedder-openai        @objectstack/embedder-openai\npackages/plugins/knowledge-memory       @objectstack/knowledge-memory\npackages/plugins/knowledge-ragflow      @objectstack/knowledge-ragflow\npackages/plugins/plugin-approvals       @objectstack/plugin-approvals\npackages/plugins/plugin-email           @objectstack/plugin-email\npackages/plugins/plugin-pinyin-search   @objectstack/plugin-pinyin-search\npackages/plugins/plugin-reports         @objectstack/plugin-reports\npackages/plugins/plugin-sharing         @objectstack/plugin-sharing\npackages/plugins/plugin-webhooks        @objectstack/plugin-webhooks\npackages/services/service-cluster       @objectstack/service-cluster\npackages/services/service-cluster-redis @objectstack/service-cluster-redis\npackages/services/service-datasource    @objectstack/service-datasource\npackages/services/service-sms           @objectstack/service-sms\npackages/triggers/trigger-api           @objectstack/trigger-api\n```\n\n对照组:`spec`、`objectql`、`platform-objects`、`plugin-audit`、`plugin-security`、`driver-sqlite-wasm`、`service-messaging`、`service-realtime`、`service-storage` 都声明了 `files`(基本是 `[\"dist\",\"README.md\"]`),所以这 20 个是**漏了**,不是有意的另一套约定。\n\n## 实测\n\n`npm pack --dry-run` on `@objectstack/plugin-webhooks`:\n\n```\n文件数: 21 | 分布: { src/: 15, scripts/: 1, 其他: 5 }\n其中测试文件: 3\n  src/auto-enqueuer.test.ts\n  src/bootstrap-declared-webhooks.test.ts\n  ...\n  scripts/i18n-extract.config.ts\n```\n\n即消费者装到的是 **TypeScript 源码 + 单元测试 + 构建期工具配置**。(该检出未构建,所以 `dist/` 未出现在列表里;真实发布时 `dist/` 会在这些之上另加,不会替代它们。)\n\n## 为什么值得修\n\n1. **体积与噪声** —— 测试文件对消费者零价值,却计入安装体积和依赖扫描面。\n2. **`scripts/` 被发布是 #4206 那条排除臂的唯一潜在反例。** 目前结论仍成立 —— 这 20 个包里带 `scripts/` 的三个(`plugin-approvals` / `plugin-sharing` / `plugin-webhooks`)装的都只是 `i18n-extract.config.ts`,是构建期工具而非运行时代码,所以「`scripts/**` 不算实现改动」没有被证伪。但这个结论是靠**逐个人工核对内容**得到的,不是靠任何机制保证的:哪天有人往某个包的 `scripts/` 放进运行时代码并发布,#4206 的排除就会开始漏报,而没有任何东西会喊一声。\n3. **一致性** —— 一半包声明 `files` 一半不声明,是 #3786 那类「手抄清单没有闸门」的形状。\n\n## 建议\n\n给这 20 个包补 `\"files\": [\"dist\", \"README.md\"]`(与已有包对齐;个别包若确实需要发布 `src/` 做 source map 调试,单独说明并显式列出)。\n\n真正治本的是加一道闸门,而不是补完这一轮就完事 —— 例如在 lint 阶段断言「每个非 private 包都必须声明 `files`」。仓库里 `scripts/check-*.mjs` 已经有一整套同形状的守卫可循,加一条的成本很低,且能顺带让 #4206 的那个假设从「人工核对过」变成「持续被校验」。"
+}

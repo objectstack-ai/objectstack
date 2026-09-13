@@ -1,0 +1,35 @@
+{
+  "number": 4368,
+  "kind": "pull_request",
+  "title": "fix(lint): 写集诊断如实描述驱动分歧，而非\"静默丢弃\" (#4271)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T09:08:48Z",
+  "updated_at": "2026-07-31T10:10:40Z",
+  "closed_at": "2026-07-31T10:10:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T10:10:38Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4368",
+  "body": "## 问题\n\n`hook-body-write-unknown-field` 和 `action-body-write-unknown-field` 三条诊断告诉作者：未声明的列 \"silently never lands in the stored record\"。\n\n在 `main` 上实测，**两个方向都是错的**。\n\n## 实际行为\n\nbody 到 driver 之间没有任何一层过滤这个 key：\n\n1. `applyMutationsToInput`（`packages/runtime/src/sandbox/body-runner.ts`）是纯 `Object.assign`，未知 key 原样拷回 payload。\n2. `validateRecord`（`packages/objectql/src/validation/record-validator.ts`）insert 走**已声明**字段，update 是 `if (!def) continue` —— 既不拒绝也不剥离。\n3. `engine.ts` 把整行直接交给 driver。\n\n于是由 driver 决定，两个家族的结论相反：\n\n| Driver | 实际结果 |\n| :--- | :--- |\n| **SQL** | 游离列进入 knex 语句，**整笔写入失败**（`table deal has no column named stagee`）。什么都没存下，连拼写正确的字段也一起丢了，而报错出现在离作者错误很远的地方。 |\n| **Schemaless**（memory、MongoDB） | driver 展开 payload，游离 key **确实被持久化**，成为下游无人读取的未声明列。 |\n\n所以 \"silently never lands\" 在 SQL 上是\"响亮失败且丢掉整笔写入\"，在 schemaless 上是\"确实落库了\"。\n\n## 为什么值得改\n\n诊断信息如果错误描述了它所警告的故障，会教出错误的排查直觉：被告知\"值会静默消失\"的作者，不会把自己真正看到的 driver 报错和造成它的拼写错误联系起来；在 schemaless 上，也不会去找那个**真的存在**的游离 key。\n\n## 改动\n\n- 三条诊断改为陈述真实分歧：[validate-hook-body-writes.ts:469](https://github.com/objectstack-ai/objectstack/blob/claude/adoring-panini-8ae2c7/packages/lint/src/validate-hook-body-writes.ts#L469)（`ctx.input` 写入）、[:488](https://github.com/objectstack-ai/objectstack/blob/claude/adoring-panini-8ae2c7/packages/lint/src/validate-hook-body-writes.ts#L488)（`ctx.api` 写入）、[validate-action-body-writes.ts:273](https://github.com/objectstack-ai/objectstack/blob/claude/adoring-panini-8ae2c7/packages/lint/src/validate-action-body-writes.ts#L273)（action）。\n- 同一句错误论断的其他落点一并对齐：两条规则的文件头注、`ScriptBodySchema` 与 `ActionSchema.body` 的 JSDoc、`reference-integrity-suite.test.ts` 的两处注释，以及两个**尚未发布**的 #4271 changeset。\n- `@objectstack/spec` 仅改 JSDoc —— 无 schema、无生成物变更（spec 全量 279 文件 / 7160 测试通过可证）。\n\n与 #4355 的关系：那个 PR 修的是散文档，本 PR 是同一处更正落在**随包发布的面**上 —— 作者真正读到的那条诊断，外加一个把它钉住的测试。\n\n## 回归测试\n\n新增 `packages/runtime/src/sandbox/undeclared-field-write-driver-split.integration.test.ts`（6 个用例）。放在 `packages/runtime`，因为它同时依赖两个 driver 且拥有 `body-runner.ts`。\n\ninsert 用例走**完整链路** —— 真 QuickJS 沙箱 → 真 hook body → 真引擎 → 真 SQLite 表 —— 所以\"未经过滤抵达 driver\"是被证明而非假设的：若该路径上任何一层将来学会过滤，SQL 那半会停止抛错、测试转红。update 用例直接打引擎，因为 `validateRecord` 的 update 分支在那里，而 `beforeUpdate` body 只会把 flat-input envelope 混进被测对象。另含一个对照组：字段拼写正确时两种 driver 都正常落库。\n\n## 验证\n\n- 新测试 6/6；runtime sandbox 全量 9 文件 74 测试\n- lint 全量 41 文件 617 测试\n- spec 全量 279 文件 7160 测试\n- `check:type-check-coverage`、`check:doc-authoring`、`check:role-word`、`check:nul-bytes` 全绿；改动文件 ESLint 干净\n- 已合并 `main`（含 #4355 / #4356 / #4322）后全部重跑\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

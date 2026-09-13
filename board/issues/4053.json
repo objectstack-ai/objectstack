@@ -1,0 +1,32 @@
+{
+  "number": 4053,
+  "kind": "issue",
+  "title": "`GET /ai/agents` is SDK-addressable but unenveloped, and the SDK compensates — making it conformant without a coordinated change silently returns an empty agent list",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T07:10:16Z",
+  "updated_at": "2026-07-31T00:42:40Z",
+  "closed_at": "2026-07-31T00:39:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4053",
+  "body": "Not a bug today. Filing it because the *fix* is the hazard: this route is one of the last unenveloped SDK-addressable surfaces, and converting it the way #3675 → #3843 → #3983 converted the others would break `client.ai.agents.list()` **silently** unless three repos move together.\n\nFound while checking whether the dispatcher domains hide more envelope drift after #4038/#4049. They mostly don't — of 10 hand-built responses across 16 domain files, `auth.ts` (×2) is better-auth's own wire format and `mcp.ts` passes an upstream `Response` through, both legitimately outside the REST envelope, and `keys.ts` / `share-links.ts` hand-build only to get a **201** (`deps.success` hardcodes 200). This is the one left over.\n\n## Current state — consistent, and that is why it is easy to miss\n\nThe payload is **declared**, and declared as the whole body:\n\n```ts\n// packages/spec/src/api/protocol.zod.ts:1078\nexport const AiAgentsResponseSchema = lazySchema(() => z.object({\n  agents: z.array(AgentSummarySchema).describe('Agents this caller may chat with'),\n}));\n```\n\nBoth producers emit exactly that, bare — no `success`, no `data`:\n\n- **framework** — `packages/runtime/src/domains/ai.ts:47`, the degraded fallback when no AI service is registered (open-source default; `service-ai` is Cloud/EE). Returns `{ status: 200, body: { agents: [] } }`.\n- **cloud** — `service-ai`'s `buildAgentRoutes`. Its own test reads the body as the bare shape: `chatbot-features.test.ts:876` → `const body = resp.body as { agents: Array<…> }`.\n\nSo unlike `/share-links` before #3983, **the two surfaces agree**. Nothing is broken.\n\n## The trap\n\nThe route is `disposition: 'sdk'` with `client: 'ai.agents.list'` (`cloud/packages/service-ai/src/ai-route-ledger.ts:196`), and the SDK reads it like this:\n\n```ts\n// packages/client/src/index.ts:3802\nlist: async (): Promise<AiAgentSummary[]> => {\n  const res = await this.fetch(`${this.baseUrl}${route}/agents`);\n  const body = await this.unwrapResponse<AiAgentsResponse>(res);\n  return body?.agents ?? [];\n},\n```\n\n`unwrapResponse` returns the body verbatim when there is no boolean `success`, so `body` is `{ agents: [...] }` and `body?.agents` pulls the array out. Correct — but it is a consumer-side accommodation for an unenveloped producer, the same class of shim Prime Directive #12 says to remove by fixing the producer.\n\n**Now add the envelope to either producer without touching the SDK:**\n\n| step | result |\n|---|---|\n| producer emits `{ success: true, data: { agents: [...] } }` | |\n| `unwrapResponse` sees a boolean `success` → returns `data` | `{ agents: [...] }` |\n| SDK does `body?.agents` on that | ✅ still works |\n\n…which is the *lucky* case, because the payload schema nests under `agents`. But the natural conversion — the one every other module did — puts the **payload directly** in `data`:\n\n| step | result |\n|---|---|\n| producer emits `{ success: true, data: [...] }` (data IS the array, as #3983 did) | |\n| `unwrapResponse` returns `data` | `[...]` |\n| SDK does `body?.agents` on an array | `undefined` → **`[]`** |\n\n`client.ai.agents.list()` then returns an empty list. No error, no 4xx, no log — the console just stops showing AI affordances, which is *also exactly what the legitimate \"no AI service configured\" state looks like*. That is the worst possible failure mode for this particular route: the broken state and the normal state are visually identical.\n\n## Why this is a real risk and not a hypothetical\n\n`share-link-routes.ts` was missed by #3843's hand survey and only turned up when the guard went repo-wide (#3983). This route can't be caught that way at all: `scripts/check-route-envelope.mjs` scans route modules that write via `res.json(...)`, and dispatcher domains return `{ status, body }` for a central sender — noted in #4049. And the real handler lives in **cloud**, outside the framework guard's reach entirely.\n\nSo the next person doing an envelope sweep sees an unenveloped SDK route, converts it the way the other five were converted, gets green CI in whichever repo they are in, and ships a silent regression.\n\n## What a correct conversion looks like\n\nThree repos, one change:\n\n1. **cloud** `service-ai` `buildAgentRoutes` — emit `{ success: true, data }`.\n2. **framework** `runtime/src/domains/ai.ts:47` — same shape for the degraded fallback, so the two surfaces stay in agreement (they do today; that is worth preserving).\n3. **framework** `packages/client/src/index.ts:3802` — drop the `body?.agents` accommodation to match whatever `data` carries.\n\nAnd decide one thing explicitly: does `data` carry `{ agents: [...] }` or the array itself? #3983 set the precedent that `data` carries the payload **directly**, which argues for the array — but that is the variant that breaks the current SDK read, so it must land with step 3, not before it.\n\n`AiAgentsResponseSchema` then describes `data` rather than the whole body — the same relocation `SettingsNamespacePayloadSchema` went through in #3843 (see the note in `service-settings/src/envelope.conformance.test.ts:182`), which is the precedent to follow for keeping the move a *relocation* rather than a reshape.\n\n## Meanwhile\n\nNothing needs doing. Both producers agree and the SDK works. This issue exists so that whoever converts it does all three steps, and so a partial conversion is recognised as the cause when the agent list mysteriously empties."
+}

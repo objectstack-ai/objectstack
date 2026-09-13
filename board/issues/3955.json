@@ -1,0 +1,32 @@
+{
+  "number": 3955,
+  "kind": "issue",
+  "title": "[17.0.0-rc.0] migrate CLI and dev runtime disagree on __search companion provisioning — migrate flags live search columns as destructive orphans",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T15:32:12Z",
+  "updated_at": "2026-07-30T04:38:09Z",
+  "closed_at": "2026-07-30T04:38:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3955",
+  "body": "Found during the HotCRM 17.0.0-rc.0 upgrade (tag commit `fc156fa4a`). Reproducible column-level evidence below.\n\n## Symptom\n`os migrate plan` against a database created by `objectstack dev` reports 9 destructive `drop_column` ops for `__search` companion columns (crm_task, crm_competitor, crm_opportunity_line_item, crm_quote_line_item, sys_metadata, sys_metadata_history, sys_metadata_commit, sys_metadata_audit, sys_view_definition):\n\n> `crm_task.__search: column exists in the database but not in metadata (orphaned) — \"os migrate apply --allow-destructive\" to drop it.`\n\n## Evidence — the two boot paths build different schemas from the same source tree\nSame worktree, same artifact, two fresh databases:\n\n| | created by | crm_task columns | `__search` present |\n|---|---|---|---|\n| dev.db | `objectstack dev` first boot | 34 | **yes** |\n| probe-fresh.db | `os migrate plan --database-url file:...` (CLI boot DDL) | 33 | **no** |\n\nAnd `os migrate plan` against its **own** freshly created DB reports 0 destructive changes — i.e. the \"orphans\" appear exactly when the DB was born under the dev runtime and judged by the CLI.\n\n## Why this is worse than a cosmetic warning\n- The columns are not orphans: they are the search-companion columns (`provisionSearchCompanion` / plugin-pinyin-search) the dev runtime provisions and maintains. Following the CLI's own remediation advice (`--allow-destructive`) deletes live feature columns; the next dev boot presumably re-provisions them — churn at best, broken search at worst.\n- Every dev-created SQLite database permanently nags with 9 destructive ops, training operators to reach for `--allow-destructive`.\n\n## Likely shape of the defect\nThe CLI boot (`packages/cli/src/utils/schema-migrate.ts` → runtime.start → syncRegisteredSchemas) either doesn't load the search plugin or computes companion eligibility differently from the dev runtime, so the metadata it diffs against lacks the `__search` fields for those 9 objects. Whichever side is \"right\", create/serve and plan/apply must share one schema view.\n\n## Related minor asymmetry (same family)\nA brand-new CLI-created DB *immediately* reports the 3 \"safe\" `replace_unique_index` relaxations from #3696 (`uniq_crm_contact_email` → `(organization_id, email)` etc.) — i.e. the create path still emits the legacy platform-wide unique indexes that drift immediately wants to replace. The #3696 fix appears to have updated drift but not table creation."
+}

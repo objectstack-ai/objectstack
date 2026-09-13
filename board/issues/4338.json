@@ -1,0 +1,35 @@
+{
+  "number": 4338,
+  "kind": "pull_request",
+  "title": "feat(lint): &lt;ListView searchableFields&gt; on a react page resolves against the bound object's fields (#4329)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T06:46:23Z",
+  "updated_at": "2026-07-31T07:00:25Z",
+  "closed_at": "2026-07-31T07:00:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T07:00:23Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4338",
+  "body": "Closes #4329.\n\n## What\n\n#4328's `searchable-field-unknown` gates a stale `searchableFields` entry on the metadata surfaces — an object's own ADR-0061 declaration, its built-in named list views, and a `defineView` aggregate's default `list` / named `listViews` — but not the react page surface. `ListView` declares `searchableFields` as a dataProp, so a `kind:'react'` page could write `<ListView searchableFields={['renamed_field']}>` and nothing resolved the name: the engine's `resolveSearchFields` silently drops it (narrower search than the page asked for, or the auto-default — wider — once every entry is stale), and once the REST read path validates the `$searchFields` override (#4254), the prop objectui echoes verbatim becomes a `400 INVALID_FIELD` on that list.\n\n## How\n\n- **`validate-searchable-fields.ts`** exports its core instead of keeping it closure-private: `indexObjectSearchTargets` (object name → declared field names, `null` preserving the \"no authored field map\" distinction) and `checkSearchableFieldList` (the per-entry loop: three skips, dotted-path strictness, message/hint). `validateSearchableFields` behavior is unchanged — its existing tests pass untouched.\n- **`validate-react-page-props.ts`** — the gate that already parses a react page's real JSX and owns React block dataProps — runs that core on every `<ListView>` whose `objectName` and `searchableFields` resolve as static literals. Same rule id, same `error` severity as the metadata surfaces, so the two agree on what counts as a field by construction: cross-package objects, objects with no authored field map, and spec-derived system columns skip; a dotted entry (`owner_id.name`) is flagged, since search matches the field map by exact string.\n- JSX-specific seams follow the gate's existing rules: a value from a variable, a call, or behind a spread is not knowable at build time and skips silently — an unresolvable binding is not a wrong one (ADR-0072 D1).\n\nThe finding's path carries the entry index (`pages[0].source › searchableFields[1]`) so the author can go straight to the stale name.\n\n## Corpus\n\nThe one live instance (`examples/app-showcase/src/ui/pages/renewals-pipeline.page.ts:97`, `searchableFields={['name']}` on `showcase_account`) resolves — this closes the gap before it bites, flagging nothing today.\n\n## Testing\n\n- `pnpm --filter @objectstack/lint test` — 594 passed (39 files), including 9 new tests pinning the JSX seams: static resolution, spread/variable skips, system columns, cross-package + no-field-map skips, dotted paths, did-you-mean, where/path shape.\n- `pnpm --filter @objectstack/lint typecheck` — clean.\n- ESLint on the three changed files — clean.\n\nChangeset included (`@objectstack/lint` minor).\n\n## Follow-ups\n\n- #4340 tracks the rest of the class centrally: every field-bearing prop on React page blocks (`ListView fields/columns/sort/filters/userFilters`, `ObjectForm fields`, `RecordHighlights/Details/Path`, `RecordRelatedList`, `<Block>`) that is still unchecked against the bound object — including the `RecordRelatedList` `objectName` contract conflict that blocks linting that block, and unifying the hand-copied `SYSTEM_FIELDS` sets onto the spec-derived one.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01FwLRwsSQP9gNHkr4dCdQUd"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 4070,
+  "kind": "pull_request",
+  "title": "feat(spec,lint): the `ui` vocabularies admit what the renderers implement (objectui#2945)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T07:58:56Z",
+  "updated_at": "2026-07-30T09:04:30Z",
+  "closed_at": "2026-07-30T09:04:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T09:04:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4070",
+  "body": "Additions-only follow-up to the vocabulary audit (objectstack-ai/objectui#2901, objectstack-ai/objectui#2945). Companion to #4061, which deletes the orphans; this one closes the gaps in the opposite direction.\n\n**Nothing here narrows a vocabulary.** No accepted value stops being accepted, so no already-stored metadata and no in-flight payload changes meaning. That is why this is safe while the actual consolidation stays blocked on #3948.\n\n## `ChartTypeSchema` admits `combo`\n\nThe taxonomy could not name the one chart family the rest of `chart.zod.ts` is written for:\n\n- `ChartSeriesSchema.type` overrides a series' chart type — its own doc comment says **\"combo charts\"**;\n- `ChartSeriesSchema.yAxis` binds a series to the left or right axis, which is only meaningful for mixed marks.\n\nobjectui's renderer draws it distinctly — mixed bar/line/area, dual axes, per-series type resolution (`AdvancedChartImpl.tsx:819`) — and had to carry `combo` in a local fork of this list, in a set whose comment claims to be *\"every value the spec's `ChartTypeSchema` admits\"*.\n\nThis satisfies the taxonomy's own admission rule (in the `NOTE` below the enum): only families the default renderer draws **distinctly**. `combo` does; it is not a variant that falls back to a base family.\n\n## `WidgetActionTypeSchema` is `ActionType`\n\nThe two lists had drifted apart by one member, `form`, and the disagreement was backwards.\n\nA dashboard header or widget action button dispatches through the same `ActionRunner` that implements `form`. objectui's `DashboardRenderer` routes **everything except a raw `url`** into it, deliberately — the code comment records that the previous `modal`/`script` allow-list meant a `flow` header action fell through to a warn and never dispatched (#3528).\n\nSo the narrower enum rejected at validation exactly what the shared dispatcher then executes at runtime. Derived rather than restated: the next type the runner implements needs one edit, not two.\n\n`dashboard.zod.ts` → `action.zod.ts` is a new import edge with no cycle (`action.zod.ts` imports neither `dashboard.zod.ts` nor anything that reaches it).\n\n## `ListChartConfigSchema.chartType` is `ChartTypeSchema.extract([...])`\n\nSame five members as before — **a de-duplication, not a widening**. A member renamed in the chart taxonomy now fails at build time instead of leaving a second list quietly disagreeing with the first. (`.extract()` resolves correctly through the `lazySchema` proxy — verified by execution, and by the guard.)\n\n`view.zod.ts` → `chart.zod.ts` is likewise cycle-free (`chart.zod.ts` imports only `i18n.zod` and `lazy-schema`).\n\n## `@objectstack/lint`'s chart-family set derives from the taxonomy\n\n`validate-widget-bindings` decides which widgets need a `chartConfig` measure mapping from a hand-written list of families. **Its omissions fail in the worst direction:** an unlisted family reads as *\"not a chart\"*, so a widget missing its measure mapping **passes** validation instead of being reported.\n\n`combo` was exactly that case. Proven rather than asserted — pinning the old hand-written list back:\n\n```\nAssertionError: expected a warning for chart type 'combo': expected [] to have a length of 1 but got +0\n```\n\nThe set is now the taxonomy minus an explicit `MEASURE_EXEMPT_CHART_TYPES` (single-value: gauge/solid-gauge/metric/kpi/bullet; tabular: table/pivot), so a family added to the spec is covered without editing the rule.\n\n## Guards\n\n`packages/spec/src/ui/vocabulary-derivation.test.ts` asserts both derivations still hold — a restated list fails *silently*, since it keeps validating, just not what the other list says:\n\n- the list-chart subset admits exactly its five members, all of them taxonomy members, still rejects `donut` and `combo`, accepts each of the five, and defaults to `bar`;\n- `WidgetActionTypeSchema`'s options equal `ActionType`'s exactly, `form` parses, an unknown type still throws.\n\nThe lint suite now walks **every** multi-series family in the taxonomy rather than a list of its own.\n\n## One item from the audit deliberately not done\n\nThe audit also proposed promoting `navigation` into `ActionType`. I did not, and the reason is the audit's own thesis:\n\n- `ActionRunner.executeNavigation` is a **strictly weaker** `executeUrl` — no `${param.X}` / `${ctx.X}` interpolation, no `apiBase` promotion for `/api/...` paths, no `openIn` — differing only by a `replace` option;\n- its one live producer is the SDUI `element:button` `action` prop, and `ElementButtonPropsSchema` **does not model an `action` prop at all** (page block `properties` are `z.record(z.string(), z.unknown())`, so it is neither validated nor stripped today).\n\nPromoting the name would add a second spelling of *navigate* to a closed authorable vocabulary — members cannot be removed later, per the audit's own rule — without closing the gap that actually exists, which is the undeclared `element:button.action`. Worth its own issue; not worth a one-way door here.\n\n## Verification\n\n- `@objectstack/spec`: **6944 tests across 267 files**, green. `tsc --noEmit` clean.\n- `@objectstack/lint`: **544 tests across 37 files**, green. `tsc --noEmit` clean for the touched file (two remaining diagnostics in this worktree are `@objectstack/formula` having no local `dist` types, in files this PR does not touch).\n- The lint guard was confirmed to fail before the fix, as quoted above.\n\nRefs objectstack-ai/objectui#2945, objectstack-ai/objectui#2901, #3528, #4061\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 4329,
+  "kind": "issue",
+  "title": "lint: `<ListView searchableFields>` on a React page is not checked against the object's fields",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T06:18:53Z",
+  "updated_at": "2026-07-31T07:00:24Z",
+  "closed_at": "2026-07-31T07:00:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4329",
+  "body": "Follow-up to #4328, which added `searchable-field-unknown` — a gating lint for a `searchableFields` entry that names no field on the object.\n\nThat rule covers the **metadata** surfaces: an object's own ADR-0061 declaration (`objects[].searchableFields`), its built-in named list views (`objects[].listViews.<k>.searchableFields`), and a `defineView` aggregate's default `list` / named `listViews`.\n\nIt does **not** cover the React page surface. `ListView` declares `searchableFields` as a dataProp:\n\nhttps://github.com/objectstack-ai/objectstack/blob/main/packages/spec/src/ui/react-blocks.ts#L91\n\n```ts\ndataProps: ['columns', 'sort', 'searchableFields', 'userFilters', 'pagination', …]\n```\n\nso a React page can write `<ListView objectName=\"showcase_account\" searchableFields={['no_such']} />` and nothing resolves that name. `validate-react-page-props.ts` only checks chart axes / aggregate coherence today; `validate-page-field-bindings.ts` covers the page-component `properties` bag, and its descriptor table names `searchFields` for `element:record_picker` but nothing for the React `ListView` block.\n\nThe failure is the same one #4328 documents: the engine's `resolveSearchFields` silently filters a stale name out, so the search either scans a narrower set than the page asked for or — once every entry is stale — falls through to the auto-default and scans a *wider* one. Once the REST read path validates the `$searchFields` override (#4254), a stale prop becomes a `400 INVALID_FIELD` on that list.\n\n**Suggested fix:** extend the descriptor table in `validate-page-field-bindings.ts` (or `validate-react-page-props.ts`, whichever owns React block dataProps) to resolve `searchableFields` against the block's bound object, reusing the same skips `validate-searchable-fields.ts` established — unknown object, no authored field map, registry-injected system columns — so the two surfaces agree on what counts as a field.\n\nThe one live instance today is clean (`examples/app-showcase/src/ui/pages/renewals-pipeline.page.ts:97` → `searchableFields={['name']}`), so this is a gap to close before it bites, not a live bug."
+}

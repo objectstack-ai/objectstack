@@ -1,0 +1,32 @@
+{
+  "number": 3957,
+  "kind": "issue",
+  "title": "Field validation messages are hardcoded English + API field name — `penalty_amount must be ≥ 0` reaches end users verbatim",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T15:46:07Z",
+  "updated_at": "2026-07-30T10:28:56Z",
+  "closed_at": "2026-07-30T10:28:56Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3957",
+  "body": "## Summary\n\n`validateRecord` / `validateOne` in `packages/objectql` build their human-readable messages by string-concatenating the **API field name** into a **hardcoded English** template. Those strings are what the Console and any custom client show the end user, even when the object has a full `zh-CN` translation bundle and the field's label is right there in the schema.\n\nVersion: `@objectstack/* 17.0.0-rc.0`.\n\n## Where\n\n`packages/objectql` — the numeric branch is representative:\n\n```js\nif (def.min !== undefined && n < def.min) {\n  return { field: name, code: 'min_value', message: `${name} must be ≥ ${def.min}` };\n}\nif (def.max !== undefined && n > def.max) {\n  return { field: name, code: 'max_value', message: `${name} must be ≤ ${def.max}` };\n}\n```\n\nSame shape for `invalid_number`, `invalid_email`, `invalid_url`, `invalid_phone`, `invalid_date`, `invalid_boolean`, the `maxLength` check, etc.\n\n## Actual\n\nA Chinese-locale user importing a bad row sees, verbatim in the UI:\n\n```\n第 1 行：penalty_amount must be ≥ 0\n```\n\nThe field is declared `label: '处罚金额'` and has a `zh-CN` translation. Neither is used. Same for `copq must be ≤ 99999999.99`, `quota_hours must be ≥ 0`, `nc_qty must be ≥ 0`, `max_hours must be ≥ 0`, and (from an earlier round) `remark must be ≤ 512 characters (got 3000)`.\n\n## Expected\n\nEither of:\n\n1. Resolve `def.label` (and the active locale's translation for it) instead of the raw API name, and route the template through the i18n service — the runtime already has `I18nService` and the bundles are loaded; or\n2. Keep `message` as a developer-facing fallback but return enough structure for clients to render their own text. The envelope already carries `code` (`min_value` / `max_value` / …) and `field`; adding the bound as a discrete value (e.g. `params: { min: 0 }`) instead of only inside the string would let every client format it locally.\n\nOption 2 alone would unblock custom clients; option 1 is needed for the Console, which has no place to intercept.\n\n## Contrast: the client side already does this correctly\n\nFor the *same* constraint, the Console form renders `min`/`max` onto the native input and the browser produces a properly localized 「值必须大于或等于 0。」. Only the server-side message is untranslated — so the user gets Chinese when the form catches it and English when the server catches it, for the identical rule.\n\n## Impact\n\nFound while adding range guards to the settlement fields of a production MES app. Any path that reaches the server rather than the form — CSV import, record-action dialogs, custom clients — surfaces raw English with an API identifier the user has never seen. There is no application-layer place to fix it for the Console.\n\nSibling gap already tracked on our side: the security layer's `[Security] Access denied: ...(row-level security)` is likewise a hardcoded English bare string. Same family, different module.\n\nRelated: #3956 (import dry run skips this validation entirely)."
+}

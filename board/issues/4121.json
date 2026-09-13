@@ -1,0 +1,32 @@
+{
+  "number": 4121,
+  "kind": "issue",
+  "title": "A filter array that isn't a valid AST reaches the driver as an opaque `where` — reject it at the protocol instead",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T10:27:11Z",
+  "updated_at": "2026-07-30T15:14:40Z",
+  "closed_at": "2026-07-30T15:14:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4121",
+  "body": "Item 2 of #3948, split out so that issue can close on its headline defect. **This is an error-locality improvement, not a correctness bug** — since #3948 item 1 the drivers throw, so nothing is silently dropped either way. What is wrong is *where* the error comes from and how much it tells you.\n\n## Current behaviour\n\n`packages/metadata-protocol/src/protocol.ts:2849-2852`:\n\n```ts\nif (isFilterAST(parsedFilter)) {\n  parsedFilter = parseFilterAST(parsedFilter);\n}\noptions.where = parsedFilter;   // assigned unconverted when isFilterAST() said no\n```\n\n`isFilterAST` is consulted as a *conversion* gate, not a *validation* gate. An array that fails it is passed straight through as if it were an opaque `where` object. The driver then rejects it — with a driver-level message, several layers from the request that carried the malformed filter, and differently per backend.\n\nA caller gets `[sql-driver] Unrecognized filter operator \"…\"` for what is really \"your `$filter` query parameter is not a valid filter AST\".\n\n## Why this is worth doing\n\nIf a value *looks* like a filter array (`Array.isArray`) but `isFilterAST()` refuses it, that is a **malformed filter**, not an opaque `where`. Rejecting at the boundary gives:\n\n- one error for every backend instead of three variants (driver-sql throws one message, driver-memory another, driver-mongodb passes `$${op}` to Mongo and surfaces a server error);\n- a message that can name the offending operator *and* point at `VALID_AST_OPERATORS`, which the driver cannot do as usefully because it has already lost the request context;\n- failure before any connection is taken.\n\n## The trap to avoid\n\n`isFilterAST` **does** accept nested arrays — `filter.zod.ts:516`:\n\n```ts\n// Legacy flat array: [[cond], [cond], ...]\nif (filter.every((item: unknown) => isFilterAST(item))) return filter.length > 0;\n```\n\nSo the naive form of this change does **not** break legitimate `[[field, op, value], [field, op, value]]` filters; they already return `true` and get parsed.\n\nWhat it *would* newly reject is an array-shaped `where` that is not an AST at all — including any driver-specific extension a caller passes opaquely, if one exists. That makes this a **request-path narrowing**, which is why #3948 phrased it as *\"Consider\"* rather than a fix. It needs someone to decide whether an opaque array `where` is a supported input, and to say so in the error either way.\n\n## Suggested shape\n\nReject only the unambiguous case — `Array.isArray(parsedFilter) && !isFilterAST(parsedFilter)` — with a 400-class error naming the first unrecognized operator it can find and referring to `VALID_AST_OPERATORS`. Object `where` values keep passing through untouched, so the `$`-token path is unaffected.\n\nWorth a test that a nested `[[a,'=',1],[b,'=',2]]` filter still parses, since that is the regression this change could plausibly cause.\n\nSplit from #3948 (items 1 and 3 of which are done). Refs objectstack-ai/objectui#2945"
+}

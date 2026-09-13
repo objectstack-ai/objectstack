@@ -1,0 +1,30 @@
+{
+  "number": 3963,
+  "kind": "issue",
+  "title": "把 public 从\"全局开关的副产品\"升级为声明式能力,然后删掉 api.requireAuth 开关",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T23:55:29Z",
+  "updated_at": "2026-07-30T06:54:58Z",
+  "closed_at": "2026-07-30T06:54:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3963",
+  "body": "**决定(两步,顺序重要):**\n\n1. ~~先给 `book.audience: 'public'` 一个声明派生的窄豁免~~ → **已完成,#3995 已合并**;\n2. **再**删掉 `api.requireAuth` 这个 opt-out 及其全套管线,匿名改为无条件 deny。← 待做\n\n**决策 A 已定:A1 —— auth-less stack 启动即明确报错。** 不保留 CLI 那条内部派生兜底:没有 auth 就没有安全模型,不该有可用的数据 API。\n\n---\n\n## 三个原始理由(保留)\n\n### 1. 所有真实的\"无会话\"场景都不靠它\n\n| 面 | 实际靠什么授权 | 需要全局开关? |\n|:--|:--|:--:|\n| `/auth/*`(登录、注册、SSO 回调、首个管理员) | allowlist(`auth-gate.ts`) | 否 |\n| `/health` `/ready` `/discovery` | allowlist | 否 |\n| `/me/apps` `/me/localization`(ADR-0069 补救 UI) | allowlist | 否 |\n| 公开表单提交 | `publicFormGrant`(ADR-0056 Option A) | 否 |\n| 分享链接 resolve / messages | token 即授权,校验后以 SYSTEM 读 | 否 |\n| **公开 book / doc 读面** | **§6.7 audience 闸门(#3995 起)** | **否** |\n| MCP 端点 | OAuth token 或 API key,fail-closed | 否 |\n\n### 2. 它的存在逼着下游各自防匿名\n\n`plugin-approvals/src/approval-service.ts:642` 的注释就是活样本:*\"the REST anonymous-deny only fires when `api.requireAuth` is set, so without it an anonymous request previously decided approvals outright by naming one.\"*\n\n### 3. 它能用的时候会做什么 —— 已实测\n\n#4002 修好之后拿到了一个匿名可达的部署,实测:匿名调用者可以读 **`sys_user`**(身份表)。这是这个开关文档化的语义(\"serve data publicly\"),也正是该退役它的理由。\n\n---\n\n## ✅ 两个原阻塞项都已消解\n\n**\"值丢在哪一环\" → #4002 已定位并修复(PR #4008)。** `serve.ts` 的浅展开让 `createStandaloneStack()` 返回的 `api`(只带 scoping 两个键)**整块替换**掉作者写的 `api`。所以这个开关不是\"设计上不可用\",而是**作者写的值在这条 boot 路径上被丢弃**;`enforceProjectMembership` 同样受害,而它在本 issue 完成后**依然存在** —— 所以 #4002 必须独立修,已修。\n\n**auth-less 兜底没坏。** 它在 `?? ((tierEnabled('auth') || hasAuthPlugin) ? true : false)` 右边,一直生效**恰恰因为**左边恒 undefined。所以那类 stack 没砖 —— 但按 A1,它现在应该**启动即报错**。\n\n---\n\n## 删除范围\n\n**开关管线(约 15 个文件):**\n\n- `spec`:`stack.zod.ts` 的 `api.requireAuth`;`api/rest-server.zod.ts` 的 `RestApiConfigSchema.requireAuth`\n- `core`:`security/anonymous-deny.ts` —— `AnonymousDenyInput.requireAuth` 去掉,`shouldDenyAnonymous` 退化为无条件 deny(仍保留 OPTIONS 放行、`userId`/`isSystem` 放行、控制面 allowlist)\n- `rest`:`rest-server.ts`(`enforceAuth` 不再读配置;`normalizeConfig` 去掉默认值);`rest-api-plugin.ts:269-286`(两条启动告警一并删 —— 没有 opt-out 就没有\"让 fail-open 可见\"这回事)\n- `runtime`:`dispatcher-plugin.ts`(选项 + `:160` gate)、`http-dispatcher.ts`、`domains/{ai,meta,security}.ts`、`domain-handler-registry.ts`\n- `plugins`:`plugin-hono-server/hono-plugin.ts` 的 `denyAnonymous`;`plugin-dev/dev-plugin.ts:614`(**在用**,自造了 `requireAuth:false` 的 REST 插件)\n- `cli`:`serve.ts:1732-1751` 删派生与双向转发,**并加上 A1 的启动报错**(无 auth tier 且无 AuthPlugin → 明确失败,而不是静默降级)\n- `qa`:`authz-conformance.matrix.ts`(ratchet 简化为无条件)\n- `verify`:`harness.ts`\n- 文档:`releases/v12.mdx`(迁移段)、`permissions/authorization.mdx`、`permissions/explain.mdx:89`、`ui/forms.mdx`、`ui/public-data-collection.mdx`;`references/api/rest-server.mdx` 是生成的 → `gen:docs`\n- **ADR-0056 D2 修订**:记录 opt-out 退役,以及取代它的四条声明派生路径\n\n**同名但无关,不要连坐删:** `cli/src/utils/api-client.ts` 的 `requireAuth(token)`(客户端断言登录);`spec/src/system/registry-config.zod.ts` 的 `requireAuthForRead` / `requireAuthForWrite`。\n\n---\n\n## 测试替代缝(已设计,已量过)\n\n`requireAuth` 在测试里出现于 **35 个文件**:rest 19 / runtime 4 / qa 4 / client 3 / plugins 2 / spec·metadata-protocol·core·cli 各 1。\n\n**分成两类:**\n\n- **`requireAuth: true`(18 处)** —— 断言的是 deny 行为。删键即可,无条件 deny 后行为不变;\n- **`requireAuth: false`(25 处,同一种写法 `{ api: { requireAuth: false } }`)** —— 靠这个开关在不构造会话的前提下 dispatch handler。需要换成\"注入一个已认证调用者\"。\n\n**缝在哪里:** `computeExecCtx` 的身份来自 `authServiceProvider`(构造函数第 7 个位置参数)→ `api.getSession({ headers })` → `resolveAuthzContext`。所以测试侧需要:\n\n```ts\n// 一个把每个请求都认成 userId 的最小 auth service\nconst stubAuth = async () => ({ api: { getSession: async () => ({ user: { id: 'test-user' } }) } });\nnew RestServer(server, protocol, cfg, undefined, undefined, undefined, stubAuth /* #7 */);\n```\n\n外加 dispatch 的 `req` 必须带 `headers: {}` —— `computeExecCtx` 在 `req.headers` 非对象时直接返回 undefined。\n\n**好消息:改动面比看起来小。** 抽样了 4 个 rest 测试文件,每个文件里 `.handler(` 的直接调用只有 **0–2 处**,而且都汇聚在文件自己的 `invoke()` / `post()` helper 里 —— 所以**每个文件通常只改 1–2 处(构造函数 + req 工厂)**,不是每个断言都要改。\n\n---\n\n## 排序:必须等 #4008 合并\n\n第 2 步要改的 `serve.ts:1732-1751` 正是 **#4008 改动的同一段**。在它合并前动手必然冲突,所以第 2 步从合并后的 main 起新分支。\n\n<sub>核对于 `origin/main` @ be7945a。#3960 已修并合并;#3984 / #3995 已合并;#4002(PR #4008)待合并。</sub>\n"
+}

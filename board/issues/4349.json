@@ -1,0 +1,35 @@
+{
+  "number": 4349,
+  "kind": "pull_request",
+  "title": "fix(objectql): every engine verb folds `filter` → `where` — `delete({filter})` no longer empties the object (#4346)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T07:33:18Z",
+  "updated_at": "2026-07-31T09:07:37Z",
+  "closed_at": "2026-07-31T09:07:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4349",
+  "body": "Closes #4346. Started as the #3795 follow-up on the sixth alias pair (`top`/`limit`) and turned up a P1 one layer down: the `filter` → `where` fold existed in **one of six** engine verbs.\n\n## What was broken\n\n`ObjectQL.find()` folds the alias, and its comment says why it must — the driver AST understands `where` only, so an unfolded `filter` is not a narrower query, it is **no query**. The five siblings never got that fold.\n\nMeasured against a real `ObjectQL` + a driver that applies `ast.where` (three rows: `a: open`, `b: done`, `c: done`), predicate passed as `filter`:\n\n| call | before | after |\n|---|---|---|\n| `find({filter: done})` | `[b, c]` ✅ | unchanged |\n| `findOne({filter: done})` | **`a`** — a row that does not match | `b` |\n| `count({filter: done})` | **3** | 2 |\n| `aggregate({filter: done, …})` | whole object | matched rows |\n| `update(data, {filter: done, multi})` | **all three rows rewritten** | only `b`, `c` |\n| `delete({filter: done, multi})` | **object emptied** | only `b`, `c` deleted |\n\nThe write verbs reached `driver.updateMany` / `deleteMany` with `ast.where === undefined`, which every driver reads as \"no predicate\". This is not a read over-grant like the ADR-0057 finding that put the fold in `find()` — it is an unbounded write.\n\n## Why it was reachable\n\n`ScopedContext` — the cross-object API handed to L2 hook bodies as `ctx.api.object('x')` — forwards its argument bag verbatim, every parameter typed `any`:\n\n```ts\nasync findOne(query: any = {}) { return this.engine.findOne(this.objectName, { ...query, context: this.context }); }\nasync delete(options: any = {}) { return this.engine.delete(this.objectName, { ...options, context: this.context }); }\n```\n\nand the spec's own hook TSDoc taught the broken call — `packages/spec/src/data/hook.zod.ts`:\n\n```ts\n *   const admin = await users.findOne({ filter: { role: 'admin' } });\n```\n\nSo a hook author following the documented example got an arbitrary user, and a cleanup hook doing `users.delete({ filter: …, multi: true })` emptied the object. That example is corrected to `where` here. The deprecated `DataEngine{Query,Update,Delete,Count}OptionsSchema` also still declare `filter` for exactly these verbs, so \"callers should not pass it\" was never the contract.\n\n## The fix\n\nOne call per entry point to the shared #3795 machinery (`foldQueryAliasSlots` + the new `ENGINE_FILTER_ALIAS_SLOTS`), rather than five more copies of `find`'s guard — the point of #3795 was to decide precedence once, and the engine is the third reader that sweep did not reach. Details that matter:\n\n- **Ordering** — the fold runs at method entry, before `withResolvedWhere` (#3810 placeholder expansion), before the by-id fast path, and before the seeded AST the middleware chain scopes (#2982). All of those read `options.where`; folding later would have fixed the symptom and left them blind.\n- **No mutation** — options bags are copied, with a fast path that skips the copy when no alias is present.\n- **`findOne` folds only the `where` slot** — it forces `limit: 1` itself, so a caller's `top` is discarded as before; feeding it to the pagination slot would manufacture a conflict out of an unambiguous request.\n- **Conflicts** — two spellings of one slot with different values are refused (`400 INVALID_REQUEST`), the #4181 rule now applied at the engine layer too. The error carries `status`/`code` so a call arriving via REST surfaces as a 400, not a 500.\n\n## The sixth pair, same pass\n\n`top` is documented as \"Alias for limit (OData compatibility)\" on both `QuerySchema` and `EngineQueryOptionsSchema`, so `limit` is canonical — but `protocol.ts` folded it **unguarded** (`options.limit = Number(options.top)`, the alias overwriting the canonical key) while `engine.find` kept `limit`. `{top: 1, limit: 3}` answered 1 over HTTP and 3 through a direct engine call: #3795's exact divergence on the pair its scope note excluded. Both now read `ENGINE_QUERY_ALIAS_SLOTS`.\n\n`top` deliberately stays a **declared** AST key rather than joining `RPC_QUERY_ALIAS_SLOTS`: those five are deprecated RPC keys the parse transform drops from its output, and removing a declared key from the parsed type is a breaking change that deserves its own decision. Giving it one precedence did not have to wait for that.\n\n## Deliberately not in scope\n\nThe engine still does not fold `select`/`sort`/`skip`/`populate`, which the deprecated query-options shape also declares. Those fail *narrow* (an ignored projection returns more columns, an ignored sort returns arbitrary order) rather than *wide*, and `sort`/`populate` need value-shape lowering the engine has no equivalent of — doing that inside a P1 fix is how you ship a second bug. Worth its own pass; noted on #4346.\n\n## Verification\n\n- 15 new engine pins (`engine-option-alias-fold.test.ts`), including two that assert the write verbs touch only matched rows — the regression here is silent and destructive, and the suite had nothing covering it.\n- Protocol pins for `top`→`limit` folding in the engine's direction, `$top` still reaching the same slot, and the conflict rejection.\n- `objectql` 1411 / `spec` 7156 / `metadata-protocol` 136 green; full `pnpm test` **132/132 tasks green**.\n- `check:generated` 8/8 green; `api-surface.json` regenerated (+2 exports).\n- Changeset: patch `@objectstack/objectql` + `@objectstack/metadata-protocol`, minor `@objectstack/spec` (new exports).\n\n**Behaviour changes**, all toward one answer: a predicate passed as `filter` now actually applies on every verb, and two spellings of one slot with different values are refused instead of silently resolved. A single spelling, and redundant identical spellings, behave exactly as before.\n\nRefs #3795, #4181, #3713, ADR-0057.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

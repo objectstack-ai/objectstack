@@ -1,0 +1,32 @@
+{
+  "number": 4290,
+  "kind": "issue",
+  "title": "An objectui pin bump reaches `main` without any PR gate ever building the pinned SHA",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T03:29:37Z",
+  "updated_at": "2026-07-31T05:32:46Z",
+  "closed_at": "2026-07-31T05:32:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4290",
+  "body": "在 #4288（`.objectui-sha` 从 `96ee72e` 推到 `bebaebd`）上发现的。合并没问题 —— 但**它绿得太容易了**，查下来是真缺口。\n\n## 现象\n\n`.objectui-sha` 是 vendored Console SPA 的唯一真相源：发布流水线读它、clone objectui、构建 `@object-ui/console`、把 dist 拷进 `packages/console/`。改这个文件等于改平台发出去的整个前端。\n\n而在 #4288 上，14 项检查里 **6 项直接 skip**，包括 Build Core、Test Core、Check Generated Artifacts、Build Docs、Dogfood Regression Gate。原因是路径过滤：tracked diff 只有 `.objectui-sha` + 一个 changeset，`ci.yml` 里没有任何 job 以这个文件为触发路径。\n\ngrep 确认 `.objectui-sha` 只出现在两处，**都不是 PR 门**：\n\n```\n.github/workflows/release.yml       ← 发布时才构建\n.github/workflows/showcase-smoke.yml\n```\n\n而 showcase-smoke 自己的头注释写得很清楚：\n\n> Manual + nightly only; **it never gates PRs**. Promote to a PR gate once it has proven stable here.\n\n## 后果\n\n一个**构建不出来的 objectui SHA**（打错、force-push 没了的提交、objectui 那边真的构建坏了、或 bundle canary 失效）可以一路绿灯进 `main`，直到：\n\n- 当晚的 nightly smoke（非阻塞，红了也不拦人），或者\n- **发布的时候**才炸。\n\n也就是说这个改动唯一的实际验证来自作者本地是否想起来跑 `scripts/build-console.sh`。#4288 我跑了（`✓ Bundle canary 'import/jobs' present`、45900 KB dist、来自 `objectui@bebaebd39ace`），但那是纪律，不是门。下一个人未必跑 —— 而 `pnpm objectui:refresh` 这个命令本身**包含**构建步骤，所以正常路径下确实会构建；风险在于有人只手改 `.objectui-sha`（或从别的分支 cherry-pick 这一行），那就完全没人拦。\n\n## 建议\n\n最小改动：在 `ci.yml` 的路径过滤里给 `.objectui-sha` 和 `scripts/build-console.sh` 加一个专门的 job，跑 `bash scripts/build-console.sh` + `pnpm check:console-sha`（后者已存在，验证 dist 被戳上了钉住的 SHA）。\n\n成本考量是真实的 —— 构建 console 不便宜（本地约几分钟）。但它**只在这两个文件变动时触发**，而这类 PR 很少（这次的 pin 已经陈旧了 76 个提交，说明频率很低）。用「罕见但高影响」换「每次都跑」是划算的。\n\nrelease.yml 已经有 dist 缓存（`hashFiles('.objectui-sha', 'scripts/build-console.sh')`），同样的 key 在 PR 门里能复用，实际开销可能比想象的低。\n\n## 相关\n\n- #4288 —— 发现现场（pin 96ee72e → bebaebd，76 个提交）\n- `scripts/build-console.sh` —— 已经做了正确的事（另建 worktree、构建、断言 canary），只是没人在 PR 上调用它\n- `pnpm check:console-sha` —— 已存在的漂移守卫，同样没进 PR 门"
+}

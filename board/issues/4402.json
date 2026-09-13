@@ -1,0 +1,35 @@
+{
+  "number": 4402,
+  "kind": "pull_request",
+  "title": "test(cli): 钉住三个命令都跑 reference-integrity suite(#4384)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T11:41:03Z",
+  "updated_at": "2026-07-31T11:53:57Z",
+  "closed_at": "2026-07-31T11:53:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T11:53:55Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4402",
+  "body": "Closes #4384\n\n## 这个 PR 补的是什么\n\n[#4394](https://github.com/objectstack-ai/objectstack/pull/4394) 已经修掉了**那一例** —— `validateReadonlyFlowWrites` 手工接进 `os validate` 和 `os compile`,唯独漏了 `os lint`,而它是 **error 级**,于是 `os lint` 长期放行 `os compile` 会拒绝的 stack。\n\n但它没有修掉**失败模式本身**:今天仍然没有任何东西能阻止下一条规则被接进三个命令里的两个。\n\n而这类缺陷的特点是**不会有任何测试变红** —— 每个命令自己的测试都过,规则的单测也过,唯一症状就是三个命令对同一个 stack 给出不同答案。上一次就是这么从 #3425 一直活到 #4394 的,期间 suite 头注释里把它称作 \"the standing proof of the drift the suite exists to end\" —— **一条注释在干测试的活**。\n\n## 钉住的不变量\n\n**`os lint` ⊇ `os compile` 的门禁集。**\n\nlint 是廉价预检,compile 是门禁。lint 绿、compile 红,预检就没有存在意义;对 agent 更糟 —— 剩下的选择只有\"全量重验\"(慢)或\"学会不信任这个信号\"(危险)。\n\n## 三条断言\n\n1. 三个命令都调用 `validateReferenceIntegrity`;\n2. 三个命令都**不**直接 import suite 成员 —— 第二个调用点总是从这行 import 开始,所以卡 import 能堵住\"加了 import 但还没加调用\"的那个窗口;\n3. suite 非空且含 `validateReadonlyFlowWrites` —— 防止前两条在 suite 被清空或导出改名后**空转通过**。\n\n## 为什么扫源码而不是打桩\n\nvitest 会把 import 内联进 transform,所以对 `@objectstack/lint` 打 spy 证明不了命令文件到底 reach 了哪些符号 —— 和 `lazy-deps.test.ts` 扫 `src/` 是同一个理由。\n\nsuite **内容**的行为覆盖在 `@objectstack/lint` 的 `reference-integrity-suite.test.ts`;本文件只守 suite 与三个调用点之间那道缝。\n\n## 反向验证\n\n不是\"今天能过\"就算数。在 `compile.ts` 里加回一行直接 import,它确实失败:\n\n```\n× compile.ts does not import a suite member directly\n```\n\n## 范围\n\n纯测试,无运行时/行为变更。`@objectstack/cli` 65 文件 / 636 测试全绿,`typecheck` 干净。空 changeset。\n\n---\n\n顺带说明为什么只提这一条:我原本按 #4384 的分析做了一版\"家族 + 组合层\"(把 suite 的成员判据和\"哪些命令跑\"拆开),做到一半发现 #4394 已经先合入了。实测确认症状已消失(同一 fixture 下 `os lint` 现在 exit 1),所以那版重构的核心价值归零,我 abort 了。\n\n剩下一个可以讨论但**不在本 PR 范围**的点:`validateReadonlyFlowWrites` 问的是\"名字解析得到、但写会不会生效\",而 suite 的判据写的是\"名字能否解析\"。#4394 的理由是\"它走的是同一张 map\"——这是邻近性论证。要不要为此调整 suite 的判据表述,是维护者的取舍,我没有在这里动它。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

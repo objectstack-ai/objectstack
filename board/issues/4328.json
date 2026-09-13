@@ -1,0 +1,35 @@
+{
+  "number": 4328,
+  "kind": "pull_request",
+  "title": "feat(lint): catch a stale `searchableFields` entry at authoring time (#4254 follow-up)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T06:17:30Z",
+  "updated_at": "2026-07-31T06:21:54Z",
+  "closed_at": "2026-07-31T06:21:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T06:21:52Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4328",
+  "body": "## The gap\n\n`searchableFields` is `z.array(z.string())` in both `object.zod.ts` (ADR-0061) and the list-view schema, so **nothing checked that an entry names a field that exists**. Rename a field and the old name stays behind: Zod-valid, shipped, pointing at a column that is gone.\n\nThe engine tolerates it, which is exactly what kept the drift invisible — `resolveSearchFields` filters the declaration down to fields that exist (`searchableFields?.filter((f) => all[f])`) and says nothing. The tolerance fails in the direction nobody expects:\n\n- **some entries stale** → `$search` scans a **narrower** set than the object declares. Records that should match do not, and the response is indistinguishable from \"no such record\".\n- **every entry stale** → the filtered set is empty, so resolution falls through to the **auto-default** (name/title + short-text). A declaration whose whole purpose is to *choose* the searchable set ends up selecting one the author never wrote — the \"asked narrower, answered wider\" inversion #4226 closed on the projection axis.\n\nAnd it stops being quiet downstream. Clients echo the declaration verbatim as the `$searchFields` override (objectui's list search sends `schema.searchableFields`), so once the REST read path validates that override against the object (#4254), a stale entry the engine had been silently skipping becomes a **`400 INVALID_FIELD` on every list search for that object** — a request-time break whose cause is an authoring typo made long before.\n\n## The rule\n\n`searchable-field-unknown`, appended to `REFERENCE_INTEGRITY_RULES` — so it reaches `os validate`, `os lint` and `os compile` with no CLI edit, the wiring contract that suite exists to provide. It covers the object's own declaration and the list views that narrow it (`objects[].listViews`, a `defineView` default `list`, named `listViews`), resolving each entry against the bound object's declared fields.\n\n**Gating (`error`), unlike the advisory field-existence rules.** `page-field-unknown` / `form-field-unknown` / `semantic-role-field-unknown` are warnings because they describe a consumer that *skips* an unknown name and renders the rest. This one describes a declaration that either selects the wrong set or refuses the request outright — the same call `validate-flow-template-paths` makes for a filter-position token, where the miss widens the query instead of shrinking the page.\n\n**Existence only.** A field that exists but is an odd search target (a `json` column) is *not* flagged: an explicit `searchableFields` is authoritative — the engine scans exactly what it names — so declaring one is a choice, not drift.\n\n**Three skips keep false positives near zero** (ADR-0072 D1 — one dead finding and authors stop trusting the linter): an object this stack does not define (may come from another package), an object with no authored field map (external / datasource-introspected), and registry-injected system columns. That last set is **derived** from the spec's own `FIELD_GROUP_SYSTEM_FIELDS` + `SystemFieldName` rather than hand-copied — this package already carries five slightly-different copies of that list, which is #3786's lesson going unlearned. (Converging the existing five is a separate cleanup, not folded in here.)\n\n**Dotted paths are flagged**, unlike in every sibling rule. They skip `owner_id.name` because the query engine resolves the traversal; search does not — `resolveSearchFields` matches the field map by exact string, so a dotted entry is dropped exactly like a typo, and it is the spelling most likely borrowed from `select`/`sort`. It gets its own fix hint.\n\n## Verification\n\n- `packages/lint` — 38 files / 564 tests green, including 22 new cases: the stale entry, a clean control, the legacy array field map, each skip, the dotted path, and one per list-view surface. Severity is pinned, since a silent downgrade to `warning` would make `os validate` exit 0.\n- `packages/cli` — 64 files / 628 tests green (it consumes the suite).\n- **Against real shipped metadata:** `os validate` passes on **showcase** (23 objects / 202 fields), **crm** and **todo** — no false positive. Injecting `email` into the showcase account object's declaration fails it with the precise path and exit 1:\n\n```\n✗ Reference integrity check failed (1 issue)\n  • object \"showcase_account\": searchableFields entry \"email\" is not a field on object \"showcase_account\". …\n      rule: searchable-field-unknown  at objects[0].searchableFields[3]\n```\n\n- `main` merged in and the full suite re-run afterwards (Multi-agent discipline #10) — the merge moved `packages/lint/package.json` and `spec/src/data`, so this was re-verified on the rebuilt tree, not the pre-merge one.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

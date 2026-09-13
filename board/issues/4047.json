@@ -1,0 +1,32 @@
+{
+  "number": 4047,
+  "kind": "issue",
+  "title": "driver-memory / driver-mongodb：`Field.datetime` 无单一存储形态，跨类型比较恒 false —— #3912 的非 SQL 版",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T06:45:07Z",
+  "updated_at": "2026-07-30T07:55:17Z",
+  "closed_at": "2026-07-30T07:55:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4047",
+  "body": "从 #4042 的修复中剥离出来的**存储形态**问题（#4042 只修边界语义）。两个驱动的 datetime 值形态由写入方决定，比较层跨类型恒不匹配：\n\n## driver-memory（已实测，mingo 7.2）\n\n同一列可同时存 JS `Date`（直接 JS 调用方）与 ISO 字符串（驱动自己的 `created_at` 默认值 `new Date().toISOString()`、所有 REST/JSON 写入）。mingo 跨类型比较恒 false：\n\n```\nrows: [{ at: new Date('2026-07-28T09:15Z') }, { at: '2026-07-28T09:15:00.000Z' }]\n{ at: { $gte: '2026-04-29' } }  →  只命中字符串行；Date 行对任何字符串比较值不可见\n```\n\n**所有操作符**（含 `$gte`/`$eq`）都命中，不只上界。`find()` 路径目前是纯字符串域；analytics 的 `dateRange` 窗口在 #4042 里已用 `$or` 双拼写桥接（等价于 driver-sql D-B2 legacy 修复的 schemaless 版），但 `find()`/cube-filter 未桥接——按 #3775 的教训，两条路要么一起对，要么各错各的。\n\n## driver-mongodb（代码层确认，需活库实测）\n\n驱动自身系统字段写 `new Date()` → BSON Date；REST/JSON 写入落字符串。MongoDB type bracketing 下 BSON Date 与字符串比较值永不匹配 —— **dashboard 默认字段 `created_at` 在 mongo 上是 BSON Date，字符串边界的日期窗口整个为空**（比丢一天更糟）。`mongodb-filter.ts` 是纯形状翻译、无字段类型信息，在该层无法修。\n\n## 建议方向（与 ADR-0053 D-B 同构）\n\n1. **写路径收敛**：两驱动的 `formatInput` 等价物把 `Field.datetime` 统一写成 canonical UTC ISO 文本（与平台 wire form 一致，等价 #3912 的「每方言单一存储形态」）——需要驱动持有字段类型元数据（`initObjects` 时记录，两驱动目前都没有）。\n2. **读侧兼容**：未迁移数据按 D-B3 姿态桥接（memory 可 $or 双拼写；mongo 视数据量做一次性迁移或聚合期 `$convert`）。\n3. **验收**：把 #4041 的行结果探针在「同列双形态」夹具上钉住（driver-memory 已有 analytics 窗口版可参照），并进 ADR-0053 D-A3 矩阵的 storage-form 轴。\n\n## 关联\n\n- 第五个求值面：`@objectstack/formula` 的 `matchesFilterCondition`（RLS 写侧 `check`）也是裸 `<=`，且因层级约束（formula 不依赖 core）未在 #4042 内对齐日历日规则——收敛存储形态时应一并决定它的归属（私有拷贝 vs 工具下沉 spec/types）。\n- #3912 / ADR-0053 D-B（SQL 侧的同一决策）、#4042（边界语义）、#3777（SQL 边界语义）。"
+}

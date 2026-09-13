@@ -1,0 +1,35 @@
+{
+  "number": 4029,
+  "kind": "pull_request",
+  "title": "fix(driver-sql,driver-memory): an uncompilable filter throws instead of matching everything (#3948)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T05:04:18Z",
+  "updated_at": "2026-07-30T05:09:44Z",
+  "closed_at": "2026-07-30T05:09:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T05:09:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4029",
+  "body": "Closes #3948 item 1 — the prerequisite the rest of that issue is blocked on.\n\nA filter neither driver could compile was **skipped, not rejected**. No predicate was emitted and the query returned every row: the caller asked to filter and silently received the unfiltered set.\n\n## The reachable shape\n\nA bare comparison triple. `['close_date','before','2024-01-01']` arrives at a driver only when `isFilterAST()` refused it — the operator is outside `VALID_AST_OPERATORS`, so `parseFilterAST()` never converted it and `protocol.ts` assigned the raw array to `where` (it is a *conversion* gate, not a *validation* gate).\n\n- **driver-sql** — `applyFilters` saw three **strings**, matched neither `and` nor `or`, and `continue`d past all three. No WHERE clause.\n- **driver-memory** — worse: it cast *every* string to a logic keyword (`item.toLowerCase() as 'and' | 'or'`), opening three empty logic groups, producing no conditions, and returning `{}` — a filter matching every record.\n\n**This is reachable from ordinary authoring, not just malformed input.** `before` and `after` are canonical `VIEW_FILTER_OPERATORS` members (`ui/view.zod.ts:90`) that `VALID_AST_OPERATORS` does not accept. **Eight of the nineteen** canonical view operators are in that position — including `equals`. The other six were masked only because ObjectUI's adapter alias table happened to cover them; the two it missed are how this surfaced (objectstack-ai/objectui#2974).\n\n## What changed\n\nBoth drivers now throw on a filter element that is neither a logical keyword nor a condition array. The nested-AST and `$`-object paths **already threw** on the same class of input, so this makes the three paths agree instead of disagree.\n\n## driver-memory also gains seven operators it was silently ignoring\n\n`not_in`, `is_null`, `is_not_null`, `isnull`, `isnotnull`, `is_empty`, `is_not_empty` — all members of `VALID_AST_OPERATORS`, all previously falling to `default: return null` and being dropped by the caller. `is_null` narrowed nothing instead of matching null rows.\n\nThis was necessary, not scope creep: throwing without implementing them would have traded a silent wrong-result bug for a **hard regression on operators the spec blesses**. Alias sets and semantics mirror driver-sql's `whereNull`/`whereNotNull` arms so both backends accept one vocabulary.\n\n## Verification\n\n| Suite | Result |\n|---|---|\n| `driver-sql` | **487 pass**, 34 skipped, 0 fail |\n| `driver-memory` | **153 pass**, 0 fail |\n| `objectql` (query engine) | **1171 pass** across 80 files, 0 fail |\n\nTwo new tests. The memory one iterates `VALID_AST_OPERATORS` directly, so the next operator the spec adds fails here rather than being silently dropped; both pin that a bare triple throws instead of returning every row.\n\n## One pre-existing issue found and deliberately not fixed\n\n`applyFilters`' legacy array form is **infix** (`[condA, 'or', condB]`). The prefix spec-AST form `['or', condA, condB]` compiles to `AND` on this path — but through the protocol it never gets here, because `isFilterAST()` accepts it and `parseFilterAST()` converts it to `{$or: […]}`, which takes the object branch. Only a direct `driver.find({where: ['or', …]})` call hits the broken path. Verified unchanged by this PR (`nextJoin` handling is untouched); noted in the test so nobody \"fixes\" the test by changing the semantics.\n\nChangeset included — `driver-memory` minor for the new operators, `driver-sql` patch, with the FROM → TO mapping for anyone whose query starts throwing."
+}

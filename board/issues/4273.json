@@ -1,0 +1,35 @@
+{
+  "number": 4273,
+  "kind": "pull_request",
+  "title": "feat(spec): 补上 defineHook() 作者侧工厂,并修正 object.zod.ts 两处错误处方 (#4269)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T01:49:23Z",
+  "updated_at": "2026-07-31T02:33:28Z",
+  "closed_at": "2026-07-31T02:33:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T02:33:26Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4273",
+  "body": "Closes #4269。从 #4001/#4207 延伸:hook 的约定扫描作者路径此前零运行时校验,且 `object.zod.ts` 的错误处方引用了不存在的 `defineHook()` —— 作者照处方 import 会再失败一次。\n\n## 改动\n\n**1. `defineHook()` 工厂**(`packages/spec/src/data/hook.zod.ts`)\n\n照 `defineDatasource` 模板(`datasource.zod.ts:538`):纯 `HookSchema.parse`,`Hook`(z.input)进、`ResolvedHook`(z.output)出;包根与 `@objectstack/spec/data` 子路径均导出。v1 不含任何劝导逻辑 —— handler 弃用告警留在 binder(`bindHooksToEngine` 的 `warnLegacyHandler` 选项),单处维护。\n\n> 注:issue 里写的 binder 函数名 `warnDeprecatedHandler` 实际不存在,核实后的真名是 `warnLegacyHandler` 选项 —— JSDoc/changeset 用的是真名,否则就是在本 PR 里复现本 PR 要修的毛病。\n\n**2. 两处错误处方修正**(`object.zod.ts` `UNKNOWN_KEY_GUIDANCE` 的 `workflows`/`hooks`)\n\n\"registered via \\`defineHook()\\`\" → \"wrapped in \\`defineHook()\\` from \\`@objectstack/spec/data\\`\":随工厂落地处方成真;措辞复核把「registered」改准确(工厂做校验,注册靠扫描/defineStack),并补上 import 路径让 AI 作者零猜测照做。既有测试钉子(lifecycle hook / record_change / #1535)全部保留。\n\n**3. drift-guard 测试**(`hook.test.ts`,+5)\n\n- 工厂产物 === schema parse 产物(防两条作者路径分叉)\n- 默认值/嵌套 retryPolicy/CEL 简写物化(z.input → z.output)\n- 函数值 handler 按引用原样通过(issue 已验证的非阻塞点)\n- 绑定期对已 parse 输出再 parse 幂等\n- 作者期硬失败,错误即 schema 自己的 #4207 guidance(`enabled` → 「hook 没有开关键」)\n\n**4. 文档一处注记**(`content/docs/protocol/objectql/schema.mdx`)\n\nLifecycle Hooks 示例裸字面量 → `export default defineHook({...})` + 「工厂优先于裸字面量」注记(defineDatasource 同款规则);`os:check` 片段对构建后 dist 类型检查通过。\n\n**5. changeset**(`@objectstack/spec` minor,新公共 API)+ api-surface 基线重生成(root 与 data 两个入口各 +`defineHook`)。\n\n## 有意的行为变化\n\nparse-at-import:坏 hook 从「绑定期 skip + warning」变为**作者期硬失败**(#4001 姿态:静默失效制造虚假完成)。存量裸字面量不受影响,工厂是可选入口,迁移纯增量。\n\n## 验证\n\n- spec 全套 276 文件 / 7154 测试绿;根 `pnpm build` 全仓绿\n- `check:api-surface` / `check:docs` / `check:skill-examples`(198 例,含本次改的片段)/ `check:strictness-ledger` / `check:exported-any` / `check:authorable-surface` 全绿\n- `check:generated` 本地红是 main 既有问题(#4265/#4255:`check:strictness-ledger` 未分类),与本 PR 无关\n\n## 后续(不扩大本 PR 范围)\n\n`skills/objectstack-data` 的 hook 示例仍教裸 `: Hook` 字面量(SKILL.md:399 等)—— 已另开 issue 跟进。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 4400,
+  "kind": "pull_request",
+  "title": "feat(objectql): engine option bags are a closed contract — unknown keys throw instead of silently doing nothing",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T11:19:04Z",
+  "updated_at": "2026-07-31T11:31:27Z",
+  "closed_at": "2026-07-31T11:31:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T11:31:24Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4400",
+  "body": "Closes #4371 — option **(2)**, the complete answer (option (1) landed in #4387). Scoped by a full caller survey of every engine call site in this repo + `cloud`, plus every key the engine itself reads.\n\n## What changes\n\n**All six engine methods reject non-null option keys they do not execute**, naming the legal set. Retired keys (`cursor`/`distinct`) quote their #4286 tombstone. `null` stays a withdrawal, same as the fold's rule.\n\nPer-method legal keys = the method's `Engine*OptionsSchema` keys **plus the documented extras** the survey proved live:\n- `searchFields` — read by the engine's `$search` expansion and sent by the protocol layer all along, but never declared on `EngineQueryOptionsSchema`; now declared (spec) and legal (engine).\n- `onFieldsDropped` on `update` — contract-declared write observability (#3407), unrepresentable in the serializable schema.\n- Driver pass-through keys (`transaction`/`tenantId`/`tenantIds`/`timezone`/`bypassTenantAudit`/`preserveAudit`) on `find`/`findOne`/`update`/`delete` — the bag IS the driver-options base there (pinned behaviour). `count`/`aggregate` forward nothing, so they **reject** these instead of accepting-and-ignoring.\n\nA **drift pin** asserts each set against its schema's `.shape` (minus tombstones, plus the extras), so a key added to the spec cannot be silently rejected.\n\n## What the survey turned up and this PR also closes\n\n1. **Bag `object` overrode the resolved object on the AST** — `{ object, ...query }` spread order let `query.object` win, splitting `ast.object` from the table actually queried (drivers use the first argument; middleware and hooks reading `ast.object` were lied to). AST now keeps the resolved name; a direct call passing `object` is rejected; the protocol refuses a POST-body `object` contradicting the route (**400 `QUERY_OBJECT_MISMATCH`**) instead of picking a winner.\n2. **`findData` leaked protocol vocabulary onto the engine bag** (`object`, `count`, `joins`, `windowFunctions`, `cursor`, `distinct`, non-aggregate `having`) — now stripped at the boundary; wire behaviour unchanged.\n3. **Nested expand ASTs** (`expand: { rel: { sort } }`) reject the four wire-only spellings exactly like the top-level bag did in #4387.\n4. **`$search`/`$searchFields` engine reads removed** — the protocol normalizes to bare keys; a direct call passing the OData spelling now throws instead of half-working on `find` only.\n5. **`DbQueueAdapter.purge`/`purgeFailed` were broken on the real engine**: both passed `{ id }`, a key the engine never read — `purge` deleted **nothing** (every delete threw \"Delete requires an ID\" into a warn-level catch) and `purgeFailed` always threw. The test fake's `delete` implemented the `{ id }` signature the real engine rejects, which is exactly how this stayed green. Both fixed to `{ where: { id } }`; the fake now matches the real contract.\n6. **19 test bags carrying the dead `filters` key** cleaned up — two were intent-carrying (a locale multi-update and an oidc dogfood assert that both silently scanned unfiltered).\n7. `driver.find` JSDoc example showed wire spellings a driver can never receive — now canonical.\n\n## Tests\n\n- 21 pins in `engine-unknown-option.test.ts` (per-method rejection, tombstones, null withdrawal, extras legal where they work and rejected where they don't, `object` rejection, nested-expand rejection + canonical expand works, drift pin).\n- 3 pins in `protocol-data.test.ts` (protocol strips its keys; matching body `object` tolerated; contradicting body `object` 400s before the engine).\n- Full local runs: objectql 1486, runtime 1001, rest 539, security 677, auth 579, automation 538, cli 629, settings 196, client 204, datasource 180, approvals 330, sharing 226, metadata-protocol 136, queue 20 — all green; spec generated-artifact gates green (docs regenerated); typecheck green.\n\nWire/HTTP callers are unaffected. Direct engine callers passing junk keys get an error that names the fix.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

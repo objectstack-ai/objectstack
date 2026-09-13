@@ -1,0 +1,30 @@
+{
+  "number": 4236,
+  "kind": "issue",
+  "title": "`sys_migration` 由 service-storage 持有，但它是平台级账本 —— 第二个消费者出现后这层耦合该解开",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T16:57:47Z",
+  "updated_at": "2026-07-31T01:32:28Z",
+  "closed_at": "2026-07-31T01:32:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4236",
+  "body": "## 现状\n\n`sys_migration`（部署级数据迁移标记账本，#3617 引入）**只在一个地方注册**：\n\n`packages/services/service-storage/src/storage-service-plugin.ts:243`\n```ts\nobjects: [SystemFile, SystemUploadSession, SysAttachment, SysMigration],\n```\n\n对象定义本身住在 `@objectstack/platform-objects`，行契约住在 `@objectstack/spec/system`——`sys-migration.object.ts` 的注释明确说了理由：\n\n> Registered by the first consuming service (`@objectstack/service-storage`); the row contract lives in `@objectstack/spec/system` (`DataMigrationFlagSchema`) so any package can read flags without depending on this one.\n\n「第一个消费它的服务来注册」在只有一个消费者时是合理的务实选择。\n\n## 为什么现在该改\n\n#3438 第 2 项（#4235）引入了**第二个消费者，且与存储毫无关系**：`adr-0104-value-shapes` 标记门禁的是 `lookup` / `location` 等值形态的严格校验。于是出现两处别扭：\n\n1. **`os migrate value-shapes` 必须启动存储服务**，只为了让内核里有 `sys_migration` 这张表——一个纯粹扫描字段值的命令，要装配 S3 适配器解析逻辑。\n2. **运行期门禁对没装 storage 的部署永久关闭**。`ObjectQL.readMigrationFlagVerified` 在 `sys_migration` 未注册时短路返回 `false`（这是正确的 fail-lenient 姿态），但对这类部署意味着：跑了扫描也无处记录，记录了也读不到，值形态严格**永远无法启用**。\n\n实际影响有限——`os serve` 的已知服务表会自动装配 storage，所以正常部署路径下它总是在的。但这是「碰巧能用」，不是设计。\n\n## 建议方向\n\n把 `SysMigration` 的注册从 storage 挪到一个**每个部署都有**的位置。候选：\n\n- `PlatformObjectsPlugin`（`packages/platform-objects/src/plugin.ts`）目前只贡献翻译，不注册对象——如果它开始注册平台系统对象，`sys_migration` 是最没争议的第一个。\n- 或者运行期引导时无条件注册这一张表（它没有任何服务依赖：8 个标量字段，`managedBy: 'engine-owned'`）。\n\n注意注册路径改变后要确认不会与 storage 的注册重复冲突（同一对象注册两次的行为需要验证）。\n\n## 参考\n\n- 现状与临时处理记录在 `packages/cli/src/utils/data-migration-plugins.ts` 的注释里（#4235 引入，两个 gated migration 共用同一套插件，就是为了让它们找到同一本账本）。\n- #3617 —— 账本的引入\n- #3438 —— 第二个消费者\n- #3459 —— 第三个（回收门禁），同样读这本账"
+}

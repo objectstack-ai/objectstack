@@ -1,0 +1,35 @@
+{
+  "number": 4346,
+  "kind": "issue",
+  "title": "[P1] `filter` folds to `where` in `engine.find` only — `findOne`/`count`/`update`/`delete` silently match EVERY row, and the hook docs teach the broken call",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T07:17:46Z",
+  "updated_at": "2026-07-31T08:52:05Z",
+  "closed_at": "2026-07-31T08:52:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4346",
+  "body": "Found while doing the #3795 follow-up sweep on the sixth alias pair (`top`/`limit`). The `filter` → `where` fold that #3795 settled at the protocol layer exists at the **engine** layer too — in exactly one of six methods.\n\n`ObjectQL.find()` folds it, with a comment saying why:\n\n```ts\n// packages/objectql/src/engine.ts (find)\n// Normalize the `filter` alias → `where`. The DataEngine contract\n// (`spec/data/data-engine.zod.ts`) exposes both, but the driver AST only\n// understands `where`; an internal caller passing `{ filter }` would\n// otherwise match ALL rows (silent over-grant — surfaced by ADR-0057's\n// sharing/graph read path). `where` wins when both are present.\nif ((ast as any).filter != null && ast.where == null) { ast.where = (ast as any).filter; }\ndelete (ast as any).filter;\n```\n\n`findOne`, `count`, `update`, `delete` and `aggregate` take the same option bags and have **no such fold**. The consequence the comment describes (\"would otherwise match ALL rows\") is therefore live in all five — and on the write methods it is not an over-grant, it is an unbounded write.\n\n## Measured, not inferred\n\nA real `ObjectQL` engine + in-memory driver, three rows (`a: open`, `b: done`, `c: done`), each call passing only `filter`:\n\n| call | result | correct |\n|---|---|---|\n| `find({filter: {status:'done'}})` | `[b, c]` | ✅ the one method that folds |\n| `findOne({filter: {status:'done'}})` | **`a`** | `b` — returned a row that does not match |\n| `count({filter: {status:'done'}})` | **3** | 2 |\n| `update({title:'ZAP'}, {filter:{status:'done'}, multi:true})` | **`a`, `b`, `c` all rewritten** | only `b`, `c` |\n| `delete({filter:{status:'done'}, multi:true})` | **table emptied** | only `b`, `c` deleted |\n\nThe write methods reach `driver.updateMany(object, ast, …)` / `driver.deleteMany(object, ast)` with `ast.where === undefined`, which every driver reads as \"no predicate\".\n\n## Why this is reachable, not theoretical\n\n`ScopedContext` — the cross-object API handed to L2 hook bodies — forwards its argument verbatim:\n\n```ts\n// packages/objectql/src/engine.ts (ScopedContext)\nasync findOne(query: any = {}) { return this.engine.findOne(this.objectName, { ...query, context: this.context }); }\nasync delete(options: any = {}) { return this.engine.delete(this.objectName, { ...options, context: this.context }); }\n```\n\nand the spec's own hook documentation teaches the broken call:\n\n```ts\n// packages/spec/src/data/hook.zod.ts:403\n *   const users = ctx.api.object('user');\n *   const admin = await users.findOne({ filter: { role: 'admin' } });\n```\n\nSo a hook author following the documented example gets an arbitrary user rather than the admin — and `users.delete({ filter: …, multi: true })` in a cleanup hook empties the object. `options` is typed `any` on every facade method, so nothing catches it at compile time. The deprecated `DataEngine{Update,Delete,Count,Query}OptionsSchema` in the spec also still declare `filter` as a legitimate option for these operations, so \"the caller shouldn't pass it\" is not a defensible position — the contract says they may.\n\n## Suggested fix\n\nThe #3795 machinery already exists and is exported: `RPC_QUERY_ALIAS_SLOTS` + `foldQueryAliasSlots` (`@objectstack/spec/data`). Route every engine entry point through one call to it instead of adding four more open-coded copies of `find`'s guard — the point of #3795 was to decide precedence once, and the engine is the third reader that sweep did not reach.\n\n1. Fold `filter` → `where` (canonical wins; different values are a conflict, per #4181) in `findOne`, `count`, `update`, `delete`, `aggregate`, and replace `find`'s hand-rolled copy with the same call.\n2. Same pass, the sixth alias pair: `top` → `limit` is folded **unguarded** in `protocol.ts` (`options.limit = Number(options.top)` — the alias overwrites the canonical key) and **guarded** in `engine.find` (`top != null && limit == null` — canonical wins). `limit` is canonical (`top` is described as \"Alias for limit (OData compatibility)\" in both `QuerySchema` and `EngineQueryOptionsSchema`), so the protocol has it backwards, and `{top: 1, limit: 3}` resolves to 1 through HTTP and 3 through a direct engine call — the #3795 divergence on the one pair its scope note excluded.\n3. Fix the `hook.zod.ts` example to `where` regardless of which way (1) lands: it is a `.describe()`-adjacent doc block that ships to `content/docs/references/`.\n4. Pin each method: `{filter}` alone applies the predicate; `{filter, where}` conflicting is refused; `{top}` alone still limits; `{top, limit}` conflicting is refused.\n\nNote the write-path pins matter most — a regression here is silent and destructive, and the current test suite has none (this whole class went unnoticed because `find` was the only method anyone thought to check).\n\nRefs #3795, #4181, #3713, ADR-0057.\n"
+}

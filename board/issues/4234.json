@@ -1,0 +1,35 @@
+{
+  "number": 4234,
+  "kind": "pull_request",
+  "title": "fix(service-datasource): the datasource-admin 503 names the service the route actually needs (#4225)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T16:54:18Z",
+  "updated_at": "2026-07-31T00:39:43Z",
+  "closed_at": "2026-07-31T00:39:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T00:39:41Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4234",
+  "body": "Closes #4225.\n\n## The finding\n\n`packages/services/service-datasource/src/admin-routes.ts` registered nine service-backed routes behind one hard-coded 503:\n\n```ts\nconst unavailable = (res: any) =>\n  sendError(res, 503, 'SERVICE_UNAVAILABLE', 'The datasource-admin service is not available.');\n```\n\nSix of those routes resolve `datasource-admin`, so the message was right. Three resolve `external-datasource` and answered with the same sentence:\n\n| Route | resolves | 503 said | 503 now says |\n|---|---|---|---|\n| `GET /:name/remote-tables` | `external-datasource` | datasource-admin | **external-datasource** |\n| `POST /:name/test` | `external-datasource` | datasource-admin | **external-datasource** |\n| `POST /:name/object-draft` | `external-datasource` | datasource-admin | **external-datasource** |\n\nAn operator whose federation service was unwired was told to go look at `datasource-admin`, which was running fine.\n\n## The code was never the bug\n\n`SERVICE_UNAVAILABLE` is correct for all nine — ADR-0112's ledger asks generic conditions to reuse the standard catalog rather than register a per-service 503 synonym, and `admin-routes.ts` documents that decision inline. Which service is down is carried by `message`, exactly as intended. The `message` was simply wrong on three routes.\n\n## The fix\n\nThe issue suggests giving `unavailable` a service-name parameter. That fixes the three, but leaves the name typed out a second time at each call site — which is the shape the mismatch grew in. So the lookup and the message now come from **one argument**: the two `adminService()` / `externalService()` resolvers collapse into a single `resolve(res, service, method)` that answers the 503 itself, naming whatever service it just failed to resolve.\n\n```ts\nconst svc = resolve(res, 'external-datasource', 'listRemoteTables');\nif (!svc) return;\n```\n\nFixing the three messages needed only the parameter; taking the name from the lookup is what stops a tenth route reintroducing the mismatch. The per-route capability check is preserved — a host may wire a partial implementation, so \"the service is registered\" and \"this route can use it\" stay separate facts, and `method` keeps that check where the call sites had it.\n\n## Wire-visible change\n\nOn those three routes only, the 503 body's `error.message` now reads `The external-datasource service is not available.` — the same string `packages/rest/src/external-datasource-routes.ts` already emits for its own surface. Status and `error.code` are unchanged on all nine.\n\n## Tests\n\nEach of the nine 503s is pinned to the service it names, driven through the real `HonoHttpServer` against a context that resolves services **per name**. The `mount` helper every existing test used answers the same object for every lookup, which is why nothing could see this — it cannot tell the two services apart. Verified red: reinstating the hard-coded string fails exactly the three external rows plus the wired/unwired case, and nothing else.\n\nOne case covers the operator's actual situation — `datasource-admin` wired and answering 200s, `external-datasource` absent — including `POST /:name/test`, where the wired admin service has a `testConnection` of its own and must not answer for the external route.\n\nThe old single 503 test asserted the same body the table's first row does; it is re-pointed at the resolver's other arm, a registry that **throws** on an unregistered name, which nothing covered. The envelope conformance suite gains the external 503 branch, so both 503 paths are checked against `BaseResponseSchema`.\n\n## Checks\n\n- `pnpm --filter @objectstack/service-datasource test` — 10 files, 169 passed\n- `pnpm --filter @objectstack/service-datasource typecheck` — clean\n- `pnpm check:route-envelope` (+ `--self-test`) — still 2 write sites / 1 `success: true` / 1 `success: false`; `resolve` writes through `sendError`, so the module stays conformant\n- `pnpm check:error-code-casing`, `pnpm check:service-providers`, `eslint` on the package — clean\n\nPre-existing — #3843 carried every code string over verbatim, and #3973 changed no bytes on the wire.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015K7vXJAoSwrwdfcJrE3mZ8)_"
+}

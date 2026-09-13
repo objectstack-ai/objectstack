@@ -1,0 +1,35 @@
+{
+  "number": 4305,
+  "kind": "pull_request",
+  "title": "feat(lint,spec): L2 hook body 写不存在字段从 accepted gap 变为作者时 lint 告警 (#4271)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T04:58:59Z",
+  "updated_at": "2026-07-31T06:25:29Z",
+  "closed_at": "2026-07-31T06:25:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T06:25:27Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4305",
+  "body": "Closes #4271。\n\n## 做了什么\n\n新增 `@objectstack/lint` 规则 **`hook-body-write-unknown-field`**(`validate-hook-body-writes.ts`):解析 L2(`language:'js'`)hook body 的 `source`(TypeScript parser,只 parse、不执行、不 type-check),把字面量写集对照目标对象「声明字段 + 系统字段」,未知字段发 **advisory warning** 并带 `findClosestMatches` 的 did-you-mean。挂进 `REFERENCE_INTEGRITY_RULES`,`os validate` / `os lint` / `os compile` 一次全覆盖,CLI 零改动;不进 `defineStack` 运行时。\n\n`hook-body.zod.ts:134` 的「Write-set opacity — accepted static-analysis gap」段落改写为指向本 lint,并明确列出仍然不查的形态,避免「没告警=没问题」的误读。\n\n## 关键设计(按 issue 方案落地,两处按实况修正)\n\n- **写模式 ledger 化 + reconciliation 测试**(issue 待决项,采纳「要」):`HOOK_BODY_WRITE_PATTERNS` 每条带 canonical example,测试用真提取器 round-trip,断言产出与声明**逐条完全一致**且都带该条 pattern id —— 「声明了模式但没人验证」(#3528 的死法)在此结构性不可能。\n- **对齐真实 API 形状**(issue 草案与实现不符的两处):\n  - `ctx.api` 写面按 `ObjectRepository` 真签名编:`insert(data)`/`create(data)`/`update(data, options)` 载荷在**第 0 位**,`updateById(id, data)` 在第 1 位 —— issue 里的 `.update(id, { x })` 形状实际不存在;`.create` 是 `insert` 的真实 alias,一并支持。\n  - flat-input proxy(`installFlatInput`)的信封键 `id`/`options`/`ast`/`data` 是 envelope 写不是记录字段写,永不判为字段。\n- **宁漏勿误的静默 bail-out**:计算键、spread、非字面量载荷、动态对象名、`object:'*'` 通配 hook 的 `ctx.input` 写、跨包对象、一层 const 别名(记为 v1 known miss)。多目标 hook 只在字段**在所有已知目标上都缺**时才告警 —— body 可用 `ctx.object === '…'` 按对象分支,partial miss 静态上不可判错。\n- **v1 全 advisory**:`HookBodyWriteSeverity = 'warning'` 类型层面固定「永不阻断」,与 `lintUnknownAuthoringKeys`(#3786)姿态一致。\n- **boot-path 契约**:TS parser 走 `validate-react-page-props` 同款 createRequire 惰性加载,另加 `ctx`/`Object` 标识符预筛 —— 没有 JS body、或 body 根本不含这些标识符时零解析零加载。`lazy-deps.test.ts` 三层守卫(结构扫描 / dist 探针 / in-process)全部扩到本规则。\n\n## 验证\n\n- `packages/lint`:38 文件 565 测试全过(含 27 个新测试、两个 dist 探针);eslint 干净。\n- spec:7178 测试过;`check:generated` 8 个生成物门禁全绿(注释改动不落生成 docs)。\n- 合并 `origin/main` 后按 AGENTS.md §9 刷新构建,全仓 `pnpm build` + `pnpm test` exit 0。\n- CLI 端到端冒烟:坏写集 `os validate` 打出 ⚠ + did-you-mean 且继续后续检查;examples 三个自带 JS hook 均写声明字段,零自触发。\n- changeset:`@objectstack/lint` minor + `@objectstack/spec` patch。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

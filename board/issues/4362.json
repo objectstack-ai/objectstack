@@ -1,0 +1,35 @@
+{
+  "number": 4362,
+  "kind": "pull_request",
+  "title": "feat(lint): action body 里落不了地的 ctx.record 写在作者时告警 (#4345)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T08:54:50Z",
+  "updated_at": "2026-07-31T09:07:23Z",
+  "closed_at": "2026-07-31T09:07:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T09:07:21Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4362",
+  "body": "Closes #4345.\n\n## 背景\n\n#4344 **刻意**没碰 `ctx.record`,并写明了理由:action 的 `ctx.record` 是一份普通快照(`unwrapProxyToPlain(actionCtx?.record)`),`boundActionHandler` 从不写回 —— hook 路径的 `applyMutationsToInput` 在 action 侧没有对应物 —— 所以 `ctx.record.x = …` 对**已声明和未声明字段一样**被丢弃。\n\n把它塞进 unknown-field 规则会是**错的**:只报未声明的那一半,等于暗示已声明的那一半会落库,正是这一族规则要消灭的假完成。它需要自己的 finding,现在有了。\n\n## 新规则 `action-record-write-discarded`(advisory)\n\n**它不是\"看见 `ctx.record.<field> = …` 就报\"** —— 把快照当 payload 攒起来是合法写法:\n\n```js\nctx.record.stage = 'won';\nawait ctx.api.object('crm_deal').update(ctx.record);   // 这个写是活的\n```\n\n所以 finding 要求这个写**可证死**:`ctx.record` 在整段 body 里从未作为**值**流出去。属性读(`ctx.record.id`)不赦免那些写;把对象本身交出去 —— 当参数、当赋值右值、展开、return —— 才会。别名 `const r = ctx.record` 也算流出,方向是安全的:代价是漏报,不是误报。\n\n### 真值判断不算流出 —— 这条是拿 showcase 跑出来的\n\n`mark_done` 开头就是\n\n```js\nvar id = ctx.recordId || (ctx.record && ctx.record.id) || input.recordId;\n```\n\n这是 action body 真实的写法。第一版把 `ctx.record &&` 这个守卫当成流出,于是**仓库里唯一一段带 record 写的 body 被自己噤声了**。真值/类型判断读一下引用、产出一个布尔 —— 或者对 `&&`/`||`/`??` 而言,只在左操作数为假时产出它,而假值是 null/undefined,什么都持久化不了。只有**左**操作数是判断:`x || ctx.record` 确实会求值成那个对象,仍然算流出。\n\n## 一个 suite 成员,两个 rule id\n\n两个 finding 出自同一次 parse、同一段源码、同一个面。再加一个 `REFERENCE_INTEGRITY_RULES` 成员,就要把每个 action body 解析两遍去说同一次遍历的两件事;而手工挂进三个 CLI 命令,正是这个 suite 要消灭的 drift —— `validateReadonlyFlowWrites` 就是活证据:挂了 `validate` 和 `compile`,唯独漏了 `lint`。取舍在 suite 注释和模块头两处都写下来了,不留给下一个人重新发现。\n\n## 台账棘轮第一次真的救了场\n\n`record-property-assign` 进入共享的 `HOOK_BODY_WRITE_PATTERNS` —— 那是**抽取器的形状清单**,不属于任何一条规则 —— 两个既有消费者必须先分类,它才能落地。\n\n这在 hook 侧不是走过场:record 写**没有 `object`**,而 `validateHookBodyWrites` 正是靠\"没有 object\"判定\"这是 `ctx.input` 写\"的,新形状会被报成 **\"the hook writes 'stage' to its input\"**。现在 hook 规则也声明了自己消费的子集(`HOOK_BODY_WRITE_PATTERN_IDS`)和带理由的排除项 —— hook 沙箱上下文压根没有 `ctx.record`(`buildSandboxContext` 从不设置),写它是**运行时抛错**而不是静默失效;响的失败不归 advisory 规则管。\n\n`extractHookBodyWriteSet` 是新的单次解析入口(writes + `ctxRecordEscapes`),`extractHookBodyWrites` 退化成它的薄投影。\n\n## boot path\n\naction 侧的预过滤从 `api` 放宽到 `api` 或 `record`,两者都不沾的 body 依然连 parse 都不做,更不会加载 ~9 MB 的 TypeScript。`lazy-deps.test.ts` 钉住这条。\n\n顺带修掉那份文件里已经过期的表述:头注释和两个 dist 探针的用例名还在声称每个惰性依赖都只等\"一个 react page\",而 typescript 从 #4271 起就也由 hook body gate 加载了。现在每个用例说清自己钉的是哪个触发点。\n\n## 文档\n\n`content/docs/automation/hook-bodies.mdx` 两个 commit 前刚被 #4351/#4355 重写过(为了不再声称写面没检查),而那一节正落在本 PR 的题目上,所以在同一个 PR 里更新,而不是让它第二次变成假的:写法表加了 `ctx.record` 行(也不再是\"三种形状\"),静默 bail 清单加了流出规则,**Signature conventions** 直接讲明 action 的 `ctx.record` 实质只读、`ctx.api.object(...)` 是 body 持久化的唯一路径。\n\n## 验证\n\n| 门 | 结果 |\n|---|---|\n| `@objectstack/lint` test | 634 passed |\n| `@objectstack/cli` test | 628 passed |\n| `@objectstack/lint` typecheck | clean |\n| `@objectstack/spec check:generated` | 8/8 up to date(只动 JSDoc/文档) |\n| eslint(改动文件) | 0 errors |\n| showcase `os validate` | 基线 0 条;注入一处死写后恰好 1 条,带正确 hint;还原后回到 0 |\n\n`ScriptContext.record`、`ScriptBodySchema`、`ActionSchema.body` 都写明了实质只读。**运行时到底该拒绝还是该兑现这个写**,仍然开在 #4345 上 —— 本 PR 只让它在作者时可见,不替那个决定下结论。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

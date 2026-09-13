@@ -1,0 +1,32 @@
+{
+  "number": 3878,
+  "kind": "issue",
+  "title": "/analytics/query 的请求体形状取决于装没装 service-analytics(降级 shim 收信封、真引擎收裸 AnalyticsQuery),且发错形状静默生成空 SELECT",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T13:51:44Z",
+  "updated_at": "2026-07-31T04:56:02Z",
+  "closed_at": "2026-07-31T04:56:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3878",
+  "body": "按 Prime Directive #10 记录。修 #3867(PR #3875)时踩到的,**是我自己被骗过去的那个坑** —— 它让我在 #3867 原文里得出了「没读到数据」的错误结论,所以值得单独收口。\n\n## 同一个端点,两种请求体\n\n`POST /api/v1/analytics/query` 的处理方由 `analytics` 服务槽决定,而这个槽有两个实现:\n\n**① 降级 shim**(`packages/metadata-protocol/src/plugin.ts`)—— 收 `{cube, query}` **信封**,并且明确做了两可兼容:\n\n```ts\nconst envelope = body && typeof body === 'object' && 'query' in body && 'cube' in body\n    ? body\n    : { cube: body?.cube, query: body };\nconst result = await protocolShim.analyticsQuery(envelope);\n```\n\n**② 真引擎**(`AnalyticsServicePlugin`,`ctx.replaceService` 替换掉 ①)—— `AnalyticsService.query(query: AnalyticsQuery, context?)`,收**裸 `AnalyticsQuery`**,即 `{cube, measures, dimensions, filters, …}` 全在顶层。没有信封兼容。\n\n所以:\n\n| 部署 | `{\"cube\":\"x\",\"measures\":[\"count\"]}` | `{\"cube\":\"x\",\"query\":{\"measures\":[\"count\"]}}` |\n|:---|:---|:---|\n| 未装 service-analytics(shim) | ✅ 走 else 分支,被包成信封 | ✅ 走 if 分支 |\n| 装了 service-analytics(默认) | ✅ | ❌ **静默错误** |\n\n同一个 URL、同一份 OpenAPI/discovery 描述,请求体契约却取决于部署里装了哪个插件。按 Prime Directive #12,这是「一个契约,N 种方言」;而且 ① 那个 `'query' in body && 'cube' in body` 的两可兼容本身就是 #12 说的「不要在消费端加宽容 fallback」的样本。\n\n## 发错形状不报错,静默生成空 SELECT\n\n这才是真正咬人的地方。真引擎收到带信封的 body 时,顶层没有 `measures`/`dimensions`,于是 `ensureCube` 推断出一个**没有任何列**的 cube,SQL 编译成:\n\n```\nPOST /api/v1/analytics/query {\"cube\":\"crm_account\",\"query\":{\"measures\":[\"count\"]}}\n→ 500 {\"success\":false,\"error\":{\"message\":\"SELECT  FROM \\\"crm_account\\\" - near \\\"FROM\\\": syntax error\",\"code\":500}}\n```\n\n注意 `SELECT` 和 `FROM` 之间是空的。**没有任何一层说「你的请求体形状不对」**,它一路走到驱动才因为 SQL 语法炸掉。\n\n我在 #3867 的第一次实证就是这么发的 payload,拿到语法错误,于是写下「只报了语法错误,没有读到数据,不宜当成数据泄露断言」。用正确形状重测才发现能读到真实行 —— 结论差了一个量级。一个静默接受畸形输入的端点会把调查者引向错误结论,这本身就是修它的理由。\n\n(PR #3875 之后这条响应变成 `Internal server error`,SQL 不再回显;但「不报形状错误」这一点没变,只是更难诊断了 —— 这也是为什么应该在入口把它挡掉,而不是靠错误信息去猜。)\n\n## 建议(未决策,留给维护者)\n\n1. **在入口用 Zod 校验请求体**,以 `AnalyticsQuery` 为唯一契约,不符合就 400 并指出缺什么。`AnalyticsQuery` 在 `@objectstack/spec/contracts` 里已有类型;按 Prime Directive #1 应该有对应的 Zod schema 作为唯一真源。这一条独立于下面两条,单独做就能消除「静默空 SELECT」。\n2. **退役信封形状**。按 #12 的做法:选 `AnalyticsQuery` 为规范形状,信封走 `readAliasedConfig` 一类的声明式 shim(warn 一次、可 lint、可按计划移除),而不是留一个裸 `'query' in body` 三元。\n3. **顺手确认 `getMeta`/`generateSql` 两侧签名是否也有同类分歧** —— shim 的 `getMeta` 忽略 `cubeName` 参数、`generateSql` 直接返回 `{sql:null}`,与真引擎的行为差别是否已在 discovery 的 `degraded` 自述里如实反映。\n\n倾向先做 1(小、独立、立刻消除静默失败),2 排在其后。\n\n关联:#3867、PR #3875、#3770、ADR-0021、ADR-0076 D10/D12。"
+}

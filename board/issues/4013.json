@@ -1,0 +1,32 @@
+{
+  "number": 4013,
+  "kind": "issue",
+  "title": "3 objectql tests fail on clean main: the analytics slot is populated where `plugin.step2` / `protocol-discovery` pin it empty (#3891 expectations)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T02:42:28Z",
+  "updated_at": "2026-07-30T06:51:32Z",
+  "closed_at": "2026-07-30T06:51:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4013",
+  "body": "Hit while validating #4011 — reproduced on a **clean checkout of `main` (`d6bfb3d`)** with no local changes, so it is not that PR's doing. Filing per the drive-to-green convention so it doesn't get attributed to whoever touches `@objectstack/objectql` next.\n\n## Repro\n\n```\npnpm --filter @objectstack/objectql exec vitest run src/plugin.step2.test.ts src/protocol-discovery.test.ts\n# Test Files  2 failed (2) · Tests  3 failed | 21 passed (24)\n```\n\n## The three failures\n\nAll the same shape — the tests pin the ADR-0076/#3891 ruling that the `analytics` service slot stays **empty** until `service-analytics` fills it, and something now fills (or fakes) it:\n\n1. `plugin.step2.test.ts` › *registerProtocol:false + MetadataProtocolPlugin reproduces the built-in service surface* — `expect(() => kernel.getService('analytics')).toThrow()` → did not throw.\n2. `plugin.step2.test.ts` › *default assembly registers protocol but leaves the analytics slot empty (#3891)* — same assertion, same non-throw.\n3. `protocol-discovery.test.ts` › *should report analytics unavailable with no advertised route when not registered* — `discovery.services.analytics.enabled` → `true`, expected `false`.\n\n## Reading\n\nThe test comments state the intent explicitly: *\"the slot stays EMPTY until service-analytics fills it … /analytics 404s honestly instead of answering with wrong numbers\"*. Either a recent change legitimately made analytics self-register (in which case these three pins — and the honest-404 story they encode — need a deliberate revision, not a drive-by green-up), or something started stuffing the slot as a side effect and the tests are correctly catching it. Both readings need an owner who knows the #3891 intent; mechanically flipping the assertions would erase the ruling they exist to protect.\n\nLikely candidates are whichever of the recent protocol/spec merges touched service assembly (the failures exist at `d6bfb3d`; I did not bisect further).\n\nNot v17-blocking *if* the behaviour change was intentional — but worth deciding before the release, since \"analytics answers with wrong numbers instead of 404ing honestly\" was the exact bug #3891 fixed."
+}

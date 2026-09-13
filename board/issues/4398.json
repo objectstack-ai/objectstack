@@ -1,0 +1,35 @@
+{
+  "number": 4398,
+  "kind": "pull_request",
+  "title": "feat(objectql,runtime): 默认 runner setter 改为 first-wins —— 私有字段探测全数退场 (#4251)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T11:03:08Z",
+  "updated_at": "2026-07-31T11:15:08Z",
+  "closed_at": "2026-07-31T11:15:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T11:15:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4398",
+  "body": "决策 memo 的 **2**:runner 幂等收编进引擎。\n\n## 变更\n\n`setDefaultBodyRunner` / `setDefaultActionRunner` 现在自己执行自己文档里写的契约(\"the runtime layer sets this once per engine\")——**first-wins**:保留第一个,后续调用忽略并返回 `false`。配上公开访问器 `getDefaultBodyRunner()` / `getDefaultActionRunner()`,字段从 `(this as any)._defaultBodyRunner` 挂载变成真正的 `private` 成员。\n\n## 之前的形状,以及为什么它值得修\n\n不变量住在**调用方**:AppPlugin 靠 `any` 探引擎私有字段来避免共享 kernel 上互相覆盖 —— 人人持有、无人执行;字段一改名,守卫静默恒 undefined,每个 AppPlugin 都重装。而且读这两个字段的不止它:引擎自己的 `bindHooks` fallback、ObjectQLPlugin 的 authored-action re-sync,三处同样的 `as any` 私有伸手。三处现在全走公开访问器;全仓剩下的 `_default*` 只在注释和 test double 里。\n\n**改语义前做了调用方审计**:每个 setter 调用点要么持有 fresh engine(sandbox / hook-binder 测试),要么要的恰是 keep-the-first(AppPlugin)—— 没有任何人需要在活引擎上替换 runner。`void → boolean` 是增量;AppPlugin 用返回值让 \"Installed default … runner\" 日志保持真实(引擎保留了先前的就不再打)。\n\n## 测试\n\n- hook-binder 测试钉住:第二次安装被拒且**端到端**验证第一个 runner 才是执行的那个;访问器暴露被保留的实例。\n- app-plugin 那条钉住旧调用方守卫的测试,改钉新分工:setter 无条件被调,引擎答 `false` 时日志跳过。\n- mock 双方(plugin-authored-actions)补 `getDefaultActionRunner()`,原有直接戳字段的用法保留可用。\n\n## 验证过程里的两个插曲(如实记录)\n\n1. 一度以为 main 红了:objectql 22 个 #4254 conformance 测试在 clean HEAD 上也失败。二分到三个 commit 后发现是**本地 `metadata-protocol` dist 过期**(测试经它的 dist 走 list path,而该包在本 worktree 从未重建)—— 重建后 89/89 绿。main 没红,是我的误报。\n2. 一次 6 文件 FAIL 是本地 vitest 并发抖动(与 spec dts build 并行跑了测试,违反了自己记过的规矩);单文件与串行复跑全绿。\n\n## 验证\n\n- `objectql` **1464 / 89**、`runtime` **1001 / 69**(串行)\n- objectql + runtime dts build 通过\n- eslint 干净;ratchet `168/36, none new`\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

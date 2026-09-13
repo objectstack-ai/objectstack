@@ -1,0 +1,35 @@
+{
+  "number": 4359,
+  "kind": "pull_request",
+  "title": "fix(spec)!: 退役处方指向 protocol 17 —— 这趟车真正会发的 major (#4350)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T08:46:07Z",
+  "updated_at": "2026-07-31T09:17:05Z",
+  "closed_at": "2026-07-31T09:17:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T09:17:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4359",
+  "body": "Closes #4350\n\n十处墓碑告诉作者某个键 \"was removed in `@objectstack/spec` **18**\"。issue 的判断属实,而且**机器也写着 18**,并且是承重的:一整个 `step18` chain step 加两个 `toMajor: 18` conversion,被接在了这趟发布列车到不了的 major 上。\n\n## 为什么是 17\n\n| 事实 | 值 |\n|:---|:---|\n| npm dist-tags | `latest` = 16.1.0,`rc` = 17.0.0-rc.0 —— 17.0.0 从未发布 |\n| `.changeset/pre.json` | `@objectstack/spec` initialVersions = **16.1.0** |\n| changesets 算法 | pre 模式从**上一个已发布**版本起算:16.1.0 + major = **17.0.0** |\n| `changeset status` | `@objectstack/spec 17.0.0-rc.0 -> 17.0.0-rc.1` |\n| `PROTOCOL_VERSION` | `'17.0.0'`,且 `protocol-version.test.ts` 把它钉在 package major 上 |\n\n\"18\" 是从在研的 `17.0.0-rc.0` 往上数了一位,而 changesets 是从 16.1.0 往上算的。\n\n## 文案只是小的那一半\n\n`composeMigrationChain(from, to = PROTOCOL_MAJOR)` 按 `m <= toMajor` 过滤,所以 key 为 18 的 step **走不到**:`os migrate meta --from 16` 走完 11–17 就跨过去了。同一个天花板卡住 `composeSpecChanges`,于是已提交的 `spec-changes.json` 里这七项退役**一条都没有**——`query.joins` / `windowFunctions` / `validateOnly` 出现 0 次,`docs/protocol-upgrade-guide.md` 里连一个 \"18\" 都没有。\n\n也就是说:作者会撞上墓碑,却既没有 chain hop 可跑,也没有升级指南可查。**只改文案会让处方说\"17 移除\"、机器却仍归档在 18 并继续丢弃。**\n\n## 改动\n\n- **`step18` 折进 `step17`** —— rationale、两个 `conversionIds`、六条 semantic migration 全部迁移;删掉 `MIGRATIONS_BY_MAJOR[18]`;两个 conversion 改 `toMajor: 17`(`migrations.test.ts` 要求 conversion major 等于 step major),`CONVERSIONS_BY_MAJOR[18]` 并入 `[17]`。\n- **30 处手写 \"18\" → \"17\"** —— 十条处方、把错版本号钉死的 `query.test.ts` 正则、内部注释、liveness ledger + README、七份未消费的 changeset。\n- **生成物走生成器** —— `spec-changes.json`(+108)、`protocol-upgrade-guide.md`(+32)、五个参考文档页(12 行,全部只含版本号)。`packages/spec/json-schema/` 是 gitignore 的构建产物。\n- **补 v17 release notes + 升级清单** —— 这七项退役此前在**任何** release doc 里都没有条目,因为它们本该落在并不存在的 v18.mdx。\n\n**没有任何行为被增删**:#3963 / #4052 / #4158 / #4196 / #4286 退役的每个键仍按原条款退役。变的是处方名字对了,且 `os migrate meta` 真的会执行那两个 stack conversion。\n\n## 验证\n\n- 11 个 spec gate 全 PASS(含 `check:api-surface` / `check:liveness` / `check:spec-changes` / `check:upgrade-guide`)\n- `@objectstack/spec` 测试:278 文件 / 7156 用例全绿\n- metadata-protocol / client / service-automation 全 PASS;`check:i18n` PASS\n- 全仓 tracked 文件残留 \"18\":0\n\n## Related\n\n- objectstack-ai/objectui#3101 —— 下游照着错文案排期的实例\n- objectstack-ai/objectui#3105 —— objectui 侧同一处措辞的更正\n- #4198 / #4196 / #4286 / #3963 / #4158 / #4052 —— 引入这些墓碑的 PR\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 4014,
+  "kind": "pull_request",
+  "title": "fix(spec,objectql,rest,runtime): localize field-validation messages, name the field by its label (#3957)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T02:43:30Z",
+  "updated_at": "2026-07-30T10:28:56Z",
+  "closed_at": "2026-07-30T10:28:55Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T10:28:55Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4014",
+  "body": "Closes #3957\n\n## 问题\n\n写路径的内建校验消息是「硬编码英文模板 + 拼进 API 字段名」。这些字符串就是 Console toast、CSV 导入行报告、CLI 和任何自定义客户端**逐字显示**的内容,所以一个中文用户导入坏行看到的是:\n\n```\n第 1 行:penalty_amount must be ≥ 0\n```\n\n而该字段声明的是 `label: '处罚金额'`,并且 `zh-CN` 翻译已经加载。同一条约束在表单层由浏览器原生 `min` 正确本地化成「值必须大于或等于 0。」—— **语言取决于哪一层先拦住它**。\n\n## 改法\n\nissue 的两个 Expected 都做了(不是二选一),分四层:\n\n**1. 契约 — `@objectstack/spec`**\n- `FieldValidationErrorSchema`(`data/validation-error.zod.ts`):`{ field, code, message, label, params }`。objectql 原来手写的同名 interface 删掉改为复用 —— 一个 Zod 源(Prime Directive #1/#12)。\n- 消息目录 `system/validation-message.ts`:`en / zh-CN / ja-JP / es-ES`,与平台 bundle 同一 locale 集合。英文措辞与改动前**逐字节相同**,英文部署的消息不变。\n- 目录走**常量**而不是 auto-gen bundle:`check:i18n` 管的是「声明的 metadata label」,往那里加 key 会被判 drift。形状对齐 `i18n-resolver.ts` 里已有的 `SYSTEM_FIELD_LABELS`。\n- `Accept-Language` 解析抽成一份共享实现(`preferredLocaleFromHeader`),两个传输层共用,不留第三份拷贝。\n\n**2. 消息生产 — `@objectstack/objectql`**\n- `validateOne` 的 14 处模板全部改走目录;字段名解析顺序 **翻译 bundle(`objects.<obj>.fields.<f>.label`)→ 声明 `label` → API 名**。API 名仍留在 `field` 里,表单照样能聚焦到正确输入框。\n- `params` 带上离散约束值:`{ min: 0 }`、`{ maxLength: 512, actual: 3000 }`、`{ allowed: 'a, b' }`。\n- 消息 key 比 wire code 更细(`invalid_option_value` / `invalid_datetime` / `invalid_type_array`),这样一个 code 能承载多个句子,而客户端匹配的 `code` 词汇表不用拆。\n- `rule-validator.ts` 的内建消息同样处理(`requiredWhen`、逐选项 gating、状态机兜底)。**作者写的 `rule.message` 一律不覆盖** —— 那已经是作者选定的语言。\n\n**3. locale 从哪来**\n`ExecutionContext.locale` 的 TSDoc 一直写着 *\\\"Drives message catalogs and number/date formatting\\\"*,却**没有任何消费者** —— declared ≠ enforced(AGENTS.md PD #10)。现在它就是那个消费者。\n\n并且两个 HTTP 入口(`rest-server.ts` 的 execCtx、runtime 的 `resolve-execution-context.ts`)都改成**请求自身的 `Accept-Language` / `?locale` 优先,workspace `localization.locale` 兜底**。否则会出现同一屏里「中文字段 label + 英文报错消息」——正是这个 issue 抱怨的那种分裂。表达不出偏好的调用方(定时任务、服务间调用)继续用 workspace 默认值。\n\n**4. 导入路径**(issue 的原始场景)\n- `import-coerce.ts` 的 10 处单元格强转消息 + 导入器的 required 预检,接同一个目录 —— 它们和引擎的约束消息落在**同一份行报告**里,只本地化一半会很怪。\n- 顺带修了实测发现的一个漏:行报告的列名读的是**未翻译**的 schema,所以出现过 `Account:未找到与\"…\"匹配的记录`。`import-prepare.ts` 现在把翻译后的 label 折进 metaMap(翻译文档本来就已经为选项同义词取过了)。\n- 引用失败消息不再泄露目标对象的 API 名(原 `no sys_user matches \\\"…\\\"`)—— 暴露内部标识符正是本 issue 要修的病,列名 + 出错值才是导入者能据以行动的信息。\n\n## 验证\n\n**测试**\n- `packages/spec/src/system/validation-message.test.ts` — 目录完整性(每个 locale 定义每个 key、边界值必须出现在模板里)、locale 回退阶梯、部署覆盖、i18n 服务抛异常时不把 400 变 500。\n- `packages/objectql/src/engine-validation-locale.test.ts` — **call site** 测试:单条 insert、批量 insert、单 id update、多行 update(`#3106` 那条批量路径)全覆盖,外加 `setI18nService` 桥接。`case` 标签不等于生效,得看调用点。\n- `record-validator.test.ts` / `rule-validator.test.ts` / `import-coerce.test.ts` 各自补了本地化断言。\n- `packages/qa/dogfood/test/validation-message-locale.dogfood.test.ts` — 真实 HTTP 栈端到端:`Accept-Language` 切语言、`label`/`code`/`params` 三件套、PATCH、导入行报告。\n\n**闸门**:`pnpm build`(71 包)、`pnpm test`(132 任务)、`check:i18n`、`check:i18n-coverage`、`check:authorable-surface` 全绿。\n\n**showcase 真机实测**(独立端口实例,已停,临时产物已清):\n- 导入向导行报告:`第 1 行:预算必须大于或等于 0` —— 声明 label 是 \\\"Budget\\\",走的是 zh-CN 翻译\n- 网格行内编辑保存:`保存失败: 年收入必须大于或等于 0` —— 声明 label 是 \\\"Annual Revenue\\\"\n- API 逐项核过 min / max / maxLength / required / email / select × zh-CN / ja-JP / 无 header\n\n## 对使用方的影响\n\n- `code` **不变**,仍然是该匹配的东西;`params` 是新增可选字段。\n- `message` **文本会变**:被本地化了,而且即使英文也改用 label(`Budget must be ≥ 0`,不再是 `budget must be ≥ 0`)。断言旧英文字符串的地方应改成匹配 `code`(现在还可以匹配 `params`)。本 PR 内更新了一处这样的测试断言(`import-integration.test.ts`)。\n- 部署可以用 `translation` 覆盖任意内建消息:定义 `validation.field.<messageKey>`,例如 `validation.field.min_value: '{{label}}不得小于 {{min}} 元'`。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

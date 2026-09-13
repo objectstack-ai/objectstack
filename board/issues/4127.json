@@ -1,0 +1,32 @@
+{
+  "number": 4127,
+  "kind": "issue",
+  "title": "dispatcher 多个 domain 调用契约里没有的方法 —— #4087 的同类，只是方向相反（契约缺声明，不是调用点乱编）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T10:37:58Z",
+  "updated_at": "2026-07-30T12:42:18Z",
+  "closed_at": "2026-07-30T12:42:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4127",
+  "body": "按 Prime Directive #10 记录，#4087（PR #4112）的根因排查时顺带扫出来的。\n\n## 为什么要单独开一条\n\n#4087 的根因不是\"忘了门控\"，而是 **dispatcher domain 的调用点和 `packages/spec/src/contracts/*` 对不上**——而现有的所有 gate 都不查这件事：`route-ledger.conformance.test.ts` 只查\"域有没有 ledger 行\"，`client-url-conformance` 只查\"SDK 拼的 URL 有没有人挂\"，`check-route-envelope` 只查响应信封。没有任何一条查\"这个 domain 调服务的方式，契约认不认\"。\n\n所以修完 #4087 我把其余 domain 按同一把尺子扫了一遍。结论：**同类问题还有，但方向是反的**。#4087 是调用点编了一个没人实现的形状；下面这些是调用点和实现是对的，**契约没声明**。危害小得多（这些路由能正常工作），但它让契约不再是契约——`packages/spec` 是 Prime Directive #12 里\"metadata 生产者和运行时之间那唯一一份合同\"，一份漏了半个面的合同挡不住下一个 #4087。\n\n## 扫描结果\n\n### 1. `/notifications` —— 三条 SDK 路由，三个方法契约里都没有\n\n`INotificationService`（`packages/spec/src/contracts/notification-service.ts`）声明的全部是：\n\n```ts\nsend(message): Promise<NotificationResult>;\nsendBatch?(messages): Promise<NotificationResult[]>;\ngetChannels?(): NotificationChannel[];\n```\n\n`domains/notifications.ts` 调的是：\n\n| 行 | 调用 | 路由 | ledger disposition |\n|---|---|---|---|\n| 72 | `service.listInbox(userId, { read, type, limit })` | `GET /notifications` | `sdk` → `notifications.list` |\n| 79 | `service.markRead(userId, ids)` | `POST /notifications/read` | `sdk` → `notifications.markRead` |\n| 85 | `service.markAllRead(userId)` | `POST /notifications/read/all` | `sdk` → `notifications.markAllRead` |\n\n实现在 `packages/services/service-messaging/src/messaging-service.ts:284` / `:365`，工作正常。\n\n值得注意的是 domain 自己已经在 duck-type 了：\n\n```ts\nif (!isServiceServeable(service) || typeof service.listInbox !== 'function') return { handled: false };\n```\n\n而 #4058 给这行加的注释写得很清楚——`typeof service.listInbox !== 'function'` 这个判断\"顺带把 dev stub 挡在外面了（那个只实现 send / sendBatch）\"。**dev stub 只实现 send/sendBatch，恰恰是因为它照着契约实现的。** 契约漏了收件箱面，于是唯一按契约写的实现反而是\"不完整\"的那个，靠 duck-type 兜住。\n\n### 2. `/automation` —— 三个方法契约里没有\n\n`IAutomationService` 没有声明：\n\n- `trigger(name, payload, { request })` —— `domains/automation.ts:61`，路由 `POST /automation/trigger/:name`\n- `getConnectorDescriptors()` —— `:120`，实现在 `service-automation/src/engine.ts:1404`\n- `getFlowRuntimeStates()` —— `:140`，实现在 `engine.ts:1555`\n\n另外 `:66` 的 `automationService.execute(triggerName, body)` 把 HTTP body 直接塞进契约声明为 `AutomationContext` 的第二个形参。同一文件 `:201` 传的是真正构造过的 `automationContext`，两处不一致——这个更接近 #4087 的形状，建议单独确认一下。\n\n### 3. `/i18n` —— `getFieldLabels` 契约里没有\n\n`II18nService` 声明了 `t` / `getTranslations` / `loadTranslations` / `getLocales` / `getDefaultLocale?` / `setDefaultLocale?` / `getCoverage?` / `suggestTranslations?`，没有 `getFieldLabels`。`domains/i18n.ts:105` 同样在 duck-type：\n\n```ts\nif (typeof i18nService.getFieldLabels === 'function') { ... }\n```\n\n路由 `GET /i18n/labels/:object/:locale` 在 ledger 里是 `sdk` → `i18n.getFieldLabels`。\n\n### 扫干净的\n\n`/analytics`、`/ui`、`/security`、`/keys`、`/share-links`、`/packages`、`/meta`、`/data` 的调用点都在契约内。`/ai` 走的是自己的 route table（真实表在 cloud 的 `service-ai/src/ai-route-ledger.ts`），不在本次尺子范围内。\n\n## 建议\n\n**按 Prime Directive #12，修契约，不是修调用点。** 这三处的调用点和实现是一致的、能用的，错的是那份漏声明的合同：\n\n1. `INotificationService` 补 `listInbox` / `markRead` / `markAllRead`（可选方法，因为收件箱是 service-messaging 才有的能力），然后 `domains/notifications.ts` 的 duck-type 可以退成 `isServiceServeable` 一个判断。\n2. `IAutomationService` 补 `trigger?` / `getConnectorDescriptors?` / `getFlowRuntimeStates?`；顺便确认 `execute(triggerName, body)` 那处是不是应该和 `:201` 一样构造 `AutomationContext`。\n3. `II18nService` 补 `getFieldLabels?`，`domains/i18n.ts` 的 duck-type 同样可以退化。\n\n**外加一条更值钱的：给这个类别加个 gate。** 三处 duck-type（`typeof x.foo === 'function'`）是同一个信号——每一处都是有人当时发现\"契约里没有\"，然后选择绕过而不是补。可行的做法是让 domain 拿到的服务句柄带上契约类型（而不是 `as any`），调用不上就是编译错误。`domains/notifications.ts:44` 现在写的就是 `as any`。\n\n## 顺带：测试侧的同一个洞\n\n#4087 能活这么久，直接原因是覆盖它的 5 个用例**全都 mock 了 handler 想要的形状而不是契约声明的形状**（`upload` 只断言\"被调用过\"、`download` mock 成 `{ data, mimeType }`，而契约是 `Promise<void>` 和 `Promise<Buffer>`）——包括 #4086 上周才加的那两个。如果 domain 测试的 mock 用 `satisfies IStorageService` 之类约束住，这类 mock 会直接编译不过。这比再加一条运行时 gate 便宜，也更早失败。\n\n关联：#4087 / PR #4112、#4058、#4000、ADR-0076 D12、Prime Directive #10 / #12。"
+}

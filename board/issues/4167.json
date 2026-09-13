@@ -1,0 +1,32 @@
+{
+  "number": 4167,
+  "kind": "issue",
+  "title": "`config.storage` authored with `driver`/`root` is silently ignored — a host asking for S3 gets local disk",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T13:16:01Z",
+  "updated_at": "2026-07-30T15:47:04Z",
+  "closed_at": "2026-07-30T15:47:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4167",
+  "body": "Found while fixing #4096 (PR #4166), which corrected the same mismatch one layer down. Filing rather than papering over, because the fix is a contract decision (AGENTS.md Prime Directive #12).\n\n## The mismatch\n\n`StorageServicePluginOptions` declares:\n\n```ts\n{ adapter?: 'local' | 's3'; local?: LocalStorageAdapterOptions; s3?: { bucket; region; endpoint? }; … }\n```\n\nThere is no `driver` and no `root`. But `serve` forwards a host's `config.storage` block verbatim as soon as it names *either* dialect:\n\n```ts\nif (cfgStorage && (cfgStorage.driver || cfgStorage.adapter)) {\n  return { options: cfgStorage };\n}\n```\n\nSo a config authored as `{ driver: 's3', bucket: '…' }` is accepted by the branch, passed to the plugin, and **every key is dropped**. The constructor's `{ adapter: 'local', ...options }` default then applies and the host silently gets **local disk** — while believing it configured S3.\n\nTypeScript does not catch it: the value is an untyped `config` field, and an object literal reaching a parameter whose interface has no index signature type-checks fine while doing nothing at runtime.\n\n## Why this is worth a decision, not a shim\n\n#4096 was the same bug in `serve`'s own fallback (`{ driver: 'local', root }`), where the consequence was a wrong upload directory plus a bogus migration warning on every boot. That one I fixed at the producer, because `serve` owns both ends.\n\nThis one crosses an authoring boundary, so the two honest options are:\n\n1. **The config schema is right and the plugin should accept the `driver`/`root` dialect** — then it belongs in a declared conversion/alias shim (the ADR-0087 conversion layer or `readAliasedConfig`), warned once and removable on a schedule, not a bare `??`.\n2. **The plugin's shape is canonical and the `driver`/`root` dialect is wrong** — then `config.storage` should be validated at authoring/compile time so an unrecognised block is rejected loudly instead of silently downgrading to local disk.\n\nEither way the current state — accepted, ignored, no diagnostic — is the `declared ≠ enforced` shape Prime Directive #10 is about. Note that whichever is chosen, `serve`'s branch condition also needs revisiting: it currently treats the mere presence of `driver` as \"the host configured a backend\", which is what routes an unreadable block past the working default.\n\n## Repro\n\n```ts\n// objectstack.config.ts\nexport default {\n  // …\n  storage: { driver: 's3', bucket: 'my-bucket', region: 'us-east-1' },\n};\n```\n\nBoot with `os serve`. Files are written to local disk under the plugin's default root; nothing reports that the S3 configuration was discarded.\n\n## Scope note\n\nUntouched by #4166, which deliberately keeps forwarding the block verbatim — the helper's doc comment records why, so the next reader does not \"tidy\" it into an alias."
+}

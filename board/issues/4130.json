@@ -1,0 +1,32 @@
+{
+  "number": 4130,
+  "kind": "issue",
+  "title": "discovery 的 `data` 槽位仍是硬编 `available` —— 目前只靠 plugin-dev 的加载顺序约定兜住，不是构造上的保证",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T10:45:36Z",
+  "updated_at": "2026-07-30T11:19:30Z",
+  "closed_at": "2026-07-30T11:19:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4130",
+  "body": "按 Prime Directive #10 记录，#4089 / PR #4114 期间核对出的同类残留。**当前无害**，记下来是因为它靠的是一条约定而非构造保证。\n\n## 现象\n\n#4114 把两个 discovery builder 的 `metadata` 槽位改成读实现自己的 `__serviceInfo`（ADR-0076 D12）。同一个\"kernel-provided (always available)\"硬编块里还有一条 `data`，两边都仍是写死的 `available`：\n\n| 文件 | 当前写法 |\n|:---|:---|\n| `packages/runtime/src/http-dispatcher.ts` | `data: svcAvailable(routes.data, 'kernel')` —— 不传 svc，等价于无条件 `available` + `handlerReady: true` |\n| `packages/metadata-protocol/src/protocol.ts` | `data: { enabled: true, status: 'available', route: '/api/v1/data', provider: 'objectql' }` |\n\n而 plugin-dev 的 `data` 实现在 `DEV_STUB_SELF_INFO` 里被分类为最严重的一档（`packages/plugins/plugin-dev/src/dev-plugin.ts`）：\n\n```\n'data': { status: 'stub', message: 'Dev stub — find() always returns [], insert() mints an id and stores nothing. Register ObjectQLPlugin for a real engine.' }\n```\n\n`stub` 的 `handlerReady` 默认 `false`。如果它进了槽位而 builder 仍报 `available` + `handlerReady: true`，那就是 D12 要消灭的那类过度声明 —— 而且发生在整个平台最核心的槽位上。\n\n## 为什么现在打不中\n\n`data` 只有一个 producer：`ObjectQLPlugin`（`packages/objectql/src/plugin.ts` 里 `ctx.registerService('data', this.ql)`）。plugin-dev 的 stub 注册循环只在 `ctx.getService(svc)` 抛错（槽位为空）时才填，而 plugin-dev **总是**把 `ObjectQLPlugin` 作为子插件加载（`dev-plugin.ts:523-525`），所以在任何能构建 discovery 的栈里，`data` 槽位都已被真引擎占住，stub 进不去。\n\n也就是说：**这条硬编现在说的是真话，但真话来自 plugin-dev 的加载顺序约定，不是来自 builder 的计算。**#4089 的教训正是这个 —— `metadata` 那两条硬编当年也曾各自\"大致成立\"，直到内核给它注入了 fallback、MetadataPlugin 又给它接了 `sys_metadata`，两条硬编就同时开始撒谎，且方向相反。\n\n## 什么时候会被打中\n\n- 出现第二个 `data` producer（例如某个自称 `degraded` 的只读 / 远端引擎实现）；\n- 有人单独用 plugin-dev 而不带 `ObjectQLPlugin`（`extraPlugins` / 裁剪过的 dev 配置），槽位就会落到那个 `find() => []` 的 stub 上，而 discovery 仍报 `available` + `handlerReady: true`。\n\n## 需要的决定\n\n二选一，倾向第 1 条：\n\n1. **`data` 也走同一条路**：dispatcher 侧 `resolveService('data')` 后交给 `svcAvailable(routes.data, 'kernel', dataSvc)`（这一支已经会读 `__serviceInfo`），metadata-protocol 侧同样读 `registeredServices.get('data')`。改动很小，且把\"真话\"从约定变成构造保证 —— 与 #4114 对 `metadata` 做的完全一致。需要注意的一点：dispatcher 的 `/data` domain 实际上是走 protocol / ObjectQL，不是走 `data` 服务，所以 `handlerReady` 该不该跟着自述走要单独想清楚（`metadata` 那边的结论是 **不跟** —— 路由由 protocol 提供，槽位里放个 degraded 实现不会把它卸掉）。\n2. 保持硬编，但把这条不变量写成测试：一旦 `data` 槽位里出现带 `__serviceInfo` 的实现就失败，让\"约定\"至少有个守卫。比第 1 条便宜，但仍然是\"declared ≠ enforced\"的债，只是让它响一声。\n\n关联：#4089、#4058、#4000、#2462、ADR-0076 D12、PR #4114。"
+}

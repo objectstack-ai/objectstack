@@ -1,0 +1,34 @@
+{
+  "number": 4244,
+  "kind": "pull_request",
+  "title": "docs(ui,protocol): 补齐六个此前只被\"点过名\"的变体",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T00:33:44Z",
+  "updated_at": "2026-07-31T00:54:03Z",
+  "closed_at": "2026-07-31T00:54:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T00:54:02Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4244",
+  "body": "#4177 变体/文档闸门的后续,用的正是它产出的信号。\n\n那道闸门判定一个变体\"已记录\"的条件是:页面里出现 `<判别键>: '<变体>'` **或**出现裸的 `` `变体` ``。它的头注写得很直白:**第二种形态是宽松的,通过只代表页面说了这个词,不代表它记录了这件事。**\n\n有六个变体正是只靠宽松形态通过的——那就是闸门自己产出的\"弱通过\"清单,也是一份精确的工作单。\n\n## apps.mdx:列举了九种,只记录了六种\n\n`report`、`action`、`component` 共享一句话——\"the spec also defines …\"——而另外六种各有独立小节和示例。现在它们也有了,导言也不再暗示存在\"半支持的第二梯队\"。\n\n`action` 那节尤其值得写:**`actionName` 位于嵌套的 `actionDef` 块里,不是顶层键**——这恰恰是读者最容易猜错的形状。\n\n`action` 和 `component` 都点明了哪个子对象是**刻意开放**的(`actionDef.params`、`component.params`):那是兄弟契约的地盘,而在 #4165 之后它们周围的一切都已经是 strict。\n\n## knowledge.mdx:有表格,零示例\n\n原本有一张表点名 `object` / `file` / `http`,但一个示例都没有,于是三种 kind 各自的键(`contentFields` vs `prefix` vs `urls`)在文档里根本无处可见。各补了一个示例。\n\n## 每个示例都对着真实 schema 解析过\n\n提交前用 `NavigationItemSchema` 和 `KnowledgeSourceKindSchema` 逐个 `safeParse`,**六个全过**。\n\n凭记忆写文档正是 #4218 里那个 region 示例用上不存在的 `id` 键的原因——不重复同一个错误。\n\n## 度量\n\n| 项 | 之前 | 之后 |\n|---|---|---|\n| app navigation item 锚定形态 | 6/9 | **9/9** |\n| knowledge source kind 锚定形态 | 0/3 | **3/3** |\n\n`check:variant-docs`、`check:docs`、`check-doc-authoring`、`check:strictness-ledger` 全绿;`content/docs/references` 零变动。\n\n## 更正:changeset\n\n这份描述最初写的是「纯文档改动,无 changeset」。**那是错的**,`Check Changeset` 随即失败并给出了正解:该闸门要求每个 PR 都有 changeset,而「不发布任何东西的改动用空 changeset 即可」。\n\n仓库里已经有 **72 个**空 changeset——那正是文档类工作在不 bump 任何包的前提下留下记录的方式。已按该形式补上(空 frontmatter + 描述)。\n\n闸门提示的另一个选项 `skip-changeset` 标签被我放弃了:它是**压制**记录而不是**写下**记录,对一个在发布说明里确实有话可说的改动来说是错误的取舍。\n\nRefs #4001, #4177\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_0147tNF4Snk7Ry1KGt4a5PY4"
+}

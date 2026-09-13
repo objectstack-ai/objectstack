@@ -1,0 +1,30 @@
+{
+  "number": 4067,
+  "kind": "issue",
+  "title": "REST 若干 501 出口返回裸 { error: string },缺 machine code —— 跨对象批量路由等",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T07:47:21Z",
+  "updated_at": "2026-07-30T08:16:49Z",
+  "closed_at": "2026-07-30T08:16:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4067",
+  "body": "## 问题\n\nREST 层大多数错误出口已带类型化 `code`(`VALIDATION_FAILED` / `BATCH_NOT_ATOMIC` / `BATCH_TOO_LARGE` / `PERMISSION_DENIED` …),clone 与 search 的 501 也已是 `{ error, code: 'NOT_IMPLEMENTED' }`(`rest-server.ts:4081,4959`)。但有几处 501 出口仍返回**裸 `{ error: '<string>' }`,缺 `code`**,客户端无法按机器码区分:\n\n| 位置 | 出口 |\n|------|------|\n| `rest-server.ts:6880` | 跨对象事务批量 `POST {basePath}/batch` —— `'Transactional batch not supported by this runtime'` |\n| `rest-server.ts:3337` | 保存 meta item(路由 A)—— `'Save operation not supported by protocol implementation'` |\n| `rest-server.ts:3720` | 保存 meta item(路由 B)—— 同上 |\n| `rest-server.ts:3783` | UI View 解析 —— `'UI View resolution not supported by protocol implementation'` |\n\n其中 **6880 是\"批量 API 契约一致性\"清扫线(承 #3897 / #3933 / #3939)的最后一处** —— 同路由的其余出口(`BATCH_NOT_ATOMIC`、`VALIDATION_FAILED`、`enforceBatchSize` 的 `BATCH_TOO_LARGE`)都已类型化,唯独运行时无事务支持这一 501 是裸串。另外三处是同形的 501 NOT_IMPLEMENTED 裸串,顺手一起收。\n\n## 修法\n\n按已有precedent(clone/search 501)给这四处补 `code: 'NOT_IMPLEMENTED'`,保持 `{ error: '<message>', code }` 扁平信封。纯**新增字段**、非破坏性:现有 501 测试只断言 `status(501)`,`error` 文案不变。\n\n补测试:把跨对象批量路由的 501 测试从只断言 status 扩展到断言 `res.body.code === 'NOT_IMPLEMENTED'`。\n\nchangeset:`@objectstack/rest` patch(additive)。"
+}

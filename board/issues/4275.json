@@ -1,0 +1,36 @@
+{
+  "number": 4275,
+  "kind": "pull_request",
+  "title": "feat(platform-objects,service-settings,verify): sys_secret 密文库改由平台基础设施注册 (#4270)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T02:02:59Z",
+  "updated_at": "2026-07-31T02:48:22Z",
+  "closed_at": "2026-07-31T02:48:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T02:48:19Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4275",
+  "body": "Closes #4270\n\n## 改了什么\n\n按 #4258(`sys_migration`,closes #4243)确立的「平台系统对象由平台层注册」落脚点,把 `sys_secret` 的注册从 service-settings 挪到 `PlatformObjectsPlugin`:\n\n- **`PlatformObjectsPlugin.init` 现在注册 `[SysMigration, SysSecret]`**(经 manifest 服务,scope: system)。`os serve` 本就自动注入该插件,所以每个被服务的内核都带密文库,与是否装 settings 无关。\n- **`settingsObjects` 摘除 `SysSecret`**,只剩 `[SysSetting, SysSettingAudit]`——移除而非并存(#4236 提醒过双注册问题),settings 服务仍是 `sys_secret` 的生产者/消费者(经其 secret store),只是不再是注册者。\n- **verify harness 补上 `PlatformObjectsPlugin`**,与 serve 的装配对齐(harness 自 #4258 起就漂移了:serve 有该插件、harness 没有)。这也让 harness 内核首次带上 `sys_migration` 账本 + 空库 attestation——dogfood 全套在该姿态下通过。\n- **两处失真注释修正**:`sys-secret.object.ts` 的「All writes flow through SettingsService」(实际引擎 `encryptSecretFields` 绕过 SettingsService 直写 driver)与 `manifest.ts` 的「Objects owned by service-settings」;`serve.ts` 5c 注释同步提及 `sys_secret`。\n\n## 为什么\n\n`sys_secret` 有三类生产者,只有一类是 settings:SettingsService(加密设置项)、**ObjectQL 引擎自身**(`encryptSecretFields`/`resolveSecret`——任何带 `Field.secret()` 的业务对象的通用写路径)、service-datasource(凭证 binder)。且失败姿态是 **fail-closed**:没这张表时任何 secret 字段写入直接抛错,而报错文案说「Ensure the platform-objects (sys_secret) are registered」——指认的责任方此前并不注册它。本次改完,这句报错成为真话。\n\n## 验证\n\n- `packages/platform-objects/src/plugin.test.ts`:注册断言更新为 `[SysMigration, SysSecret]`,并加 #4270 pin。\n- `packages/services/service-settings/src/manifest.test.ts`(新增):pin `settingsObjects` 恰为 K/V + audit,且不含 `sys_secret`(防双注册回归)。\n- 全仓 `turbo run test`:132 任务全绿(含 dogfood field-zoo 的 secret 字段 HTTP 往返——现在走的就是 platform-objects 注册的表);合并最新 main 后复跑。\n- 真实 serve 冒烟:`pnpm dev -- --fresh` 起 showcase,REST 写 `showcase_field_zoo.f_secret` 成功、读回为掩码 `••••••••`、`sys_secret` 恰有一行 `{namespace: showcase_field_zoo, key: f_secret, alg: aes-256-gcm, kms_key_id: local:v1}`。\n\n## 语义变化面\n\n手工组装 `SettingsServicePlugin` 而不组 `PlatformObjectsPlugin` 的嵌入式内核不再获得 `sys_secret` 表(secret 写入将 fail-closed 抛错,永不落明文)。changeset 已写明迁移句:补组 `PlatformObjectsPlugin` 即可——所有仓内受支持装配路径(serve / data-migration / verify)均已自带。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

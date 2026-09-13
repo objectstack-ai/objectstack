@@ -1,0 +1,32 @@
+{
+  "number": 4196,
+  "kind": "issue",
+  "title": "[P3] data: `FieldNode`'s nested-select object form is declared but nothing produces or consumes it — enforce or remove",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T14:54:29Z",
+  "updated_at": "2026-07-31T02:27:43Z",
+  "closed_at": "2026-07-31T02:27:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4196",
+  "body": "Found while fixing #4171 (PR #4194). Out of scope there; filing rather than widening it.\n\n## The finding\n\n`FieldNodeSchema` in `packages/spec/src/data/query.zod.ts` declares two forms for a select-list entry:\n\n```ts\nexport type FieldNode =\n  | string                                                        // \"name\"\n  | { field: string; fields?: FieldNode[]; alias?: string };       // nested select on a relationship\n```\n\nThe **object form is declared-but-inert**. Every producer and consumer on the `QueryAST['fields']` path treats the list as `string[]`:\n\n- `packages/objectql/src/engine.ts` — `ast.fields as string[]` at four sites (`planFormulaProjection` for `find` and `findOne`, plus both known-field filters); one of them already reaches for `String(f).split('.')[0]`, which is what defensiveness against a shape you don't actually handle looks like.\n- `packages/plugins/driver-sql/src/sql-driver.ts` — `(query.fields as string[]).map(f => this.mapSortField(f))`.\n- `packages/plugins/driver-mongodb/src/mongodb-driver.ts` — indexed the projection with the entry itself, so an object form would have produced the projection key `\"[object Object]\"`. (Fixed in #4194 to read `.field`, because the newly-precise type made it a compile error — but that is defensive handling of a shape nothing sends, not evidence the shape is live.)\n\nNothing anywhere reads `.fields` or `.alias` off a `FieldNode`. The capability the object form describes — selecting fields on a related object — is actually served by a different key: `QueryAST['expand']`, which the engine resolves via batch `$in` queries with a default max depth of 3.\n\nSo this is the ADR-0049 enforce-or-remove shape, and the ADR-0078 no-silently-inert shape: an authorable structure the runtime cannot honour. An author who writes `fields: [{ field: 'owner', fields: ['name'] }]` today gets it accepted by validation and then silently dropped or mangled, depending on the driver.\n\n## Decision needed\n\n**Remove** (likely correct): drop the object form, leaving `FieldNode = string`, and let `expand` be the single spelling for nested selection. That deletes a second de-facto contract for one capability, which is Prime Directive #12's whole argument. Needs the ADR-0087 conversion/tombstone treatment if the shape was ever publicly authorable — `FieldNodeSchema` is exported from `./data`, so it was.\n\n**Enforce**: lower the object form into `expand` at the schema boundary (a conversion-layer entry, not a consumer-side `??`), so the two spellings converge before any executor sees them. More work, and it buys an alias for something `expand` already expresses.\n\n`packages/spec/liveness` + `.claude/skills/spec-property-retirement` cover the removal route; the liveness ledger is the right place to confirm the `dead` verdict before acting.\n\n## Note on scope\n\n#4194 gave `FieldNode` a real type (it was `z.ZodType<any>`, so `QueryAST['fields']` was `any[]`). That change is what made the inertness visible — it did not create it. The `check:exported-any` gate added there does not cover this class; a declared-but-unproduced *shape* is a liveness question, not a type question.\n\nRefs #4171, ADR-0049, ADR-0078, ADR-0087."
+}

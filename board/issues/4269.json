@@ -1,0 +1,32 @@
+{
+  "number": 4269,
+  "kind": "issue",
+  "title": "补上 defineHook():hook 的作者侧工厂(defineDatasource 范式),并修正 object.zod.ts 两处引用不存在函数的错误处方",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-07-31T01:33:43Z",
+  "updated_at": "2026-07-31T02:33:27Z",
+  "closed_at": "2026-07-31T02:33:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4269",
+  "body": "从 #4001 的 hook/datasource 步骤(#4207)延伸出来。#4207 把 `HookSchema` / `HookBodySchema` 收成 `.strict()` 并配了可修错误(别名 `timeoutms → timeout`、`backoff → backoffMs`,处方 `enabled`/`active` → 「hook 没有开关键,用 `condition`」等)——但这些错误信息**只在 parse 真正跑起来时才会出现**,而 hook 恰好有一条作者路径完全不跑 parse。\n\n## 问题一:约定扫描路径在作者时零运行时校验\n\nhook 的元数据作者路径有两条,校验时机不对称:\n\n| 路径 | parse 时机 | #4207 的错误信息何时可见 |\n|---|---|---|\n| `defineStack({hooks})` / 模板 seeder / metadata service | `bindHooksToEngine`(`packages/objectql/src/hook-binder.ts`)绑定时 | 部署/绑定期 |\n| 约定扫描 `src/objects/<name>.hook.ts` 裸字面量 | **作者时不 parse**,字面量直接进产物 | 最早也要等到部署 |\n\n裸注解 `const H: Hook = {…}`(`Hook = z.input<typeof HookSchema>`)在**新鲜对象字面量**上已有 TS excess-property checking,未知键编译期能抓到——这部分不是缺口。真实缺口是:\n\n1. **约束级校验**类型层拿不到:`name` 的 snake_case 正则、URL 格式、min 边界等;\n2. **非字面量构造路径**(spread、计算键、`JSON.parse` 来的对象)绕过 excess-property checking;\n3. **错误信息质量**:tsc 只报 \"Object literal may only specify known properties\",#4207 精心写的别名/处方要等运行时才见到;\n4. **默认值不物化**:扫描路径产物是 `z.input` 形状,defineStack 路径绑定后是 `z.output`,两条路径产物不一致;\n5. **AI 自验证闭环缺失**:没有「import 即校验」的廉价反馈,AI 作者拿到 tsc 绿就报告完成。\n\n## 问题二:错误处方引用了一个不存在的函数\n\n`packages/spec/src/data/object.zod.ts` 的 `UNKNOWN_KEY_GUIDANCE` 有两处(`workflows`、`hooks` 两个墓碑,约 1247 / 1255 行)prescribe:\n\n> registered via \\`defineHook()\\`\n\n全仓 grep 确认 **`defineHook` 在任何包里都不存在**。作者在 object 上写 `hooks: […]` 被 strict 拒绝后,照着错误信息去 import `defineHook` 会再失败一次——错误处方本身在制造第二个错误。这对 AI 作者尤其糟糕:处方是我们自己写的,AI 会无条件照做。\n\n## 方案\n\n照 `defineDatasource` 模板(`packages/spec/src/data/datasource.zod.ts:538`):\n\n```ts\nexport function defineHook(config: Hook): ResolvedHook {\n  return HookSchema.parse(config);\n}\n```\n\n`Hook` / `ResolvedHook`(`z.input` / `z.output`)已存在于 `hook.zod.ts:387-388`,不需要新类型。范围:\n\n- 工厂函数 + drift-guard 测试(工厂产物 = schema parse 产物,防止两者分叉)\n- 文档一处「工厂优先于裸字面量」注记(datasource 已有先例)\n- `UNKNOWN_KEY_GUIDANCE` 两处引用随实现落地即成真,顺手复核措辞\n- changeset(minor,新公共 API)\n- v1 **保持纯 parse**:不在工厂里塞 body/L1 的劝导逻辑——handler 弃用告警已由 binder 的 `warnDeprecatedHandler` 覆盖,不要两处维护同一套劝导\n\n### 已验证的非阻塞点\n\n- handler 为函数值时经 `z.custom` 原样通过 `.parse()`,不会被序列化/剥离;\n- 双重校验幂等:绑定期对已 parse 的输出再 parse 是安全的;\n- 迁移纯增量:存量裸字面量不受影响,工厂是可选入口。\n\n### 有意的行为变化\n\nparse-at-import 把坏 hook 从「绑定期 skip + warning」变成**作者期硬失败**。这是 #4001 的姿态:静默失效比硬报错更坏,因为它制造虚假的完成。\n\n## 参考\n\n- #4001(母 issue)、#4207(hook/datasource strict + 别名/处方错误)\n- `packages/spec/src/data/datasource.zod.ts:538`(`defineDatasource` 先例)\n- `packages/objectql/src/hook-binder.ts`(元数据 hook 的唯一绑定入口)\n- `docs/audits/2026-07-unknown-key-strictness-ledger.md`(分类账)"
+}

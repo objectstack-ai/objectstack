@@ -1,0 +1,35 @@
+{
+  "number": 3981,
+  "kind": "pull_request",
+  "title": "fix(runtime,cli,types,driver-sql): one schema view for serve/dev and migrate — __search companions + declared unique indexes (#3955)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T00:53:29Z",
+  "updated_at": "2026-07-30T04:38:10Z",
+  "closed_at": "2026-07-30T04:38:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T04:38:08Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3981",
+  "body": "修复 #3955 的**两条**缺陷。都已用 HotCRM 的真实 metadata 形状复核过 —— 第二条我最初误判为\"无法复现\",用 `examples/app-crm` 探测时漏掉了,HotCRM 一测即中,详见下文。\n\n---\n\n# 缺陷一:`os migrate` 把在用的 `__search` 伴生列判成\"待删除孤儿列\"\n\n## 根因\n\nADR-0098 D1 约定:`OS_SEARCH_PINYIN_ENABLED` 未显式设置时,由\"看得到 stack 配置的启动路径\"按 locale(任一 `zh-*`)推导默认值,并**回写(stamp)到环境变量**,让之后构造的、拿不到配置的消费方(每个 engine 的 `SchemaRegistry`、`plugin-pinyin-search` 的门控)通过无参 `resolveSearchPinyinEnabled()` 读到同一个决定。\n\n问题在于这样的启动路径实际有两条,只有一条做了 stamp:\n\n| 启动路径 | 配置来源 | 修复前 |\n|---|---|---|\n| `serve`/`dev`(serve.ts) | `objectstack.config.ts` 的 `i18n` | ✅ 推导 + stamp |\n| `createStandaloneStack`(`os migrate plan`/`apply`、`os meta resync`、嵌入方) | 编译产物 `dist/objectstack.json` 的 `i18n` | ❌ 从不推导,无参解析恒为 off |\n\n于是 migrate 启动构建的 metadata 里没有任何 `__search` 伴生列,`detectManagedDrift()` 把 dev 运行时创建并维护的每一个在用伴生列都报成 destructive `drop_column`,提示语还引导操作者执行 `--allow-destructive` —— 照做即删除在用功能列。\n\n## 修复\n\n- **`@objectstack/types`**:新增 `collectConfiguredLocales(i18n)` 与 `stampSearchPinyinEnabled(i18n)` —— 解析 + 回写的唯一实现。显式环境变量仍最高优先;仅在推导为\"开\"时写回;env 写入走 `globalThis`(本包无 Node 类型依赖,edge 安全)。\n- **`@objectstack/runtime`**:`createStandaloneStack` 在**任何插件构造 `SchemaRegistry` 之前**用产物的 `i18n` 调用该 helper;同时把 `i18n` 透出到返回值。\n- **`@objectstack/cli`**:serve/dev 改用同一 helper(行为不变,消除第二份实现)。\n- **ADR-0098**:D1 补记\"两条看得到配置的启动路径都必须 stamp\"。\n\n## 验证\n\n- 修复前(examples/app-crm):`objectstack dev` 首启建库 → `os migrate plan` 报 **11 个 destructive `drop_column`**(与 issue 中 HotCRM 的 9 个同构)。\n- 修复后:**0 destructive**;反向验证 `os migrate apply` 新建的全新库自带 `__search` 列,两条路径双向收敛。\n\n---\n\n# 缺陷二:声明中的 unique 索引被误判为遗留债务 —— 计划**永不收敛**\n\n> issue 里作为\"同族小问题\"提到的 `replace_unique_index`。我先前用 app-crm 复核后写下\"无法复现\"是**错的**:app-crm 没有对象级 unique 索引声明,碰不到这个组合。HotCRM 有,一测即中。**更正在此,以下为实测结论。**\n\n## 复现(HotCRM 的真实形状)\n\n`crm_contact` 同时声明了两种唯一性:\n\n```ts\nemail: Field.email({ unique: true }),              // 字段级 → 租户复合(#3696 语义)\nindexes: [{ fields: ['email'], unique: true }],    // 对象级 → verbatim 全局唯一\n```\n\n**建表路径是对的** —— 全新库两个索引都建了:\n\n```\nuniq_hp_contact_organization_id_email  UNIQUE (organization_id, email)   ← 字段级\nuniq_hp_contact_email                  UNIQUE (email)                    ← 声明索引\n```\n\n**漂移检测是错的** —— 声明索引 materialize 出来的名字 `uniq_{table}_{column}`(`buildIndexName`)恰好是 `legacyUniqueIndexNames` 搜寻的两种遗留拼写之一。detector 于是把**当前 metadata 明确声明、且刚由自己创建**的索引当成 pre-#3696 遗留债务,提议 drop 掉换成复合索引(而复合索引早已存在)。\n\n后果比 issue 描述的严重得多 —— 不是一次性噪音,而是**无限 ping-pong**(实测三轮):\n\n| 轮次 | plan 报告 | apply 动作 |\n|---|---|---|\n| 1 | `replace_unique_index`(safe) | drop `uniq_hp_contact_email`,建复合 |\n| 2 | `create_index`:metadata 声明了它但库里没有(safe) | 重建 `uniq_hp_contact_email` |\n| 3 | 又回到 `replace_unique_index` | …… |\n\n每一轮都在活表的唯一索引上做 drop/create,且全部被标为 \"safe\"。所以 issue 的猜测(「建表路径仍在发出遗留索引,drift 想替换掉」)方向反了:**建表是对的,检测是错的**。\n\n## 修复\n\n`legacyUniqueReplacements` 现在接收对象的 `declaredIndexes`,用**建表路径同一个** `normalizeDeclaredIndex` 归一化后从遗留候选名中剔除 —— 当前 metadata 声明的索引,按定义就不是遗留债务,两条路径也不会对\"声明索引叫什么\"产生分歧。真正的遗留索引照旧退休,包括「只声明了 `uniq_` 前缀那种拼写时,knex 拼写的 `{table}_{column}_unique` 仍被退休」。\n\n## 验证\n\n`packages/plugins/driver-sql/src/sql-driver-index-drift.test.ts` 新增 4 例,**去掉过滤后 4 例全红**:\n\n1. 全新表建出两个索引,且报告 0 条 drift;\n2. 连续三轮 plan/apply 保持干净(即 ping-pong 本身);\n3. 无人声明的遗留索引仍被退休(#3728 行为不回归);\n4. 声明了 `uniq_` 前缀那种拼写时,knex 拼写的遗留索引仍被退休。\n\n端到端:HotCRM 形状产物连跑三轮 `migrate apply`,第二轮起即 `Physical schema is already in sync with metadata`,最终索引集合 = 声明集合,且 `__search` 列同时正确存在(两条修复互不干扰)。\n\n---\n\n## 测试\n\n`@objectstack/types` / `runtime` / `cli` / `driver-sql` 全量通过;根 `pnpm test` **132/132 task 全绿**。远端 CI 全绿(16/16)。\n\n回归覆盖分布:types 单测(helper 语义)· runtime 真实 boot(zh 产物 stamp + 透出 `i18n`、非中文不写 env、显式 `false` 不被覆盖)· CLI 端到端(预置 dev 形状 SQLite + zh-CN 产物,断言无 `__search` drift、无 destructive)· driver-sql 索引漂移(上述 4 例)。\n\n## 附带发现(已另行开单)\n\n- **#3978** —— `previewDeferredSchemaWork` 会把 formula(虚拟)字段永久列为待添加列:apply 刚跑完立刻 plan 仍报 `add_columns`,永远收敛不掉。与本 PR 机制无关。\n- **#3991** —— authoring 层缺口:同一列上同时写字段级 `unique: true` 与对象级单列 unique 索引时两个意图矛盾(实际以全局唯一为准,字段级的租户复合约束成为永不触发的死约束),平台零提示。本 PR 只修运行时侧的 churn,不扩大范围。\n\nCloses #3955\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01FcphmGzBuWwF8SaYPSCtCw"
+}

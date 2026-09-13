@@ -1,0 +1,34 @@
+{
+  "number": 3795,
+  "kind": "issue",
+  "title": "[P2] `protocol.ts` implements 4 of the 5 documented RPC alias precedences backwards — and disagrees with `http-dispatcher.ts` on three of them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T05:50:39Z",
+  "updated_at": "2026-07-31T06:30:43Z",
+  "closed_at": "2026-07-31T06:30:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3795",
+  "body": "Found by the alias sweep #3754 called for (\"the remaining `@deprecated`/alias declarations in `packages/spec/src` deserve the same audit — the ones that fold-and-drop are safe, the ones that merely coexist are latent #3713s\"). This is the sweep's result: one cluster is not merely latent, it is **live and inverted**.\n\n## The contract\n\n`RpcQueryOptionsSchema` accepts five legacy aliases alongside their canonical keys, and states the precedence **in prose only** — there is no transform folding them:\n\n```ts\n// packages/spec/src/data/data-engine.zod.ts (RpcQueryOptionsSchema doc block)\n * **Precedence:** When both legacy and new keys are present for the same\n * concern, the protocol normalizer uses the new key (`where` > `filter`,\n * `fields` > `select`, `orderBy` > `sort`, `offset` > `skip`,\n * `expand` > `populate`). Callers should not mix vocabularies.\n```\n\nBecause the fold lives nowhere in the schema, every reader re-implements it — the exact condition #3713 described. There are two readers, and they do not agree.\n\n## What the two normalizers actually do\n\n| pair | spec says | `runtime/src/http-dispatcher.ts` | `metadata-protocol/src/protocol.ts` |\n|---|---|---|---|\n| `where` > `filter`/`filters` | canonical | `where ?? filter ?? filters` ✅ | **`filter ?? filters ?? $filter ?? where`** ❌ |\n| `fields` > `select` | canonical | `select != null && fields == null` ✅ | **`select` clobbers `fields`** ❌ |\n| `offset` > `skip` | canonical | `skip != null && offset == null` ✅ | **`skip` clobbers `offset`** ❌ |\n| `expand` > `populate` | canonical | — | **`populate` wins, `expand` only if empty** ❌ |\n| `orderBy` > `sort` | canonical | — | `orderBy ?? sort` ✅ |\n\nFour of five inverted in `protocol.ts`; three of them are pairs where the two normalizers do the **opposite** thing.\n\n### The four inversions\n\nAll in `packages/metadata-protocol/src/protocol.ts`. Canonical `where` is consulted **last**:\n\n```ts\nconst filterValue = options.filter ?? options.filters ?? options.$filter ?? options.where;\n```\n\n`skip` overwrites a caller's `offset` unconditionally:\n\n```ts\nif (options.skip != null) {\n    options.offset = Number(options.skip);   // no `offset == null` guard\n    delete options.skip;\n}\n```\n\n`select` overwrites `fields` unconditionally:\n\n```ts\nif (typeof options.select === 'string') {\n    options.fields = options.select.split(',')…;   // no `fields == null` guard\n} else if (Array.isArray(options.select)) {\n    options.fields = options.select;\n}\n```\n\nThe deprecated `populate` is consulted **first**, canonical `expand` only when `populate` produced nothing:\n\n```ts\nconst populateValue = options.populate;\nconst expandValue = options.$expand ?? options.expand;\nconst expandNames: string[] = [];\nif (typeof populateValue === 'string')      expandNames.push(…);\nelse if (Array.isArray(populateValue))      expandNames.push(…);\nif (!expandNames.length && expandValue)     { … }   // canonical is the fallback\n```\n\n## Why this reads as an oversight, not a decision\n\nThe **same function**, a few lines above the `skip` block, folds the OData `$`-prefixed params with the correct guard:\n\n```ts\nif (options[dollar] != null && options[bare] == null) {\n    options[bare] = options[dollar];\n}\n```\n\nSo the canonical-wins pattern was known and applied there; the legacy pairs never got it.\n\n## Impact\n\nThree pairs are handled by **both** normalizers with **opposite** precedence, so the same request resolves differently depending on which path serves it:\n\n- `?filter=X&where=Y` → `Y` through the dispatcher, `X` through the metadata protocol.\n- `?select=a&fields=b` → `[b]` vs `[a]`.\n- `?skip=10&offset=0` → `0` vs `10`.\n\nNothing drops these keys at parse (unlike `action.execute` after #3742 or `field.conditionalRequired` after #3764), so both keys reach every consumer and the divergence is reachable from a plain HTTP request. The spec anticipates mixing explicitly — it documents what happens when callers do — so \"callers should not mix vocabularies\" is guidance, not a guarantee.\n\n## Suggested fix\n\nThe shape #3742 / #3764 established, applied one layer down:\n\n1. Add a transform to `RpcQueryOptionsSchema` that folds each legacy alias into its canonical key when the canonical is absent, and **drops the alias** from the parsed output. Canonical wins when both are set — matching what the doc block already promises.\n2. With the aliases gone from parsed options, delete the hand-rolled folds in both normalizers rather than fixing them in place — the point is to decide precedence **once**, not to make N readers agree by inspection.\n3. Where a normalizer must still accept raw (unparsed) input, keep a single fold helper shared by both packages instead of two open-coded copies.\n4. Pin it: a test asserting each alias key is absent from parsed output, and one per pair asserting canonical wins.\n\nNote this is a **minor** for `@objectstack/spec` on the same reasoning as #3742 / #3764 — parsed output loses deprecated keys, so a TS consumer reading `parsed.populate` fails to compile instead of silently reading `undefined`.\n\n## Scope note\n\nThe `visibleWhen` family (`visibleOn` / `visibility`) is **already correct** — `normalizeVisibleWhen` destructures the aliases out and returns the rest, i.e. fold-and-drop. It was checked as part of this sweep and needs no change. The remaining `@deprecated` markers in `packages/spec/src` are renamed *schema/type* exports (`theme.zod.ts`, `stack.zod.ts`, the `Engine*OptionsSchema` aliases), which carry no object-key precedence risk.\n\n`$filter` / `$expand` / `$top` (OData spellings) are a separate compatibility layer and are left as-is here; note only that `$expand ?? expand` also puts the OData spelling ahead of the canonical key, which is worth settling in the same pass.\n\nRefs #3713, #3742, #3754, #3764."
+}

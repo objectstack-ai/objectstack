@@ -1,0 +1,34 @@
+{
+  "number": 4050,
+  "kind": "pull_request",
+  "title": "fix(automation,spec): graduate notify's nested `source` into the conversion layer (#4045)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T07:06:53Z",
+  "updated_at": "2026-07-30T07:22:15Z",
+  "closed_at": "2026-07-30T07:22:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T07:22:12Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4050",
+  "body": "Step 1 of #4045's staged plan. The `visibleWhen` half of #4027 landed in #4040; this closes the one concrete declared-vs-read drift that investigation turned up.\n\n## The drift\n\n`notify`'s executor tolerated a second spelling of its click-through target with a bare consumer-side fallback:\n\n```ts\n// notify-node.ts, before\nconst src = (cfg.source ?? null) as { object?: unknown; id?: unknown } | null;\nconst object = toStr(interpolate(cfg.sourceObject ?? src?.object, variables, context));\nconst id     = toStr(interpolate(cfg.sourceId     ?? src?.id,     variables, context));\n```\n\nIts **own doc comment** already named the winner — `sourceObject`/`sourceId` are *\"canonical — mirrors the `sys_notification.source_object`/`source_id` columns\"*. So `source: { object, id }` was never a peer spelling; it was an alias held up by exactly the mechanism Prime Directive #12 calls debt:\n\n> When you must tolerate an alias at all, declare it as a conversion-layer entry (**never a bare `??`, and no new executor shims**) so it is declared, loud, tested, and *removable on a schedule*.\n\nAnd it was the **one alias on this executor that #3796 missed** when it moved `to`/`subject`/`body`/`url` into `flow-node-notify-config-aliases`. Consequences of it sitting outside the schema: an author using Studio's generated form could never produce the nested shape, hand-authored metadata carrying it worked with nothing describing it, and #4045's audit found it only by reading the executor.\n\n## Why the conversion layer rather than declaring `source` in `configSchema`\n\nThe test is which direction reduces the number of contracts. Declaring it means the platform permanently admits **two** spellings — the designer then either offers one (and the schema lies) or offers both (and every author picks between a canonical and a non-canonical key). Converting means the load path normalises to one, the executor reads one, the `??` dies, and the alias has a retirement date. Contracts stay at 1.\n\n## This PR\n\nGraduates it exactly like `filters` → `filter` (#2645) and `object` → `objectName` (#3796): lifted at load — including the `AutomationEngine.registerFlow` rehydration seam — and the executor fallback **deleted**. `resolveSource` now reads only `cfg.sourceObject` / `cfg.sourceId`.\n\nIt rides the existing entry rather than adding a new id, so it inherits that window (retires at 18) and needs no new migration-registry row.\n\n**Unlike the four renames, this is a 1→2 destructuring**, which `renameFlowConfigAliases`' pair mechanism cannot express — so it is a small custom transform, `liftNotifySourceShape`. It mirrors the old `??` precedence exactly:\n\n| Input | Result |\n|---|---|\n| `source: {object, id}`, no canonical keys | both lifted, `source` dropped, 2 notices |\n| `sourceObject` present + `source: {object, id}` | only `id` lifted (canonical **wins**, nested `object` left shadowed → no notice), `source` dropped |\n| both canonical present | `source` left untouched, no notice — matches `renameConfigKey`'s shadowed-alias behaviour |\n| `source` not a dict, or carrying neither key | left untouched rather than silently deleted |\n\n`source` is dropped once at least one part is lifted, because by then every part is either lifted or shadowed and the executor only ever read `.object`/`.id`. The fixture covers a clean lift *and* a partially-shadowed node, at 7 expected notices.\n\n## The pre-existing test now proves the conversion — verified, not assumed\n\n`notify-node.test.ts` already had a nested-`source` case, and it goes through `registerFlow` + `execute` rather than calling the executor directly. So with the fallback deleted it still passes — but only *because* the conversion runs. That makes it an end-to-end check of the load seam, and it is annotated to say so.\n\nI confirmed the pass is not vacuous by disabling the lift:\n\n```\n× accepts the nested source:{object,id} form and forwards actorId\nAssertionError: expected { topic: 'notify', …(6) } to match object { source: { …(2) }, …(1) }\n-   \"source\": { …\n+   \"source\": undefined,\n```\n\n## Test plan\n\n| Check | Result |\n|---|---|\n| `@objectstack/spec` | ✅ 6934 passed |\n| `@objectstack/service-automation` | ✅ 440 passed |\n| spec `tsc --noEmit` | ✅ clean |\n| ESLint on changed files | ✅ clean |\n| All eight spec generated-artifact gates | ✅ PASS |\n\nRegenerated `spec-changes.json` and `docs/protocol-upgrade-guide.md`, which the summary change invalidates — caught up front using the table added in #4046 rather than by a red build.\n\n## Remaining in #4045\n\nSteps 2–4 are unstarted and need your call on the approach (my analysis and its verification data are [in the issue](https://github.com/objectstack-ai/objectstack/issues/4045#issuecomment-5127636357)). Headline from the feasibility probe: a Zod-first `configSchema` reproduces the nested `xExpression` marker, object-valued `xRef`, `format`, `enum`+`default` and array item types correctly — but `z.record()` emits `additionalProperties: {}` rather than the load-bearing `true`, affecting **7 keyValue slots**. `.meta({ additionalProperties: true })` overrides it, and objectui accepts `{}` as keyValue anyway (`json-schema-to-fields.ts:456`), so it is the platform's own `config-schemas.test.ts` that is stricter than the consumer it protects.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QoA8AV99Ss1RRkLLAYmDzq\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QoA8AV99Ss1RRkLLAYmDzq)_"
+}

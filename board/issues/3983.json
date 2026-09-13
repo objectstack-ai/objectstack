@@ -1,0 +1,32 @@
+{
+  "number": 3983,
+  "kind": "issue",
+  "title": "`share-link-routes.ts` is the fifth drifting envelope module — no body carries `success`, and one answers the `{ ok: true }` #3689 retired",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T00:54:25Z",
+  "updated_at": "2026-07-30T05:51:56Z",
+  "closed_at": "2026-07-30T05:51:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3983",
+  "body": "Found by the repo-wide guard added in #3843 (PR #3972), not by hand. #3843's survey listed four modules; this is a fifth, and it was missed for a specific and repeatable reason: every guard before this one was **per-package**, so a module nobody thought to convert was never audited. Filing it rather than letting it ride along, the same call #3675's changeset made about storage's success bodies.\n\nMildly ironic: #3675's own changeset cites this file as an example of the *good* shape — \"the nested-`error` shape the sibling services already use (`settings-routes.ts`, `share-link-routes.ts`)\". That was true of its `error` object and not of anything else.\n\n## The drift\n\n`packages/plugins/plugin-sharing/src/share-link-routes.ts`, 6 response write sites:\n\n```ts\nres.status(status).json({ error: { code, message } });          // :52  — sendError: nested, but NO `success: false`\nawait res.status(201).json({ link });                          // :104 — bare success\nawait res.json({ links: link });                               // :127 — bare success\nawait res.status(200).json({ ok: true });                       // :139 — the private second word for `success`\nawait res.json({ record: …, link: { … } });                    // :209 — bare success\nres.status(200).json({ data: rows ?? [] });                     // :265 — `data` present, flag absent\n```\n\nSo this module carries **three** of the four dialects the #3636 → #3843 sequence has been retiring:\n\n| dialect | retired by | still here |\n|---|---|---|\n| no `success` flag on any body | #3689 (storage), #3843 (four more) | ✅ all 6 |\n| `ok: true` as a second success word | #3689 (storage's `{ ok: true, key }`) | ✅ `:139` |\n| payload at the top level instead of under `data` | #3689, #3843 | ✅ 4 sites |\n| `error` as a bare string | #3675 | ❌ already nested — the one it got right |\n\n`:265` is the interesting one: it already answers `{ data }`, so it is one field short of conformant.\n\n## Why it is not fixed in #3843\n\nConverting it is breaking for share-link consumers and needs a consumer sweep of its own — public share links are an end-user-facing feature, and `GET /share/:token` is read by the anonymous share view, not just by the SDK. That is exactly the shape of change #3687 did for storage: producer + consumers, landed deliberately, with the console taught both shapes first. It is not a quiet ride along with someone else's PR.\n\nMeanwhile the guard **pins** it: `scripts/check-route-envelope.mjs` declares this module at its current `responses: 6, ok: 0, err: 0, privateOk: 1` with a ratchet pointing here, so nothing gets worse while this is open, and the numbers drop to the conformant `2 / 1 / 1 / 0` when it lands.\n\n## What needs deciding\n\n1. **Convert it like the other five** — a `sendOk` / `sendError` pair, payloads under `data`, `{ ok: true }` at `:139` becomes the envelope's own flag. Needs the anonymous share view and any SDK/console reader taught both shapes first (the #3689 pattern), then the ratchet deleted.\n2. **Convert the flag only, leave payload depth alone** — add `success` to all six, keep top-level payloads. Cheaper and `BaseResponseSchema.safeParse` would pass, but it leaves `data` meaning different things on different routes in the same module, which is the \"two shapes from one registrar\" state #3843 called worse than untouched.\n3. **Declare the share surface exempt** — argue that an anonymous, tokenised share endpoint is not part of the `/api/v1` SDK contract (the way `hmr-routes.ts` is exempted as a dev-only SSE endpoint). Honest only if nothing on it is SDK-addressable; worth checking the route ledger before assuming.\n\nRecommendation: **1**. `:265` already emits `data`, and `:139`'s `{ ok: true }` is the precise thing #3689 removed one module over — leaving it is how the next survey misses it again. Worth sequencing after #3841 settles the code vocabulary, since `sendError` here will need to pick codes."
+}

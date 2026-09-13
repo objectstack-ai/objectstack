@@ -1,0 +1,32 @@
+{
+  "number": 4131,
+  "kind": "issue",
+  "title": "Plugin ordering is an unenforced convention: `AppPlugin` needs `objectql`/`manifest` at init but declares nothing (the structural cause of #4085)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T10:48:04Z",
+  "updated_at": "2026-07-30T14:06:00Z",
+  "closed_at": "2026-07-30T14:06:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4131",
+  "body": "发现于修 #4085（PR #4110）的过程中。#4110 已经让 `os serve` 在没有 artifact 时能启动，但它修的是**症状的位置**：让 CLI 把 `AppPlugin` 摆到正确的槽位。摆放正确仍然只是**约定**，下一个插件照样能摆错，而且照样只在启动崩溃时才被发现。\n\n## 这是同一类 bug 的第二次\n\n关键证据来自 `packages/runtime/src/default-datasource-plugin.ts` 的头部注释 —— **同一个子系统已经被同一类顺序 bug 咬过一次**：\n\n> **Ordering — phase, not list position.** The kernel resolves BOTH init and start order from the plugin dependency graph, so registration order proves nothing (a serve boot hoists `ObjectQLPlugin` ahead of anything a service plugin depends on — **exactly how the first cut of this plugin ended up starting after boot schema-sync and shipping a server with no tables**).\n\n当时的修法是：把 connect 挪进 `init()`、声明硬依赖，并**在这个插件里写下这段注释**。注释是对的、写得很好 —— 但它待在一个插件的文件头里，所以教训**没有传递**给下一个有同样约束的插件。三个月后 `AppPlugin` 用完全相同的方式失败（#4085），而且因为 artifact 路径恰好摆对了位置，它伪装成「缺 artifact 才崩」躲了很久。\n\n**一次是意外，两次是缺少被强制的契约。** 这就是本 issue 要解决的东西。\n\n## 事实\n\n内核**已经有**依赖拓扑机制：`ObjectKernel.resolveDependencies()` 会先访问 `plugin.dependencies` 里的插件，再 push 自己，Phase 1（init）与 Phase 2（start）都按这个 resolved 顺序走。仓库里至少 11 个插件在用它：\n\n| 插件 | 声明 |\n|:---|:---|\n| `packages/plugins/plugin-audit` | `dependencies = ['com.objectstack.engine.objectql']` |\n| `packages/plugins/plugin-approvals` | 同上 |\n| `packages/metadata-protocol` | 同上 |\n| `packages/runtime/default-datasource-plugin` | 同上 |\n| `packages/connectors/connector-{mcp,rest,slack,openapi}` | `['com.objectstack.service-automation']` |\n| `packages/apps/{setup,account,studio}` | `['com.objectstack.plugin-auth']` |\n| `packages/cli/utils/schema-migrate` | `['com.objectstack.runtime.default-datasource']` |\n\n**唯独 `AppPlugin`（`packages/runtime/src/app-plugin.ts`）什么都不声明** —— 而它恰恰是在 `init()` 里就同步取 `manifest` 与 `objectql` 的那一个：\n\n```ts\n// app-plugin.ts init()\nconst ql = ctx.getService('objectql');                       // 装包状态 seed\nctx.getService<{ register(m: any): void }>('manifest').register(servicePayload);\n```\n\n于是它的正确性 100% 取决于「谁先被 `kernel.use()`」。#4085 就是这个：`serve.ts` 在 stack 自己的 `plugins[]` 之前注册了它，于是 Phase 1 里 `manifest` 还不存在，启动直接死。\n\n## 为什么不能直接照抄兄弟们的写法\n\n`resolveDependencies()` 对**缺失**的依赖是抛错，不是忽略：\n\n```ts\nif (!this.plugins.has(dep)) {\n    throw new Error(`[Kernel] Dependency '${dep}' not found for plugin '${pluginName}'`);\n}\n```\n\n而 `AppPlugin` 会被组装在**没有** ObjectQLPlugin 的内核上：`empty` 环境（`plugin.app.empty-*` 那条退化路径）、metadata-only 的一次性命令、cloud/embedder 的自组装、以及一堆用 mock 引擎的单测。给它加硬依赖会把这些全部变成启动错误。\n\n## 需要拍的决定\n\n1. **软依赖（order-if-present）**：给 `Plugin` 加 `optionalDependencies`（或 `dependencies` 的 soft 变体）—— 存在则拓扑提前，不存在不报错。改动集中在 `resolveDependencies()`，语义最小。\n2. **服务级声明 `requiresServices: ['manifest', 'objectql']`**：更贴近真实约束（插件依赖的是**服务**，不是某个插件名 —— 现在的 `'com.objectstack.engine.objectql'` 本质是在用插件名代指服务）。内核可以在 Phase 1 之前校验并**指名**报错，或据此排序。代价是要定义「谁提供哪个服务」的映射。\n3. 什么都不做，把顺序契约写进文档 + lint。**不推荐** —— 上面那段历史就是这个方案的实测结果。\n\n我倾向 **2 的校验部分 + 1 的排序语义**：先做到「放错位置时启动被指名报错」，再决定要不要自动排序。这需要一个 ADR（内核插件生命周期语义）。\n\n## 顺带：`createStandaloneStack` 里有一条**已经烂掉的**顺序注释\n\n`packages/runtime/src/standalone-stack.ts`:\n\n```ts\nconst plugins: any[] = [\n    // MUST precede ObjectQLPlugin: its start() connects the default driver\n    // through the datasource connection service, and ObjectQLPlugin.start()\n    // runs boot schema-sync right after — the driver has to exist by then.\n    defaultDatasourcePlugin,\n```\n\n两处都不对，实测（`os serve --log-level debug` 抓 `Init:` 序列）：\n\n- 真实 resolved init 顺序是 `com.objectstack.engine.objectql` **#10**、`com.objectstack.runtime.default-datasource` **#16** —— 数组位置**没有**产生它声称的顺序，因为 `DefaultDatasourcePlugin` 自己声明的 `dependencies` 把 objectql 拓扑提前了；\n- 连接也**不在 `start()`** 而在 `init()`（理由见上面引的那段头部注释）。\n\n真实契约是 `objectql.init` → `default-datasource.init`(connect) → … → `objectql.start`(schema-sync 看到已连接的驱动)，由**声明的依赖 + Phase 1/2 切分**共同保证，跟数组位置无关。今天能跑，所以不是 bug —— 但它跟两米开外那份权威注释直接矛盾，会有人信错的那一份。属于本 issue 的第一步小修。"
+}

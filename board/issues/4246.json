@@ -1,0 +1,35 @@
+{
+  "number": 4246,
+  "kind": "issue",
+  "title": "MetadataPlugin 的 artifact-api loader:注释说「保留未实现」,实现却已存在并被引导流程调用(declared ≠ enforced，方向相反)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "documentation"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T00:43:34Z",
+  "updated_at": "2026-07-31T02:43:02Z",
+  "closed_at": "2026-07-31T02:43:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4246",
+  "body": "发现于 #4219 的文档准确性审计。审计 agent 想修正 `content/docs/releases/implementation-status.mdx` 里「Artifact API loader 是 Future / `artifact-api` 是 reserved」的说法,核查后发现**文档是对的、代码是自相矛盾的**,所以没有改文档,按 Prime Directive #10 转成 issue。\n\n## 矛盾\n\n`packages/metadata/src/plugin.ts:144-148` 的类型注释:\n\n```ts\n/**\n * When set, MetadataPlugin loads metadata from an artifact instead of scanning\n * the filesystem. Only `local-file` is implemented now; `artifact-api` is\n * reserved for M3/M4.\n */\nartifactSource?:\n    | { mode: 'local-file'; path: string; fetchTimeoutMs?: number }\n    | { mode: 'artifact-api'; url: string; token?: string; commitId?: string; fetchTimeoutMs?: number };\n```\n\n但同一文件里:\n\n- `_loadFromArtifactApi()` 在 **`plugin.ts:723`** 有完整实现(构造 URL、fetch、调用 `_parseAndRegisterArtifact`,并在 `:729` 对缺失 `environmentId` 抛出明确错误)\n- 引导分支在 **`:292`、`:305`、`:314`** 三处判断 `src?.mode === 'artifact-api'`,并在 **`:293`、`:306`、`:315`** 各自调用它\n\n也就是说:一个照着注释理解的调用方会以为 `mode: 'artifact-api'` 尚未落地,实际上它会真的走网络加载元数据。\n\n## 为什么值得单独修\n\n这是 #10 说的 `declared ≠ enforced` 的**反向**形态——通常是「声明了但没实现」,这次是「实现了但声明说没有」。危害同样具体:\n\n- 注释是使用方唯一的就近事实源,它把一条可用路径描述成了不可用;\n- 文档忠实照抄了这条注释(`implementation-status.mdx` 第 75 行),所以**每一轮文档审计都会重新撞上这个矛盾**,而审计 agent 只能一次次判定「代码需要 owner 决策」并留作残留 —— 这次就是这样。\n\n## 需要的决策(二选一,不该由文档侧猜)\n\n1. **实现是有效的** → 删掉/改写注释里的 \"reserved for M3/M4\",文档随之更新为已支持;或\n2. **实现是未完成的半成品** → 说明缺什么(M3/M4 的门槛具体是什么),并考虑让这三个分派点在条件不满足时显式拒绝,而不是静默走一条声称不存在的路径。\n\n## 未包含\n\n`_loadFromArtifactApi()` 本身的正确性我没有审计 —— 本 issue 只主张「注释与代码不一致」这一点。"
+}

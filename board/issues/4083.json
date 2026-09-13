@@ -1,0 +1,32 @@
+{
+  "number": 4083,
+  "kind": "issue",
+  "title": "datasource-autoconnect 的联邦查询测试在本地必现失败：ext_note 读到 6～12 行而非 2 行（CI 绿，需第二台机器复核）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T08:57:22Z",
+  "updated_at": "2026-07-30T10:24:28Z",
+  "closed_at": "2026-07-30T10:24:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4083",
+  "body": "按 Prime Directive #10 记录。在 #4062 / #4082 两次任务里都撞到，与那两条改动无关，故单独开。\n\n## 现象\n\n```\npnpm --filter @objectstack/runtime exec vitest run src/datasource-autoconnect.test.ts\n```\n\n```\nFAIL  src/datasource-autoconnect.test.ts > ADR-0062 declared-datasource auto-connect\n      > makes the federated object queryable through the engine with zero app code\n\nAssertionError: expected [ 'first', 'first', 'first', …(3) ] to deeply equal [ 'first', 'second' ]\n```\n\n测试（`packages/runtime/src/datasource-autoconnect.test.ts:118`）往外部数据源驱动里 `bulkCreate` **2** 行，然后 `engine.find('ext_note')`：\n\n- 单独跑整个文件：读到 **6** 行 —— 同样的 2 行各出现 3 次；\n- `-t \"makes the federated object queryable\"` 只跑这一条（其余 skip）：读到 **12** 行。\n\n行数随运行方式变化，但从来不是 2。\n\n## 已排除\n\n- **不是某个 PR 引入的**：在基线 commit 上 `git stash` 掉全部改动后同样失败；\n- **不是 #4048（driver-memory 的 bare-day 上界）**：把 `packages/plugins/driver-memory/src` 回退到 `b3a2318^` 并重新 build，同样失败；\n- **不是脏 build**：全新 worktree + `pnpm install` + `pnpm --filter @objectstack/runtime^... build` 之后复现。\n\n复现于 `b3a2318`、`5dc4d02`、`c53aa53` 三个 main 快照（容器：Linux 6.18.5，Node 见 CI 同版本）。\n\n## 但 CI 是绿的\n\n`Test Core` 在 main 和 PR 上都通过，而且跑整包 `pnpm --filter @objectstack/runtime test` 时这条**偶尔**能过（观察到 1 次通过 / 3 次失败）。所以它要么对执行环境敏感，要么是概率性的 —— 单独跑必现只是把概率拉满。\n\n## 值得看的方向\n\n行数是 2 的整数倍（6 = 3×2，12 = 6×2），像是同一份数据被多个 driver 实例/多次连接重复读出，而不是数据被写了多次。测试里一次 boot 会建 3 个 memory driver（默认 driver + `autoconn_ext` + `decorative`），三者都是 `driver: 'memory'`；如果联邦读把绑到 `autoconn_ext` 的对象在多个实例上各查了一遍、或者多次 `connectDeclared` 复用了同一个 store，就正好是这个形状。`InMemoryDriver` 本身没有模块级共享 store（都是实例字段），所以更可能在 `DatasourceConnectionService.connectDeclared` / 引擎的联邦读那一侧。\n\n**需要的动作**：找一台非本容器的机器跑一次上面的命令。如果也复现，那 CI 绿只是运气，这条测试保护的 ADR-0062 D1 验收其实没在保护；如果不复现，则值得查清楚是什么环境差异让它必现 —— 那个差异本身可能就是 bug 的触发条件。\n\n关联：#4062、#4082、ADR-0062 D1/D5。"
+}

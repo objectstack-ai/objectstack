@@ -1,0 +1,32 @@
+{
+  "number": 4073,
+  "kind": "issue",
+  "title": "plugin-hono-server 的 registerStandardEndpoints 把「重复供给」和「独家供给」绑在同一个开关上 —— 拆开是退役的前置条件",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T08:20:08Z",
+  "updated_at": "2026-07-31T05:37:46Z",
+  "closed_at": "2026-07-31T05:37:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4073",
+  "body": "> ⚠️ **本 issue 已订正（见下方评论）。** 初版标题与建议是\"零非测试消费者，默认翻 `false`\" —— **错的**：我当时查的是\"谁传这个选项\"，没查\"谁依赖这个默认值\"。`os serve` 正是靠默认值拿到这个面，且其中三个端点没有第二个提供者。照初版执行会打断 console。下文已按证据重写。\n\n按 Prime Directive #10 记录，#4018（静态 discovery 按注册计算，#4063 已合并）实施中发现。#4018 只收口了 discovery 那一块。\n\n## 真实现象\n\n`HonoPluginOptions.registerStandardEndpoints`（默认 **`true`**）用**一个开关**同时控制两类性质完全不同的路由：\n\n| 路由 | 性质 | 谁还提供 |\n|---|---|---|\n| `POST/GET /api/v1/data/:object`、`GET /data/:object/:id`（只有 C+R） | **重复供给** | `@objectstack/rest` 的 `/data`（完整 CRUD + 全部闸门），且因先注册先赢而实际生效 |\n| `GET /api/v1/discovery`、`/.well-known/objectstack` | **重复供给** | dispatcher / REST（#4018 后已显式 cede） |\n| `GET /api/v1/auth/me/permissions` | **独家供给** | **无** |\n| `GET /api/v1/auth/me/localization` | **独家供给** | **无** |\n| `GET /api/v1/me/apps` | **独家供给** | **无** |\n\n三条独家供给的证据：\n\n- **`os serve` 靠默认值拿到它们** —— `packages/cli/src/commands/serve.ts:1057` 是 `new HonoServerPlugin({ port })`，不传这个选项。\n- **console 硬依赖其中两条** —— objectui `packages/permissions/src/MePermissionsProvider.tsx:72` 的 `DEFAULT_ENDPOINT = '/api/v1/auth/me/permissions'`（整套 `PermissionProvider` / `ObjectForm` / `RecordDetailView` / 相关列表的 `apiOperations` 都建在这份 payload 上）；`apps/console/src/AppContent.tsx:121` 取 `/api/v1/auth/me/localization`。\n- **core 把它们当一等公民** —— `packages/core/src/security/auth-gate.ts:30` 的 `ALLOW_SUFFIXES` 含 `/me/apps`、`/me/localization`，注释写明是\"被门禁拦住的用户**必须**仍能访问，用以补救或引导补救 UI\"。\n- grep 确认 `packages/rest`、`packages/runtime` 都不挂任何 `/me/*`。\n\n所以**默认值不能直接翻 `false`** —— 那会让 `os serve` 上的 console 权限层与本地化整个断掉。\n\n## 仍然成立的部分\n\n「重复供给」那一半的论据不变，而且是这个面反复付税的根源 —— 每条平台级不变量都要在这里**再实现一遍**，且每次都是事后补的：\n\n- **#2567**：raw `/data` 直连 ObjectQL，匿名拒绝原本只在 REST 先注册时才生效 —— 安全姿态取决于加载顺序，于是单独补了一遍 `shouldDenyAnonymous` 闸门；\n- **#3298**：`transactionalBatch` 要在这里单独如实申报 `false`；\n- **#4018**：discovery 的 D12 诚实性又补一遍。\n\n## 修法：先拆，才谈退役\n\n**前置步骤（本 issue 的核心）**：把三条 `/me/*` 从 `registerStandardEndpoints` 门里挪出去，让这个开关名副其实地只覆盖重复供给。两条路线：\n\n- **A. 就地拆分** —— 在 plugin-hono-server 内部改为无条件注册（需把 `registerDiscoveryAndCrudEndpoints` 里的 `resolveCtx` / `getObjectQL` / `denyAnonymous` 提成共享 helper）。小、安全、对 `os serve` 行为不变。\n- **B. 归还真正的 owner** —— `/auth/me/*` 归 plugin-auth（它已经拥有 `/api/v1/auth/*`），`/me/apps` 归 REST 或 dispatcher。契合 ADR-0076 D11「单一 owner」，但跨插件，且 `/me/permissions` 带着约 195 行权限合并逻辑（含 `foldWildcardSuperUser`）与 objectql/spec 依赖。\n\n**拆完之后**才是原计划：默认值翻 `false` → 观察一个 release → 删除 `registerDiscoveryAndCrudEndpoints` 余下部分。\n\n## 顺带发现：`/auth/me/*` 目前是靠加载顺序活着的\n\nplugin-auth 在 `kernel:ready` 里注册 `rawApp.all('${basePath}/*')`（`auth-plugin.ts:1817`），**终结式**转发给 better-auth、不会 `next()`；hono 的 `/auth/me/permissions` 也在 `kernel:ready` 注册。两者谁先，取决于 `kernel.use()` 顺序（今天是 HonoServerPlugin 先于 AuthPlugin，所以 hono 的具体路由先注册、赢下匹配）。一旦顺序调换，`/auth/me/permissions` 会落进 better-auth 的 catch-all 拿到 404。\n\n这与 #2567、#4018 是同一类「靠顺序侥幸成立」的问题 —— 也是选 **B** 的最强论据：让 auth 拥有 `/auth/*` 下的全部路由，这个碰撞根本不存在。\n\n## 顺带：三个死常量\n\n`hono-plugin.ts` 的 `DEFAULT_ENDPOINT_PRIORITY = 100` / `CORE_ENDPOINT_PRIORITY = 950` / `DISCOVERY_ENDPOINT_PRIORITY = 900` 声明后**全仓零引用**。`DISCOVERY_ENDPOINT_PRIORITY` 尤其误导：它暗示存在一套 discovery 优先级机制，而真实机制是 Hono 的先注册先赢。\n\n## 相邻的、可独立处理的缝\n\n该面的 discovery payload 是 `{ version, apiName, routes, capabilities }`，**不满足 `DiscoverySchema`**（缺 `name` / `environment` / `locale` / **`services`**）。`services` 恰是 D12 定的 single source of truth（`handlerReady`），standalone 客户端因此读不到 D12 的那一半信息。走完退役路线后这条自动消失。\n\n关联：#4018（#4063 已合并）、#2567、#3298、ADR-0076 D11/D12、OQ#9。"
+}

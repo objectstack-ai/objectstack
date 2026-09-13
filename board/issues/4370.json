@@ -1,0 +1,35 @@
+{
+  "number": 4370,
+  "kind": "pull_request",
+  "title": "fix(sharing,runtime): a `sort` passed straight to the engine never ordered anything; migrate in-repo call sites to canonical keys (#4346)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T09:20:44Z",
+  "updated_at": "2026-07-31T09:34:12Z",
+  "closed_at": "2026-07-31T09:34:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T09:34:10Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4370",
+  "body": "#4346 的收尾清扫。原计划是\"把仓内 `{filter}` 调用迁到 `where`\"的机械 PR,但**扫描扫出了三个活 bug**,所以这个 PR 有两种性质的改动。\n\n## 一、活 bug:直连引擎的 `sort` 从未排过序\n\n#4346 让引擎在六个方法上折叠 `filter`→`where` 和 `top`→`limit`。`RPC_QUERY_ALIAS_SLOTS` 里**另外四对**(`select`/`sort`/`skip`/`populate`)只在 RPC/wire 层折叠——它们的值需要形状降级(`sort` 的 record 形式、`populate` 的名字列表),那属于那一层的职责——而**直接调 `engine.find()` 根本不经过那一层**。\n\n三处调用在那里传了 `sort`,于是它原样骑在 AST 上,每个 driver 的 `Array.isArray(query.orderBy)` 守卫都拒绝生成 ORDER BY:\n\n| 调用点 | 要的 | 实际拿到 |\n|---|---|---|\n| `share-link-routes.ts` | 分享出去的 AI 会话消息,`created_at asc` | **消息乱序** |\n| `runtime/domains/share-links.ts` | 同一路由的 runtime 副本 | 同上 |\n| `share-link-service.ts` `listLinks` | 最近 200 条分享链接 | **任意 200 条** |\n\n三处都是\"丢掉的排序 + `limit`\"——正是 #4226 注释点名的 \"latest N\" 失败模式:未生效的排序返回任意顺序,`limit` 再把它切成任意一页,而响应看起来完全正常。#4226 修的是 wire 归一化器,这三处在它下面一层。\n\n**如何确证的**(不靠读代码):写了运行时探针,用真实引擎 + 记录型 driver 打印引擎实际收到的 AST ——\n\n```\n>>> AST keys: object,sort,limit\n>>> ast.orderBy = undefined\n>>> ast.sort    = [{\"field\":\"created_at\",\"order\":\"asc\"}]\n```\n\n**针脚**:`listLinks` 此前**没有任何测试**,这是它坏了这么久没人发现的原因。新针脚断言**引擎收到的选项包**而非行顺序——因为失败点是\"这个键从未变成 `orderBy`\",而一个两种拼写都认的测试替身无论如何都会通过。保留前先把修复临时回退,确认针脚会变红(`expected undefined to deeply equal [...]`),不是恒绿装饰。\n\n## 二、清理:27 处空操作重命名\n\n其余 27 处引擎调用的 `filter` 改为 `where`(approvals 5、auth 2、reports 6、sharing 11、webhooks 2,外加 spec 一处文档示例)。因 #4346 已折叠,**这些是严格的空操作**——意义在于框架不再依赖它要求用户迁离的拼写,这是将来退役别名的前置条件。\n\n- spec 的 `system-names.ts` 示例教的是 `engine.find({ filters: [...] })` —— `filters` 是 **wire-only 别名,引擎层根本不折**,所以那个示例教的调用匹配全表。与 #4346 修掉的 hook 示例同一类。\n- 各服务自身公开 API 的 `filter` **参数**(如 `listRequests(filter)`、`listLinks(filter)`)刻意不动——那不是引擎选项包。扫描器从**调用**出发遍历(而非 grep `filter:`),正是为了区分这两者:仓内 `filter:` 有数千处命中,绝大多数是无关的。\n\n## 三、一处测试替身必须同步\n\n`approver-org-scope` 的假引擎读 `opts.filter`,所以它一直通过**仅仅因为替身和生产代码讲同一种废弃方言**。这正是让整类问题得以长期存活的机制,值得单独记一笔。已改为读规范键。顺带全仓扫了其他替身:多数读 `opts.where ?? opts.filter`(有韧性),无其他需要同步的。\n\n## 验证\n\nplugin-sharing 226 ✅ / plugin-approvals 330 ✅ / plugin-auth 579 ✅ / plugin-reports 50 ✅ / plugin-webhooks 25 ✅ / runtime 974 ✅ / spec 7160 ✅ / objectql 1450 ✅;改动包 typecheck ✅;`check:docs` ✅(生成物无漂移)。\n\n## 遗留\n\n另外四对别名在引擎层依然静默失效——一个未来的调用者写 `select`/`skip`/`populate` 会踩同样的坑,而选项类型是 `any`,编译期抓不到。这个更深的缺口(引擎应当对无法理解的查询键报错而非静默忽略)会按 PD #10 单独开 issue,不在本 PR 扩大范围。\n\nRefs #4346, #4226, #3795.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

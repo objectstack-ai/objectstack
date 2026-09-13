@@ -1,0 +1,34 @@
+{
+  "number": 4201,
+  "kind": "pull_request",
+  "title": "feat(showcase): 演示作用于选中记录的批量 action",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T15:06:31Z",
+  "updated_at": "2026-07-30T15:24:39Z",
+  "closed_at": "2026-07-30T15:24:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T15:24:36Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4201",
+  "body": "showcase 里一直没有 `bulkActions` 的例子 —— 而它恰恰是**声明批量 action 的唯一方式**：`action.bulkEnabled` 在 spec 17 的 #3896 收尾里被退役（#4054），正因为从来没有消费方，它的墓碑给的处方就是这个 key。\n\n## 改动\n\n在 `showcase_task` 上加一个 `bulk_actions` 命名视图 —— 既有 `legacy_row_actions` fixture 的**选择栏孪生**。两个名字都是对象上已声明的 action，故意各取一种形态：\n\n| action | type | 走的路 |\n|---|---|---|\n| `showcase_mark_done` | `script` | 沙箱 body 经平台 action 路由，逐条翻 `done`/`progress` |\n| `showcase_recalc_estimate` | `api` | POST showcase 自己的 `/api/v1/showcase/recalc`，靠已声明的 `recordIdParam` 带上每条记录的 id |\n\n**两者都不是字段 patch** —— 这正是它和 `project.view.ts` 里 `bulkActionDefs` 的分工：那边是经数据 API 批量**改字段**（`operation: 'update'` + patch），这边是把选中记录逐条派发给 action runner，于是「不是字段赋值」的 action（脚本、自定义端点）也能作用于一批记录。\n\n顺带在 UI 导览里写清这两种 bulk 词汇的分工，并点明 `bulkEnabled` 不是第三条路。\n\n## 验证\n\n在本 app 的真实后端 + console 里点完整流程：\n\n- **Bulk Actions** 视图出现在视图切换器，列（预计工时 / 进度 / 已完成）正常渲染。\n- 全选 10 条 → 两个按钮都带 action 自己的标签和图标。\n- **Mark Done** → 10 个 `POST /api/v1/actions/showcase_task/showcase_mark_done`，全 200；10 条记录 已完成 = ✓、进度 = 100。\n- **Recalculate Estimate** → 10 个 `POST /api/v1/showcase/recalc`，全 200（`recordIdParam` 确实带上了 id，没有 400）；预计工时逐条重算并刷新。\n- 运行全程 **0 控制台错误**（页面早期引导阶段有既存噪声，与本视图无关）。\n\n`pnpm validate` / `pnpm typecheck` / `pnpm test`（10 文件 60 测试）全绿。\n\n纯示例 + 文档，不动任何运行时代码。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

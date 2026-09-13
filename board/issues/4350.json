@@ -1,0 +1,32 @@
+{
+  "number": 4350,
+  "kind": "issue",
+  "title": "十处墓碑文案写着「removed in `@objectstack/spec` 18」,而这些键随 **17.0.0** 发布 —— 处方给了作者一个不会到来的版本号",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T07:37:24Z",
+  "updated_at": "2026-07-31T09:17:04Z",
+  "closed_at": "2026-07-31T09:17:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4350",
+  "body": "十处墓碑文案(以及它们生成的 5 个参考文档页)告诉作者某个键\"was removed in `@objectstack/spec` **18**\"。这些键会随 **17.0.0** 发布 —— 当前的发布机器根本产不出 18。墓碑文案是**给作者看的升级处方**,版本号说错会让人以为\"我还在 17,这键还能用\"。\n\n下游已经踩到:objectui#3101 照着 `waitEventConfig.timeoutMs` / `.onTimeout` 的文案,把自己的清理挂在了\"等 `@objectstack/spec` 升到 18 的那个 PR\"上 —— 那是个不会到来的事件,而真正的触发点(下一次 17.0.0-rc 刷新)可能就在这几天。\n\n## 为什么是 17\n\n| 事实 | 值 |\n|:---|:---|\n| npm dist-tags | `latest` = **16.1.0**,`rc` = **17.0.0-rc.0** —— 17.0.0 从未发布 |\n| `.changeset/pre.json` | `mode: \"pre\"`, `tag: \"rc\"`,`@objectstack/spec` initialVersions = **16.1.0** |\n| 这批退役的 changeset | `'@objectstack/spec': major` |\n| changesets 的算法 | pre 模式从**上一个已发布**版本起算:16.1.0 + major = **17.0.0**,发成 `17.0.0-rc.N`。当前 pre 窗口里没有任何路径能到 18 |\n| `packages/spec/src/kernel/protocol-version.ts` | `PROTOCOL_VERSION = '17.0.0'` —— 而墓碑**已经在同一棵树上**(如 #4198 的 `ab1633122`);`protocol-version.test.ts` 还把它钉死在 package.json 的 major 上,所以它也不能单方面改成 18 |\n| ADR-0059 §4 | 删除 → \"bump `@objectstack/spec` to a new **major**\"。相对**已发布**的 16.1.0,那个 new major 就是 **17** |\n| 发布列车 | #3909 \"v17 verification tracker — the **17.0.0** train\" 仍开着 |\n\n\"18\" 应该是从**在研版本号** `17.0.0-rc.0` 往上数了一位来的,而 changesets 是从 16.1.0 往上算的。\n\n**旁证:同一批文案里 32 处写 17、9 处写 18(spec 源码内)。** 那 9 处的共同点只是\"在 rc.0 那份 tarball 切出之后才落地\" —— 它们全都还在 17 这趟车上。已发布的 `17.0.0-rc.0` 里 `removed in @objectstack/spec 18` 出现 **0** 次,`... 17` 出现 **200** 次。\n\n## 范围\n\n**源码(10 处)**\n\n- `packages/spec/src/data/query.zod.ts:177` —— nested-select `{ field, fields, alias }`(#4196)\n- `packages/spec/src/data/query.zod.ts:216` —— `query.joins`(#4286)\n- `packages/spec/src/data/query.zod.ts:229` —— `query.cursor`(#4286)\n- `packages/spec/src/data/query.zod.ts:240` —— `query.distinct`(#4286)\n- `packages/spec/src/data/query.zod.ts:250` —— `query.windowFunctions`(#4286)\n- `packages/spec/src/automation/flow.zod.ts:237` —— `waitEventConfig.timeoutMs`(#4158)\n- `packages/spec/src/automation/flow.zod.ts:244` —— `waitEventConfig.onTimeout`(#4158)\n- `packages/spec/src/api/rest-server.zod.ts:126` —— `api.requireAuth`(#3963)\n- `packages/spec/src/stack.zod.ts:283` —— `api.requireAuth`(#3963,同一句的第二份)\n- `packages/metadata-protocol/src/protocol.ts:3510` —— nested-select(#4196)\n\n**跟着一起改**\n\n- `packages/spec/src/data/query.test.ts:94` —— 正则 `removed in @objectstack\\/spec 18` 把错版本号钉住了\n- 生成的参考文档 12 处 / 5 页(`content/docs/references/{api/contract,api/protocol,api/rest-server,data/data-engine,data/query}.mdx`)—— 走生成,别手改\n- `.changeset/wait-timeout-keys-retired.md` 正文两处 \"protocol 18\"(该 changeset 尚未消费)\n\n## 备选:如果 18 才是本意\n\n那矛盾的就不是文案而是机器:这些墓碑已经带着 `major` changeset 躺在 16.1.0 起算的 pre 窗口里,`PROTOCOL_VERSION` 也还是 `17.0.0`。真要让它们落到 18,得先退出 pre 模式把 17.0.0 切出去、再把这批变更挪到下一趟车 —— 那是个发布计划决定,不是文案改动,而且现在这样\"文案说 18、机器发 17\"两边对不上,任何一个下游读到的都是错的。我倾向直接把 9+1 处改成 17:与已有的 32 处一致,也与 ADR-0059 §4 的\"相对已发布 major\"口径一致。\n\n## Related\n\n- objectstack-ai/objectui#3101 —— 下游照着错文案排期的实例\n- objectstack-ai/objectui#3105 —— objectui 侧同一处措辞的更正\n- #4198 / #4196 / #4286 / #3963 —— 引入这些墓碑的 PR\n- #3909 —— 17.0.0 发布列车\n"
+}

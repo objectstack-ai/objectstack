@@ -1,0 +1,30 @@
+{
+  "number": 4123,
+  "kind": "issue",
+  "title": "i18n coverage never gates view labels: every defineView() bundle is skipped by the `!view.name` guard",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T10:29:26Z",
+  "updated_at": "2026-07-30T11:17:54Z",
+  "closed_at": "2026-07-30T11:17:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4123",
+  "body": "`i18n/missing-view` has **zero producers**. The `'view'` source exists in the type, the walker has code for it, and the ratchet's header claims it's covered — but no view label in this repo has ever been gated.\n\n## 证据\n\n`collectExpectedEntries()` 跑在真实编译产物上（`examples/*/dist/objectstack.json`）：\n\n```\napp-showcase: TOTAL expected entries: 2242  |  source=view: 0\n```\n\n三个 example 全量：\n\n| example | `config.views[]` | named（会被 walk） | 匿名 bundle（被跳过） | `obj.listViews` | bundle 内的视图 label |\n|---|---|---|---|---|---|\n| app-crm | 3 | **0** | 3 | 0 | 9 |\n| app-showcase | 4 | **0** | 4 | 0 | 20 |\n| app-todo | 1 | **0** | 1 | 0 | 3 |\n\n32 个用户可见的视图 label，一个都没被门禁看到。\n\n## 根因\n\n`packages/cli/src/utils/i18n-extract.ts` 里 `collectExpectedEntries` 认两种形状，而**编译产物两种都不是**：\n\n1. **对象内嵌**（~行 367）：`for (const [viewName, raw] of Object.entries(obj.listViews))` —— 但编译后的 object 上没有 `listViews`（实测三个 example 全是 0）。\n\n2. **顶层具名视图**（~行 392）：\n   ```ts\n   const views = Array.isArray(config?.views) ? config.views : [];\n   for (const view of views) {\n     if (!view?.name) continue;        // ← 这里\n   ```\n\n`defineView()` 编译出来的是一个**匿名 bundle**：\n\n```jsonc\n// config.views[i]\n{\n  \"list\":      { \"label\": \"All Tasks\", \"data\": { \"provider\": \"object\", \"object\": \"showcase_task\" } },\n  \"listViews\": { \"in_progress\": { \"label\": \"In Progress\", \"data\": {…} }, \"urgent\": {…}, … },\n  \"formViews\": { \"edit\": {…}, \"tabbed\": {…}, … }\n}\n```\n\n顶层没有 `name`，也没有 `object` / `objectName` —— 对象名藏在 `list.data.object` 里。所以 `!view?.name` 对**每一个** bundle 都成立，循环第一行就 `continue`，全仓库的视图就此静默出局。\n\n## 为什么这个洞会被漏掉\n\n视图 label 是**列表页顶部的视图切换 tab**，用户天天看。example 声明了 `i18n.supportedLocales: ['en','zh-CN',…]`，那些 tab 却全是英文，而 `check:i18n-coverage` 一直报绿。\n\n`i18n-coverage.ts` 的文件头恰好写了这个失效模式：\n\n> this detector used to keep its own parallel walk, and the two drifted until whole declared surfaces were extractable but ungated\n\n#3370 用\"共用一个 walker\"消除了 drift，但这次是 walker 自己与**编译产物的形状**脱节 —— 共用 walker 挡不住这一种。\n\n同样地 `os i18n extract` 也不会为视图 label 播种骨架，作者手上没有可填的键。\n\n## 影响面\n\n- `CoverageIssue['source']` 里的 `'view'` 是死代码（doc 注释还给了示例 `objects.account._views.all_accounts.label`）\n- `pushViewEmptyState()` 从未被有效调用过 —— 视图 emptyState 的 title/message 同样未被覆盖\n- `scripts/check-i18n-coverage.mjs` 的头部注释声称覆盖 listViews，与实现不符\n\n## 修复方向\n\n在 `collectExpectedEntries` 里认第三种形状：`config.views[]` 中不带 `name` 但带 `list` / `listViews` / `formViews` 的 bundle，逐个走进去，对象名从 `list.data.object`（以及各 listView 自己的 `data.object`）解析，键仍走既有的 `objects.<obj>._views.<view>.*` 约定。\n\n注意：修完会让存量债务**上涨**（32 个 label × 每个非默认 locale）。按 5c8afed61 立下的先例，应当**翻译而不是抬 baseline**——抬 baseline 等于把这个门禁存在的意义又放宽一次。\n\n发现于 objectui#2960 的验证过程（framework#4101 加 showcase specimen 时顺带查证 i18n 门禁会不会变红，结果发现它根本不会）。"
+}

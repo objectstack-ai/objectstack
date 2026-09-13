@@ -1,0 +1,32 @@
+{
+  "number": 4093,
+  "kind": "issue",
+  "title": "评估：plugin-dev「stub 填满槽位」这个早期设计是否整体作废 —— #4000/#4058 逐个退役到第 4 个之后，该问的是台面本身",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T09:23:02Z",
+  "updated_at": "2026-07-30T13:08:07Z",
+  "closed_at": "2026-07-30T10:30:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4093",
+  "body": "按 Prime Directive #10 记录。#4000 退役 1 个 dev stub，#4058 / PR #4086 又退役 3 个并把剩下的分了类 —— 两轮都是\"逐个判断\"。这条 issue 问上一层的问题：**「任何未被真实插件占用的核心服务槽位，都注册一个 dev stub 填满」这个设计本身是否还应该存在。**\n\n不是要求立刻删，是要求评估。下面是评估所需的证据，以及一个分档建议。\n\n## 现状（#4086 之后）\n\n| 类 | 槽位 | plugin-dev 里的实现 |\n|:---|:---|:---|\n| `degraded`（真干活，内存内） | `cache`, `queue`, `job`, `i18n` | 委托 core 的 `createMemory*` |\n| | `metadata` | **手写第二份**（见证据 3） |\n| | `file-storage`, `search`, `realtime`, `workflow` | 只有 plugin-dev 有 |\n| `stub`（编造） | `data`, `auth`, `security.permissions`, `security.rls`, `security.fieldMasker` | 手写 |\n| | `ui` | 无 factory → 无形状占位 `{}` |\n| 已退役 | `analytics`(#4000), `automation`, `notification`, `ai`(#4058) | — |\n\n## 证据\n\n### 1. 原设计理由已被反证\n\n代码里的理由是\"填满完整的 kernel service map，让下游拿到正确的返回类型（数组、布尔、对象，而不是 `undefined`）\"。\n\n但**生产环境本来就是空槽** —— 所有这些服务都是 optional，没装插件就没有。所以每个下游本来就必须处理缺失，否则生产早就崩了。#4086 是直接反证：一次清空 4 个槽位，runtime 923 / plugin-dev 8 / objectql 1183 / metadata-protocol 99 全绿，端到端起 kernel + dispatcher 正常服务。没有任何\"拿到 undefined 就崩\"的下游冒出来。\n\n这个理由成立的前提，恰恰是它想避免的那个 bug —— 如果真有下游不处理空槽，那个下游在生产里就是错的，应该修它，而不是在 dev 里喂假数据把它盖住。\n\n### 2. 安全形状的假实现，撞在 D12/#3891 自己定的红线上\n\nADR-0076 D12 从 #3891 学到的结论写得很明确：**「A fallback may degrade features, never security semantics」**。plugin-dev 的这三个 stub 做的正好是后者：\n\n```ts\nsecurity.permissions → checkObjectPermission() { return true; }   // allow-all\nsecurity.rls         → compileFilter()        { return null; }    // 无行过滤\nsecurity.fieldMasker → maskResults(r)         { return r; }       // 不脱敏\n```\n\n而 `packages/spec/src/contracts/security-service.ts:20` 明确说这三个句柄\"**are implementation internals and deliberately NOT part of this contract**\"，由 plugin-security 注册 —— plugin-dev 却给别人的实现内部造了假，且方向与同一份契约要求的 fail-closed 相反（\"Access-narrowing answers fail CLOSED … A consumer must never treat a thrown error or a deny filter as 'no restriction'\"）。\n\n触发条件是现实的：plugin-dev 对每个子插件都是 try/catch 优雅降级，所以只要 `@objectstack/plugin-security` 没装上（一条 `warn` 日志），allow-all + 无 RLS + 不脱敏就静默上线。这一档与\"该不该保留 stub 台面\"无关，本身就该走。\n\n补充一个精确性：`auth` stub 在**真实身份路径上是死代码** —— `resolve-execution-context.ts:104/120` 走的是 `authService.api.getSession()` / `getApi()` / `verifyMcpAccessToken()`，而 stub 只实现了 `verify()` / `getCurrentUser()` / `handleRequest()`，所以实际降级为匿名（fail-closed）。它不是活的越权洞。但 `verify() → { success: true, user: { roles: ['admin'] } }` 正是下一个消费者会直接信的形状，而且它占着槽位让 discovery 声称 auth 在场、让 `/api/v1/auth` 被广告出去。潜在，而非当下。\n\n### 3. 与 `packages/core/src/fallbacks/` 重复，且有\"同一个 bug 修两处\"的收据\n\n`cache`/`queue`/`job`/`i18n` 是委托 core 的 `createMemory*`（这没问题）。但 `metadata` 是 plugin-dev 手写的第二份内存注册表，与 `packages/core/src/fallbacks/memory-metadata.ts`（63 行）并存。代价已经付过一次，`packages/core/CHANGELOG.md:1386` 原文：\n\n> Both in-memory `metadata` fallbacks (`@objectstack/core`'s `createMemoryMetadata` **and** `@objectstack/plugin-dev`'s dev stub) now implement `registerInMemory` …\n\n一个 `registerInMemory` 缺失的 bug，要在两个地方修 —— 与 #3891 记录的\"同一个安全门被造了两遍\"完全同形，只是这次代价小。\n\n### 4. 这个包已发布、无护栏、仓库内无人使用、文档描述还是错的\n\n- `@objectstack/plugin-dev` **不是 private**（`17.0.0-rc.0`），会发到 npm。\n- **没有任何 `NODE_ENV` / 环境护栏**：`dev-plugin.ts` 里没有一处检查运行环境，装上就注册整套假实现（包括第 2 条那三个）。\n- **仓库内没有真实使用者**：`os dev` 走的是 `serve` 的真实 capability 装配（`commands/dev.ts` 不引用 DevPlugin），examples / create-objectstack 模板 / apps 全无引用；只剩 CLI 一处测试注释和文档。\n- **文档描述与实际不符**：`content/docs/plugins/packages.mdx:347-350` 说它是\"Metadata validation, schema introspection, debugging tools\"。实际它是\"一键装配 objectql + driver-memory + auth + security + hono + rest + dispatcher\"外加 stub 台面 —— 两件事都不是文档写的那件。\n\n## 建议：分三档，不一刀切\n\n**A. 造假类 → 直接删**（`data`、`auth`、`security.permissions`、`security.rls`、`security.fieldMasker`、无形状 `ui`）\n空槽就是生产语义，#4000/#4058 已经把这条路走通四次。第 2 条的三个安全槽位是这一档里最该先走的。\n\n**B. core 已有 fallback 的 → 删掉 plugin-dev 那一份**（`metadata`，以及把 `cache`/`queue`/`job`/`i18n` 的包装收干净）\n一份实现，一处修。与 #4089 合并做更省：那条要给 core 的五个 fallback 打 `__serviceInfo`，正好一起把\"谁是唯一那份\"定下来。\n\n**C. 只有 plugin-dev 有的真实内存实现 → 唯一值得讨论保留的一档**（`file-storage`、`search`、`realtime`、`workflow`）\n它们确实有 dev 价值（不装服务也能试功能）。但正确归宿是**真实服务自己的 InMemory 策略**（`@objectstack/service-analytics` 已是先例 —— #4000 的迁移路径就是\"装真引擎，它有 InMemory 策略\"）或 core fallback，而不是一份平行的假台面。所以这一档的问题不是\"删不删\"，而是\"退役前要不要先把对应服务的 InMemory 策略补上\"。\n\n**剩下的 plugin-dev = 纯装配插件**。那才是它真正的价值，也应该顺手把文档描述改对。\n\n## 待定问题\n\n1. **已发布包的 breaking 面**：外部使用者可能真的依赖某个 stub。17.x 还在 rc，是直接切 + changeset 写清 FROM→TO，还是留一个 deprecation 窗口（stub 保留但打 `stub` 标记 + 启动 warn）？\n2. **C 档的顺序**：先补 InMemory 策略再退役，还是先退役、把\"dev 里试不了\"当可接受的短期回退？前者更慢但不产生体验回退。\n3. **是否顺带加环境护栏**：给 plugin-dev 加 `NODE_ENV !== 'production'` 断言（逃逸阀按 PD #9 用 `OS_ALLOW_*`）。考虑到第 2 条的安全语义问题，这条可能不该等这个评估 —— 也许应该独立成 issue 先走。\n\n关联：#4058、#4000、#4089、#4087、#3891、#3989、ADR-0076 D12。\n"
+}

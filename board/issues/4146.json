@@ -1,0 +1,35 @@
+{
+  "number": 4146,
+  "kind": "pull_request",
+  "title": "fix(runtime): /ui discovery gates on the protocol service that serves it, not the vestigial ui slot (#4093)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T11:47:38Z",
+  "updated_at": "2026-07-30T13:07:45Z",
+  "closed_at": "2026-07-30T13:07:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T13:07:43Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4146",
+  "body": "> **范围已收窄**：本 PR 原本还带着 plugin-dev 的 `data`/`ui` stub 退役，但 **ADR-0115（#4137）** 在本分支开着的时候把整张 stub 表连根退役了（Tier A+B+C 一次落地）—— 那一半已按 main 收敛。留下的是 #4137 刻意没动的 runtime 一侧缝隙（ADR-0115 的 Consumers 行明确写着 \"runtime: no changes\"），而且它在 ADR-0115 之后**更重要了**：现在任何模式下都没有东西注册 `ui` 槽位，`routes.ui` 永远不广告 —— 但 `/ui` 明明在服务。\n\n## 改动\n\n`domains/ui.ts` 用 `protocol` 服务应答 `GET /ui/view/:object`，没有它就 503；`ui` 槽位从不参与这个判断，而且**全平台没有任何东西注册 `ui` 服务**（plugin-dev 的 shapeless placeholder 是史上唯一占用者，已被 ADR-0115 退役）。按槽位占用判定 `routes.ui` 因此在两个方向都错：\n\n- 有 placeholder、没 protocol 的旧 dev 启动：广告一条只能 503 的路由；\n- 没 placeholder 的所有启动（生产从来如此，ADR-0115 后 dev 也如此）：隐藏一条实际在服务的路由。\n\n现在 `routes.ui` / `services.ui` 按 `typeof protocol?.getUiView === 'function'` 判定 —— **与域 handler 自己的守卫逐字节一致**，即 `mcp` 广告已经在用的那条规则（同一谓词 ⇒ 同一事实）。`services.ui` 报告真正服务它的实现（provider `metadata-protocol`，尊重其 `__serviceInfo` 自述），unavailable 提示语点名真实补救办法（注册 MetadataPlugin），而不是 `svcUnavailable` 的「install a ui plugin」—— 不存在这样的插件。\n\nADR-0076 的 #4093 批注同步收口：指向 ADR-0115 的整体退役，并记下本 PR 这条 discovery 缝隙；#4113（plugin-dev 之外仅存的 fabricator —— dispatcher `/auth` 域自带的 mock 登录）保持开放。\n\n## 验证\n\n- runtime **936** / plugin-dev **10**（main 的 ADR-0115 测试套）/ metadata-protocol **110** 全过；build 71/71；eslint 干净\n- 新增 4 条 runtime 测试：有 protocol → 广告且真的服务（同一谓词、同一事实，`getUiView` 被以正确参数调用）；无 protocol → 不广告、`enabled: false`、提示语点名 MetadataPlugin；**回归钉**：`ui` 槽位被占而无 protocol → 仍不广告且 503（槽位买不来路由）；wrong-shaped protocol（无 `getUiView`）→ 与域一致不广告\n- 合并 main（ADR-0115）后重新 `pnpm install` + `pnpm build` 再跑的全部结果（#4137 给 plugin-dev 新增了 service-storage/service-realtime 依赖，旧 node_modules 会让 build 失败 —— 已在合并提交里处理）\n\n## 关联\n\n- #4093（A 档收尾）、ADR-0115 / #4137（整体退役）、#4126（`security.*` + 生产护栏，已合并）、#4086（#4058 step 2 门，已合并）\n- **#4113** —— 仍开放：dispatcher `/auth` mock 是 stub 类假实现最后的幸存者，在 `packages/runtime` 里跟发行版走。ADR-0115 的收尾更新点名它是\"那类假实现仅存的地方\"。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_018UNGqBQcdJ2RYHtWgntJ9B"
+}

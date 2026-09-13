@@ -1,0 +1,32 @@
+{
+  "number": 4085,
+  "kind": "issue",
+  "title": "`os serve <config>` cannot boot without a prebuilt `dist/objectstack.json` — dies with `Service 'manifest' is async - use await`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T09:10:11Z",
+  "updated_at": "2026-07-30T10:54:29Z",
+  "closed_at": "2026-07-30T10:54:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4085",
+  "body": "Found while fixing #4012 (PR #4084), where the regression test needed a temp project booted through the CLI. Unrelated to that fix, so filing rather than expanding scope (AGENTS.md Prime Directive #10).\n\n## Symptom\n\n`os serve objectstack.config.ts` fails during boot whenever `dist/objectstack.json` is absent beside the config:\n\n```\n  Loading objectstack.config.ts...\n[StandaloneStack] artifact read FAILED: path='<cwd>/dist/objectstack.json' error=ENOENT: no such file or directory\n\n  ✗ Service 'manifest' is async - use await\n```\n\nExit code 1. The thrower is `packages/core/src/kernel.ts:106` — `getService` finds the service in the plugin loader as an unresolved `Promise` and refuses it.\n\n## Repro — it is not about the fixture being minimal\n\nThe clean control is `examples/app-todo`, which boots fine normally:\n\n```bash\ncd examples/app-todo\nmv dist/objectstack.json /tmp/            # the ONLY change\nos serve objectstack.config.ts --port 44318\n#   ✗ Service 'manifest' is async - use await     → exit 1\nmv /tmp/objectstack.json dist/            # restore\nos serve objectstack.config.ts --port 44318\n#   ✓ Server is ready\n```\n\nSo a known-good app fails purely because its compiled artifact is missing. Any freshly-authored project — `os init` and then `os serve` before a first `os compile` — hits the same wall.\n\n## The earlier warning\n\nWith #4084's boot-diagnostics fix applied, the preceding boot WARN is now visible and points at the same root:\n\n```\nWARN [AppPlugin] failed to seed persisted package state {\"error\":\"Service 'objectql' is async - use await\"}\n```\n\n`AppPlugin` reaches for `objectql` (and later `manifest`) while those services are still async factories mid-resolution. With the artifact present something else resolves them first and the race never opens. Worth noting that this warning was itself invisible before #4084 — the failure gave no clue as to why.\n\n## Why it matters\n\nConfig-boot is a documented, first-class path — `serve` prints `Loading objectstack.config.ts...` and its own not-found hint offers `objectstack build` as one option *among* others, not a prerequisite. The error message names neither the missing artifact nor the fix, so it reads as an internal fault rather than \"run `os compile` first\".\n\n## What \"fixed\" looks like\n\nEither `AppPlugin` awaits the services it depends on (so no artifact is required and config-boot works as documented), or — if a prebuilt artifact really is mandatory — `serve` should detect the absent artifact up front and refuse with a message that says so and names `os compile`.\n\n## Workaround\n\nRun `os compile` before `os serve`. (That is what #4084's e2e fixture does.)"
+}

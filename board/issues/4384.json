@@ -1,0 +1,32 @@
+{
+  "number": 4384,
+  "kind": "issue",
+  "title": "[lint/cli] validateReadonlyFlowWrites 仍未接入 os lint —— 一条 gating error 只在 validate/compile 跑",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T10:03:17Z",
+  "updated_at": "2026-07-31T11:53:56Z",
+  "closed_at": "2026-07-31T11:53:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4384",
+  "body": "## 现象\n\n`flow-update-readonly-field` 是 **error**(gating):`update_record` 在 `runAs != 'system'` 下写一个 `readonly:true` 字段,引擎会静默剥掉,写永远不落地而步骤仍报 success(#2948 / #3425)。\n\n但它只在两条命令上跑:\n\n| 命令 | 调用点 |\n| :--- | :--- |\n| `os validate` | `packages/cli/src/commands/validate.ts:550` |\n| `os compile` | `packages/cli/src/commands/compile.ts:628` |\n| `os lint` | **无** |\n\n也就是说,CI 只跑 `os lint` 的团队会绿灯放行一个已经确定不会生效的写。\n\n## 根因\n\n这不是遗漏,是**已知且被写进代码里的**。`packages/lint/src/reference-integrity-suite.ts` 自己点名它:\n\n> the drift this suite exists to end (`validateReadonlyFlowWrites` is the standing proof — wired into `validate` and `compile`, never into `lint`)\n\n`REFERENCE_INTEGRITY_RULES` 加一条就三条命令全覆盖,但 `validateReadonlyFlowWrites` **按套件自己的成员判据并不属于它**:套件收的是「把 metadata 里写的**名字**解析到 stack 声明的东西上」的规则,而 readonly 规则问的是另一个问题——「这个**确实存在**的字段会不会被引擎剥掉」。硬塞进去会把套件的成员判据稀释掉,而那个判据正是它存在的意义。\n\n## 建议(需要先定方向,不是一行接线)\n\n三个选项,倾向 B:\n\n- **A. 直接手工接进 `lint.ts`。** 最小改动,但把「加规则要记住三个地方」的漂移又复制一次——正是 #3583 §5 D5 要终结的形状。\n- **B. 开第二个 list,比如 `FLOW_WRITE_SEMANTICS_RULES`**,收「字段存在,但这个写会不会真的生效」这一类:今天是 `validateReadonlyFlowWrites`,天然的下一个成员是将来任何 strip / 权限 / FLS 侧的写入语义检查。三条命令各调两个套件,新规则仍然只在一个地方登记。\n- **C. 放宽 reference-integrity 的成员判据**,把套件重新定义为「所有 pure `(stack) => Finding[]` 的作者时规则」。最省事,但套件文档里那段「什么属于它、什么不属于」的判据就没了,以后没人能回答「这条规则该放哪」。\n\n选 B 的话,顺带值得核对还有没有别的规则也只挂在部分命令上——`os doctor` 只跑 `validateWidgetBindings`,套件注释里也把这个不对称点名了(但那属于「doctor 是干什么的」的产品问题,不在本 issue 范围)。\n\n## 版本\n\n`@objectstack/*@17.0.0-rc.0`,`main` @ `38182ffb8`。发现自 #4369 —— 新规则接进套件时对比了隔壁 readonly 规则的接线方式。\n\n相关:#4380、#4383(同一批核查发现)"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 4219,
+  "kind": "pull_request",
+  "title": "docs(automation,releases,plugins): back-fill the accuracy audit #4161 never got",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T16:20:13Z",
+  "updated_at": "2026-07-31T00:39:00Z",
+  "closed_at": "2026-07-31T00:38:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T00:38:58Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4219",
+  "body": "Follow-up to #4206 (which fixed #4162). That PR fixed the mapper; this one pays the debt the mapper's bug left behind on #4161.\n\n## Why these four docs\n\n#4161's drift comment was computed by the broken mapper: the change to `packages/services/service-automation` collapsed into the container directory, so the docs were attributed to `packages/services` rather than the package. Re-derived with the fixed mapper, the change maps to four docs via `@objectstack/service-automation` — and on a service-automation-only diff the old mapper would have reported **none** of them:\n\n```\ncontent/docs/automation/flows.mdx\ncontent/docs/plugins/packages.mdx\ncontent/docs/releases/implementation-status.mdx\ncontent/docs/releases/v9.mdx\n```\n\nAudited with the `docs-accuracy-audit` workflow (8 agents: one auditor + one adversarial verifier per doc). **44 evidence-backed fixes, 5 repaired by the verifier.**\n\n## What changed\n\n**`automation/flows.mdx`** (11 fixes, 2 verifier repairs) — carries the #4161 axis itself: `runAs` now states that a `'user'` run which resolved no trigger user has its data operations refused, and that schedule / time-relative / API triggers need `'system'`. Also: `node.type` documented as an open `string` checked against the live action registry at `registerFlow()` (ADR-0018) rather than a closed enum; the `script` executor described as *naming a callable*, with `'email'` / `'slack'` called out as logger-backed markers that record intent without delivering anything; the `.strict()` flow/node/edge/variable shells; and six previously undocumented node keys (`timeoutMs`, `inputSchema`, `waitEventConfig`, `boundaryConfig`, `successMessage`, `errorMessage`).\n\n**`releases/implementation-status.mdx`** (19 fixes, 2 verifier repairs) — every REST row carries its real `/api/v1` prefix; the memory-driver capability list replaced with what `InMemoryDriver.supports` actually declares; Cache / Encryption / Dataset / Sorting statuses corrected; the `msw` column dropped (not a workspace package); `Role` → `Position` per ADR-0090 D3.\n\n**`plugins/packages.mdx`** (13 fixes, 1 verifier repair) — package inventory corrected, and the claim that plugins are never exported as `create*` factories removed (contradicted by `createRestApiPlugin`, `createDispatcherPlugin`, `createPlatformObjectsPlugin` and ~8 more).\n\n**`releases/v9.mdx`** (1 fix) — notes that `os package publish --visibility` has since shipped (`private` / `org` / `marketplace`, default `org`).\n\n**`scripts/role-word-baseline.json`** — not an unrelated edit: the `Role` → `Position` rename removes the file's last \"role\" occurrence, and `check-role-word` is a ratchet that fails on a **decrease** too, requiring the baseline to be updated and committed.\n\n## Verification beyond the workflow\n\nThe verifier on `implementation-status.mdx` only reviewed 4 of 19 fixes (its input fix-log was truncated), so I re-checked that file's claims myself and **found one error the workflow missed**: the doc cited `InMemoryDriver.capabilities`, but the real property is `InMemoryDriver.supports` (`memory-driver.ts:153` — the test name says \"capabilities\" while asserting `driver.supports.transactions`). Fixed in this PR. The substantive capability list checks out line-by-line against `supports`. Independently confirmed as well: `CoreServiceName` has no `permission` entry, `field.zod.ts` has no `checkbox` / `array` types, the four `.strict()` shells, `rest-route-ledger.ts`, and the `--visibility` options and default in `publish.ts:170-174`.\n\nGates run locally, all green: `pnpm --filter @objectstack/docs build` (410+ pages), `check:doc-authoring`, `check:role-word`, `check:nul-bytes`, `check:release-notes`, and `check:skill-examples` (198 prose examples type-check).\n\n## Residual — reported, not guessed at\n\n18 items the agents could not resolve without a code-owner decision are recorded in the changeset rather than edited. Two look like genuine code/doc contradictions worth their own issues:\n\n- **Artifact API loader** — `implementation-status.mdx` calls it \"Future\" and `artifactSource: { mode: 'artifact-api' }` \"reserved\", faithfully mirroring the comment at `packages/metadata/src/plugin.ts:145-148`. But `_loadFromArtifactApi()` exists at `plugin.ts:723-752` and is dispatched from the bootstrap switch. The *code* is self-contradictory; the doc is only echoing it.\n- **`maxRetries` default** — `FlowSchema` sets `.default(0)` while the engine reads `errorHandling.maxRetries ?? 3` (`engine.ts:3500`). Which wins depends on whether the flow was parsed through the schema first.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01J2x8Tie9WT1VgWFifqMKrR\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01J2x8Tie9WT1VgWFifqMKrR)_"
+}

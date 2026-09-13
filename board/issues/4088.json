@@ -1,0 +1,30 @@
+{
+  "number": 4088,
+  "kind": "issue",
+  "title": "plugin-auth 的终结式 catch-all 吞掉 /api/v1/auth/* 下别人的路由 —— console 权限层目前靠 kernel.use() 顺序才活着",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T09:12:26Z",
+  "updated_at": "2026-07-30T09:40:52Z",
+  "closed_at": "2026-07-30T09:40:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4088",
+  "body": "按 Prime Directive #10 记录，#4073 / #4079（拆分 `registerStandardEndpoints`）实施中发现。\n\n## 现象\n\nplugin-auth 在自己的 `kernel:ready` hook 里挂一个覆盖整个 auth 命名空间的 catch-all（`auth-plugin.ts` 的 `registerAuthRoutes`）：\n\n```ts\nrawApp.all(`${basePath}/*`, async (c) => {\n    const response = await this.authManager!.handleRequest(c.req.raw);\n    // …日志 / jwks cache-control…\n    return response;                  // ← 终结式：从不 next()\n});\n```\n\n`basePath` 默认 `/api/v1/auth`。这个 handler **从不 `next()`** —— 它无条件返回 better-auth 的响应，包括 better-auth 不认识那条路径时返回的 404。\n\n而 `plugin-hono-server` 在**它自己的** `kernel:ready` hook 里挂 `/api/v1/auth/me/permissions` 与 `/api/v1/auth/me/localization`（#4079 后这两条已改为无条件注册）。两个 hook 都在 `kernel:ready` 阶段，Hono 对同一路径按**注册顺序**依次执行 handler，先返回 Response 的赢。\n\n于是这两条端点能不能工作，**完全取决于 `kernel.use()` 的顺序**：\n\n| 顺序 | 结果 |\n|---|---|\n| HonoServerPlugin 先（今天 `os serve` 的顺序） | hono 的具体路由先注册 → 正常应答 |\n| AuthPlugin 先 | catch-all 先注册 → better-auth 不认识 `/me/permissions` → **404** |\n\n## 为什么值得单独处理\n\n坏掉的时候是**静默**的，而且砸在最要命的路径上：\n\n- objectui console 的**整个权限层**读 `/auth/me/permissions`（`MePermissionsProvider` 的 `DEFAULT_ENDPOINT`）—— 404 意味着 FLS / `apiOperations` 全线失去服务端答案；\n- `apps/console/src/AppContent.tsx` 读 `/auth/me/localization` 取区域默认值；\n- `core/security/auth-gate.ts` 把 `/me/localization` 列为\"被门禁拦住的用户**必须**仍能访问\"。\n\n而且**没有任何东西保护它**：#4079 新增的测试只钉住了 hono 插件**内部**的注册顺序（`/auth/me/*` 在 CRUD 块之前），跨插件的 hono-先于-auth 没有任何断言、也没有任何机制保证。\n\n这与 #2567（匿名拒绝取决于谁先注册 `/data`）、#4018（discovery 被顺序遮蔽）是**同一类**问题：不变量靠加载顺序侥幸成立，而非被强制。前两个都是发现后单独收口的。\n\n更一般地说：**任何**插件想在 `/api/v1/auth/*` 下挂路由，今天都会被这个 catch-all 吞掉，除非它恰好注册得更早。这是命名空间所有权的问题，不只是这三条端点的问题。\n\n## 建议修法\n\n让 catch-all 在 better-auth **不拥有**该路径时落穿，而不是把 404 当作最终答案：\n\n```ts\nrawApp.all(`${basePath}/*`, async (c, next) => {\n    const response = await this.authManager!.handleRequest(c.req.raw);\n    if (response.status === 404) {\n        await next();                     // 让后注册的具体路由有机会应答\n        if (!c.finalized) return response; // 没人接 → 保持 better-auth 原本的 404\n        return;                           // 有人接了\n    }\n    // …现有的 >=500 日志 / jwks cache-control…\n    return response;\n});\n```\n\n要点：\n\n- **只对 404 落穿。** 401/403 是 better-auth 的真实回答，不是\"不认识这条路径\"。\n- **`c.finalized` 兜底**（Hono 4.12.31 有这个属性），所以真正无人认领的 auth 路径**线上形状不变** —— 仍是 better-auth 原本那个 404，而不是平台的 notFound。\n- **优先级方向正确**：plugin-auth 拥有这个命名空间，所以 better-auth 实现了的路径仍然先赢；别人只能捡它不要的。同时结果与注册顺序无关。\n- 代价是这三条 `/me/*` 每次请求会多走一次 better-auth 的未知路径查找（应无副作用）。\n\n**不建议**改成\"按枚举只挂 better-auth 真实拥有的路径\"：#3656 的 route-ledger 明确依赖\"catch-all 会自动发布上游新增的端点\"这一性质，改成枚举会引入一份需要长期同步的表 —— 正是 #4018 / #4073 一路在消除的那种重复供给税。\n\n## 保护\n\n`auth-plugin.test.ts` 已有用 mock rawApp 驱动 `kernel:ready` 注册的先例，换成真实 Hono app 即可测到真代码：catch-all **先**注册、具体路由**后**注册，断言后者仍能应答；并断言无人认领的路径仍拿到 better-auth 原本的 404、401/403 不会被落穿。\n\n关联：#4073、#4079、#2567、#4018、#3656（auth route ledger）、ADR-0076 D11（单一 owner）。"
+}

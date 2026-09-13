@@ -1,0 +1,32 @@
+{
+  "number": 4042,
+  "kind": "issue",
+  "title": "driver-memory / driver-mongodb：裸日期 `$lte` 上界在 datetime 值上同样丢当天数据（#3777 的非 SQL 驱动对齐）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T05:39:24Z",
+  "updated_at": "2026-07-30T06:56:19Z",
+  "closed_at": "2026-07-30T06:56:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4042",
+  "body": "#3777 / PR #4041 把「裸 `YYYY-MM-DD` 上界 = 含当天整天」的操作符敏感翻译落在了 SQL 驱动的比较发射点（`SqlDriver.calendarDayUpperBoundRewrite`，`SqliteWasmDriver` 继承）与 analytics 策略层。**非 SQL 驱动未对齐**，同一 dashboard 换驱动语义漂移：\n\n## driver-memory（已核实代码路径）\n\n`memory-matcher.ts` 对 `$lte` 是裸 JS 比较：\n\n```ts\ncase '$lte':\n    if (!(value <= target)) return false;\n```\n\n存储值为 `Date` 或 ISO 字符串（`'2026-07-28T09:15:00.000Z'`）、target 为 `'2026-07-28'` 时，字符串序/coercion 都把当天 00:00 之后的值排除 —— 与 #3777 完全同构。`memory-analytics.ts` 把 `dateRange` 归一成 `{$gte: v[0], $lte: v[1]}`（约 L765/L864）后走同一匹配器，所以 **窗口路径同样命中**。`$between`（L126-129）同理。\n\n## driver-mongodb（推断，需验证）\n\n`$lte` 直译给 Mongo。BSON Date 字段 vs 字符串 `'2026-07-28'` 是跨类型比较（BSON 类型序），行为更糟：可能整个窗口都不匹配而非只丢当天。需要按 #3777 的行结果探针实测。\n\n## 建议落点\n\n与 PR #4041 相同的规则与原语，不要新造判定：\n\n- 共享 `nextUtcCalendarDay`（`@objectstack/core`，两个包均已依赖或可依赖 core）；\n- 裸日期 `$lte` × datetime 字段 → `< 次日午夜`；`$between` 裸日期 max 同样分解为半开；\n- `date` 字段、完整 ISO/`Date` 比较值、`$gte`/`$gt`/`$lt` 一律不动（#3777 语义表）；\n- memory 驱动在 `initObjects` 拿到字段类型元数据，可按声明类型收窄；matcher 若拿不到类型，可用 PR #4041 中 preview-evaluator 的类型盲等价技巧（`< 次日` 对 date 文本序等价于 `<= 当日`）。\n\n## 验收\n\n把 `sql-driver-calendar-day-upper-bound.test.ts` 的行结果探针（issue #3777 复现原样 + `$gte`/`$gt`/`$lt` 不变性 + 完整 ISO 不放宽）在两个驱动上各钉一份 —— 这也是 ADR-0053 D-A3 矩阵 driver 轴的两个格子（D-D2 已把 bound-semantics 轴写进 ADR）。"
+}

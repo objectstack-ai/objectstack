@@ -1,0 +1,30 @@
+{
+  "number": 4002,
+  "kind": "issue",
+  "title": "serve/dev 的 boot 合并把作者写的整个 api 块替换掉 —— api.requireAuth 和 enforceProjectMembership 被静默丢弃",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T02:26:16Z",
+  "updated_at": "2026-07-30T04:40:25Z",
+  "closed_at": "2026-07-30T04:40:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4002",
+  "body": "#3963 第 2 节那个\"值丢在哪一环\"的答案。**已实测定位。**\n\n## 根因\n\n`packages/cli/src/commands/serve.ts:672`(以及 `:658` 的同款):\n\n```js\nconst bootResult = await createStandaloneStack(standaloneInput);\nconfig = { ...originalConfig, ...bootResult } as any;   // ← 浅展开\n```\n\n而 `createStandaloneStack()`(`packages/runtime/src/standalone-stack.ts:337`)无条件返回:\n\n```js\napi: {\n    enableProjectScoping: false,\n    projectResolution: 'none',\n},\n```\n\n浅展开下 `bootResult.api` **整块替换**掉作者写的 `api`。boot 只想强制关掉 environment scoping,却把整个块连带清空了。\n\n## 实测证据\n\n在 `examples/app-crm` 的 `defineStack` 里写 `api: { requireAuth: false }`,在 `serve.ts:1745` 打点:\n\n```\n[DBG] configKeys= actions,api,apps,...,plugins,positions,requires,...     ← api 键在\n[DBG] apiConfig= {\"enableProjectScoping\":false,\"projectResolution\":\"none\"}\n      | resolved requireAuth= true | tierAuth= true | hasAuthPlugin= false\n```\n\n`apiConfig` 里**没有 `requireAuth`**,而且带着一个 schema 枚举(`'required' | 'optional' | 'auto'`)根本不允许的 `projectResolution: \"none\"` —— 这就是 boot 那个对象,不是作者写的那个。\n\n## 被静默丢弃的不止一个键\n\n`serve.ts` 从 `apiConfig` 读四个键,作者写的**全部**会被丢:\n\n| 键 | 后果 |\n|:--|:--|\n| `requireAuth` | v12 明确文档化的\"一行迁移\"(公开托管数据)**无效**;fallback 变成 `?? (tierEnabled('auth') ? true : false)` |\n| `enforceProjectMembership` | `sys_environment_member` 的 403 门 —— ADR-0024 D9 那个 opt-out 无效,退回 dispatcher 默认 |\n| `enableProjectScoping` / `projectResolution` | 被 boot 覆盖成 standalone 的固定值(**这两个是有意的**) |\n\n**顺带一个好消息**:#3963 里我担心的\"auth-less stack 兜底可能也坏了\"—— **没坏**。兜底是 `apiConfig.requireAuth ?? ((tierEnabled('auth') || hasAuthPlugin) ? true : false)`,由于 `apiConfig.requireAuth` 恒为 undefined,`??` 右边总是生效,auth-less stack 仍然拿到 `false`。丢的只是**作者显式写的值**。\n\n## 又是同一个形状\n\n这是本轮第五次:\n\n| | 谁被谁覆盖 |\n|:--|:--|\n| #3897 | `options` 盖掉 `where` |\n| #3933 | `req.body` 盖掉路径 `object` |\n| #3960 | `query.context` 成为执行上下文 |\n| #3984 | (变体)闸门只认一种拼写 |\n| **本 issue** | `bootResult.api` 盖掉作者的 `api` |\n\n区别是这次被盖掉的是**作者的声明**,而不是服务端派生值 —— 所以症状不是越权,而是**\"声明了但不生效\"**(PD #10)。\n\n## 修法\n\n`api` 要**按键合并**,而不是整块替换:\n\n```js\nconfig = {\n    ...originalConfig,\n    ...bootResult,\n    // boot 只想强制 scoping 相关的键;作者的其余 api 声明必须留下\n    ...(originalConfig.api || bootResult.api\n        ? { api: { ...(originalConfig as any).api, ...(bootResult as any).api } }\n        : {}),\n};\n```\n\n同时建议:`standalone-stack.ts` 的 `projectResolution: 'none'` 不在 `ObjectStackDefinitionSchema.api.projectResolution` 的枚举里 —— 要么把 `'none'` 加进枚举,要么用 `'required'|'optional'|'auto'` 里的合法值,否则这个对象无法通过自己的 schema。\n\n**顺带核实**:`bootResult` 还会返回 `plugins` / `requires` / `objects` / `manifest` / `permissions` / `positions`,同一个浅展开也会整块替换它们。artifact-serve 路径下这可能是**有意的**(boot 就是要用产物里的那份),所以我**没有**把它们算进本 issue —— 只有 `api` 这一处证据是明确的(boot 只写两个键却清空全块)。要不要一并审计其余几个,值得单独判断。\n\n## 与 #3963 的关系\n\n这**不改变**删掉 `api.requireAuth` 的结论(auth 是内核),但它把第 2 步的前提说清了:那个开关不是\"设计上不可用\",而是**作者写的值在这条 boot 路径上被丢弃**。而且 `enforceProjectMembership` 在 `requireAuth` 被删之后**依然存在**,所以这个合并 bug 必须独立修 —— 不能靠\"反正要删那个键\"带过。\n\n<sub>核对于 `origin/main` @ 77fadbf。诊断用的探针与临时配置改动均未提交。</sub>\n"
+}

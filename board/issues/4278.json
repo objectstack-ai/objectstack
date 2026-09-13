@@ -1,0 +1,32 @@
+{
+  "number": 4278,
+  "kind": "issue",
+  "title": "The schemaless nodes' designer forms live only in objectui's hand-written table, and nothing reconciles them — `script` offers three broken options and cannot author the one that works",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T02:15:13Z",
+  "updated_at": "2026-07-31T07:08:51Z",
+  "closed_at": "2026-07-31T07:08:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4278",
+  "body": "#4045 关闭时留下的**覆盖边界**，以及边界外查实的第一个实例。\n\n## 边界在哪\n\n#4045 建立的对账是「描述符发布的 `configSchema` ↔ 执行器读了什么」。五个内置节点**有意不发布** `configSchema`（`config-schemas.test.ts` 钉住了这一点，各有记录在案的理由）：`decision`、`script`、`subflow`、`wait`、`connector_action`。\n\n对这五个，平台侧没有任何声明可供对账 —— 但**作者在 Studio 里看到的表单并没有消失**，它来自 objectui 的手写表 `flow-node-config.ts` 的 `FLOW_NODE_CONFIG`。也就是说契约还在，只是搬到了另一个仓库的另一份手写清单里，而**那份清单和执行器之间没有任何对账**。\n\n`wait` 和 `connector_action` 的兄弟块（`waitEventConfig` / `connectorConfig`）在 #4161 / #4210 里逐个核过。其余三个没有。查了 `script`，是漂的。\n\n## `script` —— 已核实，用户可见\n\nobjectui `flow-node-config.ts` 的 `script` 组 vs `screen-nodes.ts` 里 `script` 执行器实际读的键：\n\n| 表单提供 | 执行器读 | 判定 |\n|---|---|---|\n| `outputVariables`（复数，stringList） | — | **声明而不读** |\n| — | `outputVariable`（单数，string，`screen-nodes.ts:245`） | **读而不声明** |\n| — | `function`（`:181`） | **读而不声明** |\n| — | `inputs`（`:244`） | **读而不声明** |\n| `actionType` 选项 `code`/`email`/`sms`/`notification` | 内置集合 `SCRIPT_BUILTIN_ACTION_TYPES = { 'email', 'slack' }`（`:34`） | **三项对不上** |\n\n逐条推到运行时后果：\n\n1. **`outputVariables` 没人读。** 作者在「Output variables」里填的名字不产生任何效果 —— #3528 的同一形状（填了 Studio 字段，什么都没发生）。执行器绑定输出用的是单数 `outputVariable`。\n2. **选 `sms` 或 `notification` 必然失败。** 二者都不在内置集合里，于是被当作函数名去 `resolveFunction('sms')`，解析不到就失败整步，错误信息写着 *\"'sms' is not a built-in action (email, slack) and no function named 'sms' is registered\"* —— 报错里列的两个选项，表单一个提供（email）、一个不提供（slack）。\n3. **默认选项 `code` 是 no-op。** 执行器自己警告得很清楚：内联 `config.script` 不被执行（没有服务端 JS 沙箱），并指路「改用注册函数 + `config.function`」。\n4. **而 `function` / `inputs` / `outputVariable` 这条唯一能工作的路径，表单里根本没有。**\n\n净效果：Studio 里 script 节点能配的四个 `actionType`，**一个是 no-op、两个运行时必然失败**，唯一真能跑的调用函数路径无法授权。\n\n## 建议\n\n不建议直接照搬 #4045 的做法（那需要给这些节点发布 `configSchema`，而它们不发布是有理由的 —— 见 `config-schemas.test.ts`：`decision` 的虚拟 Target 列由边推导、`script` 的表单按 `actionType` 条件切换、`subflow`/`wait` 的契约在顶层字段，发布一份部分 schema 会**丢掉**这些编辑器）。\n\n两个方向，成本递增：\n\n1. **先修 `script` 本身**（独立、可立即做）：`outputVariables` → `outputVariable` 的处置（按 ADR-0087 D2 判断是改名还是删）、`actionType` 选项与 `SCRIPT_BUILTIN_ACTION_TYPES` 对齐（补 `slack`，`sms`/`notification` 要么实现要么撤下）、把 `function`/`inputs` 加进表单。\n2. **给这条缝一个 ratchet**：#4045 的对账之所以成立，是因为两侧都在同一个仓库、且 Zod 的键集可机读。这里跨仓库，objectui 的 `FLOW_NODE_CONFIG` 也是手写字面量。可行的形态是把执行器派生的 Zod 键集**发布出去**（它们已经在 `@objectstack/spec` 里了），由 objectui 侧加一条测试比对 —— objectui 已经消费 `@objectstack/spec`，所以这条边本来就存在。\n\n另外查一下 `subflow` 和 `decision`，本 issue 只核实了 `script`。\n\n## Related\n\n- #4045 —— configSchema ↔ 执行器对账（已关闭），本 issue 是它的覆盖边界外\n- #3528 —— 「填了 Studio 字段，什么都没发生」的原始事故\n- objectui#3082 —— 同一条缝的另一半：发布的 schema 会整表替换手写组，删掉兄弟块编辑器（已修）\n- #1870 —— `config.function` 作为 canonical 调用引用的来源"
+}

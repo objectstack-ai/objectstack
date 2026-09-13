@@ -1,0 +1,32 @@
+{
+  "number": 4018,
+  "kind": "issue",
+  "title": "plugin-hono-server 的 registerStandardEndpoints 静态 discovery 硬编码整张路由表 —— 与 D12 \"按注册计算\" 的两个真 discovery 面不一致",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T03:06:45Z",
+  "updated_at": "2026-07-30T08:14:30Z",
+  "closed_at": "2026-07-30T08:14:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4018",
+  "body": "按 Prime Directive #10 记录，#3891 follow-through（/analytics 条件挂载）实施中发现。\n\n## 现象\n\n`packages/plugins/plugin-hono-server/src/hono-plugin.ts:764-799`（`registerDiscoveryAndCrudEndpoints`，仅在 `registerStandardEndpoints: true` 时启用）返回一份**完全静态**的 discovery：`routes` 表硬编码 `auth`/`packages`/`analytics`/`workflow`/`automation`/`ai`/`notifications`/`i18n`/`storage`/`ui` 全部条目，不看任何服务是否注册。\n\n这与两个真 discovery 面的 D12 语义（capabilities = what is actually installed, computed at runtime）不一致：\n\n- dispatcher 的 `getDiscoveryInfo`（`http-dispatcher.ts`）：`hasXxx ? route : undefined`，逐服务计算；\n- protocol 的 `getDiscovery`（`metadata-protocol/src/protocol.ts`）：`SERVICE_CONFIG` + 注册表驱动（#3989 后 analytics 也已并入）。\n\n该静态块已有局部修补痕迹（realtime 条目按 D12/#2462 删除、`transactionalBatch: false` 按 #3298 如实申报），但整表仍是\"宣传了不一定存在的路由\"——正是 D12 修掉的类。`/analytics` 现在按服务在位条件挂载后，这张表在未装 service-analytics 的 standalone hono 部署上会宣传一条 404 路由。\n\n## 缓解因素\n\n- 仅 `registerStandardEndpoints: true` 时启用；conformance 显式关闭；真实部署（`os serve`、cloud）用 dispatcher/REST 的 discovery；\n- 所以是\"遗留便捷面上的陈旧宣传\"，非默认路径的洞。\n\n## 修法建议\n\n二选一：\n1. **对齐 D12**：该块改为从 kernel 服务注册表计算 routes（同 `getDiscoveryInfo` 的 `hasXxx` 模式）；\n2. **退役该静态 discovery**：`registerStandardEndpoints` 模式下也委托 dispatcher 的 `getDiscoveryInfo`（若 dispatcher 在场），或干脆移除这个便捷面——它与 dispatcher-plugin 的 `/discovery` 是重复供给。\n\n倾向 2 的后半（评估使用面后退役），避免第三份 discovery 逻辑需要长期同步。\n\n关联：ADR-0076 D12、#2462、#3891、#3989、#4000（同为 D12 残留盘点）。"
+}

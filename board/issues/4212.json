@@ -1,0 +1,34 @@
+{
+  "number": 4212,
+  "kind": "issue",
+  "title": "Four of the five declared plugin lifecycle hooks are never invoked — and the metadata-type registry docs tell plugins to use one of them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "tech-debt"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T15:37:05Z",
+  "updated_at": "2026-07-30T17:04:06Z",
+  "closed_at": "2026-07-30T17:04:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4212",
+  "body": "Found while exempting `onEnable` from the new top-level authoring-key lint (#4167 / #4189). Checking *which* lifecycle hooks the runtime actually honours turned up that only one of the five does.\n\n## The finding\n\n`PluginLifecycleSchema` (`packages/spec/src/kernel/plugin.zod.ts:80-90`) declares five hooks, each with descriptive TSDoc, and `PluginLifecycleHooks` (`packages/spec/src/system/types/plugin.ts`) mirrors them:\n\n| hook | declared | invoked anywhere |\n|---|---|---|\n| `onInstall` | ✓ | **0 call sites** |\n| `onEnable` | ✓ | 3 (`packages/runtime/src/app-plugin.ts`) |\n| `onDisable` | ✓ | **0 call sites** |\n| `onUninstall` | ✓ | **0 call sites** |\n| `onUpgrade` | ✓ | **0 call sites** |\n\nMethod: repo-wide grep over `packages/`, `apps/`, `examples/` excluding `dist/` and tests, for both direct (`.onInstall(`) and indexed (`[hook](`) invocation, plus a check for any dynamic lifecycle dispatch table. Nothing. `onEnable` is the only hook with a runtime that runs it.\n\n`onUpgrade` has an entire supporting type built for it — `UpgradeContextSchema` with `previousVersion` / `newVersion` / `isMajorUpgrade` (`plugin.zod.ts:59-76`), exported from the package root — for a callback nothing ever calls.\n\n## The part that actively misleads\n\n`packages/spec/src/kernel/metadata-type-schemas.ts` documents `onInstall` as the place to call two registration functions:\n\n```\n:134  * Plugins that introduce custom metadata types — declared through\n      * `additionalTypes` on `MetadataPluginConfig` — should call this from\n      * their `onInstall` hook so the engine's `/meta/types/:type` endpoint\n      * starts emitting a real JSON Schema for them.\n\n:167  * Plugins call this from `onInstall` to layer actions onto any type —\n      * built-in or custom — without forking the registry.\n```\n\nA plugin author who follows that instruction exactly registers nothing. `registerMetadataTypeSchema` / `registerMetadataTypeActions` never run, `/api/v1/meta/types/:type` keeps emitting no schema and no type-level buttons, and there is no error — the hook simply never fires. That is the same silent-drop shape as #3786/#4148/#4167, one layer up: the guidance is the thing that's dead, not just the property.\n\n## Why it matters\n\n- **`declared ≠ enforced`** (Prime Directive #10) on the plugin system's own contract. `packages/spec` is the constitution; five hooks are written into it and four have no implementation.\n- It is *load-bearing advice*, not just an unused field. The metadata-type registry is the documented extension point for custom metadata types, and its documented entry point does not exist.\n- It propagates: `packages/cli/src/utils/config.ts:93` and `packages/cli/src/commands/serve.ts:676` both name `onDisable` alongside `onEnable` when preserving module-level named exports, so the CLI carefully carries a hook to a runtime that will not call it.\n\n## Suggested resolution — the `spec-property-retirement` playbook\n\nPer ADR-0049 enforce-or-remove, each of the four needs a decision, and they may not all get the same one:\n\n1. **`onInstall`** — highest priority, because it has documented consumers. Either implement it (the metadata-type registry needs *some* install-time seam) or rewrite both TSDoc blocks to name a hook that runs. Rewriting the docs to say `onEnable` is probably the cheap correct answer, but only if `onEnable`'s timing is actually right for registry population — worth checking rather than assuming.\n2. **`onDisable` / `onUninstall`** — no consumers found, no callers. Retire, or implement as part of a real enable/disable lifecycle if one is planned.\n3. **`onUpgrade`** — retire together with `UpgradeContextSchema`, or wire it into the package-upgrade path that already exists (`packages/spec/src/kernel/package-upgrade.ts`), which looks like where it was meant to go.\n\nWhichever way each goes, the lint family this came out of would like a note: `onEnable` is now in `STACK_RUNTIME_MEMBERS` precisely *because* the runtime honours it, and `onDisable` is deliberately excluded *because* it does not. If `onDisable` ever becomes real, that exclusion has to move with it — a test in `packages/spec/src/kernel/metadata-authoring-lint.test.ts` pins the current distinction and will fail loudly, which is the intended alarm.\n\nI have not implemented anything here; #4189 only documents the current state where it had to."
+}

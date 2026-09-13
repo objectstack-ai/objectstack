@@ -1,0 +1,35 @@
+{
+  "number": 4357,
+  "kind": "pull_request",
+  "title": "feat(runtime): action body 被丢弃的 ctx.record 写在调用时可见 (#4345)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T08:40:26Z",
+  "updated_at": "2026-07-31T09:41:59Z",
+  "closed_at": "2026-07-31T09:41:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T09:41:56Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4357",
+  "body": "Closes #4345 的**运行时**一半。\n\n> **范围已收敛。** 本 PR 开着的时候,#4362 合并并关掉了 #4345 的作者时一半,\n> 而且它的规则在一处比本分支原来的正确。本分支因此删掉了自己的 lint 规则,\n> 只留 #4362 明确留作 open question、且 lint 够不着的那一层。原描述的 lint 部分\n> 已作废,以下是重写的。\n\n## 为什么本分支原来的 lint 规则被删掉\n\n#4362 要求写是**可证明的死写**(`ctx.record` 不逃逸)。因为这是活的、确实落库的合法写法:\n\n```js\nctx.record.stage = 'won';\nawait ctx.api.object('crm_deal').update(ctx.record);   // 落库了\n```\n\n本分支原来的规则会把它报成\"被丢弃\",并断言 `the stored record is unchanged` ——\n**那是一句错话**,不只是噪音。实测确认后整条删除,lint 包与 `hook-bodies.mdx` 整体\n采用 main 的版本。\n\n**同一个缺陷也在本分支的运行时层**,一并修了(见下)。\n\n## 留下的是什么:调用时报告\n\nlint 只看字面模式、且只看经过 CLI 的 metadata。运行时能覆盖它够不着的三类:\n\n- **computed key 与别名** —— `ctx.record[k] = v`、`const r = ctx.record; r.x = 1`,lint 刻意跳过而不猜;\n- **整体替换** —— `ctx.record = {…}`;\n- **lint 永远看不到的 body** —— Studio / API 写进来的 metadata 不经过 `os validate`。\n\n沙箱在快照上装 `set`/`deleteProperty`/`defineProperty` proxy,**放在 accessor 后面**,\n所以整体替换也抓得到、不会把记录器换掉。命中的 key 走 `ScriptResult.droppedRecordWrites`,\n`actionBodyRunnerFactory` 报 warn,点名字段和 `ctx.api.object(...).update(...)` 的改法。\n写**照常在 VM 内生效**,拿快照当草稿纸的 body 读写仍自洽 —— 去掉的只是沉默。\n\n## 逃逸检测(与 #4362 语义对齐)\n\n写之后出现 `ownKeys` 即视为逃逸 —— 整体消费(交给 `ctx.api`、展开、返回、\n`JSON.stringify`)会枚举键,而**属性读不会**。所以:\n\n| body 形状 | 上报 |\n|---|---|\n| `ctx.record.stage='won'; return null;` | ✅ 报 |\n| `var id = ctx.recordId \\|\\| (ctx.record && ctx.record.id); ctx.record.stage='won';` | ✅ 报(showcase 真实惯用法,属性读不解救) |\n| `Object.keys(ctx.record)` 发生在写**之前** | ✅ 报 |\n| `ctx.record.stage='won'; await ctx.api.object('d').update(ctx.record);` | ❌ 不报(活写) |\n| 拷出 / 整体 return / `JSON.stringify` | ❌ 不报 |\n\n方向和 #4362 一致:**歧义算活的**。一句错的\"被丢弃\"是在对存储状态说假话,比漏报更糟。\n\nhook 的 ctx 没有 `record`,不装 proxy、零成本。`ctx.record` 仍是只读;运行时到底该\nrefuse 还是 honour 仍未决 —— **只报告不预设任何一边的答案**。\n\n## 净改动\n\n8 个文件,只碰 runtime + 一段 `ActionSchema.body` JSDoc + `actions.mdx`\n(#4362 没动这个文件)。\n\n## 验证(合流后全部重跑)\n\n| 门 | 结果 |\n|---|---|\n| `@objectstack/runtime` | **995 passed**(sandbox 89) |\n| `@objectstack/lint` | **634 passed** |\n| `@objectstack/spec` | **7161 passed** |\n| `@objectstack/cli` | **628 passed** |\n| `spec check:generated` | **8/8 up to date** |\n| typecheck + eslint | clean |\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

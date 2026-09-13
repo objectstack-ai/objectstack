@@ -1,0 +1,32 @@
+{
+  "number": 4058,
+  "kind": "issue",
+  "title": "dispatcher 其余服务域仍只判槽位占用、不读 handlerReady —— #4000 在 analytics 一域落地后剩下的类推面",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T07:25:02Z",
+  "updated_at": "2026-07-30T10:11:23Z",
+  "closed_at": "2026-07-30T10:11:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4058",
+  "body": "按 Prime Directive #10 记录，#4000 修复过程中划出的域外部分。#4000 的\"修法 2\"（dispatcher 域尊重 `handlerReady: false`）只在 **analytics 一域**落地，因为原 issue 已经写明\"这条更通用，但改动面大——各域都要统一决定是否采纳\"。这条就是那个待决定的面。\n\n## 现象\n\nADR-0076 D12 结论第 3 条要求 consumer \"只把 `handlerReady: true` / `status: 'available'` 当真能力\"。discovery 从 #3028 起就执行了这条；**dispatcher 作为 consumer 一直没执行** —— 各服务域只判 `getService()` / `resolveService()` 的真假，槽位被占住就当真实现调用，stub 返回的编造数据以 200 发回。\n\n#4000 把 analytics 一域改成读 `handlerReady`（`isAnalyticsServiceServeable`，域判据 / 路由挂载门 / discovery 的 `routes`+`features` 共用同一个谓词），并删掉了 plugin-dev 的 analytics stub。其余域没动。\n\n## 盘点（核对于 `b3a2318`）\n\n| 域 | 解析处 | 现判据 | dev 下占槽的 stub | stub 返回什么 |\n|:---|:---|:---|:---|:---|\n| `/storage` | `domains/storage.ts:38` | `!storageService` | `createStorageStub` | 内存文件，**真能用** |\n| `/automation` | `domains/automation.ts:44` | `!automationService` | `createAutomationStub` | `execute` 恒 `success: true`，**编造** |\n| `/i18n` | `domains/i18n.ts:41` | `!i18nService` | `createI18nStub` | 内存翻译表，**真能用** |\n| `/notifications` | `domains/notifications.ts:43` | `!service` | `createNotificationStub` | 只 push 进数组，声称 `success` |\n| `/ai` | `domains/ai.ts:34-39` | `!aiService` → 404 | `createAIStub` | 假回答 —— D12 记的\"已经误导过 agent\"就是它 |\n\n`realtime` / `search` 不在此列：dispatcher 没有对应域（realtime 从不广告 HTTP 面，search 的 HTTP 面归 REST 层），它们的 stub 只影响进程内调用者和 discovery 自述，那部分是诚实的。\n\n严重性远低于 #3891：全部 dev-only + 显式 opt-in，不像降级 shim 那样落在发行装配上、也不丢 RLS。真正的问题是**\"能力存在\"在 dev 和生产里含义不同**。\n\n## 需要的决定\n\n不是一个开关，是按 stub 性质分两类：\n\n1. **返回编造数据的**（`ai.chat`、`automation.execute`、`notification.send`）—— 走 analytics 的路：域 + 挂载门 + discovery 共用 `handlerReady` 谓词，stub 槽位 = 空槽位 → 404；并像 analytics 一样直接把 stub 删掉（槽位空着比\"占住但被 404\"少一层间接）。\n2. **真能用的内存实现**（`storage`、`i18n`，以及没有 HTTP 面的 `cache`/`queue`/`job`）—— 这些不是\"假数据\"而是\"功能受限但真干活\"，按 D12 的定义正好是 `degraded`（`handlerReady` 默认 `true`）而不是 `stub`。这类该改的是**标记**（`_dev: true` → `__serviceInfo: { status: 'degraded', message: … }`），不是门。\n\n倾向先做分类再动代码：现在所有 plugin-dev stub 共用一个 `_dev: true`，被归一化成 `{ status: 'stub', handlerReady: false }`，这个\"一刀切\"本身就是上面两类分不开的原因。\n\n关联：#4000、#3891、#3989、ADR-0076 D12。"
+}

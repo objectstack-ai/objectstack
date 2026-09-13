@@ -1,0 +1,34 @@
+{
+  "number": 4317,
+  "kind": "pull_request",
+  "title": "feat(spec,metadata-protocol,metadata,objectql,service-automation): stored metadata replays the full conversion chain at rehydration (#3903)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T05:45:53Z",
+  "updated_at": "2026-07-31T05:59:47Z",
+  "closed_at": "2026-07-31T05:59:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T05:59:45Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4317",
+  "body": "Closes #3903.\n\n## 决定:选项 1(在存量读取路径上转换),并回答了 registry 吞异常的问题\n\n#3903 列了三条路。选 1 的理由:#3855 已经证明不能依赖运营方主动跑迁移(选项 2 只帮跑了的人);选项 3 会把 PD #12 点名的债务(裸 `??`、各消费端自行容错)固化为永久政策。选项 1 让转换层变成真正普适的契约机制,并给了 `rule-validator.ts` 那个\"永远等不来退休\"的 `??` 一个真实的退场。\n\n## 数据静置(data at rest)的政策,一句话\n\n**退休(`retiredFromLoadPath`)是\"创作面\"的事件;存量行没有作者可教,所以存量读取路径重放完整链(含已退休条目)。** 窗口与 tombstone 继续管创作面(`normalizeStackInput` 只跑 live-window、schema 照旧硬拒),`saveMetaItem` 的 422 网关保证新写入永远是 canonical——所以存量转换是一个只会收缩的集合。已写入 ADR-0087 附录与 PD #12。\n\n## 改了什么\n\n- **spec**:新原语 `applyConversionsToStoredItem(type, item, options?)`(`conversions/stored.ts`),把一条存量行按其元数据类型包进栈集合、以 `includeRetired: true` 重放全链。幂等、不抛、不校验。\n- **metadata-protocol**:接入 `loadMetaFromDb`、`getMetaItems`(active + drafts)、`getMetaItem`(active + draft)、`getMetaItemLayered`、`duplicatePackage`(复制即新写入,先转换再过网关——遗留行终于能被复制,且副本是 canonical)。通知有进程级去重,避免每次列表读取都刷日志。\n- **metadata**:`DatabaseLoader` 活行读取(`load`/`loadMany`)转换;**history 保持原样**(版本层记录\"写下的是什么\",checksum↔body 必须对应;`SysMetadataRepository` 同理不转换——转换发生在\"行变成被服务的元数据\"处,不在版本存储处)。\n- **objectql**:authored action/hook 直读表的两个缝隙转换(pre-17 存量 action 行的 `execute` 现在真的能以 `target` 派发);`rule-validator` 删除 `requiredWhen ?? conditionalRequired`——#3883 里我承诺\"迁移后退休\"、#3903 里证明其实没有任何迁移机制,现在链在每个缝隙上跑,它可以退了。\n- **service-automation**:`registerFlow` 传 `includeRetired`。这一点刚好被 main 上新合入的 #4158 现场验证:`flow-node-wait-timeout-keys-removed` 是 17 就 retired 的流转换、`FlowSchema` 同步 tombstone 了 `timeoutMs`/`onTimeout`——不带 `includeRetired` 的话,携带这些键的存量流会从\"能跑\"直接变成\"注册失败\"。通用元数据缝隙**刻意跳过 `flow` 类型**:流转换带 ADR-0078 开放命名空间冲突守卫,需要自动化引擎的活 executor 注册表(`reservedNodeTypes`),只有 `registerFlow` 有。\n\n## registry.ts 吞校验异常的\"自己的答案\"\n\n维持注册、但不再是一句耸肩:\n\n- `loadMetaFromDb` 现在对**转换后的**行做 spec 校验(转换前校验必然对链上历史误报),返回 `{ loaded, errors, invalid }`,每条真实违约行以稳定标记 `[metadata_spec_invalid]` 告警并给出处方;\n- **仍然注册**,这是写明的决定:启动期拒绝会把活表的数据入口一起拆掉,行在 Studio 里连列出、打开、修复都做不到——可用性优先于纯洁性。硬网关在有作者在场的地方:写入端 `saveMetaItem` 422 + 读取端 `_diagnostics` 徽章(同一校验函数,现在因为先转换而不再误报链上历史);\n- `registerItem` 的校验钩子在代码里明确注释为\"诊断、非网关\",日志同样带稳定标记。\n\n## 测试\n\n- `spec/conversions/stored.test.ts`(8):retired 条目重放、嵌入 action、复数类型名、幂等、不可变、未知类型直通、冲突守卫透传。\n- `metadata-protocol/protocol.stored-conversions.test.ts`(6):直接把遗留行塞进 stub 引擎(正是绕过网关的静置数据),验证 getMetaItems/getMetaItem/loadMetaFromDb 的转换、`_diagnostics` 不再误报、flow 跳过、`invalid` 计数 + 照常注册。\n- `rule-validator.test.ts`:原\"honors the conditionalRequired alias\"改为两条——alias 不再被读(PD #12 钉死)、经存量链转换后规则照常执行。\n- 合并 main 后全量重跑:spec 7136+、objectql 1359、metadata-protocol 128、metadata 281、service-automation 482,全绿;`check:generated` 8/8(api-surface 已再生成)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

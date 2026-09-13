@@ -1,0 +1,32 @@
+{
+  "number": 3899,
+  "kind": "issue",
+  "title": "请求体从不与声明它的 schema 对照(#3877 的请求侧对偶):7 个 schema 定义了从未启用,而 API 目录已宣称生效",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T15:19:58Z",
+  "updated_at": "2026-07-31T08:07:57Z",
+  "closed_at": "2026-07-31T08:07:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3899",
+  "body": "**这是 #3877 的请求侧对偶。** 那条追踪的是\"响应体从不与声明它的 schema 对照\"；这条是同一个断裂的另一半 —— **请求体也从不与声明它的 schema 对照**，而且这一半的后果更硬：响应错了是客户端拿到脏数据，请求错了是服务端**执行了另一个语义**。\n\n#3878 暴露的是 `/analytics/query` 收到畸形请求会静默生成空 SELECT。扫了一圈，根因不局限于 analytics：请求体 schema 大量存在、但几乎没有一个被接到入口。更麻烦的是发布出去的 API 目录已经**宣称**它们生效了。\n\n## ① 目录说已校验，入口没有\n\n`packages/spec/src/api/plugin-rest-api.zod.ts`：\n\n- `:813` 声明 `requestSchema: 'FindDataRequestSchema'`\n- `:1235` 声明 `requestSchema: 'AnalyticsQueryRequestSchema'`\n\n这两处目前是**纯声明**，没有任何运行时代码消费它去做校验。对读契约的人（以及读契约生成客户端的 AI）来说，这是\"这个端点会 400 掉不合法请求\"的承诺，而实际不会。\n\n## ② 定义了却从未启用的请求 schema\n\n| Schema | 定义 | 本该守的入口 |\n|---|---|---|\n| `AnalyticsQueryRequestSchema` | `spec/api/analytics.zod.ts:32` | `POST /analytics/query`、`/analytics/sql` |\n| `AnalyticsQuerySchema`（`measures` 必填） | `spec/data/analytics.zod.ts:137` | 同上 |\n| `FindDataRequestSchema` | `spec/api/protocol.zod.ts:287` | `POST /data/:object/query` |\n| `CreateManyDataRequestSchema` | `spec/api/protocol.zod.ts:493` | `POST /data/:object/createMany` |\n| `UpdateManyDataRequestSchema` | `spec/api/protocol.zod.ts:520` | `POST /data/:object/updateMany` |\n| `DeleteManyDataRequestSchema` | `spec/api/protocol.zod.ts:538` | `POST /data/:object/deleteMany`（另见单独 issue） |\n| `SharingRuleSchema` | `spec/security/sharing.zod.ts` | `POST /data/sharing/rules`（另见单独 issue） |\n\n现状的量级：`packages/runtime/src/domains/` 下 17 个 handler，全文件搜 `safeParse` / `.parse(` 只有 **1 处**命中（`domains/packages.ts:663`）。`packages/rest/src/rest-server.ts` 六千多行里只有 **3 处**（`DatasetSchema.parse`、`ExplainRequestSchema.safeParse`、`CrossObjectBatchRequestSchema.safeParse`）。\n\n已经做对的两个可以直接拿来当范本：`POST /batch`（`rest-server.ts:6521`，400 + `issues`）和 `POST /keys`（`domains/keys.ts:62-77`，手写 allowlist + 显式 400）。\n\n## ③ 后果不是\"报错难看\"，是\"静默给出别的答案\"\n\n不校验时最坏的一档不是 500，是 200 + 语义悄悄变了。扫到的几处：\n\n- **`POST /automation/:name/toggle`**（`domains/automation.ts:202`）：`body?.enabled ?? true`。发 `{\"enable\": false}`（少个 d）→ 流程被**启用**，返回 200 `{enabled: true}`。想关掉的人以为关掉了。\n- **`POST /automation`**（`domains/automation.ts:75`）：`registerFlow(body?.name, body)`。`name` 拼错 → 流程注册在 `undefined` 键下，200 并把 body 原样回显，客户端认为成功。\n- **`POST /notifications/read`**（`domains/notifications.ts:70`）：只认 `body.ids` 且必须是数组。发 `{\"notificationIds\":[...]}` 或 `{\"ids\":\"n1\"}` → `markRead(userId, [])`，成功信封，角标永不清零。\n- **`POST /data/:object/query`**（`rest-server.ts:3596`）：`query: req.body || {}` —— 畸形 body 直接变成无过滤全量查询。\n\n## ④ analytics 归一化器自己也在静默放宽过滤\n\n这条独立于 schema 问题，在**真引擎**内部：\n\n`packages/services/service-analytics/src/strategies/filter-normalizer.ts:75`\n\n```js\n// Logical $or / $not require recursive WHERE building which the\n// current strategies don't yet support; ignore so partial queries\n// still run.\nif (key === '$or' || key === '$not') continue;\n```\n\n`:88` 同理：`MONGO_TO_CUBE_OP` 之外的操作符（`$regex` / `$like` / `$between`，或者一个拼错的 `$eqs`）也 `continue`。\n\n于是 `where: {\"$or\":[{\"stage\":\"won\"},{\"stage\":\"closed\"}]}` 编不出任何 WHERE，`native-sql-strategy.ts:158` 直接聚合**全表**，200。注释里那句 \"ignore so partial queries still run\" 就是本条的自白 —— 宁可给一个更宽的答案，也不告诉调用者它没做到。\n\n**需要说明的是这不是越权**：我确认过 RLS read-scope 不走这个归一化器（ObjectQL 路在 `objectql-strategy.ts:368` 用 `$and` 合并后交给引擎、native-sql 路走 `read-scope-sql.ts` 的独立编译器），所以行级作用域仍在。问题是\"调用者自己的过滤条件被悄悄丢掉\"，性质与 #3878 完全一致。\n\n## 建议\n\n1. 先补 ①：要么把两处 `requestSchema` 声明落地成真校验，要么先把声明摘掉 —— 目录不该承诺没做的事。#3676 已经开过这个先例（声明了 `namespace`/`keys` 过滤但服务端从不读 → 直接把声明删掉）；\n2. 把表里的 schema 逐个接到入口，从 `deleteMany` / `sharing/rules` / `analytics/query` 三个已知有实际后果的开始（前两个另有 issue）；\n3. `filter-normalizer` 的两处 `continue` 改为抛 `VALIDATION_FAILED`（或至少在响应里回一个 `unsupported` 列表），别让\"没支持\"长得像\"没匹配\"；\n4. 门：一条\"每个声明了 `requestSchema` 的路由，发一个违反该 schema 的 body 必须拿到 4xx\"的用例。\n\n关联：#3878、#3891。\n\n<sub>核对于 `origin/main` @ 93f267f81。③ 中的四条来自源码阅读，未逐一实跑。</sub>\n"
+}

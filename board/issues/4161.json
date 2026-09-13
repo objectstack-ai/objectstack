@@ -1,0 +1,35 @@
+{
+  "number": 4161,
+  "kind": "pull_request",
+  "title": "fix(spec,service-automation): the wait executor reads its declared contract only (#4045)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T13:07:16Z",
+  "updated_at": "2026-07-30T14:09:45Z",
+  "closed_at": "2026-07-30T14:09:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T14:09:43Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4161",
+  "body": "#4045 的 `wait` 一半。另一半（超时契约压根没实现）单开为 #4158，**刻意没有塞进本 PR**。\n\n## 先纠正我自己在 #4045 上说错的判断\n\n我一度把 `wait` 报成「没有 `configSchema`，所以设计器配不了它」。**那是错的**，已在 issue 上更正。`wait` 的契约不在 `config` 里，而在 `FlowNodeSchema.waitEventConfig`（`flow.zod.ts:199`）—— 每个属性都有 `.describe()`、在可授权字段清单里、进了生成参考文档、showcase 也确实这么写。描述符不带 `configSchema` 是设计如此。\n\n## 站得住的那一半\n\n```ts\n// wait-node.ts（改动前）\n// …fall back to a loose `config` for hand-authored flows that put the same keys under config.\nconst eventType = String(wec.eventType ?? loose.eventType ?? 'timer');\n```\n\n执行器另外读了 **6 个 loose `config` 键**，其中 `duration` 和 `signal` 是 spec 从未声明过的拼法。这就是 #4050 退役掉的 `notify.source` 形状：一份只由代码注释宣告的第二契约，写了它的作者会得到一个永远能跑、也永远不会被引导到声明拼法的流程（PD #12）。\n\n**而且它不是假想的** —— 见下方第二处更正。\n\n## 做法\n\n新增 ADR-0087 D2 转换 `flow-node-wait-event-config-lift`，把 6 个 loose 键提升到声明块，优先级严格镜像被删掉的 `??` 链 —— 已声明的值胜出，其 loose 对应物**留在原地**（和 `renameConfigKey` 对被遮蔽别名的处理一致）。\n\n### 一个会把存量流程写坏的陷阱\n\n`engine.ts:1465` 是 `applyConversionsToFlow(...)` 紧接 `FlowSchema.parse(converted)` —— 加载器解析的是**转换后**的流程。而 `waitEventConfig.eventType` **没有 `.optional()`**：\n\n```ts\n// flow.zod.ts:200\neventType: z.enum(['timer', 'signal', 'webhook', 'manual', 'condition'])\n```\n\n所以一个只写了 `config: { duration: 'PT1M' }` 的存量流程，若提升后不带 `eventType`，会从**能跑**变成**加载失败**。转换因此补上 `'timer'` —— 执行器对这个形状原本的默认值。这不是收尾修饰，是这个改动能不能安全上线的关键。\n\n`?? 'timer'` 在执行器里保留了，并在注释里说明它**不是**同类兜底：`waitEventConfig` 本身可选，没有它的 wait 节点是合法的定时等待。\n\n## 第二处更正：`4450fba`\n\n第一版 commit 里我写了 *\"Nothing in-repo authors it\"*。**错的。** showcase 自己的 `wait_revision` 节点写的正是这个形状：\n\n```ts\nconfig: { eventType: 'signal', signalName: 'budget_revision' }\n```\n\n所以这道后门不是假想的，而且**演示 `wait` 的那个示例本身就在用被退役的拼法**。它已改为 `waitEventConfig`。\n\n转换本来就正确处理了这个形状（执行器行为两边一致），新增的测试钉住了 showcase 撞上的那个精确组合：**声明的键名出现在未声明的位置** —— 这正是候选顺序必须处理对的地方（`signalName` 先于 `signal`），并断言转换后的流程仍能 parse。\n\n这个错误是在排查一个卡住的 `objectstack verify` CI 步骤时发现的 —— 排查结论是那不是本改动引起的，但排查过程本身翻出了这句假陈述。\n\n## 两份清单，第二份我第一版漏了\n\n这个层维护两份注册：`CONVERSIONS_BY_MAJOR[17]` 和 `step17.conversionIds`（链式回放走后者）。我第一版只加了前者，**被仓库自己的棘轮抓住** —— `migrations.test.ts` 把每个转换的 fixture 都过一遍链，未接线的转换会在那里失败，而不是静默地失效上线。\n\n顺带一提：这本身又是一个「两份手写清单」实例（#3786 那个模式），但**这一个有闸门**，所以它的表现正如设计。\n\n## 验证\n\n| 项 | 结果 |\n|:---|:---|\n| spec 全量 | 272 文件 / **7097** 测试通过 |\n| 转换 + 迁移 | 95 通过（新增 6） |\n| `wait-node.test.ts` | 13 通过（新增 3） |\n| spec 12 道闸门 | 全 PASS（含重生成后的 `check:spec-changes` / `check:upgrade-guide`） |\n| 根级 8 道闸门 | 全 PASS |\n| `pnpm --filter @objectstack/spec exec tsc --noEmit`（CI 的 typecheck 门禁） | clean |\n\n**两处负控都做实了**：\n\n1. 摘掉转换注册后重新跑 —— 新测试里 **2 个失败**。第三个即使没有转换也通过（执行器本来只读声明值），所以我把它的测试名改成只声称它实际证明的事：它钉的是执行器那一侧的优先级。\n2. 从转换输出里删掉 `eventType` —— `FlowSchema.parse` **抛错**，证明那个默认值是承重的。\n\n新的执行器测试走 `registerFlow`（也就是真正施加转换的那个 seam），所以它们证明的是存量源端到端可用，不只是「执行器不再去看 config 了」。\n\n## 生成物\n\n`spec-changes.json` 和 `docs/protocol-upgrade-guide.md` 已重生成 —— 迁移步骤的 `rationale` 是生成物输入（该字段被声明为「the one place prose is load-bearing」，所以我也扩写了它）。两道闸门都是先报 FAIL 再修好的，不是猜的。\n\n## 一条存量情况，非本 PR 造成\n\n`packages/services/service-automation` 里 `src/engine.test.ts` 有 2 个类型错误（缺 `resumeAuthority`，#3951 加该字段时带 `.default` 留下的）。**我的 diff 里 `resumeAuthority` 出现 0 次，也不含 `engine.test.ts`**；而且 CI 的 typecheck 只覆盖 `@objectstack/spec`，所以这两个错误既不是我引入的、也不在门禁内。记录在此，未在本 PR 处理。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QoA8AV99Ss1RRkLLAYmDzq\n"
+}

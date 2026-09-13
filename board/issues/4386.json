@@ -1,0 +1,32 @@
+{
+  "number": 4386,
+  "kind": "issue",
+  "title": "[P3] executeDataAction 'query' fallback drops the entire query — where/sort/limit ignored, full table returned",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T10:18:11Z",
+  "updated_at": "2026-07-31T10:55:25Z",
+  "closed_at": "2026-07-31T10:55:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4386",
+  "body": "Found during the #4371 call-site survey (checking what reaches `engine.find` unfolded).\n\n`packages/runtime/src/action-execution.ts` — the `action === 'query' || action === 'find'` branch:\n\n- **Protocol path** (normal): `params.query` (or the params rest) goes to `protocol.findData` — where/sort/limit/select all honoured.\n- **ql fallback path** (when the protocol service is unavailable): `ql.find(params.object, qlOpts)` where `qlOpts` is only `{ context }`. **The caller's query never leaves the function** — no `where`, no `orderBy`, no `limit` — and the response is an ordinary-looking `{ records, total }` of the ENTIRE table.\n\nThe `get`/`update`/`delete` fallbacks in the same function all build a proper `findOpts({ where: ... })`; `query` is the only verb whose fallback forgets the request. Degraded-mode reads silently return more than was asked — the #4226/#4371 'rows are all there and all real' failure shape, plus an unbounded scan on large tables.\n\nFix sketch: thread the same `query` the protocol path builds into the ql fallback (fold/lower as needed — the bag may carry wire spellings like `sort`, which `engine.find` now rejects per #4371, so the fallback must lower them or reuse the protocol normalizer), or refuse loudly (503) instead of answering with the wrong result set. Refusing may be the honest option: a fallback that cannot reproduce the query's semantics should not pretend to serve it (AGENTS.md route-ownership rule 3: absence must be loud).\n\nRefs #4371, #4226, AGENTS.md PD #10."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 4380,
+  "kind": "issue",
+  "title": "[lint/automation] 嵌套 region(try_catch / loop / parallel)里的节点对 flow 规则不可见 —— 两条 gating error 静默失效,第三条降级为 warning",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T10:01:42Z",
+  "updated_at": "2026-07-31T10:39:28Z",
+  "closed_at": "2026-07-31T10:39:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4380",
+  "body": "## 现象\n\n`packages/lint` 里所有走 flow 节点的规则都只遍历**顶层** `flow.nodes`。一旦作者把同一个节点挪进 `try_catch` / `loop` / `parallel` 的嵌套 region,检查就整体失效。\n\n同一组「坏节点」放在顶层 vs 放进 `try_catch.config.try.nodes`,实测(对着已构建的 `@objectstack/lint` dist):\n\n| 规则 | 严重级 | 顶层 | 嵌套 |\n| :--- | :--- | :--- | :--- |\n| `flow-node-write-unknown-field`(#4369/#4374) | error | 1 | **0** |\n| `flow-update-readonly-field`(#3425) | error | 1 | **0** |\n| `approval-approver-type-unknown` 等(#3583) | error/warning | 1 | **0** |\n| `flow-template-unknown-field` filter 位置(#3810) | error | 1 | **1,但降级为 warning** |\n\n最后一行是最隐蔽的一种失败。`validateFlowTemplatePaths` 因为对整个 `config` 做递归 string-leaf 扫描,**碰巧**还能看见嵌套节点里的 token,但 `collectNodeLeaves` 只在节点 config 的顶层拆分 `filter` 键,嵌套后 filter 位置信息丢失:\n\n```\nFLAT     error  \tflow \"f\" node \"get_record\"\tflows[0].nodes[1]\nNESTED   warning\tflow \"f\" node \"try_catch\"  \tflows[0].nodes[1]\n```\n\n即 #3810 那条「条件被抹掉会**放宽**查询,运行时直接拒绝执行该节点」的 gating 判断,变成一行黄色 advisory,而且定位到外层 `try_catch` 而不是真正出问题的 `get_record`。这正是那条规则的严重级分档所要防止的事。\n\n## 根因\n\n`FlowRegionSchema`(`packages/spec/src/automation/control-flow.zod.ts:79`)持有完整的 `nodes: z.array(FlowNodeSchema).min(1)`,一共四个嵌套槽位:\n\n| 节点类型 | 槽位 |\n| :--- | :--- |\n| `try_catch` | `config.try`、`config.catch` |\n| `loop` | `config.body` |\n| `parallel` | `config.branches[]`(`ParallelBranchSchema`) |\n\n而每条规则都是同一行:\n\n```ts\nconst nodes = Array.isArray(flow.nodes) ? (flow.nodes as AnyRec[]) : [];\n```\n\n出现在 `validate-flow-node-writes.ts:184`、`validate-readonly-flow-writes.ts:137`、`validate-flow-template-paths.ts:248/266/290`、`validate-approval-approvers.ts:154`、`validate-expressions.ts:132`。没有一条递归进 region。\n\n(`validate-flow-trigger-readiness.ts:72` 找的是 `start` 节点,按定义只在顶层,不受影响。`validate-expressions.ts` 在结构上属于同一类,但我的探针在顶层也没触发它,未确认。)\n\n## 影响面不是假设\n\napp-showcase 现在就有一个 `update_record` 落在 `catch` region 里(`examples/app-showcase/src/automation/flows/index.ts:967-978`,写 `sync_status` / `sync_error`)。那个节点字段是对的,所以不是线上 bug —— 但它**从未被检查过**,而 `os validate` 通过给了它「已检查」的假象。「在 `catch` 分支里用 `update_record` 记录失败」恰恰是这个 region 最典型的用法。\n\n## 建议\n\n**不要三处各写一遍遍历** —— 那正是会漂移的形状(#3583 建套件、#4330 收拢 system-fields 都是在收拾这个)。\n\n- 在 `packages/lint` 出一个共享的 flow 节点游走器,产出 `{ node, path, container }`;\n- `path` 必须能表达嵌套位置(`flows[0].nodes[1].config.catch.nodes[0].config.fields.stagee`),否则 finding 定位不到真正的节点 —— 上面 NESTED 那行报在 `flows[0].nodes[1]` 就是这个问题;\n- 上述规则改用它;`validateFlowTemplatePaths` 还需要让 `filter` 位置判定跟着嵌套走,否则 gating 降级问题不会因为「能看见」而自动修好;\n- 一条测试钉住四个槽位都被走到 —— 参照 `validate-flow-node-writes.test.ts` 里对着 spec schema 行为式推导的 partition 测试,让新增的嵌套槽位无法静默漏掉。\n\n## 版本\n\n`@objectstack/*@17.0.0-rc.0`,`main` @ `38182ffb8`。发现自 #4369 / #4374(flow write-set gate)的收尾核查。"
+}

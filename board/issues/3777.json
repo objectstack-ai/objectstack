@@ -1,0 +1,35 @@
+{
+  "number": 3777,
+  "kind": "issue",
+  "title": "dashboard 的日期区间上界打在 `datetime` 列上丢失当天数据 —— 默认配置即命中",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T04:07:25Z",
+  "updated_at": "2026-07-30T06:20:36Z",
+  "closed_at": "2026-07-30T06:20:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3777",
+  "body": "## TL;DR\n\nDashboard 的内置日期区间过滤器把上界发成裸 `YYYY-MM-DD` 的 `$lte`。打在 `Field.datetime` 列上,**上界那天 00:00 之后创建的记录全部消失** —— 没有报错,图照常渲染,数字偏小。\n\n用户看到的现象:「我刚建的记录不在图上」,刷新也不出现,**等到明天就出现了**。\n\n而 dashboard 日期过滤器的**默认字段就是 `created_at`,它是系统注入的 `Field.datetime`** —— 所以这不是要踩才踩,是默认配置即命中。\n\n## 可复现\n\n`packages/plugins/driver-sql/` 下,内存 SQLite,今天 = 2026-07-28:\n\n```ts\nawait driver.initObjects([\n  { name: 'task', fields: { title: { type: 'string' }, created_at: { type: 'datetime' } } },\n]);\nfor (const [id, at] of [\n  ['t_midnight',  '2026-07-28T00:00:00Z'],\n  ['t_morning',   '2026-07-28T09:15:00Z'],\n  ['t_evening',   '2026-07-28T21:40:00Z'],\n  ['t_yesterday', '2026-07-27T14:00:00Z'],\n  ['t_old',       '2026-04-19T10:00:00Z'],\n]) {\n  await driver.create('task', { id, title: id, created_at: new Date(at) }, { bypassTenantAudit: true });\n}\n\n// 正是 objectui `buildFilterCondition` 对 last_90_days 展开后发出的形状\nconst found = await driver.find('task', {\n  where: { created_at: { $gte: '2026-04-29', $lte: '2026-07-28' } },\n});\n```\n\n| | |\n|---|---|\n| 期望 | `[\"t_evening\", \"t_midnight\", \"t_morning\", \"t_yesterday\"]` |\n| **实际** | `[\"t_midnight\", \"t_yesterday\"]` |\n\n今天 09:15 和 21:40 建的任务消失,只有恰好卡在 `00:00:00` 那条侥幸命中。同一探针打在 `Field.date` 列上完全正常 —— **分歧只在 `datetime`**。\n\n## 三条放大因子(叠起来就是默认配置)\n\n1. **13 个 preset 里 7 个的 `to` 是「今天/本期末」**,全部命中 —— objectui `packages/core/src/utils/dashboard-filters.ts` 的 `PRESET_RANGES`:`today` / `this_week` / `this_month` / `this_quarter` / `this_year` / `last_7_days` / `last_30_days` / `last_90_days`。展开后都是裸 `YYYY-MM-DD`(date-macro 的 `isoDate()` 一律 `startOfDay` 后切 10 字符,没有任何 token 展开成 `23:59:59`)。\n\n2. **默认字段是 datetime。** `DATE_RANGE_DEFAULT_FIELD = 'created_at'`(framework 侧在 `packages/lint/src/validate-widget-bindings.ts:213` 显式镜像),而 `created_at` 是 registry `applySystemFields` 注入的 `Field.datetime`。**任何省略 `dateRange.field` 的 dashboard 都命中。**\n\n3. **我们自己的 showcase 就是这个配置** —— `examples/app-showcase/src/ui/dashboards/ops-dashboard.dashboard.ts:35`:\n   ```ts\n   dateRange: { field: 'created_at', defaultRange: 'last_90_days', allowCustomRange: true }\n   ```\n   而 `examples/app-showcase/src/data/objects/task.object.ts:74` 是 `created_at: Field.datetime(...)`。\n   顺带一提 `examples/app-showcase/src/ui/datasets/chart-gallery.dataset.ts:20` 把同一个字段声明成 `type: 'date'` —— 著述面自己也没把两者分清。\n\n## 为什么至今没被发现\n\n- **失败方向是「少了」不是「错了」。** 图能画、数能出,只是偏小,而且偏小的量随一天中的时间推移而变化 —— 早上看少一点,晚上看少很多,第二天自己\"好了\"。\n- **`date` 列完全正常**,而大多数业务日期字段(`close_date`、`issued_on`、`signed_on`)确实是 `date`。中招的是 `created_at`/`updated_at` 这类**系统注入**的 datetime,恰恰是作者不会主动去声明、也就不会去想它类型的那批。\n- 没有任何一层会报错。\n\n## 根因:缺的是操作符敏感的「日历日 → 边界瞬时」\n\n产生端 100% 是日历日语义 —— `{current_month_end}` 作者的意图是「本月最后一天」而不是「31 号零点那一瞬」,`{today}` 作为 `to` 时意图是「含今天」。但**没有任何一层把这个意图翻译成瞬时边界**:\n\n| 操作符 | `YYYY-MM-DD` 在 `datetime` 列上应解释为 | 现状 |\n|---|---|---|\n| `$gte` / `$gt` | 当天 `00:00:00.000` | ✅ 恰好对 |\n| `$lte` | 当天 `23:59:59.999` | ❌ **变成 00:00,当天数据全丢** |\n| `$lt` | 当天 `00:00:00.000` | ✅ 恰好对 |\n| `$eq` | 展开成整天范围 | ADR-0053 Phase 1 已处理(silent equality miss) |\n\nADR-0053 D-A1 已经在驱动层建好了 `temporalFilterValue(object, field, value)`,但它做的是**形态**转换(ISO ↔ epoch),不是**语义**转换 —— 而且**签名里没有操作符**,所以它想做也做不到。\n\n## 同一个语义问题的四套并存实现\n\n| 位置 | 上界语义 | tz-aware | 类型感知 |\n|---|---|---|---|\n| `analytics-service.ts:623-646`(drill 出口) | **半开 `[gte, lt)`** | ✅ | ✅ datetime→参考时区午夜瞬时 / date→日历日 / 未知+非UTC→省略 |\n| `triggers/trigger-schedule/src/time-relative-trigger.ts:60-62` | 闭,`23:59:59.999` | UTC | 注释理由与本 issue 同构 |\n| `service-analytics/src/preview-evaluator.ts:136` | 闭,整天(`v <= \\`${end}~\\`` 字符串 hack) | ❌ | ❌ |\n| **`where` 的 `$lte` / `NativeSQL` / `ObjectQL` 的 dateRange** | 闭,**那一刻** | ❌ | 部分 |\n\n前两个是对的,而且 drill 出口那套已经跨仓自洽(objectui `buildDatasetDrillFilter` 把它编成 `{$gte, $lt}`)。第三套和第四套是坏的。\n\n## 建议的落点与顺序\n\n修在**驱动的 filter coercion 层**,一次覆盖 `where`、analytics `dateRange`、以及 NativeSQL 的裸 SQL(它的 `coerceTemporal` 钩的就是同一个驱动方法)。\n\n1. **先做 ADR-0053 D-A2** —— 把 duck-typed 的 `temporalFilterValue` 提升为 `IDataDriver` 契约方法,**并在扩契约的同一次改动里把操作符加进签名**。这是使能项,没它后面做不了。\n\n2. **实现操作符敏感的日历日→瞬时。** `date` 列原样不动;`datetime` 列按上表分派;tz 用参考时区(Cube 的规定是「值在 query `timezone`」)。**推荐直接复用 `analytics-service.ts:623-646` 的半开 `[gte, lt)` + 类型三分派模板**,而不是新引入一个 `23:59:59.999` 常量 —— 半开在分桶边界上无歧义,而且那套已在生产、objectui 已消费。\n\n3. **建 ADR-0053 D-A3 的一致性矩阵作为验收门。** ADR 原文(`docs/adr/0053-date-and-datetime-semantics.md:391`)要求 `field-type × operator × relative-token × driver` 并断言**行结果**而非发出的 SQL —— Phase 2 的六个 slice(#1978–#1983)全部关闭,**D-A3 从没立项**。这次要立,并且**加一个维度 `bound-semantics {点, 整天}`**:ADR 原文的矩阵只覆盖存储形态,不覆盖本 issue 的上界语义。\n\n4. 三条 `dateRange` 入口语义的统一是 ②③ 的下游 —— 共用同一个工具就自动一致。\n\n## 相关\n\n- #3773 — SQLite 上 `Field.datetime` 的 dateGranularity 分桶恒为 NULL。**同一个字段类型上的第三个坏点**(窗口边界、分桶键、预览一致性),应作为 D-A3 矩阵的一个格子。\n- #3766 / #3650 — ObjectQLStrategy 施加 `timeDimensions[].dateRange`(已合并)。本 issue 是查「那 dashboard 的窗口到底是怎么生效的」时撞出来的;顺带更正:dashboard 的日期过滤器**不走** `timeDimensions`,走 `where`,所以 #3650 的真实触发面是 `compareTo` 与直接调 API 的调用方。\n- `docs/adr/0053-date-and-datetime-semantics.md` — D-A1 已落地(形态),D-A2 open(契约),D-A3 未立项(矩阵)。"
+}

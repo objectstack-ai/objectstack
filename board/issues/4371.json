@@ -1,0 +1,34 @@
+{
+  "number": 4371,
+  "kind": "issue",
+  "title": "[P2] A direct engine call silently drops `sort`/`select`/`skip`/`populate` — declared query contract, zero enforcement",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T09:21:30Z",
+  "updated_at": "2026-07-31T11:31:25Z",
+  "closed_at": "2026-07-31T11:31:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4371",
+  "body": "Found while doing the #4346 follow-up sweep of in-repo engine call sites (#4370).\n\n#4346 made `ObjectQL` fold `filter`→`where` and `top`→`limit` on all six methods. The other four pairs in `RPC_QUERY_ALIAS_SLOTS` — `select`→`fields`, `sort`→`orderBy`, `skip`→`offset`, `populate`→`expand` — fold at the RPC/wire layer **only**, because their values need shape lowering (`sort`'s `{field: 'asc'}` record form, `populate`'s name list → the `expand` record) that legitimately belongs to those layers.\n\nThat is a defensible split. What is not defensible is the **failure mode** when a direct `engine.find()` — which never crosses that layer — is handed one of the four:\n\n```ts\n// packages/objectql/src/engine.ts (find)\nconst ast: QueryAST = { object, ...query };   // `sort` rides along verbatim\n```\n\nThe key lands on the AST untouched, drivers read only the canonical name, and the request succeeds with the parameter silently discarded. Measured against a real engine + recording driver:\n\n```\n>>> AST keys: object,sort,limit\n>>> ast.orderBy = undefined\n>>> ast.sort    = [{\"field\":\"created_at\",\"order\":\"asc\"}]\n```\n\n## This is not hypothetical — it already shipped three times\n\n#4370 fixes three call sites that hit exactly this, all pairing the dropped sort with a `limit` (the \"latest N\" shape #4226 called out):\n\n| call site | asked for | got |\n|---|---|---|\n| `plugin-sharing/src/share-link-routes.ts` | shared AI conversation messages, `created_at asc` | arbitrary order |\n| `runtime/src/domains/share-links.ts` | the same route, runtime-domain copy | arbitrary order |\n| `plugin-sharing/src/share-link-service.ts` `listLinks` | the 200 most recent share links | an arbitrary 200 |\n\nNothing caught them: `EngineQueryOptions` does not declare `sort`, but every engine facade types its options bag `any` (and the sites carried `as any`), so TS said nothing; the engine ignored the key; the drivers ignored the key; the responses were ordinary.\n\nThis is the #4226 diagnosis one layer down. #4226's own words on why an unapplied sort is the worst kind of silent failure — \"the rows are all there and all real — which is exactly why nobody notices\" — apply verbatim here, except #4226 fixed the *normalizer* and these calls sit below it.\n\n## The gap in one line\n\nThe engine **declares** a query contract (`EngineQueryOptionsSchema`) and then **enforces** none of it: an undeclared key is neither folded, nor rejected, nor logged. That is the `declared ≠ enforced` shape of AGENTS.md PD #10, and the remedy the repo has used before (#1475, #3106) is to make the runtime answer for what the contract states.\n\n## Suggested fix\n\nMake an engine option bag that carries a key the engine cannot honour **fail loudly** instead of silently dropping it. Roughly, in the shared entry-point helper #4346 already added (`foldEngineOptionAliases`):\n\n1. **Reject the four wire-only aliases at the engine boundary** with a message naming the canonical key and the layer that folds it — e.g. `sort` → \"`sort` is a wire spelling folded by the protocol layer; a direct engine call must pass `orderBy` (SortNode[]).\" Cheap, exact, and it converts every future instance of this bug into an immediate throw. Note the shape lowering is the reason NOT to fold them here; rejecting costs nothing and keeps the layering.\n2. **Consider rejecting genuinely unknown keys too** (anything outside `QUERY_AST_KEYS` + the engine's own option names). This is the stronger version and matches what `metadata-protocol` already does at the wire boundary (`UNSUPPORTED_QUERY_PARAM`, #2926/#4134) — the engine is the one ingress with no such gate. Needs a survey of internal callers first; several pass extra bookkeeping keys today.\n3. Pin each: `{sort}` alone on a direct engine call is refused; `{orderBy}` works; the RPC/wire path still folds `sort` as it does now (the fold must NOT move).\n\n(1) alone closes the reachable hole and is small. (2) is the complete answer and deserves its own scoping.\n\n## Why not \"just fold them at the engine too\"\n\nTempting, but it makes the engine a second place that lowers `sort`'s record spelling and `populate`'s list spelling into canonical shapes — the exact per-reader re-implementation #3795 existed to delete, and the reason #4346 deliberately scoped the engine fold to the two slots that need no lowering. Rejecting keeps one fold, one owner.\n\nRefs #4346, #4370, #4226, #3795, #3713, ADR-0049, AGENTS.md PD #10 / #12.\n"
+}

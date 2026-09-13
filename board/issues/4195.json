@@ -1,0 +1,32 @@
+{
+  "number": 4195,
+  "kind": "issue",
+  "title": "[P3] spec: `z.input` of every `z.ZodType<T>`-annotated recursive schema is `unknown`, so the authoring surface under it is unchecked",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T14:54:05Z",
+  "updated_at": "2026-07-30T17:42:38Z",
+  "closed_at": "2026-07-30T17:42:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4195",
+  "body": "Found while fixing #4171 (PR #4194). Out of scope there; filing rather than widening it.\n\n## The mechanism\n\nZod 4's `ZodType` is `ZodType<out Output = unknown, out Input = unknown, …>`. Every recursive schema in the spec is annotated with **one** type argument:\n\n```ts\nexport const NavigationItemSchema: z.ZodType<NavigationItem> = z.lazy(() => …);\n//                                            ^ Output only — Input stays `unknown`\n```\n\nSo after #4171 `z.infer` is precise, but `z.input` is `unknown`. That propagates to every schema that embeds one:\n\n```ts\ntype NavInput = z.input<typeof AppSchema>['navigation'];   // unknown[] | undefined\ntype FieldInput = z.input<typeof FormFieldSchema>;          // unknown\n```\n\n`defineApp(config: z.input<typeof AppSchema>)` therefore accepts **any** array of anything for `navigation`. Same for `FormField` under `FormSection.fields`, and for `QueryInput['joins']` / `['fields']`.\n\nThis predates #4171 — `z.ZodType<any>` also left `Input` at `unknown` — so nothing regressed. It is the *other half* of the same defect: #4171 fixed what a consumer **reads**, this is what an author **writes**.\n\nAffected: `NavigationItemSchema`, `FormFieldSchema`, `FilterConditionSchema`, `QuerySchema`, `StateNodeSchema`, `ValidationRuleSchema`, `JoinNodeSchema`, `NormalizedFilterSchema`, `FieldNodeSchema` — every `z.ZodType<T>` annotation in `packages/spec/src`.\n\n## Why it's worth an issue rather than a note\n\nIt has already cost something concrete. #4171 made `NavigationItem` precise, which correctly flagged that `SETUP_APP: App` / `STUDIO_APP: App` / `SETUP_NAV_CONTRIBUTIONS: NavigationContribution[]` are authoring literals annotated with the **parsed** type, where `.default()`ed keys (`expanded`, `target`) are required. The sanctioned fix for that shape is \"type them as the input surface\" (the `z.input` fix #4074 applied in `types`, cited in objectui's `check-type-check-coverage.mjs`) — but retyping them to `AppInput` today would swap eight loud errors for **no checking at all**, because `AppInput['navigation']` is `unknown[]`.\n\nSo PR #4194 took the other route and spelled the defaults out in the metadata. That is honest and matches what those literals already do for `active` / `isDefault` / `collapsible` / `collapsed` / `columns` — but it is defaults-in-metadata, and it only exists because the input type is unusable.\n\n`unknown` is not as dangerous as `any` (it forces narrowing on read rather than silently permitting member access), which is why this is P3 and not P2. But for a metadata-driven platform the authorable surface **is** the third-party API, and right now nothing type-checks it for these nodes.\n\n## The fix\n\nSupply both parameters, deriving the input type the same way #4194 derives the output one:\n\n```ts\nexport type NavigationItemInput =\n  | (z.input<typeof ObjectNavItemSchema> & { children?: NavigationItemInput[] })\n  | z.input<typeof DashboardNavItemSchema>\n  | …\n  | (z.input<typeof GroupNavItemSchema> & { children: NavigationItemInput[] });\n\nexport const NavigationItemSchema: z.ZodType<NavigationItem, NavigationItemInput> = z.lazy(() => …);\n```\n\n`QueryAST` / `QueryInput` in `data/query.zod.ts` already keep exactly this pair by hand; this makes the schema annotation carry it.\n\nExpect fallout, which is the point: every `defineApp` / `defineView` call site and every `*Input`-typed artifact gets type-checked against the nav / form-field / join vocabulary for the first time. Worth doing deliberately rather than as a side effect of #4171. When it lands, the explicit `expanded: false` / `target: '_self'` / `span: 'auto'` added by #4194 can be deleted in favour of retyping those three artifacts to the input surface.\n\n## The check\n\n`check:exported-any` (added by #4194) reads the output side only. Extending it to fail on an exported schema whose **input** is `unknown` while its output is precise would ratchet this the same way — the asymmetry is the tell, and it is mechanically detectable from the built `.d.ts`.\n\nRefs #4171, #4115, #4074, objectui#3042."
+}

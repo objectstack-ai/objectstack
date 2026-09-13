@@ -1,0 +1,32 @@
+{
+  "number": 4340,
+  "kind": "issue",
+  "title": "lint: field-bearing props on React page blocks are unchecked against the bound object — close the class, not the next instance (#4329 follow-up)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-07-31T06:53:33Z",
+  "updated_at": "2026-07-31T11:01:00Z",
+  "closed_at": "2026-07-31T11:01:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4340",
+  "body": "#4329 (closed by #4338) found `<ListView searchableFields>` unchecked on the react page surface and fixed **that one prop** by exporting the metadata rule's core (`indexObjectSearchTargets` + `checkSearchableFieldList` in `validate-searchable-fields.ts`) and running it from `validate-react-page-props.ts` — the gate that owns React block dataProps. But `searchableFields` was an instance, not the class. This issue is the central worklist for the class: **every field-bearing prop in `REACT_BLOCKS` (`packages/spec/src/ui/react-blocks.ts`) that a react page can author and nothing resolves.**\n\nToday `validate-react-page-props.ts` checks: required bindings, prop typos, `<ObjectChart>` bindings (#3701/#3729), and `<ListView searchableFields>` (#4329). Everything else a block binds by field name ships exactly as typed — the same silent-skip-or-mismatch drift `validate-page-field-bindings.ts` already closes for the page-component `properties` bag, one surface over.\n\n## Inventory\n\n| Block · prop | Names fields on | Metadata twin (already linted there) | Live corpus instance |\n|---|---|---|---|\n| `<ListView fields>` (interaction, `string[]`) | bound object | `interfaceConfig.columns` → `page-field-unknown` | `crm-workbench.page.ts:74`, `task-desk.page.ts:45` |\n| `<ListView columns>` (dataProp; `string[]` \\| `{field}[]`) | bound object | `interfaceConfig.columns` | `renewals-pipeline.page.ts:96` |\n| `<ListView sort / grouping / userFilters.fields>` (+ legacy `filterableFields`) | bound object | `interfaceConfig.sort` / `.userFilters.fields` | — |\n| `<ListView filters>` (FilterArray — **field positions**) | bound object | flow **filter-position** tokens gate (`validate-flow-template-paths`) | `renewals-pipeline.page.ts:95` (`['status','=',stage]`) |\n| `<ObjectForm fields>`, `initialValues` keys | bound object | `element:form` → `form-field-unknown` family | — |\n| `<RecordHighlights fields>` | `objectName` | `record:highlights` in `COMPONENT_FIELD_SPECS` | `renewals-pipeline.page.ts:115` |\n| `<RecordDetails fields / hideFields / sections[].fields>` | `objectName` | `record:details` | — |\n| `<RecordPath statusField>` | `objectName` | `record:path` | — |\n| `<RecordRelatedList columns / sort / relationshipField>` | ⚠️ the **related** object | `record:related_list` branch of `validate-page-field-bindings` | `renewals-pipeline.page.ts:125` |\n| `<Block type=\"…\">` (whole props bag, by registered type) | per type | `COMPONENT_FIELD_SPECS` table | none today |\n\nAll live instances above resolve — like #4329, this is a gap to close before it bites, not a live bug.\n\n## ⚠️ A contract conflict blocks one row\n\n`RecordRelatedListProps.objectName` in the spec is the **related** object (`component.zod.ts:86`: \"Related object name\"), but the react overlay in `react-blocks.ts` declares `objectName` as \"The **parent** object\" — and the live page authors it the overlay's way: `objectName=\"showcase_account\"` with `columns={['name','status','total']}` naming **invoice** fields. A naive resolve-columns-against-`objectName` would false-positive on `total`. Settle which object the react block's `objectName` names (and how the related object is bound on the react surface) **before** linting this block — that ambiguity is arguably an authoring-contract bug in its own right, since the generated contract (`build-react-blocks-contract.ts`) currently publishes both meanings under one prop name.\n\n## Method (established by #4338 — follow it, don't re-derive)\n\n- **Share the core with the metadata twin** wherever one exists, so the two surfaces agree on what counts as a field by construction — the way `checkSearchableFieldList` is now shared. A descriptor table keyed by tag (mirroring `COMPONENT_FIELD_SPECS`) keeps the sweep one-table-per-block.\n- **Static literals only**: a value from a variable, call, or behind a spread skips silently (ADR-0072 D1 — unresolvable is not wrong). Note the `filters` nuance: `['status','=',stage]` has a **static field position beside a non-static value**, and `staticValue` currently bails on the whole array — per-position resolution is needed to check the common case.\n- **Severity per the established calls**: render-degrading props (columns/fields/sort) skip unknowns gracefully → `warning`, matching `page-field-unknown`. `filters` field-position misses widen or refuse the query → candidate for `error`, matching the `validate-flow-template-paths` filter-position call and the #4254 request-time behavior.\n- **Unify the system-fields set while sweeping**: `validate-react-page-props.ts` and `validate-page-field-bindings.ts` still hand-copy `SYSTEM_FIELDS`, while `validate-searchable-fields.ts` derives it from the spec's `FIELD_GROUP_SYSTEM_FIELDS` + `SystemFieldName` (#3786's lesson). The copies should migrate to the derived set.\n\n## Suggested order\n\n1. Settle the `RecordRelatedList` `objectName` contract conflict (its own fix; unblocks that row).\n2. Descriptor-table pass for the unambiguous props (`ListView fields/columns/sort/grouping/userFilters`, `ObjectForm fields`, `RecordHighlights/Details/Path`) at `warning`.\n3. `filters` per-position static resolution + severity decision.\n4. `<Block type=\"…\">` escape hatch, reusing `COMPONENT_FIELD_SPECS` by registered type.\n5. `SYSTEM_FIELDS` derivation cleanup.\n\n**Acceptance:** every field-bearing prop in `REACT_BLOCKS` is either resolved against its object or explicitly ledgered as skipped-with-reason; the example corpus stays green."
+}

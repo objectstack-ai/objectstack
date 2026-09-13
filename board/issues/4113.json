@@ -1,0 +1,30 @@
+{
+  "number": 4113,
+  "kind": "issue",
+  "title": "dispatcher 的 /auth 域内置 mock 登录：无 auth 服务时任意邮箱+任意密码都返回 200 + 伪造 session token —— 在发行装配里，不是 dev-only",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T10:14:59Z",
+  "updated_at": "2026-07-30T14:35:41Z",
+  "closed_at": "2026-07-30T14:35:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4113",
+  "body": "按 Prime Directive #10 记录，#4093 A 档准备工作中发现。**这条比 #4093 讨论的所有 plugin-dev stub 都严重，因为它不在 dev 插件里，而在 `packages/runtime` 的 dispatcher 里。**\n\n## 现象\n\n`packages/runtime/src/domains/auth.ts`：\n\n```ts\nconst authService = await deps.getService(CoreServiceName.enum.auth);\nif (authService && typeof authService.handler === 'function') {\n    return { handled: true, result: await authService.handler(...) };\n}\n// 2. Mock fallback for MSW/test environments when no auth service is registered\nreturn mockAuthFallback(normalizedPath, method, body);\n```\n\n`mockAuthFallback` 对 `POST /api/v1/auth/sign-in/email`（以及 `login` / `sign-up/email` / `register`）：\n\n```ts\nconst id = `mock_${randomUUID()}`;\nreturn { handled: true, response: { status: 200, body: {\n  user: { id, name: 'Mock User', email: body?.email || 'mock@test.local', emailVerified: true, … },\n  session: { id: `session_${id}`, userId: id, token: `mock_token_${id}`,\n             expiresAt: new Date(Date.now() + 86_400_000).toISOString() },\n}}};\n```\n\n**密码根本没有被读取**。任意邮箱 + 任意密码（或不带密码）→ 200 + 一个看起来完全正常的 user + session token + 24 小时有效期。\n\n## 触发条件（不是 dev-only）\n\n只要 `auth` 槽位里没有带 `.handler` 方法的服务。具体地：\n\n- `os serve --preset minimal` —— `TIER_PRESETS.minimal = ['core']`，不含 `auth`；\n- 任何嵌入 dispatcher 但没装 `@objectstack/plugin-auth` 的宿主 —— 这正是 #3369 / #4024 已经认定为真实失效模式的那类（\"an embedder that mounts the dispatcher without plugin-mcp\"）；\n- **以及现在的 dev 栈**：plugin-dev 的 auth stub 实现的是 `handleRequest`，**不是 `handler`**，所以那个 stub 从来没被这个分支调用过 —— 占着槽位、被 discovery 报成 `stub`，而真正应答 `/auth/*` 的一直是这个 mock。\n\n## 严重性\n\n**不是越权**：mock 发出的 token 没有任何 session 存储支撑，身份解析走的是 `authService.api.getSession()`（`packages/runtime/src/security/resolve-execution-context.ts:104-127`），没有 auth 服务就返回 undefined → 请求保持匿名 → `shouldDenyAnonymous` 照常拒绝数据访问。所以拿着 `mock_token_*` 读不到任何数据。\n\n**但它是对客户端撒谎**，而且是最不该撒谎的那件事：\n\n1. 客户端（console / SDK / agent）拿到 200 + session token，会认为登录成功；随后每个请求却是匿名的 —— \"登录成功了但什么都读不到\"，而且没有任何一层告诉它为什么。\n2. `POST /auth/sign-in/email` 用任意密码返回 200，是任何安全扫描/渗透测试都会直接标红的形状，无论后端是否真的放行。\n3. 它违反的正是 ADR-0076 D12 从 #3891 学到的那条：**\"A fallback may degrade features, never security semantics\"** —— 而且 #3891 的对象（analytics shim）只是丢了 RLS 作用域，这一条是伪造**认证成功**。\n4. 理由写的是\"for MSW/test environments\"，却**没有任何环境判据** —— 只判\"auth 槽位空不空\"，然后跟着发行版一起进生产。\n\n## 依赖面：查下来没有真实消费者\n\n- 本仓：只有两处**测试它自己**的用例（`http-dispatcher.test.ts:907`、`domain-handler-registry.test.ts:528-531`，后者断言 `token` 匹配 `/^mock_token_/`）。\n- `../objectui`：登录相关测试全部在 HTTP 客户端层自己 mock（`packages/auth/src/__tests__/createAuthClient.test.ts` 等），不经过 dispatcher 的这个 fallback。\n\n也就是说，那句 \"MSW/browser-only environments\" 的理由，我在两个仓库里都找不到实际依赖它的消费者 —— 只有为它自己写的测试在支撑它。\n\n## 建议\n\n按 #3891 的先例走：**退役这个 mock，空槽答 404**。\n\n- `/auth/*` 没有 auth 服务时 404，与 analytics 空槽同形 —— 这是诚实信号（\"没装 auth 插件\"），而不是伪造一次成功登录。\n- discovery 已经在正确地报了：`routes.auth` 按 `auth` 服务是否注册来广告，空槽时就是 `unavailable`。目前的矛盾是 **discovery 说没有、`/auth/*` 却答 200** —— 一个 `declared ≠ enforced` 的反向实例。\n- 那两处测试改成钉住新的诚实行为（404），而不是钉住 mock。\n- 如果真有浏览器纯前端 mock 的需求，那应该是 MSW handler 或显式 opt-in 的 mock 插件（`OS_ALLOW_*` 级别的显式开关），不是\"槽位空了就自动伪造\"。\n\n顺带：`plugin-dev` 的 auth dev stub 在这条修掉之前删也没有意义（它本来就没被 `/auth` 域调用）。#4093 A 档里的 `auth` 一项因此挂在这条上，我在那边也标了。\n\n关联：#4093、#4058、#4082、#3891、#3369、#4024、ADR-0076 D12。\n"
+}

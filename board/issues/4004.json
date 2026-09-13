@@ -1,0 +1,30 @@
+{
+  "number": 4004,
+  "kind": "issue",
+  "title": "ADR-0112 batch 3: retire the legacy error-shape compatibility layer (error.type, client multi-location probe, enum twins)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T02:29:10Z",
+  "updated_at": "2026-07-30T04:37:36Z",
+  "closed_at": "2026-07-30T04:37:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4004",
+  "body": "Batch 3 of ADR-0112's rollout (#3841; batch 1 = #3988, batch 2 = #4003). Runs after batch 2 — until every emitter speaks the catalog, the compatibility layer below is still load-bearing.\n\n- [ ] **Retire `error.type` as a code carrier.** Producers still emitting the code under `type` move it to `code`; `type` either disappears or is redeclared for its original purpose.\n- [ ] **Delete `ObjectStackClient`'s multi-location code probe.** The client reads `error.code` / `error.details.code` / `error.details.type` / `error.type` in order (kept for old-server compat through #3842). Once servers this client version supports all emit `error.code`, collapse to a single read.\n- [ ] **Fix the client's `category` / `retryable` reads.** They currently look for these under nesting that the envelope never standardized; align with `ApiErrorSchema`/`EnhancedApiErrorSchema` as declared.\n- [ ] **Dedupe the connector-side `ErrorCategory` / `RetryStrategy` twins** — the connector packages carry local copies of enums the spec already exports; import from `@objectstack/spec` instead.\n\nRefs #3841, #3842, #3988."
+}

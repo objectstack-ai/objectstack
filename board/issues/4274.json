@@ -1,0 +1,30 @@
+{
+  "number": 4274,
+  "kind": "issue",
+  "title": "skills/objectstack-data 的 hook 示例仍教裸 `: Hook` 字面量 —— 应改用 defineHook()(#4269 后续)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T01:49:48Z",
+  "updated_at": "2026-07-31T02:47:52Z",
+  "closed_at": "2026-07-31T02:47:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4274",
+  "body": "#4269 / PR #4273 落地了 `defineHook()`(作者侧工厂,defineDatasource 范式),`content/docs/protocol/objectql/schema.mdx` 的示例与 `object.zod.ts` 的处方均已指向工厂。但 skills 还在整体教旧姿势:\n\n- `skills/objectstack-data/SKILL.md:401`(`const accountHook: Hook = {…}` + 尾部 `export default accountHook`)\n- `skills/objectstack-data/rules/hooks.md:33`\n- `skills/objectstack-data/references/data-hooks.md` **10+ 处**(87、425、678、702、728、756、791、819 …)\n\nskills 是 AI 作者的第一入口(`check-skill-examples.ts` 的设计动机),裸字面量示例会让 #4269 的「import 即校验」闭环在最主要的受众上落空:AI 照 skill 写出的 hook 拿到 tsc 绿就报告完成,约束级错误(snake_case name、别名/处方)仍要等到部署。\n\n改法机械:`const x: Hook = {…}; export default x` → `export default defineHook({…})`(import 自 `@objectstack/spec/data`),并在 hooks.md 规则里加一句「工厂优先于裸字面量」(与 datasource/schema.mdx 同款措辞)。所有片段受 `os:check` 门禁覆盖,改完 `pnpm --filter @objectstack/spec run check:skill-examples` 必须绿。\n\n#4269 有意把范围限定在「文档一处注记」,skills 的整面翻新在此单独跟进,避免范围蔓延。"
+}
