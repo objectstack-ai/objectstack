@@ -315,15 +315,19 @@ describe('set-user-manager — refusal 3: depth', () => {
     ] as Row[],
   });
 
+  // `chain(n)` holds n-1 links among `c0..c{n-1}`, so attaching `leaf` under
+  // `c0` makes 1 + (n - 1) = n links. The cap is on the resulting chain, so
+  // n == MAX is the last admissible one and n == MAX + 1 is the first refused
+  // — the boundary is pinned from BOTH sides so an off-by-one cannot hide as
+  // "the refusal still fires".
   it(`admits a chain of exactly ${MAX_MANAGER_CHAIN_DEPTH} links`, async () => {
-    // Attaching `leaf` under `c0` makes 1 + (MAX - 1) = MAX links.
-    const engine = makeEngine(chain(MAX_MANAGER_CHAIN_DEPTH - 1));
+    const engine = makeEngine(chain(MAX_MANAGER_CHAIN_DEPTH));
     const res = await runSetUserManager(deps(engine), ACTOR, post({ userId: 'leaf', managerId: 'c0' }));
     expect(res.status).toBe(200);
   });
 
-  it('refuses the link that would cross the cap', async () => {
-    const engine = makeEngine(chain(MAX_MANAGER_CHAIN_DEPTH));
+  it('refuses the first link that would cross the cap', async () => {
+    const engine = makeEngine(chain(MAX_MANAGER_CHAIN_DEPTH + 1));
     const res = await runSetUserManager(deps(engine), ACTOR, post({ userId: 'leaf', managerId: 'c0' }));
 
     expect(res.status).toBe(400);
