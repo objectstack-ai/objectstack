@@ -53,7 +53,13 @@ function makeQl(declared: any[] = []) {
     async find(object: string, q: any) {
       if (object !== 'sys_permission_set') return [];
       const where = q?.where ?? {};
-      return rows.filter((r) => Object.entries(where).every(([k, v]) => {
+      const hits = rows.filter((r) => Object.entries(where).every(([k, v]) => {
+        // ⛔ REFUSE what this double does not implement. A `$or` / `$and` read
+        // as a FIELD NAME is the silently-wrong shape: `r.$or` is `undefined`,
+        // no row matches, and a suite asserts on an empty result set with
+        // nothing erroring (`check:where-matcher`, shape (b)). The sibling
+        // double in `objects/reserved-identity-names.test.ts` refuses the same way.
+        if (k.startsWith('$')) throw new Error(`fake driver: unsupported combinator ${k}`);
         if (v && typeof v === 'object' && !Array.isArray(v)) {
           const inList = (v as any).$in;
           if (Array.isArray(inList)) return inList.includes(r[k]);
@@ -61,6 +67,12 @@ function makeQl(declared: any[] = []) {
         }
         return r[k] === v;
       }));
+      // Hold the caller's BOUND, after the filter and by PRESENCE, so `limit: 0`
+      // returns nothing rather than everything. `defaultLookup` really does read
+      // `{ where: { name }, limit: organizationId ? 5 : 1 }` (#10103), and a
+      // limit-blind double cannot tell that read from an unbounded one
+      // (`check:objectql-double-limit`).
+      return typeof q?.limit === 'number' ? hits.slice(0, q.limit) : hits;
     },
     async insert(object: string, data: any) {
       if (object !== 'sys_permission_set') return null;
