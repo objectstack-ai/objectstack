@@ -1,8 +1,8 @@
 ---
-"@objectstack/spec": patch
+"@objectstack/spec": minor
 ---
 
-fix(spec): `SchemaLevelIsolationStrategy.performance.schemaCacheTTL` is renamed to `schemaCacheTtlSeconds` (#17784)
+feat(spec)!: the `system/tenant.zod.ts` schema-cache TTL key carries its unit in the key name (#17784, ruling A on #15939)
 
 <!-- adr-0087: registered tenant-schema-cache-ttl-unit-in-key -->
 

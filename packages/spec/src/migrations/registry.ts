@@ -10446,7 +10446,7 @@ const step18: MigrationStep = {
         + 'bd25e897dc: no in-repo runtime reads the key — outside `packages/spec/src/system/tenant.zod.ts` '
         + 'and its test the only occurrences are the four generated rows in '
         + '`content/docs/references/system/tenant.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout (`.objectui-sha` 53ded82bf7a494f54e344e19099dbf00854b8694) spells it 0 '
+        + 'objectui checkout — `.objectui-sha` = `53ded82bf7a494f54e344e19099dbf00854b8694` — spells it 0 '
         + 'times across 6409 tracked files, against lit controls `TTL` 112 and `tenant` 819 on the '
         + 'same corpus.',
       acceptanceCriteria:
