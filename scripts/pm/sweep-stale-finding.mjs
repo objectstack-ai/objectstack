@@ -36,6 +36,18 @@
  * graded: one of `GRADING_STATE_LABELS` (derived from H13's state vocabulary,
  * imported, never restated) or any `priority:*`.
  *
+ * ⚖️ That rule — the label constants, `gradeLabelsIn` and the `screenCard`
+ * screen itself — now LIVES in `check-half-states.mjs` and is imported here,
+ * re-exported under the names this file's callers and self-test already use.
+ * It moved because the patrol grew a report-only row over the same population
+ * (H63, #16904's D2) and the two must never be able to disagree about what
+ * 「stale」 means. The direction is forced rather than chosen: this file already
+ * imports `PM_STATE_LABELS` from there and derives module-level constants from
+ * it, so the patrol importing THIS file is a cycle that throws
+ * `ReferenceError: Cannot access 'PM_STATE_LABELS' before initialization` the
+ * moment the patrol is the entry point — measured, not assumed. ⛔ Do not copy
+ * the rule back here to shorten the import list.
+ *
  * ⚠️ The trigger is a DISJUNCTION, and a triage seat that swept 38 of these by
  * hand recorded the opposite constraint from its own error: 「Any automated
  * `finding`-strip must key on 「has a six-state and a priority」 and must ⛔
@@ -144,12 +156,20 @@ import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
 import {
   EXIT_PREREQUISITE_NOT_MET,
+  GRADING_STATE_LABELS,
+  NEVER_SWEPT_LABELS,
+  NOT_A_GRADE,
   PM_STATE_LABELS,
+  PRIORITY_LABEL_SHAPE,
   PROXY_FLAG,
+  STALE_FINDING_LABEL,
   SWEEP_REPO_SHAPE,
+  gradeLabelsIn,
   labelNames,
+  priorityLabelsIn,
   proxyRearmPlan,
   resolveSweepRepo,
+  staleFindingScreen,
 } from './check-half-states.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
@@ -168,34 +188,20 @@ export const EXIT_STOPPED = 4;
  */
 const PROXY_REARM_GUARD = 'OS_STALE_FINDING_SWEEP_PROXY_REARMED';
 
+/**
+ * The rule, re-exported under the names this file has always published so its
+ * callers, its renderers and its self-test are unchanged by the move. ⛔ These
+ * are ALIASES of one definition, never a second copy — the header says why the
+ * definition lives in `check-half-states.mjs` and why the arrow cannot point
+ * the other way.
+ */
+export { GRADING_STATE_LABELS, NEVER_SWEPT_LABELS, NOT_A_GRADE, PRIORITY_LABEL_SHAPE, gradeLabelsIn, priorityLabelsIn };
+
 /** The one label this sweep removes. It removes nothing else, ever. */
-export const TARGET_LABEL = 'finding';
+export const TARGET_LABEL = STALE_FINDING_LABEL;
 
-/**
- * Members of H13's state vocabulary that are NOT a grade, subtracted below.
- *
- *   `finding`   is the marker being swept — it cannot be its own trigger.
- *   `pm:seat`   is a seat registry post, not a position in the grading flow.
- *   `pm:epic`   is an index card: it says what a card IS, not that it has been
- *               read and placed. An epic that HAS been graded carries a
- *               `priority:*` too, and that is what puts it in the set.
- */
-export const NOT_A_GRADE = Object.freeze([TARGET_LABEL, 'pm:seat', 'pm:epic']);
-
-/**
- * The six states whose presence means a card has been graded — DERIVED from
- * `PM_STATE_LABELS`, which is imported. ⛔ Never restate the vocabulary here: a
- * second copy is a second answer to one question, and this one would drift
- * silently (a state added there and not here simply stops being a trigger,
- * with no failing test anywhere). The self-test pins the derived membership.
- */
-export const GRADING_STATE_LABELS = Object.freeze(PM_STATE_LABELS.filter((name) => !NOT_A_GRADE.includes(name)));
-
-/** ⛔ Never swept, whatever else the post carries. */
-export const NEVER_SWEPT_LABELS = Object.freeze(['pm:seat']);
-
-/** A grade written as a priority. The board spells them `priority:p0` … `priority:p3`. */
-export const PRIORITY_LABEL_SHAPE = /^priority:[A-Za-z0-9][A-Za-z0-9._-]*$/;
+/** The screen, over a listing row — the shared rule, under this file's name for it. */
+export const screenCard = staleFindingScreen;
 
 /** How many cards one batch acts on before the quota is read again. */
 export const DEFAULT_BATCH_SIZE = 10;
@@ -213,54 +219,9 @@ export const LISTING_PAGE_CEILING = 10;
 // Pure core — every function below is offline and is what `--self-test` pins.
 // ---------------------------------------------------------------------------
 
-/** The `priority:*` labels on this card, in the order the card carries them. */
-export function priorityLabelsIn(names) {
-  return (names ?? []).filter((name) => PRIORITY_LABEL_SHAPE.test(name));
-}
-
-/**
- * Every label on this card that is evidence of a grade: a grading state first
- * (in the imported vocabulary's order), then the priorities.
- */
-export function gradeLabelsIn(names) {
-  const carried = new Set(names ?? []);
-  return [...GRADING_STATE_LABELS.filter((label) => carried.has(label)), ...priorityLabelsIn(names)];
-}
-
 /** The label set the four-step write PUTs: everything except the target. */
 export function targetLabelSet(names) {
   return (names ?? []).filter((name) => name !== TARGET_LABEL);
-}
-
-/**
- * The screen, over a listing row. Pure, and it is the whole judgement — this
- * sweep needs no timeline, no compare and no second read to know whether a
- * card is in the set, which is why a dry run costs one listing and nothing else.
- */
-export function screenCard(issue) {
-  if (issue?.pull_request) return { verdict: 'skip', kind: 'pull-request', triggers: [] };
-  if (issue?.state !== 'open') return { verdict: 'skip', kind: 'not-open', triggers: [] };
-  const names = labelNames(issue ?? {});
-  if (!names.includes(TARGET_LABEL)) return { verdict: 'skip', kind: 'no-target-label', triggers: [] };
-  const excluded = NEVER_SWEPT_LABELS.filter((label) => names.includes(label));
-  if (excluded.length > 0) {
-    return {
-      verdict: 'skip',
-      kind: 'never-swept',
-      triggers: [],
-      detail: `carries ${excluded.map((l) => `\`${l}\``).join(', ')} — a seat registry post is not a card in the grading pool`,
-    };
-  }
-  const triggers = gradeLabelsIn(names);
-  if (triggers.length === 0) {
-    return {
-      verdict: 'leave',
-      kind: 'ungraded',
-      triggers: [],
-      detail: 'no grading state and no priority — this is the pool the index exists for, and it is honest about it',
-    };
-  }
-  return { verdict: 'stale', kind: 'graded', triggers };
 }
 
 /**
