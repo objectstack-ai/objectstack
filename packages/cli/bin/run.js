@@ -14,7 +14,83 @@
 //
 // ⛔ Nothing here changes which arguments the CLI accepts. `os dev --no-ui` is
 // still rejected — it is only rejected legibly.
-import { flush, handle, run } from '@oclif/core';
+import { flush, handle, run, settings } from '@oclif/core';
+
+/**
+ * ⭐ THIS ENTRY POINT RUNS `dist/`. It says so here so that an ambient
+ * environment variable cannot decide otherwise.
+ *
+ * `bin/run.js` is the BUILT entry — `bin.objectstack` / `bin.os`, the file an
+ * `npm i -g @objectstack/cli` install executes — and `packages/cli/package.json`
+ * declares its command table over the emitted tree
+ * (`"target": "./dist/commands"`). `bin/run-dev.js` is the SOURCE entry, run
+ * under tsx, and it is the one that is SUPPOSED to reach `src/`. That division
+ * is not new prose: `scripts/check-cli-test-child-env.mjs` already enforces it
+ * on every test that spawns this file, and its rule 3 states the property in
+ * the same words — a child of the built entrypoint must be readably outside
+ * `development`/`test`, with no baseline and only two declared exceptions.
+ *
+ * What was missing is that **this file never asserted it about itself.**
+ * `@oclif/core@4.13.3`'s `lib/config/ts-path.js` skips its TypeScript path
+ * lookup only when `isProd()`, which `lib/util/util.js` defines as
+ * `['development', 'test'].includes(process.env.NODE_ENV ?? '')` negated. So an
+ * ambient `NODE_ENV` — exported by a developer, or inherited by any child this
+ * CLI spawns — rewrote the command target from `dist/commands` to
+ * `src/commands` and registered tsx on the way. Measured against `Config.load()`
+ * on this package with `dist` present (the table #11317 recorded, unchanged):
+ *
+ *     child NODE_ENV   resolved commandsDir
+ *     --------------   -------------------------
+ *     unset            packages/cli/dist/commands
+ *     production       packages/cli/dist/commands
+ *     development      packages/cli/src/commands   ⛔
+ *     test             packages/cli/src/commands   ⛔
+ *
+ * ⚠️ The registration is the damaging half, not the redirect. `registerTsx()`
+ * runs BEFORE `determinePath()` decides anything, and tsx honours the tsconfig
+ * of the **current working directory**. An application whose tsconfig maps a
+ * workspace package to its TypeScript source for TYPE resolution —
+ * `"@objectstack/formula": ["../../packages/formula/src/index.ts"]`, which is
+ * what `examples/app-crm`, `app-showcase` and `app-multi-package` all do — then
+ * steers this CLI's own module graph into `.ts` files, after which Node's CJS
+ * resolver walks their extensionless siblings and knows nothing about `.ts`:
+ *
+ *     [MODULE_NOT_FOUND] import() failed to load …/packages/cli/src/commands/doctor.ts:
+ *     Cannot find module './registry'
+ *     Require stack:
+ *     - …/packages/formula/src/index.ts
+ *
+ * ⭐ Note WHICH file failed to load: `src/commands/doctor.ts`. The casualty is
+ * this CLI's own command table, not the user's config — so the failure is not
+ * specific to any one command, and no amount of scrubbing a CHILD's environment
+ * reaches it. Measured at `examples/app-crm` and `examples/app-showcase` with
+ * `NODE_ENV=development` exported, before this line existed: `os compile`,
+ * `os dev --compile --fresh`, `os serve --dev` and `os start` each exit 1 on
+ * that signature, against exit 0 / still-serving for every one of them with
+ * `NODE_ENV=production`. `examples/app-todo`, the one example app whose
+ * tsconfig carries no `paths` block, is the only one that survived — the
+ * failures map 1:1 onto that population, and #8249 is actively growing it.
+ *
+ * ⛔ This is deliberately NOT a `TSX_TSCONFIG_PATH` pin like the one
+ * `bin/run-dev.js` carries. That shim genuinely executes TypeScript, so all it
+ * can do is aim the transpiler at the right tsconfig; and it cannot even do
+ * that in-process (tsx parses its tsconfig in the loader's `initialize`, which
+ * has already run by then), so it pays a whole re-exec. This file executes no
+ * TypeScript at all, so the correct statement is not "transpile against a
+ * different config" but "do not transpile" — and the published install has no
+ * `packages/cli/tsconfig.json` to aim at in any case (`files` names `dist`
+ * only).
+ *
+ * ⚠️ What it costs, stated rather than discovered: a `plugins link`ed plugin
+ * written in TypeScript is no longer auto-transpiled through THIS entry (oclif
+ * keeps the lookup alive for `type === 'link'` plugins even in production, and
+ * this setting is checked ahead of that). Use `bin/run-dev.js`, or build the
+ * plugin. And on an UNBUILT tree this file now answers oclif's "command not
+ * found" under `development`/`test` as it already did when `NODE_ENV` was unset
+ * — which is the signature `scripts/cli-build-prerequisite.mjs` classifies for
+ * every gate that shells out to this CLI, so the three legs stop disagreeing.
+ */
+settings.enableAutoTranspile = false;
 
 /**
  * Print the one-line invocation verdict, if this failure is one.
