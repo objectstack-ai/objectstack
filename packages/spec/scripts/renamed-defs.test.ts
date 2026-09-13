@@ -18,6 +18,7 @@ import { describe, it, expect } from 'vitest';
 import {
   RENAMED_DEFS,
   carryAuthorableKey,
+  checkRenameBaselineCollisions,
   checkRenameTable,
 } from './lib/renamed-defs';
 
@@ -134,6 +135,112 @@ describe('checkRenameTable', () => {
         'integration/FieldMapping': 'integration/ConnectorFieldMapping',
       }),
     ).toEqual([]);
+  });
+});
+
+describe('checkRenameBaselineCollisions — a rename may MOVE keys, never MERGE them (#17383)', () => {
+  const renames = { 'integration/Old': 'integration/New' } as const;
+
+  // The shape the four rules of `checkRenameTable` cannot see. It is ONE rename,
+  // so the two-sources rule never fires; the source is unemitted and the target
+  // is emitted, so both decay rules pass. The damage is in the BASELINE, and
+  // every carry in build-schemas.ts is a plain `Map.set` on the carried key.
+  it('refuses a rename whose target already holds the same property name, and names it', () => {
+    const problems = checkRenameBaselineCollisions(
+      ['integration/New:mode', 'integration/Old:mode'],
+      renames,
+    );
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('integration/Old → integration/New');
+    expect(problems[0]).toContain('under the TARGET def — mode');
+    // The remedy must be the one the two-sources rule already prescribes.
+    expect(problems[0]).toContain('retiredKey()');
+  });
+
+  it('is silent where checkRenameTable is loud, and loud where it is silent', () => {
+    // The discriminator, stated as one assertion: the SAME baseline damage is
+    // invisible to the emitted-def rules, which is why this rule exists.
+    const baseline = ['integration/New:mode', 'integration/Old:mode'];
+    expect(checkRenameTable(new Set(['integration/New']), renames)).toEqual([]);
+    expect(checkRenameBaselineCollisions(baseline, renames)).toHaveLength(1);
+  });
+
+  it('reports EVERY colliding property, sorted, not just the first', () => {
+    const problems = checkRenameBaselineCollisions(
+      [
+        'integration/New:alpha', 'integration/New:beta', 'integration/New:gamma',
+        'integration/Old:beta', 'integration/Old:alpha', 'integration/Old:delta',
+      ],
+      renames,
+    );
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('2 of this');
+    expect(problems[0]).toContain('alpha, beta');
+  });
+
+  // ─── What it must NOT refuse — the cost this rule can impose ─────────────
+  // A `Map.set` can only collapse two entries that are the SAME key, so a merge
+  // whose two defs share no property NAME writes every key exactly once and
+  // loses nothing. Refusing a populated target as such would redden 24 of the
+  // committed entries, whose targets all hold keys once the surface snapshot has
+  // been regenerated under the new name — and it would forbid the in-tree
+  // `cloud/Sha256Digest → system/Sha256Digest` shape outright.
+
+  it('ACCEPTS a merge into a populated target whose property names are disjoint', () => {
+    expect(
+      checkRenameBaselineCollisions(
+        ['integration/New:kept', 'integration/Old:moved'],
+        renames,
+      ),
+    ).toEqual([]);
+  });
+
+  it('ACCEPTS the landing shape: the baseline holds the keys under the SOURCE only', () => {
+    // The real `authorable-surface.base.json` shape while a rename lands — the
+    // upstream anchor predates it, so the target has no keys there at all.
+    expect(
+      checkRenameBaselineCollisions(['integration/Old:mode', 'integration/Old:other'], renames),
+    ).toEqual([]);
+  });
+
+  it('ACCEPTS the settled shape: the baseline holds the keys under the TARGET only', () => {
+    // The committed `authorable-surface/` shape after regeneration — the entry is
+    // inert against the snapshot but still enforces the hygiene invariants.
+    expect(
+      checkRenameBaselineCollisions(['integration/New:mode', 'integration/New:other'], renames),
+    ).toEqual([]);
+  });
+
+  it('matches the def exactly — a def that merely shares a prefix is not the target', () => {
+    expect(
+      checkRenameBaselineCollisions(['integration/NewThing:mode', 'integration/Old:mode'], renames),
+    ).toEqual([]);
+  });
+
+  it('ignores bare def keys, which name no property and so can collide with none', () => {
+    expect(checkRenameBaselineCollisions(['integration/New', 'integration/Old'], renames)).toEqual([]);
+  });
+
+  it('splits on the FIRST separator, so a property containing ":" still collides', () => {
+    const problems = checkRenameBaselineCollisions(
+      ['integration/New:a:b', 'integration/Old:a:b'],
+      renames,
+    );
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('a:b');
+  });
+
+  it('leaves a self-rename to checkRenameTable rather than reporting it twice', () => {
+    // Every key of a self-rename collides with itself; rule 1 already names the
+    // entry, and a second line would bury the real diagnosis.
+    expect(
+      checkRenameBaselineCollisions(['integration/Old:mode'], {
+        'integration/Old': 'integration/Old',
+      }),
+    ).toEqual([]);
+    expect(
+      checkRenameTable(new Set(['integration/Old']), { 'integration/Old': 'integration/Old' }),
+    ).toHaveLength(1);
   });
 });
 
