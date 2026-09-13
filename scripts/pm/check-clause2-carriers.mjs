@@ -601,7 +601,36 @@ import {
 // tier and the served one differ unnoticed (#17915).
 import { CONTRACT_REVIEW_TIER } from './dispatch-gates.mjs';
 
-// dispatch-gates: no-path-population -- this gate reads no file in the tree at all; its whole input is the GitHub API (PRs, their labels, and the claim comments on their cards), so no card's file surface can predict it and the honest derivation is a repo-wide undetermined one (#13519)
+// -- Why this file no longer declares that it has NO path population (#17915) --
+//
+// It carried the `no-path-population` marker until C7 landed, on the reading
+// that this gate "reads no file in the tree at all; its whole input is the
+// GitHub API (PRs, their labels, and the claim comments on their cards), so no
+// card's file surface can predict it" (#13519). The INPUT half of that is still
+// exactly true -- nothing here opens a tracked file, and the three read paths
+// above are the whole of what this gate consumes.
+//
+// ⭐ The OTHER half stopped being true, and a declaration that stopped being
+// true is the shape C7 itself exists against. C7 compares against
+// `CONTRACT_REVIEW_TIER`, which is declared in `dispatch-gates.mjs` and
+// imported above, so a card editing that constant DOES predict this gate: it
+// moves the value every clearance is judged against, and the self-test that
+// pins the comparison is the thing that should run. Keeping the marker would
+// have said the opposite, in the file whose own row refuses exactly that.
+//
+// ⚠️ The import channel over-reaches on the way, and naming it here is the
+// honest half of the trade. A followed module contributes its OWN literals, so
+// this family now also inherits `.github/workflows` -- a directory this file
+// never opens, on a gate whose CI step runs the self-test only. The designed
+// narrowing (`inherited-population`, declared by the followed module) cannot
+// express this case: it is per-MODULE, and the same module's globs ARE a real
+// population for the sibling that reads them. So the lead is imprecise and
+// stated, rather than silenced by a declaration that is false.
+//
+// ⛔ Do NOT "fix" the inherited lead by restating the tier here. The constant
+// keeps exactly one value site across `scripts/pm/**` and
+// `.claude/skills/pm-dispatch/**`, and a second value site is precisely what
+// let the declared tier and the served one drift apart unnoticed.
 
 // -- The self-test's own battery roster and floor (#13489) ------------------
 //
