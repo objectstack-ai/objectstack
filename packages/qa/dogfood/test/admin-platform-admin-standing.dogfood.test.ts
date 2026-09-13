@@ -223,6 +223,13 @@ const ADMITTED = [
   'POST /api/v1/auth/admin/has-permission',
   'POST /api/v1/auth/admin/create-user',
   'POST /api/v1/auth/admin/set-user-password',
+  // #16678 — the admin write surface for `sys_user.manager_id`, the column the
+  // approvals `manager` rung and the `own_and_reports` scope both read and
+  // that no product surface could write. An ObjectStack raw mount carrying the
+  // ADR-0068 gate, and the gate is its FIRST statement — ahead of every body
+  // read, unlike `unlock-user`'s. Measured on this stack: the platform admin
+  // gets `200 {"success":true,...,"managerId":null}` from the sweep's payload.
+  'POST /api/v1/auth/admin/set-user-manager',
   'POST /api/v1/auth/admin/unlock-user',
   'POST /api/v1/auth/admin/import-users',
   'POST /api/v1/auth/admin/oauth2/toggle-disabled',
@@ -661,6 +668,16 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
         body: { format: 'json', rows: [{ email: 'standing.sweep.imported@example.com', name: 'Sweep Imported' }] },
       },
       'POST /api/v1/auth/admin/unlock-user': { body: { userId: targetUserId } },
+      // #16678. The CLEAR, not a set: it is idempotent, so the sweep leaves
+      // `manager_id` as it found it, and it still reaches a 2xx rather than a
+      // semantic error — measured 200 `{"success":true,...,"managerId":null}`.
+      // ⛔ The payload is not optional here even though the gate runs ahead of
+      // the body read: with no entry the handler answers `400 INVALID_REQUEST`
+      // "userId is required", which is neither a gate refusal nor a match for
+      // the `diedBeforeTheGate` predicate (that reads `VALIDATION_ERROR` or an
+      // "Invalid input"/"body." message, and this is neither) — so a missing
+      // payload would slip through every assertion below as a silent void.
+      'POST /api/v1/auth/admin/set-user-manager': { body: { userId: targetUserId, managerId: null } },
       'POST /api/v1/auth/admin/oauth2/toggle-disabled': { body: { client_id: 'standing-probe-client', disabled: false } },
       'POST /api/v1/auth/admin/sso/register': {
         body: {

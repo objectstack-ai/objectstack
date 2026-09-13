@@ -196,6 +196,7 @@
     "RetryPolicySchema": "src/shared/retry-policy.zod.ts#RetryPolicySchema (const)",
     "SCHEDULE_ORGANIZATION_KEY": "src/automation/schedule-organization.zod.ts#SCHEDULE_ORGANIZATION_KEY (const)",
     "SCHEMALESS_NODE_CONFIG_SCHEMAS": "src/automation/schemaless-node-config.zod.ts#SCHEMALESS_NODE_CONFIG_SCHEMAS (const)",
+    "SCREEN_FIELD_LOOKUP_REFERENCE_REQUIRED": "src/automation/builtin-node-config.zod.ts#SCREEN_FIELD_LOOKUP_REFERENCE_REQUIRED (const)",
     "STRUCTURAL_CONDITION_SHAPE_REFUSAL": "src/automation/flow-node-expression-paths.ts#STRUCTURAL_CONDITION_SHAPE_REFUSAL (const)",
     "ScheduleOrganization": "src/automation/schedule-organization.zod.ts#ScheduleOrganization (type)",
     "ScheduleOrganizationSchema": "src/automation/schedule-organization.zod.ts#ScheduleOrganizationSchema (const)",

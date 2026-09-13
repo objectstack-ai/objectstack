@@ -217,6 +217,13 @@ describe('auth route ledger hygiene', () => {
       'GET /api/v1/auth/config',
       'POST /api/v1/auth/admin/import-users',
       'POST /api/v1/auth/admin/oauth2/toggle-disabled',
+      // [#16678] The thirteenth, added on this pin's own terms exactly as the
+      // set-initial-password row below was: `auth-plugin.ts` mounts it itself
+      // (a `rawApp.post` on the `${basePath}/admin/set-user-manager`
+      // template, ahead of the catch-all), and the `live.has(route)` loop
+      // below holds it to the same proof as the other twelve — better-auth
+      // publishes no manager endpoint at all.
+      'POST /api/v1/auth/admin/set-user-manager',
       'POST /api/v1/auth/admin/sso/register',
       'POST /api/v1/auth/admin/sso/register-saml',
       'POST /api/v1/auth/admin/sso/request-domain-verification',

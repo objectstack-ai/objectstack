@@ -129,17 +129,58 @@ type Resolved<F> = F extends (...args: never[]) => PromiseLike<infer R> ? R : ne
  * and the CELL of a record row — so `any[]`, `Record<string, any>` and
  * `Record<string, any>[]` all answer `true` while the contract's own
  * `Record<string, unknown>[]` / `Record<string, unknown>` / `unknown` answer
- * `false`. The branch order matters: `IsAny<T>` is asked FIRST so a bare `any`
- * never reaches a distributive conditional, where it would split across both
- * arms and answer `boolean`.
+ * `false`.
+ *
+ * [#17970] Answering `boolean` is the ONE failure mode this detector has to
+ * stay out of, and staying out of it takes TWO guards, because `T` can reach a
+ * distributive conditional for two unrelated reasons. Every leg below is
+ * spelled `const x: ContainsAny<Door> = false`, and `false` is ASSIGNABLE to
+ * `boolean` — so a door whose detector answers `boolean` has an INERT leg: it
+ * compiles, it is green, and it is green against the very regression it exists
+ * to name. That is this file's own lesson for the third time, now about the
+ * instrument the second round installed.
+ *
+ * The branch order is the FIRST guard: `IsAny<T>` is asked before anything
+ * else, so a bare `any` never reaches the distributive arms of
+ * `ContainsAnyPerMember`, where it would split across both and answer
+ * `boolean`. That guard is about `T` BEING `any`, and it does nothing when `T`
+ * is a UNION — which `findOne`'s `Record<string, unknown> | null` is, along
+ * with every not-found and optional-argument door in this family. A union
+ * distributes member by member, so a regression to `Record<string, any> | null`
+ * answers `true` for the record member and `false` for the `null` member:
+ * `boolean` again, reached by a different route, and the `findOne` leg below
+ * sat green through exactly that.
+ *
+ * `ContainsAny` is therefore the COLLAPSE of the per-member answer — `false`
+ * only when EVERY member answered `false` — which is the SECOND guard.
+ * Measured in a standalone `tsc --strict` program, with deliberately-false
+ * claims as the firing control: per-member alone, `Record<string, any> | null`,
+ * `Record<string, any> | undefined` and `{ k?: any } | undefined` each answered
+ * `boolean`; collapsed, all three answer `true`, while
+ * `Record<string, unknown> | null`, `Record<string, unknown> | undefined`,
+ * `Record<string, unknown>`, `Record<string, unknown>[]` and `unknown` all
+ * still answer `false`.
+ *
+ * ⛔ None of this makes the nested-`any` reading above wrong. On a NON-union
+ * door it was effective and remains effective — `Record<string, any>` answers
+ * `true` under both spellings, which is the control that proves it. Union
+ * distribution was a SECOND blind spot standing beside it, never a correction
+ * of it.
  */
-type ContainsAny<T> = IsAny<T> extends true
+type ContainsAnyPerMember<T> = IsAny<T> extends true
   ? true
   : T extends readonly (infer Row)[]
-    ? ContainsAny<Row>
+    ? ContainsAnyPerMember<Row>
     : T extends Record<string, infer Cell>
       ? IsAny<Cell>
       : false;
+
+/**
+ * [#17970] The collapse. `ContainsAnyPerMember<T>` is distributive, so on a
+ * union door it answers a UNION of per-member verdicts; this reports `false`
+ * only when that union is exactly `false`, turning any `boolean` into `true`.
+ */
+type ContainsAny<T> = ContainsAnyPerMember<T> extends false ? false : true;
 
 
 type ContractFindOne = Resolved<IDataDriver['findOne']>;

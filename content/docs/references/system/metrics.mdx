@@ -166,7 +166,7 @@ Metric definition
 | **description** | `string` | optional | Metric description |
 | **labelNames** | `string[]` | optional (default: `[]`) | Label names |
 | **histogram** | `{ type: Enum<'linear' \| 'exponential' \| 'explicit'>; linear?: object; exponential?: object; explicit?: object }` | optional | Histogram bucket configuration |
-| **summary** | `{ quantiles: number[]; maxAge: integer; ageBuckets: integer }` | optional |  |
+| **summary** | `{ quantiles: number[]; maxAgeSeconds: integer; ageBuckets: integer }` | optional |  |
 | **enabled** | `boolean` | optional (default: `true`) |  |
 
 ### Allowed Values: `MetricDefinition.unit`
@@ -201,6 +201,15 @@ Metric definition
 | **exponential** | `{ start: number; factor: number; count: integer }` | optional |  |
 | **explicit** | `{ boundaries: number[] }` | optional |  |
 
+### Nested Shape: `MetricDefinition.summary`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **quantiles** | `number[]` | optional (default: `[0.5,0.9,0.99]`) |  |
+| **maxAgeSeconds** | `integer` | optional (default: `600`) | Max age of observations in seconds |
+| **maxAge** | `never` | optional | [REMOVED] `MetricDefinition.summary.maxAge` was renamed to `maxAgeSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Its unit (seconds) lived in a source JSDoc only and the published description named none, so a reader of the reference page could not tell 600 seconds from 600 milliseconds. The new name keeps the `age` stem instead of becoming `durationSeconds`, because the sibling key `ageBuckets` counts buckets of that same age. Rename the key to `maxAgeSeconds`; the value (seconds) is unchanged. |
+| **ageBuckets** | `integer` | optional (default: `5`) |  |
+
 
 ---
 
@@ -214,7 +223,8 @@ Metric export configuration
 | :--- | :--- | :--- | :--- |
 | **type** | `Enum<'prometheus' \| 'openmetrics' \| 'graphite' \| 'statsd' \| 'influxdb' \| 'datadog' \| 'cloudwatch' \| 'stackdriver' \| 'azure_monitor' \| 'http' \| 'custom'>` | ✅ | Export type |
 | **endpoint** | `string` | optional | Export endpoint |
-| **interval** | `integer` | optional (default: `60`) |  |
+| **intervalSeconds** | `integer` | optional (default: `60`) | Export interval in seconds |
+| **interval** | `never` | optional | [REMOVED] `MetricExportConfig.interval` was renamed to `intervalSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Its unit (seconds) lived in a source JSDoc only and the key carried no describe at all, so a reader of the reference page could not tell 60 seconds from 60 milliseconds. Rename the key to `intervalSeconds`; the value (seconds) is unchanged. |
 | **batch** | `{ enabled: boolean; size: integer }` | optional |  |
 | **auth** | `{ type: Enum<'none' \| 'basic' \| 'bearer' \| 'api_key'>; username?: string; password?: string; token?: string; … }` | optional |  |
 | **config** | `Record<string, any>` | optional | Additional configuration |
@@ -301,9 +311,10 @@ Metrics configuration
 | **aggregations** | `{ type: Enum<'sum' \| 'avg' \| 'min' \| 'max' \| 'count' \| 'p50' \| 'p75' \| 'p90' \| 'p95' \| 'p99' \| …>; window?: object; groupBy?: string[]; filters?: Record<string, any> }[]` | optional (default: `[]`) |  |
 | **slis** | `{ name: string; label: string; description?: string; metric: string; … }[]` | optional |  |
 | **slos** | `{ name: string; label: string; description?: string; sli: string; … }[]` | optional (default: `[]`) |  |
-| **exports** | `{ type: Enum<'prometheus' \| 'openmetrics' \| 'graphite' \| 'statsd' \| 'influxdb' \| 'datadog' \| …>; endpoint?: string; interval?: integer; batch?: object; … }[]` | optional (default: `[]`) |  |
-| **collectionInterval** | `integer` | optional (default: `15`) |  |
-| **retention** | `{ period?: integer; downsampling?: object[] }` | optional |  |
+| **exports** | `{ type: Enum<'prometheus' \| 'openmetrics' \| 'graphite' \| 'statsd' \| 'influxdb' \| 'datadog' \| …>; endpoint?: string; intervalSeconds?: integer; batch?: object; … }[]` | optional (default: `[]`) |  |
+| **collectionIntervalSeconds** | `integer` | optional (default: `15`) | Collection interval in seconds |
+| **collectionInterval** | `never` | optional | [REMOVED] `MetricsConfig.collectionInterval` was renamed to `collectionIntervalSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Its unit (seconds) lived in a source JSDoc only and the key carried no describe at all, so a reader of the reference page could not tell 15 seconds from 15 milliseconds. The qualifier is kept — `collectionIntervalSeconds`, not `intervalSeconds` — because `MetricExportConfig.intervalSeconds` is a different cadence one def over. Rename the key to `collectionIntervalSeconds`; the value (seconds) is unchanged. |
+| **retention** | `{ durationSeconds?: integer; downsampling?: object[] }` | optional |  |
 | **cardinalityLimits** | `{ maxLabelCombinations?: integer; onLimitExceeded?: Enum<'drop' \| 'sample' \| 'alert'> }` | optional |  |
 
 ### Nested Shape: `MetricsConfig.metrics[number]`
@@ -319,7 +330,7 @@ Metric definition
 | **description** | `string` | optional | Metric description |
 | **labelNames** | `string[]` | optional (default: `[]`) | Label names |
 | **histogram** | `{ type: Enum<'linear' \| 'exponential' \| 'explicit'>; linear?: object; exponential?: object; explicit?: object }` | optional | Histogram bucket configuration |
-| **summary** | `{ quantiles?: number[]; maxAge?: integer; ageBuckets?: integer }` | optional |  |
+| **summary** | `{ quantiles?: number[]; maxAgeSeconds?: integer; ageBuckets?: integer }` | optional |  |
 | **enabled** | `boolean` | optional (default: `true`) |  |
 
 ### Nested Shape: `MetricsConfig.aggregations[number]`
@@ -372,10 +383,19 @@ Metric export configuration
 | :--- | :--- | :--- | :--- |
 | **type** | `Enum<'prometheus' \| 'openmetrics' \| 'graphite' \| 'statsd' \| 'influxdb' \| 'datadog' \| …>` | ✅ | Export type |
 | **endpoint** | `string` | optional | Export endpoint |
-| **interval** | `integer` | optional (default: `60`) |  |
+| **intervalSeconds** | `integer` | optional (default: `60`) | Export interval in seconds |
+| **interval** | `never` | optional | [REMOVED] `MetricExportConfig.interval` was renamed to `intervalSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Its unit (seconds) lived in a source JSDoc only and the key carried no describe at all, so a reader of the reference page could not tell 60 seconds from 60 milliseconds. Rename the key to `intervalSeconds`; the value (seconds) is unchanged. |
 | **batch** | `{ enabled?: boolean; size?: integer }` | optional |  |
 | **auth** | `{ type: Enum<'none' \| 'basic' \| 'bearer' \| 'api_key'>; username?: string; password?: string; token?: string; … }` | optional |  |
 | **config** | `Record<string, any>` | optional | Additional configuration |
+
+### Nested Shape: `MetricsConfig.retention`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **durationSeconds** | `integer` | optional (default: `604800`) | Retention duration in seconds |
+| **period** | `never` | optional | [REMOVED] `MetricsConfig.retention.period` was renamed to `durationSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Its unit (seconds) lived in a source JSDoc only and the key carried no describe at all, so a reader of the reference page could not tell 604800 seconds from 604800 milliseconds. The new name is not `periodSeconds`: `period` is calendar vocabulary elsewhere in this spec (`ServiceLevelObjective.period.type` selects rolling or calendar, `PluginRegistryEntry.pricing.billingPeriod` is monthly or yearly), so it would have kept the ambiguous half of the name, and `durationSeconds` is what this file already calls a length of time. Rename the key to `durationSeconds`; the value (seconds) is unchanged. |
+| **downsampling** | `{ afterSeconds: integer; resolution: integer }[]` | optional |  |
 
 
 ---

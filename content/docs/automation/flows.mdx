@@ -396,6 +396,88 @@ Two things worth knowing:
   `config.fields[N].visibleWhen` — but a predicate that *parses* and simply
   names the wrong field still shows up as a field that never hides.
 
+#### A field's bound, help text and lookup target
+
+A screen field spells these three with **the object field's own key names** —
+one platform, one field vocabulary, so a name you learned declaring an object
+field means the same thing here:
+
+| Key | Type | What it does |
+|:---|:---|:---|
+| `min` / `max` | `number` | Numeric bound. Applied by the client at the input **and enforced server-side when the run resumes**. |
+| `inlineHelpText` | `string` | Help text under the input. Unlike `placeholder`, it stays readable after the user types. |
+| `reference` | `string` | Object whose records a `type: 'lookup'` field picks from, so the field renders a record picker. **Required** on a `lookup` field. |
+
+```typescript
+{
+  id: 'quote_terms',
+  type: 'screen',
+  config: {
+    fields: [
+      { name: 'discount', label: 'Discount %', type: 'number',
+        min: 0, max: 20,
+        inlineHelpText: 'Above 20% the quote is refused — this is a hard ceiling.' },
+      { name: 'resolved_by_article', label: 'Resolved by Article', type: 'lookup',
+        reference: 'crm_knowledge_article' },
+    ],
+  },
+}
+```
+
+**The bound is not advice.** `min` / `max` ride to the client so the user is
+stopped at the input, and `validateScreenInputs` re-checks them on resume, so a
+caller that skips the dialog and posts to `resume` directly is refused too
+(`min_value` / `max_value`, inside the run's `INVALID_SCREEN_INPUT`). A screen
+field's declared contract is the only contract behind it — there is no object
+schema to catch a bad bag downstream.
+
+That sentence carries no "if the value is a number" qualifier, because the
+shape is checked first: on a `type: 'number'` field a submitted value that is
+not a JSON number is **refused** on resume with `invalid_type`. `"25"` — the
+same quantity as a *string* — is **not coerced** into `25` and does not reach
+the bound; it is rejected as the wrong shape. The bound then compares numbers
+only, which is all a bound can do.
+
+**What these keys refuse:**
+
+- **A bound that is not a number.** `max: '20'` is refused at parse time
+  (`invalid_type`). The bound is a closed constraint even though the `type`
+  beside it is an open widget hint.
+- **The neighbouring spellings, by name and with their target.** `helpText`,
+  `help`, `hint` and `tooltip` are refused and named onto `inlineHelpText`;
+  `object`, `referenceTo`, `targetObject`, `lookupObject`, `relatedTo` and
+  `target` are refused and named onto `reference`. ⚠️ `object` means different
+  things one level apart: on the screen **node** it renames to `objectName`
+  (render that object's whole form), on a screen **field** it can only mean the
+  lookup target.
+- **A non-string `inlineHelpText` or `reference`.**
+- **A `lookup` field with no `reference`.** A picker with no target object
+  resolves nothing, which is ADR-0078's own example of silently-inert
+  metadata, so `reference` is **required** when `type` is `lookup` — as it is
+  on an object field. The refusal names the key and shows the spelling.
+  ⚠️ This is a **narrowing**: a stored flow declaring a bare `lookup` screen
+  field parsed before this release and does not now. There is no lossless
+  conversion — nothing in the metadata says which object the author meant — so
+  the migration chain carries it as a structured TODO
+  (`screen-field-lookup-reference-required`) naming the flow and the field,
+  not an automatic rewrite.
+
+**What they deliberately do NOT refuse:**
+
+- **A bound on a non-numeric field.** A screen field's `type` has no closed
+  vocabulary, so this schema cannot judge which types a bound is meaningful on.
+  A bound on a `text` field constrains nothing and is not an error — the shape
+  check above reads `type: 'number'` alone, never the presence of a bound.
+- **An absent value.** A bound constrains a value that is present — an optional
+  bounded field left empty is conformant. Presence is `required`'s question.
+- **A bound on a field the user was never shown.** Like `required`, a bound on a
+  hidden `visibleWhen` field does not fire — the client is the authority on what
+  was on screen.
+
+Not translatable yet: the flows translation bundle carries `label` and
+`placeholder` per field, so `inlineHelpText` renders in the authored language
+until that face grows a key for it.
+
 **Screen (object form):**
 
 Set `config.objectName`
