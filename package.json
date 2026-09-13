@@ -79,6 +79,7 @@
     "check:pm-half-states": "node scripts/pm/check-half-states.mjs --self-test",
     "check:pm-clause2-carriers": "node scripts/pm/check-clause2-carriers.mjs --self-test",
     "check:pm-widening-tells": "node scripts/pm/check-widening-tells.mjs --self-test",
+    "check:pm-prior-rulings": "node scripts/pm/check-prior-rulings.mjs --self-test",
     "check:pm-closed-card-sweep": "node scripts/pm/sweep-closed-cards.mjs --self-test",
     "check:pm-post-stamped": "node scripts/pm/post-stamped.mjs --self-test",
     "check:pm-board-snapshot": "node scripts/pm/board-snapshot.mjs --self-test",
