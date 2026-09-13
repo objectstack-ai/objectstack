@@ -15,6 +15,7 @@ import { scoreMetadata } from '../lint/score.js';
 import { checkHookBodyLowering } from '../lint/hook-body-lowering.js';
 import { lowerCallables } from '../utils/lower-callables.js';
 import { authoringRuleUnionStack } from '../utils/stack-collections.js';
+import { artifactPackages, packageBodyAsStack } from '../utils/artifact-packages.js';
 import { runMetadataEval } from '../lint/metadata-eval.js';
 import { DEFAULT_METADATA_EVAL_CORPUS } from '../lint/corpus.js';
 import {
@@ -164,6 +165,163 @@ function getViewLabel(view: any, viewPath: string): { label?: unknown; path: str
   }
 
   return { path: `${viewPath}.list.label` };
+}
+
+/**
+ * The intra-package duplicate-name advisory (ADR-0048 §3.4), over the
+ * declarations of ONE package.
+ *
+ * ADR-0048 §3.4 retired the per-item CROSS-package throw: package ids are
+ * globally unique, so two installed packages shipping the same bare name
+ * (e.g. `page/home`) legitimately COEXIST under distinct composite keys and
+ * each caller resolves to its own via package-scoped resolution. A bare name
+ * is therefore NOT a collision risk and must not warn on its own.
+ *
+ * What the lint still earns its keep on is the narrow authoring-time hygiene
+ * case the ADR explicitly leaves to `os lint`: "an author shipping two
+ * `page/home` in one package". Two items of the same (type, name) declared
+ * within ONE package's config share a single composite registry key and
+ * shadow each other (last-write-wins) — so the legitimate signal is a genuine
+ * duplicate `(type, name)` pair within one package, never a unique bare name.
+ *
+ * ⚠️ [#17821] "Within one package" is the CALLER'S to establish, and this
+ * function judges exactly the stack it is handed. It used to be neither: the
+ * rule read the ONE flattened array a composed multi-package project carries
+ * at its top level (`composeStacks(…, { manifest: 'preserve' })`) while a
+ * comment right here asserted "we only see one package's config here". Two
+ * packages that each legitimately declared `home` were therefore reported as
+ * one package declaring it twice — prescribing a rename of a name that was
+ * already correct, with the OTHER package's namespace as the suggested prefix,
+ * under a closing sentence saying distinct packages may reuse a name freely.
+ * The call site below decides what a package is; this function no longer
+ * assumes it.
+ *
+ * Objects are already prefix-*enforced* (error) in defineStack; views are
+ * object-derived; `doc` has its own build lint — so they are excluded here.
+ *
+ * @param stack      one package's stack — its own collections at the top level
+ *                   and its own identity under `manifest`: the shape
+ *                   `packageBodyAsStack` builds, or the caller's whole stack
+ *                   when that stack IS one package.
+ * @param pathPrefix prepended to the emitted `path` AND to the back-pointer
+ *                   inside the message, so a finding raised on a multi-package
+ *                   artifact resolves in the file the author wrote. Empty —
+ *                   today's spelling, byte for byte — when the stack handed in
+ *                   is the whole one.
+ */
+function duplicateNameIssues(stack: any, pathPrefix = ''): LintIssue[] {
+  const issues: LintIssue[] = [];
+  const ns: string | undefined = stack.manifest?.namespace;
+
+  // Bare-named UI/automation types that share the generic registry namespace.
+  // Data-driven so a new bare-named type is one line.
+  //
+  // `registryKey` maps an item to the key it ACTUALLY occupies at runtime, so
+  // the dedup asks "do these two collapse onto one key?" rather than "do they
+  // spell the same bare name?". For every type here the two questions coincide
+  // — except `actions`, whose engine key is composite (see below).
+  const PREFIXED_TYPES: Array<{
+    key: string;
+    label: string;
+    registryKey?: (item: any, name: string) => string;
+  }> = [
+    { key: 'apps', label: 'App' },
+    { key: 'pages', label: 'Page' },
+    { key: 'dashboards', label: 'Dashboard' },
+    { key: 'flows', label: 'Flow' },
+    // An action's engine registration key is `<objectName>:<name>`, NOT the
+    // bare name: `standaloneActionOwnerKey` in `@objectstack/objectql` — the
+    // single implementation, called directly by the ObjectQL plugin and
+    // re-exported by the runtime, whose `standaloneActionObjectName` is now a
+    // delegating alias for it — resolves the object half to `objectName`,
+    // falling back to the canonical object-less key `GLOBAL_ACTION_OBJECT_KEY`
+    // (`'global'`, #3913). So one package legitimately declaring `log_call` on
+    // each of five objects occupies five distinct keys and nothing shadows
+    // anything — deduping those on the bare name produced 12 fixed false
+    // positives per `objectstack lint` run on HotCRM, growing linearly with the
+    // object count (#5510), and "just rename one" would have broken the shared
+    // i18n keys that shape depends on (#592).
+    //
+    // `GLOBAL_ACTION_OBJECT_KEY` rather than an inert sentinel like `''` is
+    // deliberate: it is the key the engine really registers under, so an action
+    // declared on an object actually NAMED `global` and an object-less action
+    // of the same name collide for real — and are reported, as they must be.
+    // It is spelled as the imported constant rather than a bare `'global'`
+    // literal so this reader cannot part from the engine's writer in silence
+    // the day the constant moves — the same divergence #14667 removed from the
+    // plugin's own copy.
+    //
+    // Only `objectName` is read. `object`/`entity` are rejected outright by
+    // `ActionSchema`'s strict shape with a rename prescription, so they never
+    // reach a spec-valid config and a `??` chain here would only fossilize a
+    // spelling the contract already refuses (Prime Directive #12).
+    {
+      key: 'actions',
+      label: 'Action',
+      registryKey: (item, name) => {
+        const objectKey =
+          typeof item?.objectName === 'string' && item.objectName
+            ? item.objectName
+            : GLOBAL_ACTION_OBJECT_KEY;
+        return `${objectKey}:${name}`;
+      },
+    },
+    { key: 'reports', label: 'Report' },
+    { key: 'datasets', label: 'Dataset' },
+  ];
+
+  for (const { key, label, registryKey } of PREFIXED_TYPES) {
+    const items: any[] = Array.isArray(stack[key]) ? stack[key] : [];
+    // First occurrence of each registry key → its index, so a later duplicate
+    // can point back at the original declaration.
+    const firstSeen = new Map<string, number>();
+    for (let i = 0; i < items.length; i++) {
+      const name = items[i]?.name;
+      if (typeof name !== 'string' || !name) continue;
+      const dedupKey = registryKey ? registryKey(items[i], name) : name;
+      const original = firstSeen.get(dedupKey);
+      if (original === undefined) {
+        firstSeen.set(dedupKey, i);
+        continue;
+      }
+      // Genuine intra-package duplicate: two items landing on ONE registry key
+      // in the config of the package this call was handed. They shadow each
+      // other. Renaming one with THAT package's namespace prefix (`crm_home` —
+      // `ns` is read off the same stack, so it is never a sibling package's)
+      // is the simplest fix; any distinct name works.
+      const suggestion = ns && !name.startsWith(`${ns}_`) ? `${ns}_${name}` : undefined;
+      // An action has a second, usually better remedy than renaming: the two
+      // declarations collide only because they agree on `objectName` (or both
+      // omit it and fall to `global`), so pointing one at the object it really
+      // belongs to separates them while keeping the shared name — the exact
+      // move the bare-name dedup used to punish.
+      const remedy =
+        key === 'actions'
+          ? `give one a distinct \`objectName\` (same-named actions on DIFFERENT objects ` +
+            `never collide) or rename one${suggestion ? `, e.g. "${suggestion}"` : ''}`
+          : `rename one${suggestion ? `, e.g. "${suggestion}"` : ''}`;
+      const collapseText =
+        key === 'actions'
+          ? `Two actions sharing one \`objectName\` (or both object-less) collapse onto ` +
+            `the same \`objectName:name\` engine key and shadow each other`
+          : `Two items of the same type sharing a bare name within one package ` +
+            `shadow each other on the registry key`;
+      issues.push({
+        severity: 'warning',
+        rule: 'naming/namespace-prefix',
+        message:
+          `${label} "${name}" is declared more than once in this package ` +
+          `(also at ${pathPrefix}${key}[${original}].name). ${collapseText} ` +
+          `(ADR-0048 §3.4) — ${remedy}. ` +
+          `Distinct packages may reuse the same name freely; the namespace prefix ` +
+          `is an optional convention, not a collision-avoidance requirement.`,
+        path: `${pathPrefix}${key}[${i}].name`,
+        ...(suggestion ? { fix: suggestion } : {}),
+      });
+    }
+  }
+
+  return issues;
 }
 
 // ─── Lint Engine ────────────────────────────────────────────────────
@@ -349,129 +507,48 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
   }
 
   // ── Intra-package duplicate-name advisory (ADR-0048 §3.4) ──
-  // ADR-0048 §3.4 retired the per-item CROSS-package throw: package ids are
-  // globally unique, so two installed packages shipping the same bare name
-  // (e.g. `page/home`) legitimately COEXIST under distinct composite keys and
-  // each caller resolves to its own via package-scoped resolution. A bare name
-  // is therefore NOT a collision risk and must not warn on its own.
   //
-  // What the lint still earns its keep on is the narrow authoring-time hygiene
-  // case the ADR explicitly leaves to `os lint`: "an author shipping two
-  // `page/home` in one package". Two items of the same (type, name) declared
-  // within ONE package's config share a single composite registry key and
-  // shadow each other (last-write-wins). We only see one package's config here,
-  // so the legitimate signal is a genuine duplicate `(type, name)` pair within
-  // it — never a unique bare name.
+  // [#17821 / ADR-0130 D4-D5] An artifact registers PER PACKAGE, so the
+  // advisory is evaluated per package — the shape `compile.ts` step 3b-ii
+  // already runs the author-time rule table in, reached through the same two
+  // seams (`artifactPackages`, `packageBodyAsStack`) rather than a second copy
+  // of them.
   //
-  // Objects are already prefix-*enforced* (error) in defineStack; views are
-  // object-derived; `doc` has its own build lint — so they are excluded here.
-  const ns: string | undefined = stack.manifest?.namespace;
-
-  // Bare-named UI/automation types that share the generic registry namespace.
-  // Data-driven so a new bare-named type is one line.
+  // ⛔ This is NOT "skip the site per package" — `compile.ts`' own fence, and
+  // it binds here too. Every finding the advisory exists to raise is still
+  // raised, on the package that owns it; what changed is that a name is judged
+  // against ITS OWN package's declarations instead of against the union of
+  // every package's. The defect was missing attribution, never the signal.
   //
-  // `registryKey` maps an item to the key it ACTUALLY occupies at runtime, so
-  // the dedup asks "do these two collapse onto one key?" rather than "do they
-  // spell the same bare name?". For every type here the two questions coincide
-  // — except `actions`, whose engine key is composite (see below).
-  const PREFIXED_TYPES: Array<{
-    key: string;
-    label: string;
-    registryKey?: (item: any, name: string) => string;
-  }> = [
-    { key: 'apps', label: 'App' },
-    { key: 'pages', label: 'Page' },
-    { key: 'dashboards', label: 'Dashboard' },
-    { key: 'flows', label: 'Flow' },
-    // An action's engine registration key is `<objectName>:<name>`, NOT the
-    // bare name: `standaloneActionOwnerKey` in `@objectstack/objectql` — the
-    // single implementation, called directly by the ObjectQL plugin and
-    // re-exported by the runtime, whose `standaloneActionObjectName` is now a
-    // delegating alias for it — resolves the object half to `objectName`,
-    // falling back to the canonical object-less key `GLOBAL_ACTION_OBJECT_KEY`
-    // (`'global'`, #3913). So one package legitimately declaring `log_call` on
-    // each of five objects occupies five distinct keys and nothing shadows
-    // anything — deduping those on the bare name produced 12 fixed false
-    // positives per `objectstack lint` run on HotCRM, growing linearly with the
-    // object count (#5510), and "just rename one" would have broken the shared
-    // i18n keys that shape depends on (#592).
-    //
-    // `GLOBAL_ACTION_OBJECT_KEY` rather than an inert sentinel like `''` is
-    // deliberate: it is the key the engine really registers under, so an action
-    // declared on an object actually NAMED `global` and an object-less action
-    // of the same name collide for real — and are reported, as they must be.
-    // It is spelled as the imported constant rather than a bare `'global'`
-    // literal so this reader cannot part from the engine's writer in silence
-    // the day the constant moves — the same divergence #14667 removed from the
-    // plugin's own copy.
-    //
-    // Only `objectName` is read. `object`/`entity` are rejected outright by
-    // `ActionSchema`'s strict shape with a rename prescription, so they never
-    // reach a spec-valid config and a `??` chain here would only fossilize a
-    // spelling the contract already refuses (Prime Directive #12).
-    {
-      key: 'actions',
-      label: 'Action',
-      registryKey: (item, name) => {
-        const objectKey =
-          typeof item?.objectName === 'string' && item.objectName
-            ? item.objectName
-            : GLOBAL_ACTION_OBJECT_KEY;
-        return `${objectKey}:${name}`;
-      },
-    },
-    { key: 'reports', label: 'Report' },
-    { key: 'datasets', label: 'Dataset' },
-  ];
-
-  for (const { key, label, registryKey } of PREFIXED_TYPES) {
-    const items: any[] = Array.isArray(stack[key]) ? stack[key] : [];
-    // First occurrence of each registry key → its index, so a later duplicate
-    // can point back at the original declaration.
-    const firstSeen = new Map<string, number>();
-    for (let i = 0; i < items.length; i++) {
-      const name = items[i]?.name;
-      if (typeof name !== 'string' || !name) continue;
-      const dedupKey = registryKey ? registryKey(items[i], name) : name;
-      const original = firstSeen.get(dedupKey);
-      if (original === undefined) {
-        firstSeen.set(dedupKey, i);
-        continue;
-      }
-      // Genuine intra-package duplicate: two items landing on ONE registry key
-      // in this package's config. They shadow each other. Renaming one with the
-      // package namespace prefix (`crm_home`) is the simplest fix; any distinct
-      // name works.
-      const suggestion = ns && !name.startsWith(`${ns}_`) ? `${ns}_${name}` : undefined;
-      // An action has a second, usually better remedy than renaming: the two
-      // declarations collide only because they agree on `objectName` (or both
-      // omit it and fall to `global`), so pointing one at the object it really
-      // belongs to separates them while keeping the shared name — the exact
-      // move the bare-name dedup used to punish.
-      const remedy =
-        key === 'actions'
-          ? `give one a distinct \`objectName\` (same-named actions on DIFFERENT objects ` +
-            `never collide) or rename one${suggestion ? `, e.g. "${suggestion}"` : ''}`
-          : `rename one${suggestion ? `, e.g. "${suggestion}"` : ''}`;
-      const collapseText =
-        key === 'actions'
-          ? `Two actions sharing one \`objectName\` (or both object-less) collapse onto ` +
-            `the same \`objectName:name\` engine key and shadow each other`
-          : `Two items of the same type sharing a bare name within one package ` +
-            `shadow each other on the registry key`;
-      issues.push({
-        severity: 'warning',
-        rule: 'naming/namespace-prefix',
-        message:
-          `${label} "${name}" is declared more than once in this package ` +
-          `(also at ${key}[${original}].name). ${collapseText} ` +
-          `(ADR-0048 §3.4) — ${remedy}. ` +
-          `Distinct packages may reuse the same name freely; the namespace prefix ` +
-          `is an optional convention, not a collision-avoidance requirement.`,
-        path: `${key}[${i}].name`,
-        ...(suggestion ? { fix: suggestion } : {}),
-      });
+  // Fewer than two packages ⇒ the existing read already IS the per-package
+  // read, so it is kept verbatim: a stack with no `packages[]` is one package
+  // by definition, and with exactly one the top level carries that package's
+  // collections and nothing else, in its own order. Keeping it also keeps a
+  // hand-written top-level declaration that no package entry carries inside
+  // the advisory's reach, and keeps every finding's `path` in the same
+  // coordinates the rest of this function reports in.
+  //
+  // With two or more, the flattened top level MIXES packages and the
+  // per-package index is the only true one — so the path is written whole
+  // (`packages[1].manifest.apps[1].name`), which resolves in both ADR-0130 D4
+  // shapes, rather than as a bare `apps[1]` that in the additive shape points
+  // at a different item than the one being reported.
+  //
+  // ⚠️ The boundary, stated rather than implied: with two or more packages a
+  // top-level declaration that no package entry carries is outside every
+  // registration unit and is judged by neither leg. `composeStacks` cannot
+  // emit that shape — the flattened top level is exactly the union of the
+  // packages it composed.
+  const packageEntries = artifactPackages(stack);
+  if (packageEntries.length > 1) {
+    for (const pkg of packageEntries) {
+      issues.push(...duplicateNameIssues(
+        packageBodyAsStack(pkg.body, stack.packages),
+        `packages[${pkg.index}].manifest.`,
+      ));
     }
+  } else {
+    issues.push(...duplicateNameIssues(stack));
   }
 
   // ── Protocol compatibility range (ADR-0087 D1) ──
