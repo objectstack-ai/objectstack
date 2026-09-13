@@ -53,12 +53,15 @@ import { registerApprovalNode } from './approval-node.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as any;
 
+/** One captured log line — typed so the assertions below need no `any` parameter. */
+interface LoggedLine { level: string; msg: string; meta?: unknown }
+
 /** Captures the door's log lines so PIN 1 can assert the level was left alone. */
 function recordingLogger() {
-  const lines: { level: string; msg: string; meta?: unknown }[] = [];
+  const lines: LoggedLine[] = [];
   const at = (level: string) => (msg: unknown, meta?: unknown) =>
     void lines.push({ level, msg: String(msg), meta });
-  return { lines, info: at('info'), warn: at('warn'), error: at('error'), debug: at('debug') } as any;
+  return { lines, info: at('info'), warn: at('warn'), error: at('error'), debug: at('debug') };
 }
 
 /** In-memory ObjectQL stand-in for the approvals tables. */
@@ -174,8 +177,8 @@ describe('#15970 — a recall whose resume strands carries the discriminator', (
 
   /** One live process: real engine, real approval node, real approvals service. */
   function boot() {
-    const automation = new AutomationEngine(logger, new InMemorySuspendedRunStore());
-    registerApprovalNode(automation, service, logger);
+    const automation = new AutomationEngine(logger as any, new InMemorySuspendedRunStore());
+    registerApprovalNode(automation, service, logger as any);
     automation.registerNodeExecutor({
       type: 'mark',
       async execute(node: any) {
@@ -193,7 +196,7 @@ describe('#15970 — a recall whose resume strands carries the discriminator', (
     marks = []; rejectBranchThrows = undefined;
     logger = recordingLogger();
     data = makeFakeEngine();
-    service = new ApprovalService({ engine: data as any, logger });
+    service = new ApprovalService({ engine: data as any, logger: logger as any });
   });
 
   async function park(automation: AutomationEngine) {
