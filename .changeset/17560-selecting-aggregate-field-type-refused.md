@@ -8,9 +8,11 @@ feat(service-analytics)!: `min` and `max` are judged by the aggregate × field-t
 <!-- adr-0087: registered dataset-measure-selecting-aggregate-field-type-refused -->
 
 **BREAKING** — an accept-set narrowing on a published authoring surface, and the last
-one this table owed. A dataset measure pairing `aggregate: 'min'` (or `'max'`) with a
+one this table owed. A dataset measure pairing `aggregate: 'min'` (or `'max'`) with any
+of the **37** field types outside the numeric, temporal and boolean classes — for example
 `text`, `select`, `lookup`, `autonumber`, `json`, `multiselect`, `file`, `location`,
-`vector` or `formula` field used to compile and reach the backend; it is now refused by
+`vector` or `formula`; the ADR-0087 entry registered below carries the full list — used to
+compile and reach the backend; it is now refused by
 `compileDataset` with `DATASET_INVALID` / **400** before any query is built. Shipped as
 `minor` under the repo's launch-window convention for accept-set narrowings.
 
@@ -67,6 +69,18 @@ PostgreSQL at all.
 - **`AnalyticsServiceConfig.sourceFieldMeta`** no longer declares `returnType`. It was
   carried (#16236) for one reader — the retired `formula` branch — and a declared input
   nobody consumes is the declared-not-enforced shape Prime Directive #10 refuses.
+
+  ⚠️ **That key was never released, so against every published version this removal is a
+  no-op.** #16236 is still a pending changeset in the same release window as this one;
+  the last published entry (17.4.0) says in as many words that `FieldSchema.returnType`
+  "is not on `AnalyticsServiceConfig.sourceFieldMeta`'s return shape". The key was
+  therefore added and removed inside one window and no published tarball ever carried it.
+
+  **Host fix, one line:** drop `returnType` from whatever your `sourceFieldMeta` returns.
+  You do not have to — the hook is a function RETURN position, so an extra key is not an
+  excess-property error and is simply ignored at runtime — but keeping it declares an
+  input nothing reads. Hosts on `AnalyticsServicePlugin` need no change at all: the plugin
+  stopped relaying the key in this same change.
 
 ## FROM → TO, and the one-line fix
 
