@@ -374,6 +374,7 @@
     "SBOMEntrySchema": "src/kernel/plugin-security.zod.ts#SBOMEntrySchema (const)",
     "SBOMParsed": "src/kernel/plugin-security.zod.ts#SBOMParsed (type)",
     "SBOMSchema": "src/kernel/plugin-security.zod.ts#SBOMSchema (const)",
+    "SEED_WRITE_EXECUTION_CONTEXT": "src/kernel/execution-context.zod.ts#SEED_WRITE_EXECUTION_CONTEXT (const)",
     "SandboxConfig": "src/kernel/plugin-security-advanced.zod.ts#SandboxConfig (type)",
     "SandboxConfigParsed": "src/kernel/plugin-security-advanced.zod.ts#SandboxConfigParsed (type)",
     "SandboxConfigSchema": "src/kernel/plugin-security-advanced.zod.ts#SandboxConfigSchema (const)",
