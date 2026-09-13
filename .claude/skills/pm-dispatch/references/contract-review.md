@@ -43,7 +43,8 @@
 - ② 双载体已清,逐对机读 `node scripts/pm/check-clause2-carriers.mjs --pair PR-NUMBER`。
 - 0 = 双肢一致、无放宽 tell、head 上有记录;4 = 任一不成立;3 = 环境答不了,⛔ 不作干净。
 - 放宽 tell 由 `scripts/pm/check-widening-tells.mjs` 判,`no` 撞新键/成员/导出/登记即拒,附 file:line。
-- ③ PR 全部 check 全绿,⛔ 非 required 子集;受管面不适用,draft-only 终局不变。
+- ③ PR 全部 check 全绿,⛔ 非 required 子集;例外:merge-base 上同名同失败签名的红不计。
+- 签名 = 失败步 + 首错行,读 base check runs 的 API ⛔ 不凭口述;主干红止血立单不变。
 
 ## 降档保险丝(机读)
 
@@ -55,6 +56,5 @@
 - 清标前 `--pair`:裁决 `Served-tier:` ≠ `CONTRACT_REVIEW_TIER` ⇒ exit 4,点名 PR、评论、读数。
 - 施工档只取 harness `model` 盖章或认领 Container & model 行;`Co-Authored-By` = 署名常量 ⛔ 非证据。
 - 产出裁决的每轮都须读到契约复审档位,见回退证据 ⇒ 裁决整体作废。
-- 父会话只有两个合法动作:逐字采纳,或整体作废(核验失败、越范围、格式不完整)。
-- ⛔ 永不改写、删节或润色子代理裁决。
+- 父会话只可逐字采纳或整体作废(核验失败、越范围、格式不完整),⛔ 永不改写润色。
 - 契约复核 ⛔ 不适用额度耗尽豁免降档:豁免对象是派发,复核正为补偿低档派发而存在。
