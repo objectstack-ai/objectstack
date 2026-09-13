@@ -100,74 +100,98 @@ const GROUP_ROUTED_TYPES = new Set(['position', 'team', 'department']);
 /**
  * How an operator actually populates `sys_user.manager_id` (#16748 / #16678).
  *
- * ⚠️ NOT "edit the user in the Console". The column has NO product write
- * surface today: `getManagedUpdateWhitelist('sys_user')` is exactly
- * `{name, image, locale}` (ADR-0092 platform-object write narrowing), the auth
- * admin endpoints do not accept it, and the Console renders no field for it.
+ * ⚠️ STILL NOT "edit the user in the Console". The column is `readonly: true`
+ * and stays out of ADR-0092's Tier 1, so `getManagedUpdateWhitelist('sys_user')`
+ * is still exactly `{name, image, locale}` and the standard edit form still
+ * renders no editable field for it. What changed in #16678 is that the column
+ * gained a DEDICATED admin operation of its own, which is a different thing
+ * from becoming an editable profile column — and the distinction is the design,
+ * not a nicety: ADR-0092 D5's amendment made Tier-1 membership imply
+ * SELF-editability, so a `manager_id` that reached the form would hand every
+ * member their own first-rung approver.
  *
  * ⛔ AND a remedy naming a route that does not exist is worse than no remedy —
  * an exact diagnosis whose prescription cannot be carried out (#17037). So the
  * routes are GRADED here rather than listed, and each grade is a measurement
- * against this tree with a discriminating control beside it:
+ * against this tree with a discriminating control beside it. Re-taken on the
+ * change that landed the write surface:
  *
- *   - Seed, or any other system-context write — AVAILABLE HERE. Both write
- *     guards gate on `isUserContextWrite`, spelled identically in each:
- *     `Boolean(userId) && isSystem !== true` (plugin-security
+ *   - The admin endpoint — AVAILABLE HERE, and now the route to name first.
+ *     `POST /api/v1/auth/admin/set-user-manager`, body `{ userId, managerId }`
+ *     with `managerId: null` as the clear, platform-admin gated (ADR-0068) and
+ *     ledgered as an ObjectStack mount in plugin-auth's `auth-route-ledger.ts`.
+ *     It reaches the column under a SYSTEM context — by context, ⛔ not by a
+ *     whitelist entry — which is why the whitelist reading above is unchanged.
+ *     It refuses self-assignment, a link that closes a cycle, a chain past its
+ *     depth cap, a manager provably outside the user's organizations, and any
+ *     identity whose `sys_user.source` is `idp_provisioned`.
+ *   - Seed, or any other system-context write — AVAILABLE HERE, unchanged.
+ *     Both write guards gate on `isUserContextWrite`, spelled identically in
+ *     each: `Boolean(userId) && isSystem !== true` (plugin-security
  *     `system-write-guard.ts`, plugin-auth `identity-write-guard.ts`). A
  *     system-context write therefore bypasses the managed-update whitelist by
- *     construction. This is the one route with a demonstrated writer in-repo.
- *   - SCIM — NOT here. The Enterprise `manager` attribute IS declared
- *     (`scim.zod.ts`), but no non-test file under `packages/plugins` or
- *     `packages/runtime` projects it onto the column: measured 0, against a
- *     control (`SysScimGroup`) the same scan does find, so the scan
- *     discriminates.
- *   - Admin bulk import — NOT here. `admin-import-users.ts` matches
- *     `manager_id` 0 times against a control of `phone_number` 8, and
- *     `SYS_USER_IMPORT_UPDATE_FIELDS` is `{name, image, locale}` plus
- *     `phone_number` and `role`. `sys-user-writable-fields.ts` lists
- *     `manager_id` among the admin-surface-only columns, so the omission is
- *     deliberate and ⛔ not an oversight to route around.
+ *     construction.
+ *   - SCIM — NOT here, re-measured and unchanged. The Enterprise `manager`
+ *     attribute IS declared (`scim.zod.ts`), but no non-test file under
+ *     `packages/plugins` or `packages/runtime` projects it onto the column:
+ *     measured 0, against a control (`SysScimGroup`) the same scan does find,
+ *     so the scan discriminates.
+ *   - Admin bulk import — NOT here, re-measured and unchanged.
+ *     `admin-import-users.ts` matches `manager_id` 0 times against a control of
+ *     `phone_number` 8, and `SYS_USER_IMPORT_UPDATE_FIELDS` is
+ *     `{name, image, locale}` plus `phone_number` and `role`. Admitting the
+ *     column to the import tier is ruled but is a separate change.
  *
  * ⇒ SCIM and directory sync stay NAMED, because a deployment running a real
  * one may well populate the column through it — but named as something the
  * operator's own provisioning supplies, ⛔ never as something this repo gives
- * them.
+ * them. They also now have PRECEDENCE over the endpoint rather than merely
+ * sitting beside it: on an `idp_provisioned` identity the endpoint refuses, so
+ * the directory is the one authoring surface for those rows.
  *
- * ⛔ DEPENDENCY — #16678 holds the open question of whether `manager_id` should
- * GAIN a product write surface. If it ever does, these strings are the lines
- * that go stale: it would then be wrong to tell an author their only route is
- * a system-context write. Update them in the same change that opens the write
- * surface — and re-take the three grades above, which are readings of this
- * tree, not standing facts.
+ * ⛔ WHAT DID NOT CHANGE — and why this rule is not deleted. The dead end the
+ * finding reports SURVIVES the write surface: a static check still cannot read
+ * the column, so a slate that is entirely `manager` rungs can still resolve to
+ * nobody. Only its CAUSE became recoverable — "nobody can populate it" became
+ * "an operator can". So the finding stays, `stackWiresManagerChain` stays the
+ * silencer, and the remedy is what was rewritten (#16678).
  *
- * Two other carriers assert the same fact and go stale with these strings, so
- * the list is theirs too: the `manager` callout in
- * `content/docs/automation/approvals.mdx`, and `ApproverType`'s `.describe()`
- * in `packages/spec/src/automation/approval.zod.ts` (rendered verbatim into
- * `content/docs/references/automation/approval.mdx`). Neither RESTATES the
- * remedy — both point back here, which is why there is still exactly one copy
- * to edit — but both assert that the column has no product write surface, and
- * that is the sentence which stops being true.
+ * ⛔ DEPENDENCY — one carrier of the old assertion is still stale and is ⛔ NOT
+ * fixed here: `ApproverType`'s `.describe()` in
+ * `packages/spec/src/automation/approval.zod.ts` (rendered verbatim into the
+ * generated `content/docs/references/automation/approval.mdx`) still says the
+ * column "has no product write surface". That edit is `packages/spec`, which
+ * this change is fenced out of; it is reported to the PM for the `domain:spec`
+ * seat. The third carrier, the `manager` callout in
+ * `content/docs/automation/approvals.mdx`, IS updated in this same change.
+ * Neither RESTATES the remedy — both point back here, which is why there is
+ * still exactly one copy to edit.
  */
 // ⛔ The tracker ids stay in the comments above and never in this string:
 // `check:doc-authoring` Rule 3 — a runtime string reaches authors, operators and
 // generated surfaces, none of whom can resolve `#NNNN`. The reader who can
 // resolve it is reading this source.
 const MANAGER_ONLY_REMEDY =
-  `sys_user.manager_id has no product write surface — the data API's managed-update whitelist is ` +
-  `{name, image, locale}, the auth admin endpoints do not accept the column and the Console ` +
-  `renders no field for it, so it is never populated by editing the user in the Console.`;
+  `sys_user.manager_id is not a profile column — the data API's managed-update whitelist is ` +
+  `{name, image, locale} and the column is readonly on the user form, so it is never populated by ` +
+  `editing the user in the Console. It has a dedicated admin operation instead: a platform admin ` +
+  `POSTs { userId, managerId } to /api/v1/auth/admin/set-user-manager, with managerId set to null ` +
+  `to clear the link.`;
 
 /**
  * The routes an operator can actually take, GRADED — the measurement behind
  * each grade is in {@link MANAGER_ONLY_REMEDY}'s docblock.
  */
 const MANAGER_ONLY_ROUTES =
-  `On this platform the column is written by a seed, or by any other system-context write, which ` +
-  `bypasses the managed-update whitelist. SCIM provisioning and directory sync can populate it ` +
-  `too, but only through a provisioning path your own deployment supplies: this platform declares ` +
-  `the SCIM 'manager' attribute without projecting it onto the column, and its admin bulk import ` +
-  `does not write it either.`;
+  `That endpoint is the route this platform gives you, and it refuses a link that would make a ` +
+  `user their own manager, close a cycle, run past the chain depth cap, or point across an ` +
+  `organization boundary. The column is also written by a seed, or by any other system-context ` +
+  `write, which bypasses the managed-update whitelist. SCIM provisioning and directory sync can ` +
+  `populate it too, but only through a provisioning path your own deployment supplies: this ` +
+  `platform declares the SCIM 'manager' attribute without projecting it onto the column, and its ` +
+  `admin bulk import does not write it either — and where an identity carries ` +
+  `source 'idp_provisioned' the admin operation refuses, leaving that directory the one surface ` +
+  `that authors its manager.`;
 
 export type ApprovalApproverSeverity = 'error' | 'warning' | 'info';
 

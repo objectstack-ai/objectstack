@@ -31,15 +31,27 @@
  * a driver-native value here would fork that convention into a second source of
  * truth and break the moment a query crosses datasources.
  *
- * # Period `_end` is the last calendar DAY, not the last instant
+ * # Period `_end` resolves to a calendar DAY — its WIDTH is ADR-0053 D-D
  *
- * `{current_year_end}` is `2026-12-31`, per the spec's own
- * `DATE_MACRO_DESCRIPTIONS` ("Dec 31 of this year"). On a `datetime` column
- * that means `<= {current_year_end}` excludes everything after midnight on the
- * 31st — the classic half-open-range trap. Authors filtering a timestamp want
- * `< {next_year_start}`. This is a documented property of the vocabulary, not
- * something the resolver may quietly "fix": silently widening a bound would
- * make the same token mean different things on different column types.
+ * `{current_year_end}` resolves to `2026-12-31`, per the spec's own
+ * `DATE_MACRO_DESCRIPTIONS` ("Dec 31 of this year"). Emitting that bare day is
+ * the whole of what this module decides. How wide a bare day is once it lands
+ * on one side of an operator is a SEPARATE contract, stated once in
+ * `packages/spec/src/data/calendar-day.ts` (ADR-0053 D-D) and deliberately not
+ * restated here: as an upper bound (`$lte`, a `$between` max, a `dateRange`
+ * end) a bare day denotes the WHOLE day, compiled half-open to the following
+ * calendar day, so `<= {current_year_end}` reaches the final instant of Dec 31
+ * on a `datetime` column; as `$gte` / `$gt` / `$lt` it denotes that day's
+ * `00:00:00.000`. `packages/spec/src/data/temporal-conformance.ts` pins the
+ * upper-bound half cross-driver ("datetime: bare-day $lte keeps the whole
+ * final day").
+ *
+ * ⛔ So do NOT hand-write a half-open detour (`< {next_year_start}`) to cover
+ * a period's last day on a `datetime` column — every backend already applies
+ * the widening. And ⛔ do not apply it HERE either: the resolver emits the bare
+ * day the vocabulary names and nothing else, because the widening belongs one
+ * layer down, where the column type is known; doing it twice would carry the
+ * bound a whole day past what the author wrote.
  *
  * # An unknown token throws
  *

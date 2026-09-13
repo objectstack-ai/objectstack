@@ -97,21 +97,62 @@ const RESTART_BACKOFF_RETIRED =
   + RESTART_REPLACEMENT;
 
 /**
+ * Prescriptions for the two health-check durations renamed in 17 (#17780,
+ * ruling A on #15939 executing #14478).
+ *
+ * Carry NO `os migrate meta --from 17` sentence, for the same reason the
+ * restart prescriptions above do not: that command replays the conversion
+ * chain over authored METADATA SOURCES, and `PluginHealthCheck` is a library
+ * parameter a host passes to `PluginHealthMonitor` in TypeScript, never an
+ * authored document (the #4914 / #11825 keep). Naming the command would
+ * promise an affordance that cannot apply.
+ */
+const HEALTH_CHECK_INTERVAL_RETIRED =
+  '`PluginHealthCheck.interval` was renamed to `intervalMs` in '
+  + '@objectstack/spec 17 — the unit of a duration-shaped number lives in the '
+  + 'key name, not only in the describe prose. Its unit (milliseconds) lived '
+  + 'in a source JSDoc only, and the published describe named no unit: its '
+  + 'one unit-shaped token was the parenthetical "(default: 30s)", which '
+  + 'names SECONDS for a value carried in milliseconds. Rename the key to '
+  + '`intervalMs`; the value (milliseconds) and the 30000 default are '
+  + 'unchanged.';
+
+const HEALTH_CHECK_TIMEOUT_RETIRED =
+  '`PluginHealthCheck.timeout` was renamed to `timeoutMs` in '
+  + '@objectstack/spec 17 — the unit of a duration-shaped number lives in the '
+  + 'key name, not only in the describe prose. Its unit (milliseconds) lived '
+  + 'in a source JSDoc only and the published describe named none, so the '
+  + 'reference-page reader got a bare 5000. Rename the key to `timeoutMs`; '
+  + 'the value (milliseconds) and the 5000 default are unchanged.';
+
+/**
  * Plugin Health Check Configuration
  * Defines how to check plugin health
  */
 export const PluginHealthCheckSchema = lazySchema(() => z.object({
   /**
-   * Health check interval in milliseconds
+   * How often to perform health checks, in milliseconds.
+   *
+   * Renamed from `interval` (#17780, ruling A on #15939 executing #14478):
+   * the unit lived in this JSDoc only, and `.describe()` — the text
+   * `content/docs/references/**` publishes — named no unit, its one
+   * unit-shaped token being a "(default: 30s)" parenthetical that names
+   * SECONDS for a milliseconds value. Tombstoned rather than deleted because
+   * this object is not `.strict()`.
    */
-  interval: z.number().int().min(1000).default(30000)
-    .describe('How often to perform health checks (default: 30s)'),
+  intervalMs: z.number().int().min(1000).default(30000)
+    .describe('How often to perform health checks, in milliseconds'),
   
   /**
-   * Timeout for health check in milliseconds
+   * Maximum time to wait for a health check response, in milliseconds.
+   *
+   * Renamed from `timeout` (#17780, ruling A on #15939 executing #14478):
+   * the unit lived in this JSDoc only and the published `.describe()` named
+   * none. Tombstoned rather than deleted because this object is not
+   * `.strict()`.
    */
-  timeout: z.number().int().min(100).default(5000)
-    .describe('Maximum time to wait for health check response'),
+  timeoutMs: z.number().int().min(100).default(5000)
+    .describe('Maximum time to wait for health check response, in milliseconds'),
   
   /**
    * Number of consecutive failures before marking as unhealthy
@@ -152,6 +193,10 @@ export const PluginHealthCheckSchema = lazySchema(() => z.object({
    * REMOVED in 18 (#12032) — the delay before a restart that never happened.
    */
   restartBackoff: retiredKey(RESTART_BACKOFF_RETIRED),
+
+  /** Tombstones for the two duration renames above (#17780, ruling A on #15939). */
+  interval: retiredKey(HEALTH_CHECK_INTERVAL_RETIRED),
+  timeout: retiredKey(HEALTH_CHECK_TIMEOUT_RETIRED),
 }));
 
 const UPTIME_RETIRED =
@@ -286,6 +331,22 @@ const HOT_RELOAD_WATCH_PATTERNS_RETIRED =
   + 'which is unchanged.';
 
 /**
+ * Prescription for the debounce duration renamed in 17 (#17780, ruling A on
+ * #15939 executing #14478). Carries NO `os migrate meta --from 17` sentence,
+ * for the reason `HOT_RELOAD_WATCH_PATTERNS_RETIRED` above records:
+ * `HotReloadConfig` is not an authorable surface, so no authored document has
+ * ever been able to carry this key.
+ */
+const HOT_RELOAD_DEBOUNCE_DELAY_RETIRED =
+  '`HotReloadConfig.debounceDelay` was renamed to `debounceDelayMs` in '
+  + '@objectstack/spec 17 — the unit of a duration-shaped number lives in the '
+  + 'key name, not only in the describe prose. Its unit (milliseconds) lived '
+  + 'in a source JSDoc only and the published describe named none, so the '
+  + 'reference-page reader got a bare 1000. Rename the key to '
+  + '`debounceDelayMs`; the value (milliseconds) and the 1000 default are '
+  + 'unchanged.';
+
+/**
  * Hot Reload Configuration
  * Controls how plugins handle live updates
  */
@@ -308,10 +369,18 @@ export const HotReloadConfigSchema = lazySchema(() => z.object({
   watchPatterns: retiredKey(HOT_RELOAD_WATCH_PATTERNS_RETIRED),
 
   /**
-   * Debounce delay before reloading (milliseconds)
+   * Debounce delay before reloading, in milliseconds.
+   *
+   * Renamed from `debounceDelay` (#17780, ruling A on #15939 executing
+   * #14478): the unit lived in this JSDoc only and the published
+   * `.describe()` named none. Tombstoned rather than deleted because this
+   * object is not `.strict()`.
    */
-  debounceDelay: z.number().int().min(0).default(1000)
-    .describe('Wait time after change detection before reload'),
+  debounceDelayMs: z.number().int().min(0).default(1000)
+    .describe('Wait time after change detection before reload, in milliseconds'),
+
+  /** Tombstone for the rename above (#17780, ruling A on #15939). */
+  debounceDelay: retiredKey(HOT_RELOAD_DEBOUNCE_DELAY_RETIRED),
   
   /**
    * Preserve plugin state during reload
