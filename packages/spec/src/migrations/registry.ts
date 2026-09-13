@@ -10671,7 +10671,15 @@ const step18: MigrationStep = {
         + 'it is outside this rename, not outside the gate population; that JSDoc-channel gap is '
         + '#15939; '
         + 'and the exporter batch size is a COUNT of records, not a duration, so it has no unit '
-        + 'to carry. Both keep their names.',
+        + 'to carry. Both keep their names. '
+        // Pointer, not a rewrite (Prime Directive #13): the sentence above is #15679's, left
+        // word for word. The burn-rate window it names is renamed in this same, still-unreleased
+        // protocol-18 step, so a reader arriving here through `migrate meta` needs the successor.
+        + 'One of those two moves after all, in this same protocol step: the error-budget '
+        + 'burn-rate window is renamed to durationSeconds by '
+        + 'system-metrics-jsdoc-durations-unit-in-key, the remediation of the JSDoc-channel gap '
+        + '#15939 named just above. Read that entry with this one; the exporter batch size is '
+        + 'still a COUNT of records and still does not move.',
     },
     {
       id: 'system-object-storage-durations-unit-in-key',
