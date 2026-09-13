@@ -52,9 +52,10 @@ OpenTelemetry compatibility configuration
 | **endpoint** | `string` | optional | Exporter endpoint |
 | **protocol** | `string` | optional | Protocol version |
 | **headers** | `Record<string, string>` | optional | HTTP headers |
-| **timeout** | `integer` | optional (default: `10000`) |  |
+| **timeoutMs** | `integer` | optional (default: `10000`) | Exporter request timeout in milliseconds |
+| **timeout** | `never` | optional | [REMOVED] `OpenTelemetryCompatibility.exporter.timeout` was renamed to `timeoutMs` in @objectstack/spec 18 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Its unit (milliseconds) lived in a source JSDoc only and the key carried no describe at all, so the reference-page reader got a bare 10000 and could not tell it from 10000 seconds. Rename the key to `timeoutMs`; the value (milliseconds) and the 10000 default are unchanged. |
 | **compression** | `Enum<'none' \| 'gzip'>` | optional (default: `"none"`) |  |
-| **batch** | `{ maxBatchSize: integer; maxQueueSize: integer; exportTimeout: integer; scheduledDelay: integer }` | optional |  |
+| **batch** | `{ maxBatchSize: integer; maxQueueSize: integer; exportTimeoutMs: integer; scheduledDelayMs: integer }` | optional |  |
 
 ### Nested Shape: `OpenTelemetryCompatibility.resource`
 
@@ -467,7 +468,7 @@ Tracing configuration
 | **spanLimits** | `{ maxAttributes?: integer; maxEvents?: integer; maxLinks?: integer; maxAttributeValueLength?: integer }` | optional |  |
 | **traceIdGenerator** | `Enum<'random' \| 'uuid' \| 'custom'>` | optional (default: `"random"`) |  |
 | **customTraceIdGeneratorId** | `string` | optional | Custom generator identifier |
-| **performance** | `{ asyncExport?: boolean; exportInterval?: integer }` | optional |  |
+| **performance** | `{ asyncExport?: boolean; exportIntervalMs?: integer }` | optional |  |
 
 ### Nested Shape: `TracingConfig.sampling`
 
@@ -490,6 +491,14 @@ Tracing configuration
 | **resource** | `{ serviceName: string; serviceVersion?: string; serviceInstanceId?: string; serviceNamespace?: string; … }` | ✅ | Resource attributes |
 | **instrumentation** | `{ autoInstrumentation?: boolean; libraries?: string[]; disabledLibraries?: string[] }` | optional |  |
 | **semanticConventionsVersion** | `string` | optional | Semantic conventions version |
+
+### Nested Shape: `TracingConfig.performance`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **asyncExport** | `boolean` | optional (default: `true`) |  |
+| **exportIntervalMs** | `integer` | optional (default: `5000`) | Background span-export interval in milliseconds |
+| **exportInterval** | `never` | optional | [REMOVED] `TracingConfig.performance.exportInterval` was renamed to `exportIntervalMs` in @objectstack/spec 18 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Its unit (milliseconds) lived in a source JSDoc only and the key carried no describe at all, so the reference-page reader got a bare 5000. Rename the key to `exportIntervalMs`; the value (milliseconds) and the 5000 default are unchanged. |
 
 
 ---

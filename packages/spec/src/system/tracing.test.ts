@@ -592,9 +592,9 @@ describe('the OTel exporter and performance durations carry their unit (#17785)'
   };
 
   it.each([
-    ['exporter.timeout', 'timeoutMs', 10000],
-    ['exporter.batch.exportTimeout', 'exportTimeoutMs', 30000],
-    ['exporter.batch.scheduledDelay', 'scheduledDelayMs', 5000],
+    ['exporter.timeout', 'timeoutMs'],
+    ['exporter.batch.exportTimeout', 'exportTimeoutMs'],
+    ['exporter.batch.scheduledDelay', 'scheduledDelayMs'],
   ] as const)('REFUSES the retired `%s` with the rename in the message', (retired, renamed) => {
     const leaf = retired.split('.').pop()!;
     const body = retired.startsWith('exporter.batch')
