@@ -72,7 +72,7 @@ Installed package row whose manifest is the assembled package body
 | **scope** | `Enum<'cloud' \| 'system' \| 'project'>` | optional (default: `"project"`) | Deployment scope: cloud \| system \| project |
 | **name** | `string` | ✅ | Human-readable package name |
 | **description** | `string` | optional | Package description |
-| **permissions** | `{ name: string; label?: string; description?: string; packageId?: string; … }[]` | optional | Permission Sets |
+| **permissions** | `{ name: string; label?: string; description?: string; packageId?: string; … }[]` | optional | Permission Sets — the ADR-0090 collection half of `permissions`; at the manifest/authoring stage the same key is the ADR-0025 capability grant instead (`ManifestSchema.permissions`) |
 | **objects** | `{ name: string; label?: string; pluralLabel?: string; description?: string; … }[]` | optional | Business Objects definition (owned by this package) |
 | **datasources** | `{ name: string; label?: string; driver: string; config: Record<string, any>; … }[]` | optional | External Data Connections |
 | **dependencies** | `Record<string, string>` | optional | Package dependencies |
@@ -177,7 +177,7 @@ Installed package with runtime lifecycle state
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Full package manifest |
+| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Package manifest at the AUTHORING stage; a row installed by a `defineStack()` host carries the assembled body instead — see `AssembledInstalledPackageSchema` / `InstalledPackageAtEitherStageSchema` |
 | **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
 | **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
 | **installedAt** | `string` | optional | Installation timestamp |
@@ -228,7 +228,7 @@ Installed package with runtime lifecycle state
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Full package manifest |
+| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Package manifest at the AUTHORING stage; a row installed by a `defineStack()` host carries the assembled body instead — see `AssembledInstalledPackageSchema` / `InstalledPackageAtEitherStageSchema` |
 | **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
 | **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
 | **installedAt** | `string` | optional | Installation timestamp |
@@ -253,7 +253,7 @@ Installed package with runtime lifecycle state
 | **scope** | `Enum<'cloud' \| 'system' \| 'project'>` | optional (default: `"project"`) | Deployment scope: cloud \| system \| project |
 | **name** | `string` | ✅ | Human-readable package name |
 | **description** | `string` | optional | Package description |
-| **permissions** | `string[] \| { services?: string[]; hooks?: string[]; network?: string[]; fs?: string[] }` | optional | Required permissions: legacy string[] or structured plugin block (ADR-0025 §3.2) |
+| **permissions** | `string[] \| { services?: string[]; hooks?: string[]; network?: string[]; fs?: string[] }` | optional | Required permissions at the AUTHORING stage: legacy string[] or structured plugin block (ADR-0025 §3.2) — at the assembled stage the same key is the ADR-0090 `PermissionSet[]` collection instead (`AssembledPackageBodySchema`) |
 | **objects** | `string[]` | optional | Glob patterns for ObjectQL schemas files |
 | **datasources** | `string[]` | optional | Glob patterns for Datasource definitions |
 | **dependencies** | `Record<string, string>` | optional | Package dependencies |
@@ -316,7 +316,7 @@ Installed package row whose manifest is the assembled package body
 | **scope** | `Enum<'cloud' \| 'system' \| 'project'>` | optional (default: `"project"`) | Deployment scope: cloud \| system \| project |
 | **name** | `string` | ✅ | Human-readable package name |
 | **description** | `string` | optional | Package description |
-| **permissions** | `{ name: string; label?: string; description?: string; packageId?: string; … }[]` | optional | Permission Sets |
+| **permissions** | `{ name: string; label?: string; description?: string; packageId?: string; … }[]` | optional | Permission Sets — the ADR-0090 collection half of `permissions`; at the manifest/authoring stage the same key is the ADR-0025 capability grant instead (`ManifestSchema.permissions`) |
 | **objects** | `{ name: string; label?: string; pluralLabel?: string; description?: string; … }[]` | optional | Business Objects definition (owned by this package) |
 | **datasources** | `{ name: string; label?: string; driver: string; config: Record<string, any>; … }[]` | optional | External Data Connections |
 | **dependencies** | `Record<string, string>` | optional | Package dependencies |
@@ -481,7 +481,7 @@ Install package request
 | **scope** | `Enum<'cloud' \| 'system' \| 'project'>` | optional (default: `"project"`) | Deployment scope: cloud \| system \| project |
 | **name** | `string` | ✅ | Human-readable package name |
 | **description** | `string` | optional | Package description |
-| **permissions** | `string[] \| { services?: string[]; hooks?: string[]; network?: string[]; fs?: string[] }` | optional | Required permissions: legacy string[] or structured plugin block (ADR-0025 §3.2) |
+| **permissions** | `string[] \| { services?: string[]; hooks?: string[]; network?: string[]; fs?: string[] }` | optional | Required permissions at the AUTHORING stage: legacy string[] or structured plugin block (ADR-0025 §3.2) — at the assembled stage the same key is the ADR-0090 `PermissionSet[]` collection instead (`AssembledPackageBodySchema`) |
 | **objects** | `string[]` | optional | Glob patterns for ObjectQL schemas files |
 | **datasources** | `string[]` | optional | Glob patterns for Datasource definitions |
 | **dependencies** | `Record<string, string>` | optional | Package dependencies |
@@ -605,7 +605,7 @@ Upgrade package request
 | **scope** | `Enum<'cloud' \| 'system' \| 'project'>` | optional (default: `"project"`) | Deployment scope: cloud \| system \| project |
 | **name** | `string` | ✅ | Human-readable package name |
 | **description** | `string` | optional | Package description |
-| **permissions** | `string[] \| { services?: string[]; hooks?: string[]; network?: string[]; fs?: string[] }` | optional | Required permissions: legacy string[] or structured plugin block (ADR-0025 §3.2) |
+| **permissions** | `string[] \| { services?: string[]; hooks?: string[]; network?: string[]; fs?: string[] }` | optional | Required permissions at the AUTHORING stage: legacy string[] or structured plugin block (ADR-0025 §3.2) — at the assembled stage the same key is the ADR-0090 `PermissionSet[]` collection instead (`AssembledPackageBodySchema`) |
 | **objects** | `string[]` | optional | Glob patterns for ObjectQL schemas files |
 | **datasources** | `string[]` | optional | Glob patterns for Datasource definitions |
 | **dependencies** | `Record<string, string>` | optional | Package dependencies |
@@ -691,7 +691,7 @@ Resolve dependencies request
 | **scope** | `Enum<'cloud' \| 'system' \| 'project'>` | optional (default: `"project"`) | Deployment scope: cloud \| system \| project |
 | **name** | `string` | ✅ | Human-readable package name |
 | **description** | `string` | optional | Package description |
-| **permissions** | `string[] \| { services?: string[]; hooks?: string[]; network?: string[]; fs?: string[] }` | optional | Required permissions: legacy string[] or structured plugin block (ADR-0025 §3.2) |
+| **permissions** | `string[] \| { services?: string[]; hooks?: string[]; network?: string[]; fs?: string[] }` | optional | Required permissions at the AUTHORING stage: legacy string[] or structured plugin block (ADR-0025 §3.2) — at the assembled stage the same key is the ADR-0090 `PermissionSet[]` collection instead (`AssembledPackageBodySchema`) |
 | **objects** | `string[]` | optional | Glob patterns for ObjectQL schemas files |
 | **datasources** | `string[]` | optional | Glob patterns for Datasource definitions |
 | **dependencies** | `Record<string, string>` | optional | Package dependencies |
