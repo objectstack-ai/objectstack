@@ -246,6 +246,6 @@ untouched — `'user-{current_user_id}'` is a literal. Check a spelling with
 `isDateMacroToken(tok)` / `isContextToken(tok)` from `@objectstack/spec/data`,
 WITHOUT braces.
 
-**`*_end` is a calendar DAY.** `{current_year_end}` is `2026-12-31`, so on a
-`datetime` column `<= {current_year_end}` stops at midnight on the 31st. Use
-the half-open `< {next_year_start}` for timestamps.
+**`*_end` is a calendar DAY; an upper bound means the WHOLE day.**
+`<= {current_year_end}` already reaches the final instant of Dec 31
+(`calendar-day.ts`, ADR-0053 D-D): ⛔ Do NOT hand-write `< {next_year_start}`.
