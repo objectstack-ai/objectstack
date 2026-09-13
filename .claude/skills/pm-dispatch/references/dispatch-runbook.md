@@ -81,7 +81,7 @@
 
 - 裁决记录四件补遗:鲜度门可内联声明分歧代替调和正文。
 - 对过期正文记录的裁决按过期论;四件本体、记录座位全责、维护者裁与代裁同规。
-- 出决策箱须引可取回的裁决 id:转出那一笔的评论须带台账条目或卡上裁决评论 id。
+- 出决策箱须引可取回的裁决 id:认领与派发带 `Ruling-ref: <评论 id>`,指向同卡裁决评论。
 - 且该 id 同趟取回过,取这一下就是判据;带 id 不等于可取回。
 - 读侧对称:决策复读命中无可取回 id 的出箱按未裁处理,同笔转回、⛔ 不派。
 - 结论只落可核性,⛔ 不断成因。
@@ -212,8 +212,8 @@
 - 若实测表明真正的生产者在别包,直接按生产者侧修,落点与理由写进报告和 PR 正文。
 - 跨包常等于跨车道,PM 事后补跨座位声明。
 - 模型标识只禁内容工件:PR 标题与正文、代码注释、文档、changeset、评论。
-- 豁免不再申报为偏差:一是 harness 的 `Co-Authored-By` 尾注,免的是申报,trailer pair 仍 model-free。
-- 另一条是 `.claude/agents/*` frontmatter 的 `model:`,`check:agent-model-declared` 要求。
+- 豁免:`.claude/agents/*` frontmatter 的 `model:`,`check:agent-model-declared` 要求。
+- 新 changeset 文件名用 `<issue>-<slug>.md`,⛔ 不用随机词对名。
 - same-day churn 行:派发时 `git log origin/main --oneline -20 -- <paths>` 见当天合并即加一行。
 - 该行原文:基于合并后的代码工作,issue 引用的片段可能已变,先核对当前 main。
 - 在飞重叠每轮拦截:main 新落 PR 与在飞申报文件面求交,相交即发四句警告。

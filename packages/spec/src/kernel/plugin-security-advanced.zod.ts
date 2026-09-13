@@ -176,6 +176,20 @@ export const PluginPermissionSetSchema = lazySchema(() => z.object({
  * Runtime Configuration
  * Defines the execution environment for plugin isolation
  */
+// Declared ABOVE its consumer on purpose: `gen:schema` and
+// `check:authorable-surface` run with `OS_EAGER_SCHEMAS=1`, which makes
+// `lazySchema` evaluate the factory at module load, so a const declared after
+// `RuntimeConfigSchema` would be read from its temporal dead zone. The four
+// tombstone strings further down sit after their schemas for the same reason —
+// every one of them is declared before the block that reads it.
+const RUNTIME_RESOURCE_LIMITS_TIMEOUT_RETIRED =
+  '`RuntimeConfig.resourceLimits.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — '
+  + 'the unit of a duration-shaped number lives in the key name, not only in the describe prose. '
+  + 'Its unit (milliseconds) lived in a source JSDoc only and the published description read '
+  + '"Maximum execution time", naming no unit at all, so a reader of the reference page could '
+  + 'not tell 60000 milliseconds from 60000 seconds. Rename the key to `timeoutMs`; the value '
+  + '(milliseconds) is unchanged.';
+
 export const RuntimeConfigSchema = lazySchema(() => z.object({
   /**
    * Runtime engine type
@@ -289,10 +303,21 @@ export const RuntimeConfigSchema = lazySchema(() => z.object({
       .describe('Maximum CPU usage percentage'),
     
     /**
-     * Execution timeout in milliseconds
+     * Execution timeout in milliseconds.
+     *
+     * Renamed from `timeout` (#15939 ruling A, executing #14478 ruling B): the
+     * unit lived in this JSDoc only, and `.describe()` — the text
+     * `content/docs/references/kernel/plugin-security-advanced.mdx` publishes —
+     * read "Maximum execution time" and named none. Spelled `Ms`, the same
+     * token `SandboxConfig.process.timeoutMs` on this file already carries.
+     * Tombstoned rather than deleted because this nested `resourceLimits`
+     * object is not `.strict()`.
      */
-    timeout: z.number().int().min(0).optional()
-      .describe('Maximum execution time'),
+    timeoutMs: z.number().int().min(0).optional()
+      .describe('Maximum execution time in milliseconds'),
+
+    /** Tombstone for the rename above (#15939 ruling A, executing #14478). */
+    timeout: retiredKey(RUNTIME_RESOURCE_LIMITS_TIMEOUT_RETIRED),
   }).optional(),
 }));
 

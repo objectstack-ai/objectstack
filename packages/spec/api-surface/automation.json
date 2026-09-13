@@ -201,6 +201,7 @@
     "RetryPolicySchema (const)",
     "SCHEDULE_ORGANIZATION_KEY (const)",
     "SCHEMALESS_NODE_CONFIG_SCHEMAS (const)",
+    "SCREEN_FIELD_LOOKUP_REFERENCE_REQUIRED (const)",
     "STRUCTURAL_CONDITION_SHAPE_REFUSAL (const)",
     "ScheduleOrganization (type)",
     "ScheduleOrganizationSchema (const)",

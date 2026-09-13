@@ -92,7 +92,9 @@ function assertHonouredStateStrategy(pluginName: string, strategy: unknown): voi
 }
 
 /**
- * Keys removed from `HotReloadConfig` that a host may still be passing.
+ * Keys a host may still be passing that `HotReloadConfig` no longer accepts:
+ * the two removed in 18 (ADR-0049), and the debounce duration renamed in 17
+ * (#17780) so the unit rides in the key name.
  *
  * `HotReloadConfigSchema` is not `.strict()`, so zod would silently STRIP each
  * of these on the parse paths that exist — a clean parse and a setting that
@@ -128,6 +130,14 @@ const RETIRED_HOT_RELOAD_KEYS: ReadonlyArray<readonly [string, string]> = [
     + 'declare your globs wherever your own watcher reads them, and call '
     + '`HotReloadManager.scheduleReload(pluginName, reloadFn)` when one matches — '
     + 'that is the debounced integration point this class does implement.',
+  ],
+  [
+    'debounceDelay',
+    "'debounceDelay' was renamed to 'debounceDelayMs' on HotReloadConfig in "
+    + '@objectstack/spec 17 — the unit of a duration-shaped number lives in '
+    + 'the key name, not only in the describe prose. Rename the key to '
+    + "'debounceDelayMs'; the value (milliseconds) and the 1000 default are "
+    + 'unchanged.',
   ],
 ];
 
@@ -512,12 +522,12 @@ export class HotReloadManager {
         });
       });
       this.reloadTimers.delete(pluginName);
-    }, config.debounceDelay);
+    }, config.debounceDelayMs);
 
     this.reloadTimers.set(pluginName, timer);
     this.logger.debug('Reload scheduled with debounce', { 
       plugin: pluginName,
-      delay: config.debounceDelay 
+      delayMs: config.debounceDelayMs 
     });
   }
 
