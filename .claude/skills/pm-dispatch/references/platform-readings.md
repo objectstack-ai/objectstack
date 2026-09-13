@@ -376,9 +376,12 @@
 - 强制档不得因不可用而降档 —— 那正是降档保险丝要拒的替换。
 - 本车道强制多是过宽的回忆:`dispatch-gates.mjs --tier PATH` 逐路径现推,路径线是下限非放行。
 - 该脚本只答自己那棵树:姊妹仓路径回 absent from this tree,姊妹仓的档位与条款②只能手推。
-- required checks 的名单是每仓事实,objectstack 六个:
+- required checks 的名单是每仓事实,objectstack 七个:
   `TypeScript Type Check` · `Lint & Repo Gates` · `Test Core` · `Dogfood Regression Gate` ·
-  `Build Core` · `Temporal Conformance (live PG + MySQL)`。
+  `Build Core` · `Temporal Conformance (live PG + MySQL)` · `Governed Surface Queue Guard`。
+- 第七个 2026-08-27 入集(#12427),而注册表到 #15233 才钉住它。
+- ⭐ 本表的 `mustName` 不要求排他 ⇒ 第七个加注册行不会让本表变红。
+- ⇒ ⛔ 门绿不是本行已对的读数:计数行只能手跟改。
 - `in_progress` 不是过;advisory 门禁红进 main 是共享损伤,照样止血立单。
 - ⛔ 聚合命令同样不作判定:`check:type-check-debt` 可在包级 typecheck 绿时红。
 - `check:i18n` 以 PREREQUISITE NOT MET(workspace CLI 未 build)退 3,不是漂移。

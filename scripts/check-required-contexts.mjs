@@ -423,6 +423,22 @@ export const REQUIRED_CONTEXTS = [
       '2026-08-18 read, so it was applied somewhere between the two — no attestation names the day',
     carries: 'the live-server datetime conformance axis (#3912/#3942)',
   },
+  {
+    workflow: 'governed-surface-guard.yml',
+    job: 'governed-surface-guard',
+    // The one gate that governs the governed surface, and until this row the
+    // one live required context nothing pinned — `--verify-required-set` read
+    // it as `direction B` (required, pinned by NO registry row) from the day
+    // the enrolment landed until this row (#15233). Direction B is not
+    // direction A: #12427 fixed the guard running ADVISORY (not required at
+    // all); this pins the NAME it is required under. Neither implies the
+    // other, and the sweep counts them separately.
+    context: 'Governed Surface Queue Guard',
+    authorized:
+      '#12427 maintainer confirmation, closed `completed` 2026-08-27T07:51Z on the verbatim 「Governed Surface Queue Guard 已添加」 (comment 5436049459); ' +
+      'read back live in the ruleset sweep of 2026-09-10 that carries the director ruling enrolling this row (#15233)',
+    carries: 'the governed-surface refusal — the `merge_group` leg that refuses a governed diff carrying no ruled approval',
+  },
 ];
 
 /**
@@ -548,6 +564,11 @@ export const INSTRUCTION_SURFACES = [
       'Dogfood Regression Gate',
       'Build Core',
       'Temporal Conformance (live PG + MySQL)',
+      // The seventh, enrolled 2026-08-27 (#12427) and pinned here by #15233.
+      // The ledger's own count line is hand-followed prose, so it is this
+      // array — asserted against REQUIRED_CONTEXTS.length in `--self-test` —
+      // that makes the seat's copy of the required set non-optional.
+      'Governed Surface Queue Guard',
     ],
   },
   {
@@ -1703,10 +1724,17 @@ async function selfTest() {
 
   const root = scriptRepoRoot();
   const { parse } = await requireDependency('yaml', () => import('yaml'), import.meta.url);
-  const sources = {
-    'lint.yml': readFileSync(join(root, '.github', 'workflows', 'lint.yml'), 'utf8'),
-    'ci.yml': readFileSync(join(root, '.github', 'workflows', 'ci.yml'), 'utf8'),
-  };
+  // Every workflow the registry names, read from disk. A registered file left
+  // out here is not simply unexercised: `judge` reports it as never read
+  // (#4690), so EVERY fixture below inherits that finding and asserts against
+  // the wrong problem list. Derived from the registry so enrolling an eighth
+  // context cannot silently skip this step.
+  const sources = Object.fromEntries(
+    [...new Set(REQUIRED_CONTEXTS.map((e) => e.workflow))].map((file) => [
+      file,
+      readFileSync(join(root, '.github', 'workflows', file), 'utf8'),
+    ]),
+  );
 
   /** Judge the real workflows with one file's text replaced by `source`. */
   const withSource = (file, source) =>
