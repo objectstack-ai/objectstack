@@ -78,18 +78,27 @@
  *   SQL storage (no column is emitted), so no arithmetic aggregate can be
  *   lowered to it whatever that type says; `autonumber` is a formatted string.
  *
- * One row the ruling's default covers is recorded here as an OVERRIDE of an
- * existing opinion, not as settled ground — the row stands as ruled, the text
- * says only what this tree can defend:
+ * One row the ruling's default covers used to be recorded here as an OVERRIDE
+ * of an existing opinion. It is SETTLED GROUND now, and the opinion it
+ * overrode is retired rather than left standing beside it:
  *
  * - **The string classes** (`STRING_VALUE_TYPES`, `SINGLE_OPTION_TYPES`,
- *   `REFERENCE_VALUE_TYPES`, `autonumber`) are refused for `min` / `max` here,
- *   while `service-analytics`' `measureResultType` (#15768,
- *   `STRING_SOURCE_FIELD_TYPES`) already types `min` / `max` over them as a
- *   supported `'string'` result. The refusal is defensible — the ORDER of
- *   strings is collation-dependent, so two backends can return two different
- *   "smallest" values — but it overrides that existing opinion, and is
- *   recorded as such rather than presented as agreement.
+ *   `REFERENCE_VALUE_TYPES`, `autonumber`) are refused for `min` / `max`, on
+ *   the ground the table has always given: the ORDER of strings is
+ *   collation-dependent, so two backends can return two different "smallest"
+ *   values for one metadata document. `service-analytics`' `measureResultType`
+ *   (#15768) used to type those results as a supported `'string'`, which is the
+ *   opinion this paragraph recorded as overridden; that branch no longer
+ *   exists. The rule now reads the pair off this table before it answers at
+ *   all, so a refused pair cannot carry a result type and the two declarations
+ *   agree by construction rather than by review.
+ *
+ * ⛔ Nothing is "awaiting an amendment" here. The director ruling of decision
+ * batch #127 (2026-09-13) settled the whole `min` / `max` population in one
+ * pass — the string classes stay refused as batch #59 ruled, the non-string
+ * classes are refused AND enforced, and `formula` is refused on this table's
+ * own storage ground — and the compile leg judges all six aggregates through
+ * one door. A pair refused here is refused at the door.
  *
  * ## Relation to `isIncoherentAggregate`
  *

@@ -8,14 +8,14 @@
 - PM 循环工具与指令架构文件的归属见 SKILL.md 域车道表 `domain:skills` 行,⛔ 不另抄。
 - 受管面的治理执行文件:`.github/CODEOWNERS` 治理路由半边。
 - 同含 SUBJECT 是受管面本身的门禁与审计脚本。
-- 全量判据在 SKILL.md 域车道表;受管面统一定义见 SKILL.md 〈复核〉,⛔ 不另抄。
+- 全量判据在 SKILL.md 域车道表;受管面定义与两层分档见 SKILL.md 〈复核〉,⛔ 不另抄。
 - QA 管理循环执行归本席;qa-run 记录是协议载体不是工作。
 - 契约复核归派发席席内、决裁勤务归项目总监席(`director.md`);本席保留 skill 与治理文本。
 
 ## 常设承诺
 
 - 四维分析先于派发与复核。
-- 受管面 PR 恒 draft 等人合;flip 或 arm 前跑 `check-governed-merges --test` 带路径。
+- 规则层受管 PR 恒 draft 等维护者的字;flip 或 arm 前跑 `check-governed-merges --test` 带路径。
 - 轮报的受管合并审计清单带 `--since` 四仓实跑,⛔ 不凭记忆汇总。
 - 档位从 `--tier` 推导引用;pm-dispatch 根恒契约复审档;条款②闸门照现行。
 - 额度耗尽豁免的地板是默认判断档,⛔ 不再往下。
